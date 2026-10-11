@@ -1,0 +1,1370 @@
+# vmrest pid=46736 interval_ms=500 dumpEvery=10 startEpochMs=1791726905076
+# SERIES epochMs walk kPrivateUsage privCommit stackCommit heapPrivate imgPrivate mapPrivate privReserve bases regions stacks walkMs
+SERIES 1791726905577 1 15802368 13541376 176128 13365248 753664 102400 4418760704 19 289 5 1.182
+SERIES 1791726906080 2 15802368 13541376 176128 13365248 753664 102400 4418760704 19 289 5 1.031
+SERIES 1791726906581 3 15802368 13541376 176128 13365248 753664 102400 4418760704 19 289 5 0.994
+SERIES 1791726907083 4 15802368 13541376 176128 13365248 753664 102400 4418760704 19 289 5 0.965
+SERIES 1791726907586 5 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.980
+SERIES 1791726908090 6 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.272
+SERIES 1791726908593 7 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.963
+SERIES 1791726909095 8 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.039
+SERIES 1791726909596 9 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.910
+SERIES 1791726910099 10 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.971
+== VMCENSUS DUMP w=10 t=1791726910099 ==
+walkMs                  0.971
+regions                 321   (privateCommitted=63, bases=19)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=14.102 after=14.102 MiB  (drift 0.000)
+kernel PeakPagefile     15.137 MiB
+kernel WorkingSet       30.172 MiB   PeakWorkingSet 31.078 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (14.102 MiB) ---
+STACK committed                0.168 MiB    1.19%   (5 stacks)
+  of which PAGE_GUARD          0.059 MiB    0.42%
+  usable stack commit          0.109 MiB    0.78%
+PRIVATE non-stack             11.777 MiB   83.52%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.719 MiB    5.10%
+MAPPED cow-taken               0.098 MiB    0.69%
+RESOLVED by walk              12.762 MiB   90.50%
+RESIDUE (kernel-walk)          1.340 MiB    9.50%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.289 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4215.027 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a20f0000         3.672 MiB  regions=29  reserved=4.328 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000000e307000000         0.043 MiB  regions=1  reserved=1.957 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=10 t=1791726910099 ==
+SERIES 1791726910602 11 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.886
+SERIES 1791726911104 12 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.998
+SERIES 1791726911606 13 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.985
+SERIES 1791726912121 14 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.001
+SERIES 1791726912622 15 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.984
+SERIES 1791726913125 16 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.010
+SERIES 1791726913627 17 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.450
+SERIES 1791726914131 18 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.151
+SERIES 1791726914633 19 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.287
+SERIES 1791726915147 20 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.167
+== VMCENSUS DUMP w=20 t=1791726915147 ==
+walkMs                  1.167
+regions                 321   (privateCommitted=63, bases=19)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=14.102 after=14.102 MiB  (drift 0.000)
+kernel PeakPagefile     15.137 MiB
+kernel WorkingSet       30.172 MiB   PeakWorkingSet 31.078 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (14.102 MiB) ---
+STACK committed                0.168 MiB    1.19%   (5 stacks)
+  of which PAGE_GUARD          0.059 MiB    0.42%
+  usable stack commit          0.109 MiB    0.78%
+PRIVATE non-stack             11.777 MiB   83.52%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.719 MiB    5.10%
+MAPPED cow-taken               0.098 MiB    0.69%
+RESOLVED by walk              12.762 MiB   90.50%
+RESIDUE (kernel-walk)          1.340 MiB    9.50%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.289 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4215.027 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a20f0000         3.672 MiB  regions=29  reserved=4.328 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000000e307000000         0.043 MiB  regions=1  reserved=1.957 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=20 t=1791726915147 ==
+SERIES 1791726915651 21 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.042
+SERIES 1791726916167 22 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.002
+SERIES 1791726916671 23 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.966
+SERIES 1791726917175 24 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.000
+SERIES 1791726917678 25 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.126
+SERIES 1791726918180 26 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.017
+SERIES 1791726918681 27 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.966
+SERIES 1791726919183 28 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.037
+SERIES 1791726919687 29 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.033
+SERIES 1791726920193 30 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.980
+== VMCENSUS DUMP w=30 t=1791726920193 ==
+walkMs                  0.980
+regions                 321   (privateCommitted=63, bases=19)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=14.102 after=14.102 MiB  (drift 0.000)
+kernel PeakPagefile     15.137 MiB
+kernel WorkingSet       30.172 MiB   PeakWorkingSet 31.078 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (14.102 MiB) ---
+STACK committed                0.168 MiB    1.19%   (5 stacks)
+  of which PAGE_GUARD          0.059 MiB    0.42%
+  usable stack commit          0.109 MiB    0.78%
+PRIVATE non-stack             11.777 MiB   83.52%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.719 MiB    5.10%
+MAPPED cow-taken               0.098 MiB    0.69%
+RESOLVED by walk              12.762 MiB   90.50%
+RESIDUE (kernel-walk)          1.340 MiB    9.50%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.289 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4215.027 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a20f0000         3.672 MiB  regions=29  reserved=4.328 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000000e307000000         0.043 MiB  regions=1  reserved=1.957 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=30 t=1791726920193 ==
+SERIES 1791726920695 31 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 0.958
+SERIES 1791726921199 32 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.381
+SERIES 1791726921702 33 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.870
+SERIES 1791726922204 34 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.103
+SERIES 1791726922706 35 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.012
+SERIES 1791726923209 36 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.028
+SERIES 1791726923712 37 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.058
+SERIES 1791726924214 38 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.181
+SERIES 1791726924718 39 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.046
+SERIES 1791726925219 40 14786560 12525568 176128 12349440 753664 102400 4419776512 19 321 5 1.009
+== VMCENSUS DUMP w=40 t=1791726925219 ==
+walkMs                  1.009
+regions                 321   (privateCommitted=63, bases=19)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=14.102 after=14.102 MiB  (drift 0.000)
+kernel PeakPagefile     15.137 MiB
+kernel WorkingSet       30.172 MiB   PeakWorkingSet 31.078 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (14.102 MiB) ---
+STACK committed                0.168 MiB    1.19%   (5 stacks)
+  of which PAGE_GUARD          0.059 MiB    0.42%
+  usable stack commit          0.109 MiB    0.78%
+PRIVATE non-stack             11.777 MiB   83.52%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.719 MiB    5.10%
+MAPPED cow-taken               0.098 MiB    0.69%
+RESOLVED by walk              12.762 MiB   90.50%
+RESIDUE (kernel-walk)          1.340 MiB    9.50%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.289 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4215.027 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a20f0000         3.672 MiB  regions=29  reserved=4.328 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000000e307000000         0.043 MiB  regions=1  reserved=1.957 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=40 t=1791726925219 ==
+SERIES 1791726925723 41 20144128 17862656 208896 17653760 819200 102400 4434382848 23 286 7 1.570
+SERIES 1791726926228 42 31899648 29569024 372736 29196288 819200 102400 4438380544 38 362 17 1.292
+SERIES 1791726926735 43 37617664 35282944 372736 34910208 819200 102400 4432666624 38 344 17 1.206
+SERIES 1791726927240 44 45555712 43180032 372736 42807296 819200 102400 4542013440 45 388 17 1.404
+SERIES 1791726927747 45 53575680 51142656 372736 50769920 819200 102400 4768931840 59 444 17 1.651
+SERIES 1791726928255 46 54673408 52224000 372736 51851264 819200 102400 4767850496 59 446 17 2.187
+SERIES 1791726928761 47 45232128 42835968 372736 42463232 819200 102400 4559134720 46 462 17 1.747
+SERIES 1791726929266 48 48308224 45912064 372736 45539328 819200 102400 4556058624 46 430 17 2.256
+SERIES 1791726929769 49 52178944 49782784 372736 49410048 819200 102400 4552187904 46 438 17 1.634
+SERIES 1791726930276 50 58777600 56324096 372736 55951360 819200 102400 4763750400 59 482 17 1.747
+== VMCENSUS DUMP w=50 t=1791726930276 ==
+walkMs                  1.747
+regions                 482   (privateCommitted=215, bases=59)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=56.055 after=56.039 MiB  (drift -0.016)
+kernel PeakPagefile     56.117 MiB
+kernel WorkingSet       71.227 MiB   PeakWorkingSet 71.230 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (56.055 MiB) ---
+STACK committed                0.355 MiB    0.63%   (17 stacks)
+  of which PAGE_GUARD          0.199 MiB    0.36%
+  usable stack commit          0.156 MiB    0.28%
+PRIVATE non-stack             53.359 MiB   95.19%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    1.39%
+MAPPED cow-taken               0.098 MiB    0.17%
+RESOLVED by walk              54.594 MiB   97.39%
+RESIDUE (kernel-walk)          1.461 MiB    2.61%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4543.066 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a3a00000        15.664 MiB  regions=47  reserved=0.148 MiB
+  base 000002b1aa9d0000        15.453 MiB  regions=63  reserved=0.359 MiB
+  base 000002b1a20f0000         7.934 MiB  regions=21  reserved=0.066 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a2c10000         1.004 MiB  regions=1  reserved=0.008 MiB
+  base 000002b1a2d20000         1.004 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a2e30000         1.004 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a2f40000         1.004 MiB  regions=1  reserved=0.023 MiB
+  base 000002b1a3050000         1.004 MiB  regions=1  reserved=0.062 MiB
+  base 000002b1a28f0000         1.004 MiB  regions=1  reserved=0.059 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000000e307000000         0.043 MiB  regions=1  reserved=1.957 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000002b1b89a0000         0.031 MiB  regions=1  reserved=15.969 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a49d0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a59d0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a69d0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a79d0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a89d0000         0.008 MiB  regions=1  reserved=15.992 MiB
+== END DUMP w=50 t=1791726930276 ==
+SERIES 1791726930781 51 59850752 57393152 372736 57020416 819200 102400 4762484736 59 486 17 2.710
+SERIES 1791726931289 52 48869376 46460928 372736 46088192 819200 102400 4572090368 47 501 17 1.583
+SERIES 1791726931795 53 53182464 50774016 372736 50401280 819200 102400 4567777280 47 467 17 2.616
+SERIES 1791726932298 54 46403584 43978752 372736 43606016 819200 102400 4591349760 48 527 17 1.516
+SERIES 1791726932805 55 41017344 38645760 372736 38273024 819200 102400 4473856000 36 488 17 1.782
+SERIES 1791726933309 56 42352640 39976960 372736 39604224 819200 102400 4489302016 37 462 17 1.450
+SERIES 1791726933813 57 34037760 31666176 372736 31293440 819200 102400 4479737856 35 557 17 1.488
+SERIES 1791726934315 58 34037760 31666176 372736 31293440 819200 102400 4479737856 35 557 17 1.469
+SERIES 1791726934830 59 22609920 20242432 372736 19869696 819200 102400 4491161600 35 477 17 1.301
+SERIES 1791726935331 60 22544384 20185088 331776 19853312 819200 102400 4457664512 33 474 15 1.277
+== VMCENSUS DUMP w=60 t=1791726935331 ==
+walkMs                  1.277
+regions                 474   (privateCommitted=161, bases=33)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.500 after=21.500 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.773 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.500 MiB) ---
+STACK committed                0.316 MiB    1.47%   (15 stacks)
+  of which PAGE_GUARD          0.176 MiB    0.82%
+  usable stack commit          0.141 MiB    0.65%
+PRIVATE non-stack             18.934 MiB   88.06%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.63%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.129 MiB   93.62%
+RESIDUE (kernel-walk)          1.371 MiB    6.38%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4251.160 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         4.859 MiB  regions=40  reserved=3.141 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.027 MiB  regions=2  reserved=1.973 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=60 t=1791726935331 ==
+SERIES 1791726935834 61 22544384 20185088 331776 19853312 819200 102400 4457664512 33 474 15 1.277
+SERIES 1791726936334 62 22544384 20185088 331776 19853312 819200 102400 4457664512 33 474 15 1.451
+SERIES 1791726936836 63 22544384 20185088 331776 19853312 819200 102400 4457664512 33 474 15 1.274
+SERIES 1791726937338 64 22544384 20185088 331776 19853312 819200 102400 4457664512 33 474 15 1.285
+SERIES 1791726937840 65 22544384 20185088 331776 19853312 819200 102400 4457664512 33 474 15 1.442
+SERIES 1791726938343 66 22544384 20185088 331776 19853312 819200 102400 4457664512 33 474 15 1.316
+SERIES 1791726938857 67 22450176 20099072 233472 19865600 819200 102400 4451459072 27 457 9 1.399
+SERIES 1791726939359 68 22450176 20099072 233472 19865600 819200 102400 4451459072 27 457 9 1.237
+SERIES 1791726939861 69 22450176 20099072 233472 19865600 819200 102400 4451459072 27 457 9 1.281
+SERIES 1791726940364 70 22450176 20099072 233472 19865600 819200 102400 4451459072 27 457 9 1.273
+== VMCENSUS DUMP w=70 t=1791726940364 ==
+walkMs                  1.273
+regions                 457   (privateCommitted=148, bases=27)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.410 after=21.410 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.754 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.410 MiB) ---
+STACK committed                0.223 MiB    1.04%   (9 stacks)
+  of which PAGE_GUARD          0.105 MiB    0.49%
+  usable stack commit          0.117 MiB    0.55%
+PRIVATE non-stack             18.945 MiB   88.49%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.65%
+MAPPED cow-taken               0.098 MiB    0.46%
+RESOLVED by walk              20.047 MiB   93.63%
+RESIDUE (kernel-walk)          1.363 MiB    6.37%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4245.242 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         4.871 MiB  regions=39  reserved=3.129 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.027 MiB  regions=2  reserved=1.973 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=70 t=1791726940364 ==
+SERIES 1791726940867 71 22450176 20099072 233472 19865600 819200 102400 4451459072 27 457 9 1.268
+SERIES 1791726941368 72 22450176 20099072 233472 19865600 819200 102400 4451459072 27 457 9 1.202
+SERIES 1791726941870 73 22450176 20099072 233472 19865600 819200 102400 4451459072 27 457 9 1.195
+SERIES 1791726942375 74 22450176 20099072 233472 19865600 819200 102400 4451459072 27 457 9 1.052
+SERIES 1791726942879 75 22450176 20099072 233472 19865600 819200 102400 4451459072 27 457 9 1.277
+SERIES 1791726943381 76 22388736 20049920 184320 19865600 819200 102400 4448362496 24 445 6 1.234
+SERIES 1791726943884 77 22388736 20049920 184320 19865600 819200 102400 4448362496 24 445 6 1.152
+SERIES 1791726944388 78 22388736 20049920 184320 19865600 819200 102400 4448362496 24 445 6 1.186
+SERIES 1791726944890 79 22388736 20049920 184320 19865600 819200 102400 4448362496 24 445 6 1.249
+SERIES 1791726945394 80 22388736 20049920 184320 19865600 819200 102400 4448362496 24 445 6 1.803
+== VMCENSUS DUMP w=80 t=1791726945394 ==
+walkMs                  1.803
+regions                 445   (privateCommitted=142, bases=24)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.352 after=21.352 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.742 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.352 MiB) ---
+STACK committed                0.176 MiB    0.82%   (6 stacks)
+  of which PAGE_GUARD          0.070 MiB    0.33%
+  usable stack commit          0.105 MiB    0.49%
+PRIVATE non-stack             18.945 MiB   88.73%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.66%
+MAPPED cow-taken               0.098 MiB    0.46%
+RESOLVED by walk              20.000 MiB   93.67%
+RESIDUE (kernel-walk)          1.352 MiB    6.33%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4242.289 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         4.871 MiB  regions=39  reserved=3.129 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.027 MiB  regions=2  reserved=1.973 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=80 t=1791726945394 ==
+SERIES 1791726945899 81 22388736 20049920 184320 19865600 819200 102400 4448362496 24 445 6 1.260
+SERIES 1791726946402 82 22388736 20049920 184320 19865600 819200 102400 4448362496 24 445 6 1.442
+SERIES 1791726946904 83 22388736 20049920 184320 19865600 819200 102400 4448362496 24 445 6 1.206
+SERIES 1791726947407 84 22388736 20049920 184320 19865600 819200 102400 4448362496 24 445 6 1.153
+SERIES 1791726947911 85 22388736 20049920 184320 19865600 819200 102400 4448362496 24 445 6 1.268
+SERIES 1791726948415 86 23015424 20680704 151552 20529152 819200 102400 4445634560 22 436 4 1.235
+SERIES 1791726948918 87 23015424 20680704 151552 20529152 819200 102400 4445634560 22 436 4 1.849
+SERIES 1791726949421 88 23015424 20680704 151552 20529152 819200 102400 4445634560 22 436 4 1.888
+SERIES 1791726949923 89 23015424 20680704 151552 20529152 819200 102400 4445634560 22 436 4 1.327
+SERIES 1791726950426 90 23015424 20680704 151552 20529152 819200 102400 4445634560 22 436 4 1.262
+== VMCENSUS DUMP w=90 t=1791726950426 ==
+walkMs                  1.262
+regions                 436   (privateCommitted=137, bases=22)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.949 after=21.949 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.734 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.949 MiB) ---
+STACK committed                0.145 MiB    0.66%   (4 stacks)
+  of which PAGE_GUARD          0.047 MiB    0.21%
+  usable stack commit          0.098 MiB    0.44%
+PRIVATE non-stack             19.578 MiB   89.20%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.56%
+MAPPED cow-taken               0.098 MiB    0.44%
+RESOLVED by walk              20.602 MiB   93.86%
+RESIDUE (kernel-walk)          1.348 MiB    6.14%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4239.688 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.027 MiB  regions=2  reserved=1.973 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=90 t=1791726950426 ==
+SERIES 1791726950930 91 23015424 20680704 151552 20529152 819200 102400 4445634560 22 436 4 1.352
+SERIES 1791726951436 92 23015424 20680704 151552 20529152 819200 102400 4445634560 22 436 4 1.195
+SERIES 1791726951939 93 23015424 20680704 151552 20529152 819200 102400 4445634560 22 436 4 1.237
+SERIES 1791726952441 94 23015424 20680704 151552 20529152 819200 102400 4445634560 22 436 4 1.256
+SERIES 1791726952945 95 23015424 20680704 151552 20529152 819200 102400 4445634560 22 436 4 1.253
+SERIES 1791726953446 96 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.249
+SERIES 1791726953949 97 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.409
+SERIES 1791726954453 98 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.173
+SERIES 1791726954956 99 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.258
+SERIES 1791726955459 100 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.247
+== VMCENSUS DUMP w=100 t=1791726955459 ==
+walkMs                  1.247
+regions                 433   (privateCommitted=135, bases=21)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.930 after=21.930 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.730 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.930 MiB) ---
+STACK committed                0.129 MiB    0.59%   (3 stacks)
+  of which PAGE_GUARD          0.035 MiB    0.16%
+  usable stack commit          0.094 MiB    0.43%
+PRIVATE non-stack             19.578 MiB   89.28%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.56%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.586 MiB   93.87%
+RESIDUE (kernel-walk)          1.344 MiB    6.13%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4238.703 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.027 MiB  regions=2  reserved=1.973 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=100 t=1791726955459 ==
+SERIES 1791726955963 101 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.117
+SERIES 1791726956467 102 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.320
+SERIES 1791726956971 103 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.176
+SERIES 1791726957475 104 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.210
+SERIES 1791726957978 105 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.216
+SERIES 1791726958483 106 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.145
+SERIES 1791726958986 107 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.092
+SERIES 1791726959489 108 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.049
+SERIES 1791726959991 109 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.157
+SERIES 1791726960496 110 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.299
+== VMCENSUS DUMP w=110 t=1791726960496 ==
+walkMs                  1.299
+regions                 433   (privateCommitted=135, bases=21)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.930 after=21.930 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.730 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.930 MiB) ---
+STACK committed                0.129 MiB    0.59%   (3 stacks)
+  of which PAGE_GUARD          0.035 MiB    0.16%
+  usable stack commit          0.094 MiB    0.43%
+PRIVATE non-stack             19.578 MiB   89.28%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.56%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.586 MiB   93.87%
+RESIDUE (kernel-walk)          1.344 MiB    6.13%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4238.703 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.027 MiB  regions=2  reserved=1.973 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=110 t=1791726960496 ==
+SERIES 1791726961000 111 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.231
+SERIES 1791726961504 112 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.195
+SERIES 1791726962007 113 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.206
+SERIES 1791726962509 114 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.243
+SERIES 1791726963012 115 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.188
+SERIES 1791726963513 116 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.357
+SERIES 1791726964016 117 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.498
+SERIES 1791726964518 118 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.147
+SERIES 1791726965020 119 22994944 20664320 135168 20529152 819200 102400 4444602368 21 433 3 1.303
+SERIES 1791726965526 120 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.166
+== VMCENSUS DUMP w=120 t=1791726965526 ==
+walkMs                  1.166
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=120 t=1791726965526 ==
+SERIES 1791726966029 121 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.185
+SERIES 1791726966531 122 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.321
+SERIES 1791726967035 123 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.193
+SERIES 1791726967538 124 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 0.998
+SERIES 1791726968041 125 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.037
+SERIES 1791726968545 126 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.252
+SERIES 1791726969047 127 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.250
+SERIES 1791726969550 128 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.242
+SERIES 1791726970054 129 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.222
+SERIES 1791726970557 130 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.212
+== VMCENSUS DUMP w=130 t=1791726970557 ==
+walkMs                  1.212
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=130 t=1791726970557 ==
+SERIES 1791726971060 131 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.246
+SERIES 1791726971565 132 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.265
+SERIES 1791726972069 133 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.215
+SERIES 1791726972572 134 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.228
+SERIES 1791726973075 135 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.386
+SERIES 1791726973578 136 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.249
+SERIES 1791726974081 137 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.141
+SERIES 1791726974585 138 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.186
+SERIES 1791726975089 139 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.271
+SERIES 1791726975591 140 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.151
+== VMCENSUS DUMP w=140 t=1791726975591 ==
+walkMs                  1.151
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=140 t=1791726975591 ==
+SERIES 1791726976095 141 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.146
+SERIES 1791726976598 142 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.091
+SERIES 1791726977100 143 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.198
+SERIES 1791726977604 144 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.144
+SERIES 1791726978109 145 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.412
+SERIES 1791726978613 146 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.248
+SERIES 1791726979118 147 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.232
+SERIES 1791726979621 148 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.203
+SERIES 1791726980124 149 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.244
+SERIES 1791726980628 150 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.552
+== VMCENSUS DUMP w=150 t=1791726980628 ==
+walkMs                  1.552
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=150 t=1791726980628 ==
+SERIES 1791726981133 151 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.278
+SERIES 1791726981639 152 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.855
+SERIES 1791726982141 153 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.207
+SERIES 1791726982644 154 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.330
+SERIES 1791726983149 155 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.203
+SERIES 1791726983653 156 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.208
+SERIES 1791726984157 157 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.311
+SERIES 1791726984660 158 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.205
+SERIES 1791726985164 159 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.333
+SERIES 1791726985669 160 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.175
+== VMCENSUS DUMP w=160 t=1791726985669 ==
+walkMs                  1.175
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=160 t=1791726985669 ==
+SERIES 1791726986172 161 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.219
+SERIES 1791726986675 162 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.279
+SERIES 1791726987179 163 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.411
+SERIES 1791726987684 164 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.105
+SERIES 1791726988187 165 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.148
+SERIES 1791726988692 166 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.484
+SERIES 1791726989196 167 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.322
+SERIES 1791726989703 168 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.363
+SERIES 1791726990204 169 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.247
+SERIES 1791726990709 170 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.254
+== VMCENSUS DUMP w=170 t=1791726990709 ==
+walkMs                  1.254
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=170 t=1791726990709 ==
+SERIES 1791726991214 171 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.213
+SERIES 1791726991716 172 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.292
+SERIES 1791726992219 173 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.280
+SERIES 1791726992719 174 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.262
+SERIES 1791726993224 175 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.206
+SERIES 1791726993727 176 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.101
+SERIES 1791726994232 177 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.278
+SERIES 1791726994733 178 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.433
+SERIES 1791726995238 179 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.342
+SERIES 1791726995743 180 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.174
+== VMCENSUS DUMP w=180 t=1791726995743 ==
+walkMs                  1.174
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=180 t=1791726995743 ==
+SERIES 1791726996250 181 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.354
+SERIES 1791726996753 182 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.212
+SERIES 1791726997260 183 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.192
+SERIES 1791726997764 184 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.224
+SERIES 1791726998269 185 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.188
+SERIES 1791726998772 186 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.256
+SERIES 1791726999278 187 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.256
+SERIES 1791726999784 188 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.282
+SERIES 1791727000286 189 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.202
+SERIES 1791727000792 190 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.334
+== VMCENSUS DUMP w=190 t=1791727000792 ==
+walkMs                  1.334
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=190 t=1791727000792 ==
+SERIES 1791727001295 191 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.129
+SERIES 1791727001800 192 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.133
+SERIES 1791727002304 193 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.370
+SERIES 1791727002809 194 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.204
+SERIES 1791727003312 195 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.371
+SERIES 1791727003817 196 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.191
+SERIES 1791727004321 197 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.156
+SERIES 1791727004827 198 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.776
+SERIES 1791727005332 199 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.120
+SERIES 1791727005832 200 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.362
+== VMCENSUS DUMP w=200 t=1791727005832 ==
+walkMs                  1.362
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=200 t=1791727005832 ==
+SERIES 1791727006336 201 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.148
+SERIES 1791727006839 202 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.247
+SERIES 1791727007342 203 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.218
+SERIES 1791727007847 204 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.159
+SERIES 1791727008351 205 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.244
+SERIES 1791727008858 206 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.106
+SERIES 1791727009363 207 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.119
+SERIES 1791727009866 208 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.221
+SERIES 1791727010370 209 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 0.843
+SERIES 1791727010874 210 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.200
+== VMCENSUS DUMP w=210 t=1791727010874 ==
+walkMs                  1.200
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=210 t=1791727010874 ==
+SERIES 1791727011377 211 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.220
+SERIES 1791727011880 212 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.168
+SERIES 1791727012382 213 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.193
+SERIES 1791727012885 214 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.178
+SERIES 1791727013390 215 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.159
+SERIES 1791727013893 216 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.179
+SERIES 1791727014396 217 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.238
+SERIES 1791727014900 218 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.283
+SERIES 1791727015402 219 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.314
+SERIES 1791727015906 220 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.335
+== VMCENSUS DUMP w=220 t=1791727015906 ==
+walkMs                  1.335
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=220 t=1791727015906 ==
+SERIES 1791727016409 221 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.178
+SERIES 1791727016913 222 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.181
+SERIES 1791727017415 223 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.211
+SERIES 1791727017919 224 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.187
+SERIES 1791727018422 225 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.169
+SERIES 1791727018925 226 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.093
+SERIES 1791727019432 227 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.086
+SERIES 1791727019935 228 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.142
+SERIES 1791727020438 229 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.222
+SERIES 1791727020942 230 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.323
+== VMCENSUS DUMP w=230 t=1791727020942 ==
+walkMs                  1.323
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=230 t=1791727020942 ==
+SERIES 1791727021445 231 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.155
+SERIES 1791727021949 232 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.260
+SERIES 1791727022453 233 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.212
+SERIES 1791727022956 234 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.160
+SERIES 1791727023458 235 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.165
+SERIES 1791727023959 236 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.194
+SERIES 1791727024461 237 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.211
+SERIES 1791727024963 238 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.157
+SERIES 1791727025465 239 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.153
+SERIES 1791727025969 240 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.169
+== VMCENSUS DUMP w=240 t=1791727025969 ==
+walkMs                  1.169
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=240 t=1791727025969 ==
+SERIES 1791727026473 241 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.188
+SERIES 1791727026975 242 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.066
+SERIES 1791727027478 243 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.010
+SERIES 1791727027983 244 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.123
+SERIES 1791727028484 245 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.175
+SERIES 1791727028987 246 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.127
+SERIES 1791727029490 247 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.192
+SERIES 1791727029994 248 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.180
+SERIES 1791727030497 249 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.163
+SERIES 1791727030998 250 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.217
+== VMCENSUS DUMP w=250 t=1791727030998 ==
+walkMs                  1.217
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=250 t=1791727030998 ==
+SERIES 1791727031500 251 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.279
+SERIES 1791727032004 252 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.182
+SERIES 1791727032506 253 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.304
+SERIES 1791727033010 254 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.070
+SERIES 1791727033514 255 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.267
+SERIES 1791727034016 256 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.014
+SERIES 1791727034520 257 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.250
+SERIES 1791727035024 258 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.220
+SERIES 1791727035527 259 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.155
+SERIES 1791727036030 260 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.087
+== VMCENSUS DUMP w=260 t=1791727036030 ==
+walkMs                  1.087
+regions                 430   (privateCommitted=133, bases=20)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=21.898 after=21.898 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       36.738 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (21.898 MiB) ---
+STACK committed                0.109 MiB    0.50%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.11%
+  usable stack commit          0.086 MiB    0.39%
+PRIVATE non-stack             19.570 MiB   89.37%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.57%
+MAPPED cow-taken               0.098 MiB    0.45%
+RESOLVED by walk              20.559 MiB   93.88%
+RESIDUE (kernel-walk)          1.340 MiB    6.12%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4222.730 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.504 MiB  regions=38  reserved=2.496 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a3a00000         3.641 MiB  regions=29  reserved=12.172 MiB
+  base 000002b1aa9d0000         2.332 MiB  regions=35  reserved=13.480 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=260 t=1791727036030 ==
+SERIES 1791727036534 261 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.115
+SERIES 1791727037038 262 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.248
+SERIES 1791727037542 263 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.255
+SERIES 1791727038045 264 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.191
+SERIES 1791727038546 265 22962176 20635648 114688 20520960 819200 102400 4427853824 20 430 2 1.224
+SERIES 1791727039048 266 26632192 24297472 114688 24182784 819200 102400 4426346496 21 418 2 1.225
+SERIES 1791727039551 267 26632192 24297472 114688 24182784 819200 102400 4426346496 21 418 2 1.215
+SERIES 1791727040055 268 26632192 24297472 114688 24182784 819200 102400 4426346496 21 418 2 1.331
+SERIES 1791727040557 269 26632192 24297472 114688 24182784 819200 102400 4426346496 21 418 2 1.192
+SERIES 1791727041059 270 26632192 24297472 114688 24182784 819200 102400 4426346496 21 418 2 1.231
+== VMCENSUS DUMP w=270 t=1791727041059 ==
+walkMs                  1.231
+regions                 418   (privateCommitted=126, bases=21)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=25.398 after=25.398 MiB  (drift 0.000)
+kernel PeakPagefile     57.352 MiB
+kernel WorkingSet       40.293 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (25.398 MiB) ---
+STACK committed                0.109 MiB    0.43%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.09%
+  usable stack commit          0.086 MiB    0.34%
+PRIVATE non-stack             23.062 MiB   90.80%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    3.08%
+MAPPED cow-taken               0.098 MiB    0.38%
+RESOLVED by walk              24.051 MiB   94.69%
+RESIDUE (kernel-walk)          1.348 MiB    5.31%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4221.293 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1a20f0000         5.523 MiB  regions=35  reserved=2.477 MiB
+  base 000002b1a3a00000         4.242 MiB  regions=27  reserved=11.570 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1aa9d0000         3.199 MiB  regions=32  reserved=12.613 MiB
+  base 000002b1a2f40000         2.004 MiB  regions=1  reserved=0.051 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000000e307000000         0.020 MiB  regions=2  reserved=1.980 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a1970000         0.004 MiB  regions=1  reserved=0.379 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1b89a0000         0.004 MiB  regions=1  reserved=15.809 MiB
+  base 00007ff5492e0000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END DUMP w=270 t=1791727041059 ==
+SERIES 1791727041562 271 26632192 24297472 114688 24182784 819200 102400 4426346496 21 418 2 1.204
+SERIES 1791727042067 272 26632192 24297472 114688 24182784 819200 102400 4426346496 21 418 2 1.233
+SERIES 1791727042569 273 26632192 24297472 114688 24182784 819200 102400 4426346496 21 418 2 1.212
+pid=46736 walks=273 bestWalk=51 interval_ms=500 bestEpochMs=1791726930781 endEpochMs=1791727042946
+KERNEL PeakPagefileUsage  57.352 MiB   <- true high-water mark
+KERNEL PeakWorkingSet     71.605 MiB
+COVERAGE of the peak      99.52%  (best walk's PrivateUsage 57.078 / peak 57.352)
+== VMCENSUS BEST ==
+walkMs                  2.710
+regions                 486   (privateCommitted=219, bases=59)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=57.078 after=57.098 MiB  (drift 0.020)
+kernel PeakPagefile     57.105 MiB
+kernel WorkingSet       71.590 MiB   PeakWorkingSet 71.605 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (57.078 MiB) ---
+STACK committed                0.355 MiB    0.62%   (17 stacks)
+  of which PAGE_GUARD          0.199 MiB    0.35%
+  usable stack commit          0.156 MiB    0.27%
+PRIVATE non-stack             54.379 MiB   95.27%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.781 MiB    1.37%
+MAPPED cow-taken               0.098 MiB    0.17%
+RESOLVED by walk              55.613 MiB   97.43%
+RESIDUE (kernel-walk)          1.465 MiB    2.57%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared            46.227 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4541.859 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 000002b1aa9d0000        15.715 MiB  regions=61  reserved=0.098 MiB
+  base 000002b1a3a00000        15.664 MiB  regions=47  reserved=0.148 MiB
+  base 000002b1a20f0000         7.934 MiB  regions=21  reserved=0.066 MiB
+  base 000002b1a1ce0000         3.996 MiB  regions=13  reserved=0.004 MiB
+  base 000002b1a1ae0000         1.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a2c10000         1.004 MiB  regions=1  reserved=0.008 MiB
+  base 000002b1a2d20000         1.004 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a2e30000         1.004 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a2f40000         1.004 MiB  regions=1  reserved=0.023 MiB
+  base 000002b1a3050000         1.004 MiB  regions=1  reserved=0.062 MiB
+  base 000002b1a28f0000         1.004 MiB  regions=1  reserved=0.059 MiB
+  base 000002b1a1790000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1a19e0000         0.996 MiB  regions=1  reserved=0.004 MiB
+  base 000002b1b89a0000         0.789 MiB  regions=7  reserved=15.023 MiB
+  base 000000e307000000         0.043 MiB  regions=1  reserved=1.957 MiB
+  base 000002b1a1780000         0.039 MiB  regions=1  reserved=0.023 MiB
+  base 000002b1a16c0000         0.016 MiB  regions=1  reserved=0.367 MiB
+  base 000002b1ab9a0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a1620000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000002b1a49d0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a59d0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a69d0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a79d0000         0.008 MiB  regions=1  reserved=15.992 MiB
+  base 000002b1a89d0000         0.008 MiB  regions=1  reserved=15.992 MiB
+== END BEST ==

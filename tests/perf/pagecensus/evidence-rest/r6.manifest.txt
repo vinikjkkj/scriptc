@@ -1,0 +1,18 @@
+tag          r6
+arm          CLEAN
+knobset      A
+exe          /g/blocks/fr1-out/S-plain/zapo-rest-182.exe
+exe-bytes    32034304
+exe-sha16    ffc2a35a4de22b25
+knobs        CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60
+walker       /g/blocks/f2b/vmrest.exe  interval=500ms dumpEvery=10 (one full decomposition every 5 s)
+node         v22.18.0 at /c/nvm4w/nodejs/node
+launch-dir   /g/blocks/m3-zaposrc
+started      2026-10-11T14:11:53Z
+free-G-KB    30186744
+walker-pid   41521
+loader       file:///g:/scriptc/node_modules/tsx/dist/loader.mjs
+ended        2026-10-11T14:14:14Z
+rc           0
+walker-rc    0
+free-G-KB    39406824

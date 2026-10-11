@@ -1,0 +1,121 @@
+DECOMPOSITION OF PRIVATE COMMIT AT REST -- app182 history sync
+load CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60
+instant: the mean of the vmrest dumps inside SETTLED-r1 .. IDLE-60s
+column: PROCESS_MEMORY_COUNTERS_EX.PrivateUsage, read from OUTSIDE by
+        vmrest. NOT workingSet.
+subject: fr1-out/S-plain/zapo-rest-182.exe, 32,034,304 B, built at
+        3c462de14 -- the SHIPPED shape, and NOT main (HEAD 61d3ed71e).
+
+This is the instant evidence-fr2 does not have. Its own "WHAT IS NOT HERE"
+says so. Terms below are evidence-fr2/DECOMP.txt's terms, computed the same
+way: CRT HEAP = non-stack private allocation bases of >= 0.9 MiB, shape
+proved by that directory's controls; "small bases" is the rest of the
+top-24; "tail" is PRIVATE non-stack minus the whole top-24.
+
+====================================================================
+1. THE SHIPPED BINARY AT REST, a-knobs (exactly what fr1-run/a1..a6 ran)
+====================================================================
+
+--- r1. DENOMINATOR = 21.898 MiB = kernel PrivateUsage, flat to the byte
+    across 229 pmon samples and across all 12 walks in the window
+    STACK committed                 0.109 MiB    0.50%   5 stacks
+    CRT HEAP (>=0.9 MiB bases)     19.461 MiB   88.87%   7 bases
+    private, small bases            0.111 MiB    0.51%   TEB/PEB, pool reservations
+    private, tail below top-24     -0.002 MiB   -0.01%
+    IMAGE cow-taken                 0.781 MiB    3.57%
+    MAPPED cow-taken                0.098 MiB    0.45%
+    RESIDUE (kernel - walk)         1.340 MiB    6.12%
+    SUM OF TERMS                   21.898 MiB  100.00%  <- equals the denominator
+    BASES DROPPED (clip) 0 in every walk.
+
+--- r6. DENOMINATOR = 22.266 MiB = kernel PrivateUsage, flat to the byte
+    STACK committed                 0.105 MiB    0.47%   5 stacks
+    CRT HEAP (>=0.9 MiB bases)     19.835 MiB   89.08%   9 bases
+    private, small bases            0.115 MiB    0.52%
+    private, tail below top-24     -0.001 MiB   -0.00%
+    IMAGE cow-taken                 0.773 MiB    3.47%
+    MAPPED cow-taken                0.098 MiB    0.44%
+    RESIDUE (kernel - walk)         1.340 MiB    6.02%
+    SUM OF TERMS                   22.265 MiB  100.00%
+    BASES DROPPED (clip) 0 in every walk.
+
+THE ANSWER TO "HOW MUCH OF IT IS HEAP": 88.9% and 89.1%.
+Nineteen and a half MiB of the twenty-two. Everything that is not heap --
+stacks, image, mapped, TEB/PEB, page tables -- is 2.4 MiB together, and
+1.34 MiB of that is the unattributed residue.
+
+THE PER-BASE TABLE, r1, last walk of the window. The ladder
+0.996 / 1.996 / 3.996 is the NT heap segment shape evidence-fr2's
+shape.census.txt control produced from plain mixed malloc, so these bases
+are NAMED by shape and not labelled by position.
+
+    base 000002b1a20f0000      5.504 MiB  regions=38   reserved= 2.496 MiB
+    base 000002b1a1ce0000      3.996 MiB  regions=13   reserved= 0.004 MiB
+    base 000002b1a3a00000      3.641 MiB  regions=29   reserved=12.172 MiB
+    base 000002b1aa9d0000      2.332 MiB  regions=35   reserved=13.480 MiB
+    base 000002b1a1ae0000      1.996 MiB  regions= 1   reserved= 0.004 MiB
+    base 000002b1a19e0000      0.996 MiB  regions= 1   reserved= 0.004 MiB
+    base 000002b1a1790000      0.996 MiB  regions= 1   reserved= 0.004 MiB
+    ---- below 0.9 MiB, not counted as heap ----
+    base 000002b1a1780000      0.039 MiB  regions= 1   reserved= 0.023 MiB
+    base 000000e307000000      0.020 MiB  regions= 2   reserved= 1.980 MiB
+    base 000002b1a16c0000      0.016 MiB  regions= 1   reserved= 0.367 MiB
+    base 000002b1a1620000      0.008 MiB  regions= 1   reserved= 0.000 MiB
+    base 000002b1ab9a0000      0.008 MiB  regions= 1   reserved=15.992 MiB
+    base 000000007ffe0000      0.004 MiB  regions= 1   reserved= 0.000 MiB
+    base 000002b1a1970000      0.004 MiB  regions= 1   reserved= 0.379 MiB
+
+  The 0.008-committed / 15.992-reserved base is the ScrArr reserve shape
+  (scr_array.c:233-243): a 16 MiB reservation with two pages paid for. It is
+  VISIBLE FROM OUTSIDE, in the shipped binary, at rest -- the mechanism
+  tests/perf/placement registers as "vivo e ja enviado" is here in a column.
+
+====================================================================
+2. THE SAME BINARY, q-knobs (SQLite idle release ARMED)
+====================================================================
+    tag  kPrivate   STACK   CRTheap   small    IMG    MAP   RESID     SUM
+    r2     20.484   0.109    18.070   0.111  0.773  0.098   1.324  20.484
+    r5     19.422   0.109    16.917   0.201  0.773  0.098   1.324  19.421
+
+  THE KNOB IS WORTH 2.15 MiB OF HEAP AT REST, NOT 11.6.
+  a-knob mean heap 19.648, q-knob mean heap 17.494, delta -2.154 MiB.
+  n=2 per cell against a within-cell spread of 0.37 and 1.15 MiB, so the
+  sign is safe and the magnitude is one draw wide. The ~11.6 MiB the
+  heapcensus prices the SQLite page cache at is a BUSY-side figure read at
+  a different instant; it is not the commit the knob returns at rest.
+
+====================================================================
+3. THE PEAK OF THE SAME RUNS -- one run, two instants
+====================================================================
+  Measuring both instants in one run is what made the previous result of
+  this front solid, so it is done here too. vmrest keeps vmcensus's BEST
+  walk unchanged.
+
+    tag arm   kn   kPriv   kPeak   cov%   STACK  CRTheap  IMG    RESID    SUM
+    r1  CLEAN A   57.078  57.352  99.52   0.355   53.321  0.781  1.465  57.078
+    r6  CLEAN A   66.723  66.773  99.92   0.383   63.692  0.773  1.477  66.723
+    r2  CLEAN Q   57.184  57.453  99.53   0.352   53.429  0.773  1.473  57.184
+    r5  CLEAN Q   63.914  63.922  99.99   0.391   60.856  0.773  1.488  63.914
+
+  Heap share of the peak: 93.42 / 95.46 / 93.43 / 95.22 %.
+  evidence-fr2 read 95.32 / 95.24 / 94.33 on three runs of the SAME binary
+  seven hours earlier. Four more runs, same instrument, same load: the
+  94-95% stands, and the bimodality evidence-fr2 recorded (56.7 vs 65.0 MiB)
+  reproduces here as 57.1 / 66.7 / 57.2 / 63.9. THE FRACTION IS STABLE AND
+  THE ABSOLUTE IS NOT; quoting one peak is quoting one mode.
+
+  AND THE TRAP IS STILL THERE: the same dumps print
+  kernel PeakWorkingSet 71.6 / 71.3 MiB beside a peak private commit of
+  57.1 / 57.2. Residency is not commit.
+
+====================================================================
+4. WHAT THIS DOES AND DOES NOT SETTLE
+====================================================================
+  SETTLED: the shipped binary at rest pays 19.4-22.3 MiB, 88.9-89.1% of it
+  CRT heap, with every term summing to the kernel's own figure and zero
+  clipping in 72 walks across six runs.
+
+  NOT SETTLED HERE: how much of that heap is live data and how much is
+  hole. VirtualQueryEx sees committed PAGES, not heap BLOCKS. What the
+  external total DOES do is bound the hole from above, and that bound is
+  what TWO-INSTRUMENTS.md spends.

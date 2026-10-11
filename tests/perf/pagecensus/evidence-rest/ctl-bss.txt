@@ -1,0 +1,50 @@
+CONTROL -- bsstgt.exe + vmrest.exe. A 40 MiB file-scope array, untouched vs 20 MiB touched.
+date 2026-10-11T14:17:53Z
+
+######## bsstgt.exe 0 10   (walker: vmrest.exe attach ... 1000 5)
+bss=41943040 B (40.000 MiB)  PrivateUsage at start 40.617 MiB  WS 3.555 MiB
+touched 0 MiB   PrivateUsage 40.617 MiB  WS 3.793 MiB  sink=0
+kernel PrivateUsage     before=40.617 after=40.617 MiB  (drift 0.000)
+kernel WorkingSet       3.816 MiB   PeakWorkingSet 3.816 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (40.617 MiB) ---
+PRIVATE non-stack              0.141 MiB    0.35%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.246 MiB    0.61%
+RESOLVED by walk               0.492 MiB    1.21%
+RESIDUE (kernel-walk)         40.125 MiB   98.79%   NOT attributed
+IMAGE still shared            48.477 MiB   (WRITECOPY untaken + R/X)
+
+######## bsstgt.exe 10 10   (walker: vmrest.exe attach ... 1000 5)
+bss=41943040 B (40.000 MiB)  PrivateUsage at start 40.629 MiB  WS 3.562 MiB
+touched 10 MiB   PrivateUsage 40.629 MiB  WS 13.766 MiB  sink=70
+kernel PrivateUsage     before=40.629 after=40.629 MiB  (drift 0.000)
+kernel WorkingSet       13.789 MiB   PeakWorkingSet 13.789 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (40.629 MiB) ---
+PRIVATE non-stack              0.141 MiB    0.35%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken               10.211 MiB   25.13%
+RESOLVED by walk              10.465 MiB   25.76%
+RESIDUE (kernel-walk)         30.164 MiB   74.24%   NOT attributed
+IMAGE still shared            38.512 MiB   (WRITECOPY untaken + R/X)
+
+######## bsstgt.exe 20 10   (walker: vmrest.exe attach ... 1000 5)
+bss=41943040 B (40.000 MiB)  PrivateUsage at start 40.617 MiB  WS 3.559 MiB
+touched 20 MiB   PrivateUsage 40.617 MiB  WS 23.723 MiB  sink=140
+kernel PrivateUsage     before=40.617 after=40.617 MiB  (drift 0.000)
+kernel WorkingSet       23.746 MiB   PeakWorkingSet 23.746 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (40.617 MiB) ---
+PRIVATE non-stack              0.141 MiB    0.35%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken               20.172 MiB   49.66%
+RESOLVED by walk              20.422 MiB   50.28%
+RESIDUE (kernel-walk)         20.195 MiB   49.72%   NOT attributed
+IMAGE still shared            28.551 MiB   (WRITECOPY untaken + R/X)
+
+######## bsstgt.exe 40 10   (walker: vmrest.exe attach ... 1000 5)
+bss=41943040 B (40.000 MiB)  PrivateUsage at start 40.621 MiB  WS 3.562 MiB
+touched 40 MiB   PrivateUsage 40.621 MiB  WS 43.648 MiB  sink=280
+kernel PrivateUsage     before=40.621 after=40.621 MiB  (drift 0.000)
+kernel WorkingSet       43.672 MiB   PeakWorkingSet 43.672 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (40.621 MiB) ---
+PRIVATE non-stack              0.141 MiB    0.35%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken               40.094 MiB   98.70%
+RESOLVED by walk              40.348 MiB   99.33%
+RESIDUE (kernel-walk)          0.273 MiB    0.67%   NOT attributed
+IMAGE still shared             8.629 MiB   (WRITECOPY untaken + R/X)

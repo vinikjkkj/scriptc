@@ -218,3 +218,16 @@ about the CRT heap, SQLite's page cache, the string arena in `scr_string.c`
 (which has chunks of the same shape and returns none of them), or genuinely
 live data. A result here is a slice of the settled heap bounded by the number
 above, and must not be read as a whole-process figure.
+
+---
+
+## 2026-10-11 — three files added: `vmrest.c`, `heapsplit.c`, `bsstgt.c`
+
+| file | what it is for |
+|---|---|
+| `vmrest.c` | `vmcensus.c` plus a timestamped SERIES line per walk and a full decomposition dump every Nth walk. `vmcensus` keeps only its BEST walk, and the best walk is by construction the PEAK — so there was no way to decompose any other instant. With this, **peak and rest come out of ONE run**. The walk, the classification and `emit()` are `vmcensus.c`'s unchanged; the diff deletes eight lines and all eight are argument parsing, the output-file open and message text. |
+| `heapsplit.c` | a CONTROL, with a negative arm: for every free block `HeapWalk` reports, ask `VirtualQuery` whether those pages are `MEM_COMMIT` or `MEM_RESERVE`. On this heap, 74.6-93.7% of the bytes in free blocks of >= 64 KiB are **reserve** — unless nothing has been freed, in which case the figure is 0.0% and `busy+free` fits inside the kernel's charge. **A census that sums `cbData` over free entries is summing address space, not commit.** |
+| `bsstgt.c` | a CONTROL for `RESIDUE`. A 40 MiB file-scope array is charged to `PrivateUsage` **at map time whether or not a byte of it is ever written**, and `vmcensus`'s copy-on-write rule — correctly — refuses to call untaken `PAGE_WRITECOPY` pages private. So a large `.bss` lands in RESIDUE. Touching it moves it into `IMAGE cow-taken` 1:1: 0 / 10 / 20 / 40 MiB touched reads 0.25 / 10.21 / 20.17 / 40.09 MiB of cow-taken and 40.13 / 30.16 / 20.20 / 0.27 MiB of residue, with `PrivateUsage` constant at 40.62 throughout. **"RESIDUE = page tables" is true of the arms `evidence-fr2` measured and is not a general rule.** |
+
+Results and every artifact: `evidence-rest/`, whose `TABLE.txt` rebuilds byte
+for byte from the committed directory with `python f2b-table.py`.

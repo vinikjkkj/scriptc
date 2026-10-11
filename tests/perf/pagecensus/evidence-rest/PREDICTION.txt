@@ -1,0 +1,131 @@
+F2B -- PREDICTION, REGISTERED BEFORE ANY MEASUREMENT
+====================================================
+written 2026-10-11 ~10:55 local, before the walker was compiled and before
+any subject run of this slice. Nothing below is measured.
+
+CEILING (declared before starting)
+  wall clock          3 h from 10:50 -> hard stop 13:50
+  subject runs        at most 8 (each ~2.5 min of subject time)
+  builds of app182    0 unless step (1) leaves the question open AND >=60 min
+                      remain; a build is ~25-40 min and would eat the ceiling
+  gate / worktree     none. Another slice holds that budget.
+  disk floor          20 GB on G:. Sampled at 10:47 = 29.01 GB free.
+
+THE SUBJECT, and it is NOT at HEAD
+  G:\blocks\fr1-out\S-plain\zapo-rest-182.exe, 32,034,304 B, built at
+  3c462de14 (HEAD is 61d3ed71e). stackless lane, knob ABSENT. Every figure
+  in this slice is a figure about THAT binary, not about main.
+
+THE INSTANT, read from the script that produced fr1-run/a1..a6 and not from
+the briefing
+  fr1-rig.sh -> memrig.mts with CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300
+  ROUNDS=1 IDLE_S=60. memrig.mts:108 SETTLE_MS defaults to 45000 and
+  PRESYNC_MS to 20000; memrig.mts:467-470 sleeps SETTLE_MS after SYNC-DONE,
+  marks SETTLED-r<n>, then sleeps 30 s twice marking IDLE-30s / IDLE-60s.
+  THE REST WINDOW IS SETTLED-r1 .. IDLE-60s, i.e. 45 s of settle followed by
+  a 60 s window. Verified by me in the a1..a6 artifacts, not assumed:
+  a1 n=229 samples, min==max==22,396,928 B, and the six means reproduce the
+  20.495 MiB of the previous slice to the byte (21.359 19.949 19.488 19.855
+  21.430 20.887 MiB).
+
+WHAT I WILL MEASURE
+  R1  CLEAN  S-plain, a-knobs (NO SQLite idle release) -- decomposes the
+      20.495 MiB figure itself. This is deliverable (1) as briefed.
+  R2  CLEAN  S-plain, q-knobs (SCR_SQLITE_IDLE_RELEASE_MS=1000) -- the
+      knob-matched partner of the instrumented q runs.
+  R3  INSTR  v3-out182-SL (7c7897307, the PRE binary of q1/q4/q5), q-knobs
+      -- the SAME external instrument on the binary whose HeapWalk produced
+      the 43 holes. Its vmcensus committed-heap must reproduce that run's
+      in-process busy+free. CROSS-INSTRUMENT POSITIVE CONTROL.
+  Replicates if the clock allows. n=1 per cell is a draw; the effect I am
+  testing is ~15 MiB against a between-run spread of ~1 MiB on this column.
+
+THE NUMBERS I EXPECT (point, then band; I lose if the band misses)
+
+P1  R1, clean, at rest, denominator = kernel PrivateUsage ~20.5 MiB
+      STACK committed              0.33 MiB   band 0.25 - 0.45   (17 stacks
+                                                 at peak; fewer at rest)
+      IMAGE cow-taken              0.773 MiB  band 0.70 - 0.85   (same image
+                                                 as v1/v2/v3 -> same number)
+      MAPPED cow-taken             0.098 MiB  band 0.08 - 0.12
+      private small bases + tail   0.40 MiB   band 0.15 - 0.70
+      RESIDUE                      1.40 MiB   band 1.1 - 1.8
+      CRT HEAP (>=0.9 MiB bases)  17.5 MiB    band 16.0 - 18.5
+                                   = 85% of the denominator, band 78 - 90%
+      coverage of its own instant  >= 99.5%, sum closes to within 0.01 MiB
+    REASONING: every non-heap term was measured at PEAK on this same binary
+    (DECOMP.txt v3) and none of them is a function of load; the heap is the
+    only term that can have shrunk from 56.7 to 20.5.
+
+P2  R2, clean, q-knobs, at rest: CRT heap 6 - 13 MiB, i.e. 4 - 11 MiB BELOW
+    P1, because arming the SQLite idle release drops the page cache that
+    heapcensus prices at ~11.6 MiB. If R2 does NOT come in below R1 the
+    knob is not live in a 3c462de14 binary and I must say so.
+
+P3  R3, instrumented, q-knobs, at rest:
+      kernel PrivateUsage         59 MiB      band 56 - 62 (the q1..q6 mean
+                                               was 59.069)
+      CRT heap committed          32.5 MiB    band 29 - 36
+    The band on the heap term is the cross-instrument control: q1's
+    in-process HeapWalk at shutdown reads heap-0 busy=15,847,824 +
+    free=18,209,664 = 34,057,488 B = 32.479 MiB committed. If the external
+    VirtualQueryEx walk reproduces that to within a few MiB, the two
+    instruments agree and the clean reading in P1 is credible. If it does
+    NOT, the disagreement is the finding and the hole question stays open.
+
+P4  THE ANSWER I EXPECT TO DELIVER: the 43 big holes are NOT in the product.
+    Arithmetic, stated before the fact so it can fail:
+      heap committed, instrumented, at rest   ~32.5 MiB   (q1, measured)
+      heap committed, clean, at rest          ~17.5 MiB   (P1, predicted)
+      difference                              ~15.0 MiB
+      free, instrumented, at rest              17.37 MiB  (q1, measured)
+      of which in holes >= 64 KiB              15.17 MiB  (43 holes)
+    If the clean heap commits ~15 MiB less than the instrumented one while
+    busy can hardly differ by that much, the free side is where the
+    difference lands, and the clean binary's free is ~2 MiB, not ~17.
+    I predict clean free <= 5 MiB and therefore the 43 holes do not survive
+    into the shipped binary. THIS IS A BOUND FROM A TOTAL, NOT A SPLIT: the
+    external walk cannot separate busy from free. It can only say the
+    container is too small to hold the claim.
+
+P5  THE HEAPCENSUS-ONLY ARM, arithmetic done before any build
+    tests/perf/heapcensus/scr_heap_census.h, file-scope aggregates:
+      scr_hc_tbl [16384] x sizeof(ScrHcRow)=24      393,216 B
+      scr_hc_ftbl[16384] x 24                       393,216 B
+      scr_hc_runhist[40] + scr_hc_runpg[40] x 8         640 B
+      scr_hc_pkheaps[64] x 8                            512 B
+      scalars (rows/lost/pk*/...)                      ~300 B
+      TOTAL                                        ~787,900 B = 0.751 MiB
+    So heapcensus alone is CHEAP and the arm is viable. The 38.574 MiB
+    delta is essentially all prof, and the previous slice's named cause
+    is WRONG IN DETAIL: scr_prof_ptbl[1<<21] x 24 = 48 MiB sits inside
+    #ifdef SCR_PROF_LIVE (scr_prof.h:353-497) and f2-build.sh:19 does NOT
+    define SCR_PROF_LIVE. What that build actually declares is
+      scr_prof_tbl [65536] x 88 (ScrProfRow with stk_want)   5,767,168 B
+      scr_prof_hist[65536][40] x 8   (SCR_PROF_SIZEHIST)    20,971,520 B
+      scr_prof_exact[1024] x 8                                  8,192 B
+      scr_prof_stk [1<<17] x 96      (SCR_PROF_STACKS)      12,582,912 B
+      TOTAL prof                                           39,329,792 B
+                                                          = 37.508 MiB
+    plus heapcensus 0.751 MiB = 38.259 MiB declared. The measured rest
+    delta is 38.574 MiB. I predict the two do NOT simply match, because
+    BSS pages are charged only when touched AND the instrumented arm's
+    heap is itself bigger; I expect R3 to show image-cow-taken of
+    20 - 32 MiB, not 38, with the balance in its heap.
+
+P6  WHICH HALF OF THE BRIEFING I EXPECT TO BE WRONG: the half that says a
+    heapcensus-only build would settle it. Even at 0.751 MiB of statics
+    that binary is a different revision from 3c462de14 and its self-test
+    arm already shows up as 5113 x 137 = 0.671 MiB of busy. The thing that
+    settles it is the EXTERNAL committed-heap total on the SHIPPED binary,
+    which costs no build at all.
+
+FALSIFIERS, named now
+  - If R1 CRT heap at rest comes in ABOVE 18.5 MiB, P1 is wrong.
+  - If R3 external heap total disagrees with q1 HeapWalk busy+free by
+    more than ~4 MiB, the cross-instrument control FAILS and nothing in P4
+    may be asserted.
+  - If R1 and R3 differ in CRT heap by less than 8 MiB, P4 is wrong and the
+    43 holes may well be in the product.
+  - If any run reports a NEGATIVE residue, that run is void (h1 precedent).
+  - If BASES DROPPED != 0 the decomposition is invalid.
