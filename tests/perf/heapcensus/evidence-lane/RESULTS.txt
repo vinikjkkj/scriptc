@@ -269,3 +269,57 @@ addrspace      66004197     24594     65991541     11835      -12656     0.80   
     (see the spread table), which points at the allocator mapping more
     segments on the fiber lane, but that is a hypothesis this slice did not
     test and it is not asserted.
+
+================================================================================
+RETRACTED COLUMN, 2026-10-11 -- `busy + free` IS NOT COMMITTED MEMORY
+================================================================================
+
+
+  THE LINES THIS BAND ANSWERS. The column named `committed` in the tables of
+  the sections "=== EVERY RUN, in the declared CBBCCB order ===",
+  "=== ALL SIX RUNS. Welch t, CRITICAL VALUE TAKEN AT THE WELCH df ===" and
+  "=== LEAVE-ONE-OUT: position 1 (c1) dropped, as PREREG.txt promised ===":
+
+      "pos tag arm lane            busy  busyBlk        free  freeBlk
+       committed  uncommitted  busy+free+unc  reg  chunks   chunkB  freed"
+      "committed     46927717   4489829    33994955   1086332       -12932763
+       4.85   2.23   4.303        [-24408867, -1456659]   YES"
+
+  THAT COLUMN IS `busy + free` (lane-stats.mjs:48), WHICH IS ADDRESS SPACE.
+  The -12,932,763 B and its "YES" are a separable difference in heap address
+  space between the two arms. The t, the df and the interval are arithmetic
+  on the numbers as measured and are unaffected; what changes is what the
+  column is a measurement OF. It is not memory paid, and must not be quoted
+  into a commit budget.
+
+  THE THREE COLUMNS THEMSELVES ARE FINE. `busy` is live data. `uncommitted`
+  is reserved and not paid. `busy+free+unc` is heap ADDRESS SPACE and is
+  CORRECTLY NAMED -- that column needs no correction at all.
+
+  WHAT IS UNTOUCHED. Section "=== THE COMMITTED PAIR, PLACED AGAINST THIS
+  SESSION'S ARMS ===" and the 6.1%-of-the-claimed-lane-effect conclusion are
+  argued on the BUSY column and stand.
+
+  THE REFUTATION, by section and quoted sentence.
+  tests/perf/heapcensus/COMMITTED-FREE-RETRACTION.md, section
+  "1. The mechanism, demonstrated and not inferred":
+
+      "The NT heap decommits pages inside a free run without splitting that
+       run into a `PROCESS_HEAP_UNCOMMITTED_RANGE`, so `HeapWalk` keeps
+       reporting the whole block."
+
+  with a NEGATIVE CONTROL in the same table -- the arm that frees nothing
+  reads free >= 64 KiB as 0.961 MiB, 100% MEM_COMMIT, 0.000 MEM_RESERVE --
+  and section "2. The arithmetic contention, same run, no second variable":
+
+      "the process's own HeapWalk in that run: busy 15.594 + free 21.651 =
+       37.245 / EXCESS 15.933 MiB that cannot be committed anywhere"
+
+  WHAT SURVIVES, AND IT IS MOST OF IT. The numbers above are still exactly
+  what HeapWalk reported, and `busy + free` is still a valid CEILING. `busy`
+  is unaffected -- it is live data. `uncommitted` is unaffected -- it is
+  reserved and not paid. IT IS THE SUM THAT BROKE, and only as a statement
+  about COMMIT. Nothing here is deleted and no physics is withdrawn.
+
+  SCOPE OF THIS BAND. It audits ONE figure. EVERY SECTION OF THIS FILE THAT
+  IT DOES NOT NAME IS UNAUDITED BY IT -- it is NOT thereby in force.

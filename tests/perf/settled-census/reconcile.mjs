@@ -758,3 +758,41 @@ if (hc.free.size === 0) {
 
 console.log(fails ? '\nRECONCILE FAILED (' + fails + ')' : '\nRECONCILE OK')
 process.exit(fails ? 1 : 0)
+
+/* RETRACTED COLUMN, 2026-10-11 -- `busy + free` IS NOT COMMITTED MEMORY
+ *
+ * THE LINES THIS BAND ANSWERS, at :460 and :482:
+ *
+ *     'the heap holds MORE committed-free than busy ('
+ *     'committed-free space accounts for the retention to within 15% ('
+ *
+ * and the section printed at :662, 'THE PAGE-SHAPED FRACTION OF THE
+ * COMMITTED-FREE SPACE'. `crt.free` is HeapWalk's free column, so
+ * "committed-free" is a ceiling. The :482 check -- that the free column
+ * accounts for the retention to within 15% -- is the one most at risk: it
+ * matches a CEILING against a kernel-side retention figure, and the match
+ * can be coincidental in either direction.
+ *
+ * The page-shaped fraction at :662 is NOT disturbed as a shape statement:
+ * whole 4 KiB pages inside contiguous free runs are what they are. What
+ * changes is that some of those pages are already decommitted.
+ *
+ * `busy + free` is heap ADDRESS SPACE, not committed memory. The NT heap
+ * decommits pages inside a free run without emitting a
+ * PROCESS_HEAP_UNCOMMITTED_RANGE, so HeapWalk keeps reporting the whole block
+ * and the `free` column mixes committed pages with pages already returned to
+ * the OS. Demonstrated with a negative control (an arm that frees nothing
+ * reads 100% MEM_COMMIT; three arms that free read 74.6% / 93.7% / 92.7%
+ * MEM_RESERVE), and contradicted arithmetically in one run: an outside walk
+ * resolves 21.312 MiB of private non-stack commit while this process's own
+ * HeapWalk reports busy+free = 37.245 MiB.
+ *
+ * `busy` is unaffected -- it is live data. `uncommitted` is unaffected -- it
+ * is reserved and not paid. The SUM is still a valid CEILING. Only its
+ * reading as COMMIT is retracted.
+ *
+ * Full argument, negative control and inventory:
+ * tests/perf/heapcensus/COMMITTED-FREE-RETRACTION.md
+ *
+ * This band audits ONE figure. EVERYTHING ELSE IN THIS FILE IS UNAUDITED BY
+ * IT -- not thereby in force. */

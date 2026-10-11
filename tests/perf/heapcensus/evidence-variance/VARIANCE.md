@@ -369,3 +369,62 @@ string-arena repair, §3's conservation identity and §4's chunk-count
 correction are all untouched; §4 is strengthened — a third 47 was drawn on
 the fiber lane in a different session (46, 47, 46 inside one binary), so the
 count is a per-run draw and 46 stays modal.
+
+---
+
+> ## RETRACTED COLUMN, 2026-10-11 -- `busy + free` IS NOT COMMITTED MEMORY
+>
+> **The lines this band answers.** The file's title:
+>
+> > "# The committed heap does not move the way one pair said it did — and the
+> > chunk count is not 47"
+>
+> section *"0. The three sentences"*, item 2:
+>
+> > "**The committed column is not readable at this sample size, and the
+> > brief's committed range, across three back-to-back runs of one binary at
+> > fixed knobs...**"
+>
+> section *"1. The instrument, named before anything was measured"*:
+>
+> > "classifying each entry by `wFlags` into busy / uncommitted / region /
+> > (else) committed-free."
+>
+> and the **P2** rows of section *"3. The predictions, both registered before
+> run 1"*.
+>
+> **The column these sentences call `committed` is `busy + free`
+> (`stats.mjs:42`), which is heap ADDRESS SPACE**, and the `wFlags` bucket this
+> file calls `committed-free` is free-and-maybe-decommitted. The file's verdict
+> — that the column is **not readable at n = 3** — is untouched and the
+> arithmetic behind it is untouched. What changes is the column's name and
+> therefore what a reader may carry away from it.
+>
+> **Item 3 of section 0 is CORRECT AS IT STANDS** and is not covered by this
+> band: *"The 3.02 MB does not leave heap 0 at all. `busy + free + uncommitted`
+> ..."* is argued on heap **address space**, which is correctly named, and the
+> conservation identity it rests on is as sound as before.
+>
+>   THE REFUTATION, by section and quoted sentence.
+>   tests/perf/heapcensus/COMMITTED-FREE-RETRACTION.md, section
+>   "1. The mechanism, demonstrated and not inferred":
+>
+>       "The NT heap decommits pages inside a free run without splitting that
+>        run into a `PROCESS_HEAP_UNCOMMITTED_RANGE`, so `HeapWalk` keeps
+>        reporting the whole block."
+>
+>   with a NEGATIVE CONTROL in the same table -- the arm that frees nothing
+>   reads free >= 64 KiB as 0.961 MiB, 100% MEM_COMMIT, 0.000 MEM_RESERVE --
+>   and section "2. The arithmetic contention, same run, no second variable":
+>
+>       "the process's own HeapWalk in that run: busy 15.594 + free 21.651 =
+>        37.245 / EXCESS 15.933 MiB that cannot be committed anywhere"
+>
+>   WHAT SURVIVES, AND IT IS MOST OF IT. The numbers above are still exactly
+>   what HeapWalk reported, and `busy + free` is still a valid CEILING. `busy`
+>   is unaffected -- it is live data. `uncommitted` is unaffected -- it is
+>   reserved and not paid. IT IS THE SUM THAT BROKE, and only as a statement
+>   about COMMIT. Nothing here is deleted and no physics is withdrawn.
+>
+>   SCOPE OF THIS BAND. It audits ONE figure. EVERY SECTION OF THIS FILE THAT
+>   IT DOES NOT NAME IS UNAUDITED BY IT -- it is NOT thereby in force.

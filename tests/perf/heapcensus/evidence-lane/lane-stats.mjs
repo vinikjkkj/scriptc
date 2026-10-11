@@ -368,3 +368,33 @@ say('    segments on the fiber lane, but that is a hypothesis this slice did not
 say('    test and it is not asserted.')
 
 if (process.env.V2_WRITE) writeFileSync(process.env.V2_WRITE, L.join('\n') + '\n')
+
+/* RETRACTED COLUMN, 2026-10-11 -- `busy + free` IS NOT COMMITTED MEMORY
+ *
+ * THE LINE THIS BAND ANSWERS, at :48 (and the same expression at :221):
+ *
+ *     committed:+m[1]+ +m[3], addrspace:+m[1]+ +m[3]+ +m[5],
+ *
+ * The field this script calls `committed` is busy + free, and it is the
+ * column that carries the "YES" in RESULTS.txt's six-run table.
+ * `addrspace` on the same line is correctly named and is NOT affected.
+ *
+ * `busy + free` is heap ADDRESS SPACE, not committed memory. The NT heap
+ * decommits pages inside a free run without emitting a
+ * PROCESS_HEAP_UNCOMMITTED_RANGE, so HeapWalk keeps reporting the whole block
+ * and the `free` column mixes committed pages with pages already returned to
+ * the OS. Demonstrated with a negative control (an arm that frees nothing
+ * reads 100% MEM_COMMIT; three arms that free read 74.6% / 93.7% / 92.7%
+ * MEM_RESERVE), and contradicted arithmetically in one run: an outside walk
+ * resolves 21.312 MiB of private non-stack commit while this process's own
+ * HeapWalk reports busy+free = 37.245 MiB.
+ *
+ * `busy` is unaffected -- it is live data. `uncommitted` is unaffected -- it
+ * is reserved and not paid. The SUM is still a valid CEILING. Only its
+ * reading as COMMIT is retracted.
+ *
+ * Full argument, negative control and inventory:
+ * tests/perf/heapcensus/COMMITTED-FREE-RETRACTION.md
+ *
+ * This band audits ONE figure. EVERYTHING ELSE IN THIS FILE IS UNAUDITED BY
+ * IT -- not thereby in force. */

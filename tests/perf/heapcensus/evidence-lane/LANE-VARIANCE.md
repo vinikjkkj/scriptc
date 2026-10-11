@@ -264,3 +264,52 @@ because the instrumented binary writes them through a Windows text-mode `FILE`.
 Branch `perf/heapcen-lane-variance` from `dc0d063c1`, worktree
 `G:\blocks\v2-wt`. The diff is **`tests/perf/**` only**, so it is **green by
 construction — no gate runs `tests/perf`**. Not merged and not pushed.
+
+---
+
+> ## RETRACTED COLUMN, 2026-10-11 -- `busy + free` IS NOT COMMITTED MEMORY
+>
+> **The lines this band answers.** In section *"A floor that applies to every
+> \"YES\" in `RESULTS.txt`"*:
+>
+> > "columns that do cross 4.303 — `free`, `committed`, `busyBlocks`,
+> > `freeBlocks` —"
+>
+> and in section *"4. The wider sentence is bounded the same way"*:
+>
+> > "on −7.919 MiB of `free` and −23.281 MiB of `uncommitted`. Measured 3 v 3:"
+>
+> **The `committed` column is `busy + free` (`lane-stats.mjs:48`), which is heap
+> ADDRESS SPACE.** Its crossing of 4.303 is a real, separable difference in
+> address space; it is not a difference in memory paid, and the `free` column it
+> is built on mixes committed pages with pages the NT heap already returned
+> without reporting them.
+>
+> **What this band does not disturb.** The variance floor this section
+> establishes, the leave-one-out reversal, and every statement made about the
+> `busy` column are untouched — they are arithmetic on numbers that are still
+> exactly what `HeapWalk` reported.
+>
+>   THE REFUTATION, by section and quoted sentence.
+>   tests/perf/heapcensus/COMMITTED-FREE-RETRACTION.md, section
+>   "1. The mechanism, demonstrated and not inferred":
+>
+>       "The NT heap decommits pages inside a free run without splitting that
+>        run into a `PROCESS_HEAP_UNCOMMITTED_RANGE`, so `HeapWalk` keeps
+>        reporting the whole block."
+>
+>   with a NEGATIVE CONTROL in the same table -- the arm that frees nothing
+>   reads free >= 64 KiB as 0.961 MiB, 100% MEM_COMMIT, 0.000 MEM_RESERVE --
+>   and section "2. The arithmetic contention, same run, no second variable":
+>
+>       "the process's own HeapWalk in that run: busy 15.594 + free 21.651 =
+>        37.245 / EXCESS 15.933 MiB that cannot be committed anywhere"
+>
+>   WHAT SURVIVES, AND IT IS MOST OF IT. The numbers above are still exactly
+>   what HeapWalk reported, and `busy + free` is still a valid CEILING. `busy`
+>   is unaffected -- it is live data. `uncommitted` is unaffected -- it is
+>   reserved and not paid. IT IS THE SUM THAT BROKE, and only as a statement
+>   about COMMIT. Nothing here is deleted and no physics is withdrawn.
+>
+>   SCOPE OF THIS BAND. It audits ONE figure. EVERY SECTION OF THIS FILE THAT
+>   IT DOES NOT NAME IS UNAUDITED BY IT -- it is NOT thereby in force.
