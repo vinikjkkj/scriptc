@@ -139,11 +139,56 @@ including the rejecting one — which is why 3.3's example checks
 `scr_exc_pending()` after a take and bails to a cleanup path.
 
 *Known parity gap, not a regression:* a frame still parked when the loop exits
-is abandoned and its payload is not released — exactly what happens to an
-abandoned fiber today (`scr_fibers_abandoned`). If the codegen cannot
-discharge 3.5 on all paths, the right fix is a per-function `drop` hook in
-`ScrCoroBase`; that costs 8 bytes on every frame, so it is deliberately not
-there yet. Ask for it rather than leaking.
+is abandoned and its payload is not released.
+
+**THE `drop` HOOK IS NOT OWED, AND THAT IS NOW MEASURED RATHER THAN ASSUMED**
+(2026-10-11). This paragraph used to continue "— exactly what happens to an
+abandoned fiber today (`scr_fibers_abandoned`)", and then to offer: "If the
+codegen cannot discharge 3.5 on all paths, the right fix is a per-function
+`drop` hook in `ScrCoroBase`; that costs 8 bytes on every frame, so it is
+deliberately not there yet. Ask for it rather than leaking." That was a
+CONDITIONAL offer whose condition nobody ever measured, and section 7 then
+carried it for months as though it were an outstanding obligation. It is not
+one. `tests/harness/coro-abandon-parity.test.ts` drives a frame carrying a
+heap string, an array and an object ACROSS the suspension — all three read
+after the resume, so the emitter must put them in the frame — out through
+every exit path a frame can actually take, and asks the RC audit:
+
+| exit path | stackless lane, SCR_RC_AUDIT=1 | frame payload leaked |
+| --- | --- | --- |
+| the await REJECTS, caught, normal return | exit 0, audit silent | none |
+| ordinary fulfilment | exit 0, audit silent | none |
+| the consumer drops the result promise | exit 0, audit silent | none |
+| the frame's own promise rejects, unattached | exit 1 (unhandled rejection), audit silent | none |
+| throws before its first await | exit 0, audit silent | none |
+| **parked when the loop exits** | **exit 99, `RC AUDIT FAILED`** | the whole payload, by design |
+
+**The codegen discharges 3.5 on every path a frame LEAVES by.** The hook's
+condition is false, so the 8 bytes are not owed — and 8 bytes was never the
+whole price. `scr_coro_release` (`packages/runtime/src/scr_coro.c:57`) has
+EXACTLY ONE caller, `scr_coro_resume_entry` (`:308`), and a frame only
+reaches it after its body has run and released its own slots, so a hook
+invoked there DOUBLE-releases. The only site that wants one is loop exit, and
+loop exit holds no list of live frames to walk: `ScrCoroBase` is six fields
+with no links and no cycle header (`scr_coro.h:102`), and `scr_async.c:4456`
+sets a COUNTER. A usable hook therefore needs an intrusive registry with
+insert and unlink on the `scr_coro_alloc` hot path, which is two more
+pointers per frame on top of the hook — not a pointer in the header.
+
+**AND THE PARITY CLAIM WAS FALSE IN THE REASSURING DIRECTION.** The residue
+is *not* "exactly what happens to an abandoned fiber". On the SAME source the
+stackless lane prints its coroutine line, FALLS THROUGH to the leak check
+(`scr_console.c:61-64` prints and does not return), finds the deliberately
+retained payload and dies `_Exit(99)`; the fiber lane prints its skip notice,
+RETURNS (`:67-71`), and exits 0. Both halves are deliberate where they were
+written — the coroutine line exists precisely so the failure is EXPLAINED
+rather than silent — so the divergence is pinned by the test rather than
+erased. What could not stand is the sentence claiming the two lanes agree,
+because that sentence was the stated reason for leaving the residue open.
+SCR_RC_AUDIT BUILDS ONLY: `coro-abandoned-count.test.ts` PROOF 3b pins the
+literal out of a shipping image, so none of this reaches a shipped binary,
+and the column this whole clause moves is diagnostic fidelity — zero bytes,
+zero blocks. It is completeness, not a gain.
 
 ### 3.6 Pick lean or fat correctly
 `has_exc` is `false` for census classes **D1–D3** and `true` for **D4**.
@@ -858,12 +903,23 @@ not to look.
   clause on app182 is ZERO and that is measured, not unknown:** all three of
   its remaining generator-family functions are async, so the adjudicator is
   generator-lane parity, never an app182 coverage delta.
-- **A `drop` hook** for abandoned-frame payload release (3.5) — still open
-  **in `ScrCoroBase`**, which is where 3.5 needs it. A `drop` does now exist
-  one level up for generators (`scr_gen_of_coro(base, drop)`), for the
-  different reason that an UNSTARTED generator can be released before its
-  body ever runs; it is a handle parameter, not a frame field, and it costs
-  the 40-byte base nothing.
+- ~~**A `drop` hook** for abandoned-frame payload release (3.5) — still open
+  **in `ScrCoroBase`**, which is where 3.5 needs it.~~ **NOT OWED, AND THAT IS
+  MEASURED (2026-10-11).** This bullet read as an outstanding obligation; 3.5
+  only ever made a CONDITIONAL offer ("if the codegen cannot discharge 3.5 on
+  all paths") and nobody had measured the condition. It is false:
+  `tests/harness/coro-abandon-parity.test.ts` carries a string, an array and
+  an object across a suspension and out through all five paths a frame
+  LEAVES by — reject-and-catch, fulfil, dropped consumer, unattached
+  rejection, throw-before-first-await — and the RC audit is silent on every
+  one. See 3.5 for the table, for why the 8 bytes understates the price (the
+  hook would have no caller without a new frame registry), and for the parity
+  sentence that was FALSE: an abandoned frame exits 99 where an abandoned
+  fiber exits 0, in SCR_RC_AUDIT builds, on identical source. **What survives
+  as open is nothing from 3.5.** A `drop` does exist one level up for
+  generators (`scr_gen_of_coro(base, drop)`), for the different reason that an
+  UNSTARTED generator can be released before its body ever runs; it is a
+  handle parameter, not a frame field, and it costs the 40-byte base nothing.
 - ~~**D4 lowering.** The fat frame exists and is sized, but no test drives a
   suspension inside a `finally`.~~ **Two files drive exactly that now.**
   `tests/harness/stackless-finally-body.test.ts` is shape (1), an `await`
