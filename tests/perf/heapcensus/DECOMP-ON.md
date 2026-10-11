@@ -40,6 +40,40 @@ build.
 | share | **40.91%** of the arm's busy CRT heap bytes |
 | owner | **114 of the 118 blocks** are cycle-collector arena chunks |
 
+### That owner line does not survive the string arena's repair
+
+**True for the evidence this file reads, and false for any binary built after
+`strarena/drop-64k-alignment`.** The arms here are `21facf366`, where the
+string arena took its chunks through `_aligned_malloc(65536, 65536)` and they
+landed in a row of their own, `HCSIZE 131079` (section 4 here;
+`OWNER-131079.md` decomposes it to the byte). That slice makes
+`scr_str_chunk_alloc` a plain `malloc(SCR_STR_ARENA_CHUNK)` and releases the
+3,014,768 B of alignment padding -- **and the chunks it keeps move into this
+row**, because 65,536 is also the string arena's chunk size.
+
+So on a post-change census this row reads about **164 blocks** rather than
+118 -- 118 + the 46 live string chunks, a figure that is coupled to the
+workload and was 33 on `half-on`. And the owner sentence in the table above,
+
+*"114 of the 118 blocks are cycle-collector arena chunks"*
+
+**becomes false as written**. The 114 is still right; the denominator it is
+quoted against is not.
+
+**Two arenas now share one chunk size** -- `scr_cyc_ar_new` at
+`scr_cycle.c:1546` and `scr_str_chunk_alloc` in `scr_string.c` -- so the
+census row alone can no longer tell them apart, and a reader who splits it by
+eye will mis-assign up to 46 blocks. Split it by the PROF counts of the two
+sites instead: the cycle side is `scr_cycle.c:1546` minus `scr_cycle.c:1589`,
+which is the arithmetic this section already uses, and the string side
+becomes visible in PROF for the first time by the same change -- a plain
+`malloc` is interposed by `scr_prof.h` where `_aligned_malloc` never was
+(`OWNER-131079.md` section 2).
+
+**Nothing in this file is retracted.** Every number here is correct for the
+arms it names. The attribution simply does not travel forward past that
+commit, and this is the word that says so.
+
 The size is arithmetic, in the shape `WHICH-BUFFER.md` §2 used for the 4,376:
 
 ```
