@@ -9,7 +9,11 @@
  *
  *   aarch64-linux-gnu.2.36   (the linux lane's default triple, glibc
  *                             pinned to the differential container's
- *                             bookworm — docs/linux-port.md)
+ *                             bookworm — built at
+ *                             linux-differential.test.ts:536;
+ *                             docs/linux-port.md was never
+ *                             committed, see
+ *                             tests/harness/README.md)
  *   x86_64-linux-gnu.2.36    (the linux lane's amd64 triple)
  *   x86_64-windows-gnu       (the windows lane's triple)
  *   x86_64-macos             (build-only; the host arm64-macos build is

@@ -1,5 +1,7 @@
 /* The Linux differential lane — env-gated (SCRIPTC_LINUX=1), skipped everywhere
- * else so the macOS lanes never see it. The workflow (docs/linux-port.md):
+ * else so the macOS lanes never see it. The workflow (docs/linux-port.md was
+ * never committed — see the note in tests/harness/README.md; this
+ * comment is the workflow's only home):
  * corpus programs are CROSS-COMPILED on the host via `zig cc`
  * (SCRIPTC_CC=zigcc, SCRIPTC_TARGET=aarch64-linux-gnu.<glibc>) and both sides run
  * inside one Linux container — the binary, and a LINUX Node as the oracle
