@@ -16,7 +16,7 @@
  * The white set is gathered first and freed after the walk — freeing
  * during the walk would leave dangling sibling edges for later visits.
  *
- * Correctness leans on two global invariants (docs/memory.md):
+ * Correctness leans on two global invariants, both stated here:
  * - every strong reference is counted: stacks, locals, and runtime-owned
  *   buffers (timer callbacks, unhandled-rejection tracking) all hold +1,
  *   so trial deletion can never free something a root still reaches;

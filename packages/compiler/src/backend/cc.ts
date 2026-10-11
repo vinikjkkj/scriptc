@@ -2185,8 +2185,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
       .map(([name]) => name);
     if (unsupported.length > 0) {
       throw new Error(
-        `SCRIPTC_TARGET=${driver.target}: ${unsupported.join(", ")} not supported under a cross target yet ` +
-          `(host-built vendor archives / system libs — see docs/linux-port.md).`,
+        `SCRIPTC_TARGET=${driver.target}: ${unsupported.join(", ")} not supported for this cross target ` +
+          `(the retired curl reference keeps a LINUX-ONLY cross arm: vendored curl headers plus the generated libcurl.so.4 soname stub, ensureCurlStub — unset SCRIPTC_FETCH_CURL for the native fetch, which rides the socket units and has no linux-only arm).`,
       );
     }
   }

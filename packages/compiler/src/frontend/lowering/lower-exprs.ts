@@ -5902,7 +5902,7 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
 /** `a ?? b` — JS-exact nullish coalescing: ONLY null/undefined take the
    * default (0, "", and false do not), and the right side evaluates lazily.
    * On a unit-armed union left this is the `nullish` node (a runtime tag
-   * test against the unit arms, docs/ir.md); the two lowered shapes follow
+   * test against the unit arms; the node is ir/nodes.ts); the two lowered shapes follow
    * the checker's result type — pass-through (`(s: string | undefined) ??
    * t` with t also `string | undefined`) and narrowed (`s ?? "d"` → plain
    * string, the single non-unit arm). A left the checker types non-nullish

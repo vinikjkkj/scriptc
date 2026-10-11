@@ -3625,7 +3625,7 @@ function lowerOptionalDefaultArg(
       // The checker types the call `V | undefined`, which interns the
       // result union. `undefined` sorts LAST among all possible arm
       // typeKeys, so when V is itself a union its arms keep their tags in
-      // the result union — the backend leans on that (docs/ir.md).
+      // the result union — the backend leans on that (canonical arm order, ir/nodes.ts).
       //
       // Except when V is `unknown`. `unknown | undefined` IS `unknown`,
       // so the checker hands back no union at all and there was nothing

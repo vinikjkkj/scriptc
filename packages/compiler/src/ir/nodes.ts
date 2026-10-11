@@ -1,6 +1,6 @@
 /* scriptc IR — the only interface between frontend and backends.
  *
- * Design rules (see docs/ir.md for node-by-node semantics):
+ * Design rules (node-by-node semantics are the per-node doc comments in THIS file; ir/validate.ts is the executable check):
  * - Plain JSON-safe discriminated unions: no classes, no parent pointers,
  *   no cycles. Cross-references are by string id.
  * - Every node carries `loc` (source span) and every expression carries its
@@ -904,7 +904,7 @@ export function isSupportedSetElem(t: IrType): boolean {
 /** The Map VALUE fence: scalars plus every refcounted kind EXCEPT
  * jsval. Record/object/union values can point back at the map holding
  * them, which is exactly why ref-valued maps are cycle-capable (see the
- * backend's cycle analysis and docs/memory.md). Shared
+ * backend's cycle analysis in backend/emission/emit-exprs.ts). Shared
  * frontend/validator. */
 export function isSupportedMapValue(t: IrType): boolean {
   switch (t.kind) {
@@ -2581,7 +2581,7 @@ export type IrStmt =
 
 /** The complete array method/property surface (mirrors ambient/scriptc.d.ts).
  * `map`/`filter`/`forEach` are NOT here: the frontend desugars them to
- * synthetic loop functions over existing nodes (see docs/ir.md). */
+ * synthetic loop functions over existing nodes (frontend/lowering/lower-containers.ts). */
 /** `slice` is JS-exact shallow copy (ToIntegerOrInfinity indices, negatives
  * from the end, clamping; omitted args omitted from `args` — backends fill
  * 0 / +Infinity, the strIntrinsic convention); ref elements retain into

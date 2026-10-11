@@ -98,7 +98,7 @@ export function islandRestSlotType(
 
 /** How a parameter participates in CALL-SITE COMPLETION (the frontend
  * completes every call to the one full signature, so the IR and backends
- * stay count-exact — see docs/ir.md). `required` params must be passed;
+ * stay count-exact; ir/validate.ts is the backstop). `required` params must be passed;
  * `omittable` params (declared `x?: T` or `x: T = e`) may be omitted by a
  * trailing-suffix call, and the frontend appends the interned undefined arm;
  * `rest` (always last) receives the surplus arguments packed into one array
@@ -684,7 +684,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
   }
 
 /** CALL-SITE COMPLETION — the frontend half of the one-signature contract
-   * (docs/ir.md): every call lowers to exactly the callee's full ABI
+   * (enforced by ir/validate.ts): every call lowers to exactly the callee's full ABI
    * parameter list, so backends and the validator stay count-exact and no
    * runtime arity machinery exists. Omitted trailing args for omittable
    * params become the interned undefined arm (which is also what an
@@ -904,7 +904,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     return wrapped;
   }
 
-/** DECISION (docs/ir.md): function VALUES keep exact-arity semantics — a
+/** DECISION (recorded here): function VALUES keep exact-arity semantics — a
    * func-typed IrType spells one completed signature, so a function whose
    * declaration has optional/default/rest parameters can become a value only
    * where the target type spells that exact signature with required

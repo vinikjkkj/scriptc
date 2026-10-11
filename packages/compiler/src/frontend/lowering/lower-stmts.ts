@@ -5665,7 +5665,7 @@ function switchDiscAtBridgedLocal(L: Lowerer, stmt: ts.SwitchStatement, disc: Ir
   return armed;
 }
 
-/** JS-exact switch (see docs/ir.md): one shared lexical scope for all case
+/** JS-exact switch (stated here): one shared lexical scope for all case
    * bodies, lazy source-order test evaluation, fall-through. tsc has already
    * checked case-test comparability (TS2678) — the kind check below is the
    * backstop for cases tsc lets through (e.g. `unknown as` casts). */

@@ -863,7 +863,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // statement end still applies). String-returning methods hand back
         // a +1 reference, which newTemp registers in the frame like any
         // other owned string temp. Omitted optional args get the C-side
-        // defaults from docs/ir.md: indexOf position 0, slice start 0,
+        // defaults from the strIntrinsic convention (ir/nodes.ts): indexOf position 0, slice start 0,
         // slice end INFINITY (math.h is always included).
         const r = E.emitExpr(e.receiver);
         const args = e.args.map((a) => E.emitExpr(a));
@@ -1730,7 +1730,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // doubles as the cycle-capability flag: non-NULL exactly when the
         // value type carries a collector header (record/object/union values
         // can point back at the map) — such maps allocate with the header,
-        // scalar/string/array-valued maps stay lean (docs/memory.md).
+        // scalar/string/array-valued maps stay lean (isSupportedMapValue, ir/nodes.ts).
         if (e.type.kind !== "map") throw new Error("emitter bug: mapNew of non-map type");
         const value = e.type.value;
         const rc = isRefCounted(value) ? vAdapters(value) : null;
@@ -2750,7 +2750,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       }
       case "unionNarrow": {
         // Tag-UNCHECKED payload extraction: the frontend emits this only
-        // where tsc's control-flow narrowing proved the tag (docs/ir.md).
+        // where tsc's control-flow narrowing proved the tag (the unionNarrow node, ir/nodes.ts; ir/validate.ts is the backstop).
         // Ref payloads come out +1 via the arm's CONCRETE retain (statically
         // known here — no need for the stored fn ptr); the union temp itself
         // releases with this statement's frame as usual.

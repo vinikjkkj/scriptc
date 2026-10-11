@@ -3,7 +3,7 @@
  * emission is trivially correct, reference counting has one mechanical
  * hook point, and the output shape is already close to a CFG lowering.
  *
- * RC ownership discipline (must match docs/ir.md):
+ * RC ownership discipline (stated here; the LLVM twin is backend/llvm/emitter.ts):
  * - every refcounted temp (isRefCounted kinds) holds an owned (+1) reference;
  * - varDecl/assign/return/call-argument MOVE that ownership (the temp is
  *   struck from its release list); everything else borrows;

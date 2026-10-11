@@ -20,7 +20,7 @@
  * as diagnostic SC3001.
  *
  * RC ownership discipline: the frame/scope release-point machinery is
- * ported from CEmitter (docs/ir.md) — every refcounted temp holds an owned
+ * ported from CEmitter (backend/emission/emitter.ts) — every refcounted temp holds an owned
  * +1 reference; varDecl/assign/return/call-argument MOVE that ownership;
  * each statement releases its remaining refcounted temps when it ends;
  * each scope releases the refcounted locals declared in it when it exits;
@@ -13317,7 +13317,7 @@ class LlEmitter {
     // Receiver and string arguments are owned temps in the current frame;
     // every scr_str_* method BORROWS them. String/array-returning methods
     // hand back a +1 reference, which own() registers like any other.
-    // Omitted optional args get the C-side defaults from docs/ir.md.
+    // Omitted optional args get the C-side defaults from the strIntrinsic convention (ir/nodes.ts).
     const B = this.B;
     const r = this.emitExpr(e.receiver);
     const args = e.args.map((a) => this.emitExpr(a));
