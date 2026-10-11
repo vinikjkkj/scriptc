@@ -579,8 +579,37 @@ static void scr_stream_rbuf_push(ScrStreamState *st, void *chunk /*moves*/, bool
 }
 
 /* Takes n units (n <= length; bytes, or chars once encoded) off the
- * buffer head as one +1 Buffer / string. */
-static void *scr_stream_rbuf_take(ScrStreamState *st, size_t n) {
+ * buffer head as one +1 Buffer / string.
+ *
+ * `fresh` (optional) answers WHICH of the three return paths ran, and it
+ * has to be answered HERE because no caller can re-derive it: the take
+ * destroys the very state the test would read (head_off, buf[0] and its
+ * length). The three paths differ in who else can still observe the
+ * payload, which is the only thing a sharing boxer may depend on:
+ *
+ *   whole-chunk fast path  the buffered entry handed out AS-IS. The
+ *                          array's +1 moves to the caller, but that entry
+ *                          was built as `scr_bytes_retain(chunk)` in
+ *                          scr_stream_add_chunk, so the PRODUCER still
+ *                          holds the same payload; it may be a VIEW
+ *                          (ScrBytes.backing, an interior pointer into a
+ *                          larger owner that it keeps alive); and its
+ *                          flavor is whatever the producer stamped, which
+ *                          for a socket or fs read is UNKNOWN. ALIASED —
+ *                          `fresh` stays false.
+ *   string path            a +1 ScrStr, not a bytes answer at all; the
+ *                          callers' `encoded` arm takes it. false.
+ *   bytes concat path      a buffer built right here out of scr_bytes_new
+ *                          + scr_bytes_stamp_buffer, filled by memcpy from
+ *                          entries this call then drops: rc 1, backing
+ *                          NULL, flavor BUFFER, referenced by nobody else.
+ *                          `fresh` is true ONLY here.
+ *
+ * Note the fast path precedes the `encoded` test, so it answers for BOTH
+ * element kinds; that is why `fresh` is a property of the path and not of
+ * the buffer mode. */
+static void *scr_stream_rbuf_take_f(ScrStreamState *st, size_t n, bool *fresh) {
+  if (fresh) *fresh = false;
   void *first = st->r.n > 0 ? st->r.buf[0] : NULL;
   if (first && st->r.head_off == 0 && scr_stream_entry_len(st, first) == n) {
     /* whole-chunk fast path: hand the buffered chunk out as-is */
@@ -621,6 +650,7 @@ static void *scr_stream_rbuf_take(ScrStreamState *st, size_t n) {
     return out;
   }
   ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)n));
+  if (fresh) *fresh = true; /* built here, out of entries this call drops */
   size_t at = 0;
   while (at < n) {
     ScrBytes *head = st->r.buf[0];
@@ -638,6 +668,10 @@ static void *scr_stream_rbuf_take(ScrStreamState *st, size_t n) {
   }
   st->r.length -= n;
   return out;
+}
+
+static void *scr_stream_rbuf_take(ScrStreamState *st, size_t n) {
+  return scr_stream_rbuf_take_f(st, n, NULL);
 }
 
 /* emit('data', chunk) + pipe delivery. Borrows chunk (a Buffer, or a
@@ -1277,7 +1311,7 @@ static void scr_next_settle_error(ScrStream *s, ScrPromise *w /*moves*/, ScrErro
  * moment the stream could answer — the buffer take must not slide — and
  * the promise settles the turns later scr_next_settle_value owes. */
 static void scr_stream_next_fulfill(ScrStream *s, ScrPromise *w /*moves*/, void *chunk /*moves or NULL=EOF*/,
-                                    ScrStream *end_after /*borrowed or NULL*/) {
+                                    bool fresh, ScrStream *end_after /*borrowed or NULL*/) {
   ScrStreamState *st = s->st;
   if (st->r.next_dyn) {
     ScrDyn *d;
@@ -1287,8 +1321,39 @@ static void scr_stream_next_fulfill(ScrStream *s, ScrPromise *w /*moves*/, void 
       d = scr_dyn_new_str((ScrStr *)chunk);
       scr_str_release((ScrStr *)chunk);
     } else {
-      d = scr_dyn_new_buffer_copy((ScrBytes *)chunk);
-      scr_bytes_release((ScrBytes *)chunk);
+      /* The dyn box of a `for await` chunk. The BOUNDARY constructor
+       * shares one refcounted payload where the copying one allocates a
+       * second of the same size (scr_runtime.h:5436-5443: "one refcounted
+       * payload, two views of it ... exactly Node, which has no copy at
+       * all"). Sharing is sound only when nothing else can observe the
+       * payload, and that is a property of which scr_stream_rbuf_take_f
+       * path ran — not of the chunk, which carries no mark of its origin.
+       *
+       * `fresh` is the bytes CONCAT path: the take built that buffer out
+       * of entries it then released, so the move this function already
+       * owns is the only reference, and the stamp the take applies makes
+       * scr_dyn_new_bytes_ref's DERIVED `buffer` flag agree with
+       * scr_dyn_new_buffer_copy's forced one. (The two constructors are
+       * not otherwise interchangeable: the copy forces Buffer-ness on,
+       * precisely for producers whose ScrBytes is stamped UNKNOWN.)
+       *
+       * The whole-chunk fast path is the opposite on every count — the
+       * producer still holds the payload, so a write through the JS
+       * Buffer would land in it — and keeps the copy.
+       *
+       * The three predicates RE-CHECK the invariant the flag asserts
+       * instead of trusting it. An edit to the take that broke any one of
+       * them would publish an aliased payload to JS with no diagnostic,
+       * and three compares against a memcpy of the whole chunk cost
+       * nothing; they can only ever fall back to the copy. */
+      ScrBytes *cb = (ScrBytes *)chunk;
+      if (fresh && cb->rc == 1 && cb->backing == NULL &&
+          cb->flavor == SCR_BF_BUFFER) {
+        d = scr_dyn_new_bytes_ref(cb); /* +1; the release below returns to 1 */
+      } else {
+        d = scr_dyn_new_buffer_copy(cb);
+      }
+      scr_bytes_release(cb);
     }
     scr_next_settle_value(s, w, d, scr_dyn_retain_v, scr_dyn_release_v, end_after);
   } else {
@@ -1366,11 +1431,12 @@ static void scr_stream_settle_next(ScrStream *s) {
     ScrPromise *w = st->r.next_waiter;
     st->r.next_waiter = NULL;
     st->r.next_wake = false;
-    void *chunk = scr_stream_rbuf_take(st, st->r.object_entries ? 1 : st->r.length);
+    bool fresh = false;
+    void *chunk = scr_stream_rbuf_take_f(st, st->r.object_entries ? 1 : st->r.length, &fresh);
     bool drained = st->r.ended && st->r.length == 0;
     /* inline: this IS the consumer's read(), so 'end' is enqueued now,
      * exactly where Node enqueues it; parked: it rides the settlement. */
-    scr_stream_next_fulfill(s, w, chunk, (drained && scr_next_inline != s) ? s : NULL);
+    scr_stream_next_fulfill(s, w, chunk, fresh, (drained && scr_next_inline != s) ? s : NULL);
     if (drained && scr_next_inline == s) scr_stream_end_readable(s);
     return;
   }
@@ -1397,7 +1463,7 @@ static void scr_stream_settle_next(ScrStream *s) {
     ScrPromise *w = st->r.next_waiter;
     st->r.next_waiter = NULL;
     st->r.next_wake = false;
-    scr_stream_next_fulfill(s, w, NULL, NULL);
+    scr_stream_next_fulfill(s, w, NULL, false, NULL);
   }
 }
 
@@ -1412,7 +1478,7 @@ static ScrPromise *scr_stream_next_chunk_impl(ScrStream *s, bool dyn) {
   scr_next_inline = s;
   if (!st->has_r) {
     st->r.next_dyn = dyn;
-    scr_stream_next_fulfill(s, scr_promise_retain(p), NULL, NULL);
+    scr_stream_next_fulfill(s, scr_promise_retain(p), NULL, false, NULL);
     scr_next_inline = outer_inline;
     return p;
   }
@@ -4422,7 +4488,7 @@ static void scr_stream_run_tick(ScrStreamTick *t) {
         ScrPromise *w = st->r.next_waiter;
         st->r.next_waiter = NULL;
         st->r.next_wake = false;
-        scr_stream_next_fulfill(s, w, NULL, NULL);
+        scr_stream_next_fulfill(s, w, NULL, false, NULL);
       } else if (st->r.next_waiter) {
         scr_stream_settle_next(s); /* content raced in: deliver it */
       }
