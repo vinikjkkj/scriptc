@@ -1,0 +1,37 @@
+LANE DELTA, MATCHED BY MODE -- f1 (fiber, LOW) against v3 (stackless, LOW)
+Both arms are the low mode of a bimodal column, so the pair compares like
+with like. The high-mode stackless run v1 is printed only to show that the
+SHARES do not depend on the mode; it is not subtracted from anything.
+
+  term                       f1 fiber LOW   v3 stkls LOW        delta      f1 share  v3 share  v1 share
+  kernel PrivateUsage             446.164         56.652     -389.512      100.00%    100.00%    100.00%
+  STACK committed                 324.320          0.352     -323.968       72.69%      0.62%      0.60%
+    of which PAGE_GUARD           236.801          0.199     -236.602       53.07%      0.35%      0.34%
+  CRT HEAP                         79.828         53.438      -26.390       17.89%     94.33%     95.32%
+  IMAGE cow-taken                   0.773          0.773        0.000        0.17%      1.36%      1.19%
+  MAPPED cow-taken                  0.098          0.098        0.000        0.02%      0.17%      0.15%
+  RESIDUE / page tables            40.867          1.441      -39.426        9.16%      2.54%      2.26%
+
+  'THE REST' (everything but STACK)
+    fiber 121.844  ->  stackless 56.300   delta -65.544 MiB  (-53.8%)
+    of which CRT heap         -26.390 MiB    40.3% of the delta
+    of which page-table res.  -39.426 MiB    60.2% of the delta
+    of which everything else    0.272 MiB    -0.4% of the delta
+
+AGAINST THE BRIEFING'S ARITHMETIC
+  The briefing reads: 'at least 36 MiB of what the decomposition called
+  heap/arenas/sqlite went away when the fibers went away.'
+  MEASURED: heap/arenas/sqlite lost 26.390 MiB. Page tables lost 39.426 MiB.
+  The ~36 MiB inference was wrong in BOTH size and attribution:
+  60.2% of what 'the rest' lost is page tables, which estado-vmwalk sec.3
+  carried as its OWN term (REMAINDER), NOT inside PRIVATE(heap,arenas,sqlite).
+  Page tables are proportional to stacks BY CONSTRUCTION, so that share was
+  never lane-independent and its loss is not a heap result.
+
+CROSS-CHECKS AGAINST THE INSTRUMENT THIS ONE REPLACES (vmwalk2, deleted)
+  estado-vmwalk sec.10 positive control : PRIVATE 256.14 MiB, residue 0.75
+  vmcensus positive control today       : PRIVATE 256.172 MiB, residue 0.773
+  estado-vmwalk sec.7 'both' LOW mode   : page tables 40.75 MiB
+  vmcensus f1 residue today             : 40.867 MiB
+  estado-vmwalk sec.7 guard per task    : 12,288 B
+  vmcensus f1 guard per stack           : 12288 B over 20207 stacks

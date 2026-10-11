@@ -1,0 +1,41 @@
+pid=31556 walks=52 bestWalk=1 interval_ms=150
+KERNEL PeakPagefileUsage  8.727 MiB   <- true high-water mark
+KERNEL PeakWorkingSet     12.055 MiB
+COVERAGE of the peak      98.70%  (best walk's PrivateUsage 8.613 / peak 8.727)
+== VMCENSUS BEST ==
+walkMs                  0.404
+regions                 135   (privateCommitted=19, bases=18)
+BASES DROPPED (clip)    0   (none: the array held)
+kernel PrivateUsage     before=8.613 after=8.613 MiB  (drift 0.000)
+kernel PeakPagefile     8.629 MiB
+kernel WorkingSet       11.625 MiB   PeakWorkingSet 11.625 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (8.613 MiB) ---
+STACK committed                0.047 MiB    0.54%   (2 stacks)
+  of which PAGE_GUARD          0.023 MiB    0.27%
+  usable stack commit          0.023 MiB    0.27%
+PRIVATE non-stack              8.141 MiB   94.51%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.094 MiB    1.09%
+MAPPED cow-taken               0.066 MiB    0.77%
+RESOLVED by walk               8.348 MiB   96.92%
+RESIDUE (kernel-walk)          0.266 MiB    3.08%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared             9.199 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       4163.551 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 0000021a60770000         1.000 MiB  regions=1  reserved=0.020 MiB
+  base 0000021a60880000         1.000 MiB  regions=1  reserved=0.059 MiB
+  base 0000021a60990000         1.000 MiB  regions=1  reserved=0.008 MiB
+  base 0000021a60aa0000         1.000 MiB  regions=1  reserved=0.055 MiB
+  base 0000021a60bb0000         1.000 MiB  regions=1  reserved=0.039 MiB
+  base 0000021a60cc0000         1.000 MiB  regions=1  reserved=0.012 MiB
+  base 0000021a60dd0000         1.000 MiB  regions=1  reserved=0.004 MiB
+  base 0000021a60ee0000         1.000 MiB  regions=1  reserved=0.016 MiB
+  base 0000021a604c0000         0.094 MiB  regions=1  reserved=0.906 MiB
+  base 00000076ef200000         0.020 MiB  regions=1  reserved=1.980 MiB
+  base 0000021a60430000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 0000021a605d0000         0.008 MiB  regions=1  reserved=0.375 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 00007ff5cc250000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END BEST ==

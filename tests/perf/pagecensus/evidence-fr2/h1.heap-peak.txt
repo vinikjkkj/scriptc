@@ -1,0 +1,6 @@
+HEAP 00000230f4050000 busy=3289728/16382 free=0/2
+FINISHED NO -- PARTIAL, the totals below are a FLOOR   walkMs=74906 heaps=1
+BUSY  3.137 MiB over 16382 blocks
+FREE  0.000 MiB over 2 blocks
+TOTAL 3.137 MiB   busyShare=100.00%
+kernel PrivateUsage at end of walk 20.324 MiB

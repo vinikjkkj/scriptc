@@ -1,0 +1,34 @@
+pid=40288 walks=59 bestWalk=1 interval_ms=150
+KERNEL PeakPagefileUsage  531.020 MiB   <- true high-water mark
+KERNEL PeakWorkingSet     14.805 MiB
+COVERAGE of the peak      99.98%  (best walk's PrivateUsage 530.910 / peak 531.020)
+== VMCENSUS BEST ==
+walkMs                  0
+regions                 6125   (privateCommitted=4027, bases=2012)
+kernel PrivateUsage     before=530.910 after=530.910 MiB  (drift 0.000)
+kernel PeakPagefile     530.910 MiB
+kernel WorkingSet       14.379 MiB   PeakWorkingSet 14.379 MiB
+--- terms, denominator = kernel PrivateUsage at walk start (530.910 MiB) ---
+STACK committed              523.484 MiB   98.60%   (2002 stacks)
+  of which PAGE_GUARD         23.461 MiB    4.42%
+  usable stack commit        500.023 MiB   94.18%
+PRIVATE non-stack              3.098 MiB    0.58%   (heap, arenas, sqlite, TEB/PEB)
+IMAGE cow-taken                0.094 MiB    0.02%
+MAPPED cow-taken               0.066 MiB    0.01%
+RESOLVED by walk             526.742 MiB   99.21%
+RESIDUE (kernel-walk)          4.168 MiB    0.79%   NOT attributed
+--- not in private commit, printed so it cannot be confused with it ---
+IMAGE still shared             9.199 MiB   (WRITECOPY untaken + R/X)
+MAPPED still shared            1.504 MiB
+PRIVATE reserved only       5639.945 MiB   (MEM_RESERVE, no commit charge)
+--- largest non-stack private allocation bases ---
+  base 0000018931ed0000         1.312 MiB  regions=11  reserved=0.688 MiB
+  base 0000018931cd0000         0.953 MiB  regions=1  reserved=0.047 MiB
+  base 0000018931dd0000         0.785 MiB  regions=5  reserved=0.215 MiB
+  base 00000079cd600000         0.020 MiB  regions=1  reserved=1.980 MiB
+  base 0000018931b30000         0.008 MiB  regions=1  reserved=0.375 MiB
+  base 0000018931a90000         0.008 MiB  regions=1  reserved=0.000 MiB
+  base 000000007ffe0000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 000000007ffef000         0.004 MiB  regions=1  reserved=0.000 MiB
+  base 00007ff50d100000         0.004 MiB  regions=1  reserved=32.000 MiB
+== END BEST ==

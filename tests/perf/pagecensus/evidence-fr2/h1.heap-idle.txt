@@ -1,0 +1,8 @@
+HEAP 00000230f4050000 busy=2814224/12309 free=0/2
+HEAP 00000230f3e10000 busy=0/0 free=0/0
+HEAP 00000230f43a0000 busy=0/0 free=0/0
+FINISHED yes   walkMs=51922 heaps=3
+BUSY  2.684 MiB over 12309 blocks
+FREE  0.000 MiB over 2 blocks
+TOTAL 2.684 MiB   busyShare=100.00%
+kernel PrivateUsage at end of walk 10.945 MiB

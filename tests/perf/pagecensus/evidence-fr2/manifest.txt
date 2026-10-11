@@ -1,0 +1,106 @@
+MANIFEST -- vmcensus decomposition of app182 peak private commit
+========================================================================
+date        2026-10-11
+question    what are the 56.7-65.0 MiB of the stackless arm's peak made of
+
+THE LOAD (identical in every subject run)
+  CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60
+  driver  tests/perf/zapo-rest/harness/memrig.mts via G:\blocks\fr1-rig.sh
+  server  G:\blocks\m3-zaposrc/packages/fake-server
+
+THE BINARIES -- NOT built for this; reused, so no cache or tsc risk at all
+  S-plain  stackless, knob ABSENT       built at 3c462de14, dirty=0
+           exe 32034304 B   sha256 ffc2a35a4de22b25be33a1cb3f76c7a8
+           zapo-rest.ll 242844763 B   <- the lane discriminator
+  F-plain  fiber, SCRIPTC_STACKLESS=0   built at 3c462de14, dirty=0
+           exe 31372288 B   sha256 c3da49d7cbb69aa1acf0c9740bf682c1
+           zapo-rest.ll 229342757 B   <- the lane discriminator
+
+THE INSTRUMENT
+  tests/perf/pagecensus/vmcensus.c   out-of-process VirtualQueryEx walk
+  tests/perf/pagecensus/vmtgt.c      its arm (positive/negative/specificity/shape)
+  tests/perf/pagecensus/vmheap.c     ToolHelp busy/free split -- FAILED on the subject
+  built with zig 0.16.0 from G:\tools\zig (NOT the PATH's Chocolatey 0.15.2)
+  The walker is a separate process: the subject is unmodified and has no
+  instrument inside it, so its peak is its own.
+
+THE COLUMN
+  PROCESS_MEMORY_COUNTERS_EX.PrivateUsage (per-walk) and PeakPagefileUsage
+  (kernel high-water). This is PRIVATE COMMIT. It is NOT workingSet, which
+  moves differently: 2.47x where commit moves 6.90x.
+
+THE RUNS
+  tag  arm        mode  kernelPeak  walkDenominator  coverage  regions  stacks
+  v1   stackless  high      65.016           64.965    99.92%      536      19
+  v2   stackless  high      63.836           63.809    99.96%      519      19
+  v3   stackless  low       56.680           56.652    99.95%      481      17
+  f1   fiber      low      446.844          446.164    99.85%    61403   20207
+  h1   stackless  VOID -- see below. Not used in any figure.
+
+  Coverage is the best walk's PrivateUsage over the kernel's own peak. A
+  sampled walk is not a high-water mark; at 99.85-99.96% these walks are
+  decompositions OF the peak and not of some trough near it.
+
+THE DECOMPOSITION -- every term, summing to its own denominator
+
+  STACKLESS arm (v3), DENOMINATOR = 56.652 MiB = kernel PrivateUsage
+    STACK committed                   0.352 MiB    0.62%
+      of which PAGE_GUARD             0.199 MiB    0.35%
+    CRT heap                         53.438 MiB   94.33%
+    IMAGE + MAPPED cow-taken          0.871 MiB    1.54%
+    private small bases + tail        0.550 MiB    0.97%
+    RESIDUE, not attributed           1.441 MiB    2.54%
+    SUM                              56.652 MiB  100.00%   <- equals the denominator
+
+  FIBER arm (f1), DENOMINATOR = 446.164 MiB = kernel PrivateUsage
+    STACK committed                 324.320 MiB   72.69%
+      of which PAGE_GUARD           236.801 MiB   53.07%
+    CRT heap                         79.828 MiB   17.89%
+    IMAGE + MAPPED cow-taken          0.871 MiB    0.20%
+    private small bases + tail        0.277 MiB    0.06%
+    RESIDUE, not attributed          40.867 MiB    9.16%
+    SUM                             446.163 MiB  100.00%   <- equals the denominator
+
+  The RESIDUE is what the kernel charges and no region accounts for:
+  page tables and per-process kernel charge. It is NOT asserted to be
+  page tables -- it is the unattributed remainder, printed as such. That
+  it scales with stacks (40.867 MiB over 20,207 against 1.441 over 17) is
+  evidence for the page-table reading, not a definition of it.
+
+CONTROLS -- each is a run, in evidence files, not an assertion
+  pos.census.txt      256 MiB committed and untouched reads PRIVATE 256.172 MiB,
+                      residue 0.773, while workingSet stays 4.1 MiB. It measures
+                      commit, not residency. The deleted vmwalk2 recorded
+                      256.14 / 0.75 for this same arm (estado-vmwalk sec.10).
+  pos.census.txt      zero fibers reads 2 stacks -- not 0, and not 2,000.
+  spec128/spec256     2,000 fibers: 2,002 stacks; guard 23.461 MiB = 12,288 B
+                      per stack at BOTH sizes, while usable commit doubles
+                      250.023 -> 500.023 MiB. The walk sees stack size.
+  shape.census.txt    60 MiB of mixed malloc on this CRT builds the segment
+                      ladder 0.996/1.996/3.996/~8/~15.8 MiB, many regions per base.
+  big.census.txt      8 mallocs of 1,048,000 B build 8 one-region bases of
+                      1.000 MiB with small odd reservations -- the subject's
+                      seven 1.004 MiB bases have exactly this shape.
+  ctl.heap.txt        vmheap against a known-full 60 MiB heap: busy 60.393 MiB,
+                      busyShare 95.35%, finished, 0.55 ms/block.
+
+THE VOID RUN, kept because a void run that announces itself is the point
+  h1.census.txt reports RESIDUE = -2.473 MiB. A NEGATIVE residue is
+  impossible in a sound decomposition: the walk resolved more than the
+  kernel admitted owning. Cause: vmheap was walking the same process via
+  ToolHelp in that run (h1.heap-peak.txt), at 4.6 ms/block against the
+  control's 0.55, and perturbed it. h1 is excluded from every figure.
+  h1.heap-idle.txt additionally shows a FALSE GREEN: 'FINISHED yes' with a
+  last heap reading busy=0/0 and 12,309 blocks seen where the in-process
+  census counts 47,719. It finished because there was nothing more it
+  could read, not because it had read everything.
+
+WHAT IS NOT HERE
+  The largest OCCUPANT of the stackless arm's 53.438 MiB of CRT heap is
+  NOT MEASURED. The committed heap can be sized from outside; naming what
+  is inside it cannot be done from outside by ToolHelp on this subject
+  (above). The in-process census (tests/perf/heapcensus) can name it, but
+  it reports ONCE, at shutdown, so it measures the settled idle and not
+  the peak -- and every committed census arm it has is a FIBER-lane
+  binary. See the note in the parent directory's evidence and the lane
+  check recorded in this manifest's binaries section.

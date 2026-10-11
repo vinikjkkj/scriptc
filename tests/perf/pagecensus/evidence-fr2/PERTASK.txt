@@ -1,0 +1,17 @@
+WHAT ONE SUSPENDED TASK COSTS ON THE FIBER LANE
+Denominator: 20207 stacks on f1 minus 17 on v3 = 20190 tasks, both LOW mode.
+This is a DIFFERENCE per task, not a measurement of one task in isolation:
+it is what the process stops paying when the lane stops making stacks.
+
+  term                      MiB total   B per task   share
+  STACK, PAGE_GUARD           236.602        12288    60.7%
+  STACK, usable commit         87.366         4537    22.4%
+  page tables (residue)        39.426         2048    10.1%
+  CRT heap                     26.390         1371     6.8%
+  image/mapped/small           -0.273          -14    -0.1%
+  TOTAL                       389.512        20229   100.0%
+
+The 12,288 B guard row is the kernel constant estado-vmwalk sec.7 names, and
+it alone is 60.7% of the per-task cost. sec.7 says no knob reaches it and
+that the only thing that removes it is not having a stack per suspended
+task. That is what the stackless lane does, and this is the bill it stops.
