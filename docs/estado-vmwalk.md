@@ -371,6 +371,29 @@ proves nothing if the build served a cached object.
 
 ## 7. What the two levers are worth, MEASURED on the real workload
 
+> **MEASURED AGAIN WITH THE STACKLESS LANE ON, 2026-10-11 at `3c462de14`.**
+> Every figure in this section was taken at `e54bf853f`, where
+> `packages/compiler/src/ir/coro-plans.ts` DOES NOT EXIST. The stackless lane
+> became the default on 2026-10-09, seven days after this section was
+> written, and nobody had run this workload with it on. The arms below are
+> therefore both FIBER-LANE arms, and they are still correct as such: the
+> fiber arm re-measured at `3c462de14` reads **446.80 MiB** against the
+> 445.56 here (low mode) and **536.55** against 538.51 (high), +0.27% and
+> -0.36%.
+>
+> **On the same workload and the same dials, the stackless arm peaks at
+> 57.12-64.76 MiB -- 6.90x to 9.39x lower, -85.5% to -89.4%.** The park table
+> on this load reads 20,256 frames suspended at the same instant on the fiber
+> arm and 14 on the stackless one. The measurement, its controls and what it
+> corrects in the decomposition below are in
+> `docs/stackless-frame-contract.md` 6a.6; the raw tables are
+> `tests/perf/fiberstat/evidence/c08`-`c12`.
+>
+> **One thing here does NOT survive the lane**: the finding further down that
+> this is a commit win and not an RSS win. That is true of the two KNOBS and
+> false of the LANE, which removes the touched stack pages as well and moves
+> peak working set 184.18 -> 71.13 MiB.
+
 Both knobs are read by `getenv` in `scr_async.c`, the same shape
 `SCR_FIBER_POOL` is read. During the measurement both defaulted to the previous
 compile-time value, so an unset environment reproduced the old binary exactly and
