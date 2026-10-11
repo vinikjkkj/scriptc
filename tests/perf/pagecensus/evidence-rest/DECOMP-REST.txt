@@ -84,6 +84,68 @@ are NAMED by shape and not labelled by position.
   heapcensus prices the SQLite page cache at is a BUSY-side figure read at
   a different instant; it is not the commit the knob returns at rest.
 
+  >> RETRACTED 2026-10-11 -- "THE KNOB IS WORTH 2.15 MiB" IS AN A/A. <<
+  The a-knob and q-knob arms are THE SAME CONFIGURATION of the same clean
+  binary. Every pointer below was read, not taken on report:
+    - f2b-run.sh:39-40 -- A) and Q) differ only by SETTLE_MS=45000
+      PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1.
+    - memrig.mts:108 -- SETTLE_MS defaults to 45000 and PRESYNC_MS to 20000,
+      so arm A takes those identical values BY DEFAULT. Q names them; A
+      inherits them; neither run differs.
+    - scr_async.c:2574-2575 -- SCR_SQLITE_IDLE_RELEASE_MS is COMPILED IN at
+      1000. scr_sqlite_idle_ms() at :2603-2615 seeds `cached` from that macro
+      and overrides it ONLY when getenv returns non-NULL (:2609). Passing
+      =1000 therefore writes the value the binary already held.
+      No -DSCR_SQLITE_IDLE_RELEASE_MS exists anywhere in the tree. Swept with
+      a POSITIVE CONTROL, because the first sweep failed as a flag-parse
+      error and would have read as a false null: `rg -F -e '-DSCR_'` finds
+      AGENTS.md:41, ab-cpu.mjs:108, weak.test.ts:49 and more (rc=0), and the
+      same method finds the five SCR_SQLITE_IDLE_RELEASE_MS sites in
+      scr_async.c (:2564,:2574,:2575,:2604,:2607) -- then returns rc=1 on
+      the -D form.
+    - scr_sqlite.c:415 reads SCR_SQLITE_IDLE_STAT, and the only things it
+      gates are the two fprintf(stderr,...) calls at :434 and :442.
+    - 054c543d2, "the SQLite idle page-cache release ships ON", IS an
+      ancestor of 3c462de14, the clean binary's commit
+      (git merge-base --is-ancestor, rc=0). The seam was ALREADY ARMED in
+      both arms, by default, before either ran.
+  The one real difference between the arms is the volume of diagnostic
+  stderr writes. That is not nothing, but it is not the seam under test.
+
+  THE MEASUREMENTS STAND; THE PARTITION DOES NOT. 19.461 / 18.070 / 16.917 /
+  19.835 MiB are ONE population of n=4 draws of a SINGLE configuration, with
+  an amplitude of 2.918 MiB (19.835 - 16.917). Cutting them into two pairs
+  and differencing the pair means yields the -2.154 MiB above; that is the
+  within-cell spread of a four-draw sample, not an effect. The sentence
+  "the sign is safe and the magnitude is one draw wide" is VOID: an A/A has
+  no sign to be safe about.
+
+  AND THE FIGURE IT CLAIMED TO REPLACE IS STILL NOT MEASURED. The COMMIT
+  value of the SQLite idle seam AT REST remains UNMEASURED. The only genuine
+  A/B of that seam -- IDLE-RELEASE.md's long/off/on/half-on arms -- reads the
+  BUSY column, and the bridge from busy to commit (busy+free) was REVOKED on
+  2026-10-10 as address space rather than committed memory (31c413ccf,
+  merged f6641b533, 23 carriers banded). Neither column prices this seam in
+  commit today.
+
+  SECOND TIME IN THIS FRONT, AND THE SAME FAMILY. WHICH-BUFFER.md:224-241,
+  "RETRACTION -- the cap arithmetic, and why the `nocache` arm was an A/A",
+  records ZAPO_SQLITE_CACHE_KB=0 being an A/A because 0 passes no pragma and
+  falls through to the compiled-in -DSQLITE_DEFAULT_CACHE_SIZE=-16000
+  (cc.ts:1291). Same seam -- the SQLite page cache. Same mechanism -- an arm
+  sets a knob to the value already compiled in, and the harness records a
+  difference of configuration where the binary saw none. Read side by side
+  they are a PATTERN, not two accidents: ON THIS SEAM, AN ARM THAT NAMES A
+  KNOB IS NOT EVIDENCE THE KNOB MOVED. The compiled-in default has to be read
+  out of the C before any arm here is believed.
+
+  SCOPE OF THIS BAND. It retracts the interpretation in section 2 and
+  nothing else. THE SECTIONS NOT NAMED HERE ARE UNAUDITED, NOT THEREBY
+  VALID -- banding this file did not audit it. Everything in it is the Win32
+  instrument (HeapWalk plus VirtualQuery); there is NO allocator-accounting
+  surface outside #ifdef _WIN32 that could carry the same defect, which is
+  NOT the same claim as the figure being correct on macOS or Linux.
+
 ====================================================================
 3. THE PEAK OF THE SAME RUNS -- one run, two instants
 ====================================================================

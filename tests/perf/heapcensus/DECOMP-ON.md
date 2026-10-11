@@ -530,3 +530,87 @@ committed memory, and therefore the split "60% left / 40% stayed as holes": the
 40% term is an upper bound on committed holes, and the committed part of it is
 plausibly a small fraction. **Lines of this file not named above are not thereby
 in force — they are merely UNAUDITED by this band.**
+
+## BAND, 2026-10-11 — `HCSIZE 131079` IS EXTINCT, AND §6's QUEUE ITEM 1 IS DEAD. Nothing above is edited or re-run.
+
+**The sentences this band answers.** All six still present this row as a live
+class of the heap:
+
+- §2, arm `on`: *"**A2** row 131,079 — **NO OWNER** (§4) | 6,030,160 | **31.89%** | 46"*
+- §2, arm `off`: *"A2 row 131,079 — no owner | 6,030,160 | 18.90% | 46"*
+- §5: *"row 131,079 (A2) | **31.89%** — 6,030,160 B | **no owner** — no lever until attributed (§4)"*
+- §4's heading: *"`HCSIZE 131079` — 6.03 MiB that no document has ever named"*
+- §6's queue: *"1. **An owner for `HCSIZE 131079`.**"*
+- and this file's own title: *"two rows are 72.80%, and one of them has no owner"* — 40.91 + 31.89, so **half of that headline is this row**.
+
+**THE ROW READS ZERO IN EVERY POST-FIX CENSUS COMMITTED.** Eight runs, and in
+each one the `131079` row is **absent entirely** — not present-with-zero. The
+`65,536` row in the **same file, by the same regex, in the same pass** is the
+positive control, so a zero here is a fact about the heap and not a dead
+detector:
+
+| census file | `HCSIZE 131079` | `HCSIZE 65536` (positive control) |
+|---|---|---:|
+| `evidence-chunkref/q1.heapcen.txt` | **ABSENT (0 rows)** | n=163, 10,685,216 B |
+| `evidence-chunkref/q2.heapcen.txt` | **ABSENT (0 rows)** | n=163, 10,685,280 B |
+| `evidence-chunkref/q3.heapcen.txt` | **ABSENT (0 rows)** | n=164, 10,750,704 B |
+| `evidence-chunkref/q4.heapcen.txt` | **ABSENT (0 rows)** | n=165, 10,816,432 B |
+| `evidence-chunkref/q5.heapcen.txt` | **ABSENT (0 rows)** | n=166, 10,881,856 B |
+| `evidence-chunkref/q6.heapcen.txt` | **ABSENT (0 rows)** | n=166, 10,881,888 B |
+| `pagecensus/evidence-rest/r3.heapcen.txt` | **ABSENT (0 rows)** | n=166, 10,881,872 B |
+| `pagecensus/evidence-rest/r4.heapcen.txt` | **ABSENT (0 rows)** | n=164, 10,750,720 B |
+
+**And the method finds the row where the row is.** The same script on the
+pre-fix arms this file reads returns it immediately — `evidence-idle/on` and
+`/off` and `evidence-h2/main` at **n=46, 6,030,160 B**, `evidence-variance/a1`
+at n=46, 6,030,192 B — against `65,536` at n=118 on all four. **A null that
+cannot be distinguished from a broken search is not evidence; this one can.**
+
+**WHAT THIS BAND DOES *NOT* CLAIM.** The eight runs are **eight draws of ONE
+binary** — `/g/blocks/v3-out182-SL/zapo-rest-182.exe`, `exe-sha16
+e38f7c2a4d89b1dd`, identical across all eight manifests — and the pre-fix side
+is likewise **one** binary, `/g/blocks/h2-out182-prof/zapo-rest-182.exe` at
+`21facf366`. **This is n=1 binary per side, not eight independent
+confirmations**, and it is recorded that way deliberately: this front has
+already spent one slice on a knobset that partitioned a single population into
+two arms (`pagecensus/evidence-rest/DECOMP-REST.txt` §2). The row's
+disappearance is not in doubt — but it rests on being **structural**, not on
+the count of runs: `:50-52` makes `scr_str_chunk_alloc` a plain
+`malloc(SCR_STR_ARENA_CHUNK)`, so a 65,536-byte request can no longer land in
+a 131,079-byte bucket at all.
+
+**WHAT WAS ALREADY RIGHT ABOVE, AND WHAT WAS NOT REDONE.** `:45-56` **predicted
+this migration** before it happened, and the `MEASURED, 2026-10-11` block at
+`:58-67` **confirmed it to the block** (164, with the split `113 + 47 + 4`
+rather than `118 + 46`). **The defect is not a missed prediction — it is that
+§2's tables, §5's ceiling table, §4's heading and §6's queue were never
+brought into line with it.** A reader who enters at the §2 table, the §5
+ceiling, or the title meets a 31.89% second-largest row with no owner, and
+nothing at those three sites points forward to `:58`.
+
+**§6's QUEUE ITEM 1 IS DEAD, AND DEAD TWICE OVER.** It orders *"an owner for
+`HCSIZE 131079`"* as the next step of this front, warns a `PROFSTACK` band
+will not work, and prices a build. **(a) The row no longer exists** in the
+shipping lane, so there is nothing to attribute. **(b) The owner was found
+anyway**: `OWNER-131079.md` — *"`HCSIZE 131079` has an owner, and half of it
+is alignment padding"* — and `:61-64` here names **47 string-arena chunks
+(`scr_string.c:820`)**. **Do not spend a slice on it.** §6's item 2 (an
+occupancy number for the cycle arena) appears answered too, by §5's own row
+*"**NOT A LEVER — settled 2026-10-10** … Occupancy **62.93%** measured"* —
+but that came from `pagecensus`/`lifecensus`, **not** the `cycstat` arm item 2
+prescribes, so it is marked here as probably-answered rather than dead.
+
+**NO TABLE IS RECOMPUTED HERE, AND NONE SHOULD BE BY SUBTRACTION.** The §2 and
+§5 tables are correct *as measurements of the `21facf366` arms* and are left
+untouched. They cannot be repaired by deleting the A2 line and renormalising:
+the post-fix binary is a **different binary** with a different heap, and by
+the LANE MARKER at `:69-80` parts of this front's post-fix evidence sit on a
+**different coroutine lane** from these arms. A current table needs a current
+run, not arithmetic.
+
+**SCOPE.** This band marks the six sentences quoted at its head and §6's queue.
+**Sections of this file not named above are UNAUDITED, not thereby in force** —
+banding this file is not an audit of it. All of it is the **Win32 instrument**
+(`HeapWalk`-side census): there is no allocator-level accounting outside
+`#ifdef _WIN32` that could carry the same stale row, which is **not** a claim
+that anything here holds on macOS or Linux.

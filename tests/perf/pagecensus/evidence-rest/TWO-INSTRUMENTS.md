@@ -204,6 +204,47 @@ not a measurement of it.**
    charged and untaken, and `ctl-bss.txt` is the arm that makes that visible.
 3. The brief priced the SQLite idle-release knob at ~11.6 MiB of rest commit.
    **It is worth 2.15 MiB** on this column at this instant.
+
+   > ***RETRACTED 2026-10-11 — item 3 is an A/A.*** The a-knob and q-knob arms
+   > are the **same configuration of the same binary**. `f2b-run.sh:39-40`
+   > differ only by `SETTLE_MS`/`PRESYNC_MS` — whose `memrig.mts:108` defaults
+   > are the identical **45000 / 20000**, so arm `A` takes them anyway — and by
+   > `SCR_SQLITE_IDLE_RELEASE_MS=1000`, which `scr_async.c:2574-2575`
+   > **compiles in at 1000**, `:2603-2615` overriding it only when the env var
+   > exists (`:2609`); passing `=1000` writes the value already held. There is
+   > no `-DSCR_SQLITE_IDLE_RELEASE_MS` anywhere in the tree (swept with a
+   > positive control). `SCR_SQLITE_IDLE_STAT=1` gates nothing but the two
+   > `fprintf(stderr,…)` at `scr_sqlite.c:434,442`. And `054c543d2` — *"the
+   > SQLite idle page-cache release ships ON"* — is an **ancestor** of
+   > `3c462de14`, the clean binary's commit, so the seam was armed in both
+   > arms before either ran.
+   >
+   > **The −2.15 MiB is the within-cell spread of one n=4 population**:
+   > 19.461 / 18.070 / 16.917 / 19.835 MiB, amplitude **2.918 MiB**, cut into
+   > two pairs and differenced. **The brief's ~11.6 MiB is not restored
+   > either** — the **commit** value of this seam at rest is **UNMEASURED**,
+   > because the seam's only genuine A/B (`IDLE-RELEASE.md`) reads the `busy`
+   > column and `busy+free` was revoked as the bridge to commit (`31c413ccf`,
+   > merged `f6641b533`). Full band, and the second carrier of the same family
+   > — `WHICH-BUFFER.md:224-241`, the `nocache` arm that was an A/A because
+   > `ZAPO_SQLITE_CACHE_KB=0` falls through to the compiled-in
+   > `-DSQLITE_DEFAULT_CACHE_SIZE=-16000` — in `DECOMP-REST.txt` §2.
+   >
+   > **One adjacent figure, named because the sweep for this one found it.**
+   > `:42`'s row *"| **CRT heap** | **17.494** | **18.961** | **+1.467** |"* and
+   > item 1's *"17.494 vs 18.961 at matched knobs"* take `17.494` as the mean of
+   > the two q draws. That is a **clean-vs-instrumented** contrast across two
+   > different binaries, so it is a genuine A/B and is **not** retracted here.
+   > But the `+1.467` delta is **smaller than the 2.918 MiB amplitude** of the
+   > clean arm's own four draws, so it is not resolved at this n and must not be
+   > quoted as the instrument's measured rest-heap cost. Item 1's *conclusion* —
+   > that the heap is the same size in both — is untouched, and if anything that
+   > is what noise exceeding the delta supports.
+   >
+   > **Items 1, 2 and 4 of this section are UNAUDITED, not thereby valid**;
+   > this band read item 3 only. All of it is the **Win32 instrument** — there
+   > is no allocator-accounting surface outside `#ifdef _WIN32` to carry the
+   > same defect, which is not a claim that the figure holds on macOS or Linux.
 4. The brief's own named doubt — *"several of those 43 holes exceed the NT
    heap's ~508 KiB `VirtualMemoryThreshold`, so in the clean binary they may
    already be going back to the OS by themselves"* — is **right in outcome and

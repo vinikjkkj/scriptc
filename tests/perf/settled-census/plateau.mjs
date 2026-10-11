@@ -2,6 +2,14 @@
  *
  *   node tests/perf/settled-census/plateau.mjs
  *
+ * SCOPE -- WINDOWS INSTRUMENT, STANDALONE ANALYSIS. Nothing imports this
+ * file and nothing runs it: `tests/perf/**` is outside vitest's includes
+ * (`vitest.config.ts:49-53`) and no CI job invokes it. Do not read the
+ * repair below as something a gate covers. It is here because this file is
+ * CITED AS EVIDENCE -- `nonheap/scr_nonheap.h:14,33,41,49` and
+ * `boxanat/README.md:851,855` -- and a wrong number in a cited artifact
+ * does not have to run in order to do damage.
+ *
  * WHY THIS EXISTS. The fragmentation work answered "what is the free space
  * and can we return it". It never answered "what is the REST", and the
  * arithmetic makes that the question that decides whether the objective is
@@ -83,7 +91,15 @@ const M = {
   presync:      32.08 * MiB,  // idle, TOTAL (7 runs, 31.99-32.52)
   exe:          32092160,     // zapo-rest-182.exe, LLVM tier
   crtBusy:      33.62 * MiB,  // evidence-llvm182/main
-  crtFree:      36.51 * MiB,
+  /* CEILING, NOT COMMIT -- and the qualifier is in the IDENTIFIER on
+   * purpose. This is HeapWalk's `free` column, which mixes committed
+   * pages with pages the NT heap has already returned to the OS without
+   * emitting PROCESS_HEAP_UNCOMMITTED_RANGE (band at the foot of this
+   * file). It spread into 23 documents as "committed-free" because the
+   * old name `crtFree` carried no qualifier: a COMMENT does not travel
+   * with a value, an IDENTIFIER does. The committed part of it is
+   * UNMEASURED and is of order 1-4 MiB. */
+  crtFreeCeiling: 36.51 * MiB,
   pageShaped:   24.86 * MiB,
   cycArena:      7.25 * MiB,  // cycstat held=116 chunks
   strArena:      3.00 * MiB,  // cycstat strarena chunks=48, unfreeable
@@ -98,8 +114,10 @@ console.log('the settled plateau, itemised — shipped arm, ' + M.messages +
 const rows = [
   ['binary image + loader + stacks', M.presync,
    'measured idle floor; exe alone is ' + mib(M.exe) + ' MiB'],
-  ['CRT heap committed-FREE', M.crtFree,
-   'fragmentation; ' + mib(M.pageShaped) + ' MiB of it page-shaped'],
+  /* `crtFreeCeiling` WAS A LINE ITEM HERE AND IS NOT ANY MORE. This is an
+   * itemisation of what the process HOLDS; a ceiling is not a quantity of
+   * paid bytes and cannot be added to one. It is reported beside the
+   * table instead, as the bound it actually is. */
   ['arena chunks (busy)', M.cycArena + M.strArena,
    'cycle ' + mib(M.cycArena) + ' + string ' + mib(M.strArena) + ' (unfreeable by construction)'],
   ['live heap, fixed', M.liveFixed, 'service state, independent of message count'],
@@ -117,14 +135,33 @@ const gap = M.settledWs - sum
 console.log('  ' + 'unaccounted'.padEnd(32) + mib(gap).padStart(8) + ' MiB   ' +
   (100 * Math.abs(gap) / M.settledWs).toFixed(1) + '% of the plateau')
 
-let fails = 0, ran = 0
-const ok = (c, m) => { ran++; console.log((c ? NL + '  PASS  ' : NL + '  FAIL  ') + m); if (!c) fails++ }
+console.log('  ' + 'free-ceiling (NOT summed)'.padEnd(32) + mib(M.crtFreeCeiling).padStart(8) +
+  ' MiB   UPPER BOUND on heap free space, not a paid term; committed part UNMEASURED')
+/* `pageShaped` is kept and reported because it is a measured figure with its
+ * own provenance, and dropping its last reference would lose it. But it is a
+ * share of the CEILING, so it inherits the ceiling's defect: it bounds what
+ * could be page-shaped, not what is committed and page-shaped. */
+console.log('  ' + '  of which page-shaped'.padEnd(32) + mib(M.pageShaped).padStart(8) +
+  ' MiB   a share OF THE CEILING, so also a bound -- not a recoverable quantity')
 
-ok(Math.abs(gap) / M.settledWs < 0.05,
-  'the itemisation closes to within 5% of the measured plateau')
-ok(payload < M.crtFree,
-  'retained message payload (' + mib(payload) + ' MiB) is SMALLER than the fragmentation (' +
-  mib(M.crtFree) + ' MiB) — the live side is not what dominates')
+let fails = 0, ran = 0, unmeasured = 0
+const ok = (c, m) => { ran++; console.log((c ? NL + '  PASS  ' : NL + '  FAIL  ') + m); if (!c) fails++ }
+/* UNMEASURED IS NOT A PASS. It does not touch `ran` and it does not touch
+ * `fails`; it is counted on a line of its own so that an open item cannot
+ * quietly vanish from the output and be forgotten. */
+const unmeas = (m) => { unmeasured++; console.log(NL + '  UNMEASURED  ' + m) }
+
+unmeas('the itemisation does NOT close: ' + mib(gap) + ' MiB (' +
+  (100 * Math.abs(gap) / M.settledWs).toFixed(1) + '%) is unaccounted. The old check here\n' +
+  '              asserted closure within 5%, and it only closed because the 36.51 MiB\n' +
+  '              CEILING was summed in as though it were paid. Re-deriving this needs an\n' +
+  '              EXTERNAL measure of the same instant (PrivateUsage, the way\n' +
+  '              pagecensus/evidence-rest does it), which has NOT been run for this arm.')
+unmeas('whether the retained payload (' + mib(payload) + ' MiB) is smaller than the\n' +
+  '              COMMITTED free space is UNMEASURED. The old check compared it against the\n' +
+  '              ' + mib(M.crtFreeCeiling) + ' MiB CEILING, which is VACUOUS: a payload is always under a\n' +
+  '              bound that overstates. See THE PLANT below, and the RETRACTED COLUMN\n' +
+  '              band at the foot of this file.')
 ok(payload / M.settledWs < 0.25,
   'total retained payload is under a quarter of the plateau (' +
   (100 * payload / M.settledWs).toFixed(1) + '%). NOT compared to the 2.7 KB/event ' +
@@ -160,9 +197,13 @@ console.log('                                 "10 MB" is compatible with one.')
 console.log('  settled           ' + mib(M.settledPriv) + ' MiB   (their "70-100 MB")')
 console.log('  retention         ' + mib(retention) + ' MiB' + NL)
 console.log('  what it is made of, in their column:')
-console.log('    fragmentation         ' + mib(M.crtFree) + ' MiB  ' +
-  (100 * M.crtFree / retention).toFixed(0) + '%  cause is CONCURRENT chunk processing;')
-console.log('                                        the fix that works is zapo-side and forbidden')
+console.log('    free-ceiling          ' + mib(M.crtFreeCeiling) + ' MiB <=' +
+  (100 * M.crtFreeCeiling / retention).toFixed(0) + '%  NOT "fragmentation", NOT a paid term:')
+console.log('                                        an UPPER BOUND. The committed share is')
+console.log('                                        UNMEASURED (order 1-4 MiB), so the % is a')
+console.log('                                        bound too. Concurrent chunk processing is')
+console.log('                                        the cause of the free SPACE; the fix that')
+console.log('                                        works is zapo-side and forbidden.')
 console.log('    retained messages     ' + mib(payload) + ' MiB  ' +
   (100 * payload / retention).toFixed(0) + '%  data the program was asked to keep')
 console.log('    service state         ' + mib(M.liveFixed) + ' MiB  ' +
@@ -191,11 +232,44 @@ console.log('  therefore NOT in the private column above. Both statements hold.'
 ok(M.presyncPriv < M.presync * 0.5,
   'private idle (' + mib(M.presyncPriv) + ') is under half of total idle (' + mib(M.presync) +
   ') — the columns differ by the resident image and must never be conflated')
-ok((ownCycPages + ownStr) < M.crtFree,
-  'what we can own (' + mib(ownCycPages + ownStr) + ' MiB) is far less than the fragmentation (' +
-  mib(M.crtFree) + ' MiB) — the bulk of the retention is not reachable from the runtime')
+unmeas('whether what we can own (' + mib(ownCycPages + ownStr) + ' MiB) is less than the\n' +
+  '              COMMITTED free space is UNMEASURED -- the same vacuity as above: the old\n' +
+  '              check compared it against the ' + mib(M.crtFreeCeiling) + ' MiB CEILING.')
 
-if (ran < 6) { console.log(NL + 'REFUSED: only ' + ran + ' checks ran'); process.exit(2) }
+/* THE PLANT -- THE REPAIR HAS TO BE ABLE TO FAIL, AND IT HAS TO TELL THE TWO
+ * ARMS APART. A check that reads the same whichever figure you feed it is
+ * worth nothing, so the old assertion is re-run against BOTH: the retracted
+ * 36.51 MiB ceiling, and the 1-4 MiB band the committed free space is
+ * actually believed to lie in. If these arms ever stop differing, this
+ * repair has decayed and the check below goes red. */
+const arms = [
+  ['ceiling 36.51 (the RETRACTED reading)', M.crtFreeCeiling],
+  ['committed  1.00 (low end of real)',     1.00 * MiB],
+  ['committed  4.00 (high end of real)',    4.00 * MiB],
+]
+console.log(NL + 'THE PLANT -- the old assertion, re-run against both arms:')
+const verdicts = []
+for (const [label, v] of arms) {
+  const held = payload < v
+  const g = M.settledWs - (sum + v)
+  verdicts.push(held)
+  console.log('  ' + label.padEnd(40) + 'payload<free: ' + (held ? 'HOLDS  ' : 'INVERTS') +
+    '   itemisation gap ' + (100 * Math.abs(g) / M.settledWs).toFixed(1) + '%')
+}
+ok(verdicts.includes(true) && verdicts.includes(false),
+  'the old `payload < free` assertion is SENSITIVE to which figure it is fed: it HOLDS\n' +
+  '        against the ceiling and INVERTS inside the real committed band. That is the\n' +
+  '        proof the old margin was an artifact of the ceiling, not a measured result.')
+
+/* FLOOR: was `ran < 6`, now `ran < 4`, and the DROP IS CORRECT rather than a
+ * regression to paper over. Three assertions became UNMEASURED (the closure
+ * check, and the two `payload < ceiling` comparisons) because they were
+ * VACUOUS -- a payload is always below a bound that overstates -- and one
+ * real check (THE PLANT) was added: 6 - 3 + 1 = 4. This floor exists to
+ * catch "the script did not run". IT DOES NOT ATTEST COVERAGE, and it must
+ * never be raised merely to make a run pass. */
+if (ran < 4) { console.log(NL + 'REFUSED: only ' + ran + ' checks ran'); process.exit(2) }
+console.log(NL + 'unmeasured=' + unmeasured + '   (open items; NOT passes)')
 console.log(NL + (fails ? 'PLATEAU FAILED (' + fails + ')' : 'PLATEAU OK'))
 process.exit(fails ? 1 : 0)
 
@@ -232,4 +306,20 @@ process.exit(fails ? 1 : 0)
  * tests/perf/heapcensus/COMMITTED-FREE-RETRACTION.md
  *
  * This band audits ONE figure. EVERYTHING ELSE IN THIS FILE IS UNAUDITED BY
- * IT -- not thereby in force. */
+ * IT -- not thereby in force.
+ *
+ * IMPLEMENTED 2026-10-11, in this file, by the slice that wrote this note.
+ * The band above DESCRIBED the defect; these are the changes that carry it
+ * out, so a reader does not have to take the prose on trust:
+ *   - `crtFree` is renamed `crtFreeCeiling`. The two lines quoted at :206
+ *     and :207 are left spelled the OLD way on purpose -- they are this
+ *     band's record of what it answered, not live code.
+ *   - the ceiling is NO LONGER SUMMED into the itemisation; it is printed
+ *     beside it as a bound.
+ *   - the closure assertion and both `payload < ceiling` comparisons are
+ *     now UNMEASURED, counted on their own `unmeasured=` output line, and
+ *     they do NOT count as passes.
+ *   - the `fragmentation` label is gone from the private-column breakdown.
+ *   - THE PLANT re-runs the old assertion against the ceiling AND against
+ *     the 1-4 MiB real band, and asserts the two DIFFER -- so the repair
+ *     can fail, and a check that could not tell the arms apart would. */
