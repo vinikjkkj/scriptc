@@ -1,0 +1,271 @@
+=== V2 RESULTS -- THE LANE, FIBER vs STACKLESS, 3 runs each, alternated ===
+tree        /g/blocks/v2-wt @ dc0d063c1, branch perf/heapcen-lane-variance
+C = FIBER      /g/blocks/sa2-out182-prof/zapo-rest-182.exe  (exe 32,679,424 B)
+B = STACKLESS  /g/blocks/sb-out182-prof/zapo-rest-182.exe   (exe 33,356,800 B)
+BOTH ARE POST-REPAIR. The PRE binary is not used: this slice isolates the
+lane, not the repair.
+knobs     CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000
+          PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1
+          -- diffed term for term against evidence-variance/v1-run.sh: identical.
+recipe    ./v2-run.sh + ./v2-rig.sh, IN THIS DIRECTORY, sourced from here and
+          executed exactly as committed. Nothing was built.
+order     C B B C C B, declared in PREREG.txt before run 1 existed.
+cost      14.2 min wall for six runs (08:43:17Z -> 08:57:29Z), 2.37 min/run.
+
+THE CLAIM UNDER AUDIT, carried by three committed documents:
+  "busy 16,243,072 (FIBER, sa) vs 15,902,592 (STACKLESS, sb) = -340,480 B"
+It rests on ONE run per arm. This slice gives each arm three.
+
+=== CONTROLS (a control that cannot fail is not a control) ===
+  c1  parse: HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+  b1  parse: HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+  b2  parse: HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+  c2  parse: HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+  c3  parse: HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+  b3  parse: HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+
+  LANE IDENTITY. Not an exe hash -- a lane property, read off the .ll before
+  run 1:   sa2 = 1488 lines matching scr_fiber,   sb = 3 lines.  Ratio 496x.
+  BOTH READ NON-ZERO, and that is the control working. Stackless conversion
+  is per-function, so a real module keeps a declare and two calls on the
+  stackless lane. The discriminator is the RATIO; a zero here would be a
+  dead grep, not a cleaner lane. (The "must be 0" criterion belongs only to
+  the ten-line probe in tests/perf/stackless-knob-guard.mjs.)
+
+  SITE-ID CONTROL, per run, independent of the manifest. The PROF row carries
+  the binary's own site id for scr_string.c:820; it must partition by arm:
+    c1 C  site 1aab5ae
+    b1 B  site 1b4f5ae
+    b2 B  site 1b4f5ae
+    c2 C  site 1aab5ae
+    c3 C  site 1aab5ae
+    b3 B  site 1b4f5ae
+    arm C: 1aab5ae   arm B: 1b4f5ae   partitions cleanly: YES
+
+  POSITIVE CONTROL for the chunk counter: PROF :820 reads NON-ZERO in all six
+  runs (46, 46, 46, 47, 46, 46), on both lanes. The counter is alive in both arms.
+
+  AND A NULL THAT PROVES NOTHING IN THIS SLICE, SAID OUT LOUD. HCSIZE 131079
+  -- the pre-repair _aligned_malloc request of 65536+65535+8 -- is ABSENT in
+  all six runs (0, 0, 0, 0, 0, 0). BOTH arms here are post-repair, so this slice
+  contains NO arm that could make that row read non-zero. On its own it
+  cannot tell "repaired" from "dead row". Its positive arm lives in the
+  previous slice: evidence-variance arm A reads 46, 46, 46 on exactly this
+  row. Read it there, not here.
+
+=== EVERY RUN, in the declared CBBCCB order ===
+pos tag arm lane            busy  busyBlk        free  freeBlk   committed  uncommitted  busy+free+unc  reg  chunks   chunkB  freed
+  1 c1  C FIBER        15846688    47663    26646128    20494    42492816     40058880       82551696   10      46  3014656      0
+  2 b1  B STACKLESS    15891136    47623    17197424    15529    33088560     32894976       65983536    9      46  3014656      0
+  3 b2  B STACKLESS    15891632    47624    17805552    14962    33697184     32288768       65985952    9      46  3014656      0
+  4 c2  C FIBER        16287136    47663    30532672    20997    46819808     52576256       99396064   11      47  3080192      0
+  5 c3  C FIBER        15902512    47646    35568016    17873    51470528     31084544       82555072   10      46  3014656      0
+  6 b3  B STACKLESS    15956992    47624    19242128    15062    35199120     30806016       66005136    9      46  3014656      0
+
+=== >>> EACH ARM'S SPREAD, BEFORE ANY t. THIS IS THE RESULT. <<< ===
+  The brief named arm C's variance as the half of the design most likely to
+  break it, and required the sd of each arm before any t statistic.
+
+column       arm C range    arm C sd   arm B range    arm B sd   C sd / B sd
+busy             440448      239808        65856       37880          6.3
+free            8921888     4473254      2044704     1049951          4.3
+committed       8977712     4489829      2110560     1086332          4.1
+unc            21491712    10794421      2088960     1074693         10.0
+addrspace      16844368     9724126        21600       11835        821.6
+busyBlk              17          10            1           1         17.0
+freeBlk            3124        1677          567         303          5.5
+reg                   1           1            0           0          inf
+
+  THE ONE NUMBER THIS SLICE EXISTS TO PRODUCE: the FIBER arm busy sd is
+  239808 B. The previous slice's STACKLESS busy sd was 762 B, which made
+  the 340,480 B claim look like a 447x margin over the noise. Against
+  239808 B the same claim is 1.42x the arm's own sd.
+  This session's STACKLESS busy sd is 37880 B, itself 50x the previous
+  session's 762 B -- so the tight arm was a property of that session too.
+
+=== ALL SIX RUNS. Welch t, CRITICAL VALUE TAKEN AT THE WELCH df ===
+column        C mean      C sd      B mean      B sd        delta B-C     |t|    df   t_crit        95% CI on the delta    sig?
+busy          16012112    239808    15913253     37880          -98859     0.71   2.10   4.303            [-702009, 504291]    no
+free          30915605   4473254    18081701   1049951       -12833904     4.84   2.22   4.303        [-24248998, -1418810]   YES
+committed     46927717   4489829    33994955   1086332       -12932763     4.85   2.23   4.303        [-24408867, -1456659]   YES
+unc           41239893  10794421    31996587   1074693        -9243307     1.48   2.04   4.303        [-36192878, 17706265]    no
+addrspace     88167611   9724126    65991541     11835       -22176069     3.95   2.00   4.303         [-46334105, 1981966]    no
+busyBlk          47657        10       47624         1             -34     5.93   2.01   4.303                    [-58, -9]   YES
+freeBlk          19788      1677       15184       303           -4604     4.68   2.13   4.303                [-8838, -369]   YES
+reg                 10         1           9         0              -1     4.00   2.00   4.303                      [-3, 0]    no
+  SIGN CONVENTION: delta = B - C = STACKLESS minus FIBER, the same direction
+  as the audited sentence, which reports -340,480 B.
+  The Welch df collapses toward 2 when the variances are unequal, and the
+  two-sided 95% bar there is 4.303, NOT the 2.776 of df=4. Reading the
+  previous slice at df=4 flipped a verdict; the df used is printed per row.
+
+  >>> AND A FLOOR THAT APPLIES TO EVERY "YES" IN THAT TABLE. <<<
+  At 3 v 3 there are C(6,3) = 20 arm assignments, so the smallest attainable
+  TWO-SIDED permutation p is 2/20 = 0.10. No effect, however large, can
+  reach p < 0.05 at this n without leaning on the normal assumption. Every
+  YES above is therefore parametric, and the four that appear -- free,
+  committed, busyBlk, freeBlk -- all clear 4.303 only narrowly (|t| 4.7-5.9)
+  and ALL of them revert to "no" under the pre-registered leave-one-out.
+  Read them as "worth n=7", not as established.
+
+=== LEAVE-ONE-OUT: position 1 (c1) dropped, as PREREG.txt promised ===
+column        C mean      C sd      B mean      B sd        delta B-C     |t|    df   t_crit        95% CI on the delta    sig?
+busy          16094824    271970    15913253     37880         -181571     0.94   1.03  12.706          [-2640836, 2277695]    no
+free          33050344   3560526    18081701   1049951       -14968643     5.78   1.12  12.706        [-47872370, 17935085]    no
+committed     49145168   3288556    33994955   1086332       -15150213     6.29   1.15  12.706        [-45752084, 15451658]    no
+unc           41830400  15196935    31996587   1074693        -9833813     0.91   1.01  12.706      [-146598077, 126930451]    no
+addrspace     90975568  11908380    65991541     11835       -24984027     2.97   1.00  12.706       [-131974884, 82006831]    no
+busyBlk          47655        12       47624         1             -31     3.62   1.00  12.706                   [-139, 77]    no
+freeBlk          19435      2209       15184       303           -4251     2.70   1.03  12.706              [-24221, 15720]    no
+reg                 11         1           9         0              -2     3.00   1.00  12.706                      [-8, 5]    no
+  Promised before run 1 and reported whether or not it helps. With n=2 on
+  arm C the df falls further and the bar rises, so it cannot rescue busy;
+  busy there reads |t| = 0.94 against t_crit 12.706 => NOT SEPARABLE.
+
+=== >>> THE VERDICT ON THE -340,480 B SENTENCE <<< ===
+  claimed, from one cross-day pair (sb - sa):   -340480 B
+  measured here, 3 v 3 (B - C):                 -98859 B
+  arm C busy sd 239808 B,  arm B busy sd 37880 B,  se of the delta 140170 B
+  |t| = 0.71, Welch df = 2.10, t_crit = 4.303  =>  NOT SEPARABLE FROM ZERO
+  95% CI on the lane's busy delta = [-702009, 504291] B
+     contains 0 ?                      YES
+     contains the claimed -340480 ?   YES
+
+  THE INTERVAL CONTAINS BOTH ZERO AND THE CLAIM. This slice does NOT refute
+  a -340 KB lane effect; it shows the committed pair never had the power to
+  assert one. The statement that survives is NOT SEPARABLE AT n=3, and the
+  sentence must be marked as such in the three documents that carry it.
+
+  AND THE INTRA-ARM RANGE SETTLES IT WITHOUT ANY t AT ALL: arm C busy swings
+  440448 B across three runs of ONE binary at fixed knobs. The effect being
+  read off a single pair is 340480 B -- 0.77x the noise on one arm. A pair cannot
+  carry an effect smaller than the within-arm range.
+
+=== THE COMMITTED PAIR, PLACED AGAINST THIS SESSION'S ARMS ===
+  column        sa (FIBER)   z vs this C  |     sb (STACKLESS)   z vs this B
+  busy           16243072          0.96  |      15902592         -0.28
+  busyBlk           47719          6.28  |         47940        547.91
+  free           31132528          0.05  |      22828832          4.52
+  committed      47375600          0.10  |      38731424          4.36
+  unc            51982336          1.00  |      27570176         -4.12
+  addrspace      99357936          1.15  |      66301600         26.20
+  reg                  11          1.15  |             9           n/a
+
+  THE "sb IS AN OUTLIER" FINDING SPLITS IN TWO, and only half of it was an
+  artefact. a0e2c9fa3 named both halves and diagnosed neither.
+
+  ON busy IT WAS AN ARTEFACT OF THE DENOMINATOR. sb read z = +13.49 against
+  the previous session's stackless arm; against THIS session's stackless arm
+  -- same binary, same knobs -- it reads z = -0.28. An outlier score is a
+  statement about the ARM it is scored against, and that arm changed between
+  sessions: its busy sd was 762 B then and 37,880 B now. sb was never an
+  outlying RUN on busy; the previous trio was an unusually tight ARM.
+
+  ON busyBlocks IT IS REAL AND STILL UNEXPLAINED. sb's 47,940 reads z = 547.91
+  against this session, worse than the +150.52 it read against the last one.
+  Both z values are inflated by tiny denominators (sd 2 B then, 1 B now) and
+  neither should be quoted as a z at all -- but the RAW number stands on its
+  own. The 6 measured runs of this exact binary (3 last session, 3 this one)
+  read busyBlocks 47629, 47625, 47626, 47623, 47624, 47624 -- a span of 6 blocks. sb itself
+  sits at 47940, 311 blocks above the top of that span, with nothing
+  in between. THIS SLICE DOES NOT EXPLAIN IT.
+  It is named as an open item, not retired, and it is NOT the quantity the
+  -340,480 B sentence was about.
+
+=== THE FREE THIRD DATUM: BETWEEN-SESSION DRIFT OF ONE FIXED BINARY ===
+  Same exe (sb, 33,356,800 B), same ten knobs, same host, different session.
+  Previous session: evidence-variance b1/b2/b3. This session: b1/b2/b3 here.
+  Nobody had measured this term; it is reported whichever way it falls.
+  column        prev mean   prev sd    this mean   this sd       drift     |t|    df  t_crit   sig?
+busy           15892315       762     15913253     37880       20939     0.96   2.00   4.303    no
+busyBlk           47627         2        47624         1          -3     2.41   2.31   4.303    no
+free           18720139   2012395     18081701   1049951     -638437     0.49   3.01   3.182    no
+committed      34612453   2011788     33994955   1086332     -617499     0.47   3.07   3.182    no
+unc            31391744   2022748     31996587   1074693      604843     0.46   3.05   3.182    no
+addrspace      66004197     24594     65991541     11835      -12656     0.80   2.88   4.303    no
+
+  busy drifts 20939 B between sessions on a FIXED binary. That is
+  6.1% of the lane effect the committed pair claims to have measured
+  ACROSS sessions, which is why the previous slice's b-runs were NOT reused
+  as this slice's arm: session is exactly the term a reuse cannot hold fixed.
+
+=== POWER, n=3 per arm, against the claim ===
+  busy: pooled sd = 171672 B;  se of the difference = 140170 B;  t_crit(df=2.10) = 4.303
+  power to detect a TRUE lane busy shift of    98859 B  =  0.0%
+  power to detect a TRUE lane busy shift of   340480 B  =  3.0%
+  power to detect a TRUE lane busy shift of   500000 B  =  23.1%
+  power to detect a TRUE lane busy shift of  1000000 B  =  99.8%
+  power to detect a TRUE lane busy shift of  2000000 B  =  100.0%
+  MINIMUM DETECTABLE EFFECT at 80% power = 721173 B = 0.69 MiB
+  runs per arm to bring the MDE to the claimed 340,480 B: n = 7 per arm  (MDE 331997 B)
+  At 2.37 min per run that is 2 x 7 x 2.37 = 33 min of wall clock.
+  A NULL WITH ITS POWER COMPUTED. This is NOT "the lanes are the same"; it is
+  "n=3 on this rig cannot see a 340 KB difference in settled busy".
+
+=== THE ARENA: the chunk count, with every observation named ===
+  this slice, FIBER     (c1,c2,c3): 46, 47, 46
+  this slice, STACKLESS (b1,b2,b3): 46, 46, 46
+  evidence-variance, PRE  via HCSIZE 131079: 46, 46, 46
+  evidence-variance, POST via PROF :820    : 46, 46, 46
+  evidence-idle/on     (PRE)       HCSIZE 131079 = 46
+  evidence-postfix/sa  (FIBER)     PROF :820     = 47
+  evidence-postfix/sb  (STACKLESS) PROF :820     = 47
+  TALLY: 46 in 12 of 15 observations, 47 in 3 of 15.
+
+  THE DENOMINATOR IS NOT THE PREVIOUS SLICE'S. a0e2c9fa3 reported "46 in 6 of
+  8, 47 in 2 of 8"; its 8 is the three v1 A-runs, the three v1 B-runs, sa and
+  sb, and it EXCLUDED evidence-idle/on. This 15 is that 8, plus evidence-idle/on,
+  plus this slice's six. The two fractions are over different populations and
+  must not be chained or compared as if they were the same ratio.
+
+  >>> AND THIS CORRECTS THE PREVIOUS SLICE'S CORRECTION. <<<
+  a0e2c9fa3 observed 47 in exactly two places, both in the same-day sa/sb
+  pair, and that coincidence left open the reading "47 is something about
+  that pair". c2 here is a THIRD 47: fiber lane, different session, from a
+  binary that read 46 in the two runs either side of it (46, 47, 46).
+  The count is a per-run draw over {46,47} and is nothing about the pair.
+  The previous headline correction -- 46 is modal, and the raise to 16.226%
+  rested on a draw -- STANDS and is strengthened: the draw is now
+  demonstrated WITHIN one binary inside one session.
+
+  ERROR BAR ON THE MEASURED FACTOR. The released bytes are N x 65,536. The
+  65,536 is a DEFINITION (SCR_STR_ARENA_CHUNK); N is the MEASUREMENT, and N
+  is observed over {46,47} with mean 46.200 across 15 runs. The bar belongs on N:
+  46 x 65,536 = 3,014,656 B and 47 x 65,536 = 3,080,192 B. The per-chunk
+  752 B granularity term is real but 87x smaller than this step, so it is
+  not the dominant term and was never the one to quote alone.
+  chunk frees, all six runs: 0, 0, 0, 0, 0, 0. The free path exists
+  (scr_string.c:822 via scr_str_idle_drain) and is not taken. FLOW IS NOT
+  RETENTION: PROF counts the whole run, the heap-0 row counts what is live
+  at census, and these two columns must not be subtracted from each other.
+
+=== THE PRE-REGISTERED PREDICTIONS, SCORED ===
+  P1  "the lane busy delta survives in sign and magnitude (-300 to -400 KB)
+       and IS SEPARABLE"
+      REFUTED. Measured -98859 B, |t| = 0.71 vs t_crit 4.303: not separable.
+      The sign survives; the magnitude and the separability do not.
+      AND IT FAILED BY THE EXACT ROUTE PRE-REGISTERED AS THE WEAK HALF --
+      arm C's variance, not the effect. The prereg guessed "hundreds of KB"
+      for arm C's busy sd; it measured 239808 B. That is the design
+      working: the named risk is the one that fired.
+  P2  "the FIBER lane reads 46 chunks, not 47"
+      WRONG AS WORDED. Fiber read 46, 47, 46. But the claim P2 was serving --
+      that 47 is a per-run draw and not a property of the sa/sb pair -- is
+      CONFIRMED, and more directly than 46-everywhere would have confirmed
+      it: the draw happened inside one binary in one session.
+  P3  "free, uncommitted and committed remain not separable"
+      SPLIT. uncommitted is NOT separable (|t| 1.48), as predicted; free and
+      committed cross the bar narrowly (|t| 4.84, 4.85 vs 4.303) and both
+      revert to "no" on the pre-registered leave-one-out. Predicted wrong,
+      but not in a direction that supports the sentence under audit.
+
+=== WHAT THIS SLICE DOES NOT SHOW ===
+  - It does not measure PEAK anything. Every column here is the settled heap
+    at _Exit. The -21.117 MiB peak figure in the record is a different
+    quantity and is NOT touched, confirmed or refuted by this slice.
+  - It does not re-measure the string-arena repair. Both arms are post-fix;
+    the -3,020,443 B busy delta of a0e2c9fa3 stands untouched.
+  - It does not explain WHY arm C is wide. regions and free move with it
+    (see the spread table), which points at the allocator mapping more
+    segments on the fiber lane, but that is a hypothesis this slice did not
+    test and it is not asserted.

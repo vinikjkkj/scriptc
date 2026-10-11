@@ -1,0 +1,6 @@
+c1  PROF 46 3014656 0 0 0 1aab5ae 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+b1  PROF 46 3014656 0 0 0 1b4f5ae 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+b2  PROF 46 3014656 0 0 0 1b4f5ae 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+c2  PROF 47 3080192 0 0 0 1aab5ae 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+c3  PROF 46 3014656 0 0 0 1aab5ae 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+b3  PROF 46 3014656 0 0 0 1b4f5ae 0 G:\scriptc\packages\runtime\src\scr_string.c:820

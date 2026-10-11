@@ -319,3 +319,53 @@ silent empty result. Every anchor in `stats.mjs` is `\r?$`.
 Branch `perf/heapcen-committed-variance` from `ff33bac69`, worktree
 `G:\blocks\v1-wt`. The diff is **`tests/perf/**` only**, so it is **green by
 construction — no gate runs `tests/perf`**. Not merged and not pushed.
+
+---
+
+## 10. ANSWERED, 2026-10-11 (later the same day) — the open item in §8
+
+**The sentence this band answers**, in §8 ("what this slice did not do"),
+bullet "**Did not re-measure the FIBER arm (`sa`)**":
+
+> "the lane figure in `POSTFIX-CENSUS.md`'s `RESOLVED` banner — settled CRT
+> busy `−340,480 B` — is **untouched by this slice** ... Note only that it is
+> a 340,480 B claim and this slice measures a 3,803,200 B within-arm range on
+> neighbouring columns, so the same question applies to it and is still open."
+
+**That question is now closed, and this slice's instinct was right.**
+`evidence-lane/` re-measured the FIBER arm: 3 runs per arm, alternated
+`CBBCCB`, both post-fix exes, nothing built.
+
+| | arm C FIBER | arm B STACKLESS |
+|---|---:|---:|
+| `busy` sd | **239,808 B** | 37,880 B |
+| `busy` range over 3 runs | **440,448 B** | 65,856 B |
+
+Measured lane `busy` delta (B − C) = **−98,859 B**, |t| = 0.71, Welch
+df = 2.10, t_crit = **4.303** ⇒ **NOT SEPARABLE FROM ZERO**. The 95% CI
+`[−702,009, +504,291]` contains zero **and** contains the claimed −340,480.
+Power at n=3 to see a true 340,480 B shift: **3.0%**. MDE at 80%: 721,173 B.
+**n = 7 per arm, ~33 min**, would settle it.
+
+**And this slice's own §5 item is half repaired.** "Did not explain why `sb`
+ran heavy." On `busy` there was nothing to explain: `sb`'s z = +13.49 was a
+statement about the denominator, and against the fresh stackless arm — same
+binary, same knobs, different session — it reads **z = −0.28**. Arm B's
+`busy` sd was **762 B** in this slice and **37,880 B** in the new one, so the
+tight trio was a property of that session. On `busyBlocks` the anomaly is
+**real and still unexplained**: six measured runs of that binary span
+47,623–47,629 and `sb` sits at 47,940.
+
+**A term nobody had measured, reported either way.** Between-session drift of
+one fixed binary at fixed knobs (this slice's `b1/b2/b3` against the new
+`b1/b2/b3`): `busy` drifts **+20,939 B**, |t| = 0.96, df = 2.00 — not
+separable, and 6.1% of the lane effect the committed pair claimed to have
+measured *across* sessions. That is why the new slice re-ran arm B instead of
+reusing these three.
+
+**Sections of this file not named above are not thereby in force — they are
+merely unaudited by this slice.** The −3,020,443 B busy delta of the
+string-arena repair, §3's conservation identity and §4's chunk-count
+correction are all untouched; §4 is strengthened — a third 47 was drawn on
+the fiber lane in a different session (46, 47, 46 inside one binary), so the
+count is a per-run draw and 46 stays modal.

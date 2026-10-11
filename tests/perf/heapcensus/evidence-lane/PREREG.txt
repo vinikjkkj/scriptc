@@ -1,0 +1,115 @@
+PRE-REGISTRATION -- THE LANE'S EFFECT ON THE SETTLED HEAP, 3 runs per arm
+=========================================================================
+Written and committed-to BEFORE run 1 existed. Nothing in this slice is
+built; both exes already sit on disk and are identified byte-for-byte below.
+
+THE CLAIM UNDER AUDIT
+---------------------
+Three committed documents carry this sentence, obtained from a SINGLE
+cross-day pair:
+
+    "o efeito da PISTA no heap assentado: busy 16.243.072 (fibra, braco sa)
+     contra 15.902.592 (stackless, braco sb) = -340.480 B"
+
+  1. tests/perf/heapcensus/POSTFIX-CENSUS.md, block "RESOLVED, 2026-10-11"
+  2. tests/perf/heapcensus/evidence-postfix/sb.compare.txt, section
+     "THE LANE'S EFFECT ON THE SETTLED HEAP"
+  3. G:\blocks\MEM-STATE-20261010.md, tail
+
+It was obtained by exactly the method that a0e2c9fa3 refuted for the
+committed column: one run per arm, no within-arm variance. And sb is a
+known outlier against its own binary -- z = +13.49 on busy, z = +150.52 on
+busyBlocks, measured against the three b-runs of evidence-variance.
+
+THE ARMS
+--------
+  C = FIBER      G:\blocks\sa2-out182-prof\zapo-rest-182.exe
+                 exe 32,679,424 B   .ll 229,342,743 B
+  B = STACKLESS  G:\blocks\sb-out182-prof\zapo-rest-182.exe
+                 exe 33,356,800 B   .ll 242,844,729 B
+
+Both are POST-repair. The PRE binary (h2-out182-prof) is NOT used: this
+slice isolates the lane, not the repair.
+
+LANE IDENTITY, VERIFIED BEFORE RUN 1 (not an exe hash -- a lane property)
+  rg -c scr_fiber on each .ll:   sa2 = 1488 lines   sb = 3 lines
+  Ratio 496x. BOTH READ NON-ZERO, which is the point: a real module on the
+  stackless lane keeps a declare and two calls, because stackless
+  conversion is per-function. THE DISCRIMINATOR IS THE RATIO, NOT THE ZERO.
+  The "must be 0" criterion belongs only to the ten-line probe in
+  tests/perf/stackless-knob-guard.mjs. A zero here would mean a dead grep,
+  not a cleaner lane -- so 3 is the positive control for the null arm and
+  1488 is the positive control for the measured arm.
+
+THE ORDER, DECLARED NOW: C B B C C B
+------------------------------------
+Chosen, with the reason, before run 1:
+
+  (a) It is evidence-variance's ABBAAB with A -> C, term for term. That
+      makes the position structure IDENTICAL to the slice whose numbers
+      this one is being read against, so the two are comparable and the
+      pre-registered leave-one-out carries over unchanged.
+  (b) It is balanced 3/3 and neither arm holds both ends of the sequence.
+  (c) Position 1 is the known-suspect slot on this rig: first-run peaks run
+      high, and in evidence-variance arm A's busy sd fell from 10,712 B to
+      498 B when position 1 was dropped. Putting arm C in position 1 loads
+      the suspect slot onto the arm whose variance this slice is actually
+      testing -- the conservative placement, not the flattering one.
+
+LEAVE-ONE-OUT, PROMISED NOW: the analysis will ALSO report every column
+with position 1 (tag c1) dropped, whether or not that helps.
+
+KNOBS -- term for term the knobs of evidence-variance and of BOTH the
+committed sa and sb manifests. Nothing is tuned for this slice.
+  CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000
+  PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1
+
+THE B ARM IS RE-RUN IN THIS SESSION, DELIBERATELY
+-------------------------------------------------
+The three b-runs committed in evidence-variance use the SAME sb binary at
+the SAME knobs. They are NOT reused as this slice's arm. They are a
+different session, and session is exactly the term this slice cannot hold
+fixed across a reuse. Re-running B here buys a third datum for free: the
+BETWEEN-SESSION drift of one fixed binary, which nobody has measured. It
+will be reported whichever way it falls.
+
+PREDICTIONS, REGISTERED BEFORE RUN 1
+------------------------------------
+  P1  The lane's busy delta SURVIVES in sign and order of magnitude
+      (-300,000 to -400,000 B, C minus B positive i.e. fiber heavier) and
+      IS SEPARABLE at the Welch df. Basis: arm B's busy sd is 762 B and the
+      claimed effect is ~447x that.
+  P2  The chunk count on the FIBER lane reads 46, not the 47 sa recorded --
+      closing "47 was a draw" on BOTH lanes.
+  P3  free, uncommitted and committed remain NOT separable, as in the
+      PRE/POST pair.
+
+THE HALF OF THIS DESIGN MOST LIKELY TO BE WRONG: P1, by way of ARM C's
+VARIANCE, not by way of the effect. The tight 762 B sd belongs to the
+STACKLESS arm, where almost nothing parks. The FIBER arm carries 20,000+
+task stacks and its busy distribution may be far wider. If arm C's sd is of
+the order of hundreds of KB, the Welch df collapses and -340,480 B becomes
+not-separable exactly as the committed column did.
+
+IF THAT IS WHAT HAPPENS, THAT IS THE RESULT, and it is worth more than a
+confirmation: it means the settled heap does not distinguish the lanes at
+n=3, and the sentence must be retracted in the three documents named above.
+EITHER WAY, EACH ARM'S SD IS REPORTED BEFORE ANY t.
+
+THE CRITICAL VALUE IS TAKEN AT THE WELCH df AND PRINTED
+-------------------------------------------------------
+The Welch df collapses to ~2 when the variances are unequal, and the
+two-sided 95% bar there is 4.303, NOT the 2.776 of df=4. Reading the table
+at df=4 flipped a verdict in the previous slice. The df and the critical
+value used appear in every row of every table.
+
+ERROR BARS GO ON THE MEASURED FACTOR
+------------------------------------
+busy moves in whole units of 65,536 B. For any N x unit quantity the bar
+goes on N, the measured factor, not on the unit, which is a definition.
+
+HOST STATE AT PRE-REGISTRATION
+  G: free 37 GB (floor 20 GB)     C: free 1.1 GB -- not used by this slice
+  node v22.18.0 at /c/nvm4w/nodejs/node (identical to evidence-variance)
+  base dc0d063c1, branch perf/heapcen-lane-variance, worktree G:\blocks\v2-wt
+  Measured cost from evidence-variance: 2.33 min/run; six expected ~14 min.

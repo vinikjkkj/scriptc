@@ -470,3 +470,78 @@ this slice.
 > merely unaudited by this slice.** `evidence-variance/VARIANCE.md` §5 carries
 > the full table and §7 lists what else in the surrounding record it
 > contradicts.
+
+> ---
+>
+> ## AUDITED, 2026-10-11 (later the same day) — **THE LANE FIGURE IS NOT SEPARABLE AT n=3**
+>
+> **The sentence this band answers**, in the `RESOLVED, 2026-10-11` block
+> above, under "**The confound was 11.1% of the claimed effect, not 720%**":
+>
+> > "Settled CRT busy heap: 16,243,072 B fiber against 15,902,592 B
+> > stackless, **−340,480 B**."
+>
+> That block already called it "one pair, no variance estimate; read it as a
+> ceiling", and that caution was right. What was missing was the measurement.
+> It now exists.
+>
+> THE MEASUREMENT, 2026-10-11, evidence-lane/ -- 3 runs per arm, alternated
+> CBBCCB, order declared in evidence-lane/PREREG.txt before run 1 existed.
+> Same two exes (sa2-out182-prof FIBER, sb-out182-prof STACKLESS), same ten
+> knobs, nothing built. Full table: evidence-lane/RESULTS.txt, reproducible
+> with `node evidence-lane/lane-stats.mjs`.
+> 
+>   arm C (FIBER)     busy sd    239,808 B   range 440,448 B over three runs
+>   arm B (STACKLESS) busy sd     37,880 B   range  65,856 B over three runs
+>   measured lane busy delta (B - C) = -98,859 B
+>   |t| = 0.71, Welch df = 2.10, t_crit = 4.303  =>  NOT SEPARABLE FROM ZERO
+>   95% CI = [-702,009, +504,291] B -- CONTAINS ZERO *AND* CONTAINS -340,480.
+> 
+> THE CLAIM IS NOT REFUTED; IT IS UNSUPPORTED. The pair never had the power to
+> assert it. Power to detect a true 340,480 B lane shift at n=3 here is 3.0%;
+> the minimum detectable effect at 80% power is 721,173 B; n = 7 per arm
+> (about 33 min) would settle it. The fiber arm's own busy range, 440,448 B
+> across three runs of ONE binary at fixed knobs, is LARGER than the effect
+> the single pair was read as showing.
+>
+> AND THE WIDER SENTENCE IN THIS SECTION IS BOUNDED THE SAME WAY. The claim
+> that the lane's settled effect is "large" and "lives almost entirely outside
+> the busy column" rests on -7.919 MiB of free and -23.281 MiB of uncommitted
+> from the same single pair. Measured 3 v 3:
+> 
+>   free          delta -12,833,904 B  |t| 4.84  df 2.22  t_crit 4.303  marginal
+>   uncommitted   delta  -9,243,307 B  |t| 1.48  df 2.04  t_crit 4.303  NOT sep.
+>   regions       FIBER 10, 11, 10  vs  STACKLESS 9, 9, 9
+> 
+> The fiber arm's uncommitted sd is 10,794,421 B -- comparable to the claimed
+> -24,412,160 B itself -- so that column cannot carry a point estimate from a
+> pair either. The DIRECTION survives: all three fiber runs settle with more
+> free and more regions than all three stackless runs. The MAGNITUDES do not.
+> The honest form of the wider sentence is "the fiber lane settles with a
+> structurally larger heap, direction reproduced, size unpinned".
+> 
+> A FLOOR THAT APPLIES TO THE "marginal" ROW ABOVE AND TO EVERY SIMILAR ONE.
+> At 3 v 3 there are C(6,3) = 20 arm assignments, so the smallest attainable
+> two-sided permutation p is 2/20 = 0.10. No effect at this n can reach
+> p < 0.05 without the normal assumption, and the free/committed rows revert
+> to "not separable" under the pre-registered leave-one-out. Read them as
+> "worth n=7", not as established.
+> **The same block's other clause survives and is strengthened.** "The effect
+> reproduced to the byte on the other lane. 47 chunks, 3,080,192 B" — the 47
+> was already retracted as a draw by `a0e2c9fa3`; this slice saw a third 47,
+> on the fiber lane, in a different session, from a binary that read 46 in
+> the two runs either side of it (46, 47, 46). The count is a per-run draw
+> over {{46,47}} and is nothing about the `sa`/`sb` pair. 46 remains modal.
+>
+> **And the "`sb` ran heavy" item splits in two.** On `busy`, `sb`'s z = +13.49
+> was an artefact of the denominator: against this session's stackless arm,
+> same binary and knobs, it reads z = −0.28. On `busyBlocks` it is REAL and
+> still unexplained — the six measured runs of that exact binary span
+> 47,623–47,629 and `sb` sits at 47,940, 311 blocks above the top, with
+> nothing in between. Named, not retired.
+>
+> SECTIONS OF THIS FILE NOT NAMED ABOVE ARE NOT THEREBY IN FORCE -- they are
+> merely unaudited by this slice. This slice measured the SETTLED heap only.
+> It does not touch the string-arena repair's -3,020,443 B busy delta, which
+> stands, and it does not touch any PEAK figure, including the -21.117 MiB of
+> pagecensus/evidence-fr2/DECOMP.txt, which is a different quantity.
