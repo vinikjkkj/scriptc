@@ -483,3 +483,50 @@ checked against `HCTOTAL` before any share is printed, and all four arms carry
 glob (`vitest.config.ts:49-53` includes only `tests/harness/**` and
 `packages/*/{src,test}/**`), so this document and the evidence beside it are
 not gated. That is a statement about reach, not about having passed anything.
+
+---
+
+## BAND, 2026-10-11 — THE FREE COLUMN IS NOT A COMMIT COLUMN. Nothing above is edited or re-run.
+
+**The line this band answers**, in section *"Sixty percent of what was freed
+left the committed heap"*:
+
+```
+committed = busy + free
+...
+of the 12,992,832 B freed:  7,790,160 B (60.0%) left the committed heap
+                            5,202,672 B (40.0%) stayed as free-but-committed holes
+```
+
+**`busy + free` is not what the process pays, and the 40% term is not
+"free-but-committed".** `tests/perf/pagecensus/evidence-rest` measures the same
+instrumented binary at the same instant from outside the process
+(`VirtualQueryEx`, terms summing to the kernel's own `PrivateUsage` to within
+0.001 MiB) and finds **every committed private page outside thread stacks** to
+be 21.3 MiB in a run whose own `HeapWalk` reports `busy + free` = 37.2 MiB.
+The excess, 15.9 MiB, cannot be committed: there is nowhere for it to be.
+
+The mechanism is reproduced on a standalone arm with a negative control,
+`tests/perf/pagecensus/heapsplit.c` and `evidence-rest/ctl-heapsplit.txt`: for
+every free block `HeapWalk` reports, ask `VirtualQuery` about its own pages.
+
+| arm | free >= 64 KiB | MEM_COMMIT | MEM_RESERVE |
+|---|---:|---:|---:|
+| nothing freed (**negative control**) | 0.961 MiB | **0.961** | **0.000** |
+| 64 blocks of 1,000,000 B, all freed | 3.832 MiB | 0.973 | 2.859 (74.6%) |
+| 400 blocks of 200,000 B, all freed | 7.944 MiB | 0.499 | 7.445 (93.7%) |
+| half live, half freed, interleaved | 27.721 MiB | 2.030 | 25.691 (92.7%) |
+
+The NT heap decommits pages inside a free run without splitting the run into a
+`PROCESS_HEAP_UNCOMMITTED_RANGE` entry, so `HeapWalk` keeps reporting one free
+block at full extent. The negative control is what makes this a statement about
+heap STATE and not about a broken detector: when nothing has been freed, the
+free column is 100% committed and `busy + free` fits inside the kernel's charge.
+
+**WHAT SURVIVES.** The busy-side arithmetic of this document, the per-size
+tables, and the direction of the release's effect are untouched — this band
+does not re-measure them. What is marked is the reading of **`free`** as
+committed memory, and therefore the split "60% left / 40% stayed as holes": the
+40% term is an upper bound on committed holes, and the committed part of it is
+plausibly a small fraction. **Lines of this file not named above are not thereby
+in force — they are merely UNAUDITED by this band.**

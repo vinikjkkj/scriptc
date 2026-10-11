@@ -1,0 +1,130 @@
+MANIFEST -- the SHIPPED binary's private commit AT REST, decomposed by base,
+            and what the two heap instruments disagree about
+========================================================================
+date        2026-10-11
+question    (1) what are the ~20.5 MiB the shipped app182 binary commits at
+                rest made of, and how much of it is CRT heap
+            (2) do the 43 free blocks >= 64 KiB (15.17 MiB) that the
+                in-process census reports at rest exist in the product
+
+WHY THIS DIRECTORY EXISTS AT ALL
+  evidence-fr2 decomposed the PEAK with the same external walker and says so
+  in its own "WHAT IS NOT HERE". There was no rest decomposition, because
+  vmcensus.c keeps only its BEST walk and the best walk is by construction
+  the peak. vmrest.c adds a timestamped series and a periodic full dump and
+  removes nothing, so peak and rest now come out of ONE run.
+
+THE LOAD (identical in every subject run here)
+  CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60
+  driver  tests/perf/zapo-rest/harness/memrig.mts, via evidence-rest/f2b-run.sh
+  server  G:\blocks\m3-zaposrc/packages/fake-server
+  node    v22.18.0
+
+THE INSTANT, taken from the harness and not from anyone's prose
+  memrig.mts:467-470 sleeps SETTLE_MS (default 45,000) after SYNC-DONE, marks
+  SETTLED-r<n>, then sleeps 30 s twice marking IDLE-30s and IDLE-60s.
+  THE REST WINDOW IS SETTLED-r1 .. IDLE-60s. It is the same window the pmon
+  series fr1-run/a1..a6 was read in, and in all six runs here the pmon
+  privateCommit column is FLAT TO THE BYTE across 229-232 samples of it.
+
+THE BINARIES -- reused, not built for this, so no cache or tsc risk
+  CLEAN  G:\blocks\fr1-out\S-plain\zapo-rest-182.exe
+         32,034,304 B, built at 3c462de14, stackless, knob ABSENT.
+         THE SHIPPED SHAPE. It is NOT main: HEAD at the time of this slice
+         is 61d3ed71e. Every CLEAN figure below is a figure about 3c462de14.
+  INSTR  G:\blocks\v3-out182-SL\zapo-rest-182.exe
+         33,873,920 B, built at 7c7897307, prof + heapcensus force-included.
+         This is the binary f2-run/q1, q4 and q5 ran -- the binary whose
+         in-process HeapWalk produced the 43-hole figure.
+  The two differ in TWO things, not one: the instrument AND the runtime
+  revision. Declared, not hidden. Nothing below rests on them being a
+  one-variable pair; the two-instrument contradiction is measured INSIDE the
+  instrumented runs, where there is no second variable at all.
+
+THE KNOBS, as two separate cells, because they are not the same instant
+  A  (= fr1-rig.sh, what a1..a6 ran)   no SQLite idle release
+  Q  (= f2-run.sh,  what q1..q6 ran)   SCR_SQLITE_IDLE_RELEASE_MS=1000
+                                       SCR_SQLITE_IDLE_STAT=1
+                                       SETTLE_MS=45000 PRESYNC_MS=20000
+
+THE RUNS
+  tag  arm    knobs  order
+  r1   CLEAN  A      1
+  r2   CLEAN  Q      2
+  r3   INSTR  Q      3
+  r4   INSTR  Q      4
+  r5   CLEAN  Q      5
+  r6   CLEAN  A      6
+  Sequential, one subject process at a time. n=2 per cell. The effect this
+  directory is about is 10-16 MiB; the within-cell spread on the same column
+  is 1.0-1.9 MiB.
+
+THE INSTRUMENTS
+  tests/perf/pagecensus/vmrest.c     out-of-process VirtualQueryEx walk.
+    = vmcensus.c with a timestamped SERIES line per walk and a full
+      decomposition dump every Nth walk added. Its walk, its classification
+      and its emit() are vmcensus.c's, unchanged; the diff deletes eight
+      lines and all eight are argument parsing, the output-file open, and
+      message text. The subject is unmodified and has no instrument inside
+      it, so its rest is its own.
+  tests/perf/pagecensus/heapsplit.c  a CONTROL, not a subject instrument:
+      for every free block HeapWalk reports, ask VirtualQuery whether those
+      pages are committed.
+  tests/perf/pagecensus/bsstgt.c     a CONTROL for the claim that a large
+      .bss is charged to PrivateUsage with its copy-on-write untaken, and
+      therefore lands in vmcensus's RESIDUE.
+  built with zig 0.16.0 from G:\tools\zig (NOT the PATH's Chocolatey
+  0.15.2), target x86_64-unknown-windows-gnu, asserted by
+  `zig cc -print-target-triple` in the session that built them.
+
+THE COLUMN
+  PROCESS_MEMORY_COUNTERS_EX.PrivateUsage, read per walk. PRIVATE COMMIT.
+  It is NOT workingSet and it is NOT PeakWorkingSet; both are printed
+  beside it in every dump so the two cannot be confused.
+
+CONTROLS -- each is a run in this directory, not a sentence
+  ctl-pos.txt        vmrest against tests/perf/pagecensus/vmtgt.c:
+                     256 MiB committed and untouched reads PRIVATE non-stack
+                     256.164 MiB with residue 0.766 while the working set
+                     stays 8.1 MiB (it measures commit, not residency);
+                     zero fibers reads 2 stacks, not 0 and not 2,000.
+  ctl-bss.txt        a 40 MiB file-scope array at four touch levels.
+                     PrivateUsage is 40.62 MiB in ALL FOUR, including the one
+                     that never writes a byte of it. IMAGE cow-taken moves
+                     0.25 -> 10.21 -> 20.17 -> 40.09 MiB and RESIDUE moves
+                     40.13 -> 30.16 -> 20.20 -> 0.27 MiB, 1:1 with how much
+                     was touched. The charge is taken at map time; the COW
+                     discriminator cannot see it; it lands in RESIDUE.
+  ctl-heapsplit.txt  four heap shapes. In the arm where NOTHING is freed,
+                     free blocks >= 64 KiB are 0.961 MiB and 100% MEM_COMMIT
+                     and busy+free is WITHIN PrivateUsage -- the detector is
+                     not biased. In the three arms that free, 74.6% / 93.7% /
+                     92.7% of those bytes are MEM_RESERVE, and busy+free
+                     EXCEEDS the whole process's PrivateUsage by up to
+                     25.1 MiB, which is impossible for committed memory.
+
+REPRODUCING
+  python f2b-table.py            from inside this directory, no arguments.
+  It rebuilds TABLE.txt byte for byte from the *.vm.txt, *.phases.csv and
+  *.rss.csv committed beside it. Verified by cmp in the session that wrote
+  this file.
+  python f2b-pick.py . <tag>     the per-base detail of one run's window.
+
+WHAT IS NOT HERE
+  The busy/free split of the CLEAN binary. It cannot be had from outside --
+  VirtualQueryEx sees committed pages, not heap blocks -- and the in-process
+  column that would give it is the one TWO-INSTRUMENTS.md refutes. The honest
+  next instrument is named there, with its cost.
+
+LINE ENDINGS, declared rather than discovered later
+  Every prose file and every script in this directory is LF, CR=0. The CRs
+  that do exist are in MACHINE-WRITTEN artifacts and are the programs' own:
+  *.vm.txt (vmrest, fopen "w" on Windows), *.rss.csv (pmon.exe),
+  r3/r4.heapcen.txt (scr_heap_census.h), and the captured stdout in
+  TABLE.txt, ctl-*.txt and szprobe.txt. This matches the convention the
+  heapcensus evidence directories already follow.
+
+THE COMMITTED vmrest.c WAS RECOMPILED AFTER ITS HEADER COMMENT WAS WRITTEN
+  and still builds clean, so the file in the tree is the file that was run,
+  modulo the comment. The runs in this directory were produced by the
+  identical code with the shorter header.

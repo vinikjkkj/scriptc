@@ -1,0 +1,76 @@
+CONTROL -- heapsplit.exe, four arms, each a RUN. zig 0.16.0 from G:\tools\zig,
+target x86_64-unknown-windows-gnu (asserted by zig cc -print-target-triple).
+date 2026-10-11T14:17:47Z
+
+######## heapsplit.exe 64 1000000 1
+AFTER ALLOC   PrivateUsage 61.945 MiB  (64 blocks x 1000000 B = 61.035 MiB)
+AFTER FREE    PrivateUsage 1.559 MiB
+
+HEAPWALK, 2 heaps
+  busy               0.072 MiB  blocks 289
+  free               3.870 MiB  blocks 82
+  uncommitted       75.320 MiB
+  busy+free          3.941 MiB   <- what a census calls 'what the process pays'
+  free >=64K         3.832 MiB  blocks 4
+
+THE SAME FREE BLOCKS, ASKED OF THE MEMORY MANAGER (VirtualQuery, in-process)
+  free >=64 KiB : MEM_COMMIT 0.973 MiB   MEM_RESERVE 2.859 MiB   MEM_FREE 0.000 MiB  (4 blocks)
+  free < 64 KiB : MEM_COMMIT 0.028 MiB   MEM_RESERVE 0.008 MiB   MEM_FREE 0.000 MiB  (78 blocks)
+
+KERNEL PrivateUsage now 1.559 MiB. busy+free = 3.941 MiB.
+VERDICT: busy+free EXCEEDS PrivateUsage by 2.383 MiB
+
+######## heapsplit.exe 400 200000 1
+AFTER ALLOC   PrivateUsage 77.289 MiB  (400 blocks x 200000 B = 76.294 MiB)
+AFTER FREE    PrivateUsage 1.098 MiB
+
+HEAPWALK, 2 heaps
+  busy               0.074 MiB  blocks 289
+  free               7.976 MiB  blocks 88
+  uncommitted       71.211 MiB
+  busy+free          8.050 MiB   <- what a census calls 'what the process pays'
+  free >=64K         7.944 MiB  blocks 10
+
+THE SAME FREE BLOCKS, ASKED OF THE MEMORY MANAGER (VirtualQuery, in-process)
+  free >=64 KiB : MEM_COMMIT 0.499 MiB   MEM_RESERVE 7.445 MiB   MEM_FREE 0.000 MiB  (10 blocks)
+  free < 64 KiB : MEM_COMMIT 0.030 MiB   MEM_RESERVE 0.000 MiB   MEM_FREE 0.000 MiB  (78 blocks)
+
+KERNEL PrivateUsage now 1.098 MiB. busy+free = 8.050 MiB.
+VERDICT: busy+free EXCEEDS PrivateUsage by 6.953 MiB
+
+######## heapsplit.exe 64 1000000 9999
+AFTER ALLOC   PrivateUsage 61.945 MiB  (64 blocks x 1000000 B = 61.035 MiB)
+AFTER FREE    PrivateUsage 61.945 MiB
+
+HEAPWALK, 2 heaps
+  busy              60.154 MiB  blocks 352
+  free               1.209 MiB  blocks 80
+  uncommitted       17.898 MiB
+  busy+free         61.363 MiB   <- what a census calls 'what the process pays'
+  free >=64K         0.961 MiB  blocks 1
+
+THE SAME FREE BLOCKS, ASKED OF THE MEMORY MANAGER (VirtualQuery, in-process)
+  free >=64 KiB : MEM_COMMIT 0.961 MiB   MEM_RESERVE 0.000 MiB   MEM_FREE 0.000 MiB  (1 blocks)
+  free < 64 KiB : MEM_COMMIT 0.247 MiB   MEM_RESERVE 0.000 MiB   MEM_FREE 0.000 MiB  (79 blocks)
+
+KERNEL PrivateUsage now 61.945 MiB. busy+free = 61.363 MiB.
+VERDICT: busy+free is within PrivateUsage by 0.582 MiB
+
+######## heapsplit.exe 64 1000000 2
+AFTER ALLOC   PrivateUsage 61.949 MiB  (64 blocks x 1000000 B = 61.035 MiB)
+AFTER FREE    PrivateUsage 33.227 MiB
+
+HEAPWALK, 2 heaps
+  busy              30.590 MiB  blocks 321
+  free              27.750 MiB  blocks 105
+  uncommitted       20.922 MiB
+  busy+free         58.340 MiB   <- what a census calls 'what the process pays'
+  free >=64K        27.721 MiB  blocks 29
+
+THE SAME FREE BLOCKS, ASKED OF THE MEMORY MANAGER (VirtualQuery, in-process)
+  free >=64 KiB : MEM_COMMIT 2.030 MiB   MEM_RESERVE 25.691 MiB   MEM_FREE 0.000 MiB  (29 blocks)
+  free < 64 KiB : MEM_COMMIT 0.019 MiB   MEM_RESERVE 0.008 MiB   MEM_FREE 0.000 MiB  (76 blocks)
+
+KERNEL PrivateUsage now 33.227 MiB. busy+free = 58.340 MiB.
+VERDICT: busy+free EXCEEDS PrivateUsage by 25.113 MiB
+

@@ -214,3 +214,29 @@ holemap.exe 1328 5     iso    # one hole at 2,096      -- the backend DOES merge
 `zig 0.16.0`, `x86_64-windows-gnu`. The probe is a standalone process: its
 footprint on any zapo figure quoted here is **zero**, because no zapo binary
 was rebuilt or re-run for this file.
+
+---
+
+## BAND, 2026-10-11 — THE BYTES IN THE BIG HOLES ARE MOSTLY NOT COMMITTED. Nothing above is edited or re-run.
+
+This file maps holes by SIZE and by SITE, and that work is unaffected. What it
+shares with every other `HCFREE` reader is the assumption that a free block
+`HeapWalk` reports occupies memory the process is paying for.
+
+`tests/perf/pagecensus/evidence-rest/TWO-INSTRUMENTS.md` refutes that for the
+LARGE end of the distribution. Measured from outside the process, in the same
+runs, the whole committed private non-stack total is 17-22 MiB while the same
+runs' `HeapWalk` reports `busy + free` of 32-37 MiB; and
+`pagecensus/heapsplit.c` shows directly, with a negative control, that 74.6% /
+93.7% / 92.7% of the bytes in free blocks of >= 64 KiB are **MEM_RESERVE** —
+address space the heap has already handed back.
+
+**The small end is where this file works and it is the end that survives.** In
+the same `heapsplit` arms, free blocks BELOW 64 KiB are 0.030 / 0.032 / 0.019
+MiB of commit against 0.000 / 0.008 / 0.008 MiB of reserve — essentially all
+committed. So a hole population of 15,766 blocks at 1,344 B is real memory and
+this document's identification of it stands; a population of 43 blocks
+averaging 361 KiB is mostly not.
+
+**Lines of this file not named above are not thereby in force — they are merely
+UNAUDITED by this band.**

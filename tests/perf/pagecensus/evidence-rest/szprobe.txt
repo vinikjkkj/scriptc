@@ -1,0 +1,46 @@
+szprobe -- the instrument's file-scope storage, COMPILED not estimated.
+zig 0.16.0 from G:\tools\zig, x86_64-unknown-windows-gnu.
+date 2026-10-11T14:23:34Z
+
+FLAGS, copied from G:\blocks\f2-build.sh line 19 (the build that made
+v3-out182-SL and f2-out182-POS):
+  -include <repo>/tests/perf/prof/scr_prof.h -DSCR_PROF_ALLOC
+  -DSCR_PROF_SIZEHIST -DSCR_PROF_STACKS -DSCR_PROF_STACK_SIZE_MIN=1296
+  -DSCR_PROF_STACK_SIZE_MAX=1352 -DSCR_PROF_STACK_SIZE_MIN2=4376
+  -DSCR_PROF_STACK_SIZE_MAX2=4376
+  -include <repo>/tests/perf/heapcensus/scr_heap_census.h -DSCR_HEAPCEN_PEAK
+
+NEGATIVE CONTROL, and it is the whole point of this file. The first
+version of szprobe.c asked for sizeof(ScrProfPtr) -- the element type of
+scr_prof_ptbl[1<<21], the 48 MiB array a previous reading named as the
+cause of the instrument's footprint. The compile FAILED:
+
+  szprobe.c:4:39: error: use of undeclared identifier 'ScrProfPtr'
+
+The type does not exist under these flags, because scr_prof.h:353 guards
+it with #ifdef SCR_PROF_LIVE and no -DSCR_PROF_LIVE is passed. The array
+is not in the image. A missing 48 MiB cannot be anyone's footprint.
+
+WHAT THE COMPILER PRINTS. szprobe.exe stdout follows. The heapcensus
+header writes its own shutdown census first, which is why a size probe
+emits HCSIZE rows; the 5113 x 137 = 703,632 B row is the census's own
+self-test arm, and it is why that arm appears in every busy figure this
+instrument produces.
+
+ScrProfRow   88  x 65536 = 5767168
+ScrProfStack 96  x 131072 = 12582912
+sizeof scr_prof_tbl   5767168
+sizeof scr_prof_hist  20971520
+sizeof scr_prof_exact 8192
+sizeof scr_prof_stk   12582912
+ScrHcRow     24
+sizeof scr_hc_tbl     393216
+sizeof scr_hc_ftbl    393216
+sizeof scr_hc_runhist 320
+sizeof scr_hc_runpg   320
+sizeof scr_hc_pkheaps 512
+
+SUM OF THE ARRAYS
+  5767168 + 20971520 + 8192 + 12582912 + 393216 + 393216 + 320 + 320 + 512
+  = 40117376 B = 38.258 MiB
+  of which heapcensus alone = 393216+393216+320+320+512 = 787584 B = 0.751 MiB
