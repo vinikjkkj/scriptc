@@ -187,3 +187,131 @@ A SECOND ARM CHECKED AND CLEARED, recorded so it is not re-opened
   114/114/115 chunks. The cycle arena's chunk accounting on this workload
   does not separate the lanes, so a verdict resting on it does not depend
   on which lane produced the binary.
+
+
+===========================================================================
+RESOLUTION, 2026-10-11 -- THE TEST ABOVE WAS RUN. ARM `sb`.
+===========================================================================
+Nothing above is retracted or edited; the marking stands as the record of
+what was believed and why. This section records what the rebuild found.
+
+THE TEST, AS THIS FILE PRESCRIBED IT
+  Section "THE TEST THAT WOULD CLOSE IT" asked for: a rebuild from a tree
+  whose `dist/` reads the knob, knob ABSENT, same manifest, with
+  `stackless-knob-guard.mjs` certifying the entry first. That is exactly
+  what `sb` is. Tree `/g/scriptc @ fc52d1260`, which is 11 commits past the
+  `sa` build and carries ZERO diff in `packages/{runtime,compiler,cli}/src`
+  against it -- so the program is the same program.
+  Artifacts: `sb.{guard,lane,build-env,manifest,heapcen,prof,check,compare}.txt`
+  and the four rig scripts `sb-{rig,build,run,compare}.sh`, committed beside
+  this file so the recipe does not die with a scratch directory.
+
+THE LANE, CONFIRMED BEFORE THE RUN WAS ACCEPTED -- see `sb.lane.txt`
+  guard          6/6 PASS; knob absent -> 0 scr_fiber, knob=0 -> 4
+  EMITTED        zapo-rest.ll = 242,844,729   -> the STACKLESS cluster
+  and the discriminator applied to the REAL modules, not to a probe:
+    baseline h2-out182-prof  242,844,741      3 scr_fiber   STACKLESS
+    retracted sa2-out182-prof 229,342,743  1,488 scr_fiber   FIBER
+    THIS arm sb-out182-prof  242,844,729      3 scr_fiber   STACKLESS
+  `sb` matches the baseline it reproduces on that count EXACTLY.
+
+WHAT SURVIVED THE LANE CHANGE -- the string arena is lane-independent, and
+that is now measured rather than argued
+  The section "WHAT THIS DOES AND DOES NOT TOUCH" predicted that everything
+  measured inside `sa` against itself is a one-binary fact. It is, and the
+  rebuild reproduces the load-bearing ones to the byte:
+
+                               sa (FIBER)   sb (STACKLESS)
+    PROF scr_string.c:820         47 chunks     47 chunks
+    PROF bytes                 3,080,192 B   3,080,192 B
+    PROF scr_string.c:822       0 frees        0 frees
+    HCSIZE 131079               absent         absent
+    realized release           3,080,192 B   3,080,192 B
+
+  The arena allocates 47 chunks of exactly 65,536 B and releases none, on
+  both lanes, in two independently built binaries. The 3,080,192 B is not a
+  draw; it reproduced.
+
+WHAT MOVED: the shared row's TOTAL, and it is the cycle collector
+    HCSIZE 65536     164 blocks (sa)   163 blocks (sb)
+  Decomposed by the PROF sites, which is what the repaired checker now does
+  mechanically:
+    owner                     evidence-idle/on   sa    sb
+    cycle-collector arena             114        113   112
+    string arena                        0         47    47
+    other occupants of the class        4          4     4
+    row total                         118        164   163
+  The string arena and the residual are identical across both lanes; the
+  whole movement is the cycle arena's own jitter, which the committed arms
+  already span. `P2a` therefore reads FAIL on `sb` at 163 against the
+  registered 164, and the failure is the cycle collector's, not the
+  repair's. See "WHAT THIS RUN COSTS THE REGISTERED PREDICTION" below.
+
+THE CONFOUND THIS FILE FLAGGED, NOW MEASURED -- `sb.compare.txt`
+  The open question was the lane's effect on the SETTLED CRT heap, which
+  this file correctly refused to estimate from the peak slice's -21.117 MiB.
+  Measured, same recipe, one pair:
+
+    column          sa (FIBER)   sb (STACKLESS)        delta
+    busy             16,243,072     15,902,592      -340,480 B  (-0.325 MiB)
+    free             31,132,528     22,828,832    -8,303,696 B  (-7.919 MiB)
+    uncommitted      51,982,336     27,570,176   -24,412,160 B (-23.281 MiB)
+    regions                  11              9            -2
+
+  ON THE BUSY COLUMN THE CONFOUND IS 11.1% OF THE CLAIMED EFFECT, NOT 720%.
+  This file's refusal to carry the peak's 21 MiB into a settled-heap error
+  bar was right, and it was right by a wide margin and in the direction that
+  favours the measurement.
+
+  AND THE LANE IS NOT A SMALL THING IN THIS HEAP. It is worth -23.3 MiB of
+  uncommitted address space and -7.9 MiB of free-but-committed heap at
+  nearly the same busy total. The lane's settled-heap effect is large and
+  lives almost entirely OUTSIDE the column this census reports, which is why
+  the busy figure barely noticed it. The -21.117 MiB at peak is consistent
+  with that and is located, not contradicted.
+
+  WHAT THE PAIR CANNOT SAY. One pair, no variance estimate; `sb` holds 221
+  MORE busy blocks than `sa` while holding 340,480 FEWER busy bytes, so the
+  composition moved too. The honest form is a ceiling: the lane is not worth
+  megabytes on the settled BUSY heap. It is not a point estimate of -340,480.
+
+WHAT THIS RESOLVES IN `POSTFIX-CENSUS.md` SECTION 5
+  The marked sentence was: "The two agree to 0.004 percentage points by two
+  independent routes". That agreement was a fiber numerator over a stackless
+  denominator. Both routes re-run with numerator and denominator on ONE lane:
+
+    ROUTE A  this run against its own counterfactual pre-fix heap
+             3,080,192 / (15,902,592 + 3,080,192 = 18,982,784) = 16.226%
+    ROUTE B  this run against the stackless baseline evidence-idle/on
+             3,080,192 / 18,907,440                            = 16.291%
+             agreement: 0.065 pp
+
+  The two routes still agree, at 0.065 pp rather than 0.004 pp -- sixteen
+  times looser, and real. BOTH figures are now ~16.2-16.3%, where the
+  retracted pair read 15.940% and 15.944%; the shift is the denominator
+  moving to a same-lane heap, not the numerator, which did not move at all.
+
+  NOTE ON ROUTE B's REMAINING IMPURITY, stated rather than buried: route B's
+  denominator is a DIFFERENT RUN on the same lane (evidence-idle/on, a
+  different binary at 21facf366 without the repair). It is same-lane, which
+  is what was broken; it is not same-run, which route A is and route B
+  cannot be. Route A remains the only figure whose numerator and denominator
+  come from one process.
+
+WHAT THIS RUN COSTS THE REGISTERED PREDICTION, stated plainly
+  `P2a` -- "HCSIZE 65536 reads 164" -- now has one pass (`sa`, fiber) and one
+  fail (`sb`, stackless, 163). The registered constant was 118 + 46, and
+  POSTFIX-CENSUS.md section 3 had already shown that `sa`'s 164 was reached
+  by a near-cancellation (113 + 47 + 4) and not by the predicted split. `sb`
+  is the same arithmetic with the cancellation one block short. The row total
+  is a sum over two jittering owners and was never the right thing to
+  predict to the block; the decomposition is, and it is stable at 47 + 4.
+
+WHAT IS STILL NOT CLOSED
+  - The lane's settled-heap effect is one pair on one workload. Nothing here
+    licenses applying -340,480 B, or the -23.3 MiB of uncommitted, to any
+    other arm or knob set.
+  - `evidence-h2/{main,half,nocache}` still carries no `.ll` figure of its
+    own and still inherits `evidence-idle`'s row by argument.
+  - `sa` is NOT deleted and is not merely wrong: it is the fiber-lane arm of
+    what is now a two-lane pair, and the comparison above needs it.

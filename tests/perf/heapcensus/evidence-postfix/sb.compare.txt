@@ -1,0 +1,70 @@
+=== THE SETTLED CRT HEAP, heap 0, by arm and by LANE ===
+arm        lane               busy  busyBlk         free  freeBlk  uncommitted
+idle/on    STACKLESS      18907440    47624     17493520    14968     29888512
+idle/off   STACKLESS      31900272    50411     12290848    14818     21524480
+idle/long  STACKLESS      31918992    50463     12289152    14888     21487616
+postfix/sa FIBER          16243072    47719     31132528    21166     51982336
+postfix/sb STACKLESS      15902592    47940     22828832    13644     27570176
+
+=== THE LANE'S EFFECT ON THE SETTLED HEAP (sb STACKLESS - sa FIBER) ===
+    Same recipe, same knobs, same source tree for runtime/compiler/cli.
+    The intended difference is the coroutine lane.
+    sa  FIBER      busy = 16243072 B
+    sb  STACKLESS  busy = 15902592 B
+    delta            = -340480 B (-0.325 MiB, -2.10% of the fiber arm)
+
+=== ROUTE A and ROUTE B, both with their denominators named ===
+    live string-arena chunks in sb = 47 alloc - 0 freed = 47
+    realized release               = 47 x 65536 = 3080192 B
+
+    ROUTE A  this run against ITS OWN counterfactual pre-fix heap
+             3080192 / (15902592 + 3080192 = 18982784) = 16.226%
+
+    ROUTE B  this run against the STACKLESS baseline evidence-idle/on
+             3080192 / 18907440 = 16.291%
+             numerator and denominator are now BOTH on the stackless lane.
+
+    agreement between the two routes: 0.065 pp
+
+=== THE LANE'S EFFECT ON THE SETTLED HEAP, EVERY COLUMN ===
+    sa = FIBER, sb = STACKLESS, same recipe and knobs, 2026-10-11.
+
+    column          sa (FIBER)    sb (STACKLESS)         delta     delta MiB
+    busy              16243072        15902592       -340480     -0.325
+    busyBlocks           47719           47940           221          -
+    free              31132528        22828832      -8303696     -7.919
+    freeBlocks           21166           13644         -7522          -
+    uncommitted       51982336        27570176     -24412160    -23.281
+    regions                 11               9            -2          -
+
+    THE HEADLINE. On the BUSY column the lane is worth -340,480 B =
+    -0.325 MiB, which is 11.1% of the 2.9375 MiB the string-arena repair
+    claims -- NOT the 7.2x the peak-slice figure would have suggested.
+    The -21.117 MiB that pagecensus/evidence-fr2/DECOMP.txt measures at
+    the PEAK does not transfer to the settled busy heap.
+
+    AND THE REST OF THE HEAP SAYS THE OPPOSITE, WHICH IS THE FINDING.
+    free is -7.92 MiB and uncommitted is -23.28 MiB, for a committed
+    total (busy + free) of -8.244 MiB and 2 fewer regions.
+    The lane's settled-heap effect is large, and it lives almost entirely
+    OUTSIDE the busy column: the fibre arm settles holding 23 MiB more
+    uncommitted address space and 8 MiB more free-but-committed heap at
+    nearly the same busy total. That is consistent with the peak delta
+    being real, and it locates it in space the busy census does not count.
+
+    SO BOTH HALVES OF THE BRIEF'S FORK WERE PARTLY RIGHT. The lane was
+    'mostly hygiene' FOR THE NUMBER THIS CENSUS REPORTS, and it was a
+    large structural difference in the heap that number is drawn from.
+
+=== WHAT THIS PAIR CANNOT SAY ===
+    It is ONE pair, so it carries no variance estimate. The committed
+    arms vary by hundreds of busyBlocks at fixed knobs (47,606 / 47,624 /
+    47,719 / 47,940 across half-on, on, sa, sb), and sb holds 221 MORE
+    busy blocks than sa while holding 340,480 FEWER busy bytes, so the
+    block composition moved as well as the total. A -340,480 B delta from
+    a single pair cannot be separated from run-to-run jitter here, and no
+    committed arm repeats THIS arm's knobs on THIS lane to bound it.
+    What the pair does support is a CEILING of the right order: the lane
+    is not worth 21 MiB on the settled busy heap, and the confound
+    LANE.txt flagged is a fraction of the claimed effect, not a multiple
+    of it.

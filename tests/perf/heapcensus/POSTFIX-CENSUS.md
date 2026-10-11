@@ -65,6 +65,42 @@
 > **Sections this banner does not name are NOT thereby in force; they are
 > UNAUDITED.** Full record in `evidence-postfix/LANE.txt`.
 
+> ### RESOLVED, 2026-10-11 — the test the banner names was run, as arm `sb`
+>
+> **The banner is not retracted and nothing above it is edited.** The run it
+> asked for exists: `evidence-postfix/sb.*`, same manifest, knob ABSENT, from
+> a tree whose `dist/` reads it. The lane was confirmed on the artifact
+> *before* the run was accepted — `EMITTED zapo-rest.ll=242,844,729`, and the
+> guard's own discriminator on the real modules reads **3** `scr_fiber`
+> references against the retracted `sa`'s **1,488** and the baseline's **3**
+> (`sb.lane.txt`). Full record: `evidence-postfix/LANE.txt`, section
+> *"RESOLUTION, 2026-10-11"*.
+>
+> **The marked sentence, re-run on one lane.** Route A 16.226%, route B
+> 16.291%, agreement **0.065 pp** — not the 0.004 pp this section claimed.
+> The routes still agree; sixteen times looser, and this time both
+> denominators are stackless. The numerator did not move at all.
+>
+> **The effect reproduced to the byte on the other lane.** 47 chunks,
+> 3,080,192 B, zero frees, `HCSIZE 131079` absent — identical in `sa` and
+> `sb`, two independently built binaries on two lanes. The 2.938 MiB is not a
+> draw.
+>
+> **The confound was 11.1% of the claimed effect, not 720%.** Settled CRT
+> busy heap: 16,243,072 B fiber against 15,902,592 B stackless, **−340,480 B**.
+> This banner's refusal to carry the peak slice's −21.117 MiB into a
+> settled-heap error bar was correct, and by a wide margin. But the lane IS
+> large in this heap — −23.281 MiB of uncommitted and −7.919 MiB of free —
+> so its settled effect lives almost entirely outside the column this census
+> reports. One pair, no variance estimate; read it as a ceiling.
+>
+> **What it costs section 3.** `P2a` now reads **163** on `sb` against the
+> registered 164 and FAILS. The decomposition is 112 cycle + 47 string + 4
+> other: the string arena and the residual are identical to `sa`, and the
+> whole movement is the cycle collector's jitter. Section 3 already warned
+> that `sa`'s 164 was a near-cancellation rather than the predicted split;
+> `sb` is the same arithmetic one block short.
+
 > **What this is.** `PLAN-POSTFIX-CENSUS.md` was written and committed at
 > `fb90cc7fd` **without running anything**, with its prediction registered
 > before the run existed. This file is that run. One build, one `CONVS=400`

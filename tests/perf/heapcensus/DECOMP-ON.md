@@ -78,6 +78,17 @@ workload and was 33 on `half-on`.
 > would close it: `evidence-postfix/LANE.txt` and the lane banner at the top
 > of `POSTFIX-CENSUS.md`. **Sections of this file not named here are
 > UNAUDITED, not thereby endorsed.**
+>
+> **RESOLVED, 2026-10-11.** The quoted run was rebuilt on THIS file's lane as
+> arm `sb` (`evidence-postfix/sb.*`): emitted module 242,844,729 B with 3
+> `scr_fiber` references, matching this file's binary exactly where the
+> retracted `sa` read 1,488. The marker's two claims both held. The 164 was
+> indeed a one-binary count — it reads **163** on the rebuild, decomposing as
+> **112 + 47 + 4**, so the 47 and the 4 are identical across both lanes and
+> the move is this file's own cycle-collector arena, whose committed arms
+> already span 114. And the arithmetic that subtracts across runs was indeed
+> the part at risk: re-run on one lane it gives 16.291% where the retracted
+> cross-lane pair gave 15.944%.
 
 And the owner sentence in the table above,
 

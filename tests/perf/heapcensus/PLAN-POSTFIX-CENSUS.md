@@ -24,6 +24,29 @@
 >
 > **Sections this banner does not name are NOT thereby in force; they are
 > UNAUDITED.**
+>
+> ### RESOLVED, 2026-10-11 — rebuilt on the stackless lane as arm `sb`
+>
+> The banner stands. The run it asks for is `evidence-postfix/sb.*`, built
+> knob-ABSENT from a tree whose `dist/` reads the knob, with
+> `stackless-knob-guard.mjs` certifying the entry first (6/6) and the lane
+> confirmed on the emitted module before the run was accepted.
+>
+> **What the plan registered and lane-independence predicted, held.** The
+> chunk size, the P5 assertions and the ±16-per-chunk residue reproduce to
+> the byte across both lanes: 47 chunks, 3,080,192 B, zero frees.
+>
+> **What the plan registered and did NOT hold is `P2`'s row total**, which
+> reads 163 on `sb` against the registered 164. The plan predicted a shared
+> row's *sum* over two independently jittering owners; the stable quantity is
+> the *decomposition* (47 string + 4 other), not the total. This is the
+> method debt section 7 of `POSTFIX-CENSUS.md` recorded, now with a second
+> data point.
+>
+> **The three checker defects this plan's checker shipped with are repaired**
+> in `postfix-check.sh` and the repair is described in its own header: a
+> silent skip of P5d and P7, a hardcoded cross-run baseline inside a join,
+> and an underived P2b window. Full record: `evidence-postfix/LANE.txt`.
 
 > **What this is.** `OWNER-131079.md` §5 predicts that dropping the chunk
 > alignment releases **3,014,768 B = 15.94% of the instrumented CRT busy

@@ -1,0 +1,20 @@
+tag          sb
+arm          post-fix reproduction of evidence-idle/on, STACKLESS LANE
+supersedes   evidence-postfix/sa (same recipe, FIBER lane -- see LANE.txt)
+exe          /g/blocks/sb-out182-prof/zapo-rest-182.exe
+exe-bytes    33356800
+built-from   /g/scriptc @ fc52d1260e375c9b1e8802228b9c850a8a41b29a
+lane         STACKLESS, knob ABSENT; zapo-rest.ll=242844729
+knobs        CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000 PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1
+node         v22.18.0 at /c/nvm4w/nodejs/node
+pmon         /g/scriptc/tests/perf/zapo-rest/harness/pmon.exe (192512 B)
+fake-server  /g/blocks/m3-zaposrc/packages/fake-server
+launch-dir   /g/blocks/m3-zaposrc
+SCR_STRING_ARENA  <unset>
+SCRIPTC_STACKLESS <unset>
+started      2026-10-11T07:51:42Z
+free-G-GB    37G
+loader       file:///g:/scriptc/node_modules/tsx/dist/loader.mjs
+ended        2026-10-11T07:54:03Z
+rc           0
+free-G-GB    37G

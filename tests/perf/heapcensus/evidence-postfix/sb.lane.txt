@@ -1,0 +1,82 @@
+THE LANE, CONFIRMED ON THE ARTIFACT BEFORE THE RUN WAS ACCEPTED
+===============================================================
+date 2026-10-11   arm `sb`   tree /g/scriptc @ fc52d1260
+
+WHY THIS FILE EXISTS
+  `LANE.txt` in this directory records that the `sa` arm was built from a
+  tree whose `dist/` could not read SCRIPTC_STACKLESS, so "knob absent"
+  delivered FIBER while the shipping default was STACKLESS -- and that
+  NOTHING IN THE BUILD COMMAND SAID SO. This file is the check that was
+  missing, performed on the `sb` rebuild before a single number from it was
+  read.
+
+STEP 1 -- THE ENTRY IS CERTIFIED, BY ARTIFACT, BEFORE THE BUILD
+  `node tests/perf/stackless-knob-guard.mjs` against
+  `G:\scriptc\packages\cli\dist\main.js`, full output in `sb.guard.txt`:
+
+    arm           ll bytes   scr_fiber   sha256-16
+    knob-absent     16545           0   bcec8276b23bc88d
+    knob-zero       12417           4   99adb7f10451d564
+    OK (6/6 checks ran)
+
+  The same entry under the `sa` build could not have produced this: at that
+  time `rg -l SCRIPTC_STACKLESS packages/*/dist` read 0 files
+  (`evidence-peak/lane-dist.txt`). It now reads 8, and
+  `packages/compiler/dist/ir/coro-plans.js` -- the single read site's
+  compiled form -- exists.
+
+STEP 2 -- THE MEASURED MODULE ITSELF, BY SIZE
+  `sb.build-env.txt` line `EMITTED zapo-rest.ll=242844729`. The clusters
+  `pagecensus/evidence-fr2/manifest.txt` labels "<- the lane discriminator":
+
+    242,844,7xx  STACKLESS        229,342,7xx  FIBER
+
+  `sb` sits in the stackless cluster, 13.5 MB from where `sa` sat.
+
+STEP 3 -- AND BY THE GUARD'S OWN DISCRIMINATOR, ON THE REAL MODULES
+  A size cluster is a fingerprint; the thing the guard actually tests is the
+  fibre runtime's presence. Applied to the three app182 modules still on
+  disk -- not to a 10-line probe, to the measured programs themselves:
+
+    module                                        bytes        scr_fiber
+    /g/blocks/h2-out182-prof/zapo-rest.ll     242,844,741            3
+      (the evidence-idle baseline, STACKLESS)
+    /g/blocks/sa2-out182-prof/zapo-rest.ll    229,342,743        1,488
+      (the retracted `sa` arm, FIBER)
+    /g/blocks/sb-out182-prof/zapo-rest.ll     242,844,729            3
+      (THIS arm)
+
+  496x. The three surviving references on the stackless lane are one
+  `declare ptr @scr_fiber_promise(ptr)` and two calls to it -- stackless
+  conversion is per-function, so a handful of functions stay on the fibre
+  lane in both configurations. The discriminator is the ratio, and it is not
+  close.
+
+  `sb` matches the baseline it reproduces EXACTLY on this count, which is a
+  stronger statement than matching its size cluster.
+
+HOW MUCH NON-LANE COMPILER DRIFT IS IN THE sb - sa COMPARISON
+  `sb` was built with a current `dist/`; `sa` with a stale one. So their
+  delta is, in principle, lane PLUS whatever else the two dists disagree
+  about. Both halves are bounded against a known-lane reference:
+
+    sb .ll 242,844,729  vs  the baseline's 242,844,741   -- 12 B apart
+    sa .ll 229,342,743  vs  pagecensus evidence-fr2's declared-FIBER
+                            F-plain at 229,342,757       -- 14 B apart
+
+  Each artifact matches a module built from a knob-reading tree on its own
+  lane to within ~14 bytes of a 230-243 MB module. The non-lane codegen
+  disagreement between the two dists is therefore at the byte scale, and the
+  13.5 MB between them is the lane.
+
+WHAT WAS CHECKED AND WHAT WAS NOT
+  CHECKED: the entry reads the knob; the emitted module is on the intended
+  lane by two independent readings; the binary carries the repair's two site
+  strings (`scr_string.c:820` and `:822`, 1 each, against 0 in the baseline
+  exe); the build took no early cache hit (`EARLY-CACHE 0`, SCRIPTC_NO_CACHE=1).
+
+  NOT CHECKED: that the lane is the ONLY difference between `sa` and `sb`.
+  It is not -- the dists differ, bounded above at the byte scale, and the two
+  runs are two draws on a machine whose state was not identical. See
+  `sb.compare.txt` for what that means for the one number this comparison
+  is used for.

@@ -1,0 +1,18 @@
+PASS N1  census armed (the -include reached the link)
+PASS N2  the census allocated its own arm (HCSIZE 5113 present)
+PASS N3a  HCSIZE rows=247 (on reads 247)
+PASS N3b  last line is a complete record
+PASS N4  prof report terminated (the _Exit chain carried both halves)
+PASS P1  HCSIZE 131079 is gone (was 46 blocks / 6030160 B)
+FAIL P2a  HCSIZE 65536 reads 163 blocks, predicted 164
+PASS P2b  HCSIZE 65536 bytes=10685168 = 163 x 65552 + 12 extra granules of 16 (floor 10684976, ceiling 10687584)
+PASS P5a  PROF row at scr_string.c:820 exists: count=47 bytes=3080192
+PASS P5b  every chunk request is exactly 65536 (47 x 65536 = 3080192)
+PASS P5c  scr_string.c:822 freed=0 of 47 allocated (no row = 0 frees, by scr_prof.h:771)
+PASS P5d  65,536 row splits 112 cycle + 47 string + 4 other = 163 - the two PROF lanes and the census agree
+PASS P7  the arena ran (47 chunks live; the floor is half-on's 33)
+SAVED 3080192 B over 47 live chunks (2.938 MiB), residue band +-752 B
+NOTE  OWNER-131079.md:217 prints 3,014,768 for c=46, a carved estimate.
+NOTE  The band is the per-chunk extra granule, unattributable after
+NOTE  the merge into a row shared with the cycle-collector arena.
+---- 1 failed, 13 of 13 assertions scored
