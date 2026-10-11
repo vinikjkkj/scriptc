@@ -77,3 +77,25 @@ THE STRING-ARENA FIX, 3,080,192 B = 2.9375 MiB, against every denominator it has
   v2 S stackless  peak   63.809 MiB ->  4.60% of the process;  4.83% of its CRT heap
   v3 S stackless  peak   56.652 MiB ->  5.19% of the process;  5.50% of its CRT heap
   f1 F fiber      peak  446.164 MiB ->  0.66% of the process;  3.68% of its CRT heap
+
+  LANE MARKER on the block above (added 2026-10-11, audit, nothing re-run).
+  The 3,080,192 B numerator is NOT from either arm in this file. It comes
+  from heapcensus `evidence-postfix`, whose `sa` run is a FIBER-lane binary
+  -- `EMITTED zapo-rest.ll=229342743` in `sa.build-env.txt`, which lands in
+  the 229,342,xxx cluster this manifest labels "<- the lane discriminator".
+  So rows v1-v3 put a fiber-run numerator over stackless denominators.
+  Two further mismatches the block does not state: the numerator is a
+  SETTLED census taken through /shutdown and these denominators are PEAKS;
+  and the numerator's binary carries the prof+heapcensus instrument in its
+  allocation path while these binaries carry none.
+  (Checked and NOT a mismatch: both trees contain the repair --
+  `ddc1e373a` is an ancestor of `3c462de14`, and `scr_string.c` at
+  `3c462de14` has no `_aligned_malloc`. Recorded so it is not re-raised.)
+  WHAT SURVIVES: 3,080,192 B itself (47 x 65,536, one binary, source
+  arithmetic), and the v1-v3 / f1 decompositions above, which are this
+  file's own and are unaffected. What is marked is only the four percentage
+  pairs on the four lines directly above this note.
+  Mechanism, magnitude and the test that closes it:
+  `tests/perf/heapcensus/evidence-postfix/LANE.txt`.
+  Lines of this file above "THE STRING-ARENA FIX" are UNAUDITED by this
+  note, not thereby endorsed.

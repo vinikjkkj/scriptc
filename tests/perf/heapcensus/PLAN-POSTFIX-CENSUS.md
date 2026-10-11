@@ -1,5 +1,30 @@
 # The census that makes the 64 KiB-alignment saving REAL — pre-registered
 
+> ## LANE BANNER — the plan names `G:\scriptc` as the build tree, and that
+> ## selected the other coroutine lane
+>
+> **The run this plan designed came out on the FIBER lane while its baseline
+> is STACKLESS.** The plan nowhere names a coroutine lane and nowhere sets
+> `SCRIPTC_STACKLESS` — and that is the defect, not an omission to forgive.
+> Since `8f4100d7a` (2026-10-09 19:46 −0300) the shipping default is
+> stackless, but `G:\scriptc`'s `dist/` predated the lane and could not read
+> the knob, so "no knob" delivered fiber. Proof by artifact and the full
+> record are in `evidence-postfix/LANE.txt` and in the lane banner at the top
+> of `POSTFIX-CENSUS.md`.
+>
+> **WHAT THIS MARKS IN THIS FILE.** Section 4's negative arm, the bullet
+> *"**run it against `G:\scriptc` as well**, where it must read
+> `_aligned_malloc` **>= 1** and the chunk `scr_prof_malloc` **0**"* —
+> already void for a different reason recorded in `POSTFIX-CENSUS.md`
+> section 1, *"A correction to the plan's C1, and it matters"*, and void a
+> second time here, because `G:\scriptc` was not merely an unrepaired tree,
+> it was a tree on a different lane. **Everything the plan registers about the string arena
+> itself is untouched**: the chunk size, the 65,536 row, the P5 assertions
+> and the ±16-per-chunk residue are all lane-independent.
+>
+> **Sections this banner does not name are NOT thereby in force; they are
+> UNAUDITED.**
+
 > **What this is.** `OWNER-131079.md` §5 predicts that dropping the chunk
 > alignment releases **3,014,768 B = 15.94% of the instrumented CRT busy
 > heap**, and both it and `DECOMP-ON.md` say in terms that the figure is

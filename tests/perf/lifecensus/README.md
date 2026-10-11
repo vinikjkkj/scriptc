@@ -146,6 +146,28 @@ arena, at exit      114 chunks = 7.13 MiB of chunk address space
 ```
 
 `cycstat` on the same run: `arena chunks=611 freed=497 held=114 peakheld=276`.
+
+> **LANE — checked 2026-10-11 and CLEARED, recorded so it is not re-opened.**
+> This section names no coroutine lane and sets no `SCRIPTC_STACKLESS`, which
+> since the default flip at `8f4100d7a` (2026-10-09) is enough to make a
+> measurement a candidate: a build taken from a tree whose `dist/` predates
+> the lane gets FIBER while the shipping default is STACKLESS, with nothing
+> in the command to say so (`heapcensus/evidence-postfix/LANE.txt`). **It
+> does not bite here, and the proof is free and already committed.** The
+> `cycstat` line above reads `held=114 peakheld=276`;
+> `heapcensus/evidence-peak/abba1A.cycstat.txt` — a binary whose
+> `ll-bytes 242844763` makes it STACKLESS by the discriminator
+> `pagecensus/evidence-fr2/manifest.txt` declares — reads
+> `arena chunks=612 freed=498 held=114 peakheld=274`; and the pre-flip FIBER
+> reading quoted in the next sentence is **115 chunks**. Three readings,
+> two lanes, 114 / 114 / 115. **The cycle arena's chunk accounting on this
+> workload does not separate the lanes**, so this file's verdict does not
+> depend on which lane built its binary. This clearance covers the cycle
+> arena only; any figure here in process memory terms — the
+> `PEAK 92.52 MiB` / `SETTLED 74.08 MiB` line above — is NOT covered, because
+> the lane moves peak private commit by 6.90x–9.39x
+> (`docs/estado-vmwalk.md`, §7, its 2026-10-11 banner).
+
 `docs/estado-vmwalk.md`, §"The idle-floor front, 2026-10-03", recorded
 **115 chunks / 7.19 MiB** for the same question on an uninstrumented binary
 (the `cycle arena  115 chunks  7.19 MiB` row), and the same section's

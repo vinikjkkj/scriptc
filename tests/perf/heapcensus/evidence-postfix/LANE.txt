@@ -1,0 +1,189 @@
+THE `sa` ARM IS A FIBER-LANE BINARY, AND ITS BASELINE IS A STACKLESS ONE
+=======================================================================
+date 2026-10-11   (audit, read-only -- nothing was built or re-run for this)
+
+WHAT THIS FILE IS FOR
+  `evidence-peak/lane-dist.txt` proved, on an artifact, that `G:\scriptc`'s
+  `dist/` predates the stackless lane and therefore cannot read
+  SCRIPTC_STACKLESS at all. That file was written about the PEAK slice's own
+  arms. This file applies the same discriminator to the arm committed in
+  THIS directory, which was built in `G:\scriptc`, and records the answer.
+
+THE DISCRIMINATOR, AND IT IS AN ARTIFACT AND NOT AN ENVIRONMENT ECHO
+  `tests/perf/pagecensus/evidence-fr2/manifest.txt` builds both lanes of
+  app182 from one tree at `3c462de14` and labels the emitted module size
+  "<- the lane discriminator":
+
+    stackless, knob ABSENT   zapo-rest.ll 242,844,763 B   exe 32,034,304 B
+    fiber,  SCRIPTC_STACKLESS=0
+                             zapo-rest.ll 229,342,757 B   exe 31,372,288 B
+
+  The two clusters are 13.5 MB apart. No other knob in this corpus moves the
+  emitted module by that much, and both arms came out of ONE tree, so the
+  13.5 MB is the lane and nothing else.
+
+THE READING, FOR EVERY app182 ARM THIS REPOSITORY HAS COMMITTED POST-FLIP
+
+  arm                        tree              .ll bytes      lane
+  evidence-idle/{off,on,     /g/blocks/h2-wt   242,844,741   STACKLESS
+    long,half-on}
+    (the baseline this arm reproduces)
+  evidence-peak/abba{1A..4A} /g/blocks/fr2-wt  242,844,763   STACKLESS
+  pagecensus evidence-fr2    (unnamed, built   242,844,763   STACKLESS
+    S-plain                   at 3c462de14)                  (declared)
+  pagecensus evidence-fr2    (unnamed, built   229,342,757   fiber
+    F-plain                   at 3c462de14)                  (declared)
+  >>> evidence-postfix `sa`  /g/scriptc        229,342,743   FIBER <<<
+
+  `evidence-h2/{main,half,nocache}` carries no `.ll` figure of its own; it
+  comes off the same branch and tree as `evidence-idle` (`h2-which-buffer`
+  at `21facf366`, exe 33,360,896 B on both), so it inherits that row rather
+  than having one measured. The two pagecensus rows are the CONTROL: the
+  manifest declares their lanes and the discriminator reproduces the
+  declaration. The `h2-wt` tree is named in `POSTFIX-CENSUS.md` section 1,
+  "C1 -- the preprocessed TU", whose table column reads "pre-fix tree
+  `G:\blocks\h2-wt`".
+
+  The baseline's figure is recorded in `heapcensus/DECOMP-ON.md`, section
+  "The three coverage holes, each with its evidence", item 1: "the measured
+  artifact is on disk: `/g/blocks/h2-out182-prof/zapo-rest.ll`, 242,844,741
+  B". The `sa` figure is on line `EMITTED zapo-rest.ll=229342743` of
+  `sa.build-env.txt` in this directory.
+
+WHY THE `sa` ARM LANDED ON THE OTHER LANE
+  `sa.build-env.txt` records `worktree /g/scriptc` and names no KNOB. The
+  recipe did not set SCRIPTC_STACKLESS -- and that is exactly the problem.
+  The default flipped to STACKLESS at `8f4100d7a`, 2026-10-09 19:46 -0300.
+  `G:\scriptc`'s `dist/` at the time of this build predated the lane
+  entirely (`packages/compiler/dist/ir/coro-plans.js` did not exist; `rg -l
+  SCRIPTC_STACKLESS packages/*/dist` read 0 files against 8 in a fresh
+  worktree -- `evidence-peak/lane-dist.txt`). A compiler that cannot read
+  the knob cannot honour the flip, so "knob absent" delivered FIBER where
+  the shipping default was STACKLESS. There is no variable in the build
+  command to denounce this: the command is correct and the compiler is old.
+
+  START on `sa.build-env.txt` is 2026-10-11T02:50:03Z = 2026-10-10 23:50
+  local, which is AFTER the flip. Before the flip the stale `dist/` and the
+  source agreed (both fiber), so the same recipe run on 2026-10-08 would
+  carry no defect at all. The flip is the hinge.
+
+WHAT THIS DOES AND DOES NOT TOUCH -- the scope is narrow on purpose
+  DOES NOT TOUCH. Anything measured inside the `sa` run against itself. The
+  disappearance of `HCSIZE 131079`, `HCSIZE 65536` reading 164 blocks, the
+  113/47/4 ownership split, and the C1/C2 translation-unit controls are all
+  one-binary facts. The chunk size moving 131,079 -> 65,536 is source
+  arithmetic and is lane-independent in both directions.
+
+  DOES TOUCH. Every figure that crosses from `sa` to the `evidence-idle`
+  baseline, because those two binaries are on different lanes. Concretely:
+  `sa` reports CRT busy 16,243,072 B and the baseline `evidence-idle/on`
+  reports 18,907,440 B, and part of that 2.66 MB gap is the lane rather
+  than the string-arena repair.
+
+HOW LARGE THE CONFOUND COULD BE, AND THE HONEST LIMIT ON THAT NUMBER
+  `pagecensus/evidence-fr2/DECOMP.txt`, block "WHAT THE LANE REMOVED",
+  row `CRT HEAP`: 79.828 MiB on the fiber arm against a 58.711 MiB
+  stackless mean, delta -21.117 MiB. That is 7.2x the 2.9375 MiB the
+  string-arena repair claims.
+
+  BUT THAT IS AT THE PEAK, and `sa` is a settled census taken through
+  `/shutdown` after 45 s of settle and 60 s of idle. The lane's effect on
+  the SETTLED CRT heap has never been measured in this repository. So the
+  confound is proven to exist and is NOT proven to be large here. Stating
+  it as "21 MiB of error" would be the same kind of error this file is
+  about: a right measurement carried past its scope.
+
+THE TEST THAT WOULD CLOSE IT, AND ITS COST
+  Rebuild the `sa` arm from a tree whose `dist/` reads the knob -- any of
+  the worktrees above, or `G:\scriptc` as it stands today, since `371ebee70`
+  rebuilt it -- with the knob ABSENT, and re-run the same manifest.
+  `tests/perf/stackless-knob-guard.mjs` certifies the entry first and costs
+  ~3 s. The build is 977 s by `sa.build-env.txt` and the run is 2 m 31 s by
+  `sa.manifest.txt`, so about 21 minutes of machine time plus the walk.
+  A cheaper partial: the same rebuild gives a second one-binary census,
+  which settles the cross-run arithmetic without settling the lane's
+  settled-heap effect in general.
+
+  NOT DONE HERE. This audit ran no build and no measurement by instruction.
+
+POSITIVE CONTROL FOR THE SCAN THAT FOUND THIS
+  The sweep that produced the table above is a fixed-string search for the
+  two .ll size clusters over `tests/perf` and `docs`. Its positive control
+  is that it returns the two arms of `pagecensus/evidence-fr2/manifest.txt`
+  -- a pair whose lanes are DECLARED in the file -- and assigns them the
+  labels the file itself gives. A scan that could not re-derive a declared
+  label would not be trusted on an undeclared one.
+
+THE VIAS, COUNTED -- and there are THREE, not two
+  The triage this audit was given names two routes into the compiler: the
+  built CLI (suspect) and `tsx packages/cli/src/main.ts` (safe). Counted
+  over the tree at `371ebee70`, excluding `node_modules`:
+
+  (A) the built CLI, `packages/cli/dist/main.js` -- which is also what the
+      `scriptc` bin resolves to (`packages/cli/package.json`:
+      `"scriptc": "dist/main.js"`):
+        58 files spell it with `/`, 5 more with `\` in PowerShell.
+        63 files. The `\` spelling needs a pattern FILE, not a shell
+        literal: `rg "cli\dist\main.js"` is a regex parse error and
+        reads as a failed command, not as zero hits.
+
+  (B) the SOURCE, `packages/cli/src/main.ts`: 13 files name it, but only
+      THREE actually invoke it --
+        `package.json:18`  `"scriptc": "tsx packages/cli/src/main.ts"`
+        `tests/perf/wrtc/post-gate.sh:11`  `node_modules/.bin/tsx ...`
+        `packages/cli/test/flush.test.ts:19`
+      The other ten are PROSE. Eight of them are the `sites.mjs` family,
+      whose line 4 is the comment "Mirrors packages/cli/src/main.ts's
+      `coverage` path exactly". A comment is a reference to every text
+      scanner, and that is how a route got filed as safe.
+
+  (C) THE ROUTE THE TRIAGE DOES NOT NAME: the compiler's compiled dist
+      loaded directly as a library, `packages/compiler/dist/index.js`.
+      30 files, 28 of them scripts. Every `sites.mjs` is here:
+
+        const { analyze } = await import(
+          `file:///${WT}/packages/compiler/dist/index.js`);
+
+      So `sites.mjs` is on the SAME stale artifact as route (A), not on
+      the source. The triage's verdict on it is right and its stated
+      reason is false.
+
+  WHY (C) IS STILL CLEAN, and it is a property of the ENTRY POINT, not of
+  the tree: the knob has exactly one read site,
+  `packages/compiler/src/ir/coro-plans.ts`, in `coroPlans()`. `coroPlans`
+  is called from the two emitters and from `programNativeFeatures`
+  (`index.ts`). `analyze()` (`index.ts`) calls neither. Of the 28 scripts
+  on route (C), 23 enter through `analyze`, `coverage`,
+  `resolveProvenanceSources`, `loadProgram`, `lowerToIr` or
+  `rewriteBundlerCjsExports` -- all lane-independent. Exactly FIVE import
+  `compile` and therefore reach the lane: `lab/upfour/probe.mjs`,
+  `lab/upfour/realm-probe.mjs`, `tests/perf/keyorder/run-keyorder.mjs`,
+  `tests/perf/projection/run-projection.mjs` and
+  `tests/perf/projection/sweep-projection.mjs`. All five last changed
+  2026-08-22 to 2026-09-01, more than a month BEFORE the flip, when a
+  stale dist and the source agreed on fiber. Empty set.
+
+  `tests/harness/*.test.ts` import `@scriptc/compiler`, which `vitest.config.ts`
+  aliases to `./packages/compiler/src/index.ts` under the comment "Tests run
+  against compiler source directly -- no build step needed", so the suite
+  never sees the dist at all -- which is also why a green suite cannot
+  detect this defect.
+
+  RECOUNTING THIS LATER: exclude THIS FILE. It quotes all four patterns, so
+  a naive re-run reads 59/6/14/31. A matcher that counts itself is the same
+  shape of error as a comment that counts as a call site.
+
+A SECOND ARM CHECKED AND CLEARED, recorded so it is not re-opened
+  `tests/perf/lifecensus/README.md`, section "The reading, zapo-rest
+  `app182`, 2026-10-10", names no lane and no knob, so it is a candidate by
+  the same rule. It is NOT suspect, and the proof is free and committed:
+  its `cycstat` line reads `arena chunks=611 freed=497 held=114
+  peakheld=276`, against `evidence-peak/abba1A.cycstat.txt` -- a binary
+  whose `.ll` is 242,844,763 and therefore STACKLESS by the discriminator
+  above -- at `arena chunks=612 freed=498 held=114 peakheld=274`, and
+  against the pre-flip FIBER reading of 115 chunks / 7.19 MiB that
+  `lifecensus/README.md` itself quotes from `docs/estado-vmwalk.md`,
+  section "The idle-floor front, 2026-10-03". Three readings, two lanes,
+  114/114/115 chunks. The cycle arena's chunk accounting on this workload
+  does not separate the lanes, so a verdict resting on it does not depend
+  on which lane produced the binary.

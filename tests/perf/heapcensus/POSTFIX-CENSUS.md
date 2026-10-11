@@ -1,5 +1,70 @@
 # The 64 KiB-alignment saving, measured: 3,080,192 B over 47 chunks
 
+> ## LANE BANNER — this run is on the OTHER coroutine lane from its baseline
+>
+> **The `sa` arm is a FIBER-lane binary; the `evidence-idle` baseline it
+> reproduces is a STACKLESS one.** Proved on the artifact, not argued:
+> `evidence-postfix/sa.build-env.txt` records `EMITTED
+> zapo-rest.ll=229342743`, and `DECOMP-ON.md`, section *"The three coverage
+> holes, each with its evidence"*, records the baseline's as *"the measured
+> artifact is on disk: `/g/blocks/h2-out182-prof/zapo-rest.ll`, 242,844,741
+> B"*. `pagecensus/evidence-fr2/manifest.txt` builds both lanes from one
+> tree and labels that very figure *"`<- the lane discriminator`"*:
+> 242,844,763 stackless, 229,342,757 fiber. The two clusters are 13.5 MB
+> apart and `sa` sits in the fiber one.
+>
+> **The mechanism, and section 0's identity argument does not cover it.**
+> Section 0, *"The run"*, closes with *"`packages/cli/dist/main.js` is
+> byte-identical to the baseline's (`sha256:33d1e9e49e5c4111…`, 18,610 B),
+> so invalidator 5 is closed by identity and not by argument."* **That
+> identity is true and it is the wrong file.** `cli/dist/main.js` is a thin
+> entry — `zapo-rest/harness/nobuf/build.sh` says so in its own staleness
+> guard — and the stackless knob is read in exactly one place,
+> `packages/compiler/src/ir/coro-plans.ts`, whose compiled form did not
+> exist in `G:\scriptc`'s `dist/` at the time of this build
+> (`evidence-peak/lane-dist.txt`: *"`rg -l SCRIPTC_STACKLESS packages/*/dist
+> 0 files`"*). The default flipped to STACKLESS at `8f4100d7a` on
+> 2026-10-09 19:46 −0300; this build started 2026-10-11T02:50:03Z. A
+> compiler that cannot read the knob cannot honour the flip, so **a recipe
+> that set no knob at all got the fiber lane while the shipping default was
+> stackless, and nothing in the build command says so.**
+>
+> **WHAT SURVIVES, and it is most of the file.** Every one-binary fact:
+> section 1's C1 and C2 controls (a preprocessor and a string comparison of
+> `scr_string.c`, which the coroutine lane does not touch), section 3's
+> *"P1 — the row that dies"* and *"P2a — the count on the row that already
+> existed"*, section 4's two decomposed failures, and the 113/47/4
+> ownership split. The chunk size moving 131,079 → 65,536 is source
+> arithmetic and is lane-independent in both directions.
+>
+> **WHAT IS MARKED.** Section 5, *"The realized saving"*, third bullet —
+> *"The two agree to **0.004 percentage points** by two independent routes
+> — 46 chunks against yesterday's heap, 47 against today's
+> counterfactual."* Those two routes are two **lanes**: 18,907,440 B is the
+> stackless baseline's heap and 16,243,072 B is this fiber run's. The
+> agreement may be real and it is not corroboration from an independent
+> route, because the routes differ in a variable neither figure names. The
+> same applies to any other sentence in this file that crosses from `sa` to
+> the baseline.
+>
+> **HOW BIG THE CONFOUND IS — proven to exist, NOT proven to be large
+> here.** `pagecensus/evidence-fr2/DECOMP.txt`, block *"WHAT THE LANE
+> REMOVED"*, row `CRT HEAP`: 79.828 MiB fiber against a 58.711 MiB
+> stackless mean, **−21.117 MiB**, which is 7.2× the 2.9375 MiB claimed
+> here. But that is measured **at the peak**, and this is a settled census
+> taken through `/shutdown`. The lane's effect on the *settled* CRT heap has
+> never been measured in this repository. Quoting the 21 MiB as the error
+> bar here would be the same shape of mistake this banner is about.
+>
+> **THE TEST THAT CLOSES IT.** Rebuild the `sa` arm from a tree whose
+> `dist/` reads the knob, knob ABSENT, and re-run `sa.manifest.txt`'s
+> arm; certify the entry first with `tests/perf/stackless-knob-guard.mjs`
+> (~3 s). Cost: 977 s of build (`sa.build-env.txt`) plus 2 m 31 s of run.
+> **Not done here** — this marking slice ran no build and no measurement.
+>
+> **Sections this banner does not name are NOT thereby in force; they are
+> UNAUDITED.** Full record in `evidence-postfix/LANE.txt`.
+
 > **What this is.** `PLAN-POSTFIX-CENSUS.md` was written and committed at
 > `fb90cc7fd` **without running anything**, with its prediction registered
 > before the run existed. This file is that run. One build, one `CONVS=400`

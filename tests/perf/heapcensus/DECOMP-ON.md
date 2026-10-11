@@ -65,6 +65,19 @@ workload and was 33 on `half-on`.
 > cycle arena lost one chunk and the string arena gained one, and the two
 > cancel -- so 164 is right and `118 + 46` is not. A reader who takes the
 > count as confirmation of the split is wrong by one block on each side.
+>
+> **LANE MARKER on the block immediately above.** The run it quotes is on a
+> **different coroutine lane from this file's arms**: `POSTFIX-CENSUS.md`'s
+> `sa` arm emitted a 229,342,743-byte module (fiber) where this file's
+> binary emitted 242,844,741 (stackless) — the figure recorded below in
+> *"The three coverage holes, each with its evidence"*, item 1, and the
+> discriminator `pagecensus/evidence-fr2/manifest.txt` declares. **The 164
+> is unaffected**: it is a count read inside one binary, and so are the
+> 113/47/4 owners. What does NOT carry across is any arithmetic that
+> subtracts this file's heap from that run's. Mechanism and the test that
+> would close it: `evidence-postfix/LANE.txt` and the lane banner at the top
+> of `POSTFIX-CENSUS.md`. **Sections of this file not named here are
+> UNAUDITED, not thereby endorsed.**
 
 And the owner sentence in the table above,
 
