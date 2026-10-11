@@ -605,6 +605,160 @@ The stackless arm never exceeded 1.
 
 ---
 
+### 6a.6 The history-sync cell -- the program 6a.5 asked for
+
+6a.5 closes by saying the number to beat `ensure` against "is a program that
+actually runs a history sync". This is that program, and the row it was asked
+for. Everything in 6a.3 and 6a.5 is scored on HTTP routes where
+`ZAPO_AUTOCONNECT=0` makes `ensure` structurally unreachable; this cell drives
+the rig's fake WhatsApp server and `ensure` IS reached.
+
+**Two binaries of the same program at `3c462de14`, differing only in the lane**
+(`SCRIPTC_STACKLESS=0` vs the knob absent). Instrument: `PeakPagefileUsage` --
+**kernel high-water commit charge read out of process** by
+`tests/perf/zapo-rest/harness/pmon.c`, not the maximum of a sampled series.
+Driver: `memrig.mts` at `CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1
+IDLE_S=60`, the dials `docs/estado-vmwalk.md` 7 was measured at. Twelve runs in
+three ABBA series (`S F F S`, then `F S S F`, then `S F F S` again), so neither
+arm is confounded with position.
+
+#### Peak private commit
+
+| arm | mode | n | mean MiB | within-cell spread |
+|---|---|---:|---:|---:|
+| fiber | low | 5 | **446.80** | 0.09% |
+| fiber | high | 1 | **536.55** | - |
+| stackless | low | 3 | **57.12** | 0.68% |
+| stackless | high | 3 | **64.76** | 0.43% |
+
+| comparison | ratio | delta | |
+|---|---:|---:|---:|
+| most conservative (fiber low vs stackless high) | **6.90x** | -382.04 MiB | -85.5% |
+| fiber low vs stackless low | 7.82x | -389.68 MiB | -87.2% |
+| fiber high vs stackless high | 8.29x | -471.79 MiB | -87.9% |
+| most favourable (fiber high vs stackless low) | 9.39x | -479.43 MiB | -89.4% |
+| all twelve runs, arm means | 7.58x | -400.82 MiB | -86.8% |
+
+The peak falls in the same place on every one of the twelve: inside the
+history-sync decode, between `chunk-decoded-1` and `SYNC-DONE-r1`. Not boot,
+not teardown.
+
+**The fiber arm is the control and it held across seven days and a different
+tree.** Section 7 of `estado-vmwalk.md` measured 445.56 MiB (low mode) and
+538.51 (high) at `e54bf853f`; this measures **446.80** and **536.55** at
+`3c462de14` -- +0.27% and -0.36%. The bimodality reproduced too, and the park
+table below now MEASURES the population that section could only infer: `outHi`
+20,262 against the 20,207 stacks it names for the low mode.
+
+**Same work on both arms, checked rather than presumed.** `memrig-rows.mjs`
+over each run's `state.sqlite`: 19,209 messages, 19,200 of them history, 3,200
+threads, `bytesSum` 6,023,520, `integrity ok`, identical on both arms, and the
+sqlite files are the same size in bytes.
+
+#### The park table on this load, and the answer to "how many at once"
+
+Cells `c08`-`c12` in `tests/perf/fiberstat/evidence/`. The instrumented
+binaries' emitted `.ll` is **byte-identical** to the uninstrumented one on each
+arm (`SCRIPTC_PROF_CFLAGS` reaches the runtime C TUs only), so these count the
+same programs the table above weighs.
+
+| cell | arm | load | fibers out, high-water | **suspended at once** | poolHi | fresh | entries |
+|---|---|---|---:|---:|---:|---:|---:|
+| `c08` | fiber | full | 20,262 | **20,256** | 4,096 | 42,434 | 64 (+414,592 over) |
+| `c09` | stackless | full | 14 | **14** | 14 | 14 | 2 |
+| `c10` | fiber | 1x1x1 | 77 | 77 | 77 | 149 | 64 (+6,719 over) |
+| `c11` | stackless | 1x1x1 | 2 | 2 | 2 | 2 | 2 |
+| `c12` | fiber, `SCR_FIBER_POOL=0` | full | 24,311 | 24,304 | 0 | 166,381 | 64 |
+
+**The form parks, and 20,256 frames of it park at the same instant on the fiber
+arm against 14 on the stackless one -- 1,447x.** Subtracting the minimal-load
+cell, which is boot plus one message, the history sync itself accounts for
+20,179 simultaneous suspensions on the fiber arm and 12 on the stackless one.
+
+**The 14 do not scale with the payload; they scale with CHUNKS.** `c09` holds
+exactly two entries, one `gen` and one `async`, which spawn 8 and 16 times at
+`CHUNKS=8` and 1 and 2 times at `CHUNKS=1` -- linear in the chunk count and
+flat in the 19,200 messages those chunks carry. That is 6a.5's structural
+argument reproduced on the load it could not reach: at most one `ensure` frame
+is parked per concurrent protobuf stream, and streams are created one per
+history-sync notification. **Attribution of the two entries is by SCALING, not
+by symbol**: the artifact holds two `scr_async_spawn` entries
+(`ProtoStreamReader.ensure`, `destroyIfSupported`) and two `scr_agen_new`
+entries (`zipChunks`, a stream async-iterator), and resolving an entry POINTER
+to one of them needs `tests/perf/obj-symbols.mjs` against the cached objects,
+which was not done. The headline does not rest on which: it rests on 14.
+
+**Three positive controls, and all three could have come out the other way.**
+
+1. `SCR_FIBER_POOL=0` on the same binary (`c12`) drives `poolHi` 4,096 -> **0**
+   and `fresh` 42,434 -> **166,381**, which is above `outHi`, exactly as the
+   header's arming note requires. A build where both settings read the same
+   would be a broken gauge, and they do not.
+2. The fiber arm reads 20,256 where the stackless arm reads 14, on the same
+   instrument, the same load and the same host.
+3. The stackless arm's own reading is **not zero** -- 14 under load and 2 at
+   minimum load. A zero here could not have told "does not park" apart from
+   "counter dead"; a non-zero that tracks CHUNKS can.
+
+**Per-entry attribution on the FIBER arm is a floor, and badly so.** The table
+holds 64 entries and that arm overflowed it by 414,592 spawns. The two largest
+visible entries carry 22,444 spawns each -- which is 19,200 messages + 3,200
+threads + 44 -- at `parkHi` 319 and 318. The GLOBAL `outHi`/`suspHi` are not
+per-entry and are exact.
+
+#### What this corrects in `docs/estado-vmwalk.md` section 7
+
+That section decomposes the shipped 538.51 MiB high-mode peak into 24,246
+stacks at 16,830 B plus 48.68 MiB of page tables -- 437.84 MiB, **81.3% of peak
+private commit on this workload** -- and a remainder of 100.67 MiB. Scaled to
+the low mode this cell actually measured (20,262 stacks, 446.80 MiB), the same
+decomposition gives 365.49 MiB of fiber infrastructure and a remainder of
+**81.31 MiB**.
+
+**The lane lands at 57.12 MiB, about 24 MiB BELOW that remainder.** It removed
+389.68 MiB where the decomposition attributes only 365.49 MiB to fibers. The
+remainder is therefore **not lane-independent**: part of what it files as
+"rest" is proportional to the suspended-task population too, and a prediction
+built by subtracting only the stack term from the peak -- which is how this
+measurement was predicted in advance -- overestimates the floor by about 1.76x.
+
+#### Peak working set, which is a different column and a different finding
+
+| arm | mode | n | mean MiB | spread |
+|---|---|---:|---:|---:|
+| fiber | low | 5 | 184.18 | 0.20% |
+| stackless | low | 3 | 71.13 | 0.79% |
+| stackless | high | 3 | 78.21 | 0.40% |
+
+**2.47x, -109.50 MiB, -59.5%.** This contradicts the shape section 7
+established for the two FIBER KNOBS, and the contradiction is the point. Those
+knobs moved commit by 37% and left RSS untouched, because guard pages and
+untouched committed stack were never resident and removing them cannot move a
+number they were never in. **The LANE is not that kind of change**: it removes
+the whole stack, the touched pages included, so it moves both columns. Carrying
+"this is a commit win and NOT an RSS win" across to the lane is a right
+measurement used outside its scope.
+
+#### Bounds, said rather than implied
+
+* **The mode is a draw, on both arms.** Six fiber runs gave five low and one
+  high; six stackless runs gave three low and three high. The two arms' modes
+  are not matched run-for-run, which is why the ratio is quoted as a RANGE
+  (6.90x-9.39x) and the conservative end is the one to carry.
+* **Eight of the twelve runs were taken on a loaded host** -- a game holding
+  9.5 GB and ~58% of a twelve-logical-core box -- and four after it exited.
+  That is a control, not a flaw, and the column passed it: the fiber arm reads
+  446.76 MiB loaded and 446.85 MiB quiet, **+0.02%**. The stackless arm's MODE
+  did follow the host state in this sample (low while loaded, high while
+  quiet), at n=2 on the quiet side, which is too few to call a mechanism.
+* **Throughput was not measured.** 6a.3's rule applies: a kernel high-water
+  over a fixed workload is robust to a loaded host and a rate is not.
+* **One workload, one store.** Everything here is `CHUNKS=8 CONVS=400 MSGS=6`
+  against the sqlite store. Nothing is claimed about other stores, other chunk
+  shapes, or a live WhatsApp socket.
+
+---
+
 ## 6b. CLOSED DEFECT: the frame struct did not survive a TU split
 
 **Fixed in `850c92290` ("the frame struct belongs in the shared header, not
