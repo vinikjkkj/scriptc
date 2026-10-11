@@ -10,7 +10,7 @@
  *   aarch64-linux-gnu.2.36   (the linux lane's default triple, glibc
  *                             pinned to the differential container's
  *                             bookworm — built at
- *                             linux-differential.test.ts:536;
+ *                             linux-differential.test.ts:538;
  *                             docs/linux-port.md was never
  *                             committed, see
  *                             tests/harness/README.md)
