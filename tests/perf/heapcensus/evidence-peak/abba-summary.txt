@@ -1,0 +1,5 @@
+=== ABBA SUMMARY: kernel peakPagefile / peakWorkingSet, MiB ===
+abba1A   ARMED  peakPagefile   58.688   peakWorkingSet   73.504   maxSampledPrivate   58.410   samples 532
+abba2B   OFF    peakPagefile   57.387   peakWorkingSet   71.434   maxSampledPrivate   57.062   samples 532
+abba3B   OFF    peakPagefile   65.730   peakWorkingSet   79.191   maxSampledPrivate   65.703   samples 536
+abba4A   ARMED  peakPagefile   65.855   peakWorkingSet   80.043   maxSampledPrivate   65.562   samples 536

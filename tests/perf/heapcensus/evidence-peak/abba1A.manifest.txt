@@ -1,0 +1,13 @@
+tag          abba1A
+exe          /g/blocks/fr2-out/pk/zapo-rest-182.exe
+exe-bytes    33504768
+ll-bytes     242844763
+pmon         /g/blocks/fr2-wt/tests/perf/zapo-rest/harness/pmon.exe (190976 B, built from pmon.c)
+fake-server  /g/blocks/m3-zaposrc/packages/fake-server
+node         v22.18.0 at /c/Users/vinicius/AppData/Local/nvm/v22.18.0/node
+extra        SCR_HEAPCEN_PEAK_STEP_KB=512
+started      2026-10-11T06:45:36Z
+free-G-GB    37.92
+ended        2026-10-11T06:47:56Z
+rc           0
+free-G-GB    37.88

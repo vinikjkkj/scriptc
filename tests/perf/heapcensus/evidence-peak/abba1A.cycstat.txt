@@ -1,0 +1,8 @@
+[cycstat] ARMED tests/perf/cycstat/scr_cyc_stat.h
+[cycstat] passes=43 roots=171746 freed=67076
+[cycstat] Mcycles total=503.4 mark=268.8 scan=204.5 white=4.5 teardown=24.2
+[cycstat] arena chunks=612 freed=498 held=114 peakheld=274 carved=471115 listhit=35834139 listgive=36233945 callocfallback=60829
+[cycstat] strarena chunks=46 carved=69764 listhit=0 listgive=0 mallocfallback=0
+[cycstat] strarena reclaim taken=46 freed=0 charged=0 foreign=0 held=46
+[cycstat] strarena NO CHUNK EVER FREED and NOTHING WAS EVER CHARGED TO A CHUNK - the reclamation path did not run. Inert code, not a measurement of placement.
+[cycstat] strintern hit=342605 miss=103992 put=103860 evict=41375 refuse=132 hitRate=0.7671 evictPerPut=0.3984

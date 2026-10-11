@@ -1,0 +1,38 @@
+THE LANE IS SELECTED BY WHICH WORKTREE'S dist/ RUNS, NOT BY THE KNOB
+====================================================================
+date 2026-10-11
+
+CLAIM IN THE BRIEFING
+  "every committed census arm is a FIBER-lane binary ... the build inherited
+   SCRIPTC_STACKLESS=0 from the arm's recipe."
+
+THAT MECHANISM IS FALSE. The recipe never set the knob.
+  rg -c SCRIPTC_STACKLESS G:/blocks/sa2-build.sh      -> 0 matches (exit 1)
+  rg -c SCRIPTC_STACKLESS G:/blocks/fr1-build182.sh   -> 4   (positive control
+                                                        for the same rg)
+
+THE REAL MECHANISM: main's dist/ predates the stackless lane entirely.
+  packages/compiler/dist/ir/coro-plans.js        does not exist
+  rg -l SCRIPTC_STACKLESS packages/*/dist        0 files
+  rg -l SCRIPTC_STACKLESS fr1-wt/.../dist        8 files   (positive control)
+  main  packages/compiler/dist/index.js  mtime   2026-10-03 16:49
+  main  packages/compiler/dist/backend   mtime   2026-09-14 15:45
+  fr1wt packages/compiler/dist/index.js  mtime   2026-10-11 00:24
+  the default flip 8f4100d7a                     2026-10-09 19:46
+  8f4100d7a IS an ancestor of main AND of ddc1e373a (the sa build's head).
+
+PROVED ON AN ARTIFACT, BOTH DIRECTIONS, same 10-line async program:
+  dist           knob      lane.ll bytes   `scr_fiber` refs   lane
+  fr2-wt fresh   ABSENT           13,551                  0   STACKLESS
+  fr2-wt fresh   0                 9,736                  3   fiber
+  G:\scriptc     ABSENT            9,736                  3   fiber   <-- blind
+  G:\scriptc     0                 9,736                  3   fiber
+  (both arms print 9; the lowering changes, the program does not)
+
+CONSEQUENCE THE BRIEFING DOES NOT STATE, and it is worse than the briefing's
+version: main's dist does not READ the knob. So a differential run taken
+entirely from G:\scriptc sets SCRIPTC_STACKLESS=0 to get its fiber REFERENCE
+arm, gets fiber, and reads correct -- while its treatment arm is also fiber.
+It compares the fiber lane with itself and reports agreement. That is exactly
+the failure coro-plans.ts says the opt-out was kept alive to prevent; the
+opt-out survived the flip and the stale dist defeats it anyway.

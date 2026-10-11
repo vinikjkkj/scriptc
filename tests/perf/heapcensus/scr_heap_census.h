@@ -51,9 +51,34 @@
  * process.exit() lowers to scr_process_exit(), which ends in _Exit and
  * skips every atexit handler - so the two instruments this header travels
  * with (cycstat, and this one) would both write nothing on the one exit
- * route a service has. The macro below closes that, and it CHAINS: cycstat
- * registers an atexit handler only, so this header calls its report
- * directly when it is armed.
+ * route a service has. The macro below closes that, and it CHAINS.
+ *
+ * ***CORRECTED 2026-10-11. The sentence that stood here said cycstat
+ * 'registers an atexit handler only'. IT DOES NOT: scr_cyc_stat.h:274-281
+ * interposes _Exit exactly as this file does. So the composition this
+ * header's own HOW TO USE IT block prescribes -- cycstat then
+ * heapcensus -- did not COMPOSE, it was a COMPILE ERROR: _Exit was
+ * already a macro, SCR_CYCEN_ON and SCR_PROF_H were both absent, and the
+ * #else below fired with 'another header already interposes _Exit'. It
+ * fails on the first mbedtls vendor unit of app182 and on the stock tree
+ * at 5fa7a24f8, so the documented arm had never been built; every census
+ * committed on this program carries scr_prof.h, and now it is clear that
+ * was not a choice.
+ *
+ * THIS IS THE SECOND TIME THIS EXACT SHAPE HAS BEEN FOUND HERE.
+ * WHICH-BUFFER.md ss.0 records the first: census-arms.sh:21 documented
+ * the order 'prof -> heapcensus', and that was a compile error too. The
+ * repair at 21facf366 added a branch for SCR_PROF_H and for
+ * SCR_CYCEN_ON -- and not for SCR_CYCSTAT_ON, which is the one this
+ * file's own usage block names. A chain with a branch per KNOWN partner
+ * and an #error for everything else makes every new partner a build
+ * failure found at the END of a sixteen-minute build; the branch for
+ * cycstat is added below, and the #error is kept because an UNKNOWN
+ * interposer silently dropping a report is worse.
+ *
+ * scr_hc_report already calls scr_cs_report under #ifdef SCR_CYCSTAT_ON,
+ * so the cycstat branch has nothing extra to chain: it only has to
+ * REPLACE cycstat's own interposition rather than collide with it.***
  */
 #ifndef SCR_HEAP_CENSUS_H
 #define SCR_HEAP_CENSUS_H
@@ -264,40 +289,15 @@ SCR_HC_FN void scr_hc_run_close(size_t lo, size_t hi) {
 #define SCR_HEAPCEN_ARM_SIZE 5113u
 #endif
 
-SCR_HC_FN void scr_hc_report(void) {
-  if (scr_hc_reported) return;
-  scr_hc_reported = 1;
-  FILE *f = stderr;
-  {
-    const char *out = getenv("SCR_HEAPCEN_OUT");
-    if (out != NULL && *out != 0) {
-      FILE *g = fopen(out, "w");
-      if (g != NULL) f = g;
-    }
-  }
-  fprintf(f, "[heapcen] ARMED tests/perf/heapcensus/scr_heap_census.h\n");
-
-  void **heaps = NULL;
-  unsigned long nh = scr_hc_GetProcessHeaps(0, NULL);
-  if (nh > 0) {
-    heaps = (void **)malloc((size_t)nh * sizeof(void *));
-    if (heaps != NULL) nh = scr_hc_GetProcessHeaps(nh, heaps);
-  }
-  void *crt = (void *)(intptr_t)_get_heap_handle();
-  fprintf(f, "[heapcen] processHeaps=%lu crtHeap=%p\n", nh, crt);
-
-  void **arm = (void **)malloc(SCR_HEAPCEN_ARM * sizeof(void *));
-  size_t armed = 0;
-  if (arm != NULL) {
-    for (size_t i = 0; i < SCR_HEAPCEN_ARM; i++) {
-      arm[i] = malloc(SCR_HEAPCEN_ARM_SIZE);
-      if (arm[i] != NULL) {
-        memset(arm[i], 0x5a, 16);
-        armed++;
-      }
-    }
-  }
-
+/* THE WALK, factored out so the PEAK snapshot and the SHUTDOWN report run
+ * the SAME code rather than two transcriptions of it. The only difference
+ * between the two callers is `f`: NULL means fill the tables and write
+ * nothing. Everything this function touches is static storage or the
+ * caller's locals -- it allocates not one byte, which is what makes a walk
+ * at the peak affordable at all. */
+SCR_HC_FN void scr_hc_walk(FILE *f, void **heaps, unsigned long nh, void *crt,
+                           size_t *gbusyp, size_t *gfreep, size_t *gnbusyp,
+                           size_t *gnfreep, size_t *guncp) {
   size_t gbusy = 0, gfree = 0, gnbusy = 0, gnfree = 0, guncommitted = 0;
   for (unsigned long k = 0; k < nh && heaps != NULL; k++) {
     ScrHcEntry e;
@@ -373,7 +373,11 @@ SCR_HC_FN void scr_hc_report(void) {
     }
     scr_hc_run_close(runlo, runhi); runlo = runhi = 0;
     scr_hc_HeapUnlock(heaps[k]);
-    fprintf(f,
+    /* f is NULL on a PEAK snapshot: the tables are filled and nothing is
+     * formatted or written, so the snapshot touches no FILE buffer and no
+     * heap. The shutdown report passes a real f and prints as before. */
+    if (f != NULL)
+      fprintf(f,
             "[heapcen] heap %lu %p%s busy=%zu busyBlocks=%zu free=%zu"
             " freeBlocks=%zu uncommitted=%zu regions=%zu\n",
             k, heaps[k], heaps[k] == crt ? " CRT" : "", busy, nbusy, freeb,
@@ -384,6 +388,333 @@ SCR_HC_FN void scr_hc_report(void) {
     gnfree += nfree;
     guncommitted += unc;
   }
+  *gbusyp = gbusy; *gfreep = gfree; *gnbusyp = gnbusy;
+  *gnfreep = gnfree; *guncp = guncommitted;
+}
+
+/* -- THE PEAK, WHICH IS A DIFFERENT HEAP FROM THE SETTLED ONE ------------
+ *
+ * Everything above reports ONCE, at _Exit. On the zapo history-sync load
+ * that instant is ~110 s after the high-water: the process climbs during
+ * chunk decode and then settles. A ranking taken at shutdown is a ranking
+ * of the SETTLED heap, and nothing entitles anyone to carry it to the
+ * peak -- that is the same independence assumption the lane decomposition
+ * refuted one level up, where the CRT heap FELL 79.828 -> 53.438 MiB when
+ * the stacks left. "The heap" is not one number that survives a change of
+ * arm or a change of instant.
+ *
+ * THE INSTRUMENT LANDS INSIDE THE SYSTEM IT MEASURES. That is not
+ * avoidable here and it is not hidden; it is bounded, and every term is
+ * PRINTED BY THE REPORT rather than argued in this comment. What makes it
+ * affordable is a property of this file and not a claim about care:
+ * THE CENSUS DOES NOT INSTRUMENT THE ALLOCATION PATH. No malloc
+ * interposition, no per-allocation table, no site key, no constructor work
+ * beyond atexit. So a walk taken AT the peak can allocate exactly nothing:
+ *
+ *   - the heap-handle array is static (scr_hc_pkheaps), never malloc'd;
+ *   - the ARM is NOT planted on a peak walk. It is a shutdown-only cost;
+ *     planting 137 blocks on every trigger would cut fresh holes into the
+ *     very free-side distribution the walk is there to measure;
+ *   - nothing is formatted or written at trigger time. The tables are
+ *     printed at exit from the SAME storage, before the settled walk zeroes
+ *     them, so one set of tables serves both readings and the peak costs no
+ *     second 786 KiB of .data;
+ *   - the walk is scr_hc_walk, the same function the shutdown report calls,
+ *     so the two readings cannot diverge by a transcription.
+ *
+ * What it DOES cost:
+ *   - one thread, created with a 64 KiB reserved stack. vmcensus counts
+ *     stacks in a term of their own, so this lands in STACK and not in the
+ *     heap number being ranked -- but it is a stack that would not exist,
+ *     and HCPKCOST names it.
+ *   - one GetProcessMemoryInfo call per poll; HCPKCOST prints the count.
+ *   - the walks: count, total ms and max ms, all printed. A walk holds
+ *     HeapLock, so a reader is entitled to know how long the mutator was
+ *     stopped and how many times.
+ *
+ * WHY PrivateUsage AND NOT THE HEAP'S OWN SIZE. Sizing the heap means
+ * walking it, and polling by walking is the thing being avoided.
+ * PrivateUsage is one syscall; it is the column the whole decomposition is
+ * already written in; and on the stackless arm the CRT heap is 94.33% of
+ * it. It is a PROXY, and the report refuses to let that pass unnoticed:
+ * HCPKCOVER prints the snapshot's own PrivateUsage against the kernel's
+ * PeakPagefileUsage. A snapshot whose coverage is low is a reading of a
+ * trough near the peak, not of the peak. That is vmcensus's standard
+ * (99.85-99.96% on the committed runs) and it is the only thing that makes
+ * a number taken here citable as a number about the peak.
+ *
+ * NEW LINE PREFIXES, NEVER NEW COLUMNS, the discipline the free side was
+ * added under: HCPKSIZE / HCPKFREE / HCPKRUN mirror HCSIZE / HCFREE / HCRUN
+ * exactly, so one reader serves all six, and no existing line moves.
+ */
+#ifdef SCR_HEAPCEN_PEAK
+
+/* PROCESS_MEMORY_COUNTERS_EX, spelled out for the same reason
+ * PROCESS_HEAP_ENTRY is: no <windows.h> in a header force-included ahead of
+ * every TU. A drifted layout would read PrivateUsage out of the wrong eight
+ * bytes and trigger on a plausible, wrong number. */
+typedef struct ScrHcPmc {
+  unsigned long cb;
+  unsigned long PageFaultCount;
+  size_t PeakWorkingSetSize;
+  size_t WorkingSetSize;
+  size_t QuotaPeakPagedPoolUsage;
+  size_t QuotaPagedPoolUsage;
+  size_t QuotaPeakNonPagedPoolUsage;
+  size_t QuotaNonPagedPoolUsage;
+  size_t PagefileUsage;
+  size_t PeakPagefileUsage;
+  size_t PrivateUsage;
+} ScrHcPmc;
+_Static_assert(offsetof(ScrHcPmc, PagefileUsage) == 56, "PMCEX.PagefileUsage");
+_Static_assert(offsetof(ScrHcPmc, PeakPagefileUsage) == 64, "PMCEX.PeakPagefile");
+_Static_assert(offsetof(ScrHcPmc, PrivateUsage) == 72, "PMCEX.PrivateUsage");
+_Static_assert(sizeof(ScrHcPmc) == 80, "PROCESS_MEMORY_COUNTERS_EX is 80 on x64");
+
+/* Assembler names again, for the reason given above HeapWalk: <windows.h>
+ * and <psapi.h> may be included after this header in the same TU and must
+ * stay free to declare their own. K32GetProcessMemoryInfo lives in
+ * kernel32, so nothing has to be linked that is not already there. */
+int __stdcall scr_hc_GetPMI(void *, ScrHcPmc *, unsigned long)
+    __asm__("K32GetProcessMemoryInfo");
+void *__stdcall scr_hc_CurProc(void) __asm__("GetCurrentProcess");
+void __stdcall scr_hc_Sleep(unsigned long) __asm__("Sleep");
+void *__stdcall scr_hc_CreateThread(void *, size_t,
+                                    unsigned long(__stdcall *)(void *), void *,
+                                    unsigned long, unsigned long *)
+    __asm__("CreateThread");
+int __stdcall scr_hc_QPC(long long *) __asm__("QueryPerformanceCounter");
+int __stdcall scr_hc_QPF(long long *) __asm__("QueryPerformanceFrequency");
+
+#define SCR_HC_STACK_IS_RESERVATION 0x00010000u
+#define SCR_HC_PKHEAPS 64
+
+SCR_HC_SHARED void *scr_hc_pkheaps[SCR_HC_PKHEAPS] = {0};
+SCR_HC_SHARED volatile int scr_hc_pkstop = 0;
+SCR_HC_SHARED volatile int scr_hc_pkinwalk = 0;
+SCR_HC_SHARED int scr_hc_pkarmed = 0;    /* the thread was actually started */
+SCR_HC_SHARED size_t scr_hc_pkwalks = 0; /* snapshots TAKEN */
+SCR_HC_SHARED size_t scr_hc_pkpolls = 0;
+SCR_HC_SHARED double scr_hc_pkms = 0.0, scr_hc_pkmaxms = 0.0;
+SCR_HC_SHARED size_t scr_hc_pkpu = 0;   /* PrivateUsage AT the kept snapshot */
+SCR_HC_SHARED size_t scr_hc_pkhwm = 0;  /* highest PrivateUsage ever polled */
+SCR_HC_SHARED size_t scr_hc_pkpeak = 0; /* kernel PeakPagefileUsage at exit */
+SCR_HC_SHARED size_t scr_hc_pkbusy = 0, scr_hc_pkfreeb = 0;
+SCR_HC_SHARED size_t scr_hc_pknbusy = 0, scr_hc_pknfree = 0, scr_hc_pkunc = 0;
+SCR_HC_SHARED unsigned long scr_hc_pknh = 0;
+SCR_HC_SHARED unsigned long scr_hc_pkint = 5;
+SCR_HC_SHARED size_t scr_hc_pkstep = 1048576;
+SCR_HC_SHARED size_t scr_hc_pkmin = 0;
+
+/* One set of tables serves both readings, so a snapshot starts from zero
+ * and the LAST snapshot is the one that survives to be printed. */
+SCR_HC_FN void scr_hc_zero_tables(void) {
+  memset(scr_hc_tbl, 0, sizeof scr_hc_tbl);
+  memset(scr_hc_ftbl, 0, sizeof scr_hc_ftbl);
+  memset(scr_hc_runhist, 0, sizeof scr_hc_runhist);
+  memset(scr_hc_runpg, 0, sizeof scr_hc_runpg);
+  scr_hc_rows = 0;
+  scr_hc_lost = 0;
+  scr_hc_frows = 0;
+  scr_hc_flost = 0;
+  scr_hc_runs = 0;
+  scr_hc_runbytes = 0;
+  scr_hc_runmax = 0;
+  scr_hc_pages = 0;
+  scr_hc_pagebytes = 0;
+}
+
+SCR_HC_FN double scr_hc_now_ms(void) {
+  long long c = 0, fq = 0;
+  scr_hc_QPC(&c);
+  scr_hc_QPF(&fq);
+  return fq ? (double)c * 1000.0 / (double)fq : 0.0;
+}
+
+SCR_HC_FN unsigned long __stdcall scr_hc_pkthread(void *unused) {
+  (void)unused;
+  void *crt = (void *)(intptr_t)_get_heap_handle();
+  size_t trigger = scr_hc_pkmin;
+  for (;;) {
+    if (scr_hc_pkstop) break;
+    ScrHcPmc m;
+    memset(&m, 0, sizeof m);
+    m.cb = (unsigned long)sizeof m;
+    scr_hc_pkpolls++;
+    if (scr_hc_GetPMI(scr_hc_CurProc(), &m, (unsigned long)sizeof m)) {
+      if (m.PrivateUsage > scr_hc_pkhwm) scr_hc_pkhwm = m.PrivateUsage;
+      if (m.PrivateUsage >= trigger && m.PrivateUsage >= scr_hc_pkmin) {
+        /* Re-check the stop flag under the in-walk flag so the shutdown
+         * report can never print a half-filled table. */
+        scr_hc_pkinwalk = 1;
+        if (scr_hc_pkstop) {
+          scr_hc_pkinwalk = 0;
+          break;
+        }
+        unsigned long nh =
+            scr_hc_GetProcessHeaps(SCR_HC_PKHEAPS, scr_hc_pkheaps);
+        if (nh > SCR_HC_PKHEAPS) nh = SCR_HC_PKHEAPS;
+        double t0 = scr_hc_now_ms();
+        scr_hc_zero_tables();
+        size_t b = 0, fr = 0, nb = 0, nf = 0, un = 0;
+        scr_hc_walk(NULL, scr_hc_pkheaps, nh, crt, &b, &fr, &nb, &nf, &un);
+        double dt = scr_hc_now_ms() - t0;
+        scr_hc_pkbusy = b;
+        scr_hc_pkfreeb = fr;
+        scr_hc_pknbusy = nb;
+        scr_hc_pknfree = nf;
+        scr_hc_pkunc = un;
+        scr_hc_pknh = nh;
+        scr_hc_pkpu = m.PrivateUsage;
+        scr_hc_pkwalks++;
+        scr_hc_pkms += dt;
+        if (dt > scr_hc_pkmaxms) scr_hc_pkmaxms = dt;
+        trigger = m.PrivateUsage + scr_hc_pkstep;
+        scr_hc_pkinwalk = 0;
+      }
+    }
+    scr_hc_Sleep(scr_hc_pkint);
+  }
+  return 0;
+}
+
+SCR_HC_FN size_t scr_hc_env_sz(const char *name, size_t dflt) {
+  const char *v = getenv(name);
+  if (v == NULL || *v == 0) return dflt;
+  size_t n = 0;
+  for (const char *p = v; *p >= '0' && *p <= '9'; p++)
+    n = n * 10 + (size_t)(*p - '0');
+  return n;
+}
+
+SCR_HC_FN void scr_hc_peak_start(void) {
+  /* SCR_HEAPCEN_PEAK_OFF=1 is the NULL ARM, and it is inside the SAME
+   * binary: no thread, no poll, no snapshot, and the report says
+   * "NO PEAK SNAPSHOT (trigger disabled)" by name. A peak block that could
+   * only ever print numbers could not tell a dead trigger from a flat
+   * heap. */
+  const char *off = getenv("SCR_HEAPCEN_PEAK_OFF");
+  if (off != NULL && *off == '1') return;
+  scr_hc_pkint = (unsigned long)scr_hc_env_sz("SCR_HEAPCEN_PEAK_MS", 5);
+  scr_hc_pkstep = scr_hc_env_sz("SCR_HEAPCEN_PEAK_STEP_KB", 1024) * 1024;
+  scr_hc_pkmin = scr_hc_env_sz("SCR_HEAPCEN_PEAK_MIN_KB", 0) * 1024;
+  if (scr_hc_pkstep == 0) scr_hc_pkstep = 1;
+  void *h = scr_hc_CreateThread(NULL, 65536, scr_hc_pkthread, NULL,
+                                SCR_HC_STACK_IS_RESERVATION, NULL);
+  if (h != NULL) scr_hc_pkarmed = 1;
+}
+
+SCR_HC_FN void scr_hc_peak_emit(FILE *f) {
+  /* Stop the poller and wait for any walk in flight: a table printed while
+   * it is being refilled is a plausible, wrong reading. */
+  scr_hc_pkstop = 1;
+  for (int spin = 0; scr_hc_pkinwalk && spin < 20000; spin++) scr_hc_Sleep(1);
+
+  ScrHcPmc m;
+  memset(&m, 0, sizeof m);
+  m.cb = (unsigned long)sizeof m;
+  if (scr_hc_GetPMI(scr_hc_CurProc(), &m, (unsigned long)sizeof m))
+    scr_hc_pkpeak = m.PeakPagefileUsage;
+
+  if (!scr_hc_pkarmed) {
+    fprintf(f, "[heapcen] NO PEAK SNAPSHOT (trigger disabled)\n");
+    return;
+  }
+  if (scr_hc_pkwalks == 0) {
+    fprintf(f, "[heapcen] NO PEAK SNAPSHOT (armed, polls=%zu, never fired)\n",
+            scr_hc_pkpolls);
+    return;
+  }
+  fprintf(f,
+          "[heapcen] HCPKCOVER snapPrivate=%zu kernelPeakPagefile=%zu"
+          " polledHigh=%zu\n",
+          scr_hc_pkpu, scr_hc_pkpeak, scr_hc_pkhwm);
+  fprintf(f,
+          "[heapcen] HCPKCOST walks=%zu polls=%zu walkMsTotal=%.3f"
+          " walkMsMax=%.3f pollMs=%lu stepBytes=%zu minBytes=%zu threads=1"
+          " threadStackReserve=65536\n",
+          scr_hc_pkwalks, scr_hc_pkpolls, scr_hc_pkms, scr_hc_pkmaxms,
+          scr_hc_pkint, scr_hc_pkstep, scr_hc_pkmin);
+  fprintf(f,
+          "[heapcen] HCPKHEAPS heaps=%lu busy=%zu busyBlocks=%zu free=%zu"
+          " freeBlocks=%zu uncommitted=%zu\n",
+          scr_hc_pknh, scr_hc_pkbusy, scr_hc_pknbusy, scr_hc_pkfreeb,
+          scr_hc_pknfree, scr_hc_pkunc);
+  for (size_t i = 0; i < SCR_HEAPCEN_SLOTS; i++)
+    if (scr_hc_ftbl[i].n)
+      fprintf(f, "HCPKFREE %zu %zu %zu\n", scr_hc_ftbl[i].size,
+              scr_hc_ftbl[i].n, scr_hc_ftbl[i].bytes);
+  for (unsigned b = 0; b < SCR_HC_RUNB; b++)
+    if (scr_hc_runhist[b])
+      fprintf(f, "HCPKRUN %zu %zu %zu\n", (size_t)1 << b, scr_hc_runhist[b],
+              scr_hc_runpg[b]);
+  size_t tn = 0, tb = 0;
+  for (size_t i = 0; i < SCR_HEAPCEN_SLOTS; i++) {
+    if (scr_hc_tbl[i].n == 0) continue;
+    fprintf(f, "HCPKSIZE %zu %zu %zu\n", scr_hc_tbl[i].size, scr_hc_tbl[i].n,
+            scr_hc_tbl[i].bytes);
+    tn += scr_hc_tbl[i].n;
+    tb += scr_hc_tbl[i].bytes;
+  }
+  fprintf(f,
+          "[heapcen] HCPKTOTAL distinctSizes=%zu blocks=%zu bytes=%zu lost=%zu"
+          " freeRows=%zu freeLost=%zu wholePages=%zu pageBytes=%zu runs=%zu"
+          " runBytes=%zu\n",
+          scr_hc_rows, tn, tb, scr_hc_lost, scr_hc_frows, scr_hc_flost,
+          scr_hc_pages, scr_hc_pagebytes, scr_hc_runs, scr_hc_runbytes);
+  /* The settled walk starts from zero: the peak reading has been emitted
+   * and must not be added to. */
+  scr_hc_zero_tables();
+}
+
+#else /* !SCR_HEAPCEN_PEAK */
+SCR_HC_FN void scr_hc_peak_start(void) {}
+SCR_HC_FN void scr_hc_peak_emit(FILE *f) { (void)f; }
+#endif /* SCR_HEAPCEN_PEAK */
+
+SCR_HC_FN void scr_hc_report(void) {
+  if (scr_hc_reported) return;
+  scr_hc_reported = 1;
+  FILE *f = stderr;
+  {
+    const char *out = getenv("SCR_HEAPCEN_OUT");
+    if (out != NULL && *out != 0) {
+      FILE *g = fopen(out, "w");
+      if (g != NULL) f = g;
+    }
+  }
+  fprintf(f, "[heapcen] ARMED tests/perf/heapcensus/scr_heap_census.h\n");
+
+  void **heaps = NULL;
+  unsigned long nh = scr_hc_GetProcessHeaps(0, NULL);
+  if (nh > 0) {
+    heaps = (void **)malloc((size_t)nh * sizeof(void *));
+    if (heaps != NULL) nh = scr_hc_GetProcessHeaps(nh, heaps);
+  }
+  void *crt = (void *)(intptr_t)_get_heap_handle();
+  fprintf(f, "[heapcen] processHeaps=%lu crtHeap=%p\n", nh, crt);
+
+  /* THE PEAK READING COMES FIRST, out of the same tables, before the arm is
+   * planted and before the settled walk overwrites them. A reader that
+   * stops at the first HCSIZE still gets a complete, labelled peak block
+   * above it, and HCPK* never shares a line with HCSIZE*. */
+  scr_hc_peak_emit(f);
+
+  void **arm = (void **)malloc(SCR_HEAPCEN_ARM * sizeof(void *));
+  size_t armed = 0;
+  if (arm != NULL) {
+    for (size_t i = 0; i < SCR_HEAPCEN_ARM; i++) {
+      arm[i] = malloc(SCR_HEAPCEN_ARM_SIZE);
+      if (arm[i] != NULL) {
+        memset(arm[i], 0x5a, 16);
+        armed++;
+      }
+    }
+  }
+
+  size_t gbusy = 0, gfree = 0, gnbusy = 0, gnfree = 0, guncommitted = 0;
+  scr_hc_walk(f, heaps, nh, crt, &gbusy, &gfree, &gnbusy, &gnfree,
+              &guncommitted);
   fprintf(f,
           "[heapcen] ALLHEAPS busy=%zu busyBlocks=%zu free=%zu freeBlocks=%zu"
           " uncommitted=%zu\n",
@@ -460,6 +791,7 @@ __attribute__((constructor)) SCR_HC_FN void scr_hc_install(void) {
   if (scr_hc_installed) return;
   scr_hc_installed = 1;
   atexit(scr_hc_report);
+  scr_hc_peak_start();
 }
 
 #if defined(_Exit) && defined(SCR_CYCEN_ON)
@@ -478,6 +810,14 @@ __attribute__((constructor)) SCR_HC_FN void scr_hc_install(void) {
 #elif defined(_Exit) && defined(SCR_PROF_H)
 #undef _Exit
 #define _Exit(c) (scr_hc_report(), scr_prof_report(), _Exit(c))
+#elif defined(_Exit) && defined(SCR_CYCSTAT_ON)
+/* cycstat got here first and made _Exit its own. Replace it: this
+ * file's report already ends by calling scr_cs_report() under the same
+ * #ifdef, so cycstat is not lost -- it is reached through here, which
+ * is also the order the two want (the census must run before anything
+ * else opens a file in the heap it is walking). */
+#undef _Exit
+#define _Exit(c) (scr_hc_report(), _Exit(c))
 #elif !defined(_Exit)
 #define _Exit(c) (scr_hc_report(), _Exit(c))
 #else
