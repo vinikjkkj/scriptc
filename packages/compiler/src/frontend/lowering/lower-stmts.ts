@@ -35,7 +35,7 @@ import { ctorObjectGlobalValue, dynAssertionReceiver, isDynSafeReadWidth, isImmu
 import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, unionFieldReadAt, unitArmsOf } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
-import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
+import { isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
 
@@ -4832,7 +4832,16 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // `var v: void;` / `let x: undefined;` — a unit-only binding rides
       // the unit-only union (its undefined arm is the unassigned state,
       // which is also the only state).
-      if (type.kind === "void" && isUnitOnlyTsType(L.typeOf(decl.name))) {
+      // A generic body spells its own slot types (`Awaited<T>`, a bare `T`),
+      // and no such spelling carries the Void FLAG the test above reads, at
+      // any instantiation. The bound-resolver companion answers for the one
+      // bound at `void`: the same substitution, the same arms, reached by the
+      // only route the flag test cannot take.
+      if (
+        type.kind === "void" &&
+        (isUnitOnlyTsType(L.typeOf(decl.name)) ||
+          isUnitOnlyBoundTsType(L.typeOf(decl.name), L.typeCtx))
+      ) {
         type = unitOnlyUnion(L.unions);
       }
       if (type.kind === "void") L.badType(decl.name, L.typeOf(decl.name));
@@ -5176,7 +5185,16 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // unit-only union — the initializer's unit literal wraps into its arm
     // like any optional completion. Non-literal void initializers (a
     // void CALL's result) keep their fence at the coercion below.
-    if (type.kind === "void" && isUnitOnlyTsType(L.typeOf(decl.name))) {
+    // A generic body spells its own slot types (`Awaited<T>`, a bare `T`),
+    // and no such spelling carries the Void FLAG the test above reads, at
+    // any instantiation. The bound-resolver companion answers for the one
+    // bound at `void`: the same substitution, the same arms, reached by the
+    // only route the flag test cannot take.
+    if (
+      type.kind === "void" &&
+      (isUnitOnlyTsType(L.typeOf(decl.name)) ||
+        isUnitOnlyBoundTsType(L.typeOf(decl.name), L.typeCtx))
+    ) {
       type = unitOnlyUnion(L.unions);
     }
     if (type.kind === "void") L.badType(decl.name, L.typeOf(decl.name));
