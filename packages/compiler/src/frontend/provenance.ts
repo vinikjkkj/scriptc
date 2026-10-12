@@ -262,6 +262,36 @@ function bareImportsWalk(
     const file = resolve(queue.shift()!);
     if (seenFiles.has(file)) continue;
     seenFiles.add(file);
+    /* A DECLARATION's implementation twin is an edge of this walk.
+     *
+     * The walk's roots are the files mapEntryToSource answered with, and for
+     * a package with a build step that file is the TypeScript source: it IS
+     * the implementation, and following its relative edges sees every bare
+     * specifier the package imports. For an AUTHORED-JavaScript package the
+     * mapped root is the `.d.ts` instead (see authoredJsEntry for why it must
+     * be), and a declaration file imports nothing it runs -- so the walk
+     * stopped at the surface and the package's OWN dependencies were never
+     * offered to the pipeline at all. Measured on mysql2@3.24.5, whose mapped
+     * `promise.d.ts` reports `external: {}` while its `promise.js` requires
+     * seven installed packages; all seven then refuse, each as `the '<pkg>'
+     * module is not supported yet`, for no reason except that nothing ever
+     * looked inside the file that is actually compiled.
+     *
+     * The twin is the file the PROGRAM compiles (declTwinOf puts it into
+     * module order ahead of its declaration), so walking it is the walk
+     * matching what is built. isFile-probed, never invented, and the first
+     * extension that exists wins -- the same stem/extension rule
+     * noteDeclTwin applies two branches below, kept here as its own test so
+     * a root is covered as well as a relative dependency. */
+    if (/\.d\.(ts|mts|cts)$/.test(file)) {
+      const stem = file.replace(/\.d\.(ts|mts|cts)$/, "");
+      for (const ext of [".js", ".mjs", ".cjs"]) {
+        if (isFile(`${stem}${ext}`)) {
+          queue.push(`${stem}${ext}`);
+          break;
+        }
+      }
+    }
     let text: string;
     try {
       text = readFileSync(file, "utf8");

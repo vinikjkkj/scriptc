@@ -3126,6 +3126,32 @@ function preflight7(load: LoadResult): {
             if (npmReq !== null && isNpmStaticPackage(npmReq.packageName)) {
               dep = npmStaticProgramDep(program, npmReq.packageName, npmReq.typesFile);
               if (dep === null) continue; // offender recorded — the fallback loop reloads
+            } else if (resolveProjectImportSf7(program, sf, req.spec) !== null) {
+              /* A PROJECT import reached through require().
+               *
+               * The import-declaration branch above has consulted
+               * resolveProjectImport since provenance existed, so
+               * `import x from 'pkg'` of a mapped package is an ordinary
+               * user-module edge. The require() branch never did, and the two
+               * answers disagreed for the same specifier in the same program:
+               * the ESM spelling compiled, the CommonJS spelling fenced
+               * `the 'pkg' module is not supported yet`.
+               *
+               * It is the AUTHORED-JavaScript lane that makes the asymmetry
+               * load-bearing rather than cosmetic. A package mapped through
+               * that lane is CommonJS -- every edge it has to its own
+               * dependencies is a require() -- so for such a package the
+               * branch that was taught provenance is the one it never uses.
+               * Measured on mysql2@3.24.5: seven installed packages, every one
+               * of them resolvable, all refused at thirteen sites.
+               *
+               * resolveProjectImportSf7 is the same resolution the import
+               * branch takes, GUARD INCLUDED: a `.d.ts` whose implementation
+               * twin is not in the program still answers null, so a
+               * declaration with no body to compile keeps the refusal it has
+               * today rather than becoming a body-less module edge. Nothing
+               * that resolved to null before resolves to a dep now. */
+              dep = resolveProjectImportSf7(program, sf, req.spec);
             } else {
               if (
                 canonicalBuiltinModule(req.spec) === null &&

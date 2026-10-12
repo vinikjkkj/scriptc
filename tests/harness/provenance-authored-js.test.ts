@@ -211,3 +211,67 @@ describe("provenance: a package that publishes the source it authored", () => {
     expect(await mapped()).toBe(false);
   });
 });
+
+/* ---------------------------------------------------------------------------
+ * A mapped package's OWN dependencies.
+ *
+ * Every case above maps one package and stops. This one maps a package whose
+ * implementation needs a SECOND package, which is where the authored lane and
+ * the ordinary lane stop agreeing.
+ *
+ * Two edges have to exist for the value to arrive, and neither did:
+ *
+ *   the WALK. Its roots are the files the mapper answered with. For a package
+ *   with a build step that file is the TypeScript source, so following its
+ *   relative imports finds every dependency. For an authored-JavaScript
+ *   package the mapped file is the `.d.ts`, and a declaration file does not
+ *   spell what its implementation imports -- so the walk stopped at the
+ *   surface and the dependency was never offered to the pipeline. Measured on
+ *   mysql2@3.24.5: its mapped `promise.d.ts` reported no external specifiers
+ *   at all while `promise.js` required seven installed packages.
+ *
+ *   the REQUIRE. The bare-IMPORT branch of preflight has consulted
+ *   resolveProjectImport since provenance existed; the bare-REQUIRE branch had
+ *   not, so the two spellings disagreed about the same specifier in the same
+ *   program. An authored-JavaScript package is CommonJS, so the branch that
+ *   knew about provenance is the one it never uses.
+ *
+ * The two tests separate the two edges rather than asserting the pair: with
+ * the dependency left out of the manifest it stays unmappable, and the
+ * refusal has to read exactly as it did before -- a package that cannot map
+ * keeps today's answer, which is what makes the other test's zero a result
+ * and not a widening that swallowed everything. */
+const depEntry = join(fixtureDir, "cases/authoreddep/main.ts");
+const depManifest = join(fixtureDir, "manifest-authoreddep.json");
+const depManifestOnly = join(fixtureDir, "manifest-authoreddep-only.json");
+
+describe("provenance: an authored package's own dependency", () => {
+  test("a dependency that cannot map keeps its refusal, naming the module", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifestOnly;
+    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoreddep";
+    setProvenanceSources(await resolveProvenanceSources(depEntry));
+    const { coverage } = analyze(depEntry);
+    const sc1010 = coverage.diagnostics.filter((d) => d.code === "SC1010");
+    expect(sc1010.map((d) => d.message)).toContain("the 'depts' module is not supported yet");
+  });
+
+  test("the walk reaches it through the implementation twin, and require() resolves it", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifest;
+    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoreddep";
+    const sources = await resolveProvenanceSources(depEntry);
+    /* The dependency is in the graph ONLY through the `.d.ts`'s implementation
+     * twin: nothing the entry imports names it, and the declaration does not
+     * either. */
+    const byName = new Map(sources.packages.map((p) => [p.name, p]));
+    expect([...byName.keys()].sort()).toEqual(["authoreddep", "depts"]);
+    /* And it maps the ORDINARY way, to its TypeScript source -- the authored
+     * rule carries the package that has no build step, not everything it
+     * drags in. */
+    expect(byName.get("depts")!.entries["depts"]!.split("\\").join("/")).toMatch(
+      /attested-src\/depts\/src\/index\.ts$/,
+    );
+    setProvenanceSources(sources);
+    const { coverage } = analyze(depEntry);
+    expect(coverage.diagnostics.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+  });
+});
