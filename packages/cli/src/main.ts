@@ -56,7 +56,15 @@ Options:
                      provenance-attested SOURCE (fetched at the attested
                      commit) as static program modules; packages without a
                      usable attestation keep the island path (a note, never
-                     a failure)
+                     a failure).
+                     SCRIPTC_PROVENANCE_UNATTESTED=<pkg[,pkg...]> widens it:
+                     each NAMED package whose attestation the registry
+                     answers 404 for compiles from its INSTALLED TARBALL
+                     instead. Nothing attests those bytes came from any
+                     repository or commit, and the build says so -- their
+                     provenance line reads local://<dir> and their commit
+                     reads "unattested". Unset is the shipped behaviour;
+                     there is deliberately no all/1 spelling
   -h, --help         show this help
   -v, --version      print the version
 `;

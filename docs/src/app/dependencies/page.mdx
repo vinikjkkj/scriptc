@@ -56,6 +56,17 @@ This is experimental. Real packages compile statically at high but partial cover
 
 `--provenance-sources` goes one step further: for packages published with npm provenance attestations, the compiler fetches the package's **source** at the attested commit and compiles that — TypeScript compiled as TypeScript, instead of the shipped JS. Packages without a usable attestation keep the engine path, with a note, never a failure. Same maturity caveats as `--npm-static`.
 
+### Packages that publish no attestation at all
+
+Some packages answer HTTP 404 for `/-/npm/v1/attestations/<pkg>@<version>` — there is no attested tree to fetch, so nothing above reaches them and they keep the engine path. That is a property of how those packages are published, not a gap the compiler can close.
+
+`SCRIPTC_PROVENANCE_UNATTESTED=<pkg[,pkg…]>` is the decision to compile such a package's **installed tarball** as if it were its source. It is named, never inferred — there is no `all` or `1` spelling, and unset is the shipped behaviour. Three properties are worth knowing before using it:
+
+- **Absent, not merely unusable.** The admitting condition is the registry answering 404. A 200 means an attestation exists, and anything that goes wrong after that — no SLSA predicate, a source tree that will not fetch, a missing package directory — is a failure to *use* an attestation, never the absence of one, and keeps the refusal. A throwing probe is a decline too: an offline build never acquires the right to compile unattested tarballs.
+- **It says so.** An admitted package's provenance line reads `local://<installed dir>` with commit `unattested`, and a note names the directory the bytes came from, so no line of build output can be mistaken for an attestation.
+- **Being named buys a try, not a mapping.** A tarball with no declaration beside its published entry maps to nothing; such a package has its refusal put back and the build says that too, rather than claiming a compile that did not happen.
+- **Admitted is not clean.** The tarball's body joins the lowered program and brings its own refusals and deferred throws with it — including ones raised by the package's own `.d.ts`, which nothing read while the package was still refused outright. Naming a package here buys reach into it, not a lower diagnostic count.
+
 ## Where this scales
 
 The design goal is unmodified real-world packages. The measuring stick used during development is the published [Vercel CLI](https://www.npmjs.com/package/vercel) — straight off the registry, compiled with `--dynamic` into a single self-contained executable that runs its real workflows, replacing a ~120MB Node runtime plus 181MB of `node_modules`.

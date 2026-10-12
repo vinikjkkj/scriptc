@@ -93,6 +93,9 @@ Analyzes the program without producing a binary and reports, statement by statem
 
   <dt><code>SCRIPTC_TARGET</code></dt>
   <dd>Target triple for cross-compilation, e.g. <code>aarch64-linux-gnu.2.36</code> or <code>x86_64-windows-gnu</code>. See <a href="/platforms">Platform Support</a>.</dd>
+
+  <dt><code>SCRIPTC_PROVENANCE_UNATTESTED</code></dt>
+  <dd>EXPERIMENTAL, and only read under <code>--provenance-sources</code>. A comma-separated list of package names whose <strong>installed tarball</strong> may be compiled as if it were source, for packages npm publishes no provenance attestation for at all. Named, never inferred: there is no <code>all</code> or <code>1</code> spelling, and unset is the shipped behaviour. The admitting condition is the registry answering HTTP 404 — a package that <em>has</em> an attestation is never admitted here however unusable it turns out to be, and an unreachable registry is a decline, not an absence. An admitted package is announced with repo <code>local://&lt;installed dir&gt;</code> and commit <code>unattested</code>, because nothing attests those bytes came from any repository or any commit. See <a href="/dependencies">npm Dependencies</a>.</dd>
 </dl>
 
 ```console
