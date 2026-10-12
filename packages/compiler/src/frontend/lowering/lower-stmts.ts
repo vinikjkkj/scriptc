@@ -1287,6 +1287,21 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     return { kind: "block", body, labels, loc: locOf(stmt) };
   }
 
+/** True when `className` is %DOMException or a class under it. Its
+ * `.code` is the LEGACY NUMERIC code, kept in a slot BEYOND the ScrError
+ * prefix and reached only through the error.dom* libCalls -- the same
+ * spelling as ScrError's string `%code` and a different property, so the
+ * error-code write arm must not claim it. (`extends DOMException` is itself
+ * fenced today, so the walk guards against that changing rather than
+ * against a shape in the corpus.) */
+function domExceptionRooted(L: Lowerer, className: string): boolean {
+  if (className === "%DOMException") return true;
+  for (let c = L.classes.get(className)?.base ?? null; c; c = c.base) {
+    if (c.def.name === "%DOMException") return true;
+  }
+  return false;
+}
+
 export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | null {
     if (ts.isVariableStatement(stmt)) {
       // `declare const` — ambient: no storage, no init (collectGlobals
@@ -7179,6 +7194,77 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               );
             }
           }
+          // `err.code = 'ETIMEDOUT'` -- THE WRITE TWIN OF THE error.code
+          // READ, and the one shape in the "assignment to non-variables"
+          // family that is an unhandled case rather than a representation
+          // wall.
+          //
+          // ScrError's third slot is ALREADY IN %Error's LAYOUT
+          // (lower-classes' registerBuiltinErrorClasses: fields are
+          // [name, message, %code]) and the runtime stamps it at every
+          // fs/exec/system throw site. It is deliberately absent from the
+          // class's `fields` MAP, and the reason given there is about the
+          // READ: the slot is NULL when the property is absent, so `.code`
+          // answers `string | undefined` through the error.code libCall and a
+          // plain string field read would hand NULL to a string slot. A
+          // WRITE has none of that hazard -- a string goes into a string
+          // slot, and it is the very slot error.code reads back, so the two
+          // views cannot disagree. Without this arm the write fell to
+          // "assignment to non-variables" while `err.name = v` and
+          // `err.message = v` -- the other two ScrError slots -- lowered,
+          // which is the compiler disagreeing with itself about one struct.
+          //
+          // The precedent is in the tree and is the same slot from the
+          // other side: lower-classes' `routesErrorCode` points a subclass's
+          // own `code: string` DECLARATION at this inherited slot and writes
+          // it through the ordinary field route, and its comment states why
+          // that stays frontend-only -- "no backend, validator, IR or
+          // runtime layout knows about it". The upcast below buys the same
+          // here: a reinterpret to %Error, whose layout names the slot
+          // `%code`, which is the name the C emitter's runtime-error-class
+          // branch turns into ScrError's own member and which the LLVM
+          // emitter resolves positionally (classFieldIndex, by name, over
+          // the same flattened list).
+          //
+          // WHAT KEEPS FENCING, and each one is a real difference:
+          //  - a routed SUBCLASS field: `fieldTarget` above already answered
+          //    it, so this arm is never consulted for one;
+          //  - %DOMException: its `.code` is the LEGACY NUMERIC code, in a
+          //    slot beyond the ScrError prefix (error.domCode) -- a
+          //    different property that happens to share a spelling;
+          //  - a non-string RHS (`err.code = 42`, legal in Node): the slot is
+          //    a ScrStr*, so the write keeps its fence rather than storing
+          //    a coercion of a value Node would keep as a number;
+          //  - `err?.code = v` -- not a write form at all.
+          //
+          // NOT CLAIMED: own-property ENUMERABILITY. Node's assignment
+          // creates an enumerable own property that Object.keys and
+          // JSON.stringify report; the slot does not model that. It is the
+          // SAME slot the runtime already stamps on every fs error, so
+          // whatever those answer today is what a written one answers --
+          // this arm adds no new divergence class, it moves a statement out
+          // of refusing and into the representation that was already there.
+          if (!expr.left.questionDotToken && expr.left.name.text === "code") {
+            const codeRecvT = L.mapTypeOf(L.typeOf(expr.left.expression));
+            if (
+              codeRecvT?.kind === "object" &&
+              L.errorHierarchyClassOf(codeRecvT.className) &&
+              !domExceptionRooted(L, codeRecvT.className)
+            ) {
+              const codeVal = L.lowerExpr(expr.right);
+              if (codeVal.type.kind === "string") {
+                return {
+                  kind: "fieldSet",
+                  obj: L.upcastTo(L.lowerExpr(expr.left.expression), "%Error"),
+                  className: "%Error",
+                  field: "%code",
+                  value: codeVal,
+                  loc: locOf(expr),
+                };
+              }
+            }
+          }
+
           // `Codec.TAG = v` — an own property written onto a FUNCTION
           // value in a JS file. This is pbjs `--target static-module`'s
           // whole flat idiom, and its receiver is a function declaration

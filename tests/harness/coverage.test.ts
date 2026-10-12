@@ -225,6 +225,29 @@ test("'exports[<literal>]' lowers; a key only the runtime knows keeps its fence"
   expect(out).not.toContain("8 sites");
 });
 
+test("a STRING written to an error's `code` lands in ScrError's slot; anything else keeps its fence", () => {
+  // `err.code = 'ETIMEDOUT'` is the WRITE twin of the error.code read.
+  // ScrError's third slot is already in %Error's layout (`%code`) and the
+  // runtime stamps it at every fs/exec throw site, so a STRING written
+  // through the base view lands exactly where error.code reads back --
+  // which is why `err.name = v` and `err.message = v`, the other two
+  // ScrError slots, have always lowered while this one did not.
+  //
+  // A PAIR on purpose. The admitted half is three writes (a literal, a
+  // subclass receiver, a string-TYPED non-literal RHS) plus the `name`
+  // control that lowered before this arm existed. The refused half is two
+  // writes the slot cannot represent: a NUMBER (Node keeps the value a
+  // number; the slot is a ScrStr*) and a property with no slot at all.
+  // Asserting the refused half is what makes a later widening of the
+  // general property-write case FAIL this test instead of passing it.
+  const out = report(fixture("error-code-slot-write.js"));
+  expect(out).toContain("2 sites");
+  expect(out).toMatch(/×2\s+assignment to non-variables/);
+  // Before the arm this same fixture reported five.
+  expect(out).not.toContain("5 sites");
+  expect(out).toContain("(83%)");
+});
+
 test("type errors block analysis", () => {
   const out = report(fixture("type-errors.ts"));
   expect(out).toContain("not analyzable");
