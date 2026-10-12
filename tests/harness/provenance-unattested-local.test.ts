@@ -33,7 +33,7 @@
  * the tests below.
  */
 import { execFile } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
@@ -268,5 +268,156 @@ describe("provenance: a package that publishes no attestation", () => {
     const sources = await resolveProvenanceSources(bareEntry);
     expect(sources.packages).toHaveLength(0);
     expect(sources.notes.join("\n")).not.toContain("SCRIPTC_PROVENANCE_UNATTESTED names it");
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * THE ARM REACHED THROUGH A MAPPED PACKAGE'S DEPENDENCY EDGE.
+ *
+ * Every test above arms the knob against a package the TEST ENTRY IMPORTS BY
+ * NAME. A top-level bare import is handed to the mapper by the opening
+ * `bareImportsOf([entry])` loop, so such a package is already a key of
+ * `processed` before the arm runs, whatever else is true of the walk. Those
+ * eight tests are therefore green with or without the implementation-twin
+ * edge -- and that edge is the only thing that puts the REAL population into
+ * the map. Of the unattested packages on the zapo-rest MySQL service, none is
+ * imported by the service: `iconv-lite` and `long` arrive as dependencies of
+ * mysql2, discovered by walking the implementation beside mysql2's mapped
+ * `promise.d.ts`. Without that edge the arm's work list
+ *
+ *     [...processed].filter(([n, t]) => t === null && unattestedNamed.has(n) ...)
+ *
+ * is EMPTY for them: absent from the map is not null in the map, and the arm
+ * cannot see a package nothing ever enqueued. Measured on the real service,
+ * this arm alone moved 26 blockers to 26 with a byte-identical site set, and
+ * 17 to 15 once the twin edge was in the tree with it.
+ *
+ * This fixture is that shape in miniature. `unattmid` is manifest-seeded and
+ * authored-JavaScript, so its mapped entry is a `.d.ts`; its implementation
+ * twin requires `unattleaf`, which is installed, answers 404 for its
+ * attestation and is in no manifest. Nothing but the twin walk reaches it.
+ *
+ * WHAT IT DISCRIMINATES: whether the arm can admit a package that arrives as
+ * a mapped package's own dependency. Without the twin edge the armed test
+ * below fails on its first assertion -- `unattleaf` is not in the mapped set
+ * at all and the entry still carries `the 'unattleaf' module is not supported
+ * yet`.
+ *
+ * WHAT IT DOES NOT. It does not separate the twin WALK from the bare-REQUIRE
+ * resolution; `tests/harness/provenance-authored-js.test.ts` separates those.
+ * It does not cover the non-404 declines -- the tests above own them. And it
+ * deliberately does NOT build and run: no shape of `require` in the mapped
+ * host's implementation gets the leaf's VALUE across today. Three were
+ * measured on this fixture -- a namespace const leaves two SC2013 runtime
+ * fences, a destructure turns into two SC1090 blockers at the consumer, and
+ * `require('x').y` reads as a run-time specifier (SC2020). The sibling
+ * authored-JS dependency fixture has the same ceiling (SC1090, namespace
+ * objects as first-class values), so this is the lane's boundary and not
+ * something about being unattested. The last test pins that boundary so a
+ * change to it cannot pass unnoticed.
+ *
+ * GREEN BY CONSTRUCTION -- the independent ways this could pass without
+ * exercising anything, each closed by an assertion and not by reading:
+ *   1. the entry naming `unattleaf` itself, which would enqueue it through
+ *      the opening loop exactly as the eight tests above do;
+ *   2. the manifest seeding `unattleaf`, which would map it on the attested
+ *      path and never reach the arm at all;
+ *   3. the mapped host carrying a TypeScript source, which would let the
+ *      ordinary relative walk -- not the twin edge -- find the dependency;
+ *   4. a `local://` admission left behind by an earlier test in this file,
+ *      which the package name and version in the note rule out.
+ */
+const depEntry = join(fixtureDir, "cases/unattesteddep/main.ts");
+const depManifest = join(fixtureDir, "manifest-unattdep.json");
+const depImpl = join(fixtureDir, "attested-src/unattmid/index.js");
+
+/** The mapped host is seeded by manifest; the leaf is deliberately not. Both
+ * are named to the authored-JavaScript gate because both publish what they
+ * authored -- that gate and this arm are independent and both opt-in. */
+function armDep(unattested: string | undefined): void {
+  process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifest;
+  process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "unattmid,unattleaf";
+  if (unattested === undefined) delete process.env["SCRIPTC_PROVENANCE_UNATTESTED"];
+  else process.env["SCRIPTC_PROVENANCE_UNATTESTED"] = unattested;
+}
+
+describe("provenance: an unattested package reached as a mapped package's dependency", () => {
+  test("the fixture cannot reach the leaf any way except the dependency edge", () => {
+    /* (1) and (2). Read off disk rather than asserted from memory: an edit to
+     * either file is exactly what would quietly turn the armed test below
+     * into the top-level-import case this file already has eight of. */
+    expect(readFileSync(depEntry, "utf8")).not.toContain("unattleaf");
+    expect(readFileSync(depManifest, "utf8")).not.toContain("unattleaf");
+    /* (3). The host publishes a declaration and an implementation and no
+     * TypeScript source, so the authored rule is the only rule that maps it
+     * and the twin walk is the only walk that can see the require below. */
+    expect(readFileSync(depImpl, "utf8")).toContain("require('unattleaf')");
+  });
+
+  test("UNSET: the dependency keeps its refusal and nothing claims otherwise", async () => {
+    /* Not a discriminator -- it passes with or without the twin edge, for two
+     * different reasons -- but it is the inverted arm for the test below, on
+     * the same fixture, the same stub and the same process. */
+    armDep(undefined);
+    stubFetch(404);
+    const sources = await resolveProvenanceSources(depEntry);
+    expect(sources.packages.map((p) => p.name)).not.toContain("unattleaf");
+    const notes = sources.notes.join("\n");
+    expect(notes).not.toContain("UNATTESTED");
+    expect(notes).not.toContain("local://");
+    setProvenanceSources(sources);
+    expect(analyze(depEntry).coverage.diagnostics.map((d) => d.message)).toContain(
+      "the 'unattleaf' module is not supported yet",
+    );
+  });
+
+  test("ARMED: a dependency two edges from the entry is admitted and mapped", async () => {
+    armDep("unattleaf");
+    stubFetch(404);
+    const sources = await resolveProvenanceSources(depEntry);
+    const byName = new Map(sources.packages.map((p) => [p.name, p]));
+    /* The load-bearing line. `unattleaf` is in the mapped set ONLY because
+     * the walk read the implementation beside `unattmid`'s mapped `.d.ts`,
+     * offered the require()d name to the pipeline, and the pipeline left it
+     * in `processed` as null for the arm to find. Take the twin edge away
+     * and this is `["unattmid"]`. */
+    expect([...byName.keys()].sort()).toEqual(["unattleaf", "unattmid"]);
+    const leaf = byName.get("unattleaf")!;
+    expect(leaf.repo.startsWith("local://")).toBe(true);
+    expect(leaf.repo).toContain("node_modules/unattleaf");
+    expect(leaf.commit).toBe("unattested");
+    /* The mapped entry is the leaf's own installed declaration, not a
+     * checkout: there is no attested tree for it anywhere. */
+    expect(leaf.entries["unattleaf"]!.split("\\").join("/")).toMatch(
+      /node_modules\/unattleaf\/index\.d\.ts$/,
+    );
+    /* (4): name AND version, so a note left by another test cannot satisfy it. */
+    expect(sources.notes.join("\n")).toContain("unattleaf@0.3.4: UNATTESTED");
+    /* The host's own mapping had to reach it as an EXTERNAL specifier, which
+     * is the record the twin walk writes. */
+    expect(Object.keys(byName.get("unattmid")!.external ?? {})).toContain("unattleaf");
+    setProvenanceSources(sources);
+    /* And the static refusal the arm exists to remove is gone. */
+    expect(analyze(depEntry).coverage.diagnostics.map((d) => d.message)).not.toContain(
+      "the 'unattleaf' module is not supported yet",
+    );
+  });
+
+  test("the lane's ceiling: the mapping lands, the VALUE still does not cross", async () => {
+    /* Pinned deliberately. A mapped dependency of a mapped authored-JS
+     * package compiles as far as the module edge and no further: reading a
+     * value off it leaves a runtime fence, so a build of this entry links and
+     * then throws at module init. That ceiling belongs to the authored lane,
+     * not to this arm -- the attested sibling fixture hits it too -- and
+     * pinning it here is what stops "the blocker went away" from being read
+     * as "the value arrived". */
+    armDep("unattleaf");
+    stubFetch(404);
+    setProvenanceSources(await resolveProvenanceSources(depEntry));
+    const { coverage } = analyze(depEntry);
+    expect(coverage.diagnostics).toStrictEqual([]);
+    const fences = (coverage.runtimeFences ?? []).map((d) => `${d.code}: ${d.message}`);
+    expect(fences.length).toBeGreaterThan(0);
+    expect(fences.join("\n")).toContain("'unattleaf'");
   });
 });

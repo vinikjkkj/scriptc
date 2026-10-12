@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "unattmid": {
+      "dir": "./attested-src/unattmid",
+      "commit": "7777777777777777777777777777777777777777",
+      "repo": "https://github.com/example/unattmid"
+    }
+  }
+}
