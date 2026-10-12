@@ -401,6 +401,90 @@ async function fetchAttestation(name: string, version: string): Promise<Attested
   throw new Error("attestation set carries no SLSA provenance predicate");
 }
 
+/* -- the UNATTESTED-LOCAL arm (opt-in, and off unless a package is named) --
+ *
+ * Three of mysql2's installed dependencies publish NO provenance attestation
+ * at all: iconv-lite, long and generate-function each answer HTTP 404 on
+ * /-/npm/v1/attestations/<pkg>@<version>, while mysql2 itself and four of its
+ * siblings return an SLSA predicate (re-verified live 2026-10-12). There is
+ * therefore no attested source tree for the mapper to walk, the mapping is
+ * never reached, and each one refuses as `the '<pkg>' module is not supported
+ * yet`. That is not a gap in the compiler. It is a property of how those
+ * packages are PUBLISHED, and no amount of frontend work closes it.
+ *
+ * This arm is the decision to compile the INSTALLED TARBALL of such a package
+ * as if it were its source. Everything else in this file exists in order NOT
+ * to do that, so the arm is built to be impossible to take by accident and
+ * impossible to take quietly:
+ *
+ *   NAMED, never inferred. SCRIPTC_PROVENANCE_UNATTESTED lists package names.
+ *   Unset or empty is the shipped behaviour and nothing below runs. There is
+ *   deliberately NO `1`/`true`/`all` sentinel: the authored-JS gate has one
+ *   for a historical reason (env templates predate the whitelist), and
+ *   copying it here would let a single character admit every unattested
+ *   package in a dependency tree. That is the product's posture reversed, not
+ *   a setting changed.
+ *
+ *   ABSENT, never merely UNUSABLE. The admitting condition is the registry
+ *   answering 404 -- the package publishes no attestation. An attestation
+ *   that exists and could not be fetched, parsed, followed or (when this
+ *   prototype grows the signature verification its header lists as a
+ *   production gap) VERIFIED is a different answer, and keeps today's
+ *   refusal. See attestationIsAbsent for why that distinction is a status
+ *   code and not a string compare.
+ *
+ *   SAID OUT LOUD. A package admitted here is announced with repo
+ *   `local://<installed dir>` and commit `unattested`, so the one line the
+ *   build prints per mapped package cannot read as an attestation, and a note
+ *   names the directory the bytes came from. */
+
+/** Package names SCRIPTC_PROVENANCE_UNATTESTED admits, exactly as spelled.
+ *
+ * Read on every call rather than cached, for the reason authoredJsAllowlist
+ * gives: one process may resolve twice with different settings, and the test
+ * suite is the caller that does. */
+function unattestedAllowlist(): ReadonlySet<string> {
+  const raw = process.env["SCRIPTC_PROVENANCE_UNATTESTED"];
+  if (raw === undefined) return new Set();
+  return new Set(raw.split(",").map((e) => e.trim()).filter((e) => e !== ""));
+}
+
+/** Does npm publish NO attestation for this exact package@version?
+ *
+ * TRUE on exactly one answer: HTTP 404 from the attestations endpoint. Every
+ * other outcome is false, and each one is false for its own reason:
+ *
+ *   200       an attestation EXISTS. Whatever went wrong after that -- no
+ *             SLSA predicate in the set, a source tree that would not fetch,
+ *             a package directory not found inside it, and one day a bundle
+ *             that does not verify -- is a failure to USE an attestation,
+ *             never the absence of one. Admitting those here would make this
+ *             arm exactly the hole the rest of the file is shaped to prevent:
+ *             a package whose attestation DISAGREES with what it ships would
+ *             be compiled anyway, through a door opened for packages that
+ *             make no claim at all.
+ *   other     the registry declined to answer. A decline is not an answer.
+ *   throw     no network, DNS failure, or the 30s timeout. UNAVAILABLE IS NOT
+ *             ABSENT: an offline build must not silently acquire the right to
+ *             compile unattested tarballs, and an offline build is the normal
+ *             state of every test in this suite.
+ *
+ * This asks the registry a SECOND time rather than reading the first
+ * attempt's thrown message. The message is a bare string literal inside
+ * fetchAttestation; matching it would couple two places with no compile-time
+ * relationship, and the coupling would fail silently the day the wording
+ * moves. The status code is the fact itself. The cost is one extra GET per
+ * NAMED package, and the names are a list a human typed. */
+async function attestationIsAbsent(name: string, version: string): Promise<boolean> {
+  const url = `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(`${name}@${version}`).replace(/%40/g, "@").replace(/%2F/gi, "/")}`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    return res.status === 404;
+  } catch {
+    return false;
+  }
+}
+
 /* ── source fetch (content-addressed by the attested commit) ──────────── */
 
 /** Where attested source checkouts are extracted. Unset means the user's HOME
@@ -1094,6 +1178,92 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
 
   for (const name of enqueue(bareImportsOf([entry]))) {
     await mapOne(name);
+  }
+
+  /* The UNATTESTED-LOCAL second chance. Runs only over packages the loop
+   * above ALREADY ANSWERED WITH A REFUSAL (processed -> null): the attested
+   * path has had its full, unchanged turn at every one of them first, and
+   * this consumes nothing but its leftovers. With the variable unset the
+   * allowlist is empty and the whole block is one Set size check.
+   *
+   * It has its own small fixed point, because a tarball admitted here is
+   * walked like any other mapped tree and that walk can reach a second
+   * unattested package -- iconv-lite's `safer-buffer` is one. Such a
+   * package is admitted only if it too is NAMED; the arm never widens
+   * itself. A package first DISCOVERED by the main fixed point below is
+   * deliberately NOT revisited: the arm would then be re-entered from inside
+   * a loop whose termination argument is about specifiers rather than
+   * packages. Such a package keeps today's refusal, which is the safe
+   * direction -- the failure mode is a blocker that stays, never a tarball
+   * compiled without being asked for. */
+  const unattestedNamed = unattestedAllowlist();
+  const unattestedTried = new Set<string>();
+  while (unattestedNamed.size > 0) {
+    const refused = [...processed]
+      .filter(([n, t]) => t === null && unattestedNamed.has(n) && !unattestedTried.has(n))
+      .map(([n]) => n);
+    if (refused.length === 0) break;
+    for (const name of refused) {
+      unattestedTried.add(name);
+      const installed = findInstalled(entryDir, name);
+      if (installed === null) {
+        notes.push(
+          `${name}: SCRIPTC_PROVENANCE_UNATTESTED names it, but it is not installed under the entry's node_modules; island path used`,
+        );
+        continue;
+      }
+      if (!(await attestationIsAbsent(installed.name, installed.version))) {
+        notes.push(
+          `${name}@${installed.version}: SCRIPTC_PROVENANCE_UNATTESTED names it, but the registry does not answer 404 for its attestation -- it either publishes one or could not be asked, and neither of those is an absent attestation; the attested path's answer stands and the island path is used`,
+        );
+        continue;
+      }
+      const local: MappedTree = {
+        installed,
+        dir: installed.dir,
+        repo: `local://${tsgoPath(installed.dir)}`,
+        commit: "unattested",
+        /* NO alias table, deliberately, and not for lack of a place to read
+         * one. A tsconfig inside a published tarball describes how that
+         * package's SOURCE was built, and the source is precisely what is
+         * absent here: the files being compiled are the built outputs, which
+         * carry no alias specifiers for a table to answer. Reading it would
+         * at best do nothing and at worst point targets at a `src/` the
+         * tarball does not ship. It also keeps every tree admitted here out
+         * of buildAliasScopes, whose grouping key is the COMMIT -- and the
+         * commit below is the same string for all of them. */
+        aliases: undefined,
+        entries: {},
+        external: {},
+        considered: new Set(),
+        announced: false,
+      };
+      processed.set(name, local);
+      const reached = await expandSafely(name, local);
+      /* ANNOUNCED or NOTHING HAPPENED, and the note must not say otherwise.
+       * Being admitted by this arm is permission to try, not a mapping: a
+       * tarball with no declaration and no TypeScript beside its published
+       * entry maps to nothing at all (generate-function@2.3.1 is one, and
+       * expandSafely has already said so by name). Announcing an UNATTESTED
+       * compile for such a package would put a sentence in the build output
+       * that is false about the binary -- the one failure mode this arm is
+       * least allowed to have. Put the refusal back and say what happened. */
+      if (!local.announced) {
+        processed.set(name, null);
+        notes.push(
+          `${name}@${installed.version}: SCRIPTC_PROVENANCE_UNATTESTED names it, but nothing in the installed tarball maps to a source entry, so NO unattested source was compiled and the refusal stands; island path used`,
+        );
+        continue;
+      }
+      /* It is no longer UNFETCHED: nothing was fetched and nothing failed to
+       * fetch. The diagnostics layer reads that set so it can stop advising
+       * around a network failure, and this package did not have one. */
+      unfetched.delete(name);
+      notes.push(
+        `${name}@${installed.version}: UNATTESTED -- npm publishes no provenance attestation for it, and SCRIPTC_PROVENANCE_UNATTESTED named it, so the INSTALLED TARBALL at ${tsgoPath(installed.dir)} compiles as its own source. Nothing attests that those bytes came from any repository or any commit; its provenance line reads local:// and its commit reads 'unattested' for exactly that reason`,
+      );
+      for (const n of reached) await mapOne(n);
+    }
   }
 
   // The fixed point. A located package's specifier set keeps growing as
