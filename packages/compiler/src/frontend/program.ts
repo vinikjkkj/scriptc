@@ -3858,16 +3858,52 @@ export function topLevelJsStatementOf(expr: ts.Expression): ts.Statement | null 
   return n;
 }
 
+/** The property a LITERAL element-access key names, with the key NODE — `exports[2]` and
+ * `exports['strkey']` attach the properties "2" and "strkey" — or null when
+ * the key is not such a literal.
+ *
+ * NARROW ON PURPOSE, and the narrowness is the soundness argument. A
+ * COMPUTED key (`exports[k]`, `exports[n + 1]`, a template) names a
+ * property only the runtime knows, so it is not recognized as an export at
+ * all and keeps its fence. A NUMERIC literal is admitted only where the
+ * property name Node computes (ToString of the literal's VALUE) is the
+ * literal's own spelling, which the round trip decides: `exports[1e21]`
+ * attaches "1e+21" and `exports[0x10]` attaches "16", and neither may be
+ * named by its source text. That test is self-protecting — whichever of the
+ * two spellings a scanner stored in `.text`, only the canonical one passes,
+ * so the gate cannot mis-name a property however the literal was written. */
+function staticElementKey(
+  arg: ts.Expression,
+): { node: ts.StringLiteral | ts.NumericLiteral; text: string } | null {
+  if (ts.isStringLiteral(arg)) return { node: arg, text: arg.text };
+  if (ts.isNumericLiteral(arg)) {
+    const n = Number(arg.text);
+    return Number.isFinite(n) && String(n) === arg.text ? { node: arg, text: arg.text } : null;
+  }
+  return null;
+}
+
 /** Classifies a statement as a CommonJS EXPORT assignment:
  *   - table:  `module.exports = { ... }` — the whole export table at once
  *             (obj is null when the RHS is not an object literal — the
  *             recognized-but-unsupported form, fenced by the caller);
- *   - member: `exports.f = <expr>` / `module.exports.f = <expr>`.
+ *   - member: `exports.f = <expr>` / `module.exports.f = <expr>`, and the
+ *             ELEMENT-ACCESS spelling of that same attachment when the key
+ *             is a literal (`exports[2] = 'EE_READ'`, `exports['f'] = v`).
+ *             `text` is the statically-known property name, null only for a
+ *             private identifier — the one `MemberName` that names no
+ *             export, which the statement lowering fences by name.
  * Null for everything else. Callers gate on top-level position in a JS
  * module file — these forms anywhere else keep their generic fences. */
 export function cjsExportAssignmentOf(stmt: ts.Statement):
   | { kind: "table"; obj: ts.ObjectLiteralExpression | null; expr: ts.BinaryExpression }
-  | { kind: "member"; name: ts.MemberName; value: ts.Expression; expr: ts.BinaryExpression }
+  | {
+      kind: "member";
+      name: ts.MemberName | ts.StringLiteral | ts.NumericLiteral;
+      text: string | null;
+      value: ts.Expression;
+      expr: ts.BinaryExpression;
+    }
   | null {
   if (!ts.isExpressionStatement(stmt)) return null;
   const e = stmt.expression;
@@ -3879,7 +3915,35 @@ export function cjsExportAssignmentOf(stmt: ts.Statement):
     const recv = e.left.expression;
     const isExports = ts.isIdentifier(recv) && recv.text === "exports";
     if (isExports || isModuleExportsAccess(recv)) {
-      return { kind: "member", name: e.left.name, value: e.right, expr: e };
+      const name = e.left.name;
+      return {
+        kind: "member",
+        name,
+        text: ts.isIdentifier(name) ? name.text : null,
+        value: e.right,
+        expr: e,
+      };
+    }
+  }
+  // `exports[<literal>] = <expr>` — the SAME attachment the property-access
+  // arm above answers, spelled with a key. Node's semantics do not differ by
+  // one step: the statement defines the property the key names. Leaving the
+  // arm out did not fence a dynamic shape, it made ONE COMPILER DISAGREE
+  // WITH ITSELF — cjs-lexer.ts (Node's lexer, mirrored) already reads
+  // `exports['f'] =` as an export and binds the name for importers, while
+  // this recognizer answered null, so the bare `exports` receiver fell
+  // through to lowerExpr's generic "a binding form with no lowering" fence
+  // and the attachment deferred to a runtime throw. MEASURED on
+  // mysql2@3.x's generated lookup table lib/constants/errors.js: its 1,971
+  // `exports.NAME = <int>` lines fence zero times and its 1,971
+  // `exports[<int>] = '<name>'` lines fence every time — 1,971 of the
+  // package's 2,252 deferred throws, one construct, perfectly symmetric.
+  if (ts.isElementAccessExpression(e.left) && !e.left.questionDotToken) {
+    const recv = e.left.expression;
+    const isExports = ts.isIdentifier(recv) && recv.text === "exports";
+    const key = staticElementKey(e.left.argumentExpression);
+    if ((isExports || isModuleExportsAccess(recv)) && key !== null) {
+      return { kind: "member", name: key.node, text: key.text, value: e.right, expr: e };
     }
   }
   return null;
@@ -3922,7 +3986,7 @@ export function cjsExportDiscardReason(stmt: ts.Statement): string | null {
   if (myIdx < lastTable) {
     return "export members attached before a 'module.exports =' assignment (Node replaces the export object — importers never see this member; attach it to module.exports AFTER the table)";
   }
-  const left = mine.expr.left as ts.PropertyAccessExpression;
+  const left = mine.expr.left as ts.PropertyAccessExpression | ts.ElementAccessExpression;
   return ts.isIdentifier(left.expression) && left.expression.text === "exports"
     ? "'exports.f =' after a 'module.exports =' assignment ('exports' still references the replaced object — Node discards this member; write module.exports.f instead)"
     : null;

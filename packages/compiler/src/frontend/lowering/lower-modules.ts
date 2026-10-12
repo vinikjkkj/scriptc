@@ -1314,14 +1314,14 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             deferJsCollectionDiags(L, sf, diagsBefore);
           }
         };
-        if (cjs?.kind === "member" && ts.isIdentifier(cjs.name)) {
+        if (cjs?.kind === "member" && cjs.text !== null) {
           // `exports.C = C` naming a CLASS declaration: alias plumbing —
           // no storage (a class VALUE global would fence for
           // builtin-derived classes); importers re-resolve to the class
           // symbol (cjsMemberExportClassSymbol) and the class registry
           // applies unchanged.
           if (L.cjsMemberExportClassSymbol(cjs.expr) !== null) continue;
-          registerExport(cjs.name, cjs.name.text, cjs.value);
+          registerExport(cjs.name, cjs.text, cjs.value);
           continue;
         }
         // `module.exports = <scalar literal>` — a single-value replacement
