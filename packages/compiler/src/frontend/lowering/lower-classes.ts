@@ -7878,6 +7878,72 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             const ctx = L.checker.getContextualType(expr);
             const ctxMapped = ctx ? L.mapTypeOf(ctx) : null;
             if (ctxMapped?.kind === "array") t = ctxMapped;
+            else if (ctx !== undefined && ctx.isUnionType()) {
+              // ...and the contextual type can arrive as a UNION that carries
+              // the annotation without mapping AS a union. `number[] | null` is
+              // one. So is the shape an `async` body produces: a `return` inside
+              // one is contextualised through `Awaited<T>` and lands as
+              // `number[] | PromiseLike<number[]>` -- the annotation DOES cross
+              // the Promise, it just crosses as a union ARM. Without this walk
+              // `staticArr` stays null and `badType` fires SC2011 on the `any[]`
+              // the no-type-argument `new Array()` overload pins, while the
+              // element type sat in one of the arms. This is the `new Map()`
+              // contextual-union repair with its own container substituted.
+              //
+              // THE TEST ABOVE STAYS FIRST, and that ordering is load-bearing.
+              // `mapTypeOf` COLLAPSES a union whose arms all map to the same IR
+              // type -- `number[]`, `Array<number>` and `ReadonlyArray<number>`
+              // all return the same array IR -- so `number[] |
+              // ReadonlyArray<number>` already satisfied the whole-type test and
+              // already lowered on the parent commit (MEASURED, all three
+              // spellings). A draft that REPLACES the test with this walk finds
+              // two mappable arms, declines, and turns that lowering into an
+              // SC2011 refusal -- which is exactly what the first draft of the
+              // Map repair did. Falling THROUGH keeps this edit a strict
+              // superset of what was here.
+              //
+              // EXACTLY ONE arm may map, and that one is adopted. Two or more is
+              // a CHOICE this code has no grounds to make: for `number[] |
+              // string[]` either choice types every element one of two
+              // incompatible ways and the wrong one is silent. So nothing is
+              // adopted and the refusal below stands. Unlike the Map sibling --
+              // where SC2009 fences the two-arm union upstream and the guard is
+              // only a fence -- `number[] | string[]` reaches HERE on this tree
+              // and refuses with SC2011, so this guard is LIVE and the test for
+              // it discriminates. `number[] | number[][]` is the sharper one:
+              // its two arms differ only in nesting depth, so taking either
+              // would type the other's slots wrong with nothing to notice it.
+              //
+              // This branch runs ONLY when neither the expression type nor the
+              // whole contextual type mapped to an array, a path already headed
+              // for `badType`. Widening it can turn a REFUSAL into a lowering
+              // and can never turn a lowering into a refusal.
+              let armArr: (IrType & { kind: "array" }) | null = null;
+              let arrayArmCount = 0;
+              for (const arm of ts.constituentTypes(ctx)) {
+                const armIr = L.mapTypeOf(arm);
+                if (armIr?.kind === "array") {
+                  arrayArmCount += 1;
+                  armArr = armIr;
+                }
+              }
+              // An env-gated count of how often this branch is REACHED, so a
+              // blast-radius sweep can report the POWER of its null instead of
+              // reporting "no regressions" over programs that never ran it.
+              if (process.env["SCRIPTC_TRACE_ARRAY_UNION_ARM"] === "1") {
+                // process.stderr.write, NOT console.error: the lowering
+                // probes in this repo stub console.error while they lower,
+                // so a trace on that channel reads ZERO precisely in the
+                // programs that DO enter this branch. Measured: the first
+                // build of this counter reported 0 of 1747 corpus programs
+                // AND 0 for a hand-built repro that provably adopts an arm.
+                // Same channel as the `[mapbox]` trace further down.
+                process.stderr.write(
+                  `[array-union-arm] arms=${String(arrayArmCount)} adopted=${String(arrayArmCount === 1)} file=${expr.getSourceFile().fileName}\n`,
+                );
+              }
+              if (arrayArmCount === 1 && armArr !== null) t = armArr;
+            }
           }
           return t?.kind === "array" ? t : null;
         })();
