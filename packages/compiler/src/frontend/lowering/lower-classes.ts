@@ -8037,6 +8037,56 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           if (ctx && ctxMapped?.kind === "map") {
             tsType = ctx;
             mapped = ctxMapped;
+          } else if (ctx !== undefined && ctx.isUnionType()) {
+            // ...and the contextual type can arrive as a UNION that carries
+            // the annotation without mapping AS a union. `Map<K,V> | null`
+            // is one. So is the shape an `async` body produces: a `return`
+            // inside one is contextualised through `Awaited<T>` and lands as
+            // `Map<K,V> | PromiseLike<Map<K,V>>` -- the annotation DOES
+            // cross the Promise, it just crosses as a union ARM. The
+            // `async` is only a PROXY; the discriminator is the UNION, and a
+            // SYNCHRONOUS `: Map<string, Uint8Array> | null` refuses
+            // identically with no `async` anywhere in the file.
+            //
+            // THE TEST ABOVE STAYS FIRST, and that ordering is load-bearing.
+            // `mapTypeOf` COLLAPSES a union whose arms all map to the same
+            // IR type -- ReadonlyMap<K,V> and Map<K,V> both return
+            // mapOf(K,V) -- so `Map<string, number> | ReadonlyMap<string,
+            // number>` already satisfied the whole-type test and already
+            // lowered. A first draft of this repair replaced that test with
+            // the arm walk below and turned exactly that program from
+            // lowering into `SC1090 Map keys of type 'any'`. Falling THROUGH
+            // keeps this edit a strict superset of what was here.
+            //
+            // EXACTLY ONE arm may map, and that one is adopted. Two or more
+            // is a CHOICE this code has no grounds to make: for
+            // `Map<string, number> | Map<number, string>` either pick keys
+            // the table one of two incompatible ways and the wrong one is
+            // silent. So nothing is adopted and the refusal below stands.
+            // (Such a union is today already refused UPSTREAM by SC2009
+            // before this constructor is lowered -- measured, not assumed --
+            // so the guard is the fence for the day that stops being true.)
+            //
+            // Both arms of this `else if` run ONLY when `mapped?.kind !==
+            // "map"`, a path that was already going to refuse. Widening it
+            // can therefore turn a REFUSAL into a lowering and can never
+            // turn a lowering into a refusal -- the same discipline as the
+            // `Awaited<void>` slot repair this branch already carries.
+            let armTs: ts.Type | null = null;
+            let armMapped: IrType | null = null;
+            let armCount = 0;
+            for (const arm of ts.constituentTypes(ctx)) {
+              const armIr = L.mapTypeOf(arm);
+              if (armIr?.kind === "map") {
+                armCount += 1;
+                armTs = arm;
+                armMapped = armIr;
+              }
+            }
+            if (armCount === 1 && armTs !== null && armMapped !== null) {
+              tsType = armTs;
+              mapped = armMapped;
+            }
           }
         }
         // ...and with no annotation and no contextual type, the binding's
