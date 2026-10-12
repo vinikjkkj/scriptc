@@ -3236,7 +3236,40 @@ function preflight7(load: LoadResult): {
   //    strongly-connected component has an inert top level and the
   //    closing edge's bindings are used only in deferred positions, so no
   //    read can execute before every member initialized).
-  const cycleAdmissionReason = makeCycleAdmission(program, (sf) => edges.get(sf) ?? []);
+  /* A DECLARATION module's edges are its IMPLEMENTATION TWIN's edges.
+   *
+   * `edges` is keyed by userFile, and a `.d.ts` is never one — it has no
+   * statements to walk and no runtime behaviour of its own. The twin DOES:
+   * checkPreflight splices it into moduleOrder right ahead of its
+   * declaration (declTwinOf), so the twin's top level is LOWERED and its
+   * requires/imports run at startup. Until this line the walk asked the
+   * declaration for its dependencies, got nothing, and stopped — so every
+   * module reachable ONLY through a twin was in the PROGRAM and absent from
+   * the MODULE ORDER, i.e. never lowered.
+   *
+   * Measured on the real zapo-rest entry under --provenance-sources with
+   * SCRIPTC_PROVENANCE_AUTHORED_JS=1: mysql2 maps to its attested
+   * `promise.d.ts`, whose twin `promise.js` acquires its whole package in
+   * sixteen `const X = require('./lib/...')` statements. Of mysql2's 92
+   * attested `lib/` files in the program, exactly ONE had a statsByFile key
+   * — the twin itself — and every reference in it to one of those bindings
+   * refused with "a binding form with no lowering", because the module that
+   * registers the binding had never been lowered. The refusal was correct;
+   * the graph was short one edge.
+   *
+   * It is the same edge list, read through one indirection — not a new
+   * kind of edge — so the cycle admission reads it too (its contract is
+   * that `edgesOf` answers the same edges for the same file every time),
+   * and the twin lands ahead of its declaration exactly as before. A
+   * declaration with no compiled twin answers the empty list it always
+   * did. */
+  const edgesOf = (sf: ts.SourceFile): readonly CycleEdge[] => {
+    const own = edges.get(sf);
+    if (own !== undefined) return own;
+    const twin = declTwinOf(program, sf);
+    return twin !== undefined ? edges.get(twin) ?? [] : [];
+  };
+  const cycleAdmissionReason = makeCycleAdmission(program, edgesOf);
   const order: ts.SourceFile[] = [];
   const state = new Map<ts.SourceFile, "visiting" | "done">();
   const stack: string[] = [];
@@ -3247,7 +3280,7 @@ function preflight7(load: LoadResult): {
     state.set(sf, "visiting");
     stack.push(sf.fileName);
     sfStack.push(sf);
-    for (const e of edges.get(sf) ?? []) {
+    for (const e of edgesOf(sf)) {
       if (e.dep === sf) continue; // self-import: a Node cache hit, not a cycle
       const s = state.get(e.dep);
       if (s === "done") continue;
