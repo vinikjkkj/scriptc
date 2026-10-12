@@ -20056,6 +20056,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
       return null;
     }
+    // A checker-union receiver whose VALUE lowered to an ISLAND HANDLE.
+    // Reached only under --dynamic, and only one rung below a receiver with
+    // no static representation: `config.cacheTtlMs?.retryMs` in
+    // @zapo-js/store-mysql, where `config` is a WaMysqlStoreConfig living in
+    // the engine, so the OUTER read answered JSVAL while the checker still
+    // types `config.cacheTtlMs` as a declared record `| undefined` -- a
+    // union. isIslandExpr says no, because the TYPE is mappable, so the
+    // island property read never claimed this site, and the assert below
+    // fired on a value that is simply in the other world.
+    //
+    // The engine property read: the same node the island path builds for
+    // `o.x` on a handle, and the exact sibling of the dyn arm above. The two
+    // dynamic worlds answer their own receivers, and a union the CHECKER
+    // sees over a value the ENGINE holds is the engine's to read.
+    if (value.type.kind === "jsval") {
+      return { kind: "jsOp", op: "getProp", name: expr.name.text, args: [value], type: JSVAL, loc: locOf(expr) };
+    }
     if (value.type.kind !== "union") {
       throw new Error("lowerer bug: union-typed receiver lowered to a non-union");
     }
