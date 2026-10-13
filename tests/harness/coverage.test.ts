@@ -219,7 +219,7 @@ test("'exports[<literal>]' lowers; a key only the runtime knows keeps its fence"
   // template key, a call-expression key, and `1e400` -- a NumericLiteral
   // whose property name is "Infinity", not its own spelling.
   expect(out).toContain("5 sites");
-  expect(out).toMatch(/×5s+the reference to 'exports' (a binding form with no lowering)/);
+  expect(out).toMatch(/×5\s+the reference to 'exports' \(a binding form with no lowering\)/);
   // The admitted half carries no site at all: before the element-access arm
   // this same fixture reported 8.
   expect(out).not.toContain("8 sites");
