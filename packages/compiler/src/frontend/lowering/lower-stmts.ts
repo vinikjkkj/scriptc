@@ -6313,12 +6313,19 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       const discarded = ts.isExpressionStatement(stmt) ? cjsExportDiscardReason(stmt) : null;
       if (discarded !== null) L.unsupported("SC1090", cjs.expr, discarded);
     }
-    const assignExport = (nameNode: ts.Node, value: ts.Expression): IrStmt => {
+    // `staticName`, when given, is the property name the RECOGNIZER
+    // resolved (cjsExportAssignmentOf's `text`) — the element-access
+    // spelling's key node carries no symbol of its own, and its `.text` is
+    // only the property name because the recognizer's literal gate said so.
+    // Callers that pass nothing keep the identifier-node fallback exactly.
+    const assignExport = (nameNode: ts.Node, value: ts.Expression, staticName?: string): IrStmt => {
       const symbol =
         L.checker.getSymbolAtLocation(nameNode) ??
-        (ts.isIdentifier(nameNode) || ts.isPrivateIdentifier(nameNode)
-          ? L.cjsModuleExportSymbol(cjs.expr.getSourceFile(), nameNode.text)
-          : undefined);
+        (staticName !== undefined
+          ? L.cjsModuleExportSymbol(cjs.expr.getSourceFile(), staticName)
+          : ts.isIdentifier(nameNode) || ts.isPrivateIdentifier(nameNode)
+            ? L.cjsModuleExportSymbol(cjs.expr.getSourceFile(), nameNode.text)
+            : undefined);
       const g = symbol ? L.globalsBySymbol.get(symbol) : undefined;
       if (!g) {
         // Registration reported the blocker (or the name form is beyond
@@ -6329,7 +6336,11 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       return { kind: "assign", localId: g.id, value: L.lowerExprExpecting(value, g.type), loc: locOf(value) };
     };
     if (cjs.kind === "member") {
-      if (!ts.isIdentifier(cjs.name)) {
+      // A private identifier is the one MemberName that names no export,
+      // and a non-literal element key never reaches here at all (the
+      // recognizer does not admit it). Both keep a fence; only this one is
+      // named.
+      if (cjs.text === null) {
         L.unsupported("SC1090", cjs.name, "computed or private export names");
       }
       // A member export naming a CLASS declaration is alias plumbing (no
@@ -6348,7 +6359,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       // the real assignment's position already orders. Preambles with no
       // later real assignment keep the ordinary path (the export IS
       // undefined then).
-      if (ts.isIdentifier(cjs.name)) {
+      if (cjs.text !== null) {
         const isExportsMember = (e: ts.Expression): e is ts.PropertyAccessExpression =>
           ts.isPropertyAccessExpression(e) &&
           ts.isIdentifier(e.name) &&
@@ -6363,7 +6374,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           return e.kind === ts.SyntaxKind.VoidExpression || (ts.isIdentifier(e) && e.text === "undefined");
         };
         // chains: `exports.a = exports.b = void 0;` collects every name
-        const names: string[] = [cjs.name.text];
+        const names: string[] = [cjs.text];
         let tail: ts.Expression = cjs.value;
         while (
           ts.isBinaryExpression(tail) &&
@@ -6379,15 +6390,15 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           const laterRealOf = (name: string): boolean =>
             sfHere.statements.some((s) => {
               const other = cjsExportAssignmentOf(s);
-              if (other?.kind !== "member" || !ts.isIdentifier(other.name)) return false;
-              if (other.name.text !== name) return false;
+              if (other?.kind !== "member" || other.text === null) return false;
+              if (other.text !== name) return false;
               if (other.expr.getStart(sfHere) <= myPos) return false;
               return !isVoid(other.value);
             });
           if (names.every(laterRealOf)) return { kind: "block", body: [], loc };
         }
       }
-      return assignExport(cjs.name, cjs.value);
+      return assignExport(cjs.name, cjs.value, cjs.text);
     }
     let tableObj = cjs.obj;
     let resolvedTarget = false;

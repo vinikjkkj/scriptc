@@ -17348,7 +17348,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const cjs = cjsExportAssignmentOf(stmt);
       if (!cjs) continue;
       if (cjs.kind === "table" && cjsExportDiscardReason(stmt) === null) replaced = true;
-      if (cjs.kind === "member" && ts.isIdentifier(cjs.name) && cjs.name.text === expr.name.text) {
+      if (cjs.kind === "member" && cjs.text === expr.name.text) {
         return null; // a real attachment of this name exists somewhere
       }
     }

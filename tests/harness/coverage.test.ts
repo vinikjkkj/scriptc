@@ -205,6 +205,26 @@ test("a module.exports TABLE entry over a rebindable let keeps its fence", () =>
   expect(out).toMatch(/×2\s+exporting the mutable 'let' binding 'n' by reference/);
 });
 
+test("'exports[<literal>]' lowers; a key only the runtime knows keeps its fence", () => {
+  // `exports[k] = v` is the SAME attachment as `exports.k = v`, spelled with
+  // a key: Node defines the property the key names and nothing else differs.
+  // The recognizer admits it only when the key is a LITERAL whose property
+  // name is a compile-time constant, so this fixture is a PAIR -- four
+  // attachments that must lower, and five keys that must still fence. The
+  // second half is load-bearing: admitting the general element access would
+  // name at compile time a property Node names at run time, which is the
+  // silent-divergence trap, not a lowering.
+  const out = report(fixture("cjs-export-element-access/main.cjs"));
+  // The refused half, by count: an identifier key, an arithmetic key, a
+  // template key, a call-expression key, and `1e400` -- a NumericLiteral
+  // whose property name is "Infinity", not its own spelling.
+  expect(out).toContain("5 sites");
+  expect(out).toMatch(/×5\s+the reference to 'exports' \(a binding form with no lowering\)/);
+  // The admitted half carries no site at all: before the element-access arm
+  // this same fixture reported 8.
+  expect(out).not.toContain("8 sites");
+});
+
 test("type errors block analysis", () => {
   const out = report(fixture("type-errors.ts"));
   expect(out).toContain("not analyzable");
