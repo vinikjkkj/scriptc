@@ -35,7 +35,8 @@ import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lower
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
 import { declSymbolOf } from "./lower-modules.js";
 import { expandoMemberRead } from "./lower-expando.js";
-import { npmStaticPackageOfPath } from "../npm-static.js";
+import { isNpmStaticPackage, npmStaticPackageOfPath } from "../npm-static.js";
+import { provenancePackageOfFile } from "../provenance-registry.js";
 
 /** Does this parameter take paramShape's ISLAND-REST form? A JS
  * `(...args)` has no static element type — tsc's `any[]` is inference
@@ -2709,7 +2710,40 @@ const SYMBOLIC_PAIR_BUDGET = 256;
    * DECLARED in an opted-in package's JS files (user JS keeps today's
    * checked-dynamic story until the corpus is re-baselined). */
   export function implicitMonoFile(sf: ts.SourceFile): boolean {
-    return isJsSourceFile(sf) && npmStaticPackageOfPath(sf.fileName) !== null;
+    if (!isJsSourceFile(sf)) return false;
+    if (npmStaticPackageOfPath(sf.fileName) !== null) return true;
+    /* THE AUTHORED-JS LANE READ THIS GATE OFF FOR A PACKAGE THAT IS IN THE
+     * SET. npmStaticPackageOfPath answers by PATH: the innermost
+     * node_modules segment, else a registered workspace realpath
+     * (npm-static.ts). --provenance-sources with the authored-JS whitelist
+     * maps an opted-in package to its ATTESTED checkout in the
+     * content-addressed cache, which has neither -- measured directly:
+     * npmStaticPackageOfPath answers "mysql2" for
+     *   <app>/node_modules/mysql2/lib/pool_connection.js
+     * and null for the byte-identical
+     *   <cache>/e224afef.../lib/pool_connection.js
+     * so every statement of mysql2@3.24.5 lost implicit-any
+     * monomorphization the moment the lane moved the bytes. Measured on
+     * the mysql2 subtree of a store-mysql driver: 88 files / 7,729
+     * statements / 432 runtime fences before, 88 files / 5,709 / 201
+     * after -- the same 88 files, against 70 / 5,498 / 206 on the
+     * ordinary --npm-static lane where the gate was never off. The 7,729
+     * was not extra coverage; it was the same bodies lowered
+     * checked-dynamic, and it carried 231 more deferred throws.
+     * The gate asks WHOSE JavaScript this is; the path was a proxy for
+     * that, and this lane is the one that breaks the proxy.
+     *
+     * Scoped to THIS predicate deliberately. npmStaticPackageOfPath also
+     * drives the fs shadow, resolve.ts's internal-edge rule and
+     * program.ts's checker-error suppression; widening it there would put
+     * the declaration-hiding machinery onto the attested tree, which is a
+     * different question with a measured-bad answer. */
+    const prov = provenancePackageOfFile(sf.fileName);
+    const on = prov !== null && isNpmStaticPackage(prov.name);
+    if (process.env["SCRIPTC_MONO_WHY"] !== undefined) {
+      process.stderr.write(`MONOWHY ${on ? "prov-on" : "off"} ${prov?.name ?? "-"} ${sf.fileName}\n`);
+    }
+    return on;
   }
 
 /** True when the body (or a nested function capturing it) ever WRITES the
