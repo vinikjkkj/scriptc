@@ -3378,6 +3378,11 @@ export type IrLibFn =
    * (scr_lib.c: the ToUint32 wrap the bitwise six already use, then the
    * count). Never throws. */
   | "math.clz32"
+  /** `Math.imul(a, b)` — ECMA-262 Math.imul: the product of the two
+   * ToUint32 values, truncated to 32 bits and read back as a signed
+   * int32 (scr_lib.c: the same ToUint32 wrap clz32 uses, then one
+   * unsigned multiply, whose overflow C defines). Never throws. */
+  | "math.imul"
   /** The static global parsers/tests (scr_string.c). num.parseInt is
    * ECMA-262 19.2.5 exactly — JS whitespace, sign, ToInt32 radix (the
    * frontend completes an omitted radix to 0 = the spec's "undefined":

@@ -1528,6 +1528,8 @@ double scr_math_random(void);
 double scr_math_pow(double x, double y);
 /* Math.clz32 — leading zeros of ToUint32(x); 32 for zero. */
 double scr_math_clz32(double x);
+/* Math.imul — ToInt32(ToUint32(a) * ToUint32(b)), the 32-bit product. */
+double scr_math_imul(double a, double b);
 
 /* ── the integer-domain fast arms ───────────────────────────────────────
  *

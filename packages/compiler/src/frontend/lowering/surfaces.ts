@@ -537,6 +537,11 @@ export const STATIC_MATH_FNS: Record<string, { fn: IrLibFn; arity: number } | un
   pow: { fn: "math.pow", arity: 2 },
   log: { fn: "math.log", arity: 1 },
   clz32: { fn: "math.clz32", arity: 1 },
+  // imul joined for the same reason clz32 did: it is a pure 32-bit
+  // integer operation with no edge C disagrees about once the two
+  // ToUint32 wraps are written down, and nothing in the lib declares
+  // another arity for it. Reached by mysql2's parser_cache hash.
+  imul: { fn: "math.imul", arity: 2 },
 };
 
 /** Math's number CONSTANTS, and their exact double values — the same

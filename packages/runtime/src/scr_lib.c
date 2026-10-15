@@ -2931,6 +2931,20 @@ double scr_math_clz32(double x) {
   return (double)n;
 }
 
+/* Math.imul — ECMA-262 21.3.2.19. Both operands go through the SAME
+ * ToUint32 wrap clz32 uses (scr_bit_or with 0 is ToUint32-then-ToInt32;
+ * the cast pair reinterprets it unsigned), the product is taken in
+ * uint32_t where C DEFINES the wraparound, and the result is read back
+ * as a signed int32 — which is what the spec's
+ * ToInt32(ToUint32(a) x ToUint32(b)) says, and why this needs no
+ * 64-bit intermediate. NaN, +-Infinity and fractional inputs all
+ * answer through ToUint32, so there is no edge to special-case. */
+double scr_math_imul(double a, double b) {
+  uint32_t x = (uint32_t)(int32_t)scr_bit_or(a, 0.0);
+  uint32_t y = (uint32_t)(int32_t)scr_bit_or(b, 0.0);
+  return (double)(int32_t)(uint32_t)(x * y);
+}
+
 double scr_math_random(void) {
   uint64_t r;
   arc4random_buf(&r, sizeof r);
