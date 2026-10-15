@@ -913,6 +913,15 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
             { name: "name", type: STRING },
             { name: "message", type: STRING },
             { name: "%code", type: STRING },
+            // `%stack` is ScrError's FOURTH slot and the same kind of
+            // layout-only field as `%code`: the `.stack` MEMO, NULL until
+            // the first read. It is not in the fields map either -- the
+            // read has its own lowering (error.stack) and the write keeps
+            // its fence. It exists because V8 formats the stack header
+            // once, at first read, while `name` and `message` ARE writable
+            // from compiled code, so without somewhere to hold the first
+            // answer the second read diverges from node.
+            { name: "%stack", type: STRING },
           ],
           loc,
         },

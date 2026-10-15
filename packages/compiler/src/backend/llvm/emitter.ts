@@ -778,6 +778,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sym.for": "scr_sym_for",
   "sym.toString": "scr_sym_to_string",
   "error.toString": "scr_error_to_string",
+  "error.stack": "scr_error_stack",
   "class.name": "scr_classobj_name",
   // The dyn (ScrDyn dyn) surface (scr_json.c / scr_dyn_invoke.c):
   // json.parse throws the catchable SyntaxError; keySet/toString/
@@ -2212,10 +2213,12 @@ class LlEmitter {
       // strings objects lay out through it (nothing GEPs into live heap
       // arrays; those stay behind the runtime's own entry points).
       `%ScrArr = type { i64, i64, i64, i32, ptr, ptr, ptr, ptr }`,
-      // The runtime error prefix { rc, vt, name, message, code } and the
-      // class-object shape { rc, pre, post, ctor, name } — field reads on
-      // builtin errors and classval loads GEP through these.
-      `%ScrError = type { i64, ptr, ptr, ptr, ptr }`,
+      // The runtime error prefix { rc, vt, name, message, code, stack } and
+      // the class-object shape { rc, pre, post, ctor, name } — field reads
+      // on builtin errors and classval loads GEP through these. `stack` is
+      // the `.stack` memo (scr_runtime.h), appended LAST so the three field
+      // indices above it never move.
+      `%ScrError = type { i64, ptr, ptr, ptr, ptr, ptr }`,
       `%ScrClassObj = type { i64, i64, i64, ptr, ptr }`,
       // The SCR_DYN_OBJINST boxing descriptor { name, pre, post, vt,
       // retain, release } — one internal constant per boxed class

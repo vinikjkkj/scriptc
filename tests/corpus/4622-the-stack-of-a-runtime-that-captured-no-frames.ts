@@ -33,10 +33,19 @@
 //     source, which a compiled binary has no way to reproduce. The named
 //     cost of this decision is exactly "line count", and it is stated in
 //     the lowering's own comment.
-//   * V8 memoises the header at FIRST READ, so mutating `.name` after a read
-//     does not change a later read; this recomputes. Measured, reachable
-//     through a `.name` write, and left out of this fixture on purpose — a
-//     fixture that pinned it would pin a divergence as correct.
+//
+// WHAT IS NOW PINNED AND WAS NOT: V8 memoises the header at FIRST READ, so
+// mutating `.name` (or `.message`) after a read does not change a later
+// read. This file used to say that case was "left out of this fixture on
+// purpose — a fixture that pinned it would pin a divergence as correct",
+// and it was right: the lowering recomputed per read and answered
+// "Renamed: boom" where node answers "Error: boom". The lowering it sits
+// beside argued the case was UNREACHABLE because "a write to an error's
+// `.name` has no lowering (the fence stands)" — but `name` and `message`
+// are exactly %Error's two declared fields, so both writes lower, and this
+// very file already recorded the case as "Measured, reachable". The
+// runtime now memoises into a `%stack` slot at the first read, so the
+// cases below are a PARITY pin rather than a divergence pin.
 
 const boom = new Error("boom");
 console.log(typeof boom.stack);
@@ -108,3 +117,68 @@ console.log(typeof dom.stack);
 const errno: NodeJS.ErrnoException = new Error("errno");
 console.log(String(errno.code === undefined), String(typeof errno.stack === "string"));
 console.log((errno.stack ?? "MISSING").split("\n")[0]);
+
+// ── THE MEMO ─────────────────────────────────────────────────────────
+// V8 formats the header once, at the FIRST read, and caches it. A later
+// write to `name` or `message` cannot reach it. Every line compares FIRST
+// LINES only, because the frame lines are the accepted divergence and this
+// lane does not set Error.stackTraceLimit = 0.
+const head = (e: Error): string => (e.stack ?? "MISSING").split("\n")[0]!;
+
+// read, rename, read: the second read must still say "Error: m1".
+const m1 = new Error("m1");
+const m1first = head(m1);
+m1.name = "Renamed";
+console.log(m1first, head(m1), String(m1first === head(m1)));
+
+// read, re-message, read: the message half memoises the same way.
+const m2 = new Error("m2");
+const m2first = head(m2);
+m2.message = "changed";
+console.log(m2first, head(m2), String(m2first === head(m2)));
+
+// rename BEFORE the first read: the memo must not pre-empt it. This is
+// the control that makes the two above measurements rather than a
+// constant — if the header were captured at CONSTRUCTION, this line would
+// print "Error: m3" and node prints "Early: m3".
+const m3 = new Error("m3");
+m3.name = "Early";
+console.log(head(m3), head(m3));
+
+// `toString` is NOT memoised: node recomputes it on every call, so after
+// a rename the two readers DISAGREE, and that disagreement is the point.
+const m4 = new Error("m4");
+const m4first = head(m4);
+m4.name = "Later";
+console.log(m4first, m4.toString(), String(m4first !== m4.toString()));
+
+// A user subclass: the memo lives in its ScrError layout prefix, and its
+// own fields have to still read correctly past it.
+class Detailed extends Error {
+  detail: string;
+  constructor(message: string, detail: string) {
+    super(message);
+    this.name = "Detailed";
+    this.detail = detail;
+  }
+}
+const m5 = new Detailed("m5", "dd");
+const m5first = head(m5);
+m5.name = "Changed";
+console.log(m5first, head(m5), m5.detail, String(m5first === head(m5)));
+
+// An error whose `.stack` is NEVER read keeps a NULL memo through its
+// whole life — the teardown path a leak audit exercises.
+let unread = 0;
+for (let i = 0; i < 64; i++) {
+  const e = new Error("unread");
+  if (e.message === "unread") unread++;
+}
+console.log(String(unread));
+
+// …and one read many times: the memo is filled once and retained per read.
+const m6 = new Error("m6");
+let same = 0;
+for (let i = 0; i < 64; i++) if (head(m6) === "Error: m6") same++;
+m6.name = "AfterLoop";
+console.log(String(same), head(m6));

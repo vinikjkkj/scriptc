@@ -6847,6 +6847,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "error.toString":
             // Borrowed receiver; +1 "name: message" (Node's toString rules).
             return finish(`scr_error_to_string(${arg(0)})`);
+          case "error.stack":
+            // Borrowed receiver; +1 the MEMOISED header. The receiver may be
+            // a user subclass struct -- the %stack slot sits in its ScrError
+            // prefix, like %code.
+            return finish(`scr_error_stack((ScrError *)${arg(0)})`);
           case "error.newDom":
             // new DOMException(message?, nameOrOptions?) — both dyn args
             // borrowed (WebIDL resolution runs in the runtime); +1

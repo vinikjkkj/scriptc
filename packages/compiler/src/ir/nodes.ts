@@ -5057,6 +5057,13 @@ export type IrLibFn =
   | "class.name"
   | "error.ctor"
   | "error.toString"
+  /** `e.stack` (scr_error.c): borrowed `%Error`-rooted receiver, +1 the
+   * header line a zero-frame capture produces -- MEMOISED into the error's
+   * `%stack` slot at the first read, because V8 formats once at first
+   * access and a later `name`/`message` write cannot reach it. Distinct
+   * from error.toString, which node recomputes on every call. Never
+   * throws. */
+  | "error.stack"
   /** `new DOMException(message?, nameOrOptions?)` (scr_error.c): both args
    * are borrowed dyn values (the lowering passes the dyn undefined for an
    * absent argument, so WebIDL's optionality lives in one place). The

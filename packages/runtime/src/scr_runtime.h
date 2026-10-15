@@ -904,6 +904,19 @@ typedef struct ScrError {
                     * the layout prefix: the compiler's %Error class defs
                     * carry a matching third field, so user subclasses
                     * embed the slot and release it NULL-guarded. */
+  ScrStr *stack;   /* The `.stack` MEMO: NULL until the first read, then
+                    * the header scr_error_to_string produced AT THAT
+                    * MOMENT. V8 formats the stack once, at first access,
+                    * and a later `e.name = "X"` or `e.message = "y"`
+                    * cannot reach it -- measured on v22.18.0 and v25.9.0,
+                    * both of which answer "Error: boom" from a second read
+                    * after the rename, while recomputing answers
+                    * "Renamed: boom". Both slots are writable from compiled
+                    * code (they are %Error's two declared fields), so the
+                    * divergence was reachable, not hypothetical. Fourth
+                    * field of the layout prefix, like `code`: subclass
+                    * structs embed it (calloc'd NULL) and their emitted
+                    * teardown releases it NULL-guarded. */
 } ScrError;
 
 enum {
@@ -939,6 +952,9 @@ typedef struct ScrDomException {
   ScrStr *name;    /* "Error" default, or the resolved WebIDL name */
   ScrStr *message; /* "" when constructed without one */
   ScrStr *code;    /* the Node string-code slot (stays NULL here) */
+  ScrStr *stack;   /* the `.stack` memo -- MUST mirror ScrError's prefix:
+                    * scr_domex_gcfree tears a DOMException down through
+                    * scr_error_gcfree, which releases this slot. */
   double dom_code; /* the WebIDL legacy code (0 when the name is off-table) */
   bool has_cause;  /* the options form carried a `cause` member */
   struct ScrDyn *cause; /* owned; NULL when has_cause is false */
@@ -992,6 +1008,10 @@ void scr_error_init(void *obj, int kind, ScrStr *message);
 /* ECMA Error.prototype.toString: "", name, message, or "name: message".
  * Borrows e, returns +1. */
 ScrStr *scr_error_to_string(ScrError *e);
+
+/* `e.stack` -- the header a zero-frame capture produces, MEMOISED at the
+ * first read the way V8 memoises its formatted stack. +1. */
+ScrStr *scr_error_stack(ScrError *e);
 
 ScrError *scr_error_retain(ScrError *e);
 void scr_error_release(ScrError *e); /* dispatches through e->vt */

@@ -66,6 +66,7 @@ static void scr_error_gcfree(void *obj) {
   scr_str_release(e->name);
   scr_str_release(e->message);
   scr_str_release(e->code); /* NULL-safe: absent on most errors */
+  scr_str_release(e->stack); /* NULL-safe: absent until `.stack` is read */
   scr_obj_free_note();
   scr_cyc_free(e);
 }
@@ -96,6 +97,7 @@ static void scr_error_reld(void *obj) {
     scr_str_release(e->name);
     scr_str_release(e->message);
     scr_str_release(e->code); /* NULL-safe: absent on most errors */
+    scr_str_release(e->stack); /* NULL-safe: absent until `.stack` is read */
     scr_obj_free_note();
     if (scr_error_traced) scr_cyc_free(e);
     else free(e);
@@ -273,6 +275,36 @@ void scr_error_set_code(ScrError *e, const char *code) {
 
 ScrStr *scr_error_code(ScrError *e) {
   return e->code ? scr_str_retain(e->code) : NULL;
+}
+
+/* `e.stack`. This runtime captures no frames, so the value is the header
+ * line alone -- exactly what V8 produces under Error.stackTraceLimit = 0,
+ * the lane the lowering's comment names as its byte-for-byte reference.
+ *
+ * WHY THE MEMO, and it is the whole reason this is not just
+ * scr_error_to_string: V8 formats ONCE, at the first access, and caches
+ * the result inside the accessor. A later write to `name` or `message`
+ * therefore cannot change a later read. MEASURED, both runtimes:
+ *
+ *   const e = new Error('boom');
+ *   e.stack             // "Error: boom"
+ *   e.name = 'Renamed';
+ *   e.stack             // "Error: boom"   <- v22.18.0 AND v25.9.0
+ *
+ * and the same for a `message` write. Both of those slots ARE writable
+ * from compiled code -- they are %Error's two declared fields -- so
+ * recomputing per read answered "Renamed: boom" where node answers
+ * "Error: boom". The memo closes that.
+ *
+ * What is still NOT V8: the frame lines, which do not exist here. That
+ * divergence is the one surfaces.ts prices out loud.
+ *
+ * `toString` is deliberately NOT memoised: node recomputes IT on every
+ * call ("Renamed: boom" after the rename, measured), so the two readers
+ * stay separate functions over the same two slots. */
+ScrStr *scr_error_stack(ScrError *e) {
+  if (e->stack == NULL) e->stack = scr_error_to_string(e);
+  return scr_str_retain(e->stack);
 }
 
 #ifdef SCR_TRAP_TRACE

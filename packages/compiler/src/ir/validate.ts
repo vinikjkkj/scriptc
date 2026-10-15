@@ -1135,6 +1135,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "class.name": { argTypes: [null], result: STRING },
   "error.ctor": { argTypes: [null, STRING], result: VOID },
   "error.toString": { argTypes: [null], result: STRING },
+  // The MEMOISING `.stack` reader. Same receiver rule as error.toString
+  // (an `%Error`-rooted pointer), same +1 string result.
+  "error.stack": { argTypes: [null], result: STRING },
   // Receiver (any error-hierarchy object) and the program-dependent
   // `string | undefined` result are checked in the libCall case.
   "error.code": { argTypes: [null], result: VOID },
@@ -5254,9 +5257,9 @@ function validateFunction(
             break;
           }
         }
-        if (e.fn === "error.ctor" || e.fn === "error.toString") {
+        if (e.fn === "error.ctor" || e.fn === "error.toString" || e.fn === "error.stack") {
           const recv = e.args[0];
-          const wantErrorRoot = e.fn === "error.toString";
+          const wantErrorRoot = e.fn === "error.toString" || e.fn === "error.stack";
           const ok =
             recv &&
             isBuiltinErrorObject(recv.type) &&

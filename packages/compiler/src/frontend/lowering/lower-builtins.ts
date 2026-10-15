@@ -6776,11 +6776,27 @@ let digestInputValueDispatches = 0;
     // priced this out loud — "err.stack is scriptc's stack string rather
     // than V8's frame list" — and this is that string.
     //
-    // One further divergence, stated: V8 formats the header at FIRST READ
-    // and memoises it, so `e.name = "X"` AFTER a read does not change a
-    // later read; this recomputes on every read. Unreachable here — a
+    // V8 formats the header at FIRST READ and memoises it, so a later
+    // `e.name = "X"` or `e.message = "y"` does not change a later read.
+    // THAT IS MATCHED HERE, through the `%stack` memo slot, and the text
+    // this replaces said it did not need to be: "Unreachable here — a
     // write to an error's `.name` has no lowering (the fence stands), so
-    // no compiled program can observe the difference.
+    // no compiled program can observe the difference."
+    //
+    // The precondition was FALSE, and not subtly: `name` and `message` are
+    // exactly %Error's two declared fields (registerBuiltinErrorClasses),
+    // so both writes resolve a fieldTarget and lower through the ordinary
+    // field route. MEASURED on the parent commit: a four-statement program
+    // that reads `.stack`, assigns `.name`, and reads `.stack` again
+    // compiles with ZERO fences, and the binary printed "Error: boom" then
+    // "Renamed: boom" where node v22.18.0 and v25.9.0 both print
+    // "Error: boom" twice. A `message` write diverged the same way and the
+    // old text did not mention it at all.
+    //
+    // So the read goes through error.stack rather than error.toString: it
+    // fills the slot on the first read and answers from it afterwards.
+    // `toString` keeps recomputing, because node recomputes IT -- the same
+    // program's `e.toString()` answers "Renamed: boom".
     if (member === "stack") {
       const t = L.envValueType();
       if (t.kind !== "union") throw new Error("lowerer bug: envValueType is not a union");
@@ -6790,7 +6806,7 @@ let digestInputValueDispatches = 0;
         kind: "unionWrap",
         unionId: t.unionId,
         tag: strTag,
-        value: { kind: "libCall", fn: "error.toString", args: [L.upcastTo(receiver, "%Error")], type: STRING, loc },
+        value: { kind: "libCall", fn: "error.stack", args: [L.upcastTo(receiver, "%Error")], type: STRING, loc },
         type: t,
         loc,
       };
