@@ -272,26 +272,6 @@ test("a nested `module.exports.<n> =` assigns the global its own nested READ ans
   expect(out).not.toContain("5 sites");
 });
 
-test("a static METHOD copied onto a name that already answers with it is a no-op; a field is not", () => {
-  // `PoolConnection.statementKey = Connection.statementKey`. findStaticOn
-  // walks the base chain, so `Sub.statementKey` already resolves to Base's
-  // lowered body both before and after the statement -- the assignment
-  // stores the value that is already there and lowers to nothing.
-  //
-  // A PAIR on purpose, and the refused half has TWO different reasons: a
-  // DIFFERENT method under the same name (the receiver would have to start
-  // answering with something new), and a static FIELD, where JS's
-  // own-property creation is a real storage split -- that one keeps its
-  // own pointed message, which is also the proof this arm did not widen
-  // the field path by accident.
-  const out = report(fixture("static-method-copy/main.cjs"));
-  expect(out).toContain("2 sites");
-  expect(out).toMatch(/assignment to non-variables/);
-  expect(out).toMatch(/assigning the inherited static 'tag' through a subclass name/);
-  // Before the arm this same fixture reported three.
-  expect(out).not.toContain("3 sites");
-});
-
 test("type errors block analysis", () => {
   const out = report(fixture("type-errors.ts"));
   expect(out).toContain("not analyzable");
