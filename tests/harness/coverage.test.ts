@@ -248,6 +248,50 @@ test("a STRING written to an error's `code` lands in ScrError's slot; anything e
   expect(out).toContain("(83%)");
 });
 
+test("a nested `module.exports.<n> =` assigns the global its own nested READ answers from", () => {
+  // The write twin of the CJS export-member read. A top-level
+  // `module.exports.<n> = v` registers an export global; lower-exprs' read
+  // arm answers from that global ANYWHERE in the file -- nested reads
+  // included -- and says so: "the global IS the storage every `exports.Sub
+  // =` statement assigns". Write positions were excluded from it and
+  // handed to the export-assignment machinery, which walks sf.statements
+  // only, so a nested write to a top-level-attached member fell to
+  // "assignment to non-variables" while a nested read of that same member
+  // lowered. One storage, two answers.
+  //
+  // A PAIR on purpose. The refused half is the members with NO top-level
+  // attachment: no global, no storage, nothing to assign -- family B's
+  // genuine wall, and widening to it needs a first-class mutable export
+  // object. Asserting the refusal makes that widening FAIL this test
+  // instead of quietly passing it.
+  const out = report(fixture("cjs-export-member-nested-write/main.cjs"));
+  expect(out).toContain("2 sites");
+  expect(out).toMatch(/×2\s+assignment to non-variables/);
+  // Before the arm this same fixture reported five: the three admitted
+  // nested writes carried a fence each.
+  expect(out).not.toContain("5 sites");
+});
+
+test("a static METHOD copied onto a name that already answers with it is a no-op; a field is not", () => {
+  // `PoolConnection.statementKey = Connection.statementKey`. findStaticOn
+  // walks the base chain, so `Sub.statementKey` already resolves to Base's
+  // lowered body both before and after the statement -- the assignment
+  // stores the value that is already there and lowers to nothing.
+  //
+  // A PAIR on purpose, and the refused half has TWO different reasons: a
+  // DIFFERENT method under the same name (the receiver would have to start
+  // answering with something new), and a static FIELD, where JS's
+  // own-property creation is a real storage split -- that one keeps its
+  // own pointed message, which is also the proof this arm did not widen
+  // the field path by accident.
+  const out = report(fixture("static-method-copy/main.cjs"));
+  expect(out).toContain("2 sites");
+  expect(out).toMatch(/assignment to non-variables/);
+  expect(out).toMatch(/assigning the inherited static 'tag' through a subclass name/);
+  // Before the arm this same fixture reported three.
+  expect(out).not.toContain("3 sites");
+});
+
 test("type errors block analysis", () => {
   const out = report(fixture("type-errors.ts"));
   expect(out).toContain("not analyzable");

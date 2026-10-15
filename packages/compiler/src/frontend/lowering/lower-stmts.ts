@@ -13,7 +13,7 @@ import { fenceCatchProbe } from "./fence-catch.js";
 import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
-import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
+import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { requestInitWriteFence } from "./lower-fetch.js";
@@ -7070,6 +7070,60 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
                 const value = L.lowerExprExpecting(expr.right, found.field.type);
                 return { kind: "assign", localId: found.field.globalId, value, loc: locOf(expr) };
               }
+              // `PoolConnection.statementKey = Connection.statementKey` —
+              // a static METHOD copied onto a class name that ALREADY
+              // answers with that exact method. mysql2's shape, and the
+              // one member of the "assignment to non-variables" family
+              // whose honest lowering is NOTHING AT ALL.
+              //
+              // The arm above answers for static FIELDS, where JS's
+              // own-property creation is a real storage split and the
+              // fence is right. A static METHOD has no storage to split:
+              // `findStaticOn` walks the base chain and the receiver
+              // already resolves `name` to `found.method`, so every
+              // compiled read of `<recv>.<name>` — before this statement
+              // or after it — calls that same lowered body. When the RHS
+              // resolves to the SAME `{declarer, method}` the receiver
+              // already answers with, the assignment stores the value
+              // that is already there. Lowering it to a no-op is not an
+              // approximation of the write; it is the write, exactly.
+              //
+              // WHY THE RHS IS NOT EVALUATED: it is a property access on
+              // a class binding naming a static method — no getter, no
+              // call, no side effect. Nothing is dropped.
+              //
+              // THE PRECONDITION, stated because it is owned elsewhere: a
+              // static method's binding must stay immutable. Reassigning
+              // one (`Base.<m> = <other fn>`) has no lowering today — the
+              // branch above answers only for `found.field`, and this one
+              // only for an identical rebind — so no compiled program can
+              // make the two names disagree. An arm that later admits a
+              // real static-method rebind must revisit this one.
+              //
+              // NOT CLAIMED, the same boundary the `err.code` arm drew:
+              // own-property ENUMERABILITY. Node's assignment makes
+              // `Object.hasOwnProperty.call(Sub, name)` answer true where
+              // this lowering leaves it inherited. No lowering in the tree
+              // enumerates a class value's own properties, so nothing can
+              // observe it — and the arm adds no divergence CLASS that the
+              // inherited-static read did not already have.
+              if (
+                found?.method !== undefined &&
+                ts.isPropertyAccessExpression(expr.right) &&
+                !expr.right.questionDotToken &&
+                ts.isIdentifier(expr.right.name) &&
+                expr.right.name.text === expr.left.name.text
+              ) {
+                const rhsClass = L.exactClassOfReceiver(expr.right.expression);
+                const rhsFound = rhsClass ? L.findStaticOn(rhsClass, expr.right.name.text) : null;
+                if (
+                  rhsFound?.method !== undefined &&
+                  rhsFound.declarer === found.declarer &&
+                  rhsFound.method === found.method
+                ) {
+                  return { kind: "block", body: [], loc: locOf(expr) };
+                }
+              }
             } else {
               const recvT = L.mapTypeOf(L.typeOf(expr.left.expression));
               if (recvT?.kind === "classval") {
@@ -7259,6 +7313,86 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
                   className: "%Error",
                   field: "%code",
                   value: codeVal,
+                  loc: locOf(expr),
+                };
+              }
+            }
+          }
+
+          // `module.exports.encodings = {…}` written from INSIDE a
+          // function, to a member the file ALSO attaches at top level —
+          // the WRITE TWIN of the CJS export-member READ, and the second
+          // member of this family (after `err.code`) whose refusal is
+          // about WHERE THE RECOGNIZER LOOKED rather than about any
+          // representation.
+          //
+          // THE STORAGE ALREADY EXISTS AND IS ALREADY WRITTEN. A
+          // top-level `module.exports.<n> = v` registers an export global
+          // (collectGlobals) and assigns it; requirers read that global
+          // through `require('./x').<n>`. lower-exprs' CJS export-member
+          // READ arm answers from the same global ANYWHERE IN THE FILE —
+          // it has no top-level restriction — and states the invariant
+          // out loud: "the global IS the storage every `exports.Sub =`
+          // statement assigns, so the read is Node's live member". That
+          // same arm then excludes write positions with "write positions
+          // belong to the export-assignment machinery", and the machinery
+          // (cjsExportAssignmentOf) walks `sf.statements` ONLY. So a
+          // nested write to a top-level-attached member fell through
+          // every arm to "assignment to non-variables" while a nested
+          // READ of that identical member lowered to the global two
+          // hundred lines away. One storage, two answers — the same shape
+          // of evidence the `err.code` arm won on, in a different
+          // representation.
+          //
+          // THE SOUNDNESS ARGUMENT IS SYMMETRY, DELIBERATELY: this
+          // resolves the global by the READ arm's own resolution, step
+          // for step (the member symbol, the alias hop, globalsBySymbol).
+          // Where the read answers from a global, the write assigns that
+          // global; where the read finds none, this declines and the
+          // fence stands. The two views therefore cannot disagree about
+          // which storage the member is, whatever that resolution's own
+          // imprecision turns out to be.
+          //
+          // WHAT KEEPS FENCING, and each is a real difference:
+          //  - a member the file attaches ONLY from inside a function
+          //    (iconv-lite's `skipDecodeWarning`, `supportsStreams`,
+          //    `IconvLiteEncoderStream`): no top-level statement, so no
+          //    global, so no storage — that is family B's genuine wall,
+          //    and it keeps its fence here;
+          //  - `module.exports[k] = v` with a runtime key — not this
+          //    form at all;
+          //  - `module.exports?.<n> = v` — not a write form.
+          //
+          // ORDER: a nested write runs when its function is CALLED, which
+          // is exactly when Node performs it. A call during module init
+          // (iconv-lite's top-level `enableStreamingAPI(streamModule)`)
+          // assigns the global at that point; a later top-level statement
+          // over the same member assigns it again, in source order. Node
+          // answers the same sequence.
+          {
+            const cjsSf = expr.left.getSourceFile();
+            const cjsMemberRecv =
+              isModuleExportsAccess(expr.left.expression) ||
+              (ts.isIdentifier(expr.left.expression) &&
+                expr.left.expression.text === "exports" &&
+                !L.resolveLocal(expr.left.expression) &&
+                !L.globalOf(expr.left.expression));
+            if (!expr.left.questionDotToken && cjsMemberRecv && isCjsJsFile(cjsSf)) {
+              const memberSym =
+                L.checker.getSymbolAtLocation(expr.left.name) ??
+                L.cjsModuleExportSymbol(cjsSf, expr.left.name.text);
+              const memberResolved =
+                memberSym !== undefined && memberSym.flags & ts.SymbolFlags.Alias
+                  ? L.checker.getAliasedSymbol(memberSym)
+                  : memberSym;
+              const memberGlobal =
+                (memberSym ? L.globalsBySymbol.get(memberSym) : undefined) ??
+                (memberResolved ? L.globalsBySymbol.get(memberResolved) : undefined);
+              if (memberGlobal) {
+                return {
+                  kind: "assign",
+                  localId: memberGlobal.id,
+                  value: L.lowerExprExpecting(expr.right, memberGlobal.type),
                   loc: locOf(expr),
                 };
               }
