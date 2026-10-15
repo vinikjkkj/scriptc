@@ -2312,6 +2312,13 @@
       "code": "SC2012"
     },
     {
+      "id": "stdlib.math.imul",
+      "kind": "stdlib",
+      "name": "Math.imul",
+      "status": "static",
+      "note": "compiles statically at arity 2"
+    },
+    {
       "id": "stdlib.math.log",
       "kind": "stdlib",
       "name": "Math.log",

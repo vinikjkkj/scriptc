@@ -1945,14 +1945,126 @@ export function peTextVirtualSize(binaryPath: string): number {
  * code step measured (304). Deliberately not SIZE_DRIFT_PAGE. */
 export const TEXT_DRIFT_TOLERANCE = 256;
 
-/** .text VirtualSize of the canonical static hello-world, measured at
- * e03bdf0aa in RECORDED_LANE. win32 only, for the reason the file figures are
- * win32 only: a platform nobody weighed gets no invented number. */
-export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 543_702 : null;
+/* 2026-10-15 -- Math.imul joins the static Math surface, and BOTH section
+ * anchors move by 336 bytes. Re-recorded:
+ *   STATIC_CLASS_TEXT_RECORDED  543_702 -> 543_958
+ *   REGEX_CLASS_TEXT_RECORDED   630_182 -> 630_438
+ *
+ * WHAT THE BYTES ARE, MEASURED, NOT INFERRED. The whole delta is one
+ * symbol in one object. Every runtime object compiled at c17a17ca0 was
+ * diffed against the same object compiled with the change, same lane,
+ * same flags, at COFF section level:
+ *
+ *   scr_lib.o  .text   51,168 -> 51,504   (+336)
+ *   every other runtime object's .text  IDENTICAL, byte for byte
+ *
+ * and inside scr_lib.o the COFF symbol table attributes all 336 to one
+ * new function: NEW scr_math_imul 336 (new=1 gone=0 moved=0). The
+ * remaining movement in that object is unwind and literals the function
+ * brings with it: .xdata +20, .pdata +12, .rdata +32.
+ *
+ * 336 bytes for a four-line function is not a typo. scr_math_imul calls
+ * scr_bit_or(x, 0.0) TWICE for its two ToUint32 wraps, and at -O2 each
+ * one inlines the whole double->uint32 conversion out of scr_bit_or_inl
+ * in scr_runtime.h. The same expansion is what its neighbours in this
+ * object cost: scr_bit_and 304, scr_bit_xor 304, scr_bit_shl 304,
+ * scr_bit_ushr 304, scr_bit_shr 320, scr_math_clz32 208 (ONE wrap, not
+ * two). imul is two wraps, a 32-bit multiply and the signed round-trip.
+ *
+ * WHY EVERY BINARY PAYS. scr_lib.c is in RUNTIME_SOURCES (cc.ts), so
+ * scr_lib.o links into every program unconditionally, and the link line
+ * carries no -ffunction-sections and no --gc-sections -- the same fact
+ * scr_abort.c's gate in cc.ts's unit table exists for. Nothing in a
+ * hello-world references scr_math_imul and it is linked anyway; the +336
+ * on the static class IS that proof, not an illustration of it.
+ *
+ * COULD IT BE MADE PAY-FOR-USE? Three routes. The first is measured, and
+ * it fails:
+ *
+ *   (1) -ffunction-sections -fdata-sections -Wl,--gc-sections, appended
+ *       through SCRIPTC_PROF_CFLAGS so no source changes at all.
+ *       MEASURED, and the answer is NO. The flags reach the compiles --
+ *       scr_lib.o goes from 1 .text section to 224, and from 9 sections
+ *       to 1103 -- and the linked .text comes back 543,958, IDENTICAL to
+ *       the byte. zig's linker strips nothing here on this target. The
+ *       cheapest route buys exactly zero.
+ *
+ *   (2) Gate the unit, the scr_abort.c shape: scr_math_imul moves into
+ *       its own TU compiled only when the IR says a program uses it.
+ *       Price: a new UnitOpts flag, a moduleUsesMathImul bit on the IR, a
+ *       new .c file, a row in cc.ts's unit table and its gate test --
+ *       five files and a new always-optional unit, to recover 336 bytes.
+ *
+ *   (3) Lower it with no runtime symbol at all. The C tier already emits
+ *       scr_bit_or_inl directly for the bitwise six (emit-exprs.ts), so
+ *       it can spell the ToUint32 product inline; the LLVM tier can emit
+ *       two calls to the ALREADY-linked @scr_bit_or, one `mul i32` and
+ *       one `sitofp`, which is the shape its i32 native-argument path
+ *       uses today. Price: one line in emit-exprs.ts, about ten in
+ *       llvm/emitter.ts, scr_lib.c and scr_runtime.h untouched, and the
+ *       LIB_FN_SYMS row -- with it this libFn's seat in the
+ *       llvm-libcall-abi prototype audit -- goes away. Permanent cost:
+ *       ZERO. A caller pays the expansion in its own TU.
+ *
+ * (3) IS THE BETTER CHANGE AND THIS IS NOT IT. It replaces the lowering
+ * on BOTH backends with two hand-written expansions no oracle run has
+ * been through, where what is recorded here is a C function that has. It
+ * is a second candidate with its own gate, not the completion of this
+ * one. Written down so the next reader does not re-derive it: these 336
+ * bytes are recoverable, by route (3), for about eleven lines.
+ *
+ * THE DELTA IS 336, NOT THE 256 THE FAILURE PRINTED. The old anchors were
+ * taken at e03bdf0aa, 344 commits back, and the tree had drifted -80
+ * bytes under them before Math.imul touched anything. Measured in this
+ * lane, in three fresh worktrees, none with a vendor object cache:
+ *
+ *              e03bdf0aa    c17a17ca0    +Math.imul
+ *   static      543,702      543,622      543,958
+ *   regex       630,182      630,102      630,438
+ *
+ * e03bdf0aa reproduces BOTH old anchors to the byte, and that is what
+ * licenses reading the middle column as drift rather than as a broken
+ * instrument. Of the -80: -48 is scr_string.o's .text (object diff, every
+ * other runtime object identical), and the remaining -32 is linker-
+ * contributed, not attributable to any runtime TU. Both are incidental
+ * movement well inside the 128-byte largest incidental step this section
+ * records, and re-recording absorbs them.
+ *
+ * THE REGEX ANCHOR MOVES BY THE SAME 336 AND WAS MASKED. regex.test.ts
+ * checks the regex-FREE program against STATIC_CLASS_TEXT_RECORDED
+ * first, so that expect fired and the regex-program check two lines below
+ * it never ran. Both figures are re-recorded here; only one of them had
+ * ever been seen to fail.
+ *
+ * THE FILE ANCHORS ARE NOT TOUCHED. 686,592 -> 687,104 static and
+ * 827,904 -> 828,416 regex, one 512-byte granule each, which leaves both
+ * at exactly 0.50 of their one-page budget against STATIC_CLASS_RECORDED
+ * and REGEX_CLASS_RECORDED. Neither complains, and a figure that is not
+ * failing does not get nudged.
+ *
+ * LANE. x86_64-windows-gnu, SCRIPTC_CC=zigcc, zig 0.16.0 from
+ * G:/tools/zig -- RECORDED_LANE -- in fresh worktrees with no
+ * packages/runtime/vendor/.cache, which is the condition the 2026-10-06
+ * entry below makes mandatory for taking a figure here. */
+
+/** .text VirtualSize of the canonical static hello-world. RE-RECORDED
+ * 2026-10-15, 543,702 -> 543,958, measured at the Math.imul commit in
+ * RECORDED_LANE: the entry above attributes all 336 bytes to one new
+ * always-linked function and -80 of accumulated drift. The 543,702 it
+ * replaces was measured at e03bdf0aa and still reproduces there exactly.
+ * win32 only, for the reason the file figures are win32 only: a platform
+ * nobody weighed gets no invented number. */
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 543_958 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
  * together, which is why the file figures are separate too.
+ *
+ * RE-RECORDED 2026-10-15: 630,182 -> 630,438, the same +336 the static
+ * class took, for the same reason, measured in the same run. This one had
+ * never been SEEN to fail: regex.test.ts checks the regex-free program
+ * against STATIC_CLASS_TEXT_RECORDED two lines earlier, and vitest stops a
+ * test at its first failed expect.
  *
  * RE-RECORDED 2026-10-06: 630,150 -> 630,182. The previous figure did not
  * reproduce at the commit it names. Measured at e03bdf0aa in a fresh
@@ -1994,7 +2106,7 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 543_702 : null;
  * gitignored so git status, the dirty-worktree guard and the treehash are
  * all blind to it. See docs/stackless-sync-generator-results.md 13.2-15.1.
  */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 630_182 : null;
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 630_438 : null;
 
 /** The section-anchor complaint, or null when within tolerance. Same shape as
  * recordedSizeComplaint -- a string, so the caller owns the assertion and this
