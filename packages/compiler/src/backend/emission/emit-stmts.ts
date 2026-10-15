@@ -813,10 +813,18 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // the struct layout, so one emission.
         const obj = E.emitExpr(s.obj);
         const v = E.emitExpr(s.value);
-        // Runtime error classes use ScrError's own member names.
+        // Runtime error classes use ScrError's own member names. The code
+        // slot is spelled `%code` in the IR layout -- the '%' is what keeps
+        // it out of a subclass's user-declared field namespace -- and `code`
+        // in the C struct, so the one slot whose two names differ is
+        // translated here. (A subclass that ROUTED its own declaration onto
+        // the slot renames it to `code` in its OWN layout and is not a
+        // RUNTIME_ERROR_CLASSES name, so it takes the mangled branch and is
+        // unaffected. The LLVM emitter needs no twin: classFieldIndex looks
+        // the name up in the same flattened list the def carries.)
         const member =
           s.kind === "fieldSet" && RUNTIME_ERROR_CLASSES.has(s.className)
-            ? s.field
+            ? (s.field === "%code" ? "code" : s.field)
             : mangleField(s.field);
         const field = `${obj.name}->${member}`;
         if (isRefCounted(v.type)) {
