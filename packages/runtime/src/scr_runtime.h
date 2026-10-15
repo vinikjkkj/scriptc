@@ -10044,12 +10044,33 @@ void scr_request_release(ScrRequest *r);
 void *scr_request_retain_v(void *p);
 void scr_request_release_v(void *p);
 
-/* The Date ownership pair. Dead code in every program: nothing
- * constructs a ScrDate. */
+/* The Date ownership pair. LIVE as of the Date-value slice:
+ * scr_date_new below allocates, so these balance a real refcount. The
+ * four functions are UNCHANGED -- they were always correct code, and
+ * used to be dead. */
 ScrDate *scr_date_retain(ScrDate *d);
 void scr_date_release(ScrDate *d);
 void *scr_date_retain_v(void *p);
 void scr_date_release_v(void *p);
+
+/* -- Date VALUES (scr_date.c, behind the moduleUsesDate link gate) -----
+ * scr_date_new TimeClips its argument and comes back +1; the string form
+ * runs the SAME bounded grammar scr_date_parse_get_time already ships, so
+ * the value and composed forms cannot drift.  scr_date_value is
+ * getTime()/valueOf() over a BORROWED receiver.  The seven UTC field
+ * reads are pure arithmetic over the time value -- no host state, so no
+ * platform can disagree about them -- and answer NaN on an invalid Date,
+ * exactly as Node does.  None of them throws. */
+ScrDate *scr_date_new(double ms); /* +1 */
+ScrDate *scr_date_new_str(ScrStr *s); /* +1; borrowed string */
+double scr_date_value(ScrDate *d); /* borrowed */
+double scr_date_utc_full_year(double ms);
+double scr_date_utc_month(double ms);
+double scr_date_utc_date(double ms);
+double scr_date_utc_hours(double ms);
+double scr_date_utc_minutes(double ms);
+double scr_date_utc_seconds(double ms);
+double scr_date_utc_ms(double ms);
 
 /* The WebRTC ownership pairs. Dead code in every program: nothing
  * constructs either handle yet. */

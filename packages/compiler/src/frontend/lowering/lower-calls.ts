@@ -23,7 +23,7 @@ import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../dia
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
-import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
+import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall, lowerSqliteNew } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
@@ -5451,6 +5451,11 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // response.text()/json()/arrayBuffer()/bytes() and headers.get/has.
         lowerFetchMethodCall(L, expr, expr.expression) ??
         L.lowerUrlMethodCall(expr, expr.expression) ??
+        // Members off a Date VALUE -- getTime/valueOf/toISOString and the
+        // seven getUTC* reads. AFTER L.lowerDateCall above, which claims
+        // the COMPOSED new Date(x).member() forms before the receiver
+        // lowers and must keep claiming them.
+        lowerDateMethodCall(L, expr, expr.expression) ??
         L.lowerSearchParamsMethodCall(expr, expr.expression) ??
         L.lowerStatsMethodCall(expr, expr.expression) ??
         L.lowerFileHandleMethodCall(expr, expr.expression) ??

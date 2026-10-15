@@ -1,6 +1,9 @@
 /* scr_date.c — the Date handle's ownership pair.
  *
- * A TYPE WITH NO VALUES, exactly like ScrRequest in scr_fetch_static.c.
+ * A TYPE WITH VALUES as of the Date-value slice.  It was not always: this
+ * file opened for most of its life with "A TYPE WITH NO VALUES, exactly
+ * like ScrRequest in scr_fetch_static.c", and the paragraphs below it
+ * still explain why the type was declared before anything could build one.
  * Nothing in this runtime allocates a ScrDate and nothing in the compiler
  * emits a construction: `new Date(...)` as a VALUE is a refusal
  * (lower-builtins.ts's Date slice lowers only `Date.now()`, `Date.UTC()`
@@ -53,7 +56,110 @@
 
 struct ScrDate {
   size_t rc;
+  /* ECMA-262's [[DateValue]]: an INTEGRAL number of milliseconds since
+   * the epoch, or NaN for an invalid Date.  TimeClip runs once, at
+   * construction, so every member read below is pure. */
+  double ms;
 };
+
+/* -- THE VALUE, AND WHY IT IS STILL A HANDLE --------------------------
+ *
+ * This file's header used to say nothing allocates a ScrDate.  Something
+ * does now, and the two objections that header raised against a bare f64
+ * are MET rather than avoided -- by the pointer, not by the payload:
+ *
+ *   - `new Date(0)` is TRUTHY in JS.  A non-NULL pointer is truthy, and
+ *     the `date` kind sits in the IR's always-truthy set.
+ *   - two distinct Dates with equal milliseconds are `!==`.  Two
+ *     allocations are two addresses.
+ *
+ * Deliberately still NOT cycle-headered.  A Date holds one double and no
+ * outward edge, so it cannot be part of a cycle; ir/nodes.ts already
+ * classifies the kind as pure balance for exactly that reason.  The
+ * retain/release pair below is UNCHANGED: it was always correct code
+ * that happened to be dead, and the only thing that changed is that rc
+ * now starts at 1. */
+
+/* TimeClip (ECMA-262 21.4.1.31): non-finite or |t| > 8.64e15 is NaN;
+ * otherwise truncate toward zero, with -0 normalised to +0. */
+static double scr_date_time_clip(double ms) {
+  if (!(fabs(ms) <= 8640000000000000.0)) return NAN;
+  double t = trunc(ms);
+  return t == 0 ? 0 : t;
+}
+
+ScrDate *scr_date_new(double ms) {
+  ScrDate *d = (ScrDate *)malloc(sizeof *d);
+  if (d == NULL) scr_trap("scriptc: out of memory\n");
+  d->rc = 1;
+  d->ms = scr_date_time_clip(ms);
+  return d;
+}
+
+/* new Date(dateString).  The grammar is NOT widened here: this is the
+ * same bounded parse scr_date_parse_get_time already ships for the
+ * composed form, so the value form and the composed form cannot drift
+ * apart.  An unparseable string yields NaN -- an invalid Date, exactly
+ * as in Node.  The string is BORROWED (the scr_url_new convention). */
+ScrDate *scr_date_new_str(ScrStr *s) {
+  return scr_date_new(scr_date_parse_get_time(s));
+}
+
+/* getTime() / valueOf(), and the milliseconds every UTC getter below
+ * reads.  Borrowed receiver. */
+double scr_date_value(ScrDate *d) { return d->ms; }
+
+/* -- THE UTC FIELD READS ----------------------------------------------
+ *
+ * Each one is YearFromTime/MonthFromTime/HourFromTime/... of the time
+ * value itself -- pure arithmetic over the double, with NO host state of
+ * any kind.  That is the whole reason this family lowers and the LOCAL
+ * family does not: these answers cannot depend on the machine that runs
+ * the binary.
+ *
+ * The walk is scr_date_to_iso's, factored out so the ISO string and the
+ * seven getters cannot disagree about a civil date.  An out-of-range or
+ * NaN time value answers NaN from every getter, which is what Node
+ * answers on an invalid Date. */
+typedef struct {
+  long long y;
+  int mo; /* 0..11, as getUTCMonth answers */
+  int d;  /* 1..31 */
+  int h, mi, s, ms;
+} ScrDateParts;
+
+static int scr_date_parts(double ms, ScrDateParts *out) {
+  if (!(fabs(ms) <= 8640000000000000.0)) return 0; /* NaN and out of range */
+  double t = trunc(ms);
+  double dayd = floor(t / 86400000.0);
+  long long msday = (long long)(t - dayd * 86400000.0);
+  long long z = (long long)dayd + 719468;
+  long long era = (z >= 0 ? z : z - 146096) / 146097;
+  unsigned long long doe = (unsigned long long)(z - era * 146097);
+  unsigned long long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  long long y = (long long)yoe + era * 400;
+  unsigned long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  unsigned long long mp = (5 * doy + 2) / 153;
+  unsigned long long dd = doy - (153 * mp + 2) / 5 + 1;
+  unsigned long long m = mp < 10 ? mp + 3 : mp - 9;
+  if (m <= 2) y += 1;
+  out->y = y;
+  out->mo = (int)m - 1;
+  out->d = (int)dd;
+  out->h = (int)(msday / 3600000);
+  out->mi = (int)(msday / 60000 % 60);
+  out->s = (int)(msday / 1000 % 60);
+  out->ms = (int)(msday % 1000);
+  return 1;
+}
+
+double scr_date_utc_full_year(double ms) { ScrDateParts p; return scr_date_parts(ms, &p) ? (double)p.y : NAN; }
+double scr_date_utc_month(double ms) { ScrDateParts p; return scr_date_parts(ms, &p) ? (double)p.mo : NAN; }
+double scr_date_utc_date(double ms) { ScrDateParts p; return scr_date_parts(ms, &p) ? (double)p.d : NAN; }
+double scr_date_utc_hours(double ms) { ScrDateParts p; return scr_date_parts(ms, &p) ? (double)p.h : NAN; }
+double scr_date_utc_minutes(double ms) { ScrDateParts p; return scr_date_parts(ms, &p) ? (double)p.mi : NAN; }
+double scr_date_utc_seconds(double ms) { ScrDateParts p; return scr_date_parts(ms, &p) ? (double)p.s : NAN; }
+double scr_date_utc_ms(double ms) { ScrDateParts p; return scr_date_parts(ms, &p) ? (double)p.ms : NAN; }
 
 ScrDate *scr_date_retain(ScrDate *d) {
   if (d != NULL && d->rc != SIZE_MAX) d->rc++;

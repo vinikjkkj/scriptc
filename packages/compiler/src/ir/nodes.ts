@@ -5978,6 +5978,24 @@ export type IrLibFn =
    * platform's `localtime` cannot express (the declared divergence in
    * scr_lib.c). Never throws. */
   | "date.getHours"
+  /** Date VALUES (scr_date.c). `date.new` TimeClips an f64 and comes back
+   * +1; `date.newStr` runs the SAME bounded grammar date.parseGetTime
+   * uses, so a value and a composed read of one string cannot disagree.
+   * `date.value` is getTime()/valueOf() over a borrowed receiver. The
+   * seven UTC field reads take the TIME VALUE (composed with date.value
+   * at the lowering), are pure arithmetic with no host state, and answer
+   * NaN on an invalid Date. None of them throws. The LOCAL field reads
+   * are deliberately absent -- see lower-classes.ts's constructor note. */
+  | "date.new"
+  | "date.newStr"
+  | "date.value"
+  | "date.getUTCFullYear"
+  | "date.getUTCMonth"
+  | "date.getUTCDate"
+  | "date.getUTCHours"
+  | "date.getUTCMinutes"
+  | "date.getUTCSeconds"
+  | "date.getUTCMilliseconds"
   /** The fs option forms and friends (scr_lib.c), all throwing catchably
    * like the rest of sync fs. mkdirRecursiveSync is Node's recursive
    * algorithm (try mkdir, EEXIST-dir is fine, ENOENT creates the parent

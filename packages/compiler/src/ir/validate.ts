@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, DATE_T, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -1464,6 +1464,16 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "date.parseGetTime": { argTypes: [STRING], result: F64 },
   "date.utc": { argTypes: [F64, F64, F64, F64, F64, F64, F64], result: F64 },
   "date.getHours": { argTypes: [F64], result: F64 },
+  "date.new": { argTypes: [F64], result: DATE_T },
+  "date.newStr": { argTypes: [STRING], result: DATE_T },
+  "date.value": { argTypes: [DATE_T], result: F64 },
+  "date.getUTCFullYear": { argTypes: [F64], result: F64 },
+  "date.getUTCMonth": { argTypes: [F64], result: F64 },
+  "date.getUTCDate": { argTypes: [F64], result: F64 },
+  "date.getUTCHours": { argTypes: [F64], result: F64 },
+  "date.getUTCMinutes": { argTypes: [F64], result: F64 },
+  "date.getUTCSeconds": { argTypes: [F64], result: F64 },
+  "date.getUTCMilliseconds": { argTypes: [F64], result: F64 },
   "text.decode": { argTypes: [BYTES_U8], result: STRING },
   "fs.mkdirRecursiveSync": { argTypes: [STRING], result: VOID },
   "fs.rmOptsSync": { argTypes: [STRING, BOOL, BOOL], result: VOID },

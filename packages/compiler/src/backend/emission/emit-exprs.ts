@@ -7817,6 +7817,32 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // database; NaN outside Date's range or the platform's
             // time_t. Never throws.
             return finish(`scr_date_get_hours(${arg(0)})`);
+          case "date.new":
+            // A Date VALUE: +1 handle over the TimeClipped milliseconds.
+            return finish(`scr_date_new(${arg(0)})`);
+          case "date.newStr":
+            // Same, from the BOUNDED date-string grammar date.parseGetTime
+            // already runs -- an unparseable string is an invalid Date.
+            return finish(`scr_date_new_str(${arg(0)})`);
+          case "date.value":
+            // getTime()/valueOf(): the time value itself, borrowed receiver.
+            return finish(`scr_date_value(${arg(0)})`);
+          // The seven UTC field reads -- pure arithmetic over the time
+          // value, no host state, NaN on an invalid Date. Never throw.
+          case "date.getUTCFullYear":
+            return finish(`scr_date_utc_full_year(${arg(0)})`);
+          case "date.getUTCMonth":
+            return finish(`scr_date_utc_month(${arg(0)})`);
+          case "date.getUTCDate":
+            return finish(`scr_date_utc_date(${arg(0)})`);
+          case "date.getUTCHours":
+            return finish(`scr_date_utc_hours(${arg(0)})`);
+          case "date.getUTCMinutes":
+            return finish(`scr_date_utc_minutes(${arg(0)})`);
+          case "date.getUTCSeconds":
+            return finish(`scr_date_utc_seconds(${arg(0)})`);
+          case "date.getUTCMilliseconds":
+            return finish(`scr_date_utc_ms(${arg(0)})`);
           case "text.decode":
             // WHATWG utf-8 decode with the leading BOM stripped
             // (scr_bytes.c). Borrowed bytes; +1 string; never throws.

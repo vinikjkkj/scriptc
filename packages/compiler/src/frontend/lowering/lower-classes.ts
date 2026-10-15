@@ -5,7 +5,7 @@
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { BOOL, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
@@ -7770,14 +7770,65 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       if (symbol && symbol.name === "URLSearchParams" && L.isStdlibSymbol(symbol)) {
         return lowerSearchParamsNew(L, expr, loc);
       }
-      // `new Date(...)` NOT consumed by the composed toISOString lowering
-      // (lowerDateCall claims that form before the receiver lowers): Date
-      // values have no representation — point at what does compile.
+      // `new Date(...)` NOT consumed by the composed toISOString/getTime
+      // lowering (lowerDateCall claims those before the receiver lowers).
+      // What is left MAKES A DATE VALUE, and there is one now: a
+      // refcounted handle over ECMA-262's [[DateValue]] (scr_date.c).
+      //
+      //   new Date()      the live clock
+      //   new Date(ms)    TimeClip of a number
+      //   new Date(str)   the SAME bounded grammar the composed
+      //                   new Date(str).getTime() form already parses, so
+      //                   a value and a composed read cannot disagree
+      //   new Date(other) the copy constructor, its time value re-clipped
+      //
+      // THE LOCAL-TIME FIELD FORM new Date(y, m, d, ...) KEEPS ITS FENCE,
+      // and keeps it on a measurement rather than on caution: its
+      // arguments are WALL CLOCK, so the answer needs the offset the host's
+      // zone was at an instant the compiler cannot see. Sampling one
+      // instant every ~9 days from 2000 to 2030 on a Windows host in
+      // America/Sao_Paulo, the runtime's CRT localtime route disagreed with
+      // Node on 259 of 1200 -- Windows' CRT applies the zone's CURRENT rule
+      // to every instant, and this zone stopped observing DST in 2019.
+      // (Win32's dynamic-DST route closes that to ZERO for every local year
+      // the host registry's Dynamic DST table covers -- 2004 and later on
+      // the measured host -- and leaves a bounded residual before it. That
+      // is a separate change and it carries its own measurement.)
       if (symbol && symbol.name === "Date" && L.isStdlibSymbol(symbol)) {
+        const dateArgs = expr.arguments ?? [];
+        if (dateArgs.length === 0) {
+          return {
+            kind: "libCall", fn: "date.new",
+            args: [{ kind: "libCall", fn: "date.now", args: [], type: F64, loc }],
+            type: DATE_T, loc,
+          };
+        }
+        if (dateArgs.length === 1) {
+          const a = L.lowerExpr(dateArgs[0]!);
+          if (a.type.kind === "f64") {
+            return { kind: "libCall", fn: "date.new", args: [a], type: DATE_T, loc };
+          }
+          if (a.type.kind === "string") {
+            return { kind: "libCall", fn: "date.newStr", args: [a], type: DATE_T, loc };
+          }
+          if (a.type.kind === "date") {
+            return {
+              kind: "libCall", fn: "date.new",
+              args: [{ kind: "libCall", fn: "date.value", args: [a], type: F64, loc }],
+              type: DATE_T, loc,
+            };
+          }
+          L.noLowering(
+            `new Date of '${L.fmt(a.type)}' values`,
+            dateArgs[0]!,
+            "the lowered constructors take a number of milliseconds, a date STRING, or another Date -- narrow a union first",
+            symbol,
+          );
+        }
         L.noLowering(
-          "new Date",
+          "new Date with year/month/day arguments",
           expr,
-          "Date values have no representation — Date.now() and the composed new Date(ms?).toISOString() form compile",
+          "the field constructor reads its arguments as LOCAL wall time, and the run host's zone HISTORY is not something this compiler can see: on Windows the CRT applies the zone's current rule to every instant, which disagreed with Node on 259 of 1200 sampled instants. new Date(Date.UTC(y, m, d, ...)) is the exact form and it compiles",
           symbol,
         );
       }

@@ -5610,6 +5610,56 @@ let digestInputValueDispatches = 0;
     );
   }
 
+  /** Members read off a Date VALUE -- the handle lower-classes.ts now
+   * constructs. Every member served here is a PURE FUNCTION of the time
+   * value: getTime/valueOf ARE the value, toISOString is the shipping
+   * scr_date_to_iso, and the seven getUTC* reads are the civil walk that
+   * same string already performs. None of them can depend on the host.
+   *
+   * The seven LOCAL getters (getFullYear .. getMilliseconds) are
+   * deliberately NOT here: their answers need the run host's zone HISTORY,
+   * and lower-classes.ts's constructor note carries the measurement.
+   *
+   * Returning null rather than fencing for an unhandled member is also
+   * deliberate -- it leaves the existing stdlibMemberFence diagnostic
+   * exactly as it was, so this change moves only the members it serves. */
+  const DATE_UTC_GETTERS: Readonly<Record<string, IrLibFn>> = {
+    getUTCFullYear: "date.getUTCFullYear",
+    getUTCMonth: "date.getUTCMonth",
+    getUTCDate: "date.getUTCDate",
+    getUTCHours: "date.getUTCHours",
+    getUTCMinutes: "date.getUTCMinutes",
+    getUTCSeconds: "date.getUTCSeconds",
+    getUTCMilliseconds: "date.getUTCMilliseconds",
+  };
+
+  export function lowerDateMethodCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(call, access)) return null;
+    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "date") return null;
+    if (!L.isStdlibMember(access)) return null;
+    const name = access.name.text;
+    const getter = DATE_UTC_GETTERS[name];
+    const isValue = name === "getTime" || name === "valueOf";
+    const isIso = name === "toISOString";
+    if (!isValue && !isIso && getter === undefined) return null;
+    if (call.arguments.length !== 0) {
+      L.noLowering(`Date.${name} with ${call.arguments.length} arguments`, call);
+    }
+    const loc = locOf(call);
+    const recv = L.lowerExpr(access.expression);
+    const ms: IrExpr = { kind: "libCall", fn: "date.value", args: [recv], type: F64, loc };
+    if (isValue) return ms;
+    if (isIso) {
+      return { kind: "libCall", fn: "date.toISOString", args: [ms], type: STRING, loc };
+    }
+    // noUncheckedIndexedAccess types the table read as possibly
+    // undefined; the guard above already excluded that, so this is the
+    // invariant written down rather than a second check.
+    if (getter === undefined) throw new Error("lowering bug: a Date member passed the guard with no getter");
+    return { kind: "libCall", fn: getter, args: [ms], type: F64, loc };
+  }
+
 /** `new URLSearchParams(init?)` — the WHATWG constructor's lowered init
    * shapes: omitted / literal `undefined` (empty list), a string (parsed,
    * one leading '?' strips), another URLSearchParams (snapshot copy — a
