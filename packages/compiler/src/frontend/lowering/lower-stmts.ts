@@ -7088,9 +7088,23 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               // that is already there. Lowering it to a no-op is not an
               // approximation of the write; it is the write, exactly.
               //
-              // WHY THE RHS IS NOT EVALUATED: it is a property access on
-              // a class binding naming a static method — no getter, no
-              // call, no side effect. Nothing is dropped.
+              // THE RHS IS STILL LOWERED, AND DISCARDED, AND THAT IS NOT
+              // COSMETIC. The first cut of this arm returned an empty
+              // block and never lowered the right-hand side, on the
+              // argument that a property access on a class binding naming
+              // a static method has no side effect. True of the PROGRAM
+              // and false of the COMPILER: lowering that reference is
+              // what records the static as used, and dropping it took a
+              // generic instantiation with it. MEASURED on the
+              // --npm-static mysql2 lane: statementsTotal fell 56,578 ->
+              // 56,486 and thirteen fences disappeared because the
+              // statements holding them left the lowered population --
+              // `(instantiating 'addCommand' with (m374.ChangeUser))` and
+              // `(instantiating 'writePacket' with (m336.Packet))` simply
+              // stopped existing. A fence that vanishes with its
+              // statement is a coverage loss, not a fix. So the statement
+              // keeps the reference and drops only the VALUE, which is
+              // what the assignment does anyway.
               //
               // THE PRECONDITION, stated because it is owned elsewhere: a
               // static method's binding must stay immutable. Reassigning
@@ -7121,7 +7135,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
                   rhsFound.declarer === found.declarer &&
                   rhsFound.method === found.method
                 ) {
-                  return { kind: "block", body: [], loc: locOf(expr) };
+                  return { kind: "exprStmt", expr: L.lowerExpr(expr.right), loc: locOf(expr) };
                 }
               }
             } else {
