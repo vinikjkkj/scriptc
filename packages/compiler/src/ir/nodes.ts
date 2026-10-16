@@ -5062,7 +5062,17 @@ export type IrLibFn =
    * `%stack` slot at the first read, because V8 formats once at first
    * access and a later `name`/`message` write cannot reach it. Distinct
    * from error.toString, which node recomputes on every call. Never
-   * throws. */
+   * throws.
+   *
+   * NOT PURE, and this is the one thing about it that must survive: it
+   * WRITES the receiver's `%stack` slot on the first read, so it may
+   * never be folded with a second call, hoisted above a `name` or
+   * `message` write, or declared readonly/readnone. Nothing does any of
+   * those today -- the runtime declarations carry no LLVM attributes and
+   * the frontend emits one call per read -- and "nothing does it today"
+   * is exactly the kind of sentence this slot exists because somebody
+   * else wrote. error.toString, beside it, IS free of this: it reads two
+   * slots and writes none. */
   | "error.stack"
   /** `new DOMException(message?, nameOrOptions?)` (scr_error.c): both args
    * are borrowed dyn values (the lowering passes the dyn undefined for an
