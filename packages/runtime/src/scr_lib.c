@@ -4379,8 +4379,29 @@ double scr_str_last_index_of(ScrStr *s, ScrStr *needle) {
 }
 
 /* ── Date, the composed slice ──────────────────────────────────────────
- * Date values have no representation — the compiled surface is exactly
- * Date.now() and the composed new Date(ms?).toISOString(). */
+ * Date values HAVE a representation: ScrDate is { size_t rc; double ms },
+ * a refcounted handle over ECMA-262's [[DateValue]], constructed by
+ * scr_date_new / scr_date_new_str in scr_date.c.
+ *
+ * What lives in THIS file is four of the composed slice's five functions:
+ * scr_date_now, scr_date_to_iso, scr_date_parse_get_time and
+ * scr_date_utc. The fifth, scr_date_get_hours, is in scr_date.c with the
+ * value surface -- it is the one composed form that reads the HOST, so it
+ * sits next to the code that documents that cost. These files answer the
+ * same questions from the same arithmetic, which is why a value read and
+ * a composed read cannot disagree.
+ *
+ * Still absent by MEASUREMENT, not by omission: the LOCAL field reads
+ * (getFullYear..getMilliseconds, getDay, getTimezoneOffset) and the
+ * new Date(y, m, d, ...) field constructor. Their answers need the run
+ * host's zone HISTORY. scr_date_get_hours (scr_date.c:251) takes the CRT
+ * route and inherits its error: on a Windows host in America/Sao_Paulo, sampling
+ * one instant every ~9 days from 2000 to 2030, the CRT disagreed with
+ * Node on 259 of 1200 instants (16.51%) because it applies the zone's
+ * CURRENT rule to every instant and this zone stopped observing DST in
+ * 2019. Win32's SystemTimeToTzSpecificLocalTimeEx reads the registry's
+ * Dynamic DST table and errs 0.00% over the years that table covers.
+ * The wall is the CRT's, not Windows'. */
 
 double scr_date_now(void) {
   struct timespec ts;

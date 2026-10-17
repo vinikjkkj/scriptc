@@ -57,15 +57,6 @@ stdlib-fence.ts:20:13 - error SC1090: constructing values other than classes dec
      |             ^~~~~~~~~~~~~~~~~~~~~~~
   21 | 
 
-stdlib-fence.ts:23:11 - error SC2020: 'new Date' is part of the standard library types but has no scriptc lowering yet
-
-  22 | // Constructors.
-  23 | const d = new Date();
-     |           ^~~~~~~~~~
-  24 | const wm = new WeakMap();
-
-  hint: Date values have no representation — Date.now() and the composed new Date(ms?).toISOString() form compile
-
 stdlib-fence.ts:24:7 - error SC2020: 'WeakMap<WeakKey, any>' is part of the standard library types but has no scriptc lowering yet
 
   23 | const d = new Date();

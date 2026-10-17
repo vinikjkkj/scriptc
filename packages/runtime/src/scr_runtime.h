@@ -7736,8 +7736,12 @@ ScrStr *scr_intl_num_format_en_us(double x);
 ScrStr *scr_intl_default_locale(void);
 
 /* ── Date, the composed slice (scr_lib.c) ─────────────────────────────
- * Date values have no representation; the runtime surface is exactly
- * Date.now() and toISOString over a millisecond time value. */
+ * Date values HAVE a representation -- ScrDate { size_t rc; double ms },
+ * declared below and constructed by scr_date_new (scr_date.c). What is
+ * declared HERE is the composed slice only: Date.now(), toISOString over
+ * a millisecond time value, the bounded parse, Date.UTC, and the
+ * local-time getHours. The value constructors and the seven UTC field
+ * reads are declared further down with the rest of the value surface. */
 double scr_date_now(void); /* integer ms since epoch, like Node */
 /* Node's exact ISO 8601 UTC format (expanded ±YYYYYY years outside
  * 0–9999). THROWS Node's "Invalid time value" RangeError on NaN or

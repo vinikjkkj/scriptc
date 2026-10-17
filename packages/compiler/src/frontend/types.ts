@@ -3753,13 +3753,26 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // type-level stop that --best-effort cannot defer, and the last error
   // between voip's package entry and a binary.
   //
-  // Every member still refuses by name through stdlibMemberFence, and
-  // `new Date(...)` as a VALUE still refuses (lower-builtins.ts's Date
-  // slice serves only Date.now(), Date.UTC() and the COMPOSED
-  // `new Date(ms?).getTime()` / `.toISOString()`). Nothing constructs one
-  // -- packages/runtime/src/scr_date.c is four ownership functions over a
-  // struct that is never allocated -- so this arm buys the SHAPE, not the
-  // behaviour, exactly as the WebRTC pair below did.
+  // This arm now buys the SHAPE *and* the behaviour -- unlike the WebRTC
+  // pair below, which still buys only the shape.
+  //
+  // `new Date(...)` CONSTRUCTS: the zero-argument clock form, a number of
+  // milliseconds, a date STRING, and the copy constructor all lower to a
+  // ScrDate (scr_date.c allocates; the struct is no longer a shape over
+  // nothing). Members read off that value lower too -- getTime, valueOf,
+  // toISOString and the seven getUTC* reads, all pure functions of the
+  // time value.
+  //
+  // What STILL refuses by name through stdlibMemberFence: the LOCAL field
+  // reads (getFullYear..getMilliseconds, getDay, getTimezoneOffset) and
+  // the `new Date(y, m, d, ...)` field constructor, both because their
+  // answers need the run host's zone HISTORY. That is a measured refusal,
+  // not a gap -- lower-classes.ts's constructor note carries the numbers.
+  //
+  // NOTE the asymmetry this leaves, which is pre-existing and NOT closed
+  // here: the check below keys on `psym.name === "Date"`, so a plain
+  // `Date` maps while `Readonly<Date>` does not and still reports SC2001
+  // on the TYPE (tests/diagnostics/utility-types.ts:22 is the live case).
   if (
     psym?.name === "Date" &&
     checker.declarationsOf(psym).some(

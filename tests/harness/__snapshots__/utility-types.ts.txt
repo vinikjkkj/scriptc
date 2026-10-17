@@ -48,15 +48,6 @@ utility-types.ts:22:7 - error SC2001: values of type 'Readonly<Date>' cannot be 
      |       ^~~~~~~
   23 | console.log(stamped.getTime());
 
-utility-types.ts:22:33 - error SC2020: 'new Date' is part of the standard library types but has no scriptc lowering yet
-
-  21 | 
-  22 | const stamped: Readonly<Date> = new Date(0);
-     |                                 ^~~~~~~~~~~
-  23 | console.log(stamped.getTime());
-
-  hint: Date values have no representation — Date.now() and the composed new Date(ms?).toISOString() form compile
-
 utility-types.ts:23:13 - error SC2020: 'Readonly<Date>.getTime' is part of the standard library types but has no scriptc lowering yet
 
   22 | const stamped: Readonly<Date> = new Date(0);

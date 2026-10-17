@@ -9005,7 +9005,11 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * never exists (the crypto randomBytes(n).toString(enc) precedent). An
    * omitted constructor argument completes with date.now; a one-argument
    * form takes the milliseconds. String parsing, Y/M/D fields (local-time
-   * semantics), and Date VALUES stay fenced — lowerNew carries the hint.
+   * semantics) stay fenced here. Date VALUES do NOT: lowerNew builds one
+   * (lower-classes.ts), and lowerDateMethodCall above reads getTime,
+   * valueOf, toISOString and the seven getUTC* off it. This function
+   * keeps the COMPOSED forms because they never materialise the Date at
+   * all, which is still the cheaper lowering where it applies.
    * Null when this is neither form. */
   export function lowerDateCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
