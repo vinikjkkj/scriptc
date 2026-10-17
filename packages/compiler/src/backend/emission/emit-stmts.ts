@@ -30,6 +30,7 @@ function finishLines(
 import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { readFileSync } from "node:fs";
+import { resolveCc, targetPlatform } from "../cc.js";
 
 
 
@@ -190,6 +191,71 @@ export function stackCheckElidable(fn: IrFunction): boolean {
 export function stackCheckPolicy(mayThrow: Set<string>, fn: IrFunction): boolean {
   if (stackCheckElidable(fn)) return false;
   return mayThrow.has(fn.name);
+}
+
+
+/** Does the TARGET have a stack floor the prologue can actually READ?
+ *
+ * This is the same question scr_runtime.h asks in the preprocessor, and it
+ * has to stay the same question:
+ *
+ *   #if defined(_WIN32) && defined(__x86_64__) && (__GNUC__ || __clang__)
+ *     static inline ... __asm__ volatile("movq %gs:0x1478, %0" ...)
+ *   #else
+ *     #define SCR_STACK_LOW() (0)   // "no check rather than a check that
+ *   #endif                          //  cannot fire"
+ *
+ * The C lane gets that answer for free from cpp. The LLVM lane has no
+ * preprocessor and was asking NOBODY: it emitted the GS read unconditionally,
+ * on every target. 0x1478 is the WINDOWS x64 TEB's DeallocationStack, reached
+ * through addrspace(256), which IS %gs. On x86-64 Linux the GS base is ZERO
+ * (thread state lives on %fs), so that load addresses linear 0x1478 and the
+ * process dies on the first checked function it enters.
+ *
+ * MEASURED on debian-vps 2026-10-17 at bb8a01754, before this gate existed:
+ *   - 28 of 40 host-native LLVM-lane corpus binaries SIGSEGV. All 28 fault at
+ *     the SAME address and "segfault at 1478" is that address. The C lane
+ *     (12/12 exit 0) and the differential's own C lane (12/12) are clean, so
+ *     it is this backend and not the OS.
+ *   - the survivors carry ZERO `cmp %gs:0x1478` encodings and the crashers
+ *     carry 2..11. That is the whole discriminator: nothing SEMANTIC
+ *     separated the two sets -- only whether stackCheckPolicy() had selected
+ *     any function at all.
+ *   - the emitted .ll is BYTE-IDENTICAL (md5 d948f10c5f8875061978d99b2534..)
+ *     under SCRIPTC_TARGET unset, =x86_64-linux-gnu and =x86_64-windows-gnu.
+ *     The emission did not depend on the target in any way, so pinning a
+ *     target was never a workaround either.
+ *
+ * SCOPE, deliberately narrow. False here means NO CHECK -- precisely what the
+ * C lane does on those targets -- and NOT a Linux floor. Inventing one here
+ * would make the two lanes cover different functions, which emitFunction's
+ * own comment calls a worse class of defect than the crash this closes: a
+ * program whose RangeError is catchable under one backend and fatal under the
+ * other. A Linux floor is separate work and owes a MEASURED floor first,
+ * which is the standard scr_runtime.h already sets for every other target.
+ *
+ * The env is re-read on every call rather than memoised. The suites build for
+ * several targets inside ONE process, and a cached answer there would hand a
+ * Windows prologue to a Linux binary (or the reverse) with every static check
+ * still passing -- the same shape as the memoised header read above, which is
+ * safe only because a header cannot change mid-process and an env var can. */
+export function stackCheckTargetHasFloor(env: NodeJS.ProcessEnv = process.env): boolean {
+  let platform: string;
+  let arch: string;
+  try {
+    const driver = resolveCc(env);
+    platform = targetPlatform(driver);
+    // A cross triple names its own arch; a host-native build is this host's.
+    arch = driver.target === null ? process.arch : (driver.target.split("-")[0] ?? "");
+  } catch {
+    // resolveCc throws on a malformed SCRIPTC_CC/SCRIPTC_TARGET pair. That is
+    // reported at compileC exactly as before, and buildTargetPlatform() falls
+    // back to the host for the same reason; so does this.
+    platform = process.platform;
+    arch = process.arch;
+  }
+  if (platform !== "win32") return false;
+  return arch === "x64" || arch === "x86_64" || arch === "amd64";
 }
 
 

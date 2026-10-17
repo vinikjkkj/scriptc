@@ -77,7 +77,7 @@ import type {
 import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
-import { seqScopedLocals, stackCheckPolicy, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
+import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
 // The stackless lane's admission, read from the ONE place that owns it.
 // Importing coroPlans rather than re-deriving the predicate is the point:
 // index.ts gates the scr_coro.c LINK on this exact call, so a second
@@ -6171,32 +6171,45 @@ class LlEmitter {
             `would be swallowed and its error return read as a real value.`,
         );
       }
-      const flr = B.tmp();
-      const sp0 = B.tmp();
-      const spi = B.tmp();
-      const lim = B.tmp();
-      const low = B.tmp();
-      // addrspace(256) IS the GS segment on x86-64, so this lowers to the same
-      // `movq %gs:0x1478, reg` the C lane's inline asm emits -- no inline asm
-      // in a backend that has none anywhere else. 0x1478 is the TEB's
-      // DeallocationStack: the reservation floor, constant for the life of the
-      // stack and swapped by Win32 on every fiber switch. NOT StackLimit
-      // (GS:0x10), which the OS moves down WITH the stack and which therefore
-      // never compares low.
-      B.line(`${flr} = load i64, ptr addrspace(256) inttoptr (i64 5240 to ptr addrspace(256)) ; TEB DeallocationStack`);
-      this.declare(`declare ptr @llvm.stacksave.p0()`);
-      B.line(`${sp0} = call ptr @llvm.stacksave.p0()`);
-      B.line(`${spi} = ptrtoint ptr ${sp0} to i64`);
-      B.line(`${lim} = sub i64 ${spi}, ${stackMarginBytes()} ; SCR_STACK_MARGIN, read from scr_runtime.h`);
-      B.line(`${low} = icmp ult i64 ${lim}, ${flr}`);
-      const llo = B.newLabel("stk.lo");
-      const lok = B.newLabel("stk.ok");
-      B.condBr(low, llo, lok);
-      B.startBlock(llo);
-      this.declare(`declare void @scr_stack_exhausted()`);
-      B.line(`call void @scr_stack_exhausted()`);
-      this.emitUnwind();
-      B.startBlock(lok);
+      // THE TARGET GATE, and it sits HERE rather than inside stackCheckPolicy
+      // on purpose. The policy answers "which functions does this lane
+      // cover?" and the assertion above enforces that the answer propagates;
+      // BOTH must keep running on every target, because a tripwire that stops
+      // firing on Linux is one the next widening walks straight past. Only
+      // the INSTRUCTION SEQUENCE is target-conditional -- which is exactly the
+      // shape the C lane has, where cpp keeps `if (SCR_STACK_LOW())` in every
+      // emitted function and collapses the PREDICATE to (0).
+      //
+      // Ungated, the load below ran on Linux too and killed 70% of
+      // host-native LLVM binaries. See stackCheckTargetHasFloor().
+      if (stackCheckTargetHasFloor()) {
+        const flr = B.tmp();
+        const sp0 = B.tmp();
+        const spi = B.tmp();
+        const lim = B.tmp();
+        const low = B.tmp();
+        // addrspace(256) IS the GS segment on x86-64, so this lowers to the
+        // same `movq %gs:0x1478, reg` the C lane's inline asm emits -- no
+        // inline asm in a backend that has none anywhere else. 0x1478 is the
+        // TEB's DeallocationStack: the reservation floor, constant for the
+        // life of the stack and swapped by Win32 on every fiber switch. NOT
+        // StackLimit (GS:0x10), which the OS moves down WITH the stack and
+        // which therefore never compares low. WINDOWS x86-64 ONLY.
+        B.line(`${flr} = load i64, ptr addrspace(256) inttoptr (i64 5240 to ptr addrspace(256)) ; TEB DeallocationStack`);
+        this.declare(`declare ptr @llvm.stacksave.p0()`);
+        B.line(`${sp0} = call ptr @llvm.stacksave.p0()`);
+        B.line(`${spi} = ptrtoint ptr ${sp0} to i64`);
+        B.line(`${lim} = sub i64 ${spi}, ${stackMarginBytes()} ; SCR_STACK_MARGIN, read from scr_runtime.h`);
+        B.line(`${low} = icmp ult i64 ${lim}, ${flr}`);
+        const llo = B.newLabel("stk.lo");
+        const lok = B.newLabel("stk.ok");
+        B.condBr(low, llo, lok);
+        B.startBlock(llo);
+        this.declare(`declare void @scr_stack_exhausted()`);
+        B.line(`call void @scr_stack_exhausted()`);
+        this.emitUnwind();
+        B.startBlock(lok);
+      }
     }
     this.emitStmts(fn.body);
     // Implicit exit of a void function: release the function scope unless
