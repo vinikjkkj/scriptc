@@ -1140,6 +1140,86 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     fns: ["date.getHours"],
     note: "the composed new Date().getHours() form only — it reads the HOST's local zone, unlike every other Date surface here, and an arbitrary instant would depend on the run host's zone history",
   },
+  // ── Date VALUES (scr_date.c, the Date-value slice): the constructors and
+  // UTC reads over an allocated ScrDate. Each of these ten is individually
+  // pure — no host state in its own runtime code, verified by reading
+  // scr_date_new/scr_date_parse_get_time/scr_date_value/scr_date_parts —
+  // but LIB_NONDETERMINISTIC_PREFIXES sweeps the whole "date." family BY
+  // DESIGN (ir/nodes.ts's own policy comment above that table predates this
+  // slice and names exactly this shape of case: a finer analysis proving a
+  // specific date call pure does not exempt it). These rows exist so a
+  // profile can DENY the surfaces it has actually reasoned about, rather
+  // than the family-wide rule being narrowed for everyone.
+  {
+    id: "stdlib.date.new",
+    kind: "stdlib",
+    name: "Date constructor (number/copy forms)",
+    fns: ["date.new"],
+    note: "new Date(), new Date(ms), and the Date copy constructor all allocate through this call, which only TimeClips its f64 argument — pure in isolation. new Date()'s argument is a nested stdlib.date.now call (the actual clock read, already fenced); the copy form's argument is a nested stdlib.date.value read",
+  },
+  {
+    id: "stdlib.date.newStr",
+    kind: "stdlib",
+    name: "new Date(string)",
+    fns: ["date.newStr"],
+    note: "the VALUE-constructing string form (distinct from stdlib.date.getTime's composed new Date(str).getTime()); runs the same bounded, explicit-offset-only grammar — an offset-less date-time answers NaN rather than consulting a local zone, so this reads no host state",
+  },
+  {
+    id: "stdlib.date.value",
+    kind: "stdlib",
+    name: "Date.prototype.getTime/valueOf (value receiver)",
+    fns: ["date.value"],
+    note: "a field read of the allocated ScrDate's stored milliseconds — no host state",
+  },
+  {
+    id: "stdlib.date.getUTCFullYear",
+    kind: "stdlib",
+    name: "Date.prototype.getUTCFullYear",
+    fns: ["date.getUTCFullYear"],
+    note: "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart",
+  },
+  {
+    id: "stdlib.date.getUTCMonth",
+    kind: "stdlib",
+    name: "Date.prototype.getUTCMonth",
+    fns: ["date.getUTCMonth"],
+    note: "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart",
+  },
+  {
+    id: "stdlib.date.getUTCDate",
+    kind: "stdlib",
+    name: "Date.prototype.getUTCDate",
+    fns: ["date.getUTCDate"],
+    note: "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart",
+  },
+  {
+    id: "stdlib.date.getUTCHours",
+    kind: "stdlib",
+    name: "Date.prototype.getUTCHours",
+    fns: ["date.getUTCHours"],
+    note: "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart",
+  },
+  {
+    id: "stdlib.date.getUTCMinutes",
+    kind: "stdlib",
+    name: "Date.prototype.getUTCMinutes",
+    fns: ["date.getUTCMinutes"],
+    note: "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart",
+  },
+  {
+    id: "stdlib.date.getUTCSeconds",
+    kind: "stdlib",
+    name: "Date.prototype.getUTCSeconds",
+    fns: ["date.getUTCSeconds"],
+    note: "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart",
+  },
+  {
+    id: "stdlib.date.getUTCMilliseconds",
+    kind: "stdlib",
+    name: "Date.prototype.getUTCMilliseconds",
+    fns: ["date.getUTCMilliseconds"],
+    note: "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart",
+  },
   // ── crypto.randomFill (lowerCryptoModuleCall's dedicated arm): the only
   // CSPRNG member with no lowering-table row, because the fill writes into
   // a caller-owned buffer and hands control to a deferred callback rather

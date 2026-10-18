@@ -2122,6 +2122,69 @@
       "note": "the composed new Date(dateString).getTime() form; new Date().getTime() is stdlib.date.now's surface"
     },
     {
+      "id": "stdlib.date.getUTCDate",
+      "kind": "stdlib",
+      "name": "Date.prototype.getUTCDate",
+      "status": "static",
+      "note": "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart"
+    },
+    {
+      "id": "stdlib.date.getUTCFullYear",
+      "kind": "stdlib",
+      "name": "Date.prototype.getUTCFullYear",
+      "status": "static",
+      "note": "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart"
+    },
+    {
+      "id": "stdlib.date.getUTCHours",
+      "kind": "stdlib",
+      "name": "Date.prototype.getUTCHours",
+      "status": "static",
+      "note": "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart"
+    },
+    {
+      "id": "stdlib.date.getUTCMilliseconds",
+      "kind": "stdlib",
+      "name": "Date.prototype.getUTCMilliseconds",
+      "status": "static",
+      "note": "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart"
+    },
+    {
+      "id": "stdlib.date.getUTCMinutes",
+      "kind": "stdlib",
+      "name": "Date.prototype.getUTCMinutes",
+      "status": "static",
+      "note": "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart"
+    },
+    {
+      "id": "stdlib.date.getUTCMonth",
+      "kind": "stdlib",
+      "name": "Date.prototype.getUTCMonth",
+      "status": "static",
+      "note": "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart"
+    },
+    {
+      "id": "stdlib.date.getUTCSeconds",
+      "kind": "stdlib",
+      "name": "Date.prototype.getUTCSeconds",
+      "status": "static",
+      "note": "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart"
+    },
+    {
+      "id": "stdlib.date.new",
+      "kind": "stdlib",
+      "name": "Date constructor (number/copy forms)",
+      "status": "static",
+      "note": "new Date(), new Date(ms), and the Date copy constructor all allocate through this call, which only TimeClips its f64 argument — pure in isolation. new Date()'s argument is a nested stdlib.date.now call (the actual clock read, already fenced); the copy form's argument is a nested stdlib.date.value read"
+    },
+    {
+      "id": "stdlib.date.newStr",
+      "kind": "stdlib",
+      "name": "new Date(string)",
+      "status": "static",
+      "note": "the VALUE-constructing string form (distinct from stdlib.date.getTime's composed new Date(str).getTime()); runs the same bounded, explicit-offset-only grammar — an offset-less date-time answers NaN rather than consulting a local zone, so this reads no host state"
+    },
+    {
       "id": "stdlib.date.now",
       "kind": "stdlib",
       "name": "Date.now",
@@ -2134,6 +2197,13 @@
       "name": "Date.prototype.toISOString",
       "status": "static",
       "note": "the composed new Date(ms?).toISOString() form"
+    },
+    {
+      "id": "stdlib.date.value",
+      "kind": "stdlib",
+      "name": "Date.prototype.getTime/valueOf (value receiver)",
+      "status": "static",
+      "note": "a field read of the allocated ScrDate's stored milliseconds — no host state"
     },
     {
       "id": "stdlib.map.clear",

@@ -5985,7 +5985,14 @@ export type IrLibFn =
    * seven UTC field reads take the TIME VALUE (composed with date.value
    * at the lowering), are pure arithmetic with no host state, and answer
    * NaN on an invalid Date. None of them throws. The LOCAL field reads
-   * are deliberately absent -- see lower-classes.ts's constructor note. */
+   * are deliberately absent -- see lower-classes.ts's constructor note.
+   *
+   * That purity is about each call's OWN code, not about the attestation:
+   * LIB_NONDETERMINISTIC_PREFIXES's "date." entry sweeps this whole family
+   * on purpose (see that table's policy comment above it, written before
+   * this slice existed), so all ten still demote `deterministic` and are
+   * denied only by an explicit fence -- surfaces.ts's AMBIENT_SURFACE_FNS
+   * carries one stdlib.date.* row per spelling above. */
   | "date.new"
   | "date.newStr"
   | "date.value"
