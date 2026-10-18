@@ -431,13 +431,28 @@ describe("library profile fences", () => {
     // getHours joins the family and MUST: it is the one Date surface that
     // reads the host's local ZONE as well as its clock, so a determinism
     // fence that named the family without it would leave the most
-    // machine-dependent Date read on this compiler unfenced.
+    // machine-dependent Date read on this compiler unfenced. The Date
+    // VALUES slice (scr_date.c) added ten more stdlib.date.* manifest
+    // rows -- the constructors and the UTC-only field readers -- each
+    // individually pure but still swept by the family-wide prefix by
+    // design (see AMBIENT_SURFACE_FNS's comment in surfaces.ts); this
+    // enumeration is the manifest's own sorted id order, not source order.
     expect(dateIds).toEqual([
       "stdlib.date.UTC",
       "stdlib.date.getHours",
       "stdlib.date.getTime",
+      "stdlib.date.getUTCDate",
+      "stdlib.date.getUTCFullYear",
+      "stdlib.date.getUTCHours",
+      "stdlib.date.getUTCMilliseconds",
+      "stdlib.date.getUTCMinutes",
+      "stdlib.date.getUTCMonth",
+      "stdlib.date.getUTCSeconds",
+      "stdlib.date.new",
+      "stdlib.date.newStr",
       "stdlib.date.now",
       "stdlib.date.toISOString",
+      "stdlib.date.value",
     ]);
     expect(r.profile.fences[0]!.surfaces.every((s) => s.detector !== undefined)).toBe(true);
     const processIds = r.profile.fences[1]!.surfaces.map((s) => s.id);
