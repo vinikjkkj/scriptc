@@ -3880,9 +3880,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
    * proved each surfaces as T: identity, a to-dyn conversion, or an
    * arm-into-union wrap), then the overflow map on index-signature shapes.
    * A MISSING key yields the undefined dyn value (T dyn), the undefined
-   * arm (T undefined-armed union), or TRAPS with the key text (the array
-   * OOB policy — the checker claimed T and no undefined is representable).
-   * Borrows both; refcounted results are owned (+1). */
+   * arm (T undefined-armed union), or THROWS the catchable SC9003 TypeError
+   * with the key text (strandedUnitTrap/SC9004's and reqabsent/SC9005's own
+   * answer to "no sound value for this slot" — the checker claimed T and no
+   * undefined is representable). Borrows both; refcounted results are
+   * owned (+1). */
   export function recordKeyGetHelper(E: CEmitter, shapeId: string, t: IrType, overflowOnly = false): string {
     const key = `${shapeId}|${typeKey(t)}${overflowOnly ? "|ovf" : ""}`;
     const existing = E.recordKeyGetFns.get(key);
@@ -3892,11 +3894,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const name = `sc_rkg_${E.recordKeyGetFns.size}`;
     E.recordKeyGetFns.set(key, name);
     const struct = mangleRecordStruct(shapeId);
-    // Does the MISS path abort?  Decided here rather than at the bottom
-    // where it is emitted, because an aborting helper carries an extra
-    // parameter — the SOURCE SITE of the read — and the signature is
-    // written before the body.  The three arms below are the miss ladder
-    // at the end of this function, in the same order.
+    // Does the MISS path throw the catchable SC9003 TypeError?  Decided
+    // here rather than at the bottom where it is emitted, because a
+    // throwing helper carries an extra parameter — the SOURCE SITE of the
+    // read — and the signature is written before the body.  The three arms
+    // below are the miss ladder at the end of this function, in the same
+    // order.  (The name `aborts`/`recordKeyGetAborts` predates the SC9003
+    // conversion from abort() to a catchable throw and still names the
+    // same population — every helper whose miss path cannot answer
+    // `undefined`.)
     const aborts = t.kind !== "dyn" && !(t.kind === "union" && E.undefinedArmTag(t) >= 0);
     if (aborts) E.recordKeyGetAborts.add(name);
     const sig = `${E.link}${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(${struct} *r, ScrStr *k${aborts ? ", const char *sc_site" : ""})`;
@@ -3981,15 +3987,25 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       d.push(`  return ${E.unitInstanceRef(t.unionId, E.undefinedArmTag(t))};`);
     } else {
       // JS would answer undefined; T has no way to say it (the checker
-      // claimed T without noUncheckedIndexedAccess) — trap like an array
-      // OOB read instead of corrupting a typed slot (SEMANTICS.md).
+      // claimed T without noUncheckedIndexedAccess) — throw the catchable
+      // SC9003 TypeError instead of corrupting a typed slot, the same
+      // answer strandedUnitTrap (SC9004) and reqabsent (SC9005) already
+      // give the identical "no sound value for this slot" question
+      // elsewhere in this compiler (SEMANTICS.md). This USED to trap like
+      // an array OOB read (array OOB's own, separate, deliberately
+      // uncatchable policy — scr_array.c's scr_arr_trap_oob/
+      // scr_arr_trap_absent, untouched by this conversion and still
+      // uncatchable); the two were never the same mechanism, only the
+      // same shared `scr_trap_fmt` primitive, and this family no longer
+      // calls it at all.
       //
-      // This helper is in the ABORT.real population (recorded at the
-      // signature above, because an aborting helper takes `sc_site`).
-      // The abort used to name NOTHING: no code, no file, no line, only
-      // the runtime key — the worst diagnostic shape this project has,
-      // and the same one `scr_dyn_new_func`'s NULL `sig` had. It names
-      // itself now, in three parts:
+      // This helper is in the former-ABORT.real, now-STRAND-classified
+      // population (recorded at the signature above, because a throwing
+      // helper takes `sc_site`). The abort this replaced used to name
+      // NOTHING: no code, no file, no line, only the runtime key — the
+      // worst diagnostic shape this project has, and the same one
+      // `scr_dyn_new_func`'s NULL `sig` had. The THROW names itself, in
+      // three parts:
       //
       //   (SC9003 at <file>:<line>:<col>)  the CALL SITE, passed in — the
       //     helper is shared by every read of this (shape, result type)
@@ -4027,7 +4043,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       const msg =
         `scriptc: TypeError: record has no key '%.*s' (typed '${E.dynDesc(t)}' — no undefined is representable) (SC9003 at %s)\n` +
         `${why}\n`;
-      d.push(`  scr_trap_fmt(${cStringLiteral(Buffer.from(msg, "utf8"))}, (int)k->len, k->data, sc_site);`);
+      // scr_throw_error_fmt_code is scr_trap_fmt's catchable twin (SC9003):
+      // same vararg plumbing, landing in scr_throw_error_msg_code instead
+      // of abort() -- the same answer strandedUnitTrap (SC9004) and
+      // reqabsent (SC9005) already give the identical "no sound value for
+      // this slot" question elsewhere in this compiler, not array-OOB's
+      // uncatchable one. The helper now returns normally after throwing
+      // (the pending flag is what callers test), so it needs a dummy of
+      // its own result type on the fall-through.
+      d.push(
+        `  scr_throw_error_fmt_code(SCR_ERR_TYPE, "SC9003", ${cStringLiteral(Buffer.from(msg, "utf8"))}, (int)k->len, k->data, sc_site);`,
+      );
+      const dummy = t.kind === "f64" ? "0" : t.kind === "bool" ? "false" : "NULL";
+      d.push(`  return ${dummy};`);
     }
     d.push(`}`, ``);
     E.walkerDefs.push(...d);

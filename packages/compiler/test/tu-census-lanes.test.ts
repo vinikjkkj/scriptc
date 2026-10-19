@@ -143,14 +143,24 @@ const PLANTS: readonly {
   {
     name: "a4-abort",
     ext: "ts",
-    want: { "ABORT.real": 1, "ABORT.structural": 1, STRAND: 2 },
-    what: "an index-signature keyed read whose miss cannot be represented, flowing into a bare `string` parameter (uncatchable), an OOM guard, and -- MEASURED, not designed -- the two representability strand traps the same `bag[key]` plants: the keyed read's own result and the `string` parameter it flows into",
+    // Converted 2026-10-19: the index-signature keyed-read miss (SC9003) no
+    // longer aborts -- it throws the same catchable TypeError SC9004/SC9005
+    // already give the identical "no sound value for this slot" question,
+    // classified under STRAND by its code. ABORT.real is 0 here now (and on
+    // any plant this compiler emits): the three pre-existing STRAND traps
+    // the `bag[key]`/`bag[other]` reads plant (the two `string`-parameter
+    // coercions this plant was written to measure, PLUS the keyed read's
+    // own miss, now a fourth-call-site-sharing ONE statement of its own)
+    // become 3 STATEMENTS, not 2.
+    want: { "ABORT.structural": 1, STRAND: 3 },
+    what: "an index-signature keyed read whose miss cannot be represented, now a catchable SC9003 TypeError (STRAND) flowing into a bare `string` parameter, an OOM guard, and -- MEASURED, not designed -- the two representability strand traps the same `bag[key]` plants: the keyed read's own result and the `string` parameter it flows into",
     // TWO reads of the SAME result type, on purpose. Both emitters lift the
     // keyed read into ONE shared helper -- `sc_rkg_N` per result type on the C
     // lane, the single `sc_bad_key` on the LLVM one -- so this plant is one
-    // ABORT.real STATEMENT and TWO ways to die on both lanes, and the shared-
-    // helper correction is what has to find the second one. With a single read
-    // the correction is unobservable and removing it entirely still passes.
+    // STRAND STATEMENT (SC9003) and TWO ways to die on both lanes, and the
+    // shared-helper correction is what has to find the second one. With a
+    // single read the correction is unobservable and removing it entirely
+    // still passes.
     src: [
       "function need(s: string): string { return s.toUpperCase(); }",
       "const bag: Record<string, string> = { present: \"yes\" };",
@@ -429,20 +439,24 @@ describe("the census reads the LLVM lane", () => {
   test("the emitter differences the lanes DO have are the two known ones", () => {
     // (1) the .ll interns its message strings, so the bracket census.mjs
     //     counts is one per DISTINCT message and not one per throw;
-    // (2) the .ll's keyed-read abort is ONE shared sc_bad_key helper for the
-    //     whole module, where the C emitter emits one sc_rkg_N per result
-    //     type whose message names the typed slot. Since SC9003 both lanes
-    //     hand that helper the SOURCE SITE and the shape's own sentence as
-    //     pointers — so the .ll now calls scr_trap_fmt too, which it never
-    //     used to, and the census's LLVM reader classifies that call shape.
-    //     The difference that remains is how many helpers each lane spells
-    //     the abort with, not what the program can do.
+    // (2) the .ll's keyed-read-miss THROW (SC9003, STRAND since 2026-10-19)
+    //     is ONE shared sc_bad_key helper for the whole module, where the C
+    //     emitter emits one sc_rkg_N per result type whose message names the
+    //     typed slot. Both lanes hand that helper the SOURCE SITE and the
+    //     shape's own sentence as pointers via scr_throw_error_fmt_code
+    //     (scr_trap_fmt's catchable twin — neither lane calls scr_trap_fmt
+    //     for this family any more), and the census's LLVM reader
+    //     classifies that call shape. The difference that remains is how
+    //     many helpers each lane spells the throw with, not what the
+    //     program can do.
     const ll = readFileSync(TU.get("a4-abort:llvm")!, "latin1");
     const c = readFileSync(TU.get("a4-abort:c")!, "latin1");
     expect(ll).toContain("define internal void @sc_bad_key(ptr %site, ptr %why)");
     expect(ll).toContain("(SC9003 at %s)");
-    expect(ll).toMatch(/call void \(ptr, \.\.\.\) @scr_trap_fmt\(ptr @sc_bad_key_msg,/);
-    expect(c).toContain("scr_trap_fmt");
+    expect(ll).toMatch(/call void \(i32, ptr, ptr, \.\.\.\) @scr_throw_error_fmt_code\(i32 1, ptr @sc_cs_\d+, ptr @sc_bad_key_msg,/);
+    expect(ll).not.toContain("@scr_trap_fmt(");
+    expect(c).toContain("scr_throw_error_fmt_code(SCR_ERR_TYPE, \"SC9003\",");
+    expect(c).not.toContain("scr_trap_fmt(");
     expect(c).toContain("(SC9003 at %s)");
     // ONE shared helper on the .ll against one per result type on the C lane
     expect((ll.match(/define internal void @sc_bad_key\(/g) ?? []).length).toBe(1);

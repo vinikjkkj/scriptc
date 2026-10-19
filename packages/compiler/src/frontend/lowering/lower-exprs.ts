@@ -1104,9 +1104,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // `typeof section.attrs.name === 'string' ? section.attrs.name : undefined`
       // -- is asking whether the key is there at all. The checker types the
       // read by the signature's VALUE type, so at that width a MISS has
-      // nowhere to go and ABORTS ("record has no key 'name' (typed 'string'
-      // -- no undefined is representable)") on precisely the input the guard
-      // exists to reject. Read it at the undefined-armed width instead: the
+      // nowhere to go and THROWS ("record has no key 'name' (typed 'string'
+      // -- no undefined is representable)", SC9003, catchably since
+      // 2026-10-19) on precisely the input the guard exists to reject.
+      // Read it at the undefined-armed width instead: the
       // rung `recordKeyReadAtUndefinedArm` already offers `??`'s right
       // operand for the same stated reason -- that consumer "is asking
       // whether there is a value at all" -- and typeof is the purest form
@@ -4887,19 +4888,23 @@ function memberMessageIsNotRead(p: ts.Node): boolean {
  *
  * `AB_PROP_CONFIGS[name].defaultValue` — zapo
  * `client/coordinators/WaAbPropsCoordinator.ts:55:16`, sites #10 and #11 of
- * the thirteen `ABORT.real` call sites `estado-abort13` maps. The table has
- * NO index signature, so tsc typed the read by the declared fields' one
- * common type and a miss has nowhere to go: the emitted helper calls
- * `scr_trap_fmt` and the process ABORTS, walking straight past the
- * program's own `try/catch`.
+ * the thirteen `ABORT.real` call sites `estado-abort13` maps (when this
+ * rung was written; the emitted helper's miss path was `scr_trap_fmt`, an
+ * uncatchable abort past the program's own `try/catch`, converted
+ * 2026-10-19 to the catchable SC9003 TypeError the whole family now
+ * throws). The table has NO index signature, so tsc typed the read by the
+ * declared fields' one common type and a miss has nowhere to go: without
+ * this rung the read would now THROW, but with the GENERIC SC9003 message
+ * rather than Node's own.
  *
- * NODE THROWS THERE, AND IT THROWS CATCHABLY. `undefined.defaultValue` is
- * `TypeError: Cannot read properties of undefined (reading 'defaultValue')`
- * — measured against v25.9.0, not argued — and the program's own `catch`
- * sees it and finishes at exit 0. So the receiver position needs NO width
- * change downstream and no new machinery: the value the member read
- * consumes still has the shape's own type, and the ONE state that used to
- * abort now takes the throw JS itself specifies for it.
+ * NODE THROWS THERE, AND IT THROWS CATCHABLY, WITH ITS OWN MESSAGE.
+ * `undefined.defaultValue` is `TypeError: Cannot read properties of
+ * undefined (reading 'defaultValue')` — measured against v25.9.0, not
+ * argued — and the program's own `catch` sees it and finishes at exit 0.
+ * So the receiver position needs NO width change downstream and no new
+ * machinery: the value the member read consumes still has the shape's own
+ * type, and the state this rung exists for takes the EXACT throw JS
+ * itself specifies for it, rather than SC9003's generic one.
  *
  * This is `memberRecvArmBridge` one construct earlier. That rung answers
  * the same question for a REFERENCE to a local a widened keyed read stored

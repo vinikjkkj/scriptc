@@ -688,12 +688,16 @@ export const UNSUPPORTED: Record<string, UnsupportedEntry> = {
  * language/stdlib surface.
  *
  * SC9003 is the only one of those that never appears at COMPILE time: it
- * is the emitted keyed-read abort (`r[k]` on a result width with no
+ * is the emitted keyed-read-miss throw (`r[k]` on a result width with no
  * `undefined` in it — emit-walkers.ts's recordKeyGetHelper and
- * llvm/emitter.ts's @sc_bad_key), and it exists so that an abort which
- * used to name no code, no file and no line names all three. It has no
- * registry entry here for the same reason SC9001 has none: it reports a
- * state the program reached, not a surface the compiler declined. */
+ * llvm/emitter.ts's @sc_bad_key), a catchable TypeError since 2026-10-19
+ * (the same answer SC9004/strandedUnitTrap and SC9005/reqabsent already
+ * give the identical "no sound value for this slot" question — formerly
+ * an uncatchable abort, analogized at the time to the array-OOB
+ * divergence), and it exists so that a failure which used to name no
+ * code, no file and no line names all three. It has no registry entry
+ * here for the same reason SC9001 has none: it reports a state the
+ * program reached, not a surface the compiler declined. */
 export const FENCE_CODES: Record<string, { name: string; status: "unsupported" | "dynamic-only" }> = {
   // SC2001 is the residual type fence: the named type-shape families each
   // carry their own code (SC2005 generic signatures, SC2006 index

@@ -218,6 +218,53 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // reentrancy TypeError throws here too.
           f.throws = true;
           break;
+        case "recordKeyGet": {
+          // Converted 2026-10-19: a keyed read whose result width cannot
+          // spell `undefined` now throws the catchable SC9003 TypeError
+          // (scr_throw_error_fmt_code on both lanes) instead of aborting —
+          // the SAME condition recordKeyGetHelper/keyedRecordReadDirectInto
+          // use to decide whether the miss path takes the throwing branch
+          // at all (emit-walkers.ts `aborts`): a dyn result, or a union
+          // result with an undefined arm, answers `undefined` and never
+          // throws; every other result width does. Before this case
+          // existed the call-site codegen never inserted a pending check
+          // after this family's helper call (nothing here could throw,
+          // only abort past any check), so a NULL/0 dummy flowed straight
+          // into the rest of the expression on a miss -- a segfault.
+          const shape = (mod.records ?? []).find((r) => r.id === rec["shapeId"]);
+          const t = rec["type"] as IrType | undefined;
+          if (shape && t) {
+            const hasUndefinedArm =
+              t.kind === "union" &&
+              (mod.unions ?? []).find((u) => u.id === t.unionId)?.arms.some((a) => a.kind === "undefinedT") === true;
+            if (t.kind !== "dyn" && !hasUndefinedArm) f.throws = true;
+          }
+          break;
+        }
+        case "unionKeyGet": {
+          // unionDisc's generalization: a record arm with no declared field
+          // for a literal key (or no literal key at all) falls to the SAME
+          // shared keyed-read helper recordKeyGet uses, over the SAME
+          // (shape, join-type) pair -- so it is in the SC9003 throwing
+          // population under the IDENTICAL test, which depends only on the
+          // JOIN type (every (shape, type) pair's `aborts` bit is a
+          // property of `type` alone -- emit-walkers.ts's `aborts`). Kind-
+          // level conservatism, like jsonStringify/toString above: not
+          // every arm of a given union necessarily reaches the helper (a
+          // declared-field hit never does), so this can seed `f.throws`
+          // for a function whose particular unionKeyGet never actually
+          // calls a throwing helper -- the cost of that false yes is one
+          // flag read, and the cost of a false no is the same NULL-dummy
+          // segfault recordKeyGet's own conversion fixed.
+          const t = rec["type"] as IrType | undefined;
+          if (t) {
+            const hasUndefinedArm =
+              t.kind === "union" &&
+              (mod.unions ?? []).find((u) => u.id === t.unionId)?.arms.some((a) => a.kind === "undefinedT") === true;
+            if (t.kind !== "dyn" && !hasUndefinedArm) f.throws = true;
+          }
+          break;
+        }
         case "recordKeySet": {
           // A dynamic-keyed write can collide with a DECLARED field, where
           // a dyn value validates against the field's type (dynCheck) —

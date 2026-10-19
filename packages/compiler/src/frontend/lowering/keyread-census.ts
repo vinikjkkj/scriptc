@@ -3,11 +3,19 @@
  *
  * An index-signature keyed read whose CHECKER type is the signature's
  * value type (no `noUncheckedIndexedAccess`) compiles to a helper whose
- * MISS path is `scr_trap_fmt("record has no key ...")` — a process ABORT
- * that carries no `[SCxxxx]` tag. No trap census counts it, and
- * `SCRIPTC_TRAP_TRACE` never prints it, because it is not a coded throw.
- * That is why zapo's published trap numbers were blind to the class that
- * actually stops it after pairing.
+ * MISS path was (before 2026-10-19) `scr_trap_fmt("record has no key
+ * ...")` — a process ABORT that carried no `[SCxxxx]` tag; it is now
+ * `scr_throw_error_fmt_code(..., "SC9003", "record has no key ...")`, a
+ * catchable TypeError that STILL carries no `[SCxxxx]` tag (SC9003 is
+ * coded on the thrown object, not bracketed into the message — the
+ * bracket is this project's mark for a deferred compile fence, and SC9003
+ * was never that). Neither spelling is a coded throw census.mjs's bracket
+ * scan sees, and `SCRIPTC_TRAP_TRACE` never printed the abort either,
+ * because it hooks scr_throw_error_msg_code and nothing upstream of it —
+ * `scr_throw_error_fmt_code` lands there too, so the throw IS visible to
+ * it now, where the abort never was. That gap (not this one) is why
+ * zapo's published trap numbers were blind to the class that actually
+ * stopped it after pairing.
  *
  * `recordKeyReadAtUndefinedArm` reads the same key at an undefined-armed
  * width instead, and its admission rule is per-DESTINATION and

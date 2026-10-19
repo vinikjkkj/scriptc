@@ -210,7 +210,11 @@ describe("SC9003: the keyed-read abort names its source site", () => {
 
   test("the message carries the code, and the code is where the site goes", async () => {
     const tu = await cTu();
-    const traps = [...tu.matchAll(/scr_trap_fmt\("scriptc: TypeError: record has no key[^\n]*/g)].map((m) => m[0]);
+    // SC9003 is now a catchable throw (scr_throw_error_fmt_code,
+    // scr_trap_fmt's catchable twin) rather than an abort -- same message,
+    // same trailing site argument, different callee and an explicit "SC9003"
+    // code argument scr_trap_fmt never carried.
+    const traps = [...tu.matchAll(/scr_throw_error_fmt_code\(SCR_ERR_TYPE, "SC9003", "scriptc: TypeError: record has no key[^\n]*/g)].map((m) => m[0]);
     expect(traps.length).toBe(2);
     for (const t of traps) {
       expect(t).toContain("(SC9003 at %s)");

@@ -2927,28 +2927,31 @@ class LlEmitter {
     }
     if (this.needsBadKey) {
       // The keyed-read miss on a result type that cannot say `undefined`:
-      // trap like an array OOB read instead of corrupting a typed slot
-      // (SEMANTICS.md; the C helper's message additionally interpolates
-      // the runtime key — a trap-path debugging nicety, never reachable
-      // by a program whose behavior matches Node).
+      // a catchable TypeError (SC9003), the same answer strandedUnitTrap
+      // (SC9004) and reqabsent (SC9005) already give the identical "no
+      // sound value for this slot" question elsewhere in this compiler —
+      // not array-OOB's uncatchable abort (SEMANTICS.md #4/#46), which
+      // this family used to borrow without being the same shape: array
+      // OOB's checker cannot see the length; this one's checker already
+      // admitted, in the very message below, that an unchecked cast or an
+      // unvalidated dynamic crossing is what it would take to arrive here.
       //
       // The site and the why arrive as ARGUMENTS, exactly as they do on
       // the C lane and for the same reason: this helper is shared by
       // every keyed read in the module, so it cannot name the one that
-      // died. An abort with no code, no file and no line is the worst
-      // diagnostic shape this project has; the two pointers are what
-      // stop this one from having it, and they cost one interned
-      // constant per site.
+      // died. scr_throw_error_fmt_code is scr_trap_fmt's catchable twin —
+      // same vararg plumbing (vsnprintf in place of vfprintf), landing in
+      // scr_throw_error_msg_code instead of abort().
       const msg =
         "scriptc: TypeError: record has no key (typed slot — no undefined is representable) (SC9003 at %s)\n%s\n";
       const bytes = Buffer.byteLength(msg, "utf8");
-      this.declare(`declare void @scr_trap_fmt(ptr, ...)`);
+      this.declare(`declare void @scr_throw_error_fmt_code(i32, ptr, ptr, ...)`);
       defs.push(
         `@sc_bad_key_msg = internal constant [${bytes + 1} x i8] c"${llStrBytes(msg)}"`,
         `define internal void @sc_bad_key(ptr %site, ptr %why) ${FN_ATTRS} {`,
         `entry:`,
-        `  call void (ptr, ...) @scr_trap_fmt(ptr @sc_bad_key_msg, ptr %site, ptr %why)`,
-        `  unreachable`,
+        `  call void (i32, ptr, ptr, ...) @scr_throw_error_fmt_code(i32 1, ptr ${this.cstr("SC9003")}, ptr @sc_bad_key_msg, ptr %site, ptr %why)`,
+        `  ret void`,
         `}`,
         ``,
       );
@@ -15051,7 +15054,16 @@ class LlEmitter {
       ? `  the shape declares only {${shown}} and has no index signature, so no key outside that set typechecks at this read: an unchecked cast or an unvalidated dynamic crossing reached it`
       : `  the key is absent from the index signature and the result width has no undefined to answer with`;
     B.line(`call void @sc_bad_key(ptr ${this.cstr(srcSite(loc))}, ptr ${this.cstr(why)})`);
-    B.terminate(`unreachable`);
+    // sc_bad_key now THROWS (SC9003, catchable) instead of aborting: the
+    // same pending-check-then-unwind contract every other may-throw call
+    // in this emitter follows (emitPendingCheck's own doc). The call
+    // unconditionally sets the pending flag, so the "keep going" arm below
+    // is dead at run time -- but SSA still needs a value for `slot` on
+    // that arm, exactly like dynCheckHelper's own dummy-then-continue
+    // shape (backend/llvm/dyn.ts).
+    this.emitPendingCheck();
+    B.line(`store ${ty} ${ty === "double" ? f64Lit(0) : ty === "i1" ? "0" : "null"}, ptr ${slot}`);
+    B.br(join);
   }
 
   /** The claimed libCall slice: args are BORROWED (owned temps of the

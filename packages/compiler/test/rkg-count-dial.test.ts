@@ -1,13 +1,17 @@
-/* SCRIPTC_RKG_COUNT=1 — the runtime execution counter for the keyed-read
- * ABORT family (ABORT.real), and the twin of SCRIPTC_DC_COUNT.
+/* SCRIPTC_RKG_COUNT=1 — the runtime execution counter for the keyed-read-
+ * miss family (SC9003; STRAND since 2026-10-19, formerly ABORT.real), and
+ * the twin of SCRIPTC_DC_COUNT.
  *
  * `scripts/real-aborts.mjs` reads an emitted TU and says how many CALL SITES
- * of an aborting `sc_rkg_` helper it contains (51 on zapo at 8176c4a1) and
+ * of a trapping `sc_rkg_` helper it contains (51 on zapo at 8176c4a1) and
  * which source function hosts each. Nothing could say which of them a run
- * ever REACHES — and the answer is not the DYNCHECK answer, because this
- * family's miss path is a process abort: "it never fired" is true of every
- * site on every healthy run and says nothing at all. Which sites the program
- * actually WALKS is the ordering that decides what matters.
+ * ever REACHES — and the answer is not the DYNCHECK answer, because before
+ * 2026-10-19 this family's miss path was a process abort: "it never fired"
+ * was true of every site on every healthy run and said nothing at all. The
+ * miss path is a catchable throw now, but the dial and its reasoning both
+ * predate that and still apply unchanged — which sites the program actually
+ * WALKS is still the ordering that decides what matters, independent of
+ * whether a miss aborts or throws.
  *
  * The hazards this file exists for, in the order they would bite:
  *

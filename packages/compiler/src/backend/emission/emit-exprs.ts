@@ -2457,17 +2457,27 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       case "recordKeyGet": {
         // Dynamic-keyed record read through the per-(shape, result type)
         // helper — declared-field string switch, then the overflow map.
-        // Never throws (a smuggled miss traps in the helper).
+        // Converted 2026-10-19: a miss on a width with no `undefined` arm
+        // now THROWS the catchable SC9003 TypeError instead of aborting
+        // (recordKeyGetHelper's own `aborts`/`recordKeyGetAborts`, the
+        // SAME population this reads), so the temp has to ride the
+        // fallible path — the same `emitPendingCheck` every other
+        // may-throw runtime call gets — or an unwind-in-progress NULL/0
+        // dummy reads as a real value in whatever this expression feeds.
+        // A dyn result or an undefined-armed union is NOT in that
+        // population: it only ever answers `undefined`, never throws, and
+        // stays on the cheaper plain temp.
         const obj = E.emitExpr(e.obj);
         const key = E.emitExpr(e.key);
         const helper = E.recordKeyGetHelper(e.shapeId, e.type, e.overflowOnly === true);
-        // SCRIPTC_RKG_COUNT: one ordinal per emitted call of an ABORTING
+        // SCRIPTC_RKG_COUNT: one ordinal per emitted call of a THROWING
         // keyed-read helper.  Empty text with the dial off.
         const rkHit = E.rkHitC(helper, e.shapeId, typeKey(e.type));
         if (rkHit !== "") E.line(rkHit.trimEnd());
-        // The SITE, for a helper whose miss path aborts (SC9003); empty
+        // The SITE, for a helper whose miss path throws (SC9003); empty
         // text for one that answers undefined.
-        return E.newTemp(e.type, `${helper}(${obj.name}, ${key.name}${E.rkSiteArgC(helper, e.loc)})`);
+        const call = `${helper}(${obj.name}, ${key.name}${E.rkSiteArgC(helper, e.loc)})`;
+        return E.recordKeyGetAborts.has(helper) ? E.fallibleTemp(e.type, call) : E.newTemp(e.type, call);
       }
       case "recordOvfKeys": {
         // The overflow map's live keys in JS own-key order — a fresh
@@ -2805,11 +2815,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // arm goes through the shared keyed-read helper (owned result,
         // missing-key policy included), and a unit arm answers the interned
         // undefined arm (the optional-chain tail's short-circuit value).
+        // Converted 2026-10-19: the SAME keyed-read-miss throw recordKeyGet
+        // picked up applies here too, through the identical shared helper —
+        // `sawThrowingArm` below is set when any case actually reaches one,
+        // and the switch gets exactly one pending check after it when it
+        // does (the whole switch is one statement; checking per-case would
+        // duplicate it into every arm for no benefit).
         const u = E.emitExpr(e.value);
         const k = E.emitExpr(e.key);
         const def = E.unionsById.get(e.unionId);
         if (!def) throw new Error(`emitter bug: unionKeyGet of unknown union ${e.unionId}`);
         const resultDef = e.type.kind === "union" ? E.unionsById.get(e.type.unionId) : undefined;
+        let sawThrowingArm = false;
         const literal = e.key.kind === "strLit" ? e.key.value : null;
         const name = `sc_t${E.tempCounter++}`;
         E.line(`${cDecl(e.type, name)};`);
@@ -2883,6 +2900,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // key): the per-(shape, join type) keyed-read helper — a literal
           // key naming no declared field touches only the overflow map.
           const helper = E.recordKeyGetHelper(arm.shapeId, e.type, literal !== null && !!shape.indexValue);
+          if (E.recordKeyGetAborts.has(helper)) sawThrowingArm = true;
           // SCRIPTC_RKG_COUNT: the union-arm call site, in the same ordinal
           // space as the direct one.  Empty text with the dial off.
           const rkHit = E.rkHitC(helper, arm.shapeId, typeKey(e.type));
@@ -2892,6 +2910,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         E.indent--;
         E.line(`}`);
         E.registerTemp({ name, type: e.type });
+        if (sawThrowingArm) E.emitPendingCheck();
         return { name, type: e.type };
       }
       case "unionIsTag": {

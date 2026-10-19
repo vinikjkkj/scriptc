@@ -10,6 +10,7 @@
  */
 #include "scr_runtime.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -360,6 +361,30 @@ void scr_throw_error_msg_code(int kind, const char *message, size_t len,
   scr_error_set_code(e, code);
   scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v,
                  scr_error_traced ? &scr_error_trace : NULL);
+}
+
+/* scr_trap_fmt's CATCHABLE twin (SC9003): the keyed-read-miss family
+ * (emit-walkers.ts recordKeyGetHelper on the C lane, llvm/emitter.ts
+ * keyedRecordReadDirectInto on the LLVM one) is SHARED per (shape, result
+ * type) or, on the LLVM lane, module-wide -- exactly the plumbing
+ * scr_trap_fmt's vararg message already carried (site and why arrive as
+ * RUNTIME pointers, because the helper cannot bake one call site's text
+ * into its own body). Converting the family's answer from array-OOB's
+ * uncatchable abort to strandedUnitTrap/SC9004 and reqabsent/SC9005's
+ * already-shipped catchable TypeError (SEMANTICS.md) means the FORMATTING
+ * step has to survive the switch unchanged, so this is scr_trap_fmt's own
+ * vsnprintf in place of its vfprintf, landing in scr_throw_error_msg_code
+ * instead of abort(). A message that would overflow the buffer truncates
+ * (vsnprintf's own contract) rather than corrupting anything -- the site
+ * and the why are always far short of it. */
+void scr_throw_error_fmt_code(int kind, const char *code, const char *fmt, ...) {
+  char buf[512];
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(buf, sizeof buf, fmt, ap);
+  va_end(ap);
+  size_t len = n < 0 ? 0 : ((size_t)n >= sizeof buf ? sizeof buf - 1 : (size_t)n);
+  scr_throw_error_msg_code(kind, buf, len, code);
 }
 
 /* THE REFUSAL THAT REACHES THE USER. Same message, same bytes, same code as

@@ -518,6 +518,37 @@ this project introduced deliberately and chose to record here rather than
 claim a number. Each entry says which it is, because a reader who cannot tell
 them apart will read a decision we made as a fact we discovered.
 
+### A keyed record read with no undefined to answer THROWS, catchably (SC9003)
+
+`r[k]` on a record shape with no index signature, where the checker proved `k`
+is one of the shape's declared keys and the result type has no `undefined`
+arm: Node answers `undefined` silently (and the unsoundness surfaces one step
+downstream, at whatever reads the `undefined` it should not have gotten). This
+runtime cannot hold `undefined` in that slot either, so a miss here — reaching
+only through an unchecked cast or an unvalidated dynamic crossing the checker
+did not cover — throws a catchable `TypeError` (`SC9003`), naming the call
+site and why the compiler believed the miss was impossible. This is the SAME
+answer `strandedUnitTrap` (SC9004) and the required-absent-key read
+(`reqabsent`, SC9005) already give the identical "no sound value for this
+slot" question elsewhere in this compiler; it is NOT divergence 4/46's
+array-out-of-bounds policy, which stays uncatchable and is untouched by this
+entry — the two only ever shared the same underlying `scr_trap_fmt` primitive,
+never the same call sites, and this family no longer calls it at all.
+
+Before this entry the miss aborted the process uncatchably (`0xC0000409`),
+analogized in the emitter's own comment to divergence 4's array-OOB policy.
+Measured 2026-10-19: a remote-triggerable crossing at one real call site
+(zapo-js's `WaPrivacyCoordinator.getDisallowedList`, reached from an HTTP
+route with no further validation) made that abort a total-outage defect for a
+single malformed request; every one of the compiler's 17 call sites (zapo-js
+1.8.2, app182) shares one LLVM-lane helper and one C-lane helper per shared
+object, so the fix is this family's default, not a per-site carve-out. NO
+number is assigned: numbering is the registry owner's call.
+
+    packages/compiler/src/backend/emission/emit-walkers.ts (recordKeyGetHelper)
+    packages/compiler/src/backend/llvm/emitter.ts (keyedRecordReadDirectInto, helperDefs)
+    packages/runtime/src/scr_error.c (scr_throw_error_fmt_code)
+
 ### An error has no `stack` property
 
 No error object in this runtime carries a `stack` property: the string "stack"
