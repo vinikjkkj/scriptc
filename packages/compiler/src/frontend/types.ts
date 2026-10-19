@@ -6594,8 +6594,33 @@ export function isGenericCallableMemberType(t: ts.Type, checker: ts.TypeChecker)
  * to specialize a call site against. This predicate is wired ONLY into
  * the two record-shape ADMISSION sites (mapRecordTypeInner,
  * describeRecordMemberBlocker) — see WALLB-RESULTS.txt for the consumer
- * sweep this scoping was chosen to avoid needing. */
+ * sweep this scoping was chosen to avoid needing.
+ *
+ * NARROWED 2026-10-19, after tests/harness/diagnostics.test.ts >
+ * function-intersection-unrelated-returns.ts went from refused to
+ * silently compiling: a TRUE INTERSECTION of two distinct function-typed
+ * properties with incompatible signatures (unrelated return types, or
+ * different parameter lists) is, to checker.getCallSignatures alone,
+ * STRUCTURALLY INDISTINGUISHABLE from a genuine overload set -- confirmed
+ * by direct instrumentation: that fixture's "StringBase &
+ * { setup: (ctx) => Coord }".setup reads sigCount=2, every signature
+ * non-generic, exactly the shape this predicate was admitting (compile
+ * went from refusing to ok=true). The discriminator IS structural, not
+ * heuristic: that field's OWN type carries ts.TypeFlags.Intersection
+ * ((t.flags & ts.TypeFlags.Intersection) !== 0 reads true on the exact
+ * failing member), because it is synthesized from TWO DIFFERENT
+ * declarations being ANDed together, not from one symbol's own overload
+ * list. Confirmed on the motivating real type too, via the checker API
+ * directly against the installed mysql2 promise.d.ts: Pool.on reads
+ * sigCount=4, Pool.escapeId reads sigCount=2, and BOTH read
+ * isIntersectionFlag=false -- the exclusion below touches neither. The
+ * fixture's own comment states the stake directly: "If this file ever
+ * compiles, the rule has been widened past what makes it sound" -- that
+ * refusal must keep firing for a true intersection; this predicate must
+ * not let it reach that rule.
+ */
 export function isNonGenericOverloadSetMember(t: ts.Type, checker: ts.TypeChecker): boolean {
+  if ((t.flags & ts.TypeFlags.Intersection) !== 0) return false; // true intersection, not one symbol's own overload list
   const sigs = checker.getCallSignatures(t);
   if (sigs.length <= 1) return false;
   if (sigs.some((s) => s.getTypeParameters().length > 0)) return false; // isGenericCallableMemberType's turf
