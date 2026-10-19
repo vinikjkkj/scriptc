@@ -827,7 +827,31 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
           spreads.push(i);
           return src;
         }
-        return L.lowerExprExpecting(a, restType.elem);
+        // THE SAME ARGUMENT DESTINATION as the positional branch above
+        // (completeArgs' `L.lowerArgExpecting(arg, shape.type)`, ~40 lines
+        // up): a plain, non-spread element flowing into a typed REST slot
+        // is exactly as much an "argument" as a positional one, and
+        // recordKeyReadAtUndefinedArm's admission question ("does the
+        // DECLARED destination already carry an undefined arm") does not
+        // change shape because the destination happens to be array element
+        // N of a rest pack rather than parameter N directly. Using
+        // lowerExprExpecting here was the parity gap: every non-spread rest
+        // argument silently skipped the rung lowerArgExpecting offers
+        // everywhere else a value flows into a typed slot by call-argument
+        // position. A declined rung (expected not a union-with-undefined,
+        // or the node outside the syntactic guard) falls through to
+        // lowerExprExpecting internally, so this is a strict superset of
+        // the old behavior, not a new path.
+        // allowTernaryArm=true: the ONLY call site passing it (see the
+        // flag's own doc on lowerArgExpecting) -- a rest-slot element that
+        // is itself a plain ternary (`cond ? attrs.x : undefined`, zapo's
+        // WaMessageCoordinator.ts:941/948) puts a ConditionalExpression at
+        // the argument's own top node, which the identifier/property-access
+        // guard above never matched -- so the read inside never reached the
+        // rung at all. Every OTHER lowerArgExpecting call site in this file
+        // (the positional branch above, call-callee forwarding elsewhere)
+        // keeps the default false and is untouched.
+        return L.lowerArgExpecting(a, restType.elem, true);
       });
       out.push({ kind: "arrayLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: restType, loc });
     } else {
