@@ -6566,6 +6566,46 @@ export function isGenericCallableMemberType(t: ts.Type, checker: ts.TypeChecker)
   );
 }
 
+// WALLB_OVERLOAD_DECLINE_MARKER
+/** True for a callable member whose declared type is a PURE overload set —
+ * two or more call signatures, NONE of them generic — with no other shape
+ * surface (no construct signatures, no data properties, no index
+ * signatures). mysql2's `Pool.on` (4 overloads) and `Pool.escapeId` (2
+ * overloads) are the motivating case.
+ *
+ * mapTypeInner's function-value mapping only ever succeeds for EXACTLY one
+ * call signature (the `callSigs.length === 1` gate); every subsequent
+ * branch in that function is gated on `callSigs.length === 0` instead, so
+ * an overload set of two or more falls through everything to the
+ * function's terminal `return null`, unconditionally — regardless of
+ * genericity. Declining such a member — dropping it from the record shape
+ * rather than failing the WHOLE shape — is sound for exactly the reason
+ * isGenericCallableMemberType's own comment already gives for the generic
+ * case: the member already fails to map either way, so excluding it is
+ * strictly more permissive, and a read/call of it still fences (SC1090)
+ * at its own use site instead of taking an otherwise-representable class
+ * down with it.
+ *
+ * Deliberately kept SEPARATE from isGenericCallableMemberType rather than
+ * folded into it: that function's other callers (lower-calls.ts,
+ * lower-classes.ts, lower-exprs.ts) drive GENERIC monomorphization
+ * machinery (lowerObjLitGenericMethodCall and its siblings) that has no
+ * sound story for a non-generic overload set — there is no type parameter
+ * to specialize a call site against. This predicate is wired ONLY into
+ * the two record-shape ADMISSION sites (mapRecordTypeInner,
+ * describeRecordMemberBlocker) — see WALLB-RESULTS.txt for the consumer
+ * sweep this scoping was chosen to avoid needing. */
+export function isNonGenericOverloadSetMember(t: ts.Type, checker: ts.TypeChecker): boolean {
+  const sigs = checker.getCallSignatures(t);
+  if (sigs.length <= 1) return false;
+  if (sigs.some((s) => s.getTypeParameters().length > 0)) return false; // isGenericCallableMemberType's turf
+  return (
+    checker.getConstructSignatures(t).length === 0 &&
+    checker.getPropertiesOfType(t).length === 0 &&
+    checker.getIndexInfosOfType(t).length === 0
+  );
+}
+
 /** The computed pieces of a record shape mapRecordTypeInner hands back for
  * the OUTER frame to intern — or, when a back-reference minted a recursive
  * placeholder for the type mid-construction, to finalize INTO that
@@ -7484,7 +7524,14 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // walk can mint a recursive placeholder nothing will finalize, and a
       // later mapping reaching the same checker type through recIds would
       // carry that empty union/shape into the program.
-      const generic = isGenericCallableMemberType(fieldTs, checker);
+      // WALLB_OVERLOAD_DECLINE_MARKER: a pure non-generic overload set
+      // (Pool.on/.escapeId) rides the SAME speculative-decline path as a
+      // generic member below — see isNonGenericOverloadSetMember's own
+      // comment for why mapType can never succeed on it and why dropping
+      // the member (not failing the whole shape) is sound either way.
+      const generic =
+        isGenericCallableMemberType(fieldTs, checker) ||
+        isNonGenericOverloadSetMember(fieldTs, checker);
       if (process.env["SCRIPTC_MEMBER_WHY"] !== undefined) {
         const cs = checker.getCallSignatures(fieldTs);
         console.error(`[memberwhy] ${checker.typeToString(widened).slice(0,40)} . ${p.name}`
@@ -8013,7 +8060,10 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
       return null;
     }
     const fieldTs = checker.getTypeOfSymbol(p);
-    if (isGenericCallableMemberType(fieldTs, checker)) continue;
+    // WALLB_OVERLOAD_DECLINE_MARKER: mirror mapRecordTypeInner's admission
+    // (same two predicates) so the blocker DESCRIPTION agrees with what
+    // the shape builder actually does.
+    if (isGenericCallableMemberType(fieldTs, checker) || isNonGenericOverloadSetMember(fieldTs, checker)) continue;
     let pt = mapType(fieldTs, ctx);
     if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
     if (!pt || pt.kind === "void") {
