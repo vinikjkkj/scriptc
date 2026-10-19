@@ -6119,14 +6119,44 @@ export class Lowerer {
    * coercion, the same line keyedReadLocalAtDynWidth draws. Unlike the dyn
    * widening this is not a dynFrom, so no deep copy severs aliasing and
    * the immutable-primitive restriction that rule carries is not needed
-   * here: a union wrap retains the very value the map holds. */
-  recordKeyReadAtUndefinedArm(expr: IrExpr, expected: IrType): IrExpr | null {
+   * here: a union wrap retains the very value the map holds.
+   *
+   * `allowExtraArms`, OFF by default and touching NO existing caller: the
+   * default keeps every one of this rung's nine other destinations
+   * (return, assignment, switch-discriminant, member-receiver, nullish
+   * right operand, call-callee, record-literal field) at EXACTLY the
+   * width they were already measured against — this flag changes nothing
+   * for them. It exists for exactly one caller (`lowerArgExpecting`,
+   * zapo's `collectUniqueUserJids(...candidates: ReadonlyArray<string |
+   * null | undefined>)`): `stripUndefinedArm` only ever removes the
+   * undefined arm, so a THREE-arm destination (`string | null |
+   * undefined`) strips to the two-arm `string | null`, which never
+   * `typeEquals` a bare `string` read — the gate declines a destination
+   * that plainly has everything the rung needs, for a reason that is
+   * about `null`, not about the miss this rung answers. With the flag,
+   * the requirement drops from "strips to exactly the read's type" to
+   * "the read's own type is SOME arm of `expected`" (`armTag` below) —
+   * checked against the SAME `recordKeyResultOk` already used unflagged,
+   * which was already written generically over `expected`'s arm count
+   * (`L.armTag(type.unionId, t) >= 0`, lower-exprs.ts), and against both
+   * emitters' hit/miss tag lookups (C's `recordKeyGetHelper`'s `surface`,
+   * `def.arms.findIndex`; LLVM's `keyedRecordReadInto`'s `surface`, the
+   * same `findIndex`, plus `undefinedArmTag` for the miss) — read
+   * directly, neither hardcodes a two-arm union; both resolve the hit tag
+   * and the miss tag from `expected`'s own arm list regardless of how
+   * many OTHER arms it carries. A `null` arm the read can never produce
+   * is simply never selected; nothing downstream assumed otherwise. */
+  recordKeyReadAtUndefinedArm(expr: IrExpr, expected: IrType, allowExtraArms = false): IrExpr | null {
     if (expr.kind !== "recordKeyGet") return null;
     if (expected.kind !== "union") return null;
     if (this.armTag(expected.unionId, UNDEFINED_T) < 0) return null;
     // A read that can ALREADY answer a miss keeps its width.
     if (expr.type.kind === "union" && this.armTag(expr.type.unionId, UNDEFINED_T) >= 0) return null;
-    if (!typeEquals(this.stripUndefinedArm(expected), expr.type)) return null;
+    if (allowExtraArms) {
+      if (this.armTag(expected.unionId, expr.type) < 0) return null;
+    } else if (!typeEquals(this.stripUndefinedArm(expected), expr.type)) {
+      return null;
+    }
     const shape = this.shapes.get(expr.shapeId);
     if (!this.keyedReadShapeOk(shape)) return null;
     const effective = expr.overflowOnly === true ? { ...shape!, fields: [] } : shape!;
@@ -6287,7 +6317,13 @@ export class Lowerer {
           x.questionDotToken === undefined)
       ) {
         const raw = this.lowerExpr(cast === null ? node : x);
-        const armed = this.recordKeyReadAtUndefinedArm(raw, expected)
+        // allowExtraArms: an ARGUMENT destination only (see the flag's own
+        // doc on recordKeyReadAtUndefinedArm) — `collectUniqueUserJids(
+        // ...candidates: ReadonlyArray<string | null | undefined>)` is a
+        // three-arm rest-slot element type, not the two-arm shape the
+        // unflagged gate requires. The OTHER eight destinations below in
+        // this file keep calling the function unflagged and are untouched.
+        const armed = this.recordKeyReadAtUndefinedArm(raw, expected, true)
           ?? this.keyedReadRefAtUndefinedArm(raw, expected);
         if (process.env["SCRIPTC_ARGARM_WHY"]) {
           const l = locOf(node);
