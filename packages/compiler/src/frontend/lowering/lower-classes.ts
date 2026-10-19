@@ -25,7 +25,7 @@ import { declSymbolOf } from "./lower-modules.js";
 import { uniqueSymbolKeyOf } from "./lower-exprs.js";
 import { lowerHttpAgentNew, lowerHttpServerNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
-import { mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
+import { bodylessMixinCalleeOf, mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 
 /** The weak collections' constructor hints. Shared: the stdlib `new`
  * chokepoint reads them out of its ctorHints table, and the Map branch —
@@ -2192,11 +2192,54 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             base = mixinBase;
             continue;
           }
+          // `declare class D extends Factory(Base) {}` inside a .d.ts,
+          // where `Factory` is itself an AMBIENT (body-less) function: no
+          // .js file anywhere can execute this heritage call (a .d.ts
+          // emits nothing), so there is no runtime shape to pair it
+          // with and inventing one would be assuming behavior the
+          // package never defines (mysql2/promise.d.ts's
+          // QueryableAndExecutableBase is the motivating case). mapType
+          // already excludes every ambient .d.ts class from the nominal
+          // object/classval path (types.ts's own `!isDeclarationFile`
+          // guard) — nothing needs a ClassInfo here for TYPE-ONLY use,
+          // so this class is left UNREGISTERED rather than refused:
+          // quieter than `--best-effort` (no diagnostic is deferred
+          // into a runtime throw; there is nothing deferred at all) and
+          // safer than fabricating a shape (a later `new` of this name
+          // falls straight through to lowerNew's own generic terminal
+          // fence, "constructing values other than classes declared in
+          // the program", since classBySymbol has no entry for it).
+          if (decl.getSourceFile().isDeclarationFile && bodylessMixinCalleeOf(L, t.expression.expression) !== null) {
+            const sym = ts.isClassDeclaration(decl) ? declSymbolOf(L, decl) : undefined;
+            if (sym) L.ambientBodylessMixinClasses.add(sym);
+            return;
+          }
         }
         if (!t || !ts.isIdentifier(t.expression)) {
           L.unsupported("SC1090", clause, "extending computed expressions");
         }
         const symbol = L.resolveValueSymbol(t.expression);
+        // `declare class PoolConnection extends Connection {}` where
+        // `Connection` is itself one of the body-less-mixin ambient
+        // classes just above (same file, same reason): propagate the
+        // same silent skip rather than this derived class hitting its
+        // OWN, unrelated "extending classes not declared in the
+        // program" refusal below (Connection is simply absent from
+        // classBySymbol, by design, not a program bug this derived
+        // class should report). Still gated on the DERIVED class also
+        // being ambient — a real program class could never legally
+        // name one of these as a base (the base's own type is
+        // unexported from any value these ambient classes publish), so
+        // this arm only ever fires inside the same .d.ts chain.
+        if (
+          decl.getSourceFile().isDeclarationFile &&
+          symbol !== null &&
+          L.ambientBodylessMixinClasses.has(symbol)
+        ) {
+          const ownSym = ts.isClassDeclaration(decl) ? declSymbolOf(L, decl) : undefined;
+          if (ownSym) L.ambientBodylessMixinClasses.add(ownSym);
+          return;
+        }
         // `extends <ambient declare class>` on a class shape the throw
         // SHELL does not cover — a GENERIC family, a mixin instantiation,
         // a class EXPRESSION reached through lowerClassExpressionInfo.

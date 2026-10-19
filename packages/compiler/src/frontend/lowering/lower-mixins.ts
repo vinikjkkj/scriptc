@@ -224,6 +224,33 @@ export function mixinFnOfCallee(L: Lowerer, callee: ts.Expression): MixinFnShape
   return null;
 }
 
+/** True when a callee names an AMBIENT (body-less) mixin factory — the
+ * exact mirror of mixinFnOfCallee's own `!fn.body` disqualification,
+ * naming WHY a call resolved to null there: a single `declare function`
+ * declaration with no body, which no .js file can ever execute (a .d.ts
+ * is never emitted/run). mysql2/promise.d.ts's
+ * `QueryableBaseClass(ExecutableBaseClass(EventEmitter))` is the
+ * motivating shape (promise.d.ts:21-22): both factories are declared
+ * ambient in sibling .d.ts files, with no implementation anywhere in the
+ * package (confirmed by a package-wide search for their names — four
+ * hits, every one a .d.ts). Recognition is intentionally narrow —
+ * single identifier callee, single resolved declaration, that
+ * declaration a FunctionDeclaration with no body — so it only answers
+ * for exactly the shape mixinFnOfCallee refuses for exactly this
+ * reason, never for an arrow/function-expression binding (those are
+ * never ambient) or an overloaded/merged name. */
+export function bodylessMixinCalleeOf(L: Lowerer, callee: ts.Expression): ts.FunctionDeclaration | null {
+  if (!ts.isIdentifier(callee)) return null;
+  let sym = L.checker.getSymbolAtLocation(callee) ?? null;
+  if (sym && sym.flags & ts.SymbolFlags.Alias) sym = L.checker.getAliasedSymbol(sym);
+  if (!sym) return null;
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length !== 1 || decls[0] === undefined) return null;
+  const d = decls[0];
+  if (!ts.isFunctionDeclaration(d) || d.body) return null;
+  return d;
+}
+
 /** The arrow/function-expression initializer of a CONST binding — the
  * value-binding spelling of a mixin function declaration. */
 export function mixinFnNodeOfBinding(
