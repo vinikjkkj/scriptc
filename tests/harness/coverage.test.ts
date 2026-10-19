@@ -57,6 +57,20 @@ test("unreached blockers report in their own group", async () => {
   );
 });
 
+test("unreached JS fences are listed, not just counted (lowerer.ts remainder pass)", async () => {
+  // unusedJsCorner is never called. A JS source file always DEFERS its
+  // compile fences to runtime (isJsSourceFile => deferFences), so the
+  // remainder lowerer that analyzes unreached bodies for coverage produces
+  // runtimeFence statements for `e.code = 42` and `e.fatal = true` exactly
+  // as error-code-slot-write.js proves for the REACHED case — the
+  // remainder's stats.statementsFailed already counts both (feeding
+  // "statements analyzed"/"compile statically" above), so before this fix
+  // the two fences were counted and never named anywhere in the report.
+  await expect(report(fixture("unreached-js-fences.js"))).toMatchFileSnapshot(
+    "__snapshots__/coverage-unreached-js-fences.txt",
+  );
+});
+
 test("an IR-validation failure sinks the verdict and reports as itself", () => {
   // The rendering half of the same fix, pinned without depending on a
   // program that still trips the validator — after the cast-launder fences

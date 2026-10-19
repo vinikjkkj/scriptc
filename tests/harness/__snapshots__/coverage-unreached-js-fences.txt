@@ -1,0 +1,7 @@
+scriptc coverage tests/coverage-fixtures/unreached-js-fences.js
+
+  statements analyzed   6
+  compile statically    4  (66%)
+
+  deferred to runtime, in unreached code   2 sites (never lowered — cannot fail a build)
+      ×2  assignment to non-variables  SC1090

@@ -32,8 +32,12 @@ export interface CoverageInput {
   advisories?: ScrDiagnostic[];
   /** The unreached remainder: bodies nothing on the entry path reaches,
    * lowered in a throwaway analysis pass. Its blockers cannot fail a
-   * build — the report shows them as a secondary, dimmed group. */
-  unreached?: { stats: LowerStats; diagnostics: ScrDiagnostic[] };
+   * build — the report shows them as a secondary, dimmed group.
+   * runtimeFences: that same remainder's JS statements whose compile
+   * fences deferred to runtime instead of blocking — also dimmed, also
+   * incapable of failing a build, but named rather than folded silently
+   * into the top-line statement counts the way they used to be. */
+  unreached?: { stats: LowerStats; diagnostics: ScrDiagnostic[]; runtimeFences: ScrDiagnostic[] };
   /** --dynamic only: every Node builtin the embedded npm graph imports —
    * what the island must provide for this program (unshimmed ones also
    * appear as SC2030 blockers, EXCEPT lazily-reached ones, which embed
@@ -329,6 +333,28 @@ export function renderCoverageLines(input: CoverageInput, opts: { color?: boolea
     for (const b of grouped) {
       out.push(
         `    ${c(YELLOW, `×${b.count}`.padStart(4))}  ${b.what.padEnd(widestF)}  ${c(DIM, b.code)}`,
+      );
+    }
+    out.push("");
+  }
+
+  // The same thing, in code nothing on the entry path reaches: a JS
+  // statement there still defers its compile fence instead of blocking
+  // (deferFences does not consult reachability), and the remainder pass's
+  // stats.statementsFailed already folded these into the top-line counts
+  // above — unlike unreachedBlockers below, nothing rendered which sites
+  // they were. Dimmed like unreachedBlockers, for the same reason: never
+  // lowered by a build, so it can never fail one either.
+  const unreachedFences = un?.runtimeFences ?? [];
+  if (unreachedFences.length > 0) {
+    const grouped = groupBlockers(unreachedFences);
+    const widestUF = alignWidth(grouped.map((b) => b.what.length));
+    out.push(
+      `  ${c(DIM, "deferred to runtime, in unreached code")}   ${unreachedFences.length} site${unreachedFences.length === 1 ? "" : "s"} ${c(DIM, "(never lowered — cannot fail a build)")}`,
+    );
+    for (const b of grouped) {
+      out.push(
+        `    ${c(DIM, `×${b.count}`.padStart(4))}  ${c(DIM, b.what.padEnd(widestUF))}  ${c(DIM, b.code)}`,
       );
     }
     out.push("");
