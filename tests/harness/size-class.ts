@@ -2048,17 +2048,37 @@ export const TEXT_DRIFT_TOLERANCE = 256;
  * entry below makes mandatory for taking a figure here. */
 
 /** .text VirtualSize of the canonical static hello-world. RE-RECORDED
- * 2026-10-15, 543,702 -> 543,958, measured at the Math.imul commit in
- * RECORDED_LANE: the entry above attributes all 336 bytes to one new
- * always-linked function and -80 of accumulated drift. The 543,702 it
- * replaces was measured at e03bdf0aa and still reproduces there exactly.
+ * 2026-10-19, 543,958 -> 544,342 (+384), measured in RECORDED_LANE with
+ * packages/runtime/vendor/.cache cleared first (this file's own mandatory
+ * condition for taking a figure here), reproduced twice. WHY IT MOVED:
+ * the sc_bad_key/catchable-throw runtime change (packages/runtime/src/
+ * scr_error.c's scr_throw_error_fmt_code and the throw-conversion
+ * machinery it needs, plus the matching scr_runtime.h declarations) links
+ * into scr_error.o, which -- like scr_lib.o in the 2026-10-15 entry above
+ * -- is in RUNTIME_SOURCES (cc.ts) and links into EVERY program
+ * unconditionally with no -ffunction-sections/--gc-sections on this
+ * target, so a hello-world with no record-key read anywhere pays the
+ * whole new function's code, same mechanism as Math.imul's +336, not
+ * independently re-derived here. The 543,958 it replaces was measured at
+ * the Math.imul commit (2026-10-15 entry above) and reproduces there.
  * win32 only, for the reason the file figures are win32 only: a platform
  * nobody weighed gets no invented number. */
-export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 543_958 : null;
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 544_342 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
  * together, which is why the file figures are separate too.
+ *
+ * RE-RECORDED 2026-10-19: 630,438 -> 630,742 (+304), measured in
+ * RECORDED_LANE with packages/runtime/vendor/.cache cleared first, in the
+ * SAME run as STATIC_CLASS_TEXT_RECORDED's 2026-10-19 re-record above --
+ * the SAME sc_bad_key/catchable-throw runtime addition (scr_error.o,
+ * unconditionally linked, RUNTIME_SOURCES), but +304 here against +384 on
+ * the static class: the two classes do not move together (this file's own
+ * standing rule, re-demonstrated, not assumed -- this was MEASURED
+ * separately, not inferred as the same delta). This one was masked by the
+ * STATIC check failing first until that anchor was corrected two commits
+ * up; it had never been SEEN to fail on its own before now.
  *
  * RE-RECORDED 2026-10-15: 630,182 -> 630,438, the same +336 the static
  * class took, for the same reason, measured in the same run. This one had
@@ -2106,7 +2126,7 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 543_958 : null;
  * gitignored so git status, the dirty-worktree guard and the treehash are
  * all blind to it. See docs/stackless-sync-generator-results.md 13.2-15.1.
  */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 630_438 : null;
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 630_742 : null;
 
 /** The section-anchor complaint, or null when within tolerance. Same shape as
  * recordedSizeComplaint -- a string, so the caller owns the assertion and this
