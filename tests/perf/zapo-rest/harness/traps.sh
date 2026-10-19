@@ -26,10 +26,19 @@
 #
 # scr_trap is the runtime's general abort facility and is NOT a defect
 # count: every call site of it lives inside one of the compiler's own
-# shared helpers (sc_oom, sc_bad_tag, sc_bad_key), one per program that
-# links them. The breakdown names the enclosing function for each, so a
-# trap emitted into PROGRAM code — which would be a real finding — is
-# visible as a site whose host is not one of those helpers.
+# shared helpers (sc_oom, sc_bad_tag), one per program that links them.
+# The breakdown names the enclosing function for each, so a trap emitted
+# into PROGRAM code — which would be a real finding — is visible as a
+# site whose host is not one of those helpers.
+#
+# sc_bad_key left this list 2026-10-19: the keyed-read-miss family (SC9003)
+# converted from an uncatchable scr_trap_fmt abort to the SAME catchable
+# throw strandedUnitTrap/SC9004 and reqabsent/SC9005 already give the
+# identical "no sound value" question, via scr_throw_error_fmt_code
+# (scr_trap_fmt's catchable twin). sc_bad_key's own body no longer calls
+# `scr_trap`/`scr_trap_fmt` at all, so it no longer contributes to the
+# `scr_trap call sites` total below — that drop is the repair, not a
+# miscount.
 set -u
 DIR=${1:-.}
 EXPECT=${2:-1}

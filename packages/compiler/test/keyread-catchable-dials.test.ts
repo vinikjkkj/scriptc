@@ -95,8 +95,11 @@ export {};
 const count = (tu: string, re: RegExp): number => (tu.match(re) ?? []).length;
 
 /* The MISS path the emitter plants for a keyed read at a non-armed width —
- * the abort this branch exists to route away from. */
-const TRAP = /scr_trap_fmt\("scriptc: TypeError: record has no key/g;
+ * the catchable SC9003 throw (STRAND since 2026-10-19, formerly an abort)
+ * this branch exists to route away from. scr_throw_error_fmt_code is
+ * scr_trap_fmt's catchable twin: same vararg shape, a "code" argument
+ * scr_trap_fmt never carried. */
+const TRAP = /scr_throw_error_fmt_code\(SCR_ERR_TYPE, "SC9003", "scriptc: TypeError: record has no key/g;
 /* V8's own two messages, spelled by the two rungs. */
 const NOT_FN = /"FNS\[k\] is not a function"/g;
 const NO_PROPS = /"Cannot read properties of undefined \(reading 'v'\)"/g;

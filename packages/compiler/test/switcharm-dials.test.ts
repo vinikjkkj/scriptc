@@ -101,11 +101,13 @@ const DECLINERS = [
   ``,
 ].join("\n");
 
-/* The MISS path the emitter plants for a keyed read at a non-armed width.
- * Anchored on the whole trap call, not on the helper name: `sc_rkg_` names
- * every keyed-read helper, aborting or not, and counting those would report a
- * sweep it never took. */
-const TRAP = /scr_trap_fmt\("scriptc: TypeError: record has no key/g;
+/* The MISS path the emitter plants for a keyed read at a non-armed width —
+ * a catchable SC9003 throw (STRAND since 2026-10-19, formerly an abort).
+ * Anchored on the whole throw call, not on the helper name: `sc_rkg_` names
+ * every keyed-read helper, throwing or not, and counting those would report a
+ * sweep it never took. scr_throw_error_fmt_code is scr_trap_fmt's catchable
+ * twin: same vararg shape, a "code" argument scr_trap_fmt never carried. */
+const TRAP = /scr_throw_error_fmt_code\(SCR_ERR_TYPE, "SC9003", "scriptc: TypeError: record has no key/g;
 
 /* Assignments into an undefined-armed slot whose later reads have LOST the
  * arm — tsc narrows an assignment to the declared type filtered by the type

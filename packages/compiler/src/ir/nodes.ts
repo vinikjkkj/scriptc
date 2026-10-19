@@ -11109,9 +11109,11 @@ export function wsRefusalText(msg: string, site: string | undefined): string {
  * A strand trap is the statement the lowering plants where a value flowed
  * into a slot, a union arm, a class or a function signature that cannot
  * hold it. The construct COMPILED; what the trap reports is a state the
- * program reached, so — exactly like SC9003's keyed-read abort — the code
- * belongs to the SC9xxx family and has no FENCE_CODES registry entry: it
- * is not a surface the compiler declined at compile time.
+ * program reached, so — exactly like SC9003's keyed-read-miss throw (a
+ * catchable TypeError since 2026-10-19, the same answer this code gives
+ * the identical "no sound value" question) — the code belongs to the
+ * SC9xxx family and has no FENCE_CODES registry entry: it is not a
+ * surface the compiler declined at compile time.
  *
  * WHY IT EXISTS AT ALL. Every one of these was `throw new TypeError(msg)`
  * built out of `error.new` + `scr_throw_obj`. In the emitted TU that is

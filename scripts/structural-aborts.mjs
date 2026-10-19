@@ -51,7 +51,11 @@ const ALLOC = /\b(calloc|malloc|realloc)\s*\(/;
 const SELF_GUARDED_ALLOC = /\b(scr_cyc_alloc|scr_alloc|scr_pool_take)\s*\(/;
 const TAGDEF = /^\s*default:\s*(?:scr_trap\("scriptc: internal error: invalid union tag|sc_bad_tag\(\))/;
 const STRINGIFY = /(?:scr_trap\("scriptc: internal error: stringify reached an undefined arm|\bsc_stringify_undef\(\))/;
-const ANYTRAP = /\b(?:scr_trap(?:_fmt)?|sc_oom|sc_bad_tag|sc_stringify_undef)\s*\(/;
+// scr_throw_error_fmt_code: scr_trap_fmt's catchable twin (SC9003, since
+// 2026-10-19) -- the keyed-read-miss family's "REAL" row below used to be
+// reachable only through scr_trap_fmt; it throws catchably now, through
+// this callee, and must stay visible here or it vanishes silently.
+const ANYTRAP = /\b(?:scr_trap(?:_fmt)?|scr_throw_error_fmt_code|sc_oom|sc_bad_tag|sc_stringify_undef)\s*\(/;
 // The shared helpers’ OWN definition and body are not guard sites: their
 // three lines are the ONE trap statement each family now has, and counting
 // them as an unclassified trap would report an anomaly on every TU.

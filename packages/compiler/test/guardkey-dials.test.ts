@@ -83,7 +83,10 @@ const CONTROLS: readonly (readonly [string, string])[] = [
   ["for-in-other-object", `export function f(h: Attrs, g: Attrs): Attrs { const o: Attrs = {}; for (const k in g) { o[k] = h[k] } return o } console.log(f({ id: "x" }, { id: "y" }).id);`],
 ];
 
-const TRAP = /scr_trap_fmt\("scriptc: TypeError: record has no key/g;
+// The catchable SC9003 throw (STRAND since 2026-10-19, formerly an abort).
+// scr_throw_error_fmt_code is scr_trap_fmt's catchable twin: same vararg
+// shape, a "code" argument scr_trap_fmt never carried.
+const TRAP = /scr_throw_error_fmt_code\(SCR_ERR_TYPE, "SC9003", "scriptc: TypeError: record has no key/g;
 const count = (tu: string, re: RegExp): number => (tu.match(re) ?? []).length;
 
 const DIALS = ["SCRIPTC_GUARDKEY_OFF"] as const;

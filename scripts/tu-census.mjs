@@ -24,13 +24,22 @@
 //                                                             and to SCRIPTC_TRAP_TRACE)
 //   STRAND       a REPRESENTABILITY guard: the lowering planted a throw where a
 //                value flowed into a slot, a union arm, a class or a function
-//                signature that cannot hold it (SC9004, ir/nodes.ts strandTrap).
-//                Compiler-planted, so NOT the program's own throw -- but not a
-//                refusal either: the construct COMPILED, and almost every one
-//                of these sits on the arm the type system says cannot happen.
-//                Its own row, deliberately NOT summed into REFUSALS: a zapo QR
-//                TU carries ~1,900 of them against 76 refusals, and folding
-//                them in would destroy the one number this project steers by.
+//                signature that cannot hold it (SC9004, ir/nodes.ts strandTrap),
+//                OR a keyed record read came up with no key and no undefined to
+//                answer with (SC9003, emit-walkers.ts recordKeyGetHelper / llvm/
+//                emitter.ts keyedRecordReadDirectInto -- an uncatchable abort
+//                before 2026-10-19, folded in here because it answers the same
+//                "no sound value" question SC9004 does, just at a different
+//                representational layer).  Compiler-planted, so NOT the
+//                program's own throw -- but not a refusal either: the
+//                construct COMPILED, and almost every one of these sits on
+//                the arm the type system says cannot happen (SC9003's own
+//                "why" message is the one exception that sometimes names a
+//                REAL, reachable crossing instead -- see ABORT.real's history
+//                above). Its own row, deliberately NOT summed into REFUSALS:
+//                a zapo QR TU carries ~1,900 of them against 76 refusals, and
+//                folding them in would destroy the one number this project
+//                steers by.
 //
 //                They were `throw new TypeError(msg)` built from error.new +
 //                scr_throw_obj until SC9004, which in the TU is byte-for-byte
@@ -39,7 +48,13 @@
 //                exited 0.  That was the hole; this row is the fix.
 //   ABORT        an uncatchable process abort (scr_trap / scr_trap_fmt,
 //                0xC0000409).  Past every catch clause.
-//     .real        `record has no key` — reachable on ordinary input
+//     .real        kept for TUs emitted before 2026-10-19 only: `record has
+//                  no key` used to abort here, uncatchably, on ordinary
+//                  input.  A current compiler throws the catchable SC9003
+//                  TypeError instead (classified under STRAND, below, by
+//                  its code) -- the same answer SC9004/SC9005 already give
+//                  the identical "no sound value for this slot" question --
+//                  so ABORT.real is 0 on any TU this compiler emits now.
 //     .structural  OOM guards, union-tag defaults, stringify-undefined-arm
 //   BOILERPLATE  SC9002 "unreachable: a non-void function completed without
 //                returning" — one per function whose fall-through the lowering
@@ -300,6 +315,13 @@ const ABORT_STRUCTURAL = [
   { re: /^scriptc: internal error: invalid union tag/,                what: "union-tag switch default" },
   { re: /^scriptc: internal error: stringify reached an undefined arm/, what: "stringify undefined arm" },
 ];
+// KEPT FOR TUS EMITTED BEFORE 2026-10-19 ONLY (same precedent as
+// UNCODED_REFUSAL below): a current compiler no longer aborts this family at
+// all — `sc_bad_key` (LLVM) and `sc_rkg_N`'s miss branch (C) now THROW the
+// catchable SC9003 TypeError (classifyCoded's BADKEY_CODE branch, below) —
+// so these two patterns can never match a fresh TU's `scr_trap_fmt` text
+// (the family no longer calls it). They stay so an OLDER preserved TU
+// still classifies as ABORT.real instead of UNKNOWN.
 const ABORT_REAL = [
   // The LLVM lane's spelling.  Its keyed-read miss is ONE shared `sc_bad_key`
   // helper carrying a fixed message; the C lane emits a per-result-type
@@ -322,6 +344,22 @@ const UNCODED_REFUSAL = [
  * cannot drift: the compiler stamps it, this reads it. */
 const STRAND_CODE = "SC9004";
 
+/** The keyed-record-read-miss family's own code (SC9003, emit-walkers.ts
+ * recordKeyGetHelper / llvm/emitter.ts keyedRecordReadDirectInto). Converted
+ * 2026-10-19 from an uncatchable `scr_trap_fmt` abort (ABORT_REAL above) to
+ * the SAME catchable-throw answer STRAND_CODE already gives the identical
+ * "no sound value for this slot" question: classified here by CODE, exactly
+ * like STRAND_CODE, and for the same reason — the helper is interned per
+ * (shape, result type) or, on the LLVM lane, once for the whole module, so
+ * it has no one source location of its own; the SITE rides in the message
+ * text instead (SC9003's own "(SC9003 at %s)" fragment), not the bracket
+ * `[SCxxxx at ...]` census.mjs's TAGRE looks for. Folded into the STRAND
+ * category rather than given a new one: the construct compiled, the throw
+ * is catchable, and the shape is the same representability guard — only the
+ * REPRESENTATION that failed (a keyed read's result, not a value flowing
+ * into an assignment) differs. */
+const BADKEY_CODE = "SC9003";
+
 const UNCODED_PARITY = [
   { re: /^a 'data' listener declaring a (Buffer chunk received a string|string chunk received a Buffer)/,
     site: "emit-async.ts:1105/1114" },
@@ -338,6 +376,14 @@ const CODED = /scr_(?:throw_error_msg_code\(\s*([A-Z_]+)\s*,|fence_fatal\()\s*"(
 const CODED_MARKERS = ["scr_throw_error_msg_code(", "scr_fence_fatal("];
 const UNCODED = /scr_throw_error_msg\(\s*([A-Z_]+)\s*,\s*(?:"((?:[^"\\]|\\.)*)"|([A-Za-z_][A-Za-z0-9_]*))\s*,/g;
 const TRAP = /\bscr_trap(_fmt)?\s*\(\s*"((?:[^"\\]|\\.)*)"/g;
+// scr_throw_error_fmt_code — scr_trap_fmt's CATCHABLE twin (SC9003): same
+// vararg shape (a format string literal, then runtime arguments), so unlike
+// scr_throw_error_msg_code it carries no precomputed length. A coded throw
+// in every sense that matters to this census (an SC code, a representability
+// guard), just spelled with scr_trap_fmt's OWN argument shape instead of
+// scr_throw_error_msg_code's — counted into the "coded" family (nCodedCalls)
+// so every accounting line below needs no separate term for it.
+const CODEDFMT = /scr_throw_error_fmt_code\(\s*([A-Z_]+)\s*,\s*"([^"]*)"\s*,\s*"((?:[^"\\]|\\.)*)"/g;
 const TAGRE = /\[SC(\d{4}) at ([^\]]+)\]/g;
 
 // The classification decisions, factored out of the C scan so the LLVM scan
@@ -357,6 +403,9 @@ const classifyCoded = (msg, code, hostAt) => {
   // thunk is bracketless.  Classified by CODE, never by message: the message
   // interpolates two rendered types and there are hundreds of spellings.
   if (code === STRAND_CODE) return { cat: "STRAND", site: "ir/nodes.ts strandTrap (lowerer.ts strand helpers)" };
+  if (code === BADKEY_CODE) {
+    return { cat: "STRAND", site: "emit-walkers.ts recordKeyGetHelper / llvm/emitter.ts keyedRecordReadDirectInto (SC9003, formerly ABORT.real)" };
+  }
   const p = PARITY_CODED.find((x) => x.re.test(msg));
   if (p) return { cat: "PARITY", site: p.site };
   const u = UNTAGGED_REFUSAL_SITES.find((x) => x.re.test(msg));
@@ -397,6 +446,21 @@ for (let i = 0; !isLl && i < lines.length; i++) {
     while ((m = CODED.exec(l)) !== null) {
       seen++; nCodedCalls++;
       const msg = m[2], code = m[4];
+      const { cat, site } = classifyCoded(msg, code, i);
+      rows.push({ line: i + 1, family: "coded", cat, code, site, msg, host: hostName[i] });
+    }
+    if (seen === 0) {
+      rows.push({ line: i + 1, family: "coded", cat: "UNKNOWN", code: "?", site: "unparsed", msg: l.trim().slice(0, 200), host: hostName[i] });
+      nCodedCalls++;
+    }
+  }
+
+  if (l.includes("scr_throw_error_fmt_code(")) {
+    let m, seen = 0;
+    CODEDFMT.lastIndex = 0;
+    while ((m = CODEDFMT.exec(l)) !== null) {
+      seen++; nCodedCalls++;
+      const code = m[2], msg = m[3];
       const { cat, site } = classifyCoded(msg, code, i);
       rows.push({ line: i + 1, family: "coded", cat, code, site, msg, host: hostName[i] });
     }
@@ -462,17 +526,27 @@ if (isLl) {
   const CODED_LL_MARKERS = ["@scr_throw_error_msg_code(", "@scr_fence_fatal("];
   const UNCODED_LL = /call void @scr_throw_error_msg\(i32 -?\d+, ptr ([^,)]+), i64 (\d+)\)/g;
   const TRAP_LL = /call void @scr_trap\(ptr ([^,)]+)\)/g;
-  // The FORMATTED trap.  The LLVM lane grew one when the keyed-read abort
-  // started naming its source site (SC9003): @sc_bad_key takes the site and
-  // the why as pointers and hands them to scr_trap_fmt, exactly as the C
-  // lane's per-shape sc_rkg_N helper does.  Its MESSAGE is still the first
-  // pointer operand, so it classifies through the same table; what changed
-  // is only the call shape (a varargs call carries the `(ptr, ...)` type).
-  //
+  // THE FORMATTED CATCHABLE THROW (SC9003's shape since 2026-10-19).
+  // `@sc_bad_key` used to hand its (site, why) pointers to `scr_trap_fmt`
+  // and abort uncatchably — this pattern (TRAPF_LL, below) is kept for
+  // that OLDER .ll text only, since it can no longer appear in a fresh
+  // one: the keyed-read-miss family converted to the SAME catchable throw
+  // STRAND_CODE already uses elsewhere, and its own call now has a
+  // DIFFERENT shape, `scr_throw_error_fmt_code` — scr_trap_fmt's catchable
+  // twin, same vararg plumbing, carrying a `code` argument `scr_trap_fmt`
+  // never had. Its MESSAGE is still the second pointer operand (the first
+  // is the SCR_ERR_* kind, the third is the `code` string) so it
+  // classifies through the SAME table as every other coded throw.
+  const CODEDFMT_LL = /call void \(i32, ptr, ptr, \.\.\.\) @scr_throw_error_fmt_code\(i32 -?\d+, ptr ([^,)]+), ptr ([^,)]+)/g;
   // A scr_trap_fmt call this pattern does NOT match would be a family the
   // reader drops in silence, which for an instrument whose whole job is to
-  // count ways to die is the worst possible failure.  It is counted here
-  // and cross-checked below.
+  // count ways to die is the worst possible failure. It is counted here
+  // and cross-checked below. Kept for TUs emitted before 2026-10-19: a
+  // fresh compiler's .ll never emits `@scr_trap_fmt` at all (the only
+  // family that used it on this lane, the keyed-read-miss abort, no
+  // longer does), so this will match ZERO lines on a current TU and the
+  // guard below (nTrapFmtLines > 0 && nTrapFmtParsed === 0) stays silent
+  // rather than firing on an absence that is now the normal case.
   const TRAPF_LL = /call void \(ptr, \.\.\.\) @scr_trap_fmt\(ptr ([^,)]+)[^)]*\)/g;
   let nTrapFmtLines = 0, nTrapFmtParsed = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -485,6 +559,25 @@ if (isLl) {
       while ((m = CODED_LL.exec(l)) !== null) {
         seen++; nCodedCalls++;
         const msg = llMsg(m[1]), code = llMsg(m[3]);
+        if (msg === null || code === null) {
+          rows.push({ line: i + 1, family: "coded", cat: "UNKNOWN", code: code ?? "?", site: "operand not in the module string table", msg: l.trim().slice(0, 200), host: hostName[i] });
+          continue;
+        }
+        const { cat, site } = classifyCoded(msg, code, i);
+        rows.push({ line: i + 1, family: "coded", cat, code, site, msg, host: hostName[i] });
+      }
+      if (seen === 0) {
+        rows.push({ line: i + 1, family: "coded", cat: "UNKNOWN", code: "?", site: "unparsed", msg: l.trim().slice(0, 200), host: hostName[i] });
+        nCodedCalls++;
+      }
+    }
+
+    if (l.includes("@scr_throw_error_fmt_code(")) {
+      let m, seen = 0;
+      CODEDFMT_LL.lastIndex = 0;
+      while ((m = CODEDFMT_LL.exec(l)) !== null) {
+        seen++; nCodedCalls++;
+        const code = llMsg(m[1]), msg = llMsg(m[2]);
         if (msg === null || code === null) {
           rows.push({ line: i + 1, family: "coded", cat: "UNKNOWN", code: code ?? "?", site: "operand not in the module string table", msg: l.trim().slice(0, 200), host: hostName[i] });
           continue;
@@ -625,12 +718,13 @@ const SHARED_HELPER = [
   /^sc_oom$/,                      // OOM guard                  (emitter.ts sharedTrapDefs)
   /^sc_bad_tag$/,                  // union-tag default          (emitter.ts sharedTrapDefs)
   /^sc_stringify_undef$/,          // stringify undefined arm    (emitter.ts sharedTrapDefs)
-  // The LLVM lane's keyed-read abort: llvm/emitter.ts helperDefs() emits ONE
-  // `sc_bad_key` for the whole module where the C emitter emits one `sc_rkg_N`
-  // per result type.  Without this rule the .ll column would read ABORT.real as
-  // 1 way-to-die against the C column's hundreds, and the two lanes would look
-  // like they disagree about the program when they only disagree about how many
-  // helpers they spell it with.
+  // The LLVM lane's keyed-read-miss THROW (SC9003, STRAND since 2026-10-19 —
+  // formerly an abort): llvm/emitter.ts helperDefs() emits ONE `sc_bad_key`
+  // for the whole module where the C emitter emits one `sc_rkg_N` per result
+  // type.  Without this rule the .ll column would read STRAND's sc_bad_key
+  // contribution as 1 way-to-die against the C column's hundreds, and the
+  // two lanes would look like they disagree about the program when they
+  // only disagree about how many helpers they spell it with.
   /^sc_bad_key$/,                  // keyed read, absent key     (llvm/emitter.ts helperDefs)
 ];
 const wanted = new Set();
@@ -779,8 +873,8 @@ say(`LANE   ${lane}   (the code generator that ACTUALLY emitted this TU, read of
 if (isLl) {
   say(`       .ll notes: messages are INTERNED in the module string table, so census.mjs's`);
   say(`       TRAPS counts DISTINCT tagged messages (${taggedDistinct}) where the .c counts statements;`);
-  say(`       the keyed-read abort is ONE shared sc_bad_key helper, so ABORT.real has no`);
-  say(`       per-value-type breakdown and its ways-to-die is the helper's call-site count.`);
+  say(`       the keyed-read-miss throw (STRAND, SC9003) is ONE shared sc_bad_key helper, so`);
+  say(`       it has no per-value-type breakdown and its ways-to-die is the helper's call-site count.`);
 }
 say("");
 say("=== THE OLD INSTRUMENTS, REPRODUCED ============================");

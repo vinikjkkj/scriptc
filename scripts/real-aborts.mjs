@@ -48,7 +48,12 @@
 //        node scripts/real-aborts.mjs --selftest
 import { readFileSync, writeFileSync } from "node:fs";
 
-const TRAP = /scr_trap_fmt\("scriptc: TypeError: record has no key '%\.\*s' \(typed '([^']*)'/;
+// Matches BOTH spellings: a TU emitted before 2026-10-19 calls scr_trap_fmt
+// and aborts; a current one calls scr_throw_error_fmt_code (scr_trap_fmt's
+// catchable twin, SC9003) and throws. Same message, same trailing site
+// argument, different callee -- this reader's job ("which helpers can die,
+// and why") does not change with the mechanism.
+const TRAP = /scr_(?:trap_fmt\(|throw_error_fmt_code\(SCR_ERR_TYPE, "SC9003", )"scriptc: TypeError: record has no key '%\.\*s' \(typed '([^']*)'/;
 
 /** The LAST TOP-LEVEL argument of the call whose `(` sits at `open`, when
  * that argument is a string literal — otherwise null.  Character-by-

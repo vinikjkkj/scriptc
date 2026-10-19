@@ -1161,6 +1161,13 @@ void scr_undef_global_read(ScrStr *name);
 void scr_error_set_code(ScrError *e, const char *code);
 ScrStr *scr_error_code(ScrError *e);
 void scr_throw_error_msg_code(int kind, const char *message, size_t len, const char *code);
+/* scr_trap_fmt's catchable twin (SC9003): vsnprintf's `fmt`/varargs into a
+ * stack buffer, then scr_throw_error_msg_code with the result. Built for
+ * the keyed-read-miss family (emit-walkers.ts recordKeyGetHelper, llvm/
+ * emitter.ts keyedRecordReadDirectInto) -- the shared-helper plumbing
+ * needs a RUNTIME format the way scr_trap_fmt's abort did, and this is
+ * that same formatting landing in a throw instead. See scr_error.c. */
+void scr_throw_error_fmt_code(int kind, const char *code, const char *fmt, ...);
 /* The same refusal, NOT catchable: prints the identical "Uncaught Error:
  * <message>" first line scr_exc_print_uncaught would have printed and
  * _Exit(1)s without touching the exception cell. One construct opts in --
