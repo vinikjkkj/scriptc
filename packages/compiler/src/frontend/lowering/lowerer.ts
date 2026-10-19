@@ -6259,7 +6259,27 @@ export class Lowerer {
    * and object literals — none of which is a property or element access
    * — so for the admitted syntax the fallback below IS its tail,
    * lowerExpr + coerceInto, and a declined rung changes nothing. */
-  lowerArgExpecting(node: ts.Expression, expected: IrType | undefined): IrExpr {
+  /** allowTernaryArm, OFF by default and touching no OTHER caller of this
+   * function: `cond ? attrs.x : undefined` (WaMessageCoordinator.ts:941/948)
+   * puts a ConditionalExpression at the arguments own top node, which the
+   * guard a few lines down never matched (identifier / unguarded property-
+   * or-element access only) -- so the read inside never reached the rung at
+   * all, armed or not. With the flag, a plain conditional (after paren
+   * stripping) recurses into BOTH arms through this SAME function at the
+   * SAME expected -- the identical per-arm admission question this
+   * function already asks of a bare argument -- and combines the two
+   * already-expected-typed results with the plain `kind: "ternary"`
+   * combinator lower-builtins.ts already uses elsewhere to merge
+   * independently-built, same-type arms (its dyn-env-spread ternary, among
+   * others). Declines for anything else (the condition is not even
+   * consulted structurally; lowerCondition runs unchanged), so a ternary
+   * whose own narrowing matters -- an Array.isArray guard, a namespace
+   * selector -- falls through to lowerExprExpecting exactly as before:
+   * this function is never called with the flag on except from completeArgs'
+   * rest-array branch, so every OTHER lowerArgExpecting call site (the
+   * positional-argument branch, call-callee forwarding, and so on) keeps
+   * the unflagged, default-false behavior untouched. */
+  lowerArgExpecting(node: ts.Expression, expected: IrType | undefined, allowTernaryArm = false): IrExpr {
     // SCRIPTC_ARGARM_OFF=1 — the ABLATION lever. One binary can then emit
     // both sides of the A/B, so "the abort is gone" is checkable against
     // the same compiler with only this rung removed.
@@ -6287,6 +6307,18 @@ export class Lowerer {
       // cast does is lost on the decline path.
       let x: ts.Expression = node;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
+      // THE TERNARY ARM admission (allowTernaryArm's own doc, on this
+      // function's signature). A plain conditional recurses into both arms
+      // at the SAME expected type and combines them directly -- neither arm
+      // is re-derived through the general ternary lowering (lowerTernary),
+      // so this only ever fires where the flag is explicitly passed, and
+      // only for a bare `cond ? a : b` (no cast, already unwrapped above).
+      if (allowTernaryArm && ts.isConditionalExpression(x)) {
+        const condIr = this.lowerCondition(x.condition);
+        const thenIr = this.lowerArgExpecting(x.whenTrue, expected, allowTernaryArm);
+        const elseIr = this.lowerArgExpecting(x.whenFalse, expected, allowTernaryArm);
+        return { kind: "ternary", cond: condIr, then: thenIr, else_: elseIr, type: expected, loc: locOf(node) };
+      }
       // A CAST is only stripped for the rung's own attempt. If the rung
       // declines, the ORIGINAL node lowers through lowerExprExpecting
       // with the cast intact, so a declined cast is byte-for-byte what it

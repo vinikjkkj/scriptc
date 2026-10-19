@@ -842,7 +842,16 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
         // or the node outside the syntactic guard) falls through to
         // lowerExprExpecting internally, so this is a strict superset of
         // the old behavior, not a new path.
-        return L.lowerArgExpecting(a, restType.elem);
+        // allowTernaryArm=true: the ONLY call site passing it (see the
+        // flag's own doc on lowerArgExpecting) -- a rest-slot element that
+        // is itself a plain ternary (`cond ? attrs.x : undefined`, zapo's
+        // WaMessageCoordinator.ts:941/948) puts a ConditionalExpression at
+        // the argument's own top node, which the identifier/property-access
+        // guard above never matched -- so the read inside never reached the
+        // rung at all. Every OTHER lowerArgExpecting call site in this file
+        // (the positional branch above, call-callee forwarding elsewhere)
+        // keeps the default false and is untouched.
+        return L.lowerArgExpecting(a, restType.elem, true);
       });
       out.push({ kind: "arrayLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: restType, loc });
     } else {
