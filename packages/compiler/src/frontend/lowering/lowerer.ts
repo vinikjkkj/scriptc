@@ -12810,6 +12810,24 @@ export class Lowerer {
   /** Mixin calls whose instantiation is IN FLIGHT — the cyclic-extends
    * backstop (the collectingExprClasses rule). */
   readonly mixinCollectingCalls = new Set<ts.CallExpression>();
+  /** Ambient (.d.ts) classes whose heritage is a BODY-LESS mixin call (a
+   * `declare function` heritage factory — never one Node can execute,
+   * since .d.ts files emit no JS) or a declared `extends` of one of these:
+   * deliberately left UNREGISTERED in classBySymbol rather than refused.
+   * mapType already excludes every .d.ts-declared class from the nominal
+   * object/classval path (types.ts, the `!isDeclarationFile` guard), so
+   * no reference ever needed a ClassInfo here for TYPE purposes — only
+   * `new`/`instanceof` would, and neither is honest to answer without a
+   * real body. Tracked so a DERIVED ambient class (`class D extends
+   * Base {}` where Base is itself one of these) propagates the same
+   * silent-skip instead of hitting its own, unrelated "extending classes
+   * not declared in the program" refusal. Any later `new` of one of
+   * these names falls through lowerNew's own generic terminal fence
+   * ("constructing values other than classes declared in the program")
+   * rather than lowering a fabricated layout — the precondition this
+   * class exists for ("nothing ever `new`s it") is checked at measurement
+   * time, not assumed forever. */
+  readonly ambientBodylessMixinClasses = new Set<ts.Symbol>();
   /** Per mixin-class-node demand count: only the FIRST instantiation
    * counts statements toward coverage (the generic-instance rule). */
   readonly mixinOrdinals = new Map<ts.ClassLikeDeclaration, number>();
