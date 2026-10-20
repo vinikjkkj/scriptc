@@ -330,6 +330,9 @@ async function build0(file: string, backend: "c" | "llvm" | "default") {
  * against its own file list, and the printed tier line names the part. */
 export function defineLlvmDifferentialSuite(part = 1, parts = 1): void {
   const files = corpusFiles(part, parts);
+  // Coverage proof for CI logs: summing this line over the jobs of a lane must
+  // give the corpus size, each program once.
+  console.log(`corpus programs selected in this job: ${files.length} (llvm-differential${shardSuffix()}${partSuffix(part, parts)})`);
   const claimed: string[] = [];
   const refused: string[] = [];
   const refusalKinds = new Map<string, number>();

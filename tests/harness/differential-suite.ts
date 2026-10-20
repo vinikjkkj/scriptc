@@ -449,6 +449,9 @@ async function compileAndRun(file: string): Promise<RunResult> {
  * program exactly once. Defaults are the historical whole-corpus run. */
 export function defineDifferentialSuite(part = 1, parts = 1): void {
   const files = corpusFiles(part, parts);
+  // Coverage proof for CI logs: summing this line over the jobs of a lane must
+  // give the corpus size, each program once.
+  console.log(`corpus programs selected in this job: ${files.length} (differential${shardSuffix()}${partSuffix(part, parts)})`);
   describe(`differential corpus (${files.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()}${partSuffix(part, parts)})`, () => {
     // retry: absorbs ORACLE-side nondeterminism, not compiler bugs — a
     // deterministic byte mismatch fails both attempts. The concrete driver:
