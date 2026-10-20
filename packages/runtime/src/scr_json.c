@@ -7614,13 +7614,24 @@ double scr_dyn_index_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt
 
 /* Names Uint8Array.prototype and %TypedArray%.prototype declare BEYOND
  * what scr_dyn_bytes_method implements — these fence loudly instead of
- * mis-answering Node's is-not-a-function for a method Node HAS. */
+ * mis-answering Node's is-not-a-function for a method Node HAS.
+ *
+ * Does NOT include toBase64/setFromBase64/toHex/setFromHex: those were
+ * added to Uint8Array.prototype in V8 behind no flag starting somewhere
+ * after Node v24.15.0 (absent there, present on v25.9.0 -- measured
+ * directly, `typeof Uint8Array.prototype.toBase64`). .node-version pins
+ * 24.15.0, which is also the Node setup-node installs as the live oracle
+ * in CI, so "Node HAS" this method is false for the Node this runtime is
+ * actually checked against. Listing it here would make a real BYTES
+ * receiver's `.toBase64()` throw "not supported yet" -- implying Node
+ * has it and scriptc doesn't -- when the true answer for this target is
+ * Node doesn't have it either. See scr_u8_build's matching omission. */
 static bool scr_dyn_bytes_proto_name(const char *m) {
   static const char *names[] = { "slice", "at", "indexOf", "lastIndexOf", "includes", "join",
     "forEach", "map", "filter", "some", "every", "find", "findIndex", "findLast",
     "findLastIndex", "reverse", "fill", "set", "subarray", "sort", "keys", "values", "entries",
     "reduce", "reduceRight", "copyWithin", "toReversed", "toSorted", "with", "toString",
-    "toLocaleString", "toBase64", "setFromBase64", "toHex", "setFromHex", NULL };
+    "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (strcmp(m, names[i]) == 0) return true;
   return false;
 }
@@ -7948,8 +7959,10 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
  *                             'new'"; `new` is routed by pointer
  *                             identity in scr_dyn_construct.
  *   %Uint8Array.prototype%    Node's OWN members and no others:
- *                             `constructor`, `BYTES_PER_ELEMENT` 1, and
- *                             the four base64/hex methods v25 added.
+ *                             `constructor` and `BYTES_PER_ELEMENT` 1.
+ *                             (v25 also added four base64/hex methods
+ *                             here; omitted — see SCR_U8_PROTO_METHODS
+ *                             below, this target is v24.15.0.)
  *   %TypedArray%.prototype    where every other METHOD actually lives,
  *                             reached by delegation.
  *
@@ -8072,10 +8085,9 @@ static ScrDyn *scr_u8_proto_forward(const char *method, ScrDyn *const *args, siz
 }
 
 /* The names %TypedArray%.prototype declares, with Node's arity for each
- * (`Uint8Array.prototype.subarray.length` is 2), and the four v25 added
- * to Uint8Array.prototype itself. Implemented-ness is NOT this list's
- * business — scr_dyn_invoke owns that, and owning it in one place is
- * what keeps the two spellings from disagreeing. */
+ * (`Uint8Array.prototype.subarray.length` is 2). Implemented-ness is NOT
+ * this list's business — scr_dyn_invoke owns that, and owning it in one
+ * place is what keeps the two spellings from disagreeing. */
 #define SCR_TA_PROTO_METHODS(X)                                                             \
   X(entries, 0) X(keys, 0) X(values, 0) X(at, 1) X(copyWithin, 2) X(every, 1) X(fill, 1)    \
   X(filter, 1) X(find, 1) X(findIndex, 1) X(findLast, 1) X(findLastIndex, 1)                \
@@ -8083,7 +8095,21 @@ static ScrDyn *scr_u8_proto_forward(const char *method, ScrDyn *const *args, siz
   X(reverse, 0) X(reduce, 1) X(reduceRight, 1) X(set, 1) X(slice, 2) X(some, 1) X(sort, 1)  \
   X(subarray, 2) X(toReversed, 0) X(toSorted, 1) X(with, 2) X(toLocaleString, 0)            \
   X(toString, 0)
-#define SCR_U8_PROTO_METHODS(X) X(toBase64, 0) X(setFromBase64, 1) X(toHex, 0) X(setFromHex, 1)
+/* The four base64/hex methods v25 added directly to Uint8Array.prototype
+ * (not %TypedArray%.prototype) are DELIBERATELY absent here: they do not
+ * exist on Node v24.15.0, the version .node-version pins and the version
+ * setup-node installs as CI's live-oracle "node" in every job. Installing
+ * them unconditionally (as a prior version of this file did, measuring
+ * only against a locally available v25.9.0) made `typeof
+ * Uint8Array.prototype.toBase64` answer "function" here and "undefined"
+ * against the actual CI oracle -- a real divergence, not a platform one,
+ * confirmed identically on Windows and reproduced with no sandbox. If
+ * .node-version is ever bumped past the version V8 shipped these in,
+ * reinstate X(toBase64, 0) X(setFromBase64, 1) X(toHex, 0)
+ * X(setFromHex, 1) here, in scr_u8_build's prototype-install loop below,
+ * and in scr_dyn_bytes_proto_name's name list above -- re-measure first,
+ * don't just trust this comment. */
+#define SCR_U8_PROTO_METHODS(X)
 
 #define SCR_U8_THUNK(m, n)                                                         \
   static ScrDyn *scr_u8_m_##m(ScrClosure *clo, ScrDyn *const *args, size_t argc) { \
