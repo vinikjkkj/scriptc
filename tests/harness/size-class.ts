@@ -254,13 +254,86 @@ import { readFileSync } from "node:fs";
 
 const platform = process.platform;
 
+/* 2026-10-20 -- THE LINUX CEILING WAS NEVER MEASURED ON LINUX. IT JUST
+ * LOOKED LIKE IT WAS, BECAUSE IT HAD A NUMBER.
+ *
+ * Real CI (ubuntu-24.04, native clang, no SCRIPTC_CC/SCRIPTC_TARGET --
+ * the tests job's own env block sets neither) measured the actual
+ * static hello-world at 543,912 bytes (statSync total file size,
+ * island.test.ts, shard 1/20, this branch, 2026-10-20) against a
+ * STATIC_CLASS_MAX of 405,824 -- a 34% overshoot, "expected 543912 to be
+ * less than 405824".
+ *
+ * git blame says why the ceiling was that far off. Every commit that has
+ * ever touched this pair did one of two things to the linux branch:
+ *   f7734a342  moved linux, win32 AND darwin by the IDENTICAL +5,632 --
+ *              a win32 recalibration's own delta, replayed onto the other
+ *              two slots to "preserve their headroom", not a separate
+ *              linux measurement.
+ *   266b827a58, 113f639282   moved ONLY the win32 literal; linux's
+ *              405_824 / 559_848 passed through untouched.
+ * No commit in this file's history has ever rebuilt and weighed a linux
+ * binary to set this number. The original value (9321314e2a, 392_000) was
+ * a round number near the header comment's one-time "canonical Sandbox"
+ * measurement (387,600) -- already an estimate, not a recorded figure --
+ * and every later change nudged it by someone else's platform's growth.
+ * That is a single-platform number wearing a three-way ternary.
+ *
+ * THIS IS NOT THE PE/ELF CATEGORY ERROR IT COULD HAVE BEEN. STATIC_CLASS_MAX
+ * is compared against `statSync(binaryPath).size` on every platform --
+ * never against peTextVirtualSize's .text figure, on win32 or linux alike
+ * -- so the ELF .text reader added alongside this fix is not implicated in
+ * this failure and did not need to agree with PE's VirtualSize for this
+ * check to make sense: whole-file byte count is the same kind of quantity
+ * in any container format. (The two readers DO return the analogous
+ * quantity to each other where it matters -- PE VirtualSize and ELF
+ * sh_size are both exact, unrounded section sizes, cross-checked against
+ * readelf/objdump -- but that question is orthogonal to this ceiling.)
+ *
+ * WHAT 543,912 IS NOT: a number I measured on this host. There is no
+ * clang here and no Linux machine; `zig cc -target x86_64-linux-gnu` is
+ * the only local approximation, and it is not a faithful one -- confirmed
+ * with a plain `int main`, not just this runtime: zig cc embeds full
+ * DWARF (.debug_info/.debug_loc/...) even with no -g and even with an
+ * explicit -g0, which real clang does not do uninvited. Stripping every
+ * debug and symbol section from the cross-built probe left 205,072 bytes
+ * (.text 139,059) -- still less than half of CI's real 543,912, a gap
+ * debug info alone does not explain, so the local probe is not used to
+ * set or sanity-check this figure; it is UNMEASURABLE BY THIS METHOD on
+ * this host. 543,912 is the live CI number itself, the only trustworthy
+ * measurement of the real artifact anyone has taken.
+ *
+ * The margin below is this file's own win32 rule (CLASS_MAX = anchor + 2
+ * x SIZE_DRIFT_PAGE), applied for consistency -- but linux has no
+ * RECORDED pair watching it between CI runs the way win32 does, so this
+ * headroom is weaker insurance than it looks: ordinary drift here will
+ * not be caught at the one-page resolution win32 gets until the ceiling
+ * itself is breached again. Flagging rather than solving that gap.
+ *
+ * REGEX_CLASS_MAX's linux branch is NOT a second live measurement --
+ * there is no CI figure for it in hand. It is DERIVED from the real
+ * static number plus the only same-platform static-to-regex delta this
+ * file has ever recorded for linux, the original "canonical Sandbox" pair
+ * in the header comment (387,600 static, 540,232 regex, delta +152,632):
+ * 543,912 + 152,632 = 696,544, plus the same 2-page margin. That delta is
+ * itself unvalidated by any later linux measurement, so this number is a
+ * provisional estimate, not a floor -- the next live CI run of
+ * regex.test.ts on linux supersedes it immediately, and almost certainly
+ * will: at the old 559,848 ceiling a real regex-linked binary built from
+ * today's real static size has no room to fit under it at all.
+ *
+ * darwin's branch (374_824 / 526_848) is left untouched. It has the exact
+ * same lockstep provenance as linux did and no CI job reported it broken
+ * here -- changing a number with no evidence behind it would repeat the
+ * mistake this comment is correcting, just on a different platform. */
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 405_824 : platform === "win32" ? 689_152 : 374_824;
+  platform === "linux" ? 552_104 : platform === "win32" ? 689_152 : 374_824;
 
-/** A program that uses regex: libregexp + libunicode, never the engine. */
+/** A program that uses regex: libregexp + libunicode, never the engine.
+ * linux: DERIVED, not measured -- see the 2026-10-20 entry above. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 559_848 : platform === "win32" ? 830_464 : 526_848;
+  platform === "linux" ? 704_736 : platform === "win32" ? 830_464 : 526_848;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
