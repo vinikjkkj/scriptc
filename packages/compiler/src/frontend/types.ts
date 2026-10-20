@@ -2359,7 +2359,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           checker.getConstructSignatures(pt).length === 0
         );
       });
-    if (!dataInterface && !callableLiteral && !dataWithOrdinaryMethods) return ctx.dynamic ? JSVAL : null;
+    // A body-less .d.ts CLASS instance whose members are all slots a record
+    // can carry or decline (see isBodylessDeclClassInstance). The class
+    // keeps no nominal identity here: no program-built `new C()` of a
+    // non-program class exists, so the only values of the type are records
+    // the program writes structurally.
+    const bodylessClass = isBodylessDeclClassInstance(widened, checker, ctx);
+    if (!dataInterface && !callableLiteral && !dataWithOrdinaryMethods && !bodylessClass) return ctx.dynamic ? JSVAL : null;
   }
   // NOTE on module NAMESPACE types (`typeof import("./x.mjs")` — what a
   // dynamic import resolves to): non-stdlib ones fall under the rule
@@ -6138,7 +6144,77 @@ function recordProvenanceOk(
   return (
     (isInterfaceLike && isDataOnlyObjectType(t, checker)) ||
     isDataWithOrdinaryMethods ||
-    isDataOnlyDeclFileClassInstance(t, checker, ctx)
+    isDataOnlyDeclFileClassInstance(t, checker, ctx) ||
+    isBodylessDeclClassInstance(t, checker, ctx)
+  );
+}
+
+/** An INSTANCE of a `declare class` from a non-stdlib .d.ts whose
+ * implementation this build did not compile, when every member is a slot a
+ * record can carry (a data property, or one ordinary non-generic single-
+ * signature method) or one the member loop DECLINES by name (a generic
+ * method, a pure overload set — the same predicates that already exclude
+ * those from an interface's shape).
+ *
+ * mysql2's `Connection` is the case: `AuthPlugin`'s parameter names it, so
+ * `PoolOptions.authPlugins` failed on a class that is only ever a TYPE here.
+ * Nothing in a static build can produce a value of this class — `new C()` of
+ * a non-program class and every value read from the uncompiled module fence
+ * at their own gates — so the values of the type are exactly the records a
+ * program writes, which is the argument isDataOnlyDeclFileClassInstance and
+ * the data-with-ordinary-methods rule already make for protobuf messages and
+ * for Field, one declaration kind over (and one step further: methods).
+ * What stays refused: a class with a call/construct signature on the
+ * instance, a class whose own declarations include a compiled twin or the
+ * standard library, anything under --dynamic (there the same type is an
+ * island handle and a record would disagree with it), and a class with a
+ * member whose type has a construct signature. */
+function isBodylessDeclClassInstance(
+  t: ts.Type,
+  checker: ts.TypeChecker,
+  ctx?: TypeMapperCtx,
+): boolean {
+  if (ctx?.dynamic) return false;
+  const sym = t.getSymbol();
+  if (!sym || !(sym.flags & ts.SymbolFlags.Class)) return false;
+  const decls = checker.declarationsOf(sym);
+  if (decls.length === 0) return false;
+  const bodyless = decls.every((d) => {
+    const sf = d.getSourceFile();
+    return (
+      d.kind === ts.SyntaxKind.ClassDeclaration &&
+      sf.isDeclarationFile &&
+      !(ctx?.isStdlibFile?.(sf) ?? true) &&
+      !(ctx?.declFileHasCompiledImpl?.(sf) ?? false)
+    );
+  });
+  if (!bodyless) return false;
+  if (checker.getCallSignatures(t).length > 0 || checker.getConstructSignatures(t).length > 0) return false;
+  return checker.getPropertiesOfType(t).every((p) => {
+    const pt = checker.getTypeOfSymbol(p);
+    if (checker.getConstructSignatures(pt).length > 0) return false;
+    const cs = checker.getCallSignatures(pt);
+    if (cs.length === 0) return true;
+    if (cs.length === 1 && cs[0]!.getTypeParameters().length === 0) return true;
+    return isDeclinableCallableMember(pt, checker);
+  });
+}
+
+/** The member loop's decline test: a generic callable, a pure overload set,
+ * or either one made OPTIONAL (`m?<K>(...)` — @types/node's EventEmitter
+ * spells `[captureRejectionSymbol]?` that way, so every EventEmitter
+ * subclass carries it). The optional spelling is the same member plus an
+ * `undefined` arm; with that arm stripped it IS the callable, and it leaves
+ * the shape for the same reason the bare spelling does (no single closure
+ * slot holds a generic function or an overload set). */
+function isDeclinableCallableMember(t: ts.Type, checker: ts.TypeChecker): boolean {
+  if (isGenericCallableMemberType(t, checker) || isNonGenericOverloadSetMember(t, checker)) return true;
+  if (!t.isUnionType()) return false;
+  const arms = ts.constituentTypes(t).filter((a) => (a.flags & ts.TypeFlags.Undefined) === 0);
+  return (
+    arms.length === 1 &&
+    arms.length < ts.constituentTypes(t).length &&
+    (isGenericCallableMemberType(arms[0]!, checker) || isNonGenericOverloadSetMember(arms[0]!, checker))
   );
 }
 
@@ -7734,6 +7810,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       return DYN;
     }
     const fields: { name: string; type: IrType }[] = [];
+    const bodylessOwner = isBodylessDeclClassInstance(widened, checker, ctx);
     for (const p of props) {
       // ...or a DATA property that some literal in this program satisfies
       // with a getter. One layout has to serve both producers, so the slot
@@ -7853,9 +7930,18 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // generic member below — see isNonGenericOverloadSetMember's own
       // comment for why mapType can never succeed on it and why dropping
       // the member (not failing the whole shape) is sound either way.
+      // A METHOD of a body-less .d.ts class instance whose signature does
+      // not map (mysql2's `Connection.promise(impl?: PromiseConstructor)`:
+      // a parameter that is the standard library's own constructor value)
+      // is walked speculatively too and leaves the shape if it fails, for
+      // the reason a generic member does: no closure slot of this program
+      // can hold it. The class has no producer in a static build (see
+      // isBodylessDeclClassInstance), so nothing can hold a value whose
+      // method is missing; a program that names the member is refused at
+      // that site, never later.
       const generic =
-        isGenericCallableMemberType(fieldTs, checker) ||
-        isNonGenericOverloadSetMember(fieldTs, checker);
+        isDeclinableCallableMember(fieldTs, checker) ||
+        (bodylessOwner && checker.getCallSignatures(fieldTs).length > 0);
       if (process.env["SCRIPTC_MEMBER_WHY"] !== undefined) {
         const cs = checker.getCallSignatures(fieldTs);
         console.error(`[memberwhy] ${checker.typeToString(widened).slice(0,40)} . ${p.name}`
