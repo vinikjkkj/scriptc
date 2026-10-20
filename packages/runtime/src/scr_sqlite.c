@@ -56,9 +56,17 @@
  * Every behaviour below was read off better-sqlite3 13.0.3's own C++
  * (src/util/binder.cpp, src/util/data.cpp, src/objects/statement.cpp,
  * src/objects/database.cpp) and then CHECKED against it running on Node
- * v22.18.0 — the ABI-locked .node refuses to load on Node 25, which is
- * itself an argument for a vendored C engine with no ABI at all. The
- * non-obvious ones, each verified by probe:
+ * v22.18.0. That pin was NOT an ABI workaround — 13.0.3 ships Node-API
+ * prebuilds (NAPI version 10) and loads cleanly under v22, this repo's
+ * actual v24.15.0 .node-version pin, and v25 alike;
+ * tests/harness/sqlite-dynimport.test.ts's own provenance note
+ * re-confirms this directly ("13.0.3 ships Node-API prebuilds and loads
+ * on both; the ABI-locked NODE_MODULE_VERSION 127 story belongs to
+ * node-gyp builds from source, not to this package"). The C++ binding
+ * code these behaviours live in has no dependency on which Node JS
+ * runtime loads it, so checking under v22.18.0 rather than this repo's
+ * v24.15.0 pin carries none of the drift risk a JS-surface measurement
+ * would. The non-obvious ones, each verified by probe:
  *
  * - A JS NUMBER binds with sqlite3_bind_double, ALWAYS, integral or not.
  *   `insert into t(a) values(?)` with 1 into an affinity-free column
