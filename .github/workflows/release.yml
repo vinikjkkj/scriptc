@@ -11,20 +11,25 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 jobs:
   check-release:
     name: Check for new version
-    # This fork publishes its own packages under the @scriptc-fork scope;
-    # the guard keeps any further fork of THIS repo from trying to publish
-    # them (the trusted publisher is pinned to this repository).
-    if: github.repository == 'vinikjkkj/scriptc'
+    # The private mirror carries this file too; only the public repo
+    # publishes (the trusted publisher is pinned to it).
+    if: github.repository == 'vercel-labs/scriptc'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
+      actions: read
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       version: ${{ steps.check.outputs.version }}
+      artifact_run: ${{ steps.reuse.outputs.artifact_run || github.run_id }}
+      reuse_artifacts: ${{ steps.reuse.outputs.artifact_run != '' }}
+      receipt_run: ${{ steps.reuse.outputs.receipt_run }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -32,50 +37,320 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Compare package.json version to npm
+      - name: Check GitHub release completion
         id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Read BOTH the name and the version from the CLI manifest. The
-          # name used to be hardcoded as "scriptc"; after the fork renamed
-          # the packages that check silently compared against the upstream
-          # package and would have published on every push.
-          NAME=$(node -p "require('./packages/cli/package.json').name")
           LOCAL_VERSION=$(node -p "require('./packages/cli/package.json').version")
-          echo "Package: $NAME"
           echo "Local version: $LOCAL_VERSION"
-
-          # A package that has never been published makes `npm view` fail;
-          # 0.0.0 then differs from any real version and the release runs.
-          NPM_VERSION=$(npm view "$NAME" version 2>/dev/null || echo "0.0.0")
-          echo "npm version: $NPM_VERSION"
-
-          if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
-            echo "Version changed: $NPM_VERSION -> $LOCAL_VERSION"
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Version unchanged on npm, skipping publish"
+          RELEASE_DRAFT=$(gh release view "v$LOCAL_VERSION" --json isDraft --jq .isDraft 2>/dev/null || echo missing)
+          if [ "$RELEASE_DRAFT" = false ]; then
+            echo "Release is complete"
             echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Release needs publishing or completion"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
           fi
           echo "version=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Find reusable builds and accepted upload receipts
+        id: reuse
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { execFileSync, spawnSync } from 'node:child_process';
+          import { appendFileSync } from 'node:fs';
+          const api = (path) => JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }));
+          const repo = process.env.GITHUB_REPOSITORY;
+          const expected = [
+            'darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64',
+            'linux-x64-musl', 'linux-arm64-musl', 'windows-x64', 'wasm32-wasi',
+            'runtime-ios-arm64', 'runtime-ios-simulator-arm64', 'runtime-android-arm64',
+          ].map((platform) => `native-${platform}`);
+          const runs = api(`repos/${repo}/actions/workflows/release.yml/runs?branch=main&status=completed&per_page=100`).workflow_runs;
+          let artifactRun;
+          let receiptRun;
+          for (const run of runs) {
+            if (String(run.id) === process.env.GITHUB_RUN_ID || run.head_branch !== 'main' ||
+                run.head_repository?.full_name !== repo || !['push', 'workflow_dispatch'].includes(run.event)) continue;
+            // Release orchestration, packaging validation, and their tests do
+            // not change the compiled payloads in native build artifacts.
+            if (spawnSync('git', ['merge-base', '--is-ancestor', run.head_sha, 'HEAD']).status !== 0 ||
+                spawnSync('git', ['diff', '--quiet', run.head_sha, 'HEAD', '--', '.',
+                  ':(exclude).github/workflows/release.yml', ':(exclude)scripts/verify-native-cli.mjs',
+                  ':(exclude)scripts/package-native-cli.mjs', ':(exclude)tests/harness/native-cli-packaging.test.ts',
+                ]).status !== 0) continue;
+            const artifacts = api(`repos/${repo}/actions/runs/${run.id}/artifacts?per_page=100`).artifacts
+              .filter((artifact) => !artifact.expired && artifact.size_in_bytes > 0);
+            if (!artifactRun && expected.every((name) => artifacts.filter((artifact) => artifact.name === name).length === 1)) {
+              artifactRun = run.id;
+              console.log(`Reusing native builds from run ${run.id} (${run.head_sha})`);
+            }
+            if (!receiptRun && artifacts.some((artifact) => artifact.name.startsWith(`npm-accepted-${process.env.VERSION}-`))) {
+              receiptRun = run.id;
+              console.log(`Restoring accepted uploads from run ${run.id}`);
+            }
+            if (artifactRun && receiptRun) break;
+          }
+          if (artifactRun) appendFileSync(process.env.GITHUB_OUTPUT, `artifact_run=${artifactRun}\n`);
+          if (receiptRun) appendFileSync(process.env.GITHUB_OUTPUT, `receipt_run=${receiptRun}\n`);
+          NODE
+
+  build-native-packages:
+    name: Build native package (${{ matrix.platform }})
+    needs: check-release
+    if: needs.check-release.outputs.should_release == 'true' && needs.check-release.outputs.reuse_artifacts != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-15
+            helper: llvm-darwin-arm64
+            runtime: runtime-darwin-arm64
+            cli: cli-darwin-arm64
+          - platform: darwin-x64
+            runner: macos-15-intel
+            helper: llvm-darwin-x64
+            runtime: runtime-darwin-x64
+            cli: cli-darwin-x64
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            helper: llvm-linux-x64-gnu
+            runtime: runtime-linux-x64-gnu
+            cli: cli-linux-x64-gnu
+            llvm_asset: LLVM-22.1.8-Linux-X64
+            use_zig: true
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            helper: llvm-linux-arm64-gnu
+            runtime: runtime-linux-arm64-gnu
+            cli: cli-linux-arm64-gnu
+            llvm_asset: LLVM-22.1.8-Linux-ARM64
+            use_zig: true
+          - platform: windows-x64
+            runner: windows-2022
+            helper: llvm-win32-x64-msvc
+            runtime: runtime-win32-x64-msvc
+            cli: cli-win32-x64-msvc
+            use_zig: true
+          - platform: linux-x64-musl
+            runner: ubuntu-24.04
+            helper: llvm-linux-x64-musl
+            runtime: runtime-linux-x64-musl
+            cli: cli-linux-x64-musl
+            seed_helper: llvm-linux-x64-gnu
+            cli_target: x86_64-linux-musl
+            llvm_asset: LLVM-22.1.8-Linux-X64
+            use_zig: true
+          - platform: linux-arm64-musl
+            runner: ubuntu-24.04-arm
+            helper: llvm-linux-arm64-musl
+            runtime: runtime-linux-arm64-musl
+            cli: cli-linux-arm64-musl
+            seed_helper: llvm-linux-arm64-gnu
+            cli_target: aarch64-linux-musl
+            llvm_asset: LLVM-22.1.8-Linux-ARM64
+            use_zig: true
+          - platform: wasm32-wasi
+            runner: ubuntu-24.04
+            helper: llvm-linux-x64-gnu
+            runtime: runtime-wasm32-wasi
+            llvm_asset: LLVM-22.1.8-Linux-X64
+            use_zig: true
+    runs-on: ${{ matrix.runner }}
+    # The Intel macOS build took 24 minutes for 0.3.2 and passed 30 for 0.3.3.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - name: Install toolchain (macOS)
+        if: startsWith(matrix.platform, 'darwin')
+        run: |
+          brew install llvm@22
+          llvm_prefix=$(brew --prefix llvm@22)
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo "LLVM_DIR=$llvm_prefix/lib/cmake/llvm" >> "$GITHUB_ENV"
+      - name: Install pinned LLVM development distribution (Linux)
+        if: startsWith(matrix.platform, 'linux') || matrix.platform == 'wasm32-wasi'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes g++ zlib1g-dev libzstd-dev
+          curl -fL --retry 3 -o "$RUNNER_TEMP/llvm.tar.xz" "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/${{ matrix.llvm_asset }}.tar.xz"
+          tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/${{ matrix.llvm_asset }}" "$RUNNER_TEMP/llvm-22.1.8"
+          echo "LLVM_DIR=$RUNNER_TEMP/llvm-22.1.8/lib/cmake/llvm" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/llvm-22.1.8/bin" >> "$GITHUB_PATH"
+      - uses: vercel-labs/setup-zig@v1
+        if: matrix.use_zig == true
+        with:
+          version: 0.16.0
+      - name: Install pinned LLVM development distribution (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          # The complete archive supplies LLVM's exported CMake targets and
+          # static libraries. windows-2022 includes CMake, Ninja, VS 2022,
+          # and 7-Zip; unlike tar.exe, 7-Zip expands this archive quickly.
+          $archive = "$env:RUNNER_TEMP\clang+llvm-22.1.8-x86_64-pc-windows-msvc.tar.xz"
+          $llvm = "$env:RUNNER_TEMP\llvm-22.1.8"
+          $expanded = "$env:RUNNER_TEMP\llvm-expanded"
+          $sevenZip = "$env:ProgramFiles\7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            choco install 7zip --no-progress -y
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path $sevenZip)) { throw "7-Zip is unavailable" }
+          curl.exe -fL --retry 3 -o $archive https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang%2Bllvm-22.1.8-x86_64-pc-windows-msvc.tar.xz
+          & $sevenZip x -y "-o$expanded" $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $sevenZip x -y "-o$expanded" "$expanded\clang+llvm-22.1.8-x86_64-pc-windows-msvc.tar"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Move-Item "$expanded\clang+llvm-22.1.8-x86_64-pc-windows-msvc" $llvm
+          echo "LLVM_DIR=$llvm\lib\cmake\llvm" >> $env:GITHUB_ENV
+          echo "$llvm\bin" >> $env:GITHUB_PATH
+      - run: pnpm install --frozen-lockfile
+      - name: Build native packages (POSIX)
+        if: matrix.platform != 'windows-x64'
+        run: |
+          pnpm --filter @scriptc/${{ matrix.helper }} build:native
+          if [ "${{ matrix.use_zig }}" = true ]; then
+            CC=zig AR=zig pnpm --filter @scriptc/${{ matrix.runtime }} build:native
+          else
+            CC=clang AR=llvm-ar pnpm --filter @scriptc/${{ matrix.runtime }} build:native
+          fi
+      - name: Build native packages (Windows)
+        if: matrix.platform == 'windows-x64'
+        run: |
+          pnpm --filter @scriptc/${{ matrix.helper }} build:native
+          pnpm --filter @scriptc/${{ matrix.runtime }} build:native
+      - name: Build host helper for cross-libc bootstrap
+        if: matrix.seed_helper != ''
+        run: pnpm --filter @scriptc/${{ matrix.seed_helper }} build:native
+      - name: Build native CLI distribution
+        if: matrix.cli != ''
+        env:
+          SCRIPTC_TARGET: ${{ matrix.cli_target }}
+        run: |
+          pnpm --filter @scriptc/compiler --filter scriptc build
+          pnpm --filter @scriptc/${{ matrix.cli }} build:native
+          node scripts/verify-native-cli.mjs packages/${{ matrix.cli }} --run
+      - name: Verify GNU npm distribution on glibc 2.34
+        if: matrix.platform == 'linux-x64' || matrix.platform == 'linux-arm64'
+        run: |
+          NODE_ROOT=$(dirname "$(dirname "$(command -v node)")")
+          docker run --rm --volume "$GITHUB_WORKSPACE:/work:ro" --volume "$NODE_ROOT:/node:ro" \
+            --env PATH=/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin \
+            --workdir /work amazonlinux:2023 sh -c '
+              set -eu
+              dnf install --assumeyes clang tar gzip
+              test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.34"
+              node scripts/smoke-native-install.mjs packages/${{ matrix.cli }}
+            '
+      - name: Verify packed Darwin helper on its build host
+        if: matrix.platform == 'darwin-arm64'
+        run: |
+          TARBALL=$(pnpm --dir packages/llvm-darwin-arm64 pack --pack-destination "$RUNNER_TEMP" --silent)
+          node scripts/verify-llvm-package.mjs "$RUNNER_TEMP/$(basename "$TARBALL")"
+      - name: Upload native packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: |
+            packages/${{ matrix.helper }}
+            packages/${{ matrix.runtime }}
+            ${{ matrix.cli != '' && format('packages/{0}/dist', matrix.cli) || '' }}
+          retention-days: 7
+
+  build-mobile-runtime-packs:
+    name: Build ${{ matrix.runtime }}
+    needs: check-release
+    if: needs.check-release.outputs.should_release == 'true' && needs.check-release.outputs.reuse_artifacts != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: runtime-ios-arm64
+            runner: macos-15
+          - runtime: runtime-ios-simulator-arm64
+            runner: macos-15
+          - runtime: runtime-android-arm64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/mobile-runtime-pack
+        with:
+          runtime: ${{ matrix.runtime }}
+      - name: Stage mobile runtime pack
+        run: |
+          mkdir -p "$RUNNER_TEMP/mobile-pack/${{ matrix.runtime }}"
+          cp -R packages/${{ matrix.runtime }}/. "$RUNNER_TEMP/mobile-pack/${{ matrix.runtime }}/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.runtime }}
+          path: ${{ runner.temp }}/mobile-pack
+          retention-days: 7
+
   publish:
     name: Publish to npm
-    needs: check-release
-    if: needs.check-release.outputs.should_release == 'true'
+    needs: [check-release, build-native-packages, build-mobile-runtime-packs]
+    if: >-
+      !cancelled() && needs.check-release.outputs.should_release == 'true' &&
+      (needs.check-release.outputs.reuse_artifacts == 'true' ||
+      (needs.build-native-packages.result == 'success' && needs.build-mobile-runtime-packs.result == 'success'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: Release
     permissions:
       contents: read
+      actions: read
       id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download native packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: native-artifacts
+          merge-multiple: true
+          run-id: ${{ needs.check-release.outputs.artifact_run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore accepted upload receipts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.check-release.outputs.version }}
+          RECEIPT_RUN: ${{ needs.check-release.outputs.receipt_run }}
+        run: |
+          touch "$RUNNER_TEMP/npm-accepted.txt"
+          # Include this run so re-running only failed jobs restores its receipts.
+          for run in "$GITHUB_RUN_ID" "$RECEIPT_RUN"; do
+            if [ -z "$run" ]; then continue; fi
+            count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" \
+              --jq "[.artifacts[] | select(.expired == false and (.name | startswith(\"npm-accepted-$VERSION-\")))] | length")
+            if [ "$count" -eq 0 ]; then continue; fi
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern "npm-accepted-$VERSION-*" --dir "$RUNNER_TEMP/npm-receipts/$run"
+            find "$RUNNER_TEMP/npm-receipts/$run" -name npm-accepted.txt -exec cat {} + >> "$RUNNER_TEMP/npm-accepted.txt"
+          done
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 11.1.3
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -85,31 +360,31 @@ jobs:
 
       # Publishing uses npm trusted publishing (OIDC): the job's id-token
       # permission lets npm mint short-lived credentials, so no npm token
-      # secret exists anywhere in this repo. All three packages —
-      # @scriptc-fork/runtime, @scriptc-fork/compiler, @scriptc-fork/scriptc
-      # — must each be configured on npmjs.com with a GitHub Actions
-      # trusted publisher pointing at repository vinikjkkj/scriptc,
-      # workflow release.yml, environment Release. A package missing that
-      # configuration fails with an OIDC authentication error before
-      # anything uploads. See RELEASING.md for the one-time setup, which
-      # a maintainer must do by hand on npmjs.com; it cannot be scripted
-      # from here. Trusted publishing requires npm >= 11.5.1 (bundled with
-      # Node 24).
-      #
-      # The upstream packages (@scriptc/runtime, @scriptc/compiler,
-      # scriptc) belong to vercel-labs and are configured with a trusted
-      # publisher pointing at THEIR repository. This workflow can never
-      # publish to them, by construction.
+      # secret exists anywhere in this repo. The runtime, every shipped
+      # platform runtime/helper package, compiler, and CLI must each be
+      # configured on npmjs.com with a GitHub Actions trusted publisher
+      # pointing at repository vercel-labs/scriptc, workflow release.yml,
+      # environment Release. A package missing that configuration fails
+      # with an OIDC authentication error before anything uploads.
+      # Trusted publishing requires npm >= 11.5.1 (bundled with Node 24).
 
       - name: Install and build
         run: |
           pnpm install --frozen-lockfile
+          cp -R native-artifacts/. packages/
+          # upload-artifact does not preserve executable bits. Restore the
+          # helper mode before pnpm runs its prepack checks.
+          find packages -type f -path '*/bin/scriptc-llvm-codegen' -exec chmod 755 {} +
+          find packages -type f \( -path '*/dist/bin/scriptc' -o -path '*/dist/lib/typescript/lib/tsc' -o -path '*/dist/lib/scriptc-comptime' \) -exec chmod 755 {} +
           pnpm -r build
 
       - name: Check version sync
         run: |
           VERSION="${{ needs.check-release.outputs.version }}"
-          for pkg in packages/runtime packages/compiler packages/cli; do
+          for pkg in packages/runtime packages/runtime-* packages/llvm-* packages/compiler packages/experimental packages/threads packages/types packages/cli packages/cli-*; do
+            if [ "$(node -p "require('./$pkg/package.json').private === true")" = "true" ]; then
+              continue
+            fi
             V=$(node -p "require('./$pkg/package.json').version")
             if [ "$V" != "$VERSION" ]; then
               echo "Version mismatch: $pkg is $V, expected $VERSION"
@@ -119,9 +394,11 @@ jobs:
           done
 
       - name: Publish to npm
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.check-release.outputs.version }}
         run: |
-          VERSION="${{ needs.check-release.outputs.version }}"
-
           # npm accepts --provenance only from PUBLIC source repositories;
           # while this repo is internal the flag is dropped, and the same
           # step starts attaching provenance the moment the repo goes
@@ -134,59 +411,100 @@ jobs:
             echo "repository visibility is '$VISIBILITY': publishing without provenance"
           fi
 
-          # Dependency order, so each package's deps are resolvable the
-          # moment it lands. npm publish on the tarball handles OIDC.
-          # Re-runs skip anything already on the registry at this version.
-          #
-          # The workspace deps are written in the ALIAS form
-          # "@scriptc/runtime": "workspace:@scriptc-fork/runtime@*", which
-          # pnpm pack rewrites to "npm:@scriptc-fork/runtime@<version>".
-          # That is what keeps the fork's packages installable under the
-          # ORIGINAL @scriptc/* directory names, so the ~100 source files
-          # that import "@scriptc/compiler" by specifier — and the
-          # compiler's own self-referencing require.resolve calls in
-          # packages/compiler/src/frontend/shared.ts — resolve unchanged.
-          # If a packed manifest ever shows a bare "workspace:" spec, the
-          # rewrite did not happen and the tarball must NOT be published.
+          # Upload acceptance and public availability are separate states.
+          # Save acceptance immediately so retries never depend on registry lag.
           publish_dir() {
             dir="$1"
+            packed="${2:-}"
             name=$(node -p "require('./$dir/package.json').name")
-            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
-              echo "$name@$VERSION already published, skipping"
+            if grep -Fxq "$name@$VERSION" "$RUNNER_TEMP/npm-accepted.txt"; then
+              echo "$name@$VERSION upload already accepted, skipping"
               return 0
             fi
-            tarball=$(cd "$dir" && pnpm pack --silent | tail -1)
-            if tar -xzOf "$dir/$tarball" package/package.json | grep -q '"workspace:'; then
-              echo "$name@$VERSION still carries a workspace: dependency spec after pnpm pack"
-              echo "Publishing it would produce an uninstallable package; aborting."
-              exit 1
+            if [ -z "$packed" ]; then
+              tarball=$(cd "$dir" && pnpm pack --silent | tail -1)
+              packed="$dir/$tarball"
             fi
-            npm publish "$dir/$tarball" $PROVENANCE --access public
+            case "$dir" in
+              packages/llvm-darwin-*|packages/llvm-linux-*)
+                node scripts/verify-llvm-package-mode.mjs "$packed" "$name"
+                ;;
+            esac
+            publish_log="$RUNNER_TEMP/npm-publish.log"
+            if npm publish "$packed" $PROVENANCE --access public 2>&1 | tee "$publish_log"; then
+              echo "$name@$VERSION" >> "$RUNNER_TEMP/npm-accepted.txt"
+              return 0
+            else
+              publish_status=${PIPESTATUS[0]}
+            fi
+            if [ "$publish_status" -eq 0 ]; then return 1; fi
+            # Older runs have no receipts. This specific conflict means npm
+            # already accepted this version; other publish failures still fail.
+            if grep -Fq 'npm error code E409' "$publish_log" && \
+                grep -Fq "Cannot publish over previously staged version \"$VERSION\"." "$publish_log"; then
+              echo "$name@$VERSION is already accepted and awaiting npm processing"
+              echo "$name@$VERSION" >> "$RUNNER_TEMP/npm-accepted.txt"
+              return 0
+            fi
+            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+              echo "$name@$VERSION is now public"
+              echo "$name@$VERSION" >> "$RUNNER_TEMP/npm-accepted.txt"
+              return 0
+            fi
+            return "$publish_status"
           }
 
+          # pnpm pack resolves workspace dependencies; npm handles OIDC.
+          # Publish dependencies first. Registry propagation after an accepted
+          # upload must not block the remaining packages or the GitHub release.
           publish_dir packages/runtime
+          publish_dir packages/runtime-darwin-arm64
+          publish_dir packages/llvm-darwin-arm64
+          publish_dir packages/runtime-darwin-x64
+          publish_dir packages/llvm-darwin-x64
+          publish_dir packages/runtime-linux-x64-gnu
+          publish_dir packages/llvm-linux-x64-gnu
+          publish_dir packages/runtime-linux-arm64-gnu
+          publish_dir packages/llvm-linux-arm64-gnu
+          publish_dir packages/runtime-linux-x64-musl
+          publish_dir packages/llvm-linux-x64-musl
+          publish_dir packages/runtime-linux-arm64-musl
+          publish_dir packages/llvm-linux-arm64-musl
+          publish_dir packages/runtime-ios-arm64
+          publish_dir packages/runtime-ios-simulator-arm64
+          publish_dir packages/runtime-android-arm64
+          publish_dir packages/runtime-wasm32-wasi
+          publish_dir packages/runtime-win32-x64-msvc
+          publish_dir packages/llvm-win32-x64-msvc
+          for pkg in packages/cli-*; do publish_dir "$pkg"; done
           publish_dir packages/compiler
+          publish_dir packages/experimental
+          publish_dir packages/threads
+          publish_dir packages/types
           publish_dir packages/cli
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "All package uploads accepted; npm registry propagation may continue after this job." >> "$GITHUB_STEP_SUMMARY"
 
-  # The GitHub release is a tag, notes, and one asset: the surface
-  # manifest (packages/compiler/surface-manifest.json — the machine-
-  # readable listing of the surface the static tier compiles at this
-  # version, regenerated here and verified against the committed file).
-  # scriptc has no platform binary assets to stage (programs compile on
-  # the user's machine), so the job runs AFTER a successful npm publish
-  # and never gates it. The body is the CHANGELOG.md block between the
-  # release:start/release:end markers, which RELEASING.md keeps on the
-  # latest entry only.
+      - name: Save accepted upload receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-accepted-${{ needs.check-release.outputs.version }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/npm-accepted.txt
+          if-no-files-found: ignore
+          retention-days: 90
+
+  # Publish standalone native distributions and the surface manifest after
+  # npm publishing succeeds. The release body comes from the marked changelog.
   github-release:
     name: Create GitHub Release
     needs: [check-release, publish]
-    if: needs.check-release.outputs.should_release == 'true'
+    if: >-
+      !cancelled() && needs.check-release.outputs.should_release == 'true' && needs.publish.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
+      actions: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -194,7 +512,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 11.1.3
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -202,7 +520,7 @@ jobs:
           node-version: "24"
 
       # Regenerate the surface manifest from this tree and require it to
-      # match the committed file byte-for-byte — the same staleness guard
+      # match the committed file exactly — the same staleness guard
       # the test suite runs — so the attached asset is provably the
       # manifest of the code being released.
       - name: Generate surface manifest
@@ -222,6 +540,18 @@ jobs:
           fi
           echo "Extracted release notes for $VERSION ($LINES lines)"
 
+      - name: Download native distributions and runtime packs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: packages
+          merge-multiple: true
+          run-id: ${{ needs.check-release.outputs.artifact_run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package standalone compilers
+        run: node scripts/package-native-cli.mjs packages /tmp/scriptc-release-assets
+
       - name: Create GitHub Release
         run: |
           VERSION="${{ needs.check-release.outputs.version }}"
@@ -234,11 +564,14 @@ jobs:
             gh release create "$TAG" \
               --target "$GITHUB_SHA" \
               --title "$TAG" \
+              --draft \
               --notes-file /tmp/release-notes.md
           fi
 
           # Attach the surface manifest (idempotent: --clobber makes
           # re-runs replace the asset instead of failing).
           gh release upload "$TAG" packages/compiler/surface-manifest.json --clobber
+          gh release upload "$TAG" /tmp/scriptc-release-assets/* --clobber
+          gh release edit "$TAG" --draft=false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

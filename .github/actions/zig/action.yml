@@ -1,0 +1,19 @@
+name: Pinned Zig
+description: Reuse the verified Zig installation across hosted runners
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache/restore@v4
+      id: zig
+      with:
+        path: ${{ runner.tool_cache }}/zig/0.16.0
+        key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-minisign-v1
+    # The installer checks the verified marker and runs `zig version` on hits.
+    - uses: vercel-labs/setup-zig@v1
+      with:
+        version: 0.16.0
+    - uses: actions/cache/save@v4
+      if: steps.zig.outputs.cache-hit != 'true'
+      with:
+        path: ${{ runner.tool_cache }}/zig/0.16.0
+        key: ${{ steps.zig.outputs.cache-primary-key }}

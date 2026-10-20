@@ -1,0 +1,38 @@
+name: Pinned Linux LLVM
+description: Reuse the pinned LLVM development distribution across CI jobs
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache/restore@v4
+      id: llvm
+      with:
+        path: ${{ runner.temp }}/llvm-22.1.8
+        key: llvm-22.1.8-linux-x64-v1
+    - name: Install LLVM system libraries
+      shell: bash
+      run: |
+        if ! dpkg-query -W -f='${Status}\n' g++ zlib1g-dev libzstd-dev 2>/dev/null | grep -c '^install ok installed$' | grep -qx 3; then
+          sudo apt-get update
+          sudo apt-get install --yes g++ zlib1g-dev libzstd-dev
+        fi
+    - name: Download LLVM
+      if: steps.llvm.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        curl -fL --connect-timeout 20 --max-time 300 --speed-limit 102400 --speed-time 30 \
+          --retry 2 --retry-max-time 600 -o "$RUNNER_TEMP/llvm.tar.xz" \
+          https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-Linux-X64.tar.xz
+        tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
+        mv "$RUNNER_TEMP/LLVM-22.1.8-Linux-X64" "$RUNNER_TEMP/llvm-22.1.8"
+    - name: Select LLVM
+      shell: bash
+      run: |
+        test "$("$RUNNER_TEMP/llvm-22.1.8/bin/llvm-config" --version)" = 22.1.8
+        echo "LLVM_DIR=$RUNNER_TEMP/llvm-22.1.8/lib/cmake/llvm" >> "$GITHUB_ENV"
+        echo "$RUNNER_TEMP/llvm-22.1.8/bin" >> "$GITHUB_PATH"
+    # Publish setup work before the long tests, including when a later test fails.
+    - uses: actions/cache/save@v4
+      if: steps.llvm.outputs.cache-hit != 'true'
+      with:
+        path: ${{ runner.temp }}/llvm-22.1.8
+        key: ${{ steps.llvm.outputs.cache-primary-key }}
