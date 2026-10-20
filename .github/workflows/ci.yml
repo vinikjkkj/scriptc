@@ -169,6 +169,16 @@ jobs:
       # platforms, so LSan is disabled here to match what the macOS flavor
       # already gets for free from Apple's toolchain.
       ASAN_OPTIONS: detect_leaks=0
+      # size-class.ts parses the compiled binary as a Windows PE image
+      # (e_lfanew + the "PE" signature); on Linux the binary is ELF, so
+      # that parse throws before any size assertion runs. Linux-only:
+      # island.test.ts and regex.test.ts already gate their one
+      # PE-specific test each behind this flag (island.test.ts:48,
+      # regex.test.ts:43), and library-mode.test.ts's K10 ASan subtests
+      # reuse the same guard name -- 2 unique tests fixed, 2 unique
+      # tests (4 instances across both emissions) collaterally skipped.
+      # Must not reach tests_windows below: those are the real coverage.
+      SCRIPTC_PORTABLE_ONLY: "1"
       # Within-file partition for the large case-driven harnesses (npm,
       # server, Vercel E2E, and the three corpus suites): they hash stable
       # case names into slice i of 20 (tests/harness/shard.ts), so the
