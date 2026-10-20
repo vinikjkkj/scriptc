@@ -44,6 +44,13 @@ char *strcasestr(const char *hay, const char *needle);
 #ifdef _MSC_VER
 #include <BaseTsd.h> /* SSIZE_T */
 typedef SSIZE_T ssize_t;
+
+/* mode_t: same story. mingw-w64 gets it from its own <sys/types.h>
+ * (pulled in by <sys/stat.h>); MSVC's <sys/stat.h> has only the bare
+ * _S_IFxxx bit constants, no mode_t typedef. Used purely as a small
+ * integer (cast at every call site, e.g. (mode_t)mode), so a plain
+ * unsigned short is behaviour-identical to mingw's own typedef. */
+typedef unsigned short mode_t;
 #endif
 #endif
 
