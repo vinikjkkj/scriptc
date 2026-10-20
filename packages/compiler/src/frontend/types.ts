@@ -4768,11 +4768,16 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // isPlainCallableTypeLiteral's own comment) admits the same return
     // position for the same reason, one syntactic layer deeper; mysql2's
     // `authSwitchHandler?: (data: any, callback: () => void) => any` is its
-    // motivating case. Either condition alone is sufficient — this is a
-    // plain OR of two disjoint-in-practice admissions, not a new, wider
-    // rule: a call site that is neither a union-arm attempt nor mapping a
-    // bare .d.ts callable literal still takes the global `any` decline
-    // exactly as before.
+    // motivating case. Either condition alone is sufficient — and the two
+    // routinely hold TOGETHER on mysql2's own shapes (TypeCast's and
+    // authSwitchHandler's callable arms are both union-arm attempts whose
+    // arm is ALSO a bare .d.ts callable-type-literal), which is harmless
+    // precisely because both conditions gate the SAME consequent (DYN):
+    // the OR only ever picks between "admitted for reason (1)", "reason
+    // (2)", or "both reasons at once", never a different outcome in the
+    // overlap. This is a plain OR, not a new, wider rule: a call site that
+    // is neither a union-arm attempt nor mapping a bare .d.ts callable
+    // literal still takes the global `any` decline exactly as before.
     const ret =
       retT.flags & ts.TypeFlags.Never
         ? VOID
