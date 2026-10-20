@@ -2272,6 +2272,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // for node_modules types and the generic story otherwise.
   const npmSym = widened.getAliasSymbol() ?? widened.getSymbol();
   const npmDecls = npmSym ? checker.declarationsOf(npmSym) : undefined;
+  // INFILE_CALLABLE_LITERAL_MARKER: set when `widened` ITSELF is admitted
+  // below as a bare callable type literal from an uncompiled .d.ts (see
+  // isPlainCallableTypeLiteral's own comment). Consulted much further
+  // down, in the "Function types" section's parameter/return mapping,
+  // to let a bare `any` I/O position of THIS SPECIFIC shape read as DYN
+  // instead of refusing — mysql2's `queryFormat?: (query: string, values:
+  // any) => void` and `authSwitchHandler?: (data: any, callback: () =>
+  // void) => any` are the motivating cases, one layer deeper than
+  // infileStreamFactory's own (which has no `any` anywhere and needs only
+  // the carve-out below). `widened` is a single `const` for this whole
+  // mapTypeInner call, so this flag describes exactly the one type being
+  // mapped, never a type reached from a sibling recursive call.
+  let fromUncompiledCallableLiteral = false;
   if (
     npmDecls &&
     npmDecls.length > 0 &&
@@ -2310,7 +2323,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         (d) => ts.isInterfaceDeclaration(d) || ts.isTypeLiteralNode(d) || ts.isTypeAliasDeclaration(d),
       ) &&
       isDataOnlyObjectType(widened, checker);
-    if (!dataInterface) return ctx.dynamic ? JSVAL : null;
+    // INFILE_CALLABLE_LITERAL_MARKER: a bare function-type LITERAL (not a
+    // method on an interface, not an overload set, not a class) makes no
+    // promise about a body the .d.ts would need to carry — see
+    // isPlainCallableTypeLiteral's own comment for why this is a DIFFERENT
+    // claim than dataInterface's, not a widening of it.
+    const callableLiteral = !ctx.dynamic && isPlainCallableTypeLiteral(widened, npmDecls, checker);
+    if (callableLiteral) fromUncompiledCallableLiteral = true;
+    if (!dataInterface && !callableLiteral) return ctx.dynamic ? JSVAL : null;
   }
   // NOTE on module NAMESPACE types (`typeof import("./x.mjs")` — what a
   // dynamic import resolves to): non-stdlib ones fall under the rule
@@ -4676,6 +4696,26 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         ts.isParameter(decl) &&
         (decl.questionToken !== undefined || decl.initializer !== undefined);
       let pt = mapType(checker.getTypeOfSymbol(p), ctx);
+      // INFILE_CALLABLE_LITERAL_MARKER: a bare `any` PARAMETER of a
+      // callable type literal already admitted above (fromUncompiledCallableLiteral
+      // — see isPlainCallableTypeLiteral's own comment) reads as DYN
+      // instead of refusing. mysql2's `queryFormat?: (query: string,
+      // values: any) => void` and `authSwitchHandler?: (data: any,
+      // callback: () => void) => any` are the motivating cases: the SAME
+      // "library-author laziness, not a program's own unchecked hole"
+      // reasoning the bare-`any` RECORD MEMBER carve-out already applies
+      // (see mapRecordTypeInner's own member loop), one syntactic layer
+      // deeper — a PARAMETER of a .d.ts-only callable literal instead of
+      // the record member itself. Scoped tightly: only fires when the
+      // ENCLOSING function type already cleared isPlainCallableTypeLiteral
+      // (one call signature, no properties, no construct signature, the
+      // declaration itself nothing but the arrow-spelled type syntax), so
+      // a program-authored `(x: any) => void` is completely untouched —
+      // fromUncompiledCallableLiteral is only ever true for THIS call's
+      // own `widened`.
+      if (pt === null && fromUncompiledCallableLiteral && (checker.getTypeOfSymbol(p).flags & ts.TypeFlags.Any) !== 0) {
+        pt = DYN;
+      }
       // Belt and braces for non-strict type worlds: an optional param's
       // ABI slot is always the undefined-armed union (strictNullChecks
       // already spells it that way; arm it here if the world didn't).
@@ -4717,16 +4757,26 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // `() => never` (a throw-only lambda's inferred type) is assignable to
     // `() => void` and its calls never produce a value — map the return
     // like declaredReturnType does for declarations.
-    // UNIONARM_ANY_RETURN_MARKER: under ctx.unionArmAnyReturn (set only by
-    // the union-arm loop below, for exactly one constituent being attempted)
-    // an `any`-flagged return reads as `unknown` instead of taking the
-    // global `any` decline — see the ctx field's own comment. The ordinary,
-    // non-union-arm path is completely unchanged: this condition is false
-    // everywhere else mapType reaches a function type's return position.
+    // UNIONARM_ANY_RETURN_MARKER / INFILE_CALLABLE_LITERAL_MARKER: two
+    // independent admissions share this one return-position carve-out, and
+    // neither widens the other. (1) under ctx.unionArmAnyReturn (set only
+    // by the union-arm loop below, for exactly one constituent being
+    // attempted) an `any`-flagged return reads as `unknown` instead of
+    // taking the global `any` decline — see the ctx field's own comment.
+    // (2) fromUncompiledCallableLiteral (set above, only for a bare
+    // callable type literal from an uncompiled .d.ts — see
+    // isPlainCallableTypeLiteral's own comment) admits the same return
+    // position for the same reason, one syntactic layer deeper; mysql2's
+    // `authSwitchHandler?: (data: any, callback: () => void) => any` is its
+    // motivating case. Either condition alone is sufficient — this is a
+    // plain OR of two disjoint-in-practice admissions, not a new, wider
+    // rule: a call site that is neither a union-arm attempt nor mapping a
+    // bare .d.ts callable literal still takes the global `any` decline
+    // exactly as before.
     const ret =
       retT.flags & ts.TypeFlags.Never
         ? VOID
-        : ctx.unionArmAnyReturn === true && (retT.flags & ts.TypeFlags.Any) !== 0
+        : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral) && (retT.flags & ts.TypeFlags.Any) !== 0
           ? DYN
           : mapType(retT, ctx);
     if (!ret) {
@@ -6587,6 +6637,62 @@ export function referencesPendingPlaceholder(
     default:
       return null;
   }
+}
+
+// INFILE_CALLABLE_LITERAL_MARKER
+/** True when EVERY declaration behind a type's symbol is a bare, INLINE
+ * function-type-literal node (`(path: string) => Readable` — the
+ * arrow-spelled type syntax, `ts.isFunctionTypeNode`), with exactly one
+ * non-generic call signature and no other shape surface (no construct
+ * signature, no properties, no index signatures). mysql2's
+ * `infileStreamFactory?: (path: string) => Readable` is the motivating
+ * case — MEASURED to fail one step earlier than the optional/union
+ * wrapping around it: `checker.getAliasSymbol() ?? checker.getSymbol()`
+ * of the bare function-type ARM (not the `| undefined` union) answers a
+ * synthetic `__type` symbol declared at that exact inline syntax node,
+ * and the caller just above (the "a .d.ts type's values need --dynamic
+ * unless it is pure data" rule) declines it for having a call signature
+ * at all, before the union/optionality machinery, before
+ * mapRecordTypeInner's member loop, and before any of this file's other
+ * callable-member predicates ever run — confirmed by direct trace
+ * instrumentation against the live provenance-fetched mysql2 checkout:
+ * mapTypeInner enters the bare arm, never reaches the "Function types"
+ * section below, and the earlier `npmDecls`-gated check is exactly where
+ * it returns null (SCRIPTC_NO_MEMO=1 ruled out a memo artifact; the
+ * entry trace fired on every pass).
+ *
+ * WHY THE RULE ABOVE MUST NOT CLAIM THIS SHAPE TOO: that rule's own
+ * comment states the reason plainly — "a call signature needs a body the
+ * .d.ts lacks" — which is true of an ENGINE OBJECT'S METHOD (the
+ * uncompiled module owns the implementation the .d.ts merely promises)
+ * but is NOT true of a bare function-type literal used as a field's
+ * type. Such a literal makes no promise about what the function DOES —
+ * it describes the SHAPE of a closure value the caller/program supplies,
+ * exactly like `infileStreamFactory: (p) => Readable.from([p])` in an
+ * object literal the PROGRAM writes. There is no body for the .d.ts to
+ * lack, because the .d.ts never claimed to carry one; the value always
+ * arrives from outside the declaring module, .d.ts-declared or not. A
+ * class, an interface with other methods or properties, or an overload
+ * set (Pool.on) all keep the fence — this predicate requires the
+ * declaration node ITSELF be nothing but the arrow-spelled function-type
+ * syntax, one signature, non-generic, no other surface, so none of those
+ * wider shapes are touched. Scoped to the SAME one call site as
+ * `dataInterface` just above (mapTypeInner's `.d.ts`-without-compiled-
+ * impl decline) — nowhere else in this file. */
+export function isPlainCallableTypeLiteral(
+  t: ts.Type,
+  decls: readonly ts.Node[],
+  checker: ts.TypeChecker,
+): boolean {
+  if (decls.length === 0 || !decls.every((d) => ts.isFunctionTypeNode(d))) return false;
+  const sigs = checker.getCallSignatures(t);
+  if (sigs.length !== 1) return false;
+  if (sigs[0]!.getTypeParameters().length > 0) return false; // generic literal: a different question, untouched here
+  return (
+    checker.getConstructSignatures(t).length === 0 &&
+    checker.getPropertiesOfType(t).length === 0 &&
+    checker.getIndexInfosOfType(t).length === 0
+  );
 }
 
 export function isGenericCallableMemberType(t: ts.Type, checker: ts.TypeChecker): boolean {
