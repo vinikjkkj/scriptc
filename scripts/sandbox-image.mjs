@@ -2,18 +2,25 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { sandboxImageConfig } from "./sandbox-config.mjs";
+import {
+  requiredSandboxImageConfig,
+  sandboxVcrConfig,
+  sandboxVercelConfig,
+} from "./sandbox-config.mjs";
 import { linuxAmd64ManifestDigest } from "./oci-manifest.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const { project, reference: image, repository, tag, team } = sandboxImageConfig();
+const { reference: image, repository, tag } = requiredSandboxImageConfig();
+const vercelConfig = sandboxVercelConfig();
+const vcrConfig = sandboxVcrConfig(vercelConfig);
+const scopeArgs = vcrConfig.scopeArgs;
 const nodeVersion = (await readFile(new URL("../.node-version", import.meta.url), "utf8")).trim();
 
 function run(command, args, { capture = false } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: root,
-      env: { ...process.env, NO_UPDATE_NOTIFIER: "1" },
+      env: { ...vcrConfig.env, NO_UPDATE_NOTIFIER: "1" },
       stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
     });
     let stdout = "";
@@ -27,13 +34,18 @@ function run(command, args, { capture = false } = {}) {
     child.on("error", reject);
     child.on("exit", (code, signal) => {
       if (code === 0) resolve(stdout);
-      else reject(new Error(`${command} exited ${signal ?? code}${stderr ? `\n${stderr.trim()}` : ""}`));
+      else
+        reject(
+          new Error(`${command} exited ${signal ?? code}${stderr ? `\n${stderr.trim()}` : ""}`),
+        );
     });
   });
 }
 
-console.log(`Authenticating Docker for ${team}/${project}...`);
-await run("vercel", ["vcr", "login", "docker", "--scope", team, "--project", project]);
+console.log(
+  `Authenticating Docker with ${vcrConfig.authSource} ` + `(scope: ${vcrConfig.scopeSource})...`,
+);
+await run("vercel", ["vcr", "login", "docker", ...scopeArgs]);
 
 console.log(`Building and pushing ${image} for linux/amd64...`);
 await run("docker", [
@@ -51,11 +63,9 @@ await run("docker", [
 ]);
 
 const inspection = JSON.parse(
-  await run(
-    "docker",
-    ["buildx", "imagetools", "inspect", image, "--format", "{{json .}}"],
-    { capture: true },
-  ),
+  await run("docker", ["buildx", "imagetools", "inspect", image, "--format", "{{json .}}"], {
+    capture: true,
+  }),
 );
 let amd64Digest;
 try {
@@ -70,11 +80,9 @@ console.log("Waiting for VCR to prepare the image for Sandbox...");
 const deadline = Date.now() + 5 * 60_000;
 while (Date.now() < deadline) {
   const listing = JSON.parse(
-    await run(
-      "vercel",
-      ["vcr", "image", "ls", repository, "--format", "json", "--scope", team, "--project", project],
-      { capture: true },
-    ),
+    await run("vercel", ["vcr", "image", "ls", repository, "--format", "json", ...scopeArgs], {
+      capture: true,
+    }),
   );
   const manifest = listing.images?.find((candidate) => candidate.manifestDigest === amd64Digest);
   if (manifest?.status === "ready") {
