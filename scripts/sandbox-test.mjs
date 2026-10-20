@@ -193,9 +193,23 @@ Environment:
   SCRIPTC_SANDBOX_TIMEOUT   sandbox and command timeout (default: 45m)
   SCRIPTC_TEST_WORKERS      Vitest workers per sandbox (default: 4)
   SCRIPTC_LOCAL_TEST_WORKERS Vitest workers per local lane (default: 2)
-  SCRIPTC_LOCAL_CASE_SHARDS local shards per external suite lane (default: 2)`);
+  SCRIPTC_LOCAL_CASE_SHARDS local shards per external suite lane (default: 2)
+  SCRIPTC_SANDBOX_TEST_ONLY repo-relative path to a single test file; when set,
+                            each sandbox's Testing phase runs only that file
+                            (plus a one-line \`uname -a\` platform probe) instead
+                            of the full corpus/cases/cache/native-build pipeline
+                            and the host artifact contracts step. Everything
+                            else (create/upload/prepare/cleanup) is unchanged.
+                            Unset preserves the existing full-suite behavior.`);
   process.exit(0);
 }
+
+// A narrow smoke-test escape hatch: point one or more sandboxes at exactly
+// one test file instead of the full corpus pipeline. Combined with --shards 1
+// and --lane plain this proves the end-to-end lane (create, upload, prepare,
+// run, cleanup) for the lowest cost and wall time the script can reach
+// without touching the default path, which stays untouched when unset.
+const singleTestFile = process.env.SCRIPTC_SANDBOX_TEST_ONLY?.trim() || undefined;
 
 const sourceConfig = sandboxTestSourceConfig();
 const bootstrapCommand = sandboxBootstrapCommand(sourceConfig.prepared);
@@ -272,6 +286,7 @@ function run(
   args,
   {
     baseEnv = process.env,
+    cwd = root,
     env = {},
     exitMarker,
     idleTimeoutMs,
@@ -282,7 +297,7 @@ function run(
 ) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      cwd: root,
+      cwd,
       env: { ...baseEnv, NO_UPDATE_NOTIFIER: "1", ...env },
       stdio: quiet ? "ignore" : ["ignore", "pipe", "pipe"],
     });
@@ -654,7 +669,21 @@ async function createWorker(worker) {
 async function uploadArchive(worker, archive) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      await vercel(["sandbox", "copy", archive, `${worker.name}:/tmp/worktree.tar.gz`], {
+      // `vercel sandbox copy`'s own <src>/<dst> syntax treats a colon in
+      // either argument as introducing a "sandbox_name:path" remote
+      // reference (see `vercel sandbox copy --help`). An absolute,
+      // drive-lettered Windows path such as G:\Temp\...\worktree.tar.gz
+      // satisfies that same shape, so the CLI misreads the LOCAL source
+      // argument as a remote spec -- confirmed empirically: the destination
+      // argument (the real remote spec) was looked up with sandbox name "G"
+      // taken from the source argument, a 404, while a plain relative local
+      // path for the same local file parses correctly. Running the command
+      // with its cwd set to the archive's own directory and passing only
+      // the relative basename (the same technique already used for
+      // createArchive()'s tar invocation) avoids the ambiguity without
+      // depending on any tar/CLI implementation detail.
+      await vercel(["sandbox", "copy", basename(archive), `${worker.name}:/tmp/worktree.tar.gz`], {
+        cwd: dirname(archive),
         idleTimeoutMs: 60_000,
         label: worker.label,
         timeoutMs: 2 * 60_000,
@@ -863,6 +892,23 @@ try {
     );
 
     await allWorkers("Testing", async (worker) => {
+      if (singleTestFile) {
+        // Prove remote execution unambiguously before running the file: this
+        // command's output cannot have come from the orchestrating host.
+        await execIn(worker, "sh", ["-c", "uname -a"], {}, "platform probe", 60_000);
+        await execIn(
+          worker,
+          "pnpm",
+          ["test", "--reporter=dot", singleTestFile],
+          {
+            ...sandboxLaneEnv(worker.lane),
+            SCRIPTC_PORTABLE_ONLY: "1",
+            SCRIPTC_TEST_WORKERS: "1",
+          },
+          "single file",
+        );
+        return;
+      }
       const sharedTestEnv = {
         ...sandboxLaneEnv(worker.lane),
         // Platform artifact contracts run against the native host below.
@@ -974,7 +1020,7 @@ try {
       }
     });
 
-    if (hostSchedule.remoteArtifactContracts) {
+    if (!singleTestFile && hostSchedule.remoteArtifactContracts) {
       const contractWorker = workers.find(
         (worker) => worker.lane === onceLane && worker.shard === 1,
       );
