@@ -167,7 +167,7 @@ describe("provenance: a package that publishes the source it authored", () => {
   test("the default list is DATA, and it names the package wam needs", () => {
     /* If this constant ever changes, the change is the review. It is the whole
      * blast radius of the shipped default. */
-    expect([...AUTHORED_JS_DEFAULT_PACKAGES]).toStrictEqual(["@vinikjkkj/wa-wam"]);
+    expect([...AUTHORED_JS_DEFAULT_PACKAGES]).toStrictEqual(["@vinikjkkj/wa-wam", "mysql2"]);
     expect(AUTHORED_JS_DEFAULT_PACKAGES).not.toContain("authoredjs");
   });
 
