@@ -5744,31 +5744,25 @@ static void scr_gen_coro_step(ScrGen *g, ScrGenInject inject) {
     ScrExcCell *sc_cell = scr_exc_current_cell();
     if (sc_cell->kind == SCR_EXC_NONE) sc_cell->kind = SCR_EXC_GENRET;
   }
-  /* SCR_GEN_INJECT_THROW IS LEAN-ONLY, AND SAYS SO RATHER THAN LOOKING
-   * HANDLED. The fibre twin moves the payload across explicitly:
+  /* SCR_GEN_INJECT_THROW on a FAT frame: scr_coro_state_in (above) already
+   * swapped the active cell to the frame's own (st.mine), so the payload
+   * scr_gen_resume_throw parked in the then-ambient cell is now sitting in
+   * st.prev_cell, where the body never looks -- the body reads the active
+   * cell, which is st.mine. The fibre twin moves the same payload across
+   * explicitly (scr_exc_cell_move(&g->fiber->exc, mine)), and the lean
+   * equivalent a few lines below in scr_gen_resume_throw does the identical
+   * move inline, unconditionally -- "an earlier sentinel parked by a
+   * finally-yield is replaced, the injected throw wins". This is that same
+   * move for the FAT case, which was unreachable (and therefore unwritten,
+   * on purpose -- see the superseded fix-it-later note this replaces)
+   * before emitGenCoroSpawn started passing the real has_exc instead of a
+   * hardcoded false.
    *
-   *     scr_exc_cell_move(&g->fiber->exc, mine);
-   *
-   * This lane does nothing, and is right for a LEAN frame: it borrows the
-   * ambient cell, so the payload the consumer parked is already the one the
-   * body reads. A FAT frame is the opposite -- scr_coro_state_in swapped
-   * the active cell to the frame's own, so the payload would sit in
-   * st.prev_cell where the body never looks and the .throw() would vanish
-   * with no diagnostic.
-   *
-   * Lean is guaranteed by emitGenCoroSpawn passing has_exc=false, in
-   * another file, in one place. An enum member that silently does nothing
-   * because of a constant elsewhere is how a new member gets default-
-   * handled into a wrong answer, so the precondition is asserted here
-   * instead of assumed. The four-line fix is a cell move from st.prev_cell
-   * into st.mine; it is deliberately NOT written, because code for a
-   * configuration that cannot exist cannot be tested and would be trusted
-   * anyway. */
+   * Unconditional, matching the fiber path exactly: no `kind == NONE`
+   * guard, because the throw must win over a parked finally-yield sentinel
+   * here too, not merely when the cell happens to be empty. */
   if (inject == SCR_GEN_INJECT_THROW && st.mine != NULL) {
-    fputs("scriptc: internal error: .throw() into a FAT generator frame is "
-          "not lowered -- the payload is in the resumer's cell and the body "
-          "reads the frame's\n", stderr);
-    abort();
+    scr_exc_cell_move(st.mine, st.prev_cell);
   }
   base->flags &= ~(uint32_t)SCR_CORO_YIELDED;
   base->flags |= SCR_CORO_RUNNING;
