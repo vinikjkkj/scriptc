@@ -185,6 +185,12 @@ function comparableStderr(stderr: Buffer): Buffer {
   const kept = lines.filter(
     (l) =>
       !l.startsWith("scriptc RC audit skipped:") &&
+      // The coroutine counterpart of the fiber skip notice above (see
+      // differential-suite.ts's comparableStderr for the full rationale):
+      // scriptc-only diagnostic text Node can never print, which failed
+      // every abandoned-coroutine corpus program on a stderr mismatch
+      // alone even when the exit code already agreed with Node's.
+      !/^scriptc RC audit: \d+ coroutine\(s\) abandoned$/.test(l) &&
       // Linux ASan's once-per-process fiber-swapcontext warning (see
       // differential.test.ts's comparableStderr).
       !/^==\d+==WARNING: ASan doesn't fully support makecontext\/swapcontext/.test(l),
