@@ -398,12 +398,108 @@ jobs:
           if ($actual -ne $expected) {
             throw "Windows CA-store output differed:`nNODE:`n$expected`nNATIVE:`n$actual"
           }
+  # Full test matrix on the Windows GNU target: x86_64-windows-gnu is this
+  # fork's actual production target (scriptc's own `pnpm build` cross-
+  # compiles through zig cc to it), and until now only windows_cli's smoke
+  # steps above exercised it in CI -- the full verdict only ever ran on a
+  # contributor's own machine (~2h there). Same 20-way divisor as `tests`
+  # (shard.test.ts's test.for([2, 3, 20]) already pins non-empty parts at
+  # this count; an empty shard would report success, so changing the
+  # divisor without extending that assertion would stop covering what
+  # actually runs here).
+  #
+  # plain only, no `san` flavor -- NOT just a redundant-but-harmless
+  # duplicate, a BROKEN one: zig's mingw target compiles ASan
+  # instrumentation and then has no asan runtime to link against
+  # (packages/compiler/src/backend/cc.ts's optAuditArgs comment: "the whole
+  # reason the win32 lane runs unsanitized"). optAuditArgs() adds
+  # -fsanitize=address unconditionally whenever sanitize=true, with no
+  # probe or fallback the way the small-scale runtime unit tests get from
+  # packages/runtime/test/cc.ts's asanWorks() -- so SCRIPTC_SAN=1 here
+  # would fail to LINK across the differential/corpus suites, not merely
+  # waste 20 extra jobs. 20 jobs, not 40.
+  #
+  # Gated exactly like `tests` and `windows_cli` (validation_scope + the
+  # linux lane flag) and NOT `needs: [tests]`: the Linux lane is currently
+  # red, and needs: on a failed job means this would never run at all.
+  # Public-repo minutes are free, so running in parallel costs the same
+  # wall time as after Linux (20 Windows + 40 Linux against a ~40-slot
+  # cap is two queued waves either way) without being hostage to Linux's
+  # result.
+  tests_windows:
+    name: test (Windows, ${{ matrix.shard }}/20)
+    needs: [validation_scope, lanes]
+    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' }}
+    runs-on: windows-latest
+    # windows_cli's 15 is a smoke-job number (a handful of targeted vitest
+    # runs). This runs a full 1/20 shard of the suite, which clocks ~18min
+    # on the Linux `tests` job; Windows I/O (process spawn, filesystem,
+    # antivirus-scanned writes) is markedly slower for this kind of
+    # compile-heavy, many-small-files workload, so budget roughly 2-3x
+    # that plus setup overhead (zig cache restore, pnpm install's documented
+    # retry, pnpm build) rather than reusing either existing number as-is.
+    # A timeout that fires reads identically to a real failure on the
+    # dashboard, so this errs toward headroom over tightness.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    env:
+      SCRIPTC_NO_CACHE: "1"
+      SCRIPTC_CC: zigcc
+      SCRIPTC_TARGET: x86_64-windows-gnu
+      # GitHub's standard windows-latest runner provides 4 vCPU, same as
+      # the ubuntu-24.04 runner `tests` caps at "4" for the same reason
+      # (worker-pool oversubscription under the corpus compile fan-out).
+      SCRIPTC_TEST_WORKERS: "4"
+      SCRIPTC_TEST_SHARD: ${{ matrix.shard }}/20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/zig
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "pnpm exited without a diagnostic; retrying once"
+            pnpm install --frozen-lockfile
+          }
+      - run: pnpm build
+      # Same three-step split as `tests` (file-sharded / case-sharded /
+      # coverage sweep) -- see that job's comments for why the axes must
+      # not mix. No `ulimit`/core-dump step: that is an Ubuntu apport
+      # workaround with no Windows equivalent.
+      - name: Tests (file-sharded, case-sharded files excluded)
+        run: >-
+          pnpm test --shard=${{ matrix.shard }}/20
+          --exclude=tests/harness/corpus/**
+          --exclude=tests/harness/npm.test.ts
+          --exclude=tests/harness/server.test.ts
+          --exclude=tests/harness/vercel-e2e.test.ts
+      - name: Tests (case-sharded, slice ${{ matrix.shard }}/20)
+        run: >-
+          pnpm test
+          tests/harness/corpus/differential-
+          tests/harness/corpus/llvm-differential-
+          tests/harness/npm.test.ts
+          tests/harness/server.test.ts
+          tests/harness/vercel-e2e.test.ts
+      - name: Tests (coverage sweep, slice ${{ matrix.shard }}/20)
+        run: pnpm test tests/harness/corpus/coverage-corpus-
 
   # Retain the pre-matrix "test" check for branch protection and badges.
   # Require this check on the stack base. Upper layers must not pass before
   # full validation, so untested groups cannot merge. Merge bottom-up.
   test:
-    needs: [validation_scope, lanes, code_quality, tests, macos_number_oracle, linux_host_clang, windows_cli]
+    needs: [validation_scope, lanes, code_quality, tests, macos_number_oracle, linux_host_clang, windows_cli, tests_windows]
     # Run even after failed or cancelled lanes: skipped required jobs allow merging.
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -422,6 +518,7 @@ jobs:
               lane macos_number_oracle "${{ needs.macos_number_oracle.result }}" "${{ needs.lanes.outputs.macos }}"
               lane linux_host_clang "${{ needs.linux_host_clang.result }}" "${{ needs.lanes.outputs.linux }}"
               lane windows_cli "${{ needs.windows_cli.result }}" "${{ needs.lanes.outputs.linux }}"
+              lane tests_windows "${{ needs.tests_windows.result }}" "${{ needs.lanes.outputs.linux }}"
               ;;
             false)
               echo "::notice::Full CI is deferred until this PR becomes the lowest unmerged layer. Merge the stack from the bottom up."
