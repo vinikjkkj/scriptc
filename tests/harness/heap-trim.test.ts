@@ -160,7 +160,27 @@ describe("the idle seam trims the heap, behind a knob, and says so", () => {
     for (const w of windows) expect(w.before).toBeGreaterThan(0);
   }, 240_000);
 
-  test("the census reports the floor the trim cannot go below", async () => {
+  /* The census is a HeapWalk, and HeapWalk has no counterpart on this
+   * platform: scr_async.c keeps the census body inside `#ifdef _WIN32`
+   * because no other target keeps allocator accounting (glibc's mallinfo
+   * has no per-block walk, and there is no busyBlocks to report). So off
+   * Windows the claim is the opposite one, and it is asserted rather than
+   * skipped: SCR_HEAP_TRIM_CENSUS asks for a reading that does not exist,
+   * the seam prints NO census line (not zeroes), and the window lines still
+   * run. */
+  test.skipIf(process.platform === "win32")(
+    "off Windows the census knob prints no census, and the windows still run",
+    async () => {
+      const { stdout, stderr } = await runArm(bin, 50, { SCR_HEAP_TRIM_CENSUS: "1" });
+      expect(stdout).toBe(expected);
+      expect(parseCensus(stderr)).toEqual([]);
+      expect(stderr).not.toContain("[heaptrim] census");
+      expect(parseWindows(stderr).length).toBeGreaterThanOrEqual(4);
+    },
+    240_000
+  );
+
+  test.skipIf(process.platform !== "win32")("the census reports the floor the trim cannot go below", async () => {
     const { stdout, stderr } = await runArm(bin, 50, { SCR_HEAP_TRIM_CENSUS: "1" });
     expect(stdout).toBe(expected);
     const census = parseCensus(stderr);

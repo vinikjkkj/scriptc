@@ -2838,6 +2838,39 @@ static size_t scr_heap_commit_kib(void) {
   if (!GetProcessMemoryInfo(GetCurrentProcess(), &c, (DWORD)sizeof c)) return 0;
   return (size_t)(c.PagefileUsage / 1024u);
 }
+#elif defined(__GLIBC__)
+/* Private resident memory, in KiB: statm's resident minus shared pages. The
+ * glibc analogue of the Win32 reading above, and the right one for the same
+ * reason: malloc_trim hands pages back with madvise(MADV_DONTNEED), which
+ * drops them from RESIDENT and leaves the address space (VmSize) alone, so
+ * only a resident-set reading can fall across a trim. open/read/close and a
+ * hand-parse, NOT stdio/sscanf: this TU is always linked and measured to
+ * the page. Returns 0 only when /proc is unreadable, which is the "failed
+ * syscall" the test's before>0 assertion exists to tell apart. */
+static size_t scr_heap_commit_kib(void) {
+  char buf[128];
+  unsigned long long f[3] = {0, 0, 0};
+  size_t i = 0, k = 0;
+  ssize_t n;
+  int fd = open("/proc/self/statm", O_RDONLY);
+  if (fd < 0) return 0;
+  n = read(fd, buf, sizeof buf - 1);
+  close(fd);
+  if (n <= 0) return 0;
+  buf[n] = '\0';
+  while (k < 3 && i < (size_t)n) {
+    while (i < (size_t)n && (buf[i] < '0' || buf[i] > '9')) i++;
+    while (i < (size_t)n && buf[i] >= '0' && buf[i] <= '9')
+      f[k] = f[k] * 10u + (unsigned)(buf[i++] - '0');
+    k++;
+  }
+  if (k < 3 || f[1] < f[2]) return 0;
+  {
+    long pg = sysconf(_SC_PAGESIZE);
+    if (pg <= 0) return 0;
+    return (size_t)((f[1] - f[2]) * (unsigned long long)pg / 1024u);
+  }
+}
 #endif
 
 /* Prints `<label><decimal>` for each pair and a newline, to stderr.
@@ -2903,10 +2936,14 @@ static void scr_heap_trim(double now) {
 #elif defined(__GLIBC__)
   {
     struct timespec t0, t1;
-    if (stat) clock_gettime(CLOCK_MONOTONIC, &t0);
+    if (stat) {
+      before = scr_heap_commit_kib();
+      clock_gettime(CLOCK_MONOTONIC, &t0);
+    }
     malloc_trim(0);
     if (stat) {
       clock_gettime(CLOCK_MONOTONIC, &t1);
+      after = scr_heap_commit_kib();
       us = (size_t)((t1.tv_sec - t0.tv_sec) * 1000000L +
                     (t1.tv_nsec - t0.tv_nsec) / 1000L);
     }
