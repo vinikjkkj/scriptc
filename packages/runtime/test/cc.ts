@@ -244,8 +244,34 @@ export function expectCasesPassed(
  * and `isWindows` is frozen at module load, so no cwd can make a Windows
  * Node take the POSIX branch. A backslash-spelled cwd reaches the same
  * OUTPUT the POSIX branch produces, which is all the probe needs. Without
- * "\\" in this list twelve `relative(".", …)` cases come back unexplained. */
-const PROBE_CWDS = ["/", "/zz/yy", "\\", "\\zz\\yy", "Q:\\", "Q:\\zz\\yy"] as const;
+ * "\\" in this list twelve `relative(".", …)` cases come back unexplained.
+ *
+ * "Drive-ful" used to mean only Q:, a letter that appears NOWHERE else in
+ * the corpus. That was the bug: `relative(<relative-from>, "d:/games")`
+ * (and every other case whose absolute operand names a real drive letter
+ * from the corpus's own vocabulary -- C:, D:, Z: all appear in `paths`,
+ * `joinSeeds`, `resolveSeeds` and `relativeSeeds`) looks cwd-INVARIANT
+ * across six probes that never happen to land on C:, D: or Z:, so it was
+ * wrongly compared against the committed bytes as if it could not consult
+ * the cwd. On a host whose cwd is actually on D: (GitHub's Windows runner
+ * checks out to D:\a\<repo>\<repo>), `relative("..", "d:/games")` answers
+ * "games", not the "d:\games" the committed file pins (generated on a
+ * host whose cwd was NOT on D:) -- a real, correct, per-host divergence
+ * the old probe set could not see. Probing C:, D: and Z: too -- both root
+ * and deep, matching the existing Q: pair -- catches it: once any probe
+ * shares a drive letter with an operand already in the corpus, cwdBound
+ * flips true and the case is re-derived live instead of pinned. Widening
+ * this set can only RECLASSIFY a case from pinned to re-derived, never the
+ * reverse, so it is safe to extend as the corpus's own drive-letter
+ * vocabulary grows -- that is the invariant to maintain here, not the
+ * specific letters C/D/Z/Q. */
+const PROBE_CWDS = [
+  "/", "/zz/yy", "\\", "\\zz\\yy",
+  "Q:\\", "Q:\\zz\\yy",
+  "C:\\", "C:\\zz\\yy",
+  "D:\\", "D:\\zz\\yy",
+  "Z:\\", "Z:\\zz\\yy",
+] as const;
 
 /**
  * A committed/host disagreement on a case the cwd probe says is cwd-free.
@@ -358,9 +384,13 @@ export async function materializeHostCases(
   }
   if (stale.length > 0) {
     throw new Error(
-      `${committedFile} disagrees with this host's Node on ${stale.length}+ cases that do NOT ` +
-        `consult the cwd, so the platform excuse does not cover them. Either Node changed ` +
-        `behaviour or the port's oracle is wrong -- read the diff, do not re-record:\n` +
+      `${committedFile} disagrees with this host's Node on ${stale.length}+ cases the ` +
+        `PROBE_CWDS set did not detect as cwd-bound (not a proof they are cwd-free -- a probe ` +
+        `set samples, it does not enumerate; one gap in it already cost a real incident where ` +
+        `an operand's drive letter was never a probed cwd, see PROBE_CWDS's comment). Three ` +
+        `explanations, in order of likelihood: the probe set still has a drive-letter or shape ` +
+        `gap for an operand in these specific cases; Node changed behaviour; or the port's ` +
+        `oracle is wrong. Read the diff, do not re-record:\n` +
         stale.join("\n"),
     );
   }
