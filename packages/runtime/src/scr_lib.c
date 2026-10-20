@@ -1662,12 +1662,18 @@ void scr_process_chdir(ScrStr *dir) {
  * back at every dial, the way Node reads autoSelectFamilyAttemptTimeout-
  * Default when connect() builds its attempt context.
  *
- * 500, MEASURED on v25.9.0 — `node -p
- * "net.getDefaultAutoSelectFamilyAttemptTimeout()"` answers 500. The 250
- * this held is the value the flag shipped with in v20 and is no longer
- * Node's; the getter surfaces the number, so the stale default was a
- * wrong value on a path that compiles clean. */
-static double scr_net_autosel_timeout_ms = 500;
+ * 250, MEASURED on 24.15.0 — the Node version .node-version pins, and
+ * the version setup-node actually installs for every CI job (confirmed
+ * against a live CI log's "Resolved .node-version as 24.15.0"). `node -p
+ * "net.getDefaultAutoSelectFamilyAttemptTimeout()"` answers 250 on
+ * 24.15.0 (also 22.18.0) and 500 on 25.9.0 — the default changed
+ * somewhere after 24.15.0, not before it. A prior pass here hardcoded
+ * 500 citing "MEASURED on v25.9.0", which is newer than this repo's pin;
+ * that measurement was real but taken on the wrong interpreter. Keep
+ * this in lockstep with .node-version: re-measure on whatever version
+ * the pin names if it ever moves past 25.x, don't assume 500 is safe to
+ * restore. */
+static double scr_net_autosel_timeout_ms = 250;
 
 double scr_net_get_autosel_timeout(void) { return scr_net_autosel_timeout_ms; }
 
