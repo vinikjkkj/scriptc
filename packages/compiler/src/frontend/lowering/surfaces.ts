@@ -2673,6 +2673,15 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     //   SuppressedError WebAssembly Storage Performance PerformanceObserver
     //   CloseEvent ErrorEvent Request Response Headers
     //
+    // (Pin note: the oracle CI scores against is v24.15.0, .node-version.
+    // On it `Storage`, `localStorage`, `sessionStorage` and `ErrorEvent` are
+    // NOT globals -- own property false -- while the other twenty are. They
+    // are a v25 addition, measured with
+    // `Object.prototype.hasOwnProperty.call(globalThis, n)` on v24.15.0 and
+    // v25.9.0. Nothing here folds on them: the capability-gated `localStorage`
+    // is typed `unknown` and declines, so this is a wording correction, not
+    // a behaviour change.)
+    //
     // — on both backends, clean, at exit 0, where Node prints "function"
     // or "object" (lab probe gprobe3.ts). So the evidence has to be a
     // DECLARATION THAT SAYS SO: the ambient global object must declare the
@@ -2693,8 +2702,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // and, CONFIRMING the block above rather than contradicting it:
     //
     //   navigator true | Blob true | File true | FormData true
-    //   URLPattern true | WebAssembly true | localStorage true
-    //   Storage true | Performance true | performance true
+    //   URLPattern true | WebAssembly true | localStorage true (v25 only)
+    //   Storage true (v25 only) | Performance true | performance true
     //
     // -- which is exactly why none of those is in the table.
     //
