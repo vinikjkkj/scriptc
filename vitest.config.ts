@@ -1,6 +1,8 @@
+import { resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import { BaseSequencer } from "vitest/node";
+import { shardOf } from "./tests/harness/shard.ts";
 
 // Compiled-binary + oracle caches for the test lanes (see cc.ts's cache block
 // and tests/harness/README.md). Workers inherit SCRIPTC_CACHE_DIR from here;
@@ -28,6 +30,37 @@ const workers = process.env["SCRIPTC_TEST_WORKERS"];
  * need it most. Hoisting them is a stable partition of whatever order the
  * base sequencer produced, so the rest keeps its (duration-aware) order. */
 class CorpusFirstSequencer extends BaseSequencer {
+  // Default BaseSequencer.shard() hashes each matched file's path, SORTS the
+  // whole list by that hash, and SLICES a contiguous window per CI shard
+  // index. That is not a per-file assignment: adding or removing a single
+  // spec file anywhere in the repo shifts every later file's position in
+  // the sorted order by one, which can push an UNRELATED file across a
+  // shard boundary into a different CI job. On 2026-10-20 this silently
+  // relocated packages/compiler/test/ts7/resolver-parity.test.ts (a
+  // pre-existing, Windows-only failure unrelated to the change in flight)
+  // from shard 19/20 to shard 20/20 purely because
+  // tests/harness/classd-rc-audit-probe.test.ts was added, flipping a
+  // previously-green Windows job red and misattributing a 44-job-old defect
+  // to the PR that happened to add a file earlier in hash order.
+  //
+  // Use the SAME stable per-key hash as SCRIPTC_TEST_SHARD's shardOf (see
+  // shard.ts) instead: a file's shard membership then depends only on its
+  // OWN path, never on how many other files exist or in what order. The two
+  // uses of shardOf operate on disjoint key domains (full test-file paths
+  // here vs. corpus case names there), so there is no cross-axis
+  // correlation to salt apart (contrast partOf, which deliberately is
+  // salted apart from shardOf because it shares shardOf's own key domain).
+  async shard(files: Parameters<BaseSequencer["shard"]>[0]) {
+    const { config } = this.ctx;
+    const { index, count } = config.shard;
+    const root = config.root.replace(/\\/g, "/");
+    return files.filter((spec) => {
+      const fullPath = resolvePath(root, spec.moduleId).replace(/\\/g, "/");
+      const specPath = fullPath.slice(root.length);
+      return shardOf(specPath, count) === index;
+    });
+  }
+
   async sort(files: Parameters<BaseSequencer["sort"]>[0]) {
     const sorted = await super.sort(files);
     const corpus = (f: (typeof sorted)[number]): boolean =>
