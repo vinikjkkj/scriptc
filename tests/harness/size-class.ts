@@ -1918,12 +1918,48 @@ export const ENGINE_CLASS_MIN = 500_000;
  * confirmations that the lane was right before any .text number was read out
  * of it. */
 
+/** The size of the binary's .text section, read from whichever container
+ * format the FILE actually is -- NOT from process.platform, which can
+ * disagree with a cross-compiled artifact. Dispatch is on the magic bytes
+ * at offset 0: `MZ` routes to the PE/COFF reader below, `\x7fELF` routes
+ * to the ELF64-little-endian reader below. Anything else is refused rather
+ * than guessed at.
+ *
+ * The two readers measure DIFFERENT quantities, named here so a caller
+ * never treats them as interchangeable:
+ *
+ *   PE:  SectionHeader.VirtualSize -- exact, not rounded to the 512-byte
+ *        file-alignment granule (see the comment preserved on
+ *        peTextVirtualSizePe below).
+ *   ELF: Shdr.sh_size for a SHT_PROGBITS section -- also exact. ELF carries
+ *        no separate raw/virtual split for .text the way PE does (that
+ *        split exists on PE because its file alignment and section
+ *        alignment can differ; ELF's sh_size already is the byte count,
+ *        with sh_addr merely naming where it loads). So the ELF number is
+ *        the analogous exact quantity, not a lookalike that merely shares
+ *        the name: neither reader is a rounded-up file size.
+ */
+export function peTextVirtualSize(binaryPath: string): number {
+  const d = readFileSync(binaryPath);
+  if (d.length >= 4 && d[0] === 0x7f && d[1] === 0x45 && d[2] === 0x4c && d[3] === 0x46) {
+    return elfTextSize(d, binaryPath);
+  }
+  if (d.length >= 2 && d[0] === 0x4d && d[1] === 0x5a) {
+    return peTextVirtualSizePe(d, binaryPath);
+  }
+  throw new Error(
+    `${binaryPath}: unrecognized image format (first bytes are neither "MZ" nor "\\x7fELF")`,
+  );
+}
+
 /** The .text VirtualSize of a PE, which unlike the file size is exact rather
  * than rounded to the 512-byte file-alignment granule. VirtualSize, not
  * SizeOfRawData: the raw size is itself aligned and carries the same blind
- * spot the file size does. */
-export function peTextVirtualSize(binaryPath: string): number {
-  const d = readFileSync(binaryPath);
+ * spot the file size does. Unchanged from before the ELF dispatch above was
+ * added -- this is the exact function that produced every win32 figure
+ * calibrated elsewhere in this file, now reached through one extra magic
+ * check rather than called directly. */
+function peTextVirtualSizePe(d: Buffer, binaryPath: string): number {
   const pe = d.readUInt32LE(0x3c);
   if (d.toString("latin1", pe, pe + 2) !== "PE") {
     throw new Error(`${binaryPath}: not a PE image (no PE signature at e_lfanew)`);
@@ -1936,6 +1972,60 @@ export function peTextVirtualSize(binaryPath: string): number {
     // Section names are NUL-padded to 8 bytes, not space-padded.
     const name = d.toString("latin1", off, off + 8).split("\u0000")[0];
     if (name === ".text") return d.readUInt32LE(off + 8);
+  }
+  throw new Error(`${binaryPath}: no .text section`);
+}
+
+/** The .text sh_size of an ELF64 little-endian image. ELF32 and big-endian
+ * are refused explicitly (EI_CLASS / EI_DATA, offsets 4 and 5 of e_ident)
+ * rather than mis-parsed: every artifact this project can actually produce
+ * -- `zig cc -target x86_64-linux-gnu` and `-target aarch64-linux-gnu` --
+ * is ELF64-LE (confirmed by building both and reading e_ident back), so
+ * those are the only two combinations this reader has ever been asked to
+ * handle, and refusing the rest is safer than a silent wrong answer on a
+ * triple nobody has tried.
+ *
+ * sh_addr (offset +16) is read in the layout comment below for completeness
+ * but not used: for a SHT_PROGBITS section like .text, sh_size already is
+ * the exact loaded byte count, so sh_addr contributes nothing this function
+ * needs -- it would matter for computing a span across sections, not the
+ * size of one. */
+function elfTextSize(d: Buffer, binaryPath: string): number {
+  const eiClass = d[4];
+  const eiData = d[5];
+  if (eiClass !== 2) {
+    throw new Error(
+      `${binaryPath}: ELF32 is not supported by this reader (EI_CLASS=${eiClass}); ` +
+        `only ELF64 little-endian is handled`,
+    );
+  }
+  if (eiData !== 1) {
+    throw new Error(
+      `${binaryPath}: big-endian ELF is not supported by this reader (EI_DATA=${eiData}); ` +
+        `only ELF64 little-endian is handled`,
+    );
+  }
+  // ELF64 header layout (relevant fields only): e_shoff at 0x28 (8 bytes),
+  // e_shentsize at 0x3a (2), e_shnum at 0x3c (2), e_shstrndx at 0x3e (2).
+  const eShoff = Number(d.readBigUInt64LE(0x28));
+  const eShentsize = d.readUInt16LE(0x3a);
+  const eShnum = d.readUInt16LE(0x3c);
+  const eShstrndx = d.readUInt16LE(0x3e);
+  if (eShoff === 0 || eShnum === 0) {
+    throw new Error(`${binaryPath}: ELF has no section header table (stripped?)`);
+  }
+  // Elf64_Shdr is 64 bytes: sh_name +0 (4), sh_type +4 (4), sh_flags +8 (8),
+  // sh_addr +16 (8), sh_offset +24 (8), sh_size +32 (8), sh_link +40 (4),
+  // sh_info +44 (4), sh_addralign +48 (8), sh_entsize +56 (8).
+  const shstrHdr = eShoff + eShstrndx * eShentsize;
+  const shstrOff = Number(d.readBigUInt64LE(shstrHdr + 24));
+  for (let i = 0; i < eShnum; i++) {
+    const h = eShoff + i * eShentsize;
+    const nameIdx = d.readUInt32LE(h);
+    const nameStart = shstrOff + nameIdx;
+    const nameEnd = d.indexOf(0, nameStart);
+    const name = d.toString("latin1", nameStart, nameEnd === -1 ? undefined : nameEnd);
+    if (name === ".text") return Number(d.readBigUInt64LE(h + 32));
   }
   throw new Error(`${binaryPath}: no .text section`);
 }
