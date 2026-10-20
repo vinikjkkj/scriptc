@@ -1422,6 +1422,23 @@ export interface TypeMapperCtx {
    * from the type itself, and widening every tuple-typed rest instead
    * changed the calling convention of 30 corpus programs. */
   restTupleFromErasure?: boolean | undefined;
+  /** Inside a UNION ARM attempt (mapTypeInner's union rule), for exactly one
+   * purpose: a plain callable arm (one call signature, no construct
+   * signature, no properties) whose declared RETURN type is `any` maps the
+   * return position as `unknown` (DYN) instead of refusing. mysql2's
+   * `TypeCast = ((field: Field, next: Next) => any) | boolean` is the
+   * motivating case — `any` is a library author's laziness here, not an
+   * unchecked hole the program created, and the two non-function arms
+   * (`boolean`) give the union a real discriminant to carry a DYN-returning
+   * closure beside.
+   *
+   * Scoped to the union-arm call site ONLY, not threaded into the general
+   * `any`-flagged branch at mapTypeInner's top (ctx.dynamic ? JSVAL : null):
+   * that branch is the global `any` decline and stays exactly as it is for
+   * every OTHER position — a standalone variable, parameter, or return of
+   * type `any` is unaffected; only a function TYPE's return, and only while
+   * mapType is attempting one constituent of a union, reads this flag. */
+  unionArmAnyReturn?: boolean | undefined;
   /** This mapping is an ATTEMPT whose failure is discarded by the caller.
    * Refusals collected under it are not the types' own answer and must not
    * reach the memo — the caller's rollback restores registries and the
@@ -1670,7 +1687,7 @@ const mapTypeMemo = new WeakMap<ts.Type, Map<string, { ctx: TypeMapperCtx; resul
  * characters because memoUsableUnder compares them with ===. */
 function memoModeKey(ctx: TypeMapperCtx): string {
   const f = (v: boolean | undefined): string => (v === undefined ? "u" : v ? "t" : "f");
-  return f(ctx.dynamic) + f(ctx.indexUnionOk) + f(ctx.restTupleFromErasure);
+  return f(ctx.dynamic) + f(ctx.indexUnionOk) + f(ctx.restTupleFromErasure) + f(ctx.unionArmAnyReturn);
 }
 
 /* ── SCRIPTC_SPEC_AUDIT ────────────────────────────────────────────────────
@@ -1816,7 +1833,8 @@ function memoUsableUnder(entry: TypeMapperCtx, ctx: TypeMapperCtx): boolean {
       entry.checker === ctx.checker &&
       entry.dynamic === ctx.dynamic &&
       entry.indexUnionOk === ctx.indexUnionOk &&
-      entry.restTupleFromErasure === ctx.restTupleFromErasure)
+      entry.restTupleFromErasure === ctx.restTupleFromErasure &&
+      entry.unionArmAnyReturn === ctx.unionArmAnyReturn)
   );
 }
 
@@ -4699,7 +4717,18 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // `() => never` (a throw-only lambda's inferred type) is assignable to
     // `() => void` and its calls never produce a value — map the return
     // like declaredReturnType does for declarations.
-    const ret = retT.flags & ts.TypeFlags.Never ? VOID : mapType(retT, ctx);
+    // UNIONARM_ANY_RETURN_MARKER: under ctx.unionArmAnyReturn (set only by
+    // the union-arm loop below, for exactly one constituent being attempted)
+    // an `any`-flagged return reads as `unknown` instead of taking the
+    // global `any` decline — see the ctx field's own comment. The ordinary,
+    // non-union-arm path is completely unchanged: this condition is false
+    // everywhere else mapType reaches a function type's return position.
+    const ret =
+      retT.flags & ts.TypeFlags.Never
+        ? VOID
+        : ctx.unionArmAnyReturn === true && (retT.flags & ts.TypeFlags.Any) !== 0
+          ? DYN
+          : mapType(retT, ctx);
     if (!ret) {
       mapTrace(`FNRET ${checker.typeToString(type).slice(0, 46)} -> ${checker.typeToString(retT).slice(0, 60)}`);
       return null;
@@ -4887,7 +4916,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           byKey.set(typeKey(NULL_T), NULL_T);
           continue;
         }
-        const mapped = mapType(part, ctx);
+        // UNIONARM_ANY_RETURN_MARKER: this ARM, and only this arm's own
+        // mapType attempt, is let off the global `any`-return decline — see
+        // isAnyReturningPlainCallable and the ctx field's own comment.
+        // Pre-filtered (not just passed unconditionally) so the flag never
+        // rides into a RECORD arm's nested member mapping: a part that is
+        // itself a plain callable with an `any` return gets the lenient
+        // ctx; every other arm (including one that happens to be a record
+        // whose OWN field is such a callable) maps under the ordinary ctx,
+        // exactly as before.
+        const armCtx: TypeMapperCtx = isAnyReturningPlainCallable(part, checker)
+          ? { ...ctx, unionArmAnyReturn: true }
+          : ctx;
+        const mapped = mapType(part, armCtx);
         // A jsval PART absorbs the union: `GeneratedFile | undefined` (a
         // package-declared arm) is one island handle — the engine's
         // undefined/null ARE handle values, and any data sibling is
@@ -6629,6 +6670,32 @@ export function isNonGenericOverloadSetMember(t: ts.Type, checker: ts.TypeChecke
     checker.getPropertiesOfType(t).length === 0 &&
     checker.getIndexInfosOfType(t).length === 0
   );
+}
+
+// UNIONARM_ANY_RETURN_MARKER
+/** True for a callable type with exactly ONE, non-generic call signature,
+ * no construct signature, no data properties, whose declared RETURN type is
+ * `any` — mysql2's `TypeCast`'s function arm (`(field: Field, next: Next) =>
+ * any`) is the motivating case. Consulted ONLY at the union-arm mapping
+ * site in mapTypeInner, to decide whether THIS ARM gets attempted with
+ * ctx.unionArmAnyReturn set — see that field's own comment for why the
+ * return position alone, and only there, is let off the global `any`
+ * decline. A member failing for any OTHER reason (a bad parameter type, an
+ * overload set, a generic signature) is untouched: this predicate answers
+ * `false` for every shape it does not name, and the ordinary mapType call
+ * runs for everything else exactly as it did before. */
+export function isAnyReturningPlainCallable(t: ts.Type, checker: ts.TypeChecker): boolean {
+  const sigs = checker.getCallSignatures(t);
+  if (sigs.length !== 1) return false;
+  const sig = sigs[0]!;
+  if (sig.getTypeParameters().length > 0) return false; // leave generics to their own speculative rule
+  if (
+    checker.getConstructSignatures(t).length !== 0 ||
+    checker.getPropertiesOfType(t).length !== 0
+  ) {
+    return false;
+  }
+  return (checker.getReturnTypeOfSignature(sig).flags & ts.TypeFlags.Any) !== 0;
 }
 
 /** The computed pieces of a record shape mapRecordTypeInner hands back for
