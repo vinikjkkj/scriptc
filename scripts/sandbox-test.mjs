@@ -780,26 +780,20 @@ try {
         // Resetting the source tree removes dist but preserves node_modules,
         // including TypeScript's incremental metadata. Rebuild both together.
         await execIn(worker, "pnpm", ["build:fresh"], {}, "", 2 * 60_000);
-        // Workspace builds deliberately do not rebuild packaged native artifacts.
-        // Every remote lane needs the Linux helper and runtime from this worktree.
-        await execIn(
-          worker,
-          "pnpm",
-          ["--filter", "@scriptc/llvm-linux-x64-gnu", "build:native"],
-          {},
-          "LLVM helper",
-          5 * 60_000,
-        );
-        await execIn(
-          worker,
-          "pnpm",
-          ["--filter", "@scriptc/runtime-linux-x64-gnu", "build:native"],
-          { CC: "zig", AR: "zig" },
-          "runtime pack",
-          5 * 60_000,
-          "/workspace",
-          3 * 60_000,
-        );
+        // Upstream rebuilds @scriptc/llvm-linux-x64-gnu (a cmake/ninja/clang
+        // C++ helper that calls the LLVM API directly) and
+        // @scriptc/runtime-linux-x64-gnu (a packed, precompiled runtime) here.
+        // Neither package exists in this workspace and neither is needed:
+        // this fork's LLVM backend (packages/compiler/src/backend/llvm) emits
+        // textual IR from TypeScript and hands it to `zig cc` (see
+        // packages/compiler/src/backend/cc.ts), and packages/runtime ships
+        // plain C sources compiled fresh by that same driver -- there is no
+        // separate native helper binary or runtime pack to build. Adding
+        // placeholder packages under those names would still require new
+        // `importers` entries in pnpm-lock.yaml (lockfileVersion 9 lists
+        // every workspace member, even dependency-free ones), which is a
+        // lockfile change outside this adaptation's scope -- so the two
+        // steps are dropped rather than stubbed.
         // Keep Zig available to the portable compiler bootstrap and entropy
         // contract, without expanding the conditional cross-target cache tests.
         await execIn(
