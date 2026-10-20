@@ -51,6 +51,22 @@ typedef SSIZE_T ssize_t;
  * integer (cast at every call site, e.g. (mode_t)mode), so a plain
  * unsigned short is behaviour-identical to mingw's own typedef. */
 typedef unsigned short mode_t;
+
+/* S_ISREG/S_ISDIR/S_ISFIFO/S_ISCHR/S_ISBLK: mingw's <sys/stat.h> defines
+ * these POSIX convenience macros over its own _S_IFMT bits; MSVC's
+ * <sys/stat.h> only has the bare _S_IFxxx constants, no S_ISxxx macros.
+ * (S_ISLNK/S_ISSOCK are deliberately left undefined here: mingw doesn't
+ * define those two either, and the one call site that needs them
+ * already guards itself with #ifdef S_ISLNK / #ifdef S_ISSOCK -- see
+ * scr_lib.c. Adding them here would make that site diverge from the
+ * mingw lane instead of matching it.) Windows' native stat() never
+ * sets a block-device bit, so S_ISBLK below is unconditionally false --
+ * the same answer mingw's own S_ISBLK gives in practice on this OS. */
+#define S_ISREG(m)  (((m) & _S_IFMT) == _S_IFREG)
+#define S_ISDIR(m)  (((m) & _S_IFMT) == _S_IFDIR)
+#define S_ISFIFO(m) (((m) & _S_IFMT) == _S_IFIFO)
+#define S_ISCHR(m)  (((m) & _S_IFMT) == _S_IFCHR)
+#define S_ISBLK(m)  ((void)(m), 0)
 #endif
 #endif
 
