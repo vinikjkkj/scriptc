@@ -2330,7 +2330,34 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // claim than dataInterface's, not a widening of it.
     const callableLiteral = !ctx.dynamic && isPlainCallableTypeLiteral(widened, npmDecls, checker);
     if (callableLiteral) fromUncompiledCallableLiteral = true;
-    if (!dataInterface && !callableLiteral) return ctx.dynamic ? JSVAL : null;
+    // A data record whose ONLY non-data members are ORDINARY (non-generic,
+    // single-signature, non-constructable) methods -- exactly the shape
+    // mapRecordTypeInner's own member loop already knows how to carry as
+    // plain func-kind fields once it gets a chance to run. mysql2's Field
+    // (Type & { ...data..., string(), buffer(), geometry() }) is the
+    // motivating case: isDataOnlyObjectType correctly refuses it (it DOES
+    // have methods), but nothing downstream ever gets to decide whether
+    // those methods are individually representable, because this gate
+    // refuses the WHOLE type first. This is independent of callableLiteral
+    // above: callableLiteral admits a bare function-type literal ITSELF;
+    // this admits a data interface whose MEMBERS happen to be ordinary
+    // methods.
+    const dataWithOrdinaryMethods =
+      !ctx.dynamic &&
+      npmDecls.every(
+        (d) => ts.isInterfaceDeclaration(d) || ts.isTypeLiteralNode(d) || ts.isTypeAliasDeclaration(d),
+      ) &&
+      checker.getPropertiesOfType(widened).every((p) => {
+        const pt = checker.getTypeOfSymbol(p);
+        const cs = checker.getCallSignatures(pt);
+        if (cs.length === 0) return checker.getConstructSignatures(pt).length === 0;
+        return (
+          cs.length === 1 &&
+          cs[0]!.getTypeParameters().length === 0 &&
+          checker.getConstructSignatures(pt).length === 0
+        );
+      });
+    if (!dataInterface && !callableLiteral && !dataWithOrdinaryMethods) return ctx.dynamic ? JSVAL : null;
   }
   // NOTE on module NAMESPACE types (`typeof import("./x.mjs")` — what a
   // dynamic import resolves to): non-stdlib ones fall under the rule
@@ -6064,8 +6091,23 @@ function recordProvenanceOk(
   const isInterfaceLike = decls.every(
     (d) => ts.isInterfaceDeclaration(d) || ts.isTypeLiteralNode(d) || ts.isTypeAliasDeclaration(d),
   );
+  // The SAME dataWithOrdinaryMethods carve-out as mapTypeInner's own
+  // npmSym gate — duplicated here because recordProvenanceOk is a
+  // SEPARATE, independent re-check inside mapRecordTypeInner enforcing the
+  // identical "pure data only" restriction. Patching only the first gate
+  // (mapTypeInner) is NOT sufficient: a Field-shaped type still refuses
+  // here, before ever reaching mapRecordTypeInner's per-member loop.
+  const isDataWithOrdinaryMethods =
+    isInterfaceLike &&
+    checker.getPropertiesOfType(t).every((p) => {
+      const pt = checker.getTypeOfSymbol(p);
+      const cs = checker.getCallSignatures(pt);
+      if (cs.length === 0) return checker.getConstructSignatures(pt).length === 0;
+      return cs.length === 1 && cs[0]!.getTypeParameters().length === 0 && checker.getConstructSignatures(pt).length === 0;
+    });
   return (
     (isInterfaceLike && isDataOnlyObjectType(t, checker)) ||
+    isDataWithOrdinaryMethods ||
     isDataOnlyDeclFileClassInstance(t, checker, ctx)
   );
 }
@@ -7712,7 +7754,18 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
           ctx.dynamic !== true &&
           checker.getCallSignatures(memberTs).length === 0 &&
           checker.getConstructSignatures(memberTs).length === 0;
-        if (!dataMember) return null;
+        // An ORDINARY (non-generic, single-signature, non-constructable)
+        // callable member from a .d.ts, inside a computed/intersection
+        // shape, falls through to the ordinary generic/overload-exclusion
+        // machinery just below instead of refusing the WHOLE record here
+        // unconditionally. mysql2's Field (Type & {...,
+        // string()/buffer()/geometry()}) is the motivating case.
+        const ordinaryCallableMember =
+          ctx.dynamic !== true &&
+          checker.getCallSignatures(memberTs).length === 1 &&
+          checker.getCallSignatures(memberTs)[0]!.getTypeParameters().length === 0 &&
+          checker.getConstructSignatures(memberTs).length === 0;
+        if (!dataMember && !ordinaryCallableMember) return null;
       }
       const fieldTs = checker.getTypeOfSymbol(p);
       // GENERIC-callable members leave the shape (no single closure slot
