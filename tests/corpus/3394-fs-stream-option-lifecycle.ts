@@ -9,6 +9,14 @@
 // so the descriptor is measured, not asserted: openSync hands back the
 // LOWEST free descriptor, so a probe that stays flat across cycles proves
 // every stream returned its own, and one that climbs proves a leak.
+//
+// Nothing is printed until every probe has been taken. Node on Unix opens
+// one /dev/null descriptor lazily, the first time libuv initializes a
+// stream handle (uv__stream_init reserves it for the EMFILE accept trick),
+// and a piped stdout is exactly such a handle: the FIRST console.log would
+// move the lowest free fd up by one for the rest of the process and read as
+// a leak in every cycle after it. Buffering the report keeps the drift a
+// measure of the streams alone, whatever stdout is wired to.
 import { closeSync, createReadStream, createWriteStream, existsSync, mkdirSync, openSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 
 function tail(path: string): string {
@@ -35,6 +43,7 @@ function probe(): number {
   return fd;
 }
 const base = probe();
+const report: string[] = [];
 
 // ── event shapes ────────────────────────────────────────────────────
 async function events(tag: string, mk: () => import("node:stream").Readable): Promise<void> {
@@ -44,10 +53,10 @@ async function events(tag: string, mk: () => import("node:stream").Readable): Pr
   rs.on("end", () => { seen.push("end"); });
   rs.on("close", () => { seen.push("close"); });
   await new Promise<void>((res) => { rs.on("end", () => { setTimeout(() => res(), 25); }); });
-  console.log(tag, "events=" + seen.join(" "), "destroyed=" + rs.destroyed);
+  report.push([tag, "events=" + seen.join(" "), "destroyed=" + rs.destroyed].join(" "));
   rs.destroy();
   await new Promise<void>((res) => { setTimeout(() => res(), 15); });
-  console.log(tag, "after an explicit destroy(): destroyed=" + rs.destroyed);
+  report.push([tag, "after an explicit destroy(): destroyed=" + rs.destroyed].join(" "));
 }
 await events("autoClose default", () => createReadStream(src, { start: 0, end: 9 }));
 await events("autoClose:false", () => createReadStream(src, { autoClose: false, start: 0, end: 9 }));
@@ -60,10 +69,10 @@ await events("emitClose:false", () => createReadStream(src, { emitClose: false, 
   ws.on("finish", () => { seen.push("finish"); });
   ws.on("close", () => { seen.push("close"); });
   await new Promise<void>((res) => { ws.end("hi", () => { setTimeout(() => res(), 25); }); });
-  console.log("ws autoClose:false events=" + seen.join(" "), "destroyed=" + ws.destroyed);
+  report.push(["ws autoClose:false events=" + seen.join(" "), "destroyed=" + ws.destroyed].join(" "));
   ws.destroy();
   await new Promise<void>((res) => { setTimeout(() => res(), 15); });
-  console.log("ws after destroy(): destroyed=" + ws.destroyed);
+  report.push(["ws after destroy(): destroyed=" + ws.destroyed].join(" "));
 }
 
 // ── the descriptor, over many cycles ────────────────────────────────
@@ -109,8 +118,9 @@ for (const [name, cycle] of [
 ] as [string, () => Promise<void>][]) {
   writeFileSync(out, "");
   for (let i = 0; i < CYCLES; i = i + 1) await cycle();
-  console.log("fd drift", name, probe() - base);
+  report.push("fd drift " + name + " " + (probe() - base));
 }
 
 for (const name of readdirSync(scratch)) rmSync(scratch + "/" + name);
 rmdirSync(scratch);
+for (const line of report) console.log(line);
