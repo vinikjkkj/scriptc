@@ -3909,12 +3909,31 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     E.walkerProtos.push(`${sig}; /* r[k] on ${shapeId} as ${typeKey(t)} */`);
     const d: string[] = [`${sig} { /* r[k] on ${shapeId} as ${typeKey(t)} */`];
     // How a value of type `vt` (a field, or the overflow hit) surfaces as T.
-    const surface = (vt: IrType, expr: string, owned: boolean): string => {
+    // `field` is the attribution a stranded func box's thrown message
+    // names (see dynFuncFieldBoxC) — the declared field's own name for a
+    // struct slot, or "<index>" for an overflow hit, which has no fixed
+    // name: the runtime key is a caller-supplied string, not a shape
+    // member, so naming the mechanism (an index signature) is the honest
+    // answer rather than guessing at one.
+    const surface = (vt: IrType, expr: string, owned: boolean, field: string): string => {
       if (typeEquals(vt, t)) {
         return owned || !isRefCounted(vt) ? expr : retainCallC(vt, expr);
       }
       if (t.kind === "dyn") {
         // toDyn borrows — an owned operand would leak; callers pass borrowed.
+        // FUNC is its own case: toDynHelper's generic per-kind switch has
+        // no "func" arm (it is not a type toDyn's deep-copy/retain-by-
+        // reference dispatch ever had to answer for before an index
+        // signature's value type could BE one — isSupportedIndexValue
+        // admits "func" on the strength of the command-registry pattern,
+        // mapRecordTypeInner's own comment names it). dynFuncFieldBoxC is
+        // the existing, reviewed boxer for exactly this: boxable per
+        // canBoxFuncIntoDyn, or the catchable-TypeError stranded box
+        // otherwise — never an uncaught "emitter bug" crash for a
+        // signature the type system already let through.
+        if (vt.kind === "func") {
+          return dynFuncFieldBoxC(E, vt, expr, field);
+        }
         return `${E.toDynHelper(vt)}(${expr})`;
       }
       if (t.kind === "union") {
@@ -3934,7 +3953,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     for (const f of overflowOnly ? [] : shape.fields) {
       const lit = E.internLiteral(f.name);
       d.push(`  if (scr_str_eq(k, (ScrStr *)&${lit})) { /* ${f.name} */`);
-      d.push(`    return ${surface(f.type, `r->${mangleField(f.name)}`, false)};`);
+      d.push(`    return ${surface(f.type, `r->${mangleField(f.name)}`, false, f.name)};`);
       d.push(`  }`);
     }
     const iv = shape.indexValue;
@@ -3944,7 +3963,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         const acc = iv.kind === "f64" ? "f64" : "bool";
         d.push(`  ${cDecl(iv, "hit")};`);
         d.push(`  if (scr_map_get_str_${acc}(${m}, k, &hit)) {`);
-        d.push(`    return ${surface(iv, "hit", true)};`);
+        d.push(`    return ${surface(iv, "hit", true, "<index>")};`);
         d.push(`  }`);
       } else {
         d.push(`  ${cDecl(iv, "hit")} = (${cType(iv).trim()})scr_map_get_str_ref(${m}, k);`);
@@ -3952,13 +3971,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (typeEquals(iv, t)) {
           d.push(`    return hit; /* get returned +1 */`);
         } else if (t.kind === "union") {
-          d.push(`    return ${surface(iv, "hit", true)};`);
+          d.push(`    return ${surface(iv, "hit", true, "<index>")};`);
         } else if (t.kind === "dyn") {
           // A dyn JOIN over a non-dyn overflow (the slot-width read: the
           // key's value converts here instead of one step later, so an
           // ABSENT key can answer undefined below). toDyn BORROWS, and the
           // map get returned +1 — convert, then drop the hit's reference.
-          d.push(`    ${cDecl(t, "out")} = ${surface(iv, "hit", false)};`);
+          d.push(`    ${cDecl(t, "out")} = ${surface(iv, "hit", false, "<index>")};`);
           d.push(`    ${releaseCallC(iv, "hit")};`);
           d.push(`    return out;`);
         } else {
