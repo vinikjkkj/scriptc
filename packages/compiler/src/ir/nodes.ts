@@ -1053,12 +1053,19 @@ export function funcOf(params: IrType[], ret: IrType): IrType {
  * else separates them — the promise rule's "a second promise arm stays
  * refused", exactly.
  *
- * MAP arms keep the unit-only rule. `instanceof Map` is the same test in
- * principle and no lowering emits it yet; a rule ahead of its lowering
- * would admit a union no program can narrow. */
+ * A MAP arm now follows the SET rule exactly, one constructor further:
+ * `instanceof Map` lowers to the same runtime TAG compare
+ * (lowerInstanceOf's Map arm, mirroring its Set arm), so it needs no more
+ * than a SET arm does. The unit-only carve-out predates that lowering —
+ * admitting the arm beside data siblings ahead of it would have admitted a
+ * union no program could narrow, which is why it stayed unit-only until
+ * the lowering existed. The one shape with no test is a SECOND map arm,
+ * for the identical reason a second Set arm has none: `instanceof Map`
+ * answers true for both `Map<string, A>` and `Map<string, B>`, and
+ * nothing else separates them. */
 export function unionFuncSetArmsOk(arms: IrType[]): boolean {
   return arms.every((a, i) => {
-    if (a.kind === "map") return arms.every((b, j) => j === i || isUnitType(b));
+    if (a.kind === "map") return !arms.some((b, j) => j !== i && b.kind === "map");
     if (a.kind === "set") return !arms.some((b, j) => j !== i && b.kind === "set");
     return true;
   });

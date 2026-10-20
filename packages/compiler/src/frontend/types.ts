@@ -7812,22 +7812,22 @@ function unionArmsHaveHomes(arms: IrType[], unions: UnionRegistry): boolean {
   return !arms.some(
     (a, i) =>
       a.kind === "void" || a.kind === "union" ||
-      // MAP arms have no narrowing test against DATA siblings (no
-      // discriminant fields, typeof answers "object" like the rest,
-      // and no lowering emits `instanceof Map`) — but against units
-      // there is nothing to narrow: the unit TAG test is the whole
-      // story, which is the container-or-absent shape a Map lookup
-      // returns (`Map<string, Set<T>>.get(k)`). Beside any data sibling
-      // they stay out. REGEX arms map anywhere: `x instanceof RegExp`
-      // is their narrowing test (the skip-utility `string | RegExp`
-      // shape), and the arm rides the ref machinery like array regex
-      // elements. SET arms map anywhere too — `x instanceof Set` is
-      // the same test one constructor over, and over a union it lowers
-      // to the runtime TAG compare (lowerInstanceOf's Set arm) — except
-      // beside a SECOND set arm, which that test answers true for as
-      // well and nothing else separates. unionFuncSetArmsOk is this
-      // rule under its own name (the validator's copy).
-      (a.kind === "map" && !arms.every((c) => c === a || isUnitType(c))) ||
+      // MAP arms now follow the SET rule: `instanceof Map` lowers to the
+      // runtime TAG compare (lowerInstanceOf's Map arm, mirroring its Set
+      // arm) one constructor further than REGEX below, so a map arm maps
+      // beside any sibling except a SECOND map arm, which that test
+      // answers true for as well and nothing else separates (same reason
+      // a second Set arm stays out). REGEX arms map anywhere: `x
+      // instanceof RegExp` is their narrowing test (the skip-utility
+      // `string | RegExp` shape), and the arm rides the ref machinery
+      // like array regex elements. SET arms map anywhere too — `x
+      // instanceof Set` is the same test one constructor over, and over
+      // a union it lowers to the runtime TAG compare (lowerInstanceOf's
+      // Set arm) — except beside a SECOND set arm, which that test
+      // answers true for as well and nothing else separates.
+      // unionFuncSetArmsOk is this rule under its own name (the
+      // validator's copy) and MUST move in lockstep with this one.
+      (a.kind === "map" && arms.some((c, j) => j !== i && c.kind === "map")) ||
       (a.kind === "set" && arms.some((c, j) => j !== i && c.kind === "set")) ||
       a.kind === "dyn" ||
       // Generator arms follow the map/set rule: no narrowing test.
@@ -7872,11 +7872,13 @@ function armHasUnionHome(arm: IrType, siblingCount: number, siblings: IrType[]):
     case "generator":
     case "dyn":
       return false;
-    // Map arms: only beside units (the container-or-absent shape a Map
-    // lookup returns). Against a data sibling there is no narrowing test —
-    // see mapTypeInner's union rule.
+    // Map arms: anywhere except beside a SECOND map arm — same rule as
+    // Set, one constructor over: `instanceof Map` is the tag test, and it
+    // answers true for both of those. MUST stay in lockstep with Set's
+    // case immediately below and with unionArmsHaveHomes/
+    // unionFuncSetArmsOk's copies of this same rule.
     case "map":
-      return siblingCount === 0;
+      return !siblings.some((s) => s.kind === "map");
     // Set arms: anywhere except beside a SECOND set arm — `instanceof Set`
     // is the tag test, and it answers true for both of those.
     case "set":
@@ -8013,6 +8015,9 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
       const siblings = mappedArms.flatMap(({ p, mapped: m }) => (p === part || m === null ? [] : [m]));
       if (mapped.kind === "set" && siblings.some((s) => s.kind === "set")) {
         return `the union shape is supported, but a union carrying two Set arms has no runtime test to tell '${text(part)}' from the other one ('instanceof Set' answers true for both, and 'typeof' answers "object" for every arm here)`;
+      }
+      if (mapped.kind === "map" && siblings.some((s) => s.kind === "map")) {
+        return `the union shape is supported, but a union carrying two Map arms has no runtime test to tell '${text(part)}' from the other one ('instanceof Map' answers true for both, and 'typeof' answers "object" for every arm here)`;
       }
       if (!armHasUnionHome(mapped, dataArms.length - 1, siblings)) {
         return `the union shape is supported, but '${text(part)}' arms have no home in a compiled union yet (no runtime narrowing test exists against sibling arms)`;
