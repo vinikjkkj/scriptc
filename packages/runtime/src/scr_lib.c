@@ -44,7 +44,28 @@
 #include <direct.h>  /* _mkdir */
 #include <io.h>      /* _isatty, _access, open/read/write/close */
 #include <process.h> /* getpid */
+#ifdef _MSC_VER
+/* mingw-w64's unistd.h/io.h declare these POSIX names without the
+ * leading underscore for free; the header itself does not exist on
+ * MSVC at all, and MSVC's own <io.h>/<direct.h>/<process.h> (already
+ * included above) only guarantee the underscore-prefixed spellings.
+ * Every POSIX name this file calls bare below gets a local alias here
+ * -- purely additive, nothing already working on mingw/POSIX changes. */
+#define getcwd  _getcwd
+#define getpid  _getpid
+#define open    _open
+#define close   _close
+#define read    _read
+#define write   _write
+#define access  _access
+#define chmod   _chmod
+#define unlink  _unlink
+#define rmdir   _rmdir
+#define isatty  _isatty
+#define mkdir   _mkdir
+#else
 #include <unistd.h>  /* mingw-w64 ships one: getcwd, access, isatty, ... */
+#endif
 #include <winsock2.h> /* BEFORE windows.h (which pulls winsock 1 otherwise) */
 #include <ws2tcpip.h> /* inet_ntop, sockaddr_in6 */
 #include <iphlpapi.h> /* GetAdaptersAddresses (os.networkInterfaces) */
