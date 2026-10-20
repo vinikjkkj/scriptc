@@ -74,7 +74,7 @@ const invariantRemoteFiles = [
   "packages/compiler/test/ts7/facade.test.ts",
   "packages/compiler/test/ts7/order-parity.test.ts",
   "packages/compiler/test/ts7/parity.test.ts",
-  "packages/compiler/test/ts7/program-adapter.test.ts",
+  "packages/compiler/test/ts7/program.test.ts",
   "packages/compiler/test/ts7/resolver-parity.test.ts",
   // These C runtime units compile with ASan + SCR_RC_AUDIT themselves.
   "packages/runtime/test/array.test.ts",
