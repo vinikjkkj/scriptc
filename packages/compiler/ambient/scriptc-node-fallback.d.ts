@@ -1355,6 +1355,26 @@ declare module "node:url" {
  * one fused string-producing operation (the Buffer never materializes
  * there); every other use gets an ordinary Buffer value. */
 declare module "crypto" {
+  /* Pure type-compat shims: @types/node's RsaPublicKey/RsaPrivateKey/
+   * KeyLike are referenced by third-party .d.ts files (mysql2's bundled
+   * typings/mysql/lib/Auth.d.ts, imported for the TYPE of a key argument
+   * it never actually widens publicEncrypt's own declared shape with —
+   * see the comment on publicEncrypt below) even where the fallback's own
+   * narrower publicEncrypt signature is what actually resolves the call.
+   * Without these names such packages fail to typecheck AT ALL under
+   * --npm-static, before lowering is ever reached. Declared only so the
+   * names exist for OTHER declarations to reference; nothing here widens
+   * what publicEncrypt itself accepts or lowers. */
+  export interface RsaPublicKey {
+    key: string | Uint8Array;
+    padding?: number;
+    oaepHash?: string;
+    oaepLabel?: Uint8Array;
+  }
+  export interface RsaPrivateKey extends RsaPublicKey {
+    passphrase?: string;
+  }
+  export type KeyLike = string | Uint8Array;
   export function randomUUID(): string;
   /* timingSafeEqual: constant-time equality. @types/node declares the
    * arguments as the wide NodeJS.ArrayBufferView (and, since v20, allows
