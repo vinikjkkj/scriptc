@@ -97,7 +97,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _MSC_VER
+/* read()/close() are redefined to the winsock wrappers below on every
+ * _WIN32 build anyway; unused on MSVC. */
 #include <unistd.h>
+#endif
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
