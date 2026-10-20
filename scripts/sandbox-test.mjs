@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -573,16 +573,30 @@ async function createArchive(path) {
     env: { ...process.env, COPYFILE_DISABLE: "1" },
     stdio: ["ignore", "pipe", "inherit"],
   });
+  // Never hand tar an absolute, drive-lettered path as the archive name: on
+  // Windows, GNU tar (both Git for Windows' and MSYS2's) parses a leading
+  // "G:" as a remote host spec ("tar (child): Cannot connect to G: resolve
+  // failed") rather than a drive letter, and aborts before writing anything.
+  // Running tar with its own cwd set to the archive's directory and passing
+  // only the relative file name sidesteps the ambiguity entirely -- no tar
+  // implementation, including the ones that mis-parse an absolute path,
+  // treats a bare relative output name as a remote spec. `-C root` keeps the
+  // source tree resolution (via the piped `-T -` file list) anchored at the
+  // repository root exactly as it was before. This is not platform-specific:
+  // it behaves identically, and is required by none of the behavior, on
+  // POSIX hosts where the ambiguity cannot arise.
   const tarArgs = [
     ...(process.platform === "darwin" ? ["--no-xattrs", "--no-mac-metadata"] : []),
     "--null",
+    "-C",
+    root,
     "-T",
     "-",
     "-czf",
-    path,
+    basename(path),
   ];
   const tar = spawn("tar", tarArgs, {
-    cwd: root,
+    cwd: dirname(path),
     env: { ...process.env, COPYFILE_DISABLE: "1" },
     stdio: ["pipe", "inherit", "inherit"],
   });
