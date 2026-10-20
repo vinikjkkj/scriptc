@@ -226,9 +226,30 @@ export function setProvenanceSources(sources: ProvenanceSources | null): void {
  *
  * Null when the result would be shallower than two segments: an alias
  * target pointing outside the checkout would otherwise pull the root up to
- * the drive and scope half the filesystem to one table. */
+ * the drive and scope half the filesystem to one table.
+ *
+ * POSIX root marker, restored rather than assumed away: `.split("/")` on an
+ * absolute POSIX path ("/home/...") produces a leading EMPTY segment (the
+ * text before the first "/"), and `.filter((s) => s !== "")` — there to drop
+ * the harmless empty segments a doubled slash would also produce — strips
+ * that one too, indistinguishably. The segment comparison below still works
+ * (every path in one build is absolute, so the loss is uniform), but
+ * `common.join("/")` then rebuilds a ROOT with no leading "/" at all —
+ * "home/..." instead of "/home/...". On win32 this is invisible: a drive
+ * path ("G:/...") has no leading slash to lose, so provenanceAliasScopeOf's
+ * `f.startsWith(scope.root)` against a real file name ("G:/...") kept
+ * matching by accident. On POSIX, every real file name DOES start with "/",
+ * so it can never start with a root that has quietly lost its own — the
+ * prefix compare fails for every file, provenanceAliasScopeOf returns null
+ * unconditionally, and provenance-rewrite.ts's per-tree rewrite (the whole
+ * point of this module) never fires. Every mapped tree then falls back to
+ * the single flat tsconfig "paths" table this module exists to route
+ * around — the import-order-dependent defect the module's own header
+ * describes, silently reintroduced on every non-Windows host. */
 function aliasTreeRootOf(pkg: ProvenancePackageSource): string | null {
-  const dirSegs = tsgoPath(pkg.dir).split("/").filter((s) => s !== "");
+  const dirPath = tsgoPath(pkg.dir);
+  const posixRoot = dirPath.startsWith("/") ? "/" : "";
+  const dirSegs = dirPath.split("/").filter((s) => s !== "");
   let common = dirSegs;
   for (const targets of Object.values(pkg.aliases ?? {})) {
     for (const t of targets) {
@@ -245,7 +266,7 @@ function aliasTreeRootOf(pkg: ProvenancePackageSource): string | null {
     }
   }
   if (common.length < 2) return null;
-  return provenanceDirPrefix(common.join("/"));
+  return provenanceDirPrefix(posixRoot + common.join("/"));
 }
 
 /** One alias table per source TREE, merged from the packages of that tree.
