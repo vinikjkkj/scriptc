@@ -2328,7 +2328,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // promise about a body the .d.ts would need to carry — see
     // isPlainCallableTypeLiteral's own comment for why this is a DIFFERENT
     // claim than dataInterface's, not a widening of it.
-    const callableLiteral = !ctx.dynamic && isPlainCallableTypeLiteral(widened, npmDecls, checker);
+    const callableLiteral =
+      !ctx.dynamic &&
+      (isPlainCallableTypeLiteral(widened, npmDecls, checker) || isPlainDeclMethodType(widened, npmDecls, checker));
     if (callableLiteral) fromUncompiledCallableLiteral = true;
     // A data record whose ONLY non-data members are ORDINARY (non-generic,
     // single-signature, non-constructable) methods -- exactly the shape
@@ -6749,6 +6751,39 @@ export function isPlainCallableTypeLiteral(
   const sigs = checker.getCallSignatures(t);
   if (sigs.length !== 1) return false;
   if (sigs[0]!.getTypeParameters().length > 0) return false; // generic literal: a different question, untouched here
+  return (
+    checker.getConstructSignatures(t).length === 0 &&
+    checker.getPropertiesOfType(t).length === 0 &&
+    checker.getIndexInfosOfType(t).length === 0
+  );
+}
+
+/** A METHOD member's own type — `end(): void` declared as a method
+ * signature in an interface, or as a method declaration in a `declare
+ * class` — when every declaration behind it is such a method node, with one
+ * non-generic call signature and no other shape surface.
+ *
+ * isPlainCallableTypeLiteral admits the arrow-spelled `end: () => void`
+ * and refuses the IDENTICAL type spelled `end(): void`: the symbol behind a
+ * method's type is the method itself, whose declaration is a MethodSignature
+ * or MethodDeclaration, not a FunctionTypeNode. The two spellings are one
+ * type to the checker, so the spelling decided admission. Reaching this
+ * predicate means the ENCLOSING record already cleared its own gates (a
+ * data-with-ordinary-methods interface, or a body-less .d.ts class instance),
+ * and a record's method slot is a closure the program supplies when it
+ * builds the value; the only way to obtain such a value FROM the uncompiled
+ * module is a value import, which fences at its own gate. The standard
+ * library is excluded by the caller, and an overload set or a generic
+ * signature never reaches here (they keep the decline predicates). */
+export function isPlainDeclMethodType(
+  t: ts.Type,
+  decls: readonly ts.Node[],
+  checker: ts.TypeChecker,
+): boolean {
+  if (decls.length === 0 || !decls.every((d) => d.kind === ts.SyntaxKind.MethodSignature || d.kind === ts.SyntaxKind.MethodDeclaration)) return false;
+  const sigs = checker.getCallSignatures(t);
+  if (sigs.length !== 1) return false;
+  if (sigs[0]!.getTypeParameters().length > 0) return false;
   return (
     checker.getConstructSignatures(t).length === 0 &&
     checker.getPropertiesOfType(t).length === 0 &&
