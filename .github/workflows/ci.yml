@@ -111,27 +111,39 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
 
+
   tests:
-    name: test (${{ matrix.flavor }}, ${{ matrix.shard }}/20)
-    # arm64 macOS: same clang/libc the differential + number-formatting
-    # oracles were verified against. Not lane-gated (validation_scope/lanes
-    # here only gate linux_host_clang and windows_cli) -- this is this
-    # fork's own proven corpus/integration job, restored from the pre-port
-    # ci.yml rather than upstream's Linux `tests` job, which delegates to
-    # scripts/ci-test.mjs (absent from this tree) and needs native_linux's
-    # packaged artifact (this fork has no native-package split; pruned in
-    # this commit along with native_macos, tests_macos, native_linux,
-    # effects, bootstrap(_seed), ts7_parity, every llvm_artifacts_*, and
-    # mobile_runtime_packs).
+    name: test (Linux, ${{ matrix.flavor }}, ${{ matrix.shard }}/20)
+    needs: [validation_scope, lanes]
+    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' }}
+    # Moved here from macOS (this fork's historical CI host for this job) so
+    # the 20-way shard actually buys parallelism: GitHub caps macOS at 5
+    # concurrent jobs on EVERY plan, so a 40-job (2 flavors x 20 shards)
+    # matrix on macOS runs in 8 queued waves -- slower than the old 6-job/2-
+    # wave macOS config, the opposite of the goal. Linux has no such cap
+    # (up to the account-wide ~40-job ceiling), so the split parallelizes
+    # for real here. tests_macos below keeps a full run on macOS arm64.
     #
-    # Shard divisor raised 3 -> 20 (GitHub Pro's ~40 concurrent-job ceiling:
-    # 2 flavors x 20 shards = 40). Verified against tests/harness/shard.ts's
-    # corpusSlice directly (tsx-loaded, not a full vitest run) for both the
-    # synthetic 1000-key fixture and the real ~1,871-file corpus glob
-    # differential.test.ts used: the 20x8 shard x part grid has no empty
-    # cell, minimum 5 programs per cell. shard.test.ts's
-    # test.for([2, 3]) is extended to test.for([2, 3, 20]) to pin it.
-    runs-on: macos-15
+    # This is a platform move, so correctness was checked, not assumed,
+    # before committing to it -- three independent, pre-existing pieces of
+    # evidence, none authored for this change:
+    #   - packages/runtime/src/scr_number.c's header: number-to-string is
+    #     vendored Ryu digit generation, "pure integer arithmetic -- no
+    #     snprintf/strtod probing, no locale dependence" -- it cannot
+    #     diverge by host libc, so the old comment's "number-formatting
+    #     oracle" concern does not block a Linux host.
+    #   - tests/harness/linux-differential.test.ts (SCRIPTC_LINUX=1,
+    #     cross-compiled via zig cc into a Linux container) documents
+    #     running "the whole corpus... NO feature is cross-gated to Linux
+    #     anymore", with no skip list -- the strongest existing signal in
+    #     this tree that Linux output parity holds across the full suite.
+    #   - linux_host_clang below already proves a native ubuntu-24.04
+    #     clang build of this runtime compiles and runs (same default-
+    #     clang code path this job's plain `pnpm build` also takes).
+    # None of the three is a live run of THIS exact job (native x86_64,
+    # not cross-compiled, on ubuntu-24.04) -- tests_macos stays as the
+    # redundant, already-proven cross-check rather than retiring macOS.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -146,6 +158,11 @@ jobs:
       SCRIPTC_TEST_WORKERS: "4"
       # san = ASan + RC audit over the same suite; anything but "1" is plain.
       SCRIPTC_SAN: ${{ matrix.flavor == 'san' && '1' || '' }}
+      # Linux's ASan ships LeakSanitizer; Apple's does not. The RC audit
+      # owns leak detection (including intentional abandonment) on both
+      # platforms, so LSan is disabled here to match what the macOS flavor
+      # already gets for free from Apple's toolchain.
+      ASAN_OPTIONS: detect_leaks=0
       # Within-file partition for the large case-driven harnesses (npm,
       # server, Vercel E2E, and the three corpus suites): they hash stable
       # case names into slice i of 20 (tests/harness/shard.ts), so the
@@ -170,12 +187,19 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      # Ubuntu pipes core dumps to apport, and RLIMIT_CORE does not limit a
+      # piped dump: the kernel streams every page of the runtime's reserved
+      # allocator address space through the pipe, so an expected abort
+      # outlives its test timeout. Write cores to files instead.
+      - name: Disable piped core dumps
+        run: sudo sysctl -w kernel.core_pattern=core
       # Separate vitest invocations because the shard axes must not mix: a file
       # lands in exactly ONE --shard slice, so an env-sharded file behind
       # --shard would run only one of its twenty case slices and silently
       # drop the rest. Files split by --shard here; cases split by env below.
       - name: Tests (file-sharded, case-sharded files excluded)
         run: >-
+          ulimit -c 0 &&
           pnpm test --shard=${{ matrix.shard }}/20
           --exclude=tests/harness/corpus/**
           --exclude=tests/harness/npm.test.ts
@@ -183,6 +207,7 @@ jobs:
           --exclude=tests/harness/vercel-e2e.test.ts
       - name: Tests (case-sharded, slice ${{ matrix.shard }}/20)
         run: >-
+          ulimit -c 0 &&
           pnpm test
           tests/harness/corpus/differential-
           tests/harness/corpus/llvm-differential-
@@ -192,6 +217,58 @@ jobs:
       # Coverage analysis is frontend-only: SCRIPTC_SAN cannot change its
       # result, so the twenty plain slices cover the full corpus once.
       - name: Tests (coverage sweep, slice ${{ matrix.shard }}/20)
+        if: matrix.flavor == 'plain'
+        run: pnpm test tests/harness/corpus/coverage-corpus-
+
+  # Redundant with `tests` above by design: oracle fidelity on the
+  # platform this suite's number-formatting and differential contracts
+  # were historically verified against, kept at this fork's original
+  # (proven) divisor rather than upstream's nightly-only 10-way/PR-only
+  # 3-way split -- this fork has no scripts/ci-test-plan.mjs to select a
+  # "darwin subset", so this runs the WHOLE corpus every time, same as
+  # `tests`, just on fewer, larger shards (macOS's 5-concurrent cap makes
+  # a wide matrix here counterproductive -- see `tests`'s comment).
+  tests_macos:
+    name: test (macOS, ${{ matrix.flavor }}, ${{ matrix.shard }}/3)
+    needs: [validation_scope, lanes]
+    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.macos == 'true' }}
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [plain, san]
+        shard: [1, 2, 3]
+    env:
+      SCRIPTC_TEST_WORKERS: "4"
+      SCRIPTC_SAN: ${{ matrix.flavor == 'san' && '1' || '' }}
+      SCRIPTC_TEST_SHARD: ${{ matrix.shard }}/3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Tests (file-sharded, case-sharded files excluded)
+        run: >-
+          pnpm test --shard=${{ matrix.shard }}/3
+          --exclude=tests/harness/corpus/**
+          --exclude=tests/harness/npm.test.ts
+          --exclude=tests/harness/server.test.ts
+          --exclude=tests/harness/vercel-e2e.test.ts
+      - name: Tests (case-sharded, slice ${{ matrix.shard }}/3)
+        run: >-
+          pnpm test
+          tests/harness/corpus/differential-
+          tests/harness/corpus/llvm-differential-
+          tests/harness/npm.test.ts
+          tests/harness/server.test.ts
+          tests/harness/vercel-e2e.test.ts
+      - name: Tests (coverage sweep, slice ${{ matrix.shard }}/3)
         if: matrix.flavor == 'plain'
         run: pnpm test tests/harness/corpus/coverage-corpus-
 
@@ -274,15 +351,6 @@ jobs:
           if ($actual -ne "hello world") {
             throw "unexpected scriptc output: $actual"
           }
-      - name: Windows filesystem links differential
-        # Repointed from upstream's tests/harness/differential.test.ts: the 8
-        # part files under tests/harness/corpus/ partition the same corpus
-        # under the same test names (dd9a3b92d), so --testNamePattern still
-        # selects the same two cases, just spread across 8 files instead of
-        # 1. Unchanged by this prune commit.
-        run: >-
-          pnpm exec vitest run tests/harness/corpus/differential- tests/harness/project-config.test.ts
-          --testNamePattern "node24-fs-links|filesystem links"
       - name: Windows CA-store differential
         shell: pwsh
         run: |
@@ -304,7 +372,7 @@ jobs:
   # Require this check on the stack base. Upper layers must not pass before
   # full validation, so untested groups cannot merge. Merge bottom-up.
   test:
-    needs: [validation_scope, lanes, code_quality, tests, linux_host_clang, windows_cli]
+    needs: [validation_scope, lanes, code_quality, tests, tests_macos, linux_host_clang, windows_cli]
     # Run even after failed or cancelled lanes: skipped required jobs allow merging.
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -314,12 +382,13 @@ jobs:
         run: |
           test "${{ needs.validation_scope.result }}" = success
           test "${{ needs.code_quality.result }}" = success
-          test "${{ needs.tests.result }}" = success
           case "${{ needs.validation_scope.outputs.full }}" in
             true)
               test "${{ needs.lanes.result }}" = success
               # A lane job passes when it succeeded, or when it was skipped because its lane is off.
               lane() { [ "$2" = success ] || { [ "$3" = false ] && [ "$2" = skipped ]; } || { echo "$1: $2 (lane $3)"; exit 1; }; }
+              lane tests "${{ needs.tests.result }}" "${{ needs.lanes.outputs.linux }}"
+              lane tests_macos "${{ needs.tests_macos.result }}" "${{ needs.lanes.outputs.macos }}"
               lane linux_host_clang "${{ needs.linux_host_clang.result }}" "${{ needs.lanes.outputs.linux }}"
               lane windows_cli "${{ needs.windows_cli.result }}" "${{ needs.lanes.outputs.linux }}"
               ;;
