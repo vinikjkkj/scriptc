@@ -238,7 +238,12 @@ jobs:
           --exclude=tests/harness/npm.test.ts
           --exclude=tests/harness/server.test.ts
           --exclude=tests/harness/vercel-e2e.test.ts
+      # Runs even when the file-sharded step above failed: a step without an
+      # `if:` is skipped after any earlier failure, which left this slice's
+      # corpus programs (and npm/server/vercel-e2e) unexecuted in every red
+      # job. `!cancelled()` still honors a cancelled run.
       - name: Tests (case-sharded, slice ${{ matrix.shard }}/20)
+        if: ${{ !cancelled() }}
         run: >-
           ulimit -c 0 &&
           pnpm test
@@ -250,7 +255,7 @@ jobs:
       # Coverage analysis is frontend-only: SCRIPTC_SAN cannot change its
       # result, so the twenty plain slices cover the full corpus once.
       - name: Tests (coverage sweep, slice ${{ matrix.shard }}/20)
-        if: matrix.flavor == 'plain'
+        if: ${{ !cancelled() && matrix.flavor == 'plain' }}
         run: pnpm test tests/harness/corpus/coverage-corpus-
 
   # Replaces the earlier full-corpus tests_macos. That job ran the WHOLE
@@ -518,7 +523,12 @@ jobs:
           --exclude=tests/harness/npm.test.ts
           --exclude=tests/harness/server.test.ts
           --exclude=tests/harness/vercel-e2e.test.ts
+      # Runs even when the file-sharded step above failed: a step without an
+      # `if:` is skipped after any earlier failure, which left this slice's
+      # corpus programs (and npm/server/vercel-e2e) unexecuted in every red
+      # job. `!cancelled()` still honors a cancelled run.
       - name: Tests (case-sharded, slice ${{ matrix.shard }}/20)
+        if: ${{ !cancelled() }}
         run: >-
           pnpm test
           tests/harness/corpus/differential-
@@ -527,6 +537,7 @@ jobs:
           tests/harness/server.test.ts
           tests/harness/vercel-e2e.test.ts
       - name: Tests (coverage sweep, slice ${{ matrix.shard }}/20)
+        if: ${{ !cancelled() }}
         run: pnpm test tests/harness/corpus/coverage-corpus-
 
   # Retain the pre-matrix "test" check for branch protection and badges.
