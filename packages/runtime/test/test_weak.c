@@ -61,8 +61,17 @@ static ScrWeakMap *W(void) {
 static ScrArr *A(const char *tag) {
   ScrArr *a = scr_arr_new_ref(&scr_str_retain_v, &scr_str_release_v, NULL, 0);
   ScrStr *e = S(tag);
+  /* push_ref MOVES e's one reference into the array; it does not retain
+   * (scr_arr_push_slot just stores the slot -- see scr_array.c). Every
+   * production call site agrees: a freshly-owned value is handed to push
+   * with no release after (scr_async.c, scr_child.c, scr_fetch*.c), or the
+   * value is explicitly retained first when the caller keeps its own
+   * reference too (scr_path.c, scr_events_emitter.c, emit-async.ts). An
+   * extra scr_str_release(e) here double-released the same count, freeing
+   * the string while the array still held the only pointer to it -- CI's
+   * Class K heap-use-after-free (scr_arr_release -> scr_str_release reading
+   * freed memory). Fixed: push, and nothing else. */
   scr_arr_push_ref(a, e);
-  scr_str_release(e);
   return a;
 }
 
@@ -95,7 +104,13 @@ static void test_array_keys(void) {
 #endif
   scr_arr_release(k1); /* THE DEATH, through the untraced free path */
 #ifdef SCR_RC_AUDIT
-  check(scr_str_live_count() == live_before - 1,
+  /* -2, not -1: k1's own death releases TWO strings now that A() no longer
+   * double-frees its element -- its own array element ("alpha") going
+   * through the untraced free path, AND the weak map's held value (v)
+   * getting spliced and released because its key died. Before the A() fix
+   * this read -1 only because the element was already (wrongly) dead
+   * before this line ever ran. */
+  check(scr_str_live_count() == live_before - 2,
         "the value is released when an ARRAY key dies");
 #endif
   scr_arr_release(k2);
