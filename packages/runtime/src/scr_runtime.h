@@ -32,6 +32,19 @@ char *stpcpy(char *dst, const char *src);
 void arc4random_buf(void *buf, size_t n);
 struct tm *gmtime_r(const time_t *t, struct tm *out);
 char *strcasestr(const char *hay, const char *needle);
+
+/* ── MSVC-ABI-only gaps ─────────────────────────────────────────────────
+ * Everything above this point is for BOTH win32 toolchains. mingw-w64's
+ * CRT additionally ships its own POSIX-shaped <sys/types.h>, which is
+ * where ssize_t comes from on that lane; MSVC's own headers have no such
+ * typedef at all (BaseTsd.h's SSIZE_T is the closest equivalent). Guarded
+ * on the compiler (_MSC_VER), not the OS (_WIN32), so the shipping
+ * target — x86_64-windows-gnu via zig cc, where _MSC_VER is never
+ * defined — never sees this block. */
+#ifdef _MSC_VER
+#include <BaseTsd.h> /* SSIZE_T */
+typedef SSIZE_T ssize_t;
+#endif
 #endif
 
 /* ── process ──────────────────────────────────────────────────────────── */
