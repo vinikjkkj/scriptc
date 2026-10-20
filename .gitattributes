@@ -1,11 +1,23 @@
 # The runtime's committed Node oracle corpora are tab-separated, hex-encoded
 # ASCII generated once by gen-*-cases.mjs (see packages/runtime/test/). They
 # are stored LF-only. Without this file, GitHub's Windows runner image ships
-# core.autocrlf=true, and a checkout on that runner silently rewrites every
-# line to CRLF -- which materializeHostCases() in
+# core.autocrlf=true, and a checkout on that runner would silently rewrite
+# every line to CRLF -- which materializeHostCases() in
 # packages/runtime/test/cc.ts compares byte-for-byte against this host's
-# freshly generated (LF-only) output, so EVERY non-cwd-bound case disagrees
-# by a trailing \r that GitHub's log viewer does not render, and the failure
-# reads as "Node changed behaviour" when it is a checkout-time line-ending
-# corruption. Pin these to LF so that cannot happen again, on any platform.
+# freshly generated (LF-only) output, so EVERY non-cwd-bound case would
+# disagree by a trailing \r that GitHub's log viewer does not render. Pin
+# these to LF so that risk cannot materialise, on any platform.
+#
+# HYGIENE, NOT A DIAGNOSIS: this rule was added while investigating a real
+# Windows path.test.ts CI failure, on the hypothesis that CRLF corruption
+# explained it. That hypothesis was WRONG and is retracted -- the CI log's
+# "committed"/"this host" pairs rendered byte-identical because the
+# underlying VALUES genuinely differed (a drive-letter cwd dependency in
+# path.win32.relative that the cwd probe never sampled), not because of an
+# invisible \r. See e53695b5c ("PROBE_CWDS never probed a drive letter
+# already in the corpus") for the actual mechanism and fix; CRLF played no
+# part in that failure, with or without this file. This rule earns its
+# place on its own merits -- it closes a real, independently demonstrated
+# checkout-time risk (verified by cloning with -c core.autocrlf=true) -- not
+# because it cured anything observed in CI.
 packages/runtime/test/*-cases.txt text eol=lf
