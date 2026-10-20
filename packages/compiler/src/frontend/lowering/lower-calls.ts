@@ -11803,6 +11803,30 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     // reserved %call slot — `colors.blue("x")` where blue also carries
     // `.bold` (the chalk shape).
     if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
+    // PROBE(anymember): a DYN-typed field (a record member admitted from a
+    // bare `any` declaration — mapRecordTypeInner's member-loop carve-out)
+    // called directly off the record (`opts.debug("x")`, not through an
+    // intermediate local): the generic call path (lowerCall's own
+    // `callee.type.kind === "dyn"` branch, same file) already builds
+    // exactly this call for a dyn-typed CALLEE reached any other way — an
+    // identifier, a Map/array read, a dyn-receiver member. This record-
+    // field-specific path never had that branch because no record field
+    // could be dyn-typed before the member-loop carve-out existed; a
+    // bare-`any` field's callee always arrived here as `null`/`void` and
+    // the owning record never mapped at all, so this call site was dead
+    // for that shape. Mirrors the generic branch exactly (same dynCall
+    // IrExpr, same spread handling via lowerSpreadArgsCall): the ONLY
+    // difference is the callee came from fieldGetExpr instead of a plain
+    // expression lowering.
+    if (callee.type.kind === "dyn") {
+      if (call.arguments.some((a) => ts.isSpreadElement(a))) {
+        const spreadServed = lowerSpreadArgsCall(L, call, callee, locOf(call));
+        if (spreadServed) return spreadServed;
+        L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
+      }
+      const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+      return { kind: "dynCall", callee, calleeName: access.getText(), args, type: DYN, loc: locOf(call) };
+    }
     if (callee.type.kind !== "func") L.badType(access, L.typeOf(access));
     const params = callee.type.params;
     const packedRest = restPackedArgs(L, call, params, locOf(call));

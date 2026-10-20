@@ -7682,6 +7682,48 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // unit-only union. The runtime value is the interned unit, JSON
       // omits the undefined arm exactly like an omitted optional.
       if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
+      // PROBE(anymember): a bare `any` FIELD declared in a SHIPPED .d.ts
+      // (a package's, or a local ambient one) — never one the PROGRAM
+      // itself wrote — reads exactly like mapIndexSignatureValue's own
+      // `any` exception just above in this file: the slot has exactly one
+      // declared name and exactly one runtime store either way, and
+      // `any`/`unknown` already intern to the SAME checked-dynamic
+      // representation — they differ only in what tsc lets a READ flow
+      // into without a cast, settled at the read, not here (see
+      // mapIndexSignatureValue's own comment for the full soundness
+      // argument).
+      //
+      // The declaration-file gate is NOT incidental: tests/diagnostics/
+      // any-outside-an-index-signature-still-has-no-representation.ts is a
+      // committed, pinned-snapshot regression proving the opposite answer
+      // for a PROGRAM-authored member (`const rec = { item: {} as any,
+      // width: "10px" }` keeps its SC2011 pair on purpose) — the hint
+      // there is "restate the type inside the static surface", advice only
+      // the type's AUTHOR can act on. A library's own lazy `.d.ts` member
+      // (mysql2's `PoolOptions.debug: any`) has no author the program can
+      // reach: nothing the caller writes changes the declaration, so the
+      // same refusal has no actionable fix behind it and buys nothing by
+      // staying a refusal. Every declaration must be in a declaration file
+      // (`.every`, not `.some`) so a merged program-side augmentation of an
+      // ambient interface still refuses.
+      //
+      // Does NOT touch mapTypeInner's `any` branch (`ctx.dynamic ? JSVAL :
+      // null`) — every OTHER position (a parameter, a local, a return, an
+      // array element, and a program-authored record member) still
+      // refuses a bare `any` exactly as before. Only a field inside THIS
+      // shape-building loop, and only when every declaration of that
+      // field is .d.ts-shipped, gets the DYN reading — and only after
+      // mapType's ordinary attempt already answered null for being bare
+      // `any`.
+      if (
+        pt === null &&
+        (fieldTs.flags & ts.TypeFlags.Any) !== 0 &&
+        !ctx.dynamic &&
+        checker.declarationsOf(p).length > 0 &&
+        checker.declarationsOf(p).every((d) => d.getSourceFile().isDeclarationFile)
+      ) {
+        pt = DYN;
+      }
       // dyn FIELDS map now (`{ v: unknown }`, `[string, unknown]` tuples):
       // the slot carries a dyn value exactly like an `unknown`-valued
       // overflow entry — same RC adapters, same dynFrom conversion on the
@@ -8091,6 +8133,22 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     if (isGenericCallableMemberType(fieldTs, checker) || isNonGenericOverloadSetMember(fieldTs, checker)) continue;
     let pt = mapType(fieldTs, ctx);
     if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
+    // PROBE(anymember): mirror mapRecordTypeInner's bare-`any` member
+    // carve-out (same file, see its own comment, including why it is
+    // gated on every declaration being .d.ts-shipped) so this DESCRIPTION
+    // agrees with what the shape builder actually admits — otherwise a
+    // record with a bare-`any` member AND a separately-blocked member
+    // would misattribute the blame to the (now-admitted) `any` field
+    // instead of the real blocker.
+    if (
+      pt === null &&
+      (fieldTs.flags & ts.TypeFlags.Any) !== 0 &&
+      !ctx.dynamic &&
+      checker.declarationsOf(p).length > 0 &&
+      checker.declarationsOf(p).every((d) => d.getSourceFile().isDeclarationFile)
+    ) {
+      continue;
+    }
     if (!pt || pt.kind === "void") {
       return `the record shape is supported, but its member '${p.name}' has type '${checker.typeToString(fieldTs)}', which does not compile`;
     }
