@@ -93,7 +93,7 @@ import {
   mangleLocal,
   mangleRawParam,
 } from "../mangle.js";
-import { coroField, coroLabel, coroReload, coroSpill, isRefCounted } from "./emit-coro.js";
+import { coroField, coroLabel, coroNeedsExcCell, coroReload, coroSpill, isRefCounted } from "./emit-coro.js";
 import { poisonYieldArm } from "./gen-poison.js";
 
 /** The runtime entry point for each arm of the yield channel. Spelled in
@@ -323,8 +323,24 @@ export function emitGenCoroSpawn(
     `${E.link}${sig} {`,
     /* has_exc mirrors emitCoroSpawns rather than deciding independently: one
      * place decides fat versus lean, and a second opinion here is exactly
-     * the copy-beside-the-source shape this front keeps paying for. */
-    `  ${frame} *sc_f = (${frame} *)scr_gen_coro_alloc(sizeof *sc_f, &${mangleCoroResume(fn.name)}, /*has_exc=*/false);`,
+     * the copy-beside-the-source shape this front keeps paying for.
+     *
+     * It was hardcoded `false` here regardless -- not a second opinion, no
+     * opinion at all -- while emitCoroFrames (emit-coro.ts) decides the
+     * STRUCT's own `base` field type from the real coroNeedsExcCell(fn):
+     * `ScrCoroExc base;` (fat) for a generator with a try/finally, which
+     * every one of this frame's OWN siblings already gets right. A fat
+     * frame built with has_exc=false stores the WRONG discriminant in
+     * scr_coro_init (scr_async.c's scr_gen_coro_alloc forwards it
+     * unchanged) -- the frame has real exception-cell storage but every
+     * reader of that bit is told it does not. Found investigating an
+     * unrelated class of RC-audit false exits, by its OWN collateral
+     * damage: tests/corpus/2014-generators-values.ts's `leaky` generator
+     * (a try/finally generator abandoned mid-drain) could not even
+     * compile past the `scr_gen_of_coro` call two lines below on a real
+     * clang (clang-22, a Linux sandbox run on this commit; zig cc/Windows
+     * only warns). */
+    `  ${frame} *sc_f = (${frame} *)scr_gen_coro_alloc(sizeof *sc_f, &${mangleCoroResume(fn.name)}, /*has_exc=*/${coroNeedsExcCell(fn) ? "true" : "false"});`,
     ...(lifted ? [`  sc_f->sc_env = scr_closure_retain(sc_env);`] : []),
     ...fn.params.flatMap((q) => {
       const f = coroField(q.localId);
@@ -337,7 +353,24 @@ export function emitGenCoroSpawn(
         `  scr_box_set_${boxAccess(q.type)}(sc_f->${f}, ${pname(q)}); /* moves the +1 in */`,
       ];
     }),
-    `  ScrGen *sc_g = scr_gen_of_coro(&sc_f->base, &${mangleGenDrop(fn.name)});`,
+    /* The cast is load-bearing, not cosmetic, for a FAT frame: `sc_f->base`
+     * is then declared `ScrCoroExc`, not `ScrCoroBase`, so `&sc_f->base` is
+     * a ScrCoroExc* -- a real incompatible-pointer-types mismatch against
+     * scr_gen_of_coro's ScrCoroBase* parameter, not merely a naming
+     * coincidence. It compiles (address-identical: ScrCoroBase is
+     * ScrCoroExc's first member, the embedding scr_coro.h itself documents
+     * and relies on) only because zig cc/Windows downgrades the mismatch to
+     * a warning; real clang (clang-22, confirmed in a Linux sandbox run on
+     * this commit) hard-errors on it. The cast makes the already-intended
+     * reinterpretation explicit instead of relying on a lenient compiler to
+     * paper over it -- a no-op for a lean frame, where the types already
+     * match. emitCoroSpawns' sibling call (emit-coro.ts, `scr_coro_spawn
+     * (&sc_f->base)`) has the identical shape and was NOT modified here: no
+     * corpus program was found exercising a fat ASYNC (non-generator) frame
+     * through it, so this fix is scoped to the call site actually proven to
+     * fail -- flagging the sibling as likely carrying the same latent gap,
+     * for whoever owns that lane to confirm and fix. */
+    `  ScrGen *sc_g = scr_gen_of_coro((ScrCoroBase *)&sc_f->base, &${mangleGenDrop(fn.name)});`,
     `  sc_f->sc_gen = sc_g;`,
     `  return sc_g; /* NOTHING has run: the body starts at the first .next() */`,
     `}`,
