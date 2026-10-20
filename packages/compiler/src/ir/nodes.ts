@@ -5725,6 +5725,14 @@ export type IrLibFn =
   | "key.signAsync"
   | "key.verifyAsync"
   | "key.genAsync"
+  /** crypto.publicEncrypt, the one shape this runtime lowers: an RSA
+   * public key (PEM string or DER/PEM Buffer — the two variants below),
+   * PKCS#1 v2.1 OAEP padding, SHA-1 MGF1/label hash, empty label, a Buffer
+   * plaintext. Not a KeyObject input — stateless and one-shot, scr_rsa_pubenc.c.
+   * Every other publicEncrypt/publicDecrypt/privateEncrypt/privateDecrypt
+   * shape stays refused (surfaces.ts). */
+  | "rsa.publicEncryptOaepSha1Str"
+  | "rsa.publicEncryptOaepSha1Bytes"
   | "big.add"
   | "big.sub"
   | "big.mul"
@@ -9689,6 +9697,32 @@ export function moduleUsesAsym(mod: IrModule): boolean {
   return found;
 }
 
+/** True when the module reaches the one crypto.publicEncrypt shape this
+ * runtime lowers (RSA public key, OAEP padding, SHA-1 hash) — the link
+ * switch that pulls scr_rsa_pubenc.c and the vendored mbedTLS RSA/PK/entropy
+ * stack in (cc.ts), independent of whether the program also uses tls/wrtc.
+ * A prefix matcher over the rsa.* namespace, not the one name that exists
+ * today, the same discipline moduleUsesCipher/moduleUsesAsym use — so a
+ * second rsa.* libCall added later is covered by construction. */
+export function moduleUsesRsaPubEnc(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("rsa.")) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module contains any dc.* libCall — the link switch that
  * pulls scr_dc.c (the diagnostics_channel registry and pub/sub) into the
  * binary (cc.ts). Channel-free binaries keep their exact size class.
@@ -11612,6 +11646,21 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
+  // crypto.publicEncrypt, RSA-OAEP/SHA-1 only (scr_rsa_pubenc.c). The RSA
+  // key is a REMOTE peer's, not local configuration -- bad/unparseable key
+  // material, a non-RSA key, or an OAEP-too-long input throws a catchable
+  // Error naming the call site and carrying Node's own ERR_OSSL_* code
+  // (measured against node v22.18.0), the sc_bad_key precedent
+  // (43bae03e0..6a66b3c4f: a remote-reachable uncatchable abort converted
+  // to a catchable throw after a live fire-test). Both backends emit the
+  // pending check through this set (emit-exprs.ts's finish(),
+  // llvm/emitter.ts's bespoke case ahead of the MAY_THROW_LIB_FNS/
+  // LIB_FN_SYMS guard), and may-throw.ts's generic `case "libCall"` seed
+  // reads this same set, so no bespoke fixpoint entry is needed the way
+  // recordKeyGet/unionKeyGet needed one -- those are a different IR node
+  // KIND, not a libCall.
+  "rsa.publicEncryptOaepSha1Str",
+  "rsa.publicEncryptOaepSha1Bytes",
   // RTCDataChannel.send on a channel that is not open. Node's
   // @roamhq/wrtc throws InvalidStateError SYNCHRONOUSLY (message
   // "RTCDataChannel.readyState is not 'open'" -- captured from the

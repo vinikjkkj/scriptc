@@ -25,7 +25,7 @@ import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
 import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesRequireVerdict, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesBigInt,
-  moduleUsesAsym, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
+  moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
@@ -749,6 +749,7 @@ function programNativeFeatures(
     // main installs scr_zlib_inflate_exact on the same predicate).
     bigint: moduleUsesBigInt(mod),
     asym: moduleUsesAsym(mod),
+    rsaPubEnc: moduleUsesRsaPubEnc(mod),
     cipher: moduleUsesCipher(mod),
     zlib: moduleUsesZlib(mod) || moduleEmbedsCompressedNpm(mod),
     // The link switch for scr_zlib_stream.c, the createUnzip bridge.
@@ -2066,6 +2067,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
     emitter: moduleUsesEmitter(mod),
     bigint: moduleUsesBigInt(mod),
     asym: moduleUsesAsym(mod),
+    rsaPubEnc: moduleUsesRsaPubEnc(mod),
     cipher: moduleUsesCipher(mod),
     zlib: moduleUsesZlib(mod),
     copying: moduleUsesCopying(mod),

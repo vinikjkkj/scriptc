@@ -3051,6 +3051,48 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return value.type.kind === "f64" ? value : null;
   }
 
+/** crypto.publicEncrypt's `{ key, oaepHash?, padding? }` first argument,
+   * as the lowered RSA-OAEP/SHA-1 shape or null for anything else. `key`
+   * must be present and map to a string or Buffer/Uint8Array (a KeyObject
+   * needs the general public-key value model, which this runtime does not
+   * have — see surfaces.ts); `oaepHash`, if present, must be the literal
+   * 'sha1'; `padding`, if present, must lower to the literal
+   * crypto.constants.RSA_PKCS1_OAEP_PADDING (4) — crypto.constants bakes
+   * as literals at every access site (crypto-tables.ts), so this reads the
+   * ALREADY-LOWERED value rather than re-deriving it. Any other property
+   * name (oaepLabel included) returns null: the claim this shape makes is
+   * that the emitted call reproduces what Node's own call does, and that
+   * claim does not extend to a label this runtime's OAEP call never
+   * passes. */
+  function rsaOaepSha1PublicKeyOption(
+    L: Lowerer,
+    optNode: ts.Expression,
+  ): { kind: "str" | "bytes"; key: IrExpr } | null {
+    let opt: ts.Expression = optNode;
+    while (ts.isParenthesizedExpression(opt)) opt = opt.expression;
+    if (!ts.isObjectLiteralExpression(opt)) return null;
+    let keyNode: ts.Expression | undefined;
+    for (const prop of opt.properties) {
+      if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) return null;
+      if (prop.name.text === "key") {
+        keyNode = prop.initializer;
+      } else if (prop.name.text === "oaepHash") {
+        const hashT = L.typeOf(prop.initializer);
+        if (!hashT.isStringLiteralType() || hashT.value !== "sha1") return null;
+      } else if (prop.name.text === "padding") {
+        const paddingIr = L.lowerExpr(prop.initializer);
+        if (paddingIr.kind !== "numLit" || paddingIr.value !== 4) return null;
+      } else {
+        return null;
+      }
+    }
+    if (keyNode === undefined) return null;
+    const keyIr = L.mapTypeOf(L.typeOf(keyNode));
+    if (keyIr?.kind === "string") return { kind: "str", key: L.lowerExprExpecting(keyNode, STRING) };
+    if (keyIr?.kind === "bytes") return { kind: "bytes", key: L.lowerExpr(keyNode) };
+    return null;
+  }
+
 /** The `{ privateKey, publicKey }` options argument of a diffieHellman
    * call, as the two KEYOBJ reads the agreement takes -- the object-literal
    * spelling and the BOUND-record one, exactly the pair the synchronous
@@ -5305,6 +5347,32 @@ let digestInputValueDispatches = 0;
         "string and Buffer/Uint8Array keys are the lowered forms (a KeyObject key needs the " +
           "secret-key surface, which has no lowering)",
       );
+    }
+    // `publicEncrypt({ key, oaepHash?, padding? }, buffer)` — ONE shape:
+    // an RSA public key (string or Buffer, never a KeyObject), PKCS#1
+    // v2.1 OAEP padding, the sha1 oaepHash. padding/oaepHash are each
+    // either absent (Node's own default for this function IS OAEP; the
+    // call that omits padding and the call that spells it out are the
+    // SAME operation) or exactly that literal value — anything else
+    // (a different padding, a different hash, an oaepLabel, a KeyObject
+    // key, a non-object first argument) returns null and falls through to
+    // the general fence (surfaces.ts's crypto.publicEncrypt entry), same
+    // as a diffieHellman shape that does not match falls through to ITS
+    // fence. scr_rsa_pubenc.c.
+    if (bi.member === "publicEncrypt") {
+      if (expr.arguments.length !== 2 || expr.arguments.some(ts.isSpreadElement)) return null;
+      const shape = rsaOaepSha1PublicKeyOption(L, expr.arguments[0]!);
+      if (shape === null) return null;
+      const dataNode = expr.arguments[1]!;
+      if (L.mapTypeOf(L.typeOf(dataNode))?.kind !== "bytes") return null;
+      const data = L.lowerExprExpecting(dataNode, BYTES_U8);
+      return {
+        kind: "libCall",
+        fn: shape.kind === "str" ? "rsa.publicEncryptOaepSha1Str" : "rsa.publicEncryptOaepSha1Bytes",
+        args: [shape.key, data],
+        type: BYTES_U8,
+        loc,
+      };
     }
     // `timingSafeEqual(a, b)` — the constant-time compare. Both
     // arguments must be typed-array/Buffer values; @types/node declares

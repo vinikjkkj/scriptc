@@ -278,6 +278,7 @@ export interface CcOptions {
   zlibStream?: boolean;
   bigint?: boolean;
   asym?: boolean;
+  rsaPubEnc?: boolean;
   cipher?: boolean;
   /** The program uses node:assert (index.ts detects assert.* libCalls on
    * the IR): compiles scr_assert.c — the zlib gating precedent, so
@@ -1604,6 +1605,7 @@ export interface LibArchiveOptions {
   zlib?: boolean;
   bigint?: boolean;
   asym?: boolean;
+  rsaPubEnc?: boolean;
   cipher?: boolean;
   copying?: boolean;
   abortSignal?: boolean;
@@ -2126,6 +2128,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
    * question with no right answer. */
   const sqlite = (opts.sqlite ?? false) && !dynamic;
   const wrtc = opts.wrtc ?? false;
+  // crypto.publicEncrypt's one lowered shape (RSA-OAEP/SHA-1,
+  // scr_rsa_pubenc.c) needs the same vendored mbedTLS archive as tls/wrtc
+  // but neither of those units -- see the tlsArchive gate below.
+  const rsaPubEnc = opts.rsaPubEnc ?? false;
   const dateUnit = opts.date ?? false;
   const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
   const fetchDispatch = (opts.fetchDispatch ?? false) && fetchStatic;
@@ -2193,10 +2199,12 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const engineArchive = dynamic ? await ensureEngineArchive(opts.sanitize ?? false, driver) : null;
   /* The WebRTC path needs the SAME vendored mbedTLS archive (DTLS 1.2,
    * ECDSA P-256, SHA-256) but NOT scr_tls.c, which is the TLS-over-TCP
-   * client. Gating the archive on `tls || wrtc` and scr_tls.c on `tls`
-   * alone keeps every existing TLS program's link line byte-identical --
-   * for them `tls` is true and both arms fire exactly as before. */
-  const tlsArchive = tls || wrtc ? await ensureTlsArchive(opts.sanitize ?? false, driver) : null;
+   * client; crypto.publicEncrypt's RSA-OAEP lowering (scr_rsa_pubenc.c)
+   * needs it too but is neither. Gating the archive on `tls || wrtc ||
+   * rsaPubEnc` and scr_tls.c on `tls` alone keeps every existing TLS and
+   * WebRTC program's link line byte-identical -- for them `rsaPubEnc` is
+   * false and the extra arm never fires. */
+  const tlsArchive = tls || wrtc || rsaPubEnc ? await ensureTlsArchive(opts.sanitize ?? false, driver) : null;
   // --dynamic + regex shares the archive's libregexp (its host hooks and
   // ours would collide; see scr_regex.c) — the standalone objects are for
   // static builds only.
@@ -2420,6 +2428,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       ? [
           "-I", join(vendorTlsDir(), "include"),
           ...(tls ? [rt(join(rtDir, "scr_tls.c"))] : []),
+          ...(rsaPubEnc ? [rt(join(rtDir, "scr_rsa_pubenc.c"))] : []),
           tlsArchive,
           // mbedTLS's win32 entropy poll is BCryptGenRandom (bcrypt.h) —
           // an import the unconditional win32 libs above don't carry.
