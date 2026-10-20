@@ -156,6 +156,16 @@ jobs:
         flavor: [plain, san]
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     env:
+      # Pinned so resolveProvenanceSources' own "cache directory is ... unset"
+      # note (provenance.ts, emitted whenever this variable is unset) never
+      # fires here: several provenance tests assert an exact notes array
+      # (empty, or exactly one entry naming something else), and a CI runner
+      # that never sets this is indistinguishable, from that assertion's
+      # point of view, from a real misconfiguration. This was never a
+      # platform difference — Windows' tests_windows job hit the identical
+      # extra-note failures on the identical subtests before this was added
+      # there too; nothing here is OS-conditional.
+      SCRIPTC_PROVENANCE_CACHE: ${{ runner.temp }}/scriptc-provenance-cache
       # Capped workers: the shared runner's cores oversubscribe under the
       # corpus compile fan-out, and vitest's worker RPC times out ("Timeout
       # calling onTaskUpdate") with every test green — the same contention
@@ -449,6 +459,12 @@ jobs:
       SCRIPTC_NO_CACHE: "1"
       SCRIPTC_CC: zigcc
       SCRIPTC_TARGET: x86_64-windows-gnu
+      # See the Linux `tests` job's identical line: pins resolveProvenanceSources'
+      # own "cache directory is ... unset" note off, so it cannot pollute the
+      # exact notes-array assertions several provenance tests make. Not a
+      # Windows-specific need — this runner was missing it exactly as much as
+      # Linux was.
+      SCRIPTC_PROVENANCE_CACHE: ${{ runner.temp }}/scriptc-provenance-cache
       # GitHub's standard windows-latest runner provides 4 vCPU, same as
       # the ubuntu-24.04 runner `tests` caps at "4" for the same reason
       # (worker-pool oversubscription under the corpus compile fan-out).
