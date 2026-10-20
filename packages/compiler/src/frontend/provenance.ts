@@ -742,7 +742,7 @@ function mapEntryToSource(
  * a reviewable diff; widening a boolean is not.
  *
  * The measurement: tests/perf/wamcoord section 11. */
-export const AUTHORED_JS_DEFAULT_PACKAGES: readonly string[] = ["@vinikjkkj/wa-wam"];
+export const AUTHORED_JS_DEFAULT_PACKAGES: readonly string[] = ["@vinikjkkj/wa-wam", "mysql2"];
 
 /** Values of SCRIPTC_PROVENANCE_AUTHORED_JS that mean EVERY package. `1` is
  * the spelling that shipped first, when the gate was a boolean; env templates
