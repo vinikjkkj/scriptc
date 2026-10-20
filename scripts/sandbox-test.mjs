@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -368,8 +369,39 @@ function run(
 }
 
 const scopeArgs = vercelConfig.scopeArgs;
+// Node's child_process.spawn()/spawnSync() do not apply PATHEXT resolution to a
+// bare command name: on POSIX the extensionless `node_modules/.bin/vercel` shim
+// is found via PATH and works, but on Windows the only PATH entry is the
+// generated `vercel.CMD`, and spawning a `.CMD` file without `shell: true`
+// throws EINVAL -- Windows batch files are not directly executable. Routing
+// through `shell: true` instead would hand these arguments to cmd.exe, which
+// reinterprets `%`, `^`, `&`, `|`, `<`, `>` and quoting; several call sites
+// below build `--env KEY=VALUE` pairs and `--scope`/`--project` values from
+// data this script does not fully control, so that risks silently corrupting
+// an argument instead of failing loudly. Instead, resolve the CLI's own
+// declared bin entry from its package.json and invoke it with the same `node`
+// binary already running this script -- every argument stays an exact array
+// element on both platforms, with no shell involved, which is what the
+// generated OS shims do internally anyway once you strip their shell/batch
+// wrapper away.
+function resolveVercelEntry() {
+  const pkgPath = join(root, "node_modules", "vercel", "package.json");
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  } catch (cause) {
+    throw new Error(`Could not read the "vercel" package at ${pkgPath}`, { cause });
+  }
+  const binEntry = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.vercel;
+  if (!binEntry) {
+    throw new Error(`"vercel" package.json has no "bin.vercel" entry (${pkgPath})`);
+  }
+  return join(root, "node_modules", "vercel", binEntry);
+}
+const vercelEntry = resolveVercelEntry();
+const vercelArgv = (args) => [vercelEntry, ...args];
 const vercel = ([group, command, ...args], options) =>
-  run("vercel", [group, command, ...scopeArgs, ...args], {
+  run(process.execPath, vercelArgv([group, command, ...scopeArgs, ...args]), {
     ...options,
     baseEnv: vercelProcessEnv,
   });
@@ -504,7 +536,7 @@ async function preflight() {
   console.log(`  shape: ${workers.length} sandboxes, ${vcpus} vCPUs each`);
 
   try {
-    await run("vercel", ["--version"], {
+    await run(process.execPath, vercelArgv(["--version"]), {
       baseEnv: vercelProcessEnv,
       label: "preflight CLI",
       timeoutMs: 30_000,
@@ -702,7 +734,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
       console.log(
         `\nStopping ${created.size} disposable sandbox${created.size === 1 ? "" : "es"}...`,
       );
-      spawnSync("vercel", ["sandbox", "stop", ...scopeArgs, ...created], {
+      spawnSync(process.execPath, vercelArgv(["sandbox", "stop", ...scopeArgs, ...created]), {
         cwd: root,
         env: { ...vercelProcessEnv, NO_UPDATE_NOTIFIER: "1" },
         stdio: "inherit",
