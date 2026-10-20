@@ -71,7 +71,6 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import {
-  arrayOf,
   BOOL,
   F64,
   funcOf,
@@ -79,7 +78,6 @@ import {
   type IrFunction,
   type IrLibFn,
   type IrType,
-  RESPONSE_T,
   type SrcLoc,
   STRING,
   typeEquals,
@@ -101,8 +99,6 @@ interface BuiltinFnValue {
 function libCall(fn: IrLibFn, args: readonly IrExpr[], type: IrType, loc: SrcLoc): IrExpr {
   return { kind: "libCall", fn, args: [...args], type, loc };
 }
-
-const FETCH_VALUE_RET: IrType = { kind: "promise", inner: RESPONSE_T };
 
 /** An entry whose signature is the CHECKER'S OWN mapping of the name
  * rather than a shape written here.
@@ -163,8 +159,7 @@ const BUILTIN_FN_VALUE_RESOLVERS: Readonly<Record<string, BuiltinFnValueResolver
 const BUILTIN_FN_VALUES: Readonly<Record<string, BuiltinFnValue | undefined>> = {
   // `fetch` has NO fixed row: its signature is the checker's own mapping
   // of the ambient global, resolved per program by
-  // BUILTIN_FN_VALUE_RESOLVERS above. The FETCH_VALUE_RET constant stays
-  // as the shape that resolver requires.
+  // BUILTIN_FN_VALUE_RESOLVERS above.
   // parseInt's radix is EXPLICIT in the value form -- see the header's
   // arity note. Its direct call completes an omitted radix to 0.
   parseInt: {

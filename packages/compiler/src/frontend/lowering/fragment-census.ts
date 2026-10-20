@@ -30,7 +30,7 @@
  */
 
 import { appendFileSync } from "node:fs";
-import type { IrFunction, IrGlobal, IrRecordShape, IrUnionDef } from "../../ir/nodes.js";
+import type { IrFunction, IrGlobal } from "../../ir/nodes.js";
 import { mintLogActive, mintLogSnapshot } from "../types.js";
 import {
   censusRecord,
