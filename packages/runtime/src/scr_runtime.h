@@ -6205,6 +6205,12 @@ ScrMap *scr_dyn_map_unbox(const ScrDyn *d, const char *tkey,
 /* The boxed type's display word for error texts — "Map" or "Set",
  * decided by the interned typeKey's own spelling. */
 const char *scr_dyn_map_cls(const ScrDyn *d);
+/* `u instanceof Map` / `u instanceof Set` on an unknown value: the
+ * kind compare plus the tkey-first-byte discriminant scr_dyn_map_cls
+ * already uses to tell the two apart -- scr_dyn_is_u8array's shape,
+ * one kind over. Borrowed; never throws. */
+bool scr_dyn_is_map(const ScrDyn *d);
+bool scr_dyn_is_set(const ScrDyn *d);
 /* The loud ladder for every operation the box has no layout to answer
  * (keyed access and indexing, `size`, `get`/`has`/`add`, iteration,
  * structuredClone): "<what> on a dynamic Map is not supported yet".

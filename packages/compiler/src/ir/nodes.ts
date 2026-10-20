@@ -7209,13 +7209,21 @@ export type IrExpr =
    * `data instanceof ArrayBuffer` that every WebSocket message handler
    * writes was a refusal, and the `instanceof Uint8Array` line ABOVE it
    * silently decided the dispatch on its own. */
+  /** `"map"` is `v instanceof Map` and `"set"` is `v instanceof Set` on an
+   * unknown value. Both ride the SAME dyn kind (SCR_DYN_MAP is shared --
+   * `Map<K,V>` and `Set<E>` collapse to identical ScrMap storage, told
+   * apart only by the boxed type key's first byte, scr_dyn_map_cls's own
+   * reasoning), so the bare kind compare answers for neither -- each test
+   * is the runtime predicate that adds that one-byte discriminant
+   * (scr_dyn_is_map / scr_dyn_is_set), the same shape `u8array` takes
+   * below for the kind SCR_DYN_BYTES shares with DataView. */
   /** `u8array` is `bytes` MINUS the DataViews: SCR_DYN_BYTES carries both
    * (DataView maps to bytes<u8>), so the bare kind compare answers TRUE
    * for a boxed DataView where Node's `instanceof Uint8Array` answers
    * false. `bytes` keeps its meaning -- "this dyn holds u8 bytes", which
    * is what every narrowing extraction wants -- and the instanceof site
    * uses the flavor-aware one. */
-  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An

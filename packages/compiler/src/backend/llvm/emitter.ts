@@ -10829,6 +10829,16 @@ class LlEmitter {
             this.declare(`declare zeroext i1 @scr_dyn_is_u8array(ptr)`);
             test = B.tmp();
             B.line(`${test} = call zeroext i1 @scr_dyn_is_u8array(ptr ${d.name})`);
+          } else if (e.test === "map" || e.test === "set") {
+            // `u instanceof Map` / `u instanceof Set`: DK.MAP (SCR_DYN_MAP)
+            // is shared by both, so the kind compare alone cannot tell
+            // them apart. One runtime predicate per word, shared with the
+            // C lane so the two cannot answer differently. Borrowed;
+            // never throws.
+            const helper = `scr_dyn_is_${e.test}`;
+            this.declare(`declare zeroext i1 @${helper}(ptr)`);
+            test = B.tmp();
+            B.line(`${test} = call zeroext i1 @${helper}(ptr ${d.name})`);
           } else {
             const kindOf: Record<string, number> = {
               string: DK.STR,
