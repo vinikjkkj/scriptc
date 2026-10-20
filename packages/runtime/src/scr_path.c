@@ -22,7 +22,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _MSC_VER
+#include <direct.h> /* _getcwd */
+#define getcwd _getcwd
+#else
 #include <unistd.h>
+#endif
 
 /* ── a tiny growable byte buffer ─────────────────────────────────────── */
 
