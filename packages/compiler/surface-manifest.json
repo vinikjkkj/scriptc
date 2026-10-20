@@ -701,7 +701,7 @@
       "name": "crypto.publicEncrypt",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "asymmetric-key operations need a public-key stack (bignum, RSA/EC/EdDSA math) and a KeyObject value model — neither exists in the static runtime, so no faithful lowering can be small; the lowered crypto surface is hashing, randomness, and the introspection statics"
+      "note": "the lowered shape is an RSA public key (a PEM string or Buffer, never a KeyObject) with OAEP padding and the sha1 oaepHash — every other key type, padding, oaepHash, or an oaepLabel has no lowering; scr_rsa_pubenc.c"
     },
     {
       "id": "node-builtin.crypto.randomBytes",

@@ -5,7 +5,7 @@ import { fiberOnly, type Fenced } from "../../ir/suspends.js";
 import { poisonYieldArm } from "./gen-poison.js";
 import { emitCoroYield } from "./emit-gen-coro.js";
 import type { CEmitter, Temp } from "./emitter.js";
-import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
+import { rcSitesRequested, rcSiteLabel, srcSite } from "./emitter.js";
 import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
@@ -7665,6 +7665,30 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_fmt_s(${arg(0)}, ${arg(1)})`);
           case "big.str":
             return finish(`scr_big_to_str(${arg(0)}, ${arg(1)})`);
+          // crypto.publicEncrypt, RSA-OAEP/SHA-1 only (scr_rsa_pubenc.c).
+          // Stateless and one-shot — no KeyObject involved. The RSA key
+          // here is a REMOTE peer's (a MySQL server's, for the one caller
+          // this exists for), not local configuration, so bad/unparseable
+          // key material, a non-RSA key, or an input too long for OAEP at
+          // this key size throw a catchable Error instead of trapping —
+          // the sc_bad_key precedent (43bae03e0..6a66b3c4f): a remote-
+          // reachable uncatchable abort is the one failure shape this
+          // runtime no longer ships for new surfaces. IN MAY_THROW_LIB_FNS
+          // (unlike key.* above it, which really does trap on bad DER —
+          // that family's input is local file/env material, not a peer's).
+          // sc_site: the shared runtime symbol serves every publicEncrypt
+          // call site in the module, so the site rides in as a THIRD,
+          // compiler-baked argument (recordKeyGetHelper's own shape) —
+          // finish()'s MAY_THROW_LIB_FNS check below still fires the
+          // pending check exactly as it does for every other member here.
+          case "rsa.publicEncryptOaepSha1Str":
+            return finish(
+              `scr_rsa_public_encrypt_oaep_sha1_str_key(${arg(0)}, ${arg(1)}, ${cStringLiteral(Buffer.from(srcSite(e.loc), "utf8"))})`,
+            );
+          case "rsa.publicEncryptOaepSha1Bytes":
+            return finish(
+              `scr_rsa_public_encrypt_oaep_sha1_bytes_key(${arg(0)}, ${arg(1)}, ${cStringLiteral(Buffer.from(srcSite(e.loc), "utf8"))})`,
+            );
           case "key.fromPkcs8":
             return finish(`scr_key_from_pkcs8(${arg(0)})`);
           case "key.fromSpki":

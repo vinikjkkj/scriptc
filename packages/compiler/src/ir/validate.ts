@@ -1342,6 +1342,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.dynS": { argTypes: [DYN, F64], result: STRING },
   "insp.fmtS": { argTypes: [DYN, F64], result: STRING },
   "big.str": { argTypes: [BIGINT_T, F64], result: STRING },
+  "rsa.publicEncryptOaepSha1Str": { argTypes: [STRING, BYTES_U8_T], result: BYTES_U8_T },
+  "rsa.publicEncryptOaepSha1Bytes": { argTypes: [BYTES_U8_T, BYTES_U8_T], result: BYTES_U8_T },
   "key.fromPkcs8": { argTypes: [BYTES_U8_T], result: KEYOBJ_T },
   "key.fromSpki": { argTypes: [BYTES_U8_T], result: KEYOBJ_T },
   "key.secretBytes": { argTypes: [BYTES_U8_T], result: KEYOBJ_T },

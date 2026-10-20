@@ -1442,6 +1442,22 @@ declare module "crypto" {
     format: "der" | "pem";
     type?: "spki";
   }): KeyObject;
+  /* publicEncrypt: the one shape this runtime lowers -- an RSA public key
+   * (a PEM string or a DER/PEM Buffer, never a KeyObject: that needs the
+   * general public-key value model this runtime does not have), PKCS#1
+   * v2.1 OAEP padding, the sha1 oaepHash. @types/node widens `key` to
+   * RsaPublicKey | RsaPrivateKey | KeyLike and admits every padding/hash;
+   * the fallback declares only the form that lowers -- the lowering
+   * itself (lower-builtins.ts) refuses any call whose oaepHash/padding
+   * are not literally 'sha1'/RSA_PKCS1_OAEP_PADDING, or that omits `key`,
+   * or that carries an oaepLabel or any other property, so this type being
+   * permissive about those two optional fields does not widen what
+   * compiles. publicDecrypt/privateEncrypt/privateDecrypt stay undeclared
+   * -- they have no lowering. */
+  export function publicEncrypt(
+    key: { key: string | Uint8Array; oaepHash?: string; padding?: number },
+    buffer: Uint8Array,
+  ): Buffer;
   /* AES-256 in the three modes the runtime implements. @types/node splits
    * these by overload (a gcm algorithm gives CipherGCM, everything else
    * plain Cipher); the fallback declares the union of the members and lets

@@ -1609,6 +1609,21 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     createHmac:
       "the lowered algorithms are sha256, sha512, sha1 and md5, keyed by a string or a Buffer — " +
       "a KeyObject key needs the secret-key surface, which has no lowering",
+    // The one asymmetric-key operation with a narrow lowering: an RSA
+    // public key (a PEM string or a DER/PEM Buffer, never a KeyObject —
+    // that needs the general public-key value model the rest of this
+    // family is fenced on below) with PKCS#1 v2.1 OAEP padding and the
+    // sha1 oaepHash (Node's own default for this function, so the call
+    // that omits padding/oaepHash entirely resolves to the same lowered
+    // shape as the call that spells them out). Every other key type,
+    // padding (RSA_PKCS1_PADDING, RSA_NO_PADDING), oaepHash, or an
+    // oaepLabel falls through to the fence below, UNCHANGED from before
+    // this shape was added — this message only fires for a shape outside
+    // the one that lowers.
+    publicEncrypt:
+      "the lowered shape is an RSA public key (a PEM string or Buffer, never a KeyObject) with " +
+      "OAEP padding and the sha1 oaepHash — every other key type, padding, oaepHash, or an " +
+      "oaepLabel has no lowering; scr_rsa_pubenc.c",
     ...Object.fromEntries(
       [
         "generateKeyPair", "generateKeyPairSync", "generateKey", "generateKeySync",
@@ -1616,7 +1631,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
         "createSign", "createVerify", "sign", "verify",
         "createDiffieHellman", "createDiffieHellmanGroup", "getDiffieHellman",
         "createECDH", "diffieHellman",
-        "publicEncrypt", "publicDecrypt", "privateEncrypt", "privateDecrypt",
+        "publicDecrypt", "privateEncrypt", "privateDecrypt",
       ].map((m) => [
         m,
         "asymmetric-key operations need a public-key stack (bignum, RSA/EC/EdDSA math) and a " +
