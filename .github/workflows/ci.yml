@@ -3,25 +3,20 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
-  # Nightly full macOS sweep, including on days without a push to main.
-  schedule:
-    - cron: "17 7 * * *"
-  # A manual run; macos_full runs the complete suite on macOS as the nightly sweep does (for example on a
-  # release candidate commit).
+  # Not a schedule: fires only when invoked, costs nothing idle, and without
+  # it there would be no way to re-run CI short of pushing a commit. No
+  # inputs -- the only consumer of the old macos_full input
+  # (tests_macos's full-corpus nightly variant) no longer exists; see
+  # macos_number_oracle below.
   workflow_dispatch:
-    inputs:
-      macos_full:
-        description: Run the complete test suite on macOS
-        type: boolean
-        default: false
 
 concurrency:
-  # A new push to a pull request cancels its previous run. Every push to main runs to completion in a group of
-  # its own commit, so each merged commit gets a full result (releases require a green run on their commit). The
-  # nightly sweep and manual runs neither cancel nor are cancelled by main pushes.
-  group: ci-${{ github.event_name == 'schedule' && 'schedule' || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Every push to main runs to completion in a group of its own commit (releases need a full result per
+  # merged commit); a manual dispatch gets its own group by run id. No pull_request or schedule trigger
+  # exists anymore (CI is push-to-main and workflow_dispatch only), so cancel-in-progress is PERMANENTLY
+  # false -- by design, not dead: a push to main must never be auto-cancelled by a later push.
+  group: ci-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.sha }}
+  cancel-in-progress: false
 
 jobs:
   # GitHub recommends stack.base.ref == base.ref for the lowest unmerged PR:
@@ -74,6 +69,13 @@ jobs:
       effects: ${{ steps.lanes.outputs.effects }}
       bootstrap: ${{ steps.lanes.outputs.bootstrap }}
     steps:
+      # No `pull_request` trigger exists anymore (push/workflow_dispatch only),
+      # so this checkout's `if:` is never true and the script's `elif git show
+      # ...` branch below it is unreachable dead code -- `every()` is the only
+      # path either event can take. Left in place (not deleted) rather than
+      # rewritten: it costs nothing to skip, and it is the one piece of this
+      # job that would come back to life on its own if `pull_request` were
+      # ever reintroduced as a trigger.
       - uses: actions/checkout@v4
         if: github.event_name == 'pull_request'
         with:
@@ -122,7 +124,8 @@ jobs:
     # matrix on macOS runs in 8 queued waves -- slower than the old 6-job/2-
     # wave macOS config, the opposite of the goal. Linux has no such cap
     # (up to the account-wide ~40-job ceiling), so the split parallelizes
-    # for real here. tests_macos below keeps a full run on macOS arm64.
+    # for real here. macos_number_oracle below keeps a small, targeted
+    # macOS cross-check for the one host-sensitive path that job found.
     #
     # This is a platform move, so correctness was checked, not assumed,
     # before committing to it -- three independent, pre-existing pieces of
@@ -141,8 +144,11 @@ jobs:
     #     clang build of this runtime compiles and runs (same default-
     #     clang code path this job's plain `pnpm build` also takes).
     # None of the three is a live run of THIS exact job (native x86_64,
-    # not cross-compiled, on ubuntu-24.04) -- tests_macos stays as the
-    # redundant, already-proven cross-check rather than retiring macOS.
+    # not cross-compiled, on ubuntu-24.04). What is NOT covered by any of
+    # the three: string-to-number parsing (Number()/parseFloat/JSON numbers)
+    # calls the host's own strtod() directly (scr_string.c, scr_json.c) --
+    # not vendored, not proven host-independent the way Ryu is. That is
+    # macos_number_oracle's whole job, not a full-corpus redundancy.
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -220,28 +226,57 @@ jobs:
         if: matrix.flavor == 'plain'
         run: pnpm test tests/harness/corpus/coverage-corpus-
 
-  # Redundant with `tests` above by design: oracle fidelity on the
-  # platform this suite's number-formatting and differential contracts
-  # were historically verified against, kept at this fork's original
-  # (proven) divisor rather than upstream's nightly-only 10-way/PR-only
-  # 3-way split -- this fork has no scripts/ci-test-plan.mjs to select a
-  # "darwin subset", so this runs the WHOLE corpus every time, same as
-  # `tests`, just on fewer, larger shards (macOS's 5-concurrent cap makes
-  # a wide matrix here counterproductive -- see `tests`'s comment).
-  tests_macos:
-    name: test (macOS, ${{ matrix.flavor }}, ${{ matrix.shard }}/3)
+  # Replaces the earlier full-corpus tests_macos. That job ran the WHOLE
+  # corpus on macOS purely out of caution ("the platform the differential +
+  # number-formatting oracles were historically verified against"), with no
+  # push trigger left to amortize its cost over (no schedule, no
+  # pull_request) every push to main would have lit 6 macOS jobs at 1/3 of
+  # the corpus each, against the 5-concurrent macOS cap no plan raises --
+  # an estimated 1-2 hours owning the critical path, guarding a claim this
+  # fork's own source mostly refutes:
+  #
+  #   - packages/runtime/src/scr_number.c: double-to-string is vendored Ryu,
+  #     "pure integer arithmetic -- no snprintf/strtod probing, no locale
+  #     dependence" -- cannot diverge by host libc. Not host-sensitive.
+  #   - tests/harness/linux-differential.test.ts's header: the whole corpus
+  #     passes on Linux with no skip list. Not host-sensitive, so far as
+  #     that lane's own scope statement is concerned.
+  #
+  # One path IS genuinely host-sensitive and was found while checking the
+  # above: string-to-number parsing (Number(str), parseFloat, JSON numeric
+  # literals -- the Number(aString)/unary-+ lowering and JSON.parse's number
+  # grammar) calls the HOST's own strtod() directly (scr_string.c,
+  # scr_json.c) -- not vendored, not proven host-independent the way Ryu is.
+  # Correctly-rounded strtod is a well-defined operation so glibc and
+  # Apple's libc SHOULD agree, but "should" is an assumption, not the Ryu
+  # argument's proof, and both libc families have historically had strtod
+  # rounding bugs for edge cases (subnormals, long digit strings, exponent
+  # boundaries).
+  #
+  # So: kept, not dropped -- but narrowed to exactly what is host-sensitive,
+  # as a single job (no sharding, no flavor matrix: the cap is irrelevant to
+  # one job). These three already-existing, already-maintained oracle tests
+  # each compile one small C binary and run it against a committed
+  # Node-generated case file -- no corpus compilation, no differential
+  # sweep:
+  #   - tonumber.test.ts: scr_string_to_number vs Node's Number(s) over
+  #     ~50k cases (whitespace set, signed decimals/exponents, boundary
+  #     doubles, 0x/0o/0b, garbage -> NaN) -- the strtod-dependent path
+  #     above, directly.
+  #   - json.test.ts: the JSON number grammar + parser (also strtod-backed)
+  #     under ASan + the RC audit.
+  #   - number.test.ts: scr_f64_to_str (Ryu) vs Node's String(x) -- kept for
+  #     symmetry with the formatting half of the original claim, even
+  #     though the Ryu argument above says it should not be able to diverge.
+  # All three already build with -fsanitize=address -DSCR_RC_AUDIT
+  # unconditionally (see their own ccCompile args), so there is no
+  # plain/san flavor split to carry here.
+  macos_number_oracle:
+    name: test (macOS number/string-to-number oracle)
     needs: [validation_scope, lanes]
     if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.macos == 'true' }}
     runs-on: macos-15
-    strategy:
-      fail-fast: false
-      matrix:
-        flavor: [plain, san]
-        shard: [1, 2, 3]
-    env:
-      SCRIPTC_TEST_WORKERS: "4"
-      SCRIPTC_SAN: ${{ matrix.flavor == 'san' && '1' || '' }}
-      SCRIPTC_TEST_SHARD: ${{ matrix.shard }}/3
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -253,24 +288,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - name: Tests (file-sharded, case-sharded files excluded)
-        run: >-
-          pnpm test --shard=${{ matrix.shard }}/3
-          --exclude=tests/harness/corpus/**
-          --exclude=tests/harness/npm.test.ts
-          --exclude=tests/harness/server.test.ts
-          --exclude=tests/harness/vercel-e2e.test.ts
-      - name: Tests (case-sharded, slice ${{ matrix.shard }}/3)
+      - name: Number/string-to-number oracle tests
         run: >-
           pnpm test
-          tests/harness/corpus/differential-
-          tests/harness/corpus/llvm-differential-
-          tests/harness/npm.test.ts
-          tests/harness/server.test.ts
-          tests/harness/vercel-e2e.test.ts
-      - name: Tests (coverage sweep, slice ${{ matrix.shard }}/3)
-        if: matrix.flavor == 'plain'
-        run: pnpm test tests/harness/corpus/coverage-corpus-
+          packages/runtime/test/tonumber.test.ts
+          packages/runtime/test/json.test.ts
+          packages/runtime/test/number.test.ts
 
   # A real host-clang/glibc build, not the zig cross-target lane: catches
   # Linux feature-test macro omissions at compile time and separate-libm
@@ -307,6 +330,14 @@ jobs:
   windows_cli:
     name: test (windows CLI smoke)
     needs: [validation_scope, lanes]
+    # Deliberate, not a copy-paste: upstream's own scripts/ci-lanes.mjs names
+    # this lane "linux" but documents it as "the Linux build and test
+    # shards... and the smaller Linux, Windows and mobile jobs" -- Windows
+    # and the Linux lane share one flag by upstream's own taxonomy. Harmless
+    # today (every lane is always true with no pull_request trigger to drive
+    # ci-lanes.mjs's diff-based selection), but if that script is ever ported
+    # here, this gate should stay pointed at .linux, not switch to a
+    # nonexistent .windows output.
     if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 15
@@ -372,7 +403,7 @@ jobs:
   # Require this check on the stack base. Upper layers must not pass before
   # full validation, so untested groups cannot merge. Merge bottom-up.
   test:
-    needs: [validation_scope, lanes, code_quality, tests, tests_macos, linux_host_clang, windows_cli]
+    needs: [validation_scope, lanes, code_quality, tests, macos_number_oracle, linux_host_clang, windows_cli]
     # Run even after failed or cancelled lanes: skipped required jobs allow merging.
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -388,7 +419,7 @@ jobs:
               # A lane job passes when it succeeded, or when it was skipped because its lane is off.
               lane() { [ "$2" = success ] || { [ "$3" = false ] && [ "$2" = skipped ]; } || { echo "$1: $2 (lane $3)"; exit 1; }; }
               lane tests "${{ needs.tests.result }}" "${{ needs.lanes.outputs.linux }}"
-              lane tests_macos "${{ needs.tests_macos.result }}" "${{ needs.lanes.outputs.macos }}"
+              lane macos_number_oracle "${{ needs.macos_number_oracle.result }}" "${{ needs.lanes.outputs.macos }}"
               lane linux_host_clang "${{ needs.linux_host_clang.result }}" "${{ needs.lanes.outputs.linux }}"
               lane windows_cli "${{ needs.windows_cli.result }}" "${{ needs.lanes.outputs.linux }}"
               ;;
