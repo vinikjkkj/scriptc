@@ -62,10 +62,13 @@ const pathIsQuotable = !/\s/.test(cycstat) && !/\s/.test(pagecen);
 
 /* The arena is compiled out under SCR_RC_AUDIT (that lane exists to prove
  * every logical free is a real free, so it must reach free() for every
- * block), and the sanitized lane does not link on this toolchain. Either
- * way there is nothing here to measure, and skipping loudly beats asserting
- * a zero that means "not armed". */
-const armable = pathIsQuotable && !rcAudit;
+ * block). SCRIPTC_SAN=1 IS that lane: cc.ts's optAuditArgs adds
+ * -DSCR_RC_AUDIT together with -fsanitize=address, and scr_cyc_arena_on()
+ * returns 0 unconditionally under it, so every block goes to calloc
+ * (measured: callocfallback=620915, carved=0). The arena does not exist in
+ * that build by design, and there is nothing here to measure, so it skips
+ * loudly rather than asserting a zero that means "not armed". */
+const armable = pathIsQuotable && !rcAudit && !sanitize;
 
 interface Arena {
   readonly chunks: number;
