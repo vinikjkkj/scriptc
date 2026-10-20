@@ -1096,6 +1096,26 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     const target = contextual
       ? L.checker.getContextualType(contextual)
       : (resolvedTarget ?? undefined);
+    // A real expression position (contextual is the lambda itself, not a
+    // declaration form) whose surrounding syntax supplies NO contextual
+    // type at all (the unannotated-const case) commits this value to no
+    // destination yet — there is nothing for the completed ABI to
+    // disagree with. Re-deriving the lambda's "own type" through the
+    // general type mapper to confirm that tautology is where this used to
+    // fence for real code: that mapper refuses a bare `any` ANYWHERE in
+    // the signature (mapType's any->null rule, off outside --dynamic), so
+    // any untyped sub-component — the inner handler's own parameters in a
+    // curried `(opts = {}) => (ctx) => ...` factory, the common shape of
+    // untyped npm callback factories — poisoned the confirmation even
+    // though lambdaSignature's shapes already gave funcType a sound
+    // completed signature (optional/defaulted params armed, untyped
+    // sub-parts carried as 'dyn'). Skip the confirmation instead of
+    // failing it: a later real destination gets its own compatibility
+    // check (general assignment/coercion, or this same rule at that use)
+    // when one exists; declaration forms with structurally no target
+    // (nested function declarations) still fall through below unchanged,
+    // since contextual is null there, not merely untyped.
+    if (contextual && target === undefined) return;
     const mapped = target
       ? L.mapTypeOf(target)
       : contextual
