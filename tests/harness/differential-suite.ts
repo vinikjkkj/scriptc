@@ -201,13 +201,36 @@ async function runBinary(cmd: string, args: string[]): Promise<RunResult> {
  * (scriptc-only diagnostics, not program output) — dropped before the
  * byte comparison. Linux ASan additionally prints a once-per-process
  * warning at the first fiber swapcontext (no off switch in the
- * interceptor; Apple's ASan never intercepts ucontext) — same treatment. */
+ * interceptor; Apple's ASan never intercepts ucontext) — same treatment.
+ *
+ * The coroutine counterpart (scr_console.c's `scr_rc_audit_at_exit`, added
+ * by f9ba8ec2d) is the SAME kind of scriptc-only diagnostic as the fiber
+ * skip notice above — Node can never print it, by construction — but
+ * f9ba8ec2d's own design deliberately does NOT `return` after printing it
+ * (unlike the fiber branch): the audit "keeps looking, keeps measuring"
+ * past an abandoned coroutine rather than exempting everything else too,
+ * so an UNRELATED leak sharing the same exit is still caught. That means
+ * this line, unlike the skip notice, was never exempted from the byte
+ * comparison, and every corpus program with an abandoned coroutine (one
+ * nobody resumes at loop exhaustion — Node exits 0 there too) failed the
+ * differential on a stderr mismatch alone, even when nothing else was
+ * live and the exit code already agreed with Node's. Measured directly
+ * (classd probe, 2026-10-20): 2014-generators-values.ts and
+ * 2019-generators-loops.ts print exactly this line and exit 0, matching
+ * Node's exit code already — only the line itself diverged. Dropping it
+ * here is the same treatment already given the fiber skip notice and the
+ * ASan warning, for the same reason: it is scriptc's own instrumentation
+ * text, not program output. This does NOT touch the separate case where
+ * the abandoned coroutine's own frame is ALSO counted as a live closure
+ * and trips `_Exit(99)` (1024-async-pending-exit.ts) — that is a real
+ * exit-code mismatch no stderr filter can paper over, and is unfixed. */
 function comparableStderr(stderr: Buffer): Buffer {
   if (!rcAudit) return stderr;
   const lines = stderr.toString("utf8").split("\n");
   const kept = lines.filter(
     (l) =>
       !l.startsWith("scriptc RC audit skipped:") &&
+      !/^scriptc RC audit: \d+ coroutine\(s\) abandoned$/.test(l) &&
       !/^==\d+==WARNING: ASan doesn't fully support makecontext\/swapcontext/.test(l),
   );
   return Buffer.from(kept.join("\n"), "utf8");
