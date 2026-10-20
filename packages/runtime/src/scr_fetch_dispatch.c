@@ -101,13 +101,13 @@ static FdHop *fd_of(ScrClosure *clo) {
 
 /* ── small dyn helpers ──────────────────────────────────────────────── */
 
-static void fd_set(ScrDyn *obj, const char *k, ScrDyn *v) {
+static void fd_obj_set(ScrDyn *obj, const char *k, ScrDyn *v) {
   scr_dyn_obj_set(obj, k, strlen(k), v); /* MOVES v */
 }
 
 static void fd_set_str(ScrDyn *obj, const char *k, const char *v, size_t vlen) {
   ScrStr *s = scr_str_new(v, vlen);
-  fd_set(obj, k, scr_dyn_new_str(s));
+  fd_obj_set(obj, k, scr_dyn_new_str(s));
   scr_str_release(s);
 }
 
@@ -272,18 +272,18 @@ static ScrDyn *fd_fn(FdHop *h, ScrDynThunk t, uint32_t arity, const char *sig, c
  * handed. */
 static ScrDyn *fd_handler(FdHop *h) {
   ScrDyn *o = scr_dyn_new_obj();
-  fd_set(o, "body", scr_dyn_new_null());
-  fd_set(o, "abort", scr_dyn_new_null());
-  fd_set(o, "onConnect", fd_fn(h, &fd_on_connect, 1, "(abort)", "onConnect"));
-  fd_set(o, "onResponseStarted", fd_fn(h, &fd_nop, 0, "()", "onResponseStarted"));
-  fd_set(o, "onHeaders",
+  fd_obj_set(o, "body", scr_dyn_new_null());
+  fd_obj_set(o, "abort", scr_dyn_new_null());
+  fd_obj_set(o, "onConnect", fd_fn(h, &fd_on_connect, 1, "(abort)", "onConnect"));
+  fd_obj_set(o, "onResponseStarted", fd_fn(h, &fd_nop, 0, "()", "onResponseStarted"));
+  fd_obj_set(o, "onHeaders",
          fd_fn(h, &fd_on_headers, 4, "(statusCode,headers,resume,statusText)", "onHeaders"));
-  fd_set(o, "onData", fd_fn(h, &fd_on_data, 1, "(chunk)", "onData"));
-  fd_set(o, "onComplete", fd_fn(h, &fd_on_complete, 0, "(trailers)", "onComplete"));
-  fd_set(o, "onError", fd_fn(h, &fd_on_error, 1, "(err)", "onError"));
-  fd_set(o, "onRequestUpgrade",
+  fd_obj_set(o, "onData", fd_fn(h, &fd_on_data, 1, "(chunk)", "onData"));
+  fd_obj_set(o, "onComplete", fd_fn(h, &fd_on_complete, 0, "(trailers)", "onComplete"));
+  fd_obj_set(o, "onError", fd_fn(h, &fd_on_error, 1, "(err)", "onError"));
+  fd_obj_set(o, "onRequestUpgrade",
          fd_fn(h, &fd_nop, 4, "(controller,statusCode,headers,socket)", "onRequestUpgrade"));
-  fd_set(o, "onUpgrade", fd_fn(h, &fd_nop, 3, "(statusCode,headers,socket)", "onUpgrade"));
+  fd_obj_set(o, "onUpgrade", fd_fn(h, &fd_nop, 3, "(statusCode,headers,socket)", "onUpgrade"));
   return o;
 }
 
@@ -306,7 +306,7 @@ static ScrDyn *fd_opts(const ScrStr *origin, const ScrStr *path, const ScrStr *m
    * unit refuses that combination at the call, because opts.body is an
    * async generator in the oracle and every substitute this runtime could
    * put there is a body the dispatcher misreads in silence. */
-  fd_set(o, "body", scr_dyn_new_null());
+  fd_obj_set(o, "body", scr_dyn_new_null());
   ScrDyn *hd = scr_dyn_new_obj();
   size_t n = (size_t)scr_arr_len(header_pairs);
   for (size_t i = 0; i + 1 < n; i += 2) {
@@ -317,9 +317,9 @@ static ScrDyn *fd_opts(const ScrStr *origin, const ScrStr *path, const ScrStr *m
     scr_str_release(k);
     scr_str_release(v);
   }
-  fd_set(o, "headers", hd);
-  fd_set(o, "maxRedirections", scr_dyn_new_num(0));
-  fd_set(o, "upgrade", scr_dyn_undefined());
+  fd_obj_set(o, "headers", hd);
+  fd_obj_set(o, "maxRedirections", scr_dyn_new_num(0));
+  fd_obj_set(o, "upgrade", scr_dyn_undefined());
   return o;
 }
 
