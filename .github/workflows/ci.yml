@@ -617,7 +617,12 @@ jobs:
       - name: LLVM release/dev differential (${{ matrix.shard }}/5)
         env:
           SCRIPTC_TEST_WORKERS: "4"
-        run: pnpm test tests/harness/llvm-differential.test.ts
+        # Repointed from upstream's tests/harness/llvm-differential.test.ts:
+        # dd9a3b92d split it into 8 part files under tests/harness/corpus/
+        # (vitest's pool is file-granular, so the monolith pinned the whole
+        # job to one worker). The prefix below collects all 8; SCRIPTC_TEST_SHARD
+        # above still slices the cases within them.
+        run: pnpm test tests/harness/corpus/llvm-differential-
       - name: Packaged helper contract
         if: matrix.shard == 1
         run: |
@@ -749,8 +754,13 @@ jobs:
       - name: Windows utility runtime linking
         run: pnpm exec vitest run packages/compiler/test/util-runtime-linking.test.ts
       - name: Windows filesystem links differential
+        # Repointed from upstream's tests/harness/differential.test.ts (see
+        # the LLVM release/dev differential step above for why): the 8 part
+        # files under tests/harness/corpus/ partition the same corpus under
+        # the same test names, so --testNamePattern still selects the same
+        # two cases, just spread across 8 files instead of 1.
         run: >-
-          pnpm exec vitest run tests/harness/differential.test.ts tests/harness/project-config.test.ts
+          pnpm exec vitest run tests/harness/corpus/differential- tests/harness/project-config.test.ts
           --testNamePattern "node24-fs-links|filesystem links"
       - name: Windows CA-store differential
         shell: pwsh
