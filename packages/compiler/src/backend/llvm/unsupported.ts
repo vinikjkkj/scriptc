@@ -76,7 +76,7 @@ export class LlvmCensus {
   private readonly rows = new Map<string, LlvmCensusRow>();
   private first: LlvmUnsupportedError | undefined;
 
-  record(err: unknown, fn: string, loc?: SrcLoc): void {
+  record(err: unknown, fn: string): void {
     const refusal = err instanceof LlvmUnsupportedError;
     if (refusal && this.first === undefined) this.first = err;
     const kind = refusal

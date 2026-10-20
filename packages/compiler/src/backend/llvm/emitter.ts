@@ -1786,7 +1786,7 @@ class LlEmitter {
       ) {
         const err = new LlvmUnsupportedError(`classDef:${cls.name}`, cls.loc);
         if (this.census === null) throw err;
-        this.census.record(err, `%${cls.name}`, cls.loc);
+        this.census.record(err, `%${cls.name}`);
       }
     }
     // The class graph: base/children links, hierarchy membership, the
@@ -1863,7 +1863,7 @@ class LlEmitter {
       try {
         fnDefs.push(this.emitFunction(fn));
       } catch (err) {
-        this.census.record(err, fn.name, fn.loc);
+        this.census.record(err, fn.name);
       }
     }
     if (this.census !== null && this.census.size > 0) {
@@ -6539,7 +6539,7 @@ class LlEmitter {
     try {
       this.emitStmtInner(s);
     } catch (err) {
-      this.census.record(err, this.currentFnName, s.loc);
+      this.census.record(err, this.currentFnName);
       this.frames.length = frameDepth;
       this.scopes.length = scopeDepth;
     }
