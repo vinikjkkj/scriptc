@@ -189,9 +189,20 @@ console.log("6.4 the other branch", (function (start, end) {
 // Node HAS them, so the READ answers a function here too; the refusal
 // lands where the work would, and it is the same refusal the ordinary
 // call spelling gives.
+//
+// NOT toBase64/setFromBase64/toHex/setFromHex here: those four landed on
+// Uint8Array.prototype in V8 only after Node v24.15.0 (absent there,
+// present on v25.9.0 -- measured directly). .node-version pins 24.15.0,
+// the same version CI's setup-node installs as the live oracle this file
+// diffs against, so "Node HAS them" does not hold for that pairing, and
+// scriptc deliberately does not install them either (scr_json.c's
+// scr_u8_build) -- printing one would turn a version question into a
+// false "scriptc disagrees with Node" failure on whichever side of the
+// v25 boundary happens to be running. copyWithin is unaffected by that
+// boundary (present on every Node version this runtime targets).
 console.log("7.1 they read as functions",
   typeof A.prototype.fill, typeof A.prototype.set, typeof A.prototype.map,
-  typeof A.prototype.toBase64);
+  typeof A.prototype.copyWithin);
 console.log("7.2 a name nothing declares", A.prototype.zzz);
 
 // ── 8. an instance still behaves like one ─────────────────────────────
