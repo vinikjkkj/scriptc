@@ -5111,6 +5111,69 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         if (unions.recursivePending(widened)) return null;
         return arms[0]!;
       }
+      // SEVERAL PROMISE ARMS BESIDE THEIR OWN SETTLED VALUES COLLAPSE INTO ONE
+      // SETTLE-OR-VALUE PROMISE. mysql2's AuthPlugin returns `Promise<string>
+      // | string | Buffer | Promise<Buffer> | null`: the value, or a promise
+      // of it, or nothing. The union-home rules below refuse a second
+      // promise arm (two promises are both `typeof "object"`), and the
+      // all-promise collapse right after this block does not apply because
+      // the data arms are there too.
+      //
+      // The same argument as the all-promise collapse carries over: no
+      // operation can observe WHICH promise arm a value came from, only
+      // what it settles to, so the promise arms are one `Promise<P>`. Here
+      // P is the union of their payloads AND of every non-promise arm. The
+      // second half widens a promise's payload by the arms the data side
+      // already holds, which is the covariance `Promise<string>` ->
+      // `Promise<string | Buffer | null>` TypeScript itself grants, and it
+      // is not observable either: the data arms keep their own tags (a
+      // `null` arm stays a `null` arm, never a promise settling to null),
+      // and `await` yields payload plus those arms either way. What it buys
+      // is exactly the shape the one-promise rule already compiles
+      // (settleOrValueArms: the non-promise arms ARE the payload's arms, so
+      // the union's own tag picks the branch and `await` needs no test).
+      //
+      // Applies only when it lands on that shape: at least TWO promise arms
+      // (a single one keeps today's rule untouched), every promise over a
+      // non-promise payload, and every promise payload arm also a
+      // non-promise arm (`Promise<number> | string` has no such home and
+      // keeps its refusal).
+      if (
+        !unions.recursivePending(widened)
+      ) {
+        const promiseArms = arms.filter((a): a is IrType & { kind: "promise" } => a.kind === "promise");
+        const dataArms = arms.filter((a) => a.kind !== "promise");
+        if (promiseArms.length >= 2 && dataArms.length >= 1 && promiseArms.every((a) => a.inner.kind !== "promise")) {
+          const dataKeys = new Set(dataArms.map((a) => typeKey(a)));
+          let spliceable = true;
+          const payloadByKey2 = new Map<string, IrType>();
+          for (const pa of promiseArms) {
+            if (pa.inner.kind === "union") {
+              const inner = unions.get(pa.inner.unionId);
+              if (inner === undefined || unions.isPending(pa.inner.unionId) || inner.arms.length === 0) {
+                spliceable = false;
+                break;
+              }
+              for (const ia of inner.arms) payloadByKey2.set(typeKey(ia), ia);
+            } else {
+              payloadByKey2.set(typeKey(pa.inner), pa.inner);
+            }
+          }
+          if (spliceable && [...payloadByKey2.keys()].every((k) => dataKeys.has(k))) {
+            for (const da of dataArms) payloadByKey2.set(typeKey(da), da);
+            const payloadArms2 = [...payloadByKey2.values()];
+            if (payloadArms2.length >= 2 && unionArmsHaveHomes(payloadArms2, unions)) {
+              const sorted2 = [...payloadArms2].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+              const merged: IrType = { kind: "promise", inner: { kind: "union", unionId: unions.intern(sorted2) } };
+              mapTrace(
+                `PROMISESETTLEUNION ${checker.typeToString(widened).slice(0, 70)} -> ` +
+                  `${dataArms.length} data arms + promise<${payloadArms2.length} arms>`,
+              );
+              arms.splice(0, arms.length, ...dataArms, merged);
+            }
+          }
+        }
+      }
       // ALL-PROMISE UNIONS COLLAPSE INTO ONE PROMISE. A ternary whose two
       // arms are promises types as `Promise<A> | Promise<B>` — the shape
       // `cond ? Promise.resolve(null) : requirePreKey(...)` takes, and one
