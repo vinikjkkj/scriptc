@@ -128,7 +128,7 @@ describe("corpusSlice", () => {
     expect([...union].sort()).toEqual([...keys].sort());
   });
 
-  test.for([2, 3])("every part is non-empty under a %i-way CI shard", (shards) => {
+  test.for([2, 3, 20])("every part is non-empty under a %i-way CI shard", (shards) => {
     for (let s = 1; s <= shards; s++) {
       for (let p = 1; p <= 8; p++) {
         const got = corpusSlice(keys, (k) => k, p, 8, { index: s, count: shards });
