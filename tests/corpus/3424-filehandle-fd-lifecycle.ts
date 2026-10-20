@@ -4,6 +4,14 @@
 // runs the identical loop with no FileHandle in it — without the control
 // a flat number proves nothing about the handles and a rising one blames
 // the wrong thing.
+//
+// Nothing is printed until every probe has been taken. Node on Unix opens
+// one /dev/null descriptor lazily, the first time libuv initializes a
+// stream handle (uv__stream_init reserves it for the EMFILE accept trick),
+// and a piped stdout is exactly such a handle: the FIRST console.log would
+// move the lowest free fd up by one for the rest of the process and read as
+// a leak in every phase after it. Buffering the report keeps the drift a
+// measure of the handles alone, whatever stdout is wired to.
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 
@@ -76,9 +84,10 @@ async function control(): Promise<void> {
   b[0] = 1;
 }
 
+const report: string[] = [];
 async function run(name: string, f: () => Promise<void>): Promise<void> {
   for (let i = 0; i < CYCLES; i++) await f();
-  console.log(name, probe() - base);
+  report.push(name + " " + (probe() - base));
 }
 
 await run("control      ", control);
@@ -87,7 +96,8 @@ await run("closeOnly    ", closeOnly);
 await run("manyReads    ", manyReads);
 await run("failedRead   ", failedRead);
 await run("failedOpen   ", failedOpen);
-console.log("final drift  ", probe() - base);
+report.push("final drift   " + (probe() - base));
+for (const line of report) console.log(line);
 
 for (const name of readdirSync(scratch)) rmSync(scratch + "/" + name);
 rmdirSync(scratch);
