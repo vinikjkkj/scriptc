@@ -3053,7 +3053,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                             // rides SCR_DYN_BYTES too. One runtime
                             // predicate, shared with the LLVM lane.
                             `scr_dyn_is_u8array(${d.name})`
-                          : `${d.name}->kind == ${
+                          : e.test === "map" || e.test === "set"
+                            ? // `instanceof Map` / `instanceof Set` on an
+                              // unknown value: SCR_DYN_MAP is shared by
+                              // both, so the kind compare alone cannot
+                              // tell them apart -- one runtime predicate
+                              // per word, shared with the LLVM lane.
+                              `scr_dyn_is_${e.test}(${d.name})`
+                            : `${d.name}->kind == ${
                               { string: "SCR_DYN_STR", number: "SCR_DYN_NUM", boolean: "SCR_DYN_BOOL", undefined: "SCR_DYN_UNDEF", null: "SCR_DYN_NULL", bytes: "SCR_DYN_BYTES", arraybuffer: "SCR_DYN_ARRBUF", bigint: "SCR_DYN_BIG" }[e.test]
                             }`;
         return E.newTemp(e.type, e.negated ? `!(${test})` : test);

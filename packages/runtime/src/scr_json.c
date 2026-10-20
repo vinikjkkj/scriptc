@@ -2878,6 +2878,21 @@ const char *scr_dyn_map_cls(const ScrDyn *d) {
   return d->v.map.tkey[0] == 's' ? "Set" : "Map";
 }
 
+/* `u instanceof Map` / `u instanceof Set` on an unknown value. SCR_DYN_MAP
+ * is SHARED by both (scr_dyn_map_cls's own comment: the tkey's first byte
+ * is the only thing that tells them apart -- 'm' for "map<K,V>", 's' for
+ * "set<E>"), so the kind compare alone answers for neither; these two
+ * predicates are the kind compare PLUS that one-byte discriminant, the
+ * same shape as scr_dyn_is_u8array (SCR_DYN_BYTES is shared with
+ * DataView, and u8array needs the extra flavor check the kind alone
+ * cannot give). Borrowed; never throws. */
+bool scr_dyn_is_map(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_MAP && d->v.map.tkey[0] != 's';
+}
+bool scr_dyn_is_set(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_MAP && d->v.map.tkey[0] == 's';
+}
+
 bool scr_dyn_map_fence(const ScrDyn *d, const char *what) {
   ScrJsonBuf b;
   scr_jb_init(&b);

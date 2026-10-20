@@ -1801,9 +1801,9 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       // closure pointer identity per tag is the narrowing); a SET arm
       // allows any sibling but a second set arm (`instanceof Set` is its
       // narrowing test and over a union it is the tag compare, but it
-      // answers true for both of two Set arms); a MAP arm is valid exactly
-      // when every other arm is a unit (the defaulted-Map-param ABI — no
-      // lowering emits `instanceof Map`).
+      // answers true for both of two Set arms); a MAP arm follows the
+      // same rule, one constructor over (`instanceof Map` lowers to the
+      // identical tag compare) — any sibling but a second map arm.
       if (arm.kind === "void" || arm.kind === "union" || arm.kind === "dyn" || arm.kind === "jsval" || arm.kind === "generator" || arm.kind === "asyncGenerator") {
         errors.push({ message: `union ${u.id}: arm ${i} is ${arm.kind}`, loc: noLoc });
       }

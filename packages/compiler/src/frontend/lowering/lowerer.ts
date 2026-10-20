@@ -161,7 +161,8 @@ export type WidthLift =
   | { how: "dynOut" }
   | { how: "upcast" }
   | { how: "httpBody" }
-  | { how: "funcAdapt" };
+  | { how: "funcAdapt" }
+  | { how: "mapval" };
 
 /** A class METHOD projected into a func-typed record slot: the field
  * becomes a BOUND closure — the instance captured, the method called with
@@ -7698,6 +7699,15 @@ export class Lowerer {
             (src.kind === "array" && arm.kind === "array") ||
             (src.kind === "object" && arm.kind === "record") ||
             (src.kind === "record" && arm.kind === "object") ||
+            // A MAP arm: `new Map([...])` (inferred `Map<string, number>`)
+            // against a `Map<string, SqlValue>` arm -- sql-escaper's
+            // objectToValues/escape call sites are exactly this shape.
+            // Keys never width-coerce (the Map key fence admits no union
+            // kind at all, so an exact key match is the only question
+            // widthLiftPlan's map/map case below asks); only the VALUE
+            // needs the recursive lift, the same as an array's element one
+            // family up.
+            (src.kind === "map" && arm.kind === "map") ||
             // A FUNCTION arm: `socket.onopen = () => {…}` against
             // `((e: Event) => void) | null`, where JS simply does not pass
             // the argument the callback ignores. The adapter that makes the
@@ -7968,6 +7978,18 @@ export class Lowerer {
       }
       return null;
     }
+    // A bare `Map<K, V>` into a `Map<K, V'>` slot (sql-escaper's
+    // `objectToValues`/`escape`, called with a plain `new Map([...])` where
+    // the parameter is `Map<string, SqlValue>`): the array element rule one
+    // container over. Keys never width-coerce -- the Map key fence admits
+    // f64/string/object/record and nothing a union could carry, so two
+    // Map types with the same key kind either already have IDENTICAL keys
+    // or are not the same Map at all; only typeEquals decides. The VALUE
+    // takes the same recursive widthLiftPlan the element type does above.
+    if (dst.kind === "map" && src.kind === "map") {
+      if (!typeEquals(src.key, dst.key)) return null;
+      return this.widthLiftPlan(src.value, dst.value) !== null ? { how: "mapval" } : null;
+    }
     // A TUPLE flowing into an array FIELD/ELEMENT (`aliases: ["ls"]` into
     // an `aliases: string[]` slot): per-position lifts, the top-level
     // tuple-into-array coercion applied recursively.
@@ -8031,6 +8053,12 @@ export class Lowerer {
         if (dst.kind !== "array" || value.type.kind !== "array") throw new Error("lowerer bug: arr lift shape");
         const helper = this.arrayWidthHelper(value.type, dst, loc);
         if (!helper) throw new Error("lowerer bug: planned arr lift failed to intern");
+        return { kind: "call", callee: helper, args: [value], type: dst, loc };
+      }
+      case "mapval": {
+        if (dst.kind !== "map" || value.type.kind !== "map") throw new Error("lowerer bug: mapval lift shape");
+        const helper = this.mapValueWidthHelper(value.type, dst, loc);
+        if (!helper) throw new Error("lowerer bug: planned mapval lift failed to intern");
         return { kind: "call", callee: helper, args: [value], type: dst, loc };
       }
       case "tupleArr": {
@@ -8929,6 +8957,92 @@ export class Lowerer {
           loc,
         },
         { kind: "return", value: ref("out.0", outT), loc },
+      ],
+      loc,
+    });
+    return name;
+  }
+
+  /** The Map twin of arrayWidthHelper: rebuild the map with each VALUE
+   * lifted, one container over from the array element loop above. Keys
+   * never width-coerce (widthLiftPlan's map/map case already required
+   * them typeEquals-identical, so iterKey's read needs no lift of its
+   * own), which is why this is a VALUE helper and not a general map
+   * helper — the array case has no such asymmetry because an array has
+   * only the one slot. Built from the SAME dense-with-tombstones
+   * iteration primitives the for-of-over-map desugar uses
+   * (buildMapIterDrainFn, lower-containers.ts) — iterCount is re-read
+   * every pass and iterLive skips deleted slots, exactly as that desugar
+   * does, even though this loop never runs user code that could mutate
+   * the source mid-pass; matching the existing primitive's contract
+   * costs nothing and keeps one iteration idiom in the IR instead of two. */
+  mapValueWidthHelper(fromT: IrType & { kind: "map" }, toT: IrType & { kind: "map" }, loc: SrcLoc,): string | null {
+    const valueLift = this.widthLiftPlan(fromT.value, toT.value);
+    if (!valueLift || valueLift.how === "copy") return null;
+    const key = `mapval:${typeKey(fromT.value)}:${typeKey(toT.value)}`;
+    const existing = this.widthHelpers.get(key);
+    if (existing) return existing;
+    const name = `%map.width.${this.widthHelpers.size}`;
+    this.widthHelpers.set(key, name);
+    const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: { kind: "f64" }, loc });
+    const f64: IrType = { kind: "f64" };
+    const iter = (
+      m: "iterCount" | "iterLive" | "iterKey" | "iterValue",
+      args: IrExpr[],
+      type: IrType,
+    ): IrExpr => ({ kind: "mapIntrinsic", method: m, receiver: ref("m.0", fromT), args, type, loc });
+    this.liftedFns.push({
+      name,
+      params: [{ localId: "m.0", name: "m", type: fromT }],
+      returnType: toT,
+      locals: [
+        { id: "m.0", name: "m", type: fromT, mutable: true },
+        { id: "out.0", name: "out", type: toT, mutable: false },
+        { id: "n.0", name: "n", type: f64, mutable: false },
+        { id: "i.0", name: "i", type: f64, mutable: true },
+      ],
+      body: [
+        { kind: "varDecl", localId: "out.0", init: { kind: "mapNew", type: toT, loc }, loc },
+        { kind: "varDecl", localId: "n.0", init: iter("iterCount", [], f64), loc },
+        {
+          kind: "for",
+          init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
+          cond: { kind: "bin", op: "<", left: ref("i.0", f64), right: ref("n.0", f64), type: BOOL, loc },
+          update: {
+            kind: "assign",
+            localId: "i.0",
+            value: { kind: "bin", op: "+", left: ref("i.0", f64), right: num(1), type: f64, loc },
+            loc,
+          },
+          body: [
+            {
+              kind: "if",
+              cond: iter("iterLive", [ref("i.0", f64)], BOOL),
+              then: [
+                {
+                  kind: "exprStmt",
+                  expr: {
+                    kind: "mapIntrinsic",
+                    method: "set",
+                    receiver: ref("out.0", toT),
+                    args: [
+                      iter("iterKey", [ref("i.0", f64)], fromT.key),
+                      this.applyWidthLift(valueLift, iter("iterValue", [ref("i.0", f64)], fromT.value), toT.value, loc),
+                    ],
+                    type: VOID,
+                    loc,
+                  },
+                  loc,
+                },
+              ],
+              else_: null,
+              loc,
+            },
+          ],
+          loc,
+        },
+        { kind: "return", value: ref("out.0", toT), loc },
       ],
       loc,
     });

@@ -17781,6 +17781,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             return { kind: "unionIsTag", unionId: left.type.unionId, tag: tags[0]!, negated: false, value: left, type: BOOL, loc };
           }
         }
+        // `u instanceof Set` over a DYN (`unknown`) operand -- the
+        // ArrayBuffer-against-dyn shape above, one kind over: SCR_DYN_MAP
+        // is shared with Map, so the kind compare alone cannot answer;
+        // scr_dyn_is_set is that compare PLUS the tkey discriminant.
+        if (left.type.kind === "dyn") {
+          return { kind: "dynTest", test: "set", value: left, type: BOOL, loc };
+        }
         // A plain set-typed operand folds true. The read may arrive as
         // maybeNarrow's tag-checked bridge rather than a bare varRef (a
         // `const held: T | Set<E> = live` that tsc already narrowed), and
@@ -17794,6 +17801,57 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
           narrowBridgeArm(left)?.kind === "varRef";
         if (left.type.kind === "set" && pureSetRead) {
+          return { kind: "boolLit", value: true, type: BOOL, loc };
+        }
+      }
+      // `x instanceof Map` over a union with a map arm — the Set rule one
+      // constructor over, now that the MAP arm's union-home rule
+      // (unionFuncSetArmsOk / unionArmsHaveHomes / armHasUnionHome) admits
+      // it beside data siblings, not just beside units: `typeof` answers
+      // "object" for a map and for every object-flavored sibling alike, so
+      // this is the only thing that separates them; over a union it is the
+      // runtime TAG compare, exact against every sibling kind. sql-escaper's
+      // `SqlValue` (`... | Map<string, SqlValue> | null | undefined`),
+      // narrowed by `object instanceof Map` in its own `objectToValues`/
+      // `escape`, is the shape that asked.
+      //
+      // Reads in the true branch bridge through maybeNarrow's tag-CHECKED
+      // %union.narrow, so nothing here is a trusted reinterpret.
+      //
+      // TWO map arms are refused upstream (no test tells them apart, same
+      // as two Set arms), so the one-hit rule below is the only case that
+      // can arise from a compiled union; the guard stays anyway because a
+      // union built by some other route must never silently pick the first
+      // Map.
+      if (
+        ts.isIdentifier(expr.right) &&
+        L.isStdlibGlobal(expr.right, "Map") &&
+        !L.caughtLocalOf(expr.left)
+      ) {
+        const left = L.lowerExpr(expr.left);
+        if (left.type.kind === "union") {
+          const def = L.unions.get(left.type.unionId);
+          const tags = def ? def.arms.flatMap((a, i) => (a.kind === "map" ? [i] : [])) : [];
+          if (tags.length === 1) {
+            return { kind: "unionIsTag", unionId: left.type.unionId, tag: tags[0]!, negated: false, value: left, type: BOOL, loc };
+          }
+        }
+        // `u instanceof Map` over a DYN (`unknown`) operand -- sql-escaper's
+        // isRecord helper (`!(value instanceof Set) && !(value instanceof
+        // Map)` over a `value: unknown`) is exactly this idiom. SCR_DYN_MAP
+        // is shared with Set, so the kind compare alone cannot answer;
+        // scr_dyn_is_map is that compare PLUS the tkey discriminant.
+        if (left.type.kind === "dyn") {
+          return { kind: "dynTest", test: "map", value: left, type: BOOL, loc };
+        }
+        // A plain map-typed operand folds true — same reasoning as the Set
+        // fold immediately above (the bridge's checked arm is the one the
+        // constant answers for).
+        const pureMapRead =
+          left.kind === "varRef" ||
+          (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
+          narrowBridgeArm(left)?.kind === "varRef";
+        if (left.type.kind === "map" && pureMapRead) {
           return { kind: "boolLit", value: true, type: BOOL, loc };
         }
       }
