@@ -13,7 +13,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _MSC_VER
+#include <direct.h> /* _chdir */
+#define chdir _chdir
+#else
 #include <unistd.h>
+#endif
 
 #define MAX_FIELD 8192
 
