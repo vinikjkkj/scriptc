@@ -6097,8 +6097,22 @@ function recordProvenanceOk(
   // identical "pure data only" restriction. Patching only the first gate
   // (mapTypeInner) is NOT sufficient: a Field-shaped type still refuses
   // here, before ever reaching mapRecordTypeInner's per-member loop.
+  // mapTypeInner's OWN gate is entered only when EVERY decl's source file
+  // is a declaration file AND NOT the standard library (its ~2294 `!
+  // ctx.isStdlibFile(sf)` conjunct) -- this re-check has no such enclosing
+  // gate, so without repeating the exclusion here it silently admits
+  // stdlib interfaces of the identical data+ordinary-method shape, like
+  // lib.es5.d.ts's ConcatArray<T> (length + an index signature + ordinary
+  // join()/slice()). Admitting ConcatArray makes mapRecordTypeInner
+  // actually build it as a record instead of leaving it unmapped, and a
+  // later stage then refuses the now-fully-resolved stdlib type with
+  // SC2020 ("part of the standard library types but has no scriptc
+  // lowering yet") on ordinary, previously-silent Array#concat(array)
+  // calls -- see tests/corpus/1983-array-tuple-surfaces.ts and
+  // tests/corpus/7411-a-served-package-value-fills-a-driver-shaped-record.ts.
   const isDataWithOrdinaryMethods =
     isInterfaceLike &&
+    decls.every((d) => !(ctx?.isStdlibFile?.(d.getSourceFile()) ?? false)) &&
     checker.getPropertiesOfType(t).every((p) => {
       const pt = checker.getTypeOfSymbol(p);
       const cs = checker.getCallSignatures(pt);
@@ -7759,12 +7773,20 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
         // shape, falls through to the ordinary generic/overload-exclusion
         // machinery just below instead of refusing the WHOLE record here
         // unconditionally. mysql2's Field (Type & {...,
-        // string()/buffer()/geometry()}) is the motivating case.
+        // string()/buffer()/geometry()}) is the motivating case. EXCLUDING
+        // the standard library here too, same as recordProvenanceOk's own
+        // isDataWithOrdinaryMethods carve-out: a computed shape over a lib
+        // interface (`Readonly<Date>`'s getTime, a single ordinary
+        // zero-arg signature) is still the lib's type world per this
+        // function's own comment two paragraphs up, not a data shape --
+        // without this exclusion it would ALSO pass as "ordinary", not
+        // just methods declared in a third-party package's .d.ts.
         const ordinaryCallableMember =
           ctx.dynamic !== true &&
           checker.getCallSignatures(memberTs).length === 1 &&
           checker.getCallSignatures(memberTs)[0]!.getTypeParameters().length === 0 &&
-          checker.getConstructSignatures(memberTs).length === 0;
+          checker.getConstructSignatures(memberTs).length === 0 &&
+          checker.declarationsOf(p).every((d) => !ctx.isStdlibFile(d.getSourceFile()));
         if (!dataMember && !ordinaryCallableMember) return null;
       }
       const fieldTs = checker.getTypeOfSymbol(p);
