@@ -24,7 +24,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { IrExpr, IrStmt } from "../../ir/nodes.js";
 import type { IrLibFn, IrType, SrcLoc } from "../../ir/nodes.js";
-import { BOOL, BYTES_U8, F64, RTCDATACHANNEL_T, RTCPEERCONNECTION_T, STRING, VOID, typeEquals } from "../../ir/nodes.js";
+import { BOOL, F64, RTCDATACHANNEL_T, RTCPEERCONNECTION_T, STRING, VOID, typeEquals } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
 

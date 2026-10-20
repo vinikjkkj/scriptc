@@ -57,7 +57,6 @@ import type {
   IrRecordShape,
   IrStmt,
   IrType,
-  IrLibFn,
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";

@@ -276,7 +276,6 @@ export function lowerSqliteNew(L: Lowerer, expr: ts.NewExpression | ts.CallExpre
  */
 function paramsArray(L: Lowerer, call: ts.CallExpression, method: string, loc: SrcLoc): IrExpr {
   let args: IrExpr = { kind: "libCall", fn: "sqlite.argsNew", args: [], type: DYN, loc };
-  const spreadCount = call.arguments.filter((a) => ts.isSpreadElement(a)).length;
   for (const a of call.arguments) {
     if (ts.isSpreadElement(a)) {
       const src = dynSpreadSource(L, a, L.lowerExpr(a.expression), `Statement.${method}`);

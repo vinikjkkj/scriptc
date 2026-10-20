@@ -1115,7 +1115,7 @@ function nonInertTopLevel7(
     const rf = root.getSourceFile();
     const lo = root.getStart(rf);
     const hi = root.getEnd();
-    let sym = checker.getSymbolAtLocation(id);
+    const sym = checker.getSymbolAtLocation(id);
     if (sym === undefined) return false;
     if (sym.flags & ts.SymbolFlags.Alias) return false; // an import is never a local
     const decls = checker.declarationsOf(sym);

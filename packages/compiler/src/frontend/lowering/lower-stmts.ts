@@ -5,7 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
-import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
