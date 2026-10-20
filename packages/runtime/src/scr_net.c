@@ -3192,14 +3192,15 @@ static bool scr_net_sock_emit_close(ScrNetSocket *sock, size_t due_floor) {
  * the close inline in the socket walk fired one socket's 'close' before
  * the next socket's 'data'.
  *
- * Second, a socket destroyed while ITS OWN event was being delivered goes
- * FIRST, ahead of everything else the same turn destroyed. On win32
- * uv_tcp_close can only run the handle's endgame once its outstanding
- * overlapped requests have completed; the socket whose read completion
- * just fired has none left, so its close callback runs in this iteration
- * while the others wait for their cancelled reads to come back and close
- * in the next. Measured against Node v25.9.0 -- four sockets, all
- * destroyed inside socket K's own 'data' callback, two runs of each cell:
+ * Second, ON WIN32 ONLY, a socket destroyed while ITS OWN event was being
+ * delivered goes FIRST, ahead of everything else the same turn destroyed.
+ * uv_tcp_close there can only run the handle's endgame once its
+ * outstanding overlapped requests have completed; the socket whose read
+ * completion just fired has none left, so its close callback runs in this
+ * iteration while the others wait for their cancelled reads to come back
+ * and close in the next. Measured against a Windows Node v25.9.0 -- four
+ * sockets, all destroyed inside socket K's own 'data' callback, two runs
+ * of each cell:
  *
  *   K=0 destroyed 0,1,2,3 -> 'close' 0,3,2,1     K=0 destroyed 3,2,1,0 -> 0,1,2,3
  *   K=2 destroyed 0,1,2,3 -> 'close' 2,3,1,0     K=2 destroyed 3,2,1,0 -> 2,0,1,3
@@ -3216,11 +3217,22 @@ static bool scr_net_sock_emit_close(ScrNetSocket *sock, size_t due_floor) {
  *
  *   s1 closed / srv closed / s2 closed / s0 closed
  *
- * under Node -- the server drains in the poll phase BETWEEN s1's close and
- * the other two. So the phase emits the self sockets and leaves the rest
- * for the next sweep pass rather than ordering them all in one batch.
+ * under a Windows Node -- the server drains in the poll phase BETWEEN
+ * s1's close and the other two. So on win32 the phase emits the self
+ * sockets and leaves the rest for the next sweep pass rather than ordering
+ * them all in one batch. POSIX libuv has no overlapped I/O for a handle to
+ * wait on, so there is no self/iteration split there: uv_close() just
+ * prepends to loop->closing_handles and uv__run_closing_handles() runs
+ * every handle queued in the same turn together, plain LIFO. Measured
+ * against a real Node v25.9.0 on a real Linux sandbox (kernel 6.18.49):
+ * the net-close-order-many/self/tick-between fixtures all print reverse-
+ * destroy-order with no self exception (e.g. net-close-order-many destroys
+ * c2,c0,c1 and Node prints client1/client0/client2 -- the exact reverse,
+ * c2 last, not first). any_self below is therefore gated to _WIN32; on
+ * every other platform the barrier loop runs unconditionally LIFO, which
+ * is this same third property on its own.
  *
- * Third, it is LIFO. uv_close pushes onto the FRONT of
+ * Third, it is LIFO on every platform. uv_close pushes onto the FRONT of
  * loop->closing_handles and uv__run_closing_handles walks that list, so
  * one iteration's callbacks run in the reverse of the destroy order:
  *
@@ -3250,10 +3262,31 @@ static void scr_net_sock_close_phase(void) {
   for (ScrNetSocket *it = scr_net_socks; it; it = it->next) {
     if (it->emit_close && !it->close_emitted && it->fd < 0) {
       if (it->close_seq > barrier) barrier = it->close_seq;
+#if defined(_WIN32)
       if (it->close_self) any_self = true;
+#endif
     }
   }
   if (barrier == 0) return;
+#if defined(_WIN32)
+  /* The self-ahead-an-iteration split above is a Win32/IOCP artifact (see
+   * the phase's header comment: uv_tcp_close waits for a handle's
+   * outstanding OVERLAPPED requests, and the handle whose completion just
+   * fired has none). POSIX libuv has no overlapped I/O to wait for --
+   * uv_close() just prepends to loop->closing_handles and
+   * uv__run_closing_handles() runs the whole list in one pass, LIFO, with
+   * no exception for whichever handle's callback is on the stack. Gating
+   * this to _WIN32 is not a guess: tests/fixtures/server/cases/
+   * net-close-order-many, net-close-order-self and the net-close-order-
+   * tick-between / net-read-arm-tick-between pair were measured against a
+   * real Node v25.9.0 on a real Linux sandbox (Vercel Sandbox, kernel
+   * 6.18.49) and all four print plain reverse-destroy-order LIFO with no
+   * self exception, byte for byte what the barrier loop below already
+   * produces once any_self is forced false -- e.g. net-close-order-many
+   * destroys c2,c0,c1 and Node prints client1/client0/client2 (reverse of
+   * the destroy order), not client2 first. any_self stays false on every
+   * non-Windows build, so this split, and close_deferred's re-stamp in
+   * scr_net_settle_due_head, are dead code there by construction. */
   if (any_self) {
     /* the others belong to the next iteration -- their epoch is re-stamped
      * at the sweep head so a server that drains in between still emits
@@ -3264,6 +3297,7 @@ static void scr_net_sock_close_phase(void) {
       }
     }
   }
+#endif
   for (;;) {
     ScrNetSocket *pick = NULL;
     for (ScrNetSocket *it = scr_net_socks; it; it = it->next) {
