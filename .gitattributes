@@ -1,0 +1,11 @@
+# The runtime's committed Node oracle corpora are tab-separated, hex-encoded
+# ASCII generated once by gen-*-cases.mjs (see packages/runtime/test/). They
+# are stored LF-only. Without this file, GitHub's Windows runner image ships
+# core.autocrlf=true, and a checkout on that runner silently rewrites every
+# line to CRLF -- which materializeHostCases() in
+# packages/runtime/test/cc.ts compares byte-for-byte against this host's
+# freshly generated (LF-only) output, so EVERY non-cwd-bound case disagrees
+# by a trailing \r that GitHub's log viewer does not render, and the failure
+# reads as "Node changed behaviour" when it is a checkout-time line-ending
+# corruption. Pin these to LF so that cannot happen again, on any platform.
+packages/runtime/test/*-cases.txt text eol=lf
