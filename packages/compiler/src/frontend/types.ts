@@ -4691,7 +4691,21 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // SIGNATURE map too, so a rest function can flow as a value;
         // callers pack the surplus arguments (restPackArity). A rest bound
         // to a TUPLE has no single element type and keeps the fence.
-        const restT = mapType(checker.getTypeOfSymbol(p), ctx);
+        let restT = mapType(checker.getTypeOfSymbol(p), ctx);
+        // A `...args: any[]` rest slot of a callable the uncompiled .d.ts
+        // spells (`listener: (...args: any[]) => void`, EventEmitter's and
+        // mysql2's own listener type): the same library-author `any` the
+        // bare-`any` PARAMETER rule just below reads as DYN, one array
+        // layer out. The slot is the array-of-dyn the `unknown[]` spelling
+        // already maps to. Fires only when the ENCLOSING function type
+        // cleared the .d.ts callable gate, like that rule.
+        if (restT === null && fromUncompiledCallableLiteral) {
+          const restTs = checker.getTypeOfSymbol(p);
+          if (checker.isArrayType(restTs)) {
+            const el = checker.getTypeArguments(restTs as ts.TypeReference)[0];
+            if (el !== undefined && (el.flags & ts.TypeFlags.Any) !== 0) restT = arrayOf(DYN);
+          }
+        }
         if (process.env["SCRIPTC_REST_WHY"] !== undefined) {
           console.error(`[restwhy] ${p.name}: ts=${checker.typeToString(checker.getTypeOfSymbol(p)).slice(0,70)} -> ir=${restT?.kind ?? "null"}`);
         }
