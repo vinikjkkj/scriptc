@@ -7444,6 +7444,24 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         anyRecvNarrowed = true;
       }
     }
+    // `.length` of a receiver the CHECKER spells bare `any` while the
+    // VALUE lowered to a string, array or bytes (`const s = v.toString()`
+    // inside a monomorphized body: tsc keeps `any` for `s`, the lowered
+    // local is the instance's string). The lowered type is the instantiation's
+    // truth, the same stance as the instanceof bridge above; `length` is the one
+    // member read this way.
+    if (
+      kind === undefined &&
+      expr.name.text === "length" &&
+      isJsSourceFile(expr.getSourceFile()) &&
+      (L.typeOf(expr.expression).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0
+    ) {
+      const probe = probeLower(L, expr.expression);
+      if (probe?.type.kind === "string" || probe?.type.kind === "bytes" || probe?.type.kind === "array") {
+        kind = probe.type.kind;
+        anyRecvNarrowed = true;
+      }
+    }
     if (kind !== "string" && kind !== "array" && kind !== "map" && kind !== "set" && kind !== "f64" && kind !== "regex" && kind !== "url" && kind !== "searchParams" && kind !== "stats" && kind !== "fileHandle" && kind !== "spawnRes" && kind !== "child" && kind !== "bytes" && kind !== "symbol") {
       return null;
     }
