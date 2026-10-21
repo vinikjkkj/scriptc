@@ -25,7 +25,7 @@ overloaded-function-values.ts:17:7 - error SC2007: values of type '{ (event: "ex
 
   hint: annotate the slot with the ONE signature the program actually calls (e.g. '(x: number) => string'), or wrap the overloaded function in a single-signature arrow
 
-overloaded-function-values.ts:18:13 - error SC1090: console.log of a void call result (call it as its own statement, then console.log(undefined)) is not supported yet
+overloaded-function-values.ts:18:13 - error SC1090: calling a function value with 2 arguments where its lowered signature takes 0 is not supported yet
 
   17 | const listener = on;
   18 | console.log(listener("exit", 0));

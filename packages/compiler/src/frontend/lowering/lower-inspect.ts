@@ -1134,13 +1134,15 @@ export function lowerConsoleInspectArg(
     return inspectExpr(L, t, value, num(0, loc), num(2, loc), loc);
   }
   if (t.kind === "void") {
-    // Node prints "undefined" for a void call's result; a void expression
-    // is not a value here, so the composition fences with the rewrite.
-    L.unsupported(
-      "SC1090",
-      node,
-      `${surface} of a void call result (call it as its own statement, then ${surface}(undefined))`,
-    );
+    // Node prints "undefined" for a void call's result: the call runs for
+    // its effect, in argument order, and the rendering is the baked text.
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: value, loc }],
+      result: str("undefined", loc),
+      type: STRING,
+      loc,
+    };
   }
   const walk = { recursive: false };
   const reason = inspectSupport(L, t, new Set(), walk);
