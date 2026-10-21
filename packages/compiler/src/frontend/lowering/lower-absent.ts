@@ -19,7 +19,7 @@
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, F64, IrExpr, IrGlobal, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, isUnitType, strandTrap, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { BOOL, F64, IrExpr, IrGlobal, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, isUnitType, strandTrap, typeEquals, VOID } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { checkedJsNumber } from "./lower-exprs.js";
 import { idxMissKeyHelper } from "./lower-containers.js";
