@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesDate, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
+import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesSymbol, moduleUsesDate, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
@@ -1859,6 +1859,9 @@ export class CEmitter {
       // on the same moduleUsesDate switch) so a Date can cross into the
       // checked-dynamic tree by reference.
       ...(moduleUsesDate(this.mod) ? [`  scr_date_dyn_install();`] : []),
+      // Symbol values cross the checked-dynamic tree as handles (SCR_DYNH_SYMBOL): the ops are installed
+      // exactly when scr_symbol.c links (moduleUsesSymbol, cc.ts's gate).
+      ...(moduleUsesSymbol(this.mod) ? [`  scr_sym_dyn_install();`] : []),
       // Child-stdio programs stamp the child-stream handle-dispatch ops so
       // `child.stdout` can cross into the checked-dynamic tree by
       // reference. scr_child.c is always linked, so this is a plain
