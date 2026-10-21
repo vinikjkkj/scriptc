@@ -8017,6 +8017,17 @@ bool scr_num_same_value(double a, double b);
  * digits, "∞"/"NaN" texts, "-0" for negative inputs rounding to zero.
  * en-US is the one embedded locale. Result +1; never throws. */
 ScrStr *scr_intl_num_format_en_us(double x);
+/* Number formatting over the ICU 78.2 locale data (scr_nf.c): Number.prototype.toLocaleString and
+ * Intl.NumberFormat(...).format. `kv` is a string[] of alternating option name and tagged value ('s' string,
+ * 'n' number, 'b' boolean, 'u' undefined). +1, or NULL with a RangeError / TypeError pending. */
+ScrStr *scr_nf_format_num(double x, ScrStr *locales, ScrArr *kv);
+ScrStr *scr_nf_format_big(ScrStr *digits, ScrStr *locales, ScrArr *kv);
+/* The checked-dynamic toLocaleString reaches the number formatter through these: scr_nf.c sets them when it is
+ * linked (the compiler links it for every program whose dynamic dispatch can name toLocaleString). */
+extern ScrStr *(*scr_nf_hook_dyn)(const ScrDyn *v, const ScrDyn *locales, const ScrDyn *opts);
+/* The same with the options as a checked-dynamic value (an any / unknown typed bag): +1, or NULL with an exception. */
+ScrStr *scr_nf_format_num_dyn(double x, ScrStr *locales, const ScrDyn *opts);
+ScrStr *scr_nf_format_big_dyn(ScrStr *digits, ScrStr *locales, const ScrDyn *opts);
 
 /* The environment's default locale as a BCP-47 tag — the value behind
  * Intl.DateTimeFormat().resolvedOptions().locale. A fact about the
