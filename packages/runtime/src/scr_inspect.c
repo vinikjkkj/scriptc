@@ -675,7 +675,10 @@ ScrStr *scr_insp_buffer(ScrBytes *b) {
  * `[Error: m] { code: 'X' }`, `[Error]` beyond depth. Message newlines
  * indent like Node's formatError tail. */
 ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
-  bool has_code = e->code != NULL; /* the stamped slot, read directly (borrowed) */
+  double ext_errno = 0;
+  const ScrStr *ext_syscall = NULL, *ext_path = NULL, *ext_dest = NULL;
+  bool has_ext = scr_error_ext_get(e, &ext_errno, &ext_syscall, &ext_path, &ext_dest);
+  bool has_code = e->code != NULL || has_ext; /* the stamped slots, read directly (borrowed) */
   if (has_code && recurse > depth) {
     /* `[${getCtxStyle(...)}]` with the trailing space sliced: [Name] */
     InspBuf out = {0};
@@ -701,13 +704,36 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
   ScrStr *base_str = ib_take(&base);
   if (!has_code) return base_str;
   scr_insp_begin(recurse + 1);
-  {
+  if (has_ext) {
+    InspBuf entry = {0};
+    char nb[40];
+    size_t nn = scr_f64_to_str(ext_errno, nb);
+    ib_cstr(&entry, "errno: ");
+    for (size_t i = 0; i < nn; i++) ib_char(&entry, nb[i]);
+    ScrStr *entry_str = ib_take(&entry);
+    scr_insp_entry(entry_str, false);
+    scr_str_release(entry_str);
+  }
+  if (e->code != NULL) {
     InspBuf entry = {0};
     ib_cstr(&entry, "code: ");
     insp_quote_into(&entry, e->code->data, e->code->len);
     ScrStr *entry_str = ib_take(&entry);
     scr_insp_entry(entry_str, false);
     scr_str_release(entry_str);
+  }
+  if (has_ext) {
+    const struct { const char *label; const ScrStr *val; } rows[3] = {
+        {"syscall: ", ext_syscall}, {"path: ", ext_path}, {"dest: ", ext_dest}};
+    for (int r = 0; r < 3; r++) {
+      if (rows[r].val == NULL) continue;
+      InspBuf entry = {0};
+      ib_cstr(&entry, rows[r].label);
+      insp_quote_into(&entry, rows[r].val->data, rows[r].val->len);
+      ScrStr *entry_str = ib_take(&entry);
+      scr_insp_entry(entry_str, false);
+      scr_str_release(entry_str);
+    }
   }
   ScrStr *b0 = scr_str_new("{", 1);
   ScrStr *b1 = scr_str_new("}", 1);

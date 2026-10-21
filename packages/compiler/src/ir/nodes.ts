@@ -5124,6 +5124,10 @@ export type IrLibFn =
   | "error.domCode"
   | "error.domHasCause"
   | "error.domCause"
+  /** `.errno` / `.syscall` / `.path` / `.dest` of an error-hierarchy receiver
+   * (scr_error_ext_dyn; args: receiver, key string): the value the throw
+   * site stamped, +1, or the dyn undefined. Never throws. */
+  | "error.ext"
   /** structuredClone of a %DOMException receiver (scr_error.c): WebIDL
    * serialization — name/message copy, the legacy code re-derives, cause
    * does not serialize. args are the borrowed receiver and the borrowed

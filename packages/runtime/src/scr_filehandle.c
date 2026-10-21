@@ -109,7 +109,7 @@ static void scr_fh_seek_throw(void) {
   const char *text = scr_errno_text(e);
   char msg[160];
   int len = snprintf(msg, sizeof msg, "%s: %s, read", name, text);
-  scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+  scr_throw_errno_error(e, name, msg, (size_t)len, "read", NULL, NULL);
 }
 
 double scr_fh_read_into(ScrFileHandle *h, ScrBytes *buf, double offset, double length,
@@ -155,7 +155,7 @@ void scr_fh_close_raw(ScrFileHandle *h) {
     const char *text = scr_errno_text(e);
     char msg[160];
     int len = snprintf(msg, sizeof msg, "%s: %s, close", name, text);
-    scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+    scr_throw_errno_error(e, name, msg, (size_t)len, "close", NULL, NULL);
   }
 }
 

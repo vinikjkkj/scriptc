@@ -11402,6 +11402,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8343-fs-errors-carry-errno-syscall-path-and-dest.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8343-fs-errors-carry-errno-syscall-path-and-dest.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8344-fs-errno-properties-through-a-typed-catch.ts": {
+   "order": [
+    "<repo>/tests/corpus/8344-fs-errno-properties-through-a-typed-catch.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"

@@ -6717,6 +6717,15 @@ let digestInputValueDispatches = 0;
       }
     }
     const member = expr.name.text;
+    if (member === "errno" || member === "syscall" || member === "path" || member === "dest") {
+      let eInfo = L.classes.get(recvT.className) ?? null;
+      while (eInfo && eInfo.base) eInfo = eInfo.base;
+      if (!eInfo || eInfo.def.name !== "%Error" || !L.isStdlibMember(expr)) return null;
+      const eloc = locOf(expr);
+      const erecv = L.lowerExpr(expr.expression);
+      const ekey: IrExpr = { kind: "strLit", value: member, type: STRING, loc: eloc };
+      return { kind: "libCall", fn: "error.ext", args: [erecv, ekey], type: DYN, loc: eloc };
+    }
     if (member !== "code" && member !== "stack") return null;
     // Error-rooted classes only — builtin or user subclass (both embed the
     // code slot in their layout prefix).

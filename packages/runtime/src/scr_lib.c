@@ -1902,8 +1902,8 @@ void scr_fs_throw(int e, const char *op, const ScrStr *path) {
    * typed catch's `e instanceof Error` + `e.message` observes in Node —
    * with `code` stamped to the errno name (the exotic-errno fallback
    * stamps its "E<num>" spelling; Node would carry the uv name there).
-   * errno/syscall/path stay unrepresented (SEMANTICS.md divergence 13). */
-  scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+   * errno/syscall/path ride the error's side table (scr_error_set_ext). */
+  scr_throw_errno_error(e, name, msg, (size_t)len, op, shown, NULL);
   free(msg);
 }
 
@@ -1937,7 +1937,7 @@ ScrStr *scr_fs_read_file(ScrStr *path) {
     int e = errno;
     fclose(f);
     free(buf);
-    scr_fs_throw(e, "read", path);
+    scr_fs_throw_nopath(e, "read"); /* a failed read(2) names no path in Node */
     return NULL;
   }
   fclose(f);
@@ -2176,7 +2176,7 @@ double scr_fs_read_sync(double fd, ScrBytes *buf, double offset, double length) 
     const char *text = scr_errno_text(e);
     char msg[160];
     int len = snprintf(msg, sizeof msg, "%s: %s, read", name, text);
-    scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+    scr_throw_errno_error(e, name, msg, (size_t)len, "read", NULL, NULL);
     return 0;
   }
   return (double)n;
@@ -2202,7 +2202,7 @@ double scr_fs_read_at(double fd, ScrBytes *buf, double offset, double length, do
     const char *text = scr_errno_text(e);
     char msg[160];
     int len = snprintf(msg, sizeof msg, "%s: %s, read", name, text);
-    scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+    scr_throw_errno_error(e, name, msg, (size_t)len, "read", NULL, NULL);
     return 0;
   }
   double n = scr_fs_read_sync(fd, buf, offset, length);
@@ -2221,7 +2221,7 @@ void scr_fs_close(double fd) {
     const char *text = scr_errno_text(e);
     char msg[160];
     int len = snprintf(msg, sizeof msg, "%s: %s, close", name, text);
-    scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+    scr_throw_errno_error(e, name, msg, (size_t)len, "close", NULL, NULL);
   }
 }
 
@@ -2240,7 +2240,7 @@ static void scr_fs_throw2(int e, const char *op, const ScrStr *src, const ScrStr
     scr_trap("scriptc: out of memory\n");
   }
   int len = snprintf(msg, cap, "%s: %s, %s '%s' -> '%s'", name, text, op, shown_src, shown_dest);
-  scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+  scr_throw_errno_error(e, name, msg, (size_t)len, op, shown_src, shown_dest);
   free(msg);
 }
 
@@ -2621,13 +2621,13 @@ void scr_fs_access(ScrStr *path, double mode) {
 
 /* The no-path variant of the fs error shape — Node's fd reads report
  * "EBADF: bad file descriptor, read" with no quoted path. */
-static void scr_fs_throw_nopath(int e, const char *op) {
+void scr_fs_throw_nopath(int e, const char *op) {
   char namebuf[16];
   const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
   const char *text = scr_errno_text(e);
   char msg[256];
   int len = snprintf(msg, sizeof msg, "%s: %s, %s", name, text, op);
-  scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)len);
+  scr_throw_errno_error(e, name, msg, (size_t)len, op, NULL, NULL);
 }
 
 /* read(2) loop to EOF from the CURRENT position — Node's

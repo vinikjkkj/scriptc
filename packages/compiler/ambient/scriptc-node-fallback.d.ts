@@ -19,10 +19,10 @@
  * @types/node's as an overload instead of colliding). */
 
 /* NodeJS.ErrnoException — the Error shape @types/node attaches to fs and
- * child failures. The TYPE maps to the runtime Error root; only `code`
- * has a lowering (throw sites stamp the errno name — "ENOENT" and
- * friends; reads answer `string | undefined`), errno/syscall/path
- * typecheck and fence per member. */
+ * child failures. The TYPE maps to the runtime Error root; `code` (the
+ * errno name a throw site stamps — "ENOENT" and friends) and the fs errors'
+ * errno/syscall/path/dest read through the lowering (errno is libuv's
+ * negative number; a member the throw site did not stamp reads undefined). */
 declare namespace NodeJS {
   /* The process introspection records — named interfaces so the type
    * mapper interns their record shapes (the RemoteInfo pattern; the
