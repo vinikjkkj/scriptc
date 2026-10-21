@@ -2348,7 +2348,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // claim than dataInterface's, not a widening of it.
     const callableLiteral =
       !ctx.dynamic &&
-      (isPlainCallableTypeLiteral(widened, npmDecls, checker) || isPlainDeclMethodType(widened, npmDecls, checker));
+      (isPlainCallableTypeLiteral(widened, npmDecls, checker) ||
+        isPlainDeclMethodType(widened, npmDecls, checker) ||
+        (ctx.declMember === true && isDeclMemberCallable(widened, npmDecls, checker)));
     if (callableLiteral) fromUncompiledCallableLiteral = true;
     // A data record whose ONLY non-data members are ORDINARY (non-generic,
     // single-signature, non-constructable) methods -- exactly the shape
@@ -4681,8 +4683,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (hybrid) return hybrid;
   }
   const callSigs = checker.getCallSignatures(widened);
-  if (callSigs.length === 1) {
-    const sig = callSigs[0]!;
+  const mapOneSig = (sig: ts.Signature, ctx: TypeMapperCtx): IrType | null => {
     // A GENERIC signature has no single calling convention of its own, but
     // one instantiation is always honest: every type parameter bound to
     // its CONSTRAINT. The body type-checks for every type satisfying the
@@ -4900,6 +4901,76 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       return null;
     }
     return sawRestIn ? { kind: "func" as const, params, ret, restIn: true as const } : funcOf(params, ret);
+  };
+  if (callSigs.length === 1) return mapOneSig(callSigs[0]!, ctx);
+  // AN OVERLOAD SET as a member of a body-less .d.ts class instance
+  // (mysql2's `Connection.end`, `escapeId`, `query`, `execute`). A record
+  // field holds ONE closure, so the member is the MERGED signature: every
+  // overload maps on its own (a generic one at its constraint), parameter
+  // `i` is the union of the types the overloads give position `i` (a dyn if
+  // any overload spells `any` there; undefined-armed when some overload stops
+  // short of it), and the result must be the SAME type in every overload —
+  // true of every overloaded member mysql2 declares. Callers see the
+  // overloads (the checker resolves the call to one of them) and the argument
+  // coerces into that overload's slice of the merged parameter. Overloads
+  // whose results differ keep the refusal: a merged result would hand the
+  // caller a wider type than the overload it called promised.
+  if (callSigs.length > 1 && ctx.declMember === true && !ctx.dynamic && checker.getConstructSignatures(widened).length === 0) {
+    const fns: (IrType & { kind: "func" })[] = [];
+    for (const sg of callSigs) {
+      const f = mapOneSig(sg, ctx);
+      if (f === null || f.kind !== "func" || f.restIn === true || f.rest === true) {
+        mapTrace(`OVERLOAD ${checker.typeToString(type).slice(0, 60)} -> an overload does not map on its own`);
+        return null;
+      }
+      fns.push(f);
+    }
+    const ret0 = fns[0]!.ret;
+    if (!fns.every((f) => typeEquals(f.ret, ret0))) {
+      mapTrace(`OVERLOAD ${checker.typeToString(type).slice(0, 60)} -> the overloads answer different types`);
+      return null;
+    }
+    const width = Math.max(...fns.map((f) => f.params.length));
+    const mergedParams: IrType[] = [];
+    for (let i = 0; i < width; i++) {
+      const armsByKey = new Map<string, IrType>();
+      let anyDyn = false;
+      let short = false;
+      for (const f of fns) {
+        const pt = f.params[i];
+        if (pt === undefined) {
+          short = true;
+          continue;
+        }
+        if (pt.kind === "dyn") {
+          anyDyn = true;
+          continue;
+        }
+        let parts: readonly IrType[] = [pt];
+        if (pt.kind === "union") {
+          const u = ctx.unions.get(pt.unionId);
+          if (u === undefined || ctx.unions.isPending(pt.unionId) || u.arms.length === 0) return null;
+          parts = u.arms;
+        }
+        for (const part of parts) armsByKey.set(typeKey(part), part);
+      }
+      if (anyDyn) {
+        mergedParams.push(DYN);
+        continue;
+      }
+      if (short) armsByKey.set(typeKey(UNDEFINED_T), UNDEFINED_T);
+      const sorted = [...armsByKey.values()].sort((x, y) => (typeKey(x) < typeKey(y) ? -1 : 1));
+      if (sorted.length === 1) {
+        mergedParams.push(sorted[0]!);
+        continue;
+      }
+      if (!unionArmsHaveHomes(sorted, ctx.unions)) {
+        mapTrace(`OVERLOAD ${checker.typeToString(type).slice(0, 60)} -> parameter ${i} arms have no union home`);
+        return null;
+      }
+      mergedParams.push({ kind: "union", unionId: ctx.unions.intern(sorted) });
+    }
+    return funcOf(mergedParams, ret0);
   }
   // Records: object types whose members are all data properties (shorthand
   // methods in type position count — they're func-typed fields) with
@@ -7071,6 +7142,37 @@ export function isPlainDeclMethodType(
   if (sigs.length !== 1) return false;
   if (sigs[0]!.getTypeParameters().length > 0) return false;
   return (
+    checker.getConstructSignatures(t).length === 0 &&
+    checker.getPropertiesOfType(t).length === 0 &&
+    checker.getIndexInfosOfType(t).length === 0
+  );
+}
+
+/** A callable member of a body-less .d.ts class instance that is not a plain
+ * single-signature method: an OVERLOAD SET, a GENERIC method, or both, every
+ * declaration a method signature / method declaration / function type node
+ * with no other shape surface. Reached only under ctx.declMember, where the
+ * member loop has already established the owner is a class no program
+ * constructs; the merged-signature and constraint-erasure rules in
+ * mapTypeInner decide whether the member then actually maps. */
+export function isDeclMemberCallable(
+  t: ts.Type,
+  decls: readonly ts.Node[],
+  checker: ts.TypeChecker,
+): boolean {
+  if (
+    decls.length === 0 ||
+    !decls.every(
+      (d) =>
+        d.kind === ts.SyntaxKind.MethodSignature ||
+        d.kind === ts.SyntaxKind.MethodDeclaration ||
+        ts.isFunctionTypeNode(d),
+    )
+  ) {
+    return false;
+  }
+  return (
+    checker.getCallSignatures(t).length > 0 &&
     checker.getConstructSignatures(t).length === 0 &&
     checker.getPropertiesOfType(t).length === 0 &&
     checker.getIndexInfosOfType(t).length === 0
