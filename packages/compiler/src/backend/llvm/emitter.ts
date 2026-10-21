@@ -7927,6 +7927,12 @@ class LlEmitter {
                 B.line(`store ptr ${this.retainValue(sym, e.type)}, ptr ${slot}`);
                 break;
               }
+              case "map":
+              case "set": {
+                const sym = this.internLiteral(arm.kind === "map" ? "[object Map]" : "[object Set]");
+                B.line(`store ptr ${this.retainValue(sym, e.type)}, ptr ${slot}`);
+                break;
+              }
               default:
                 throw new LlvmUnsupportedError(`toString:union:${arm.kind}`, e.loc);
             }

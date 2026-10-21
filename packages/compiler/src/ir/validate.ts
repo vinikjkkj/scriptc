@@ -2546,6 +2546,8 @@ function validateFunction(
                 a.kind === "undefinedT" || a.kind === "nullT" ||
                 a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
                 (a.kind === "bytes" && a.elem === "u8") ||
+                // Map/Set arms: Object.prototype.toString's constant too.
+                a.kind === "map" || a.kind === "set" ||
                 // A plain data RECORD arm: Object.prototype.toString's
                 // constant, decidable here for the same reason the LONE
                 // record operand is — not a tuple (which prints its
