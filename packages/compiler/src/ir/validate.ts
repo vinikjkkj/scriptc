@@ -1143,6 +1143,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.errInstanceof": { argTypes: [DYN, F64], result: BOOL },
   "dyn.objKeys": { argTypes: [DYN], result: DYN },
   "dyn.hasOwn": { argTypes: [DYN, STRING], result: BOOL },
+  "dyn.objectToString": { argTypes: [DYN], result: STRING },
   "dyn.assign": { argTypes: [DYN, DYN], result: DYN },
   "dyn.packPush": { argTypes: [DYN, DYN], result: VOID },
   "dyn.packPushSpread": { argTypes: [DYN, DYN, STRING], result: VOID },
