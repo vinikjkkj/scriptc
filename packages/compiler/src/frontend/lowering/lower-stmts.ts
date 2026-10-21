@@ -1321,6 +1321,31 @@ function domExceptionRooted(L: Lowerer, className: string): boolean {
   return false;
 }
 
+/** True when a statement the compiler has DECIDED never runs may be left
+ * unlowered: it declares nothing whose effect outlives the branch. A `var`
+ * (or a function declaration) inside hoists to the enclosing function, so
+ * skipping it would drop a binding the rest of the function can read; both
+ * keep the branch lowered. Nested function bodies are not entered (their
+ * own `var`s belong to them). */
+function deadBranchSkippable(node: ts.Node): boolean {
+  let ok = true;
+  const walk = (n: ts.Node): void => {
+    if (!ok) return;
+    if (ts.isFunctionDeclaration(n)) {
+      ok = false;
+      return;
+    }
+    if (ts.isVariableDeclarationList(n) && (n.flags & ts.NodeFlags.BlockScoped) === 0) {
+      ok = false;
+      return;
+    }
+    if (n !== node && ts.isFunctionLike(n)) return;
+    ts.forEachChild(n, walk);
+  };
+  walk(node);
+  return ok;
+}
+
 export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | null {
     if (ts.isVariableStatement(stmt)) {
       // `declare const` — ambient: no storage, no init (collectGlobals
@@ -1337,6 +1362,22 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     }
     if (ts.isIfStatement(stmt)) {
       const cond = L.lowerCondition(stmt.expression);
+      // A DECIDED test (the condition lowered to a literal): the branch it
+      // rules out never runs, so it is not lowered at all — the statement
+      // twin of the ternary/short-circuit folds. Only when the dead branch
+      // declares nothing that hoists (see deadBranchSkippable).
+      if (cond.kind === "boolLit") {
+        const dead = cond.value ? stmt.elseStatement : stmt.thenStatement;
+        if (dead === undefined || deadBranchSkippable(dead)) {
+          const live = cond.value ? stmt.thenStatement : stmt.elseStatement;
+          const lowered = live === undefined
+            ? []
+            : L.narrowingAliases(aliasTypeofNarrows(L, stmt.expression, cond.value), () => L.lowerScopedBlock(live));
+          return cond.value
+            ? { kind: "if", cond, then: lowered, else_: null, loc: locOf(stmt) }
+            : { kind: "if", cond, then: [], else_: live === undefined ? null : lowered, loc: locOf(stmt) };
+        }
+      }
       // Aliased-typeof narrows (ms's `var type = typeof val` guard): the
       // then-branch lowers under what a TRUE condition proves, the
       // else-branch under a FALSE one — the var/let alias narrowing the
@@ -1354,7 +1395,10 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     if (ts.isWhileStatement(stmt)) {
       const labels = L.takeLabels();
       const cond = L.lowerCondition(stmt.expression);
-      const body = L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
+      // `while (false)`: the body never runs, so it is not lowered.
+      const body = cond.kind === "boolLit" && !cond.value && deadBranchSkippable(stmt.statement)
+        ? []
+        : L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
       return { kind: "while", cond, body, ...(labels && { labels }), loc: locOf(stmt) };
     }
     if (ts.isDoStatement(stmt)) {
