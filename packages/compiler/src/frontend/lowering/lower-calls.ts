@@ -3522,6 +3522,41 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
    * handle is not a union of exactly one f64 arm and unit arms — anything
    * else keeps the fence it had. */
   function optionalTimerHandleClear(L: Lowerer, handle: IrExpr, fn: IrLibFn, loc: SrcLoc): IrExpr | null {
+    // A checked-dynamic handle (a slot the checker calls `any`): the same
+    // rule at run time -- a number is the id, anything else is not a live
+    // handle and clearing it does nothing.
+    if (handle.type.kind === "dyn") {
+      const dynKey = `clearDyn:${fn}`;
+      let dynName = L.arrHofHelpers.get(dynKey);
+      if (dynName === undefined) {
+        dynName = `%timers.clearDyn.${L.arrHofHelpers.size}`;
+        L.arrHofHelpers.set(dynKey, dynName);
+        const dv = (): IrExpr => ({ kind: "varRef", localId: "h.0", type: DYN, loc });
+        L.liftedFns.push({
+          name: dynName,
+          params: [{ localId: "h.0", name: "h", type: DYN }],
+          returnType: VOID,
+          locals: [{ id: "h.0", name: "h", type: DYN, mutable: false }],
+          body: [
+            {
+              kind: "if",
+              cond: { kind: "dynTest", test: "number", value: dv(), type: BOOL, loc },
+              then: [
+                {
+                  kind: "exprStmt",
+                  expr: { kind: "libCall", fn, args: [{ kind: "dynCheck", value: dv(), type: F64, loc }], type: VOID, loc },
+                  loc,
+                },
+              ],
+              else_: null,
+              loc,
+            },
+          ],
+          loc,
+        });
+      }
+      return { kind: "call", callee: dynName, args: [handle], type: VOID, loc };
+    }
     if (handle.type.kind !== "union") return null;
     const t = handle.type;
     const def = L.unions.get(t.unionId);
