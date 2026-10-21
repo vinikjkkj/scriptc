@@ -10971,6 +10971,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7810-a-definite-assignment-local-reads-undefined-before-its-assignment.ts": {
+   "order": [
+    "<repo>/tests/corpus/7810-a-definite-assignment-local-reads-undefined-before-its-assignment.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7811-a-definite-assignment-field-reads-undefined-before-its-assignment.ts": {
+   "order": [
+    "<repo>/tests/corpus/7811-a-definite-assignment-field-reads-undefined-before-its-assignment.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7812-a-module-level-definite-assignment-binding-reads-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/7812-a-module-level-definite-assignment-binding-reads-undefined.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7813-an-array-index-past-the-end-reads-undefined-where-the-consumer-takes-it.ts": {
+   "order": [
+    "<repo>/tests/corpus/7813-an-array-index-past-the-end-reads-undefined-where-the-consumer-takes-it.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7814-a-non-null-assertion-over-undefined-is-erased-and-fails-at-the-use.ts": {
+   "order": [
+    "<repo>/tests/corpus/7814-a-non-null-assertion-over-undefined-is-erased-and-fails-at-the-use.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7815-a-union-typed-definite-assignment-field-reads-undefined-before-its-assignment.ts": {
+   "order": [
+    "<repo>/tests/corpus/7815-a-union-typed-definite-assignment-field-reads-undefined-before-its-assignment.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7816-placeholder-initializers-and-compound-assignment-on-deferred-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/7816-placeholder-initializers-and-compound-assignment-on-deferred-fields.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
