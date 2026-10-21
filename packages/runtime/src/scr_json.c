@@ -5113,6 +5113,57 @@ bool scr_dyn_loose_eq_num(double n, const ScrDyn *d) {
   return eq;
 }
 
+/* One side a NUMBER n, the other any dyn value: 7.2.14 steps 5, 6, 12, 13
+ * and (an object) 11/12 again after ToPrimitive. -1 = exception pending. */
+static int scr_loose_num(double n, const ScrDyn *o) {
+  switch (o->kind) {
+  case SCR_DYN_NULL:
+  case SCR_DYN_UNDEF: return 0;
+  case SCR_DYN_NUM: return n == o->v.num;
+  case SCR_DYN_STR: return n == scr_string_to_number(o->v.str);
+  case SCR_DYN_BOOL: return n == (o->v.b ? 1.0 : 0.0);
+  case SCR_DYN_BIG: return scr_dyn_big_ops()->eq_f64(o->v.big, n);
+  default: {
+    ScrDyn *p = scr_dyn_to_primitive(o, SCR_TOPRIM_DEFAULT);
+    if (!p) return -1;
+    int r = scr_loose_num(n, p);
+    scr_dyn_release(p);
+    return r;
+  }
+  }
+}
+
+static int scr_loose_rec(const ScrDyn *x, const ScrDyn *y) {
+  bool xn = x->kind == SCR_DYN_NULL || x->kind == SCR_DYN_UNDEF;
+  bool yn = y->kind == SCR_DYN_NULL || y->kind == SCR_DYN_UNDEF;
+  if (xn || yn) return xn && yn;
+  if (x->kind == y->kind) {
+    bool eq = scr_dyn_strict_eq(x, y);
+    return scr_exc_pending() ? -1 : eq;
+  }
+  if (x->kind == SCR_DYN_NUM) return scr_loose_num(x->v.num, y);
+  if (y->kind == SCR_DYN_NUM) return scr_loose_num(y->v.num, x);
+  if (x->kind == SCR_DYN_BOOL) return scr_loose_num(x->v.b ? 1.0 : 0.0, y);
+  if (y->kind == SCR_DYN_BOOL) return scr_loose_num(y->v.b ? 1.0 : 0.0, x);
+  if (x->kind == SCR_DYN_STR && y->kind == SCR_DYN_BIG) return scr_dyn_big_ops()->eq_str(y->v.big, x->v.str);
+  if (x->kind == SCR_DYN_BIG && y->kind == SCR_DYN_STR) return scr_dyn_big_ops()->eq_str(x->v.big, y->v.str);
+  bool xp = x->kind == SCR_DYN_STR || x->kind == SCR_DYN_BIG;
+  bool yp = y->kind == SCR_DYN_STR || y->kind == SCR_DYN_BIG;
+  if (xp == yp) return 0; /* two different-kind objects */
+  const ScrDyn *obj = xp ? y : x;
+  const ScrDyn *prim = xp ? x : y;
+  ScrDyn *p = scr_dyn_to_primitive(obj, SCR_TOPRIM_DEFAULT);
+  if (!p) return -1;
+  int r = scr_loose_rec(prim, p);
+  scr_dyn_release(p);
+  return r;
+}
+
+bool scr_dyn_loose_eq(const ScrDyn *a, const ScrDyn *b) {
+  if (a == NULL || b == NULL) return false;
+  return scr_loose_rec(a, b) == 1;
+}
+
 ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {
   if (d->kind != SCR_DYN_OBJ) return scr_dyn_string_coerce(d);
   ScrDyn *m = scr_dyn_obj_own_data(d, "valueOf", 7); /* borrowed */
