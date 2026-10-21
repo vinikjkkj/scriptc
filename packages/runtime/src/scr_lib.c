@@ -17,7 +17,9 @@
 #include "scr_runtime.h"
 
 #include <ctype.h>
-#include <dirent.h>
+#ifndef _MSC_VER
+#include <dirent.h> /* MSVC: declared by scr_runtime.h, defined in scr_win.c */
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
