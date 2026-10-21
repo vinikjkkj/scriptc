@@ -9990,6 +9990,17 @@ export class Lowerer {
    * dyn/jsval slots). The width family's func gate — widthLiftPlan
    * bridges only signatures whose every call succeeds by construction. */
   cleanFuncAdaptable(src: IrType & { kind: "func" }, dst: IrType & { kind: "func" }): boolean {
+    if (process.env["SCRIPTC_FUNCADAPT_WHY"] !== undefined) {
+      // One line per piece, so a refused adapter names the position (or the
+      // result) that did not convert instead of two long signature prints.
+      const F = (t: IrType): string => this.fmt(t).slice(0, 160);
+      console.error(`FUNCADAPT ${F(src)} => ${F(dst)}`);
+      src.params.forEach((p, i) => {
+        const dp = dst.params[i];
+        console.error(`  param ${i}: ${dp === undefined ? "MISSING" : String(this.coercibleValue(dp, p))} ${dp === undefined ? "" : F(dp)} -> ${F(p)}`);
+      });
+      console.error(`  ret: ${String(this.coercibleValue(src.ret, dst.ret, true))} ${F(src.ret)} -> ${F(dst.ret)}`);
+    }
     if (src.rest === true || dst.rest === true) return false;
     // A SPELLED rest slot is a DIFFERENT calling convention — the packed
     // array is one argument, not a positional list — so the positional
