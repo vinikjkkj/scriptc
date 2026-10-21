@@ -523,6 +523,9 @@ export interface CcOptions {
   /** The program formats a Date as text (moduleUsesDateFmt): compiles
    * scr_date_fmt.c and the generated zone-name table scr_date_zones.c. */
   dateFmt?: boolean;
+  /** The program reads local time (moduleUsesDateTz): compiles the zone database
+   * scr_date_tz.c + scr_date_tzdb.c; without it scr_date_tz_stub.c stands in. */
+  dateTz?: boolean;
   /** A Date and an `unknown` meet (moduleUsesDateDyn): compiles scr_date_dyn.c. */
   dateDyn?: boolean;
   /** The program holds a named stdlib handle, `Blob` or `PromiseConstructor`
@@ -2227,6 +2230,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const dateUnit = opts.date ?? false;
   const dateDynUnit = (opts.dateDyn ?? false) && dateUnit;
   const dateFmtUnit = ((opts.dateFmt ?? false) || dateDynUnit) && dateUnit;
+  const dateTzUnit = ((opts.dateTz ?? false) || dateFmtUnit) && dateUnit;
   const opaqueUnit = opts.opaque ?? false;
   const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
   const fetchDispatch = (opts.fetchDispatch ?? false) && fetchStatic;
@@ -2455,6 +2459,11 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(dateUnit ? [rt(join(rtDir, "scr_date.c"))] : []),
     ...(dateDynUnit ? [rt(join(rtDir, "scr_date_dyn.c"))] : []),
     ...(dateFmtUnit ? [rt(join(rtDir, "scr_date_fmt.c")), rt(join(rtDir, "scr_date_zones.c"))] : []),
+    ...(dateUnit
+      ? dateTzUnit
+        ? [rt(join(rtDir, "scr_date_tz.c")), rt(join(rtDir, "scr_date_tzdb.c"))]
+        : [rt(join(rtDir, "scr_date_tz_stub.c"))]
+      : []),
     ...(opaqueUnit ? [rt(join(rtDir, "scr_opaque.c"))] : []),
     // The WebRTC data-channel handles. Ownership pairs only for now; the
     // handles are never constructed, but a program that declares the

@@ -1168,14 +1168,14 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     kind: "stdlib",
     name: "Date constructor (year/month/day... local-time form)",
     fns: ["date.newParts"],
-    note: "new Date(y, mo, d, h, mi, s, ms): reads the HOST's zone database to turn a wall-clock reading into an instant (the spec's gap/overlap rule), so the answer depends on the machine that runs the binary",
+    note: "new Date(y, mo, d, h, mi, s, ms): reads the bundled zone database (Node's own offset history) to turn a wall-clock reading into an instant (the spec's gap/overlap rule), so the answer depends on the zone the binary runs in",
   },
   {
     id: "stdlib.date.set",
     kind: "stdlib",
     name: "Date.prototype setters (setTime, setFullYear .. setMilliseconds and the UTC forms)",
     fns: ["date.set"],
-    note: "mutates the Date handle's time value; the local forms read the HOST's zone database like the local getters",
+    note: "mutates the Date handle's time value; the local forms read the bundled zone database like the local getters",
   },
   {
     id: "stdlib.date.newStr",
@@ -1252,7 +1252,7 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     kind: "stdlib",
     name: "Date.prototype local-time getters (getFullYear .. getMilliseconds, getDay)",
     fns: ["date.localTime"],
-    note: "LocalTime(t): reads the HOST's zone database (POSIX localtime/gmtime, Windows SystemTimeToTzSpecificLocalTimeEx), so the answer depends on the machine that runs the binary",
+    note: "LocalTime(t): reads the bundled zone database (Node's own offset history, scr_date_tzdb.c) for the TZ environment variable's zone or the system zone, so the answer depends on the zone the binary runs in and not on the host's tzdata release",
   },
   {
     id: "stdlib.date.toString",
@@ -1266,7 +1266,7 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     kind: "stdlib",
     name: "Date.prototype.toDateString/toTimeString/toUTCString/toGMTString/toLocaleString/toLocaleDateString/toLocaleTimeString (no arguments)",
     fns: ["date.format"],
-    note: "text over the time value; the local forms read the HOST's zone database and its ICU long name like toString",
+    note: "text over the time value; the local forms read the bundled zone database and its ICU long name like toString",
   },
   {
     id: "stdlib.date.tzOffset",
