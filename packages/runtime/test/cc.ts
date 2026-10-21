@@ -11,7 +11,7 @@
 // runtime's libc shim TU (stpcpy, arc4random_buf) is a separate translation
 // unit that the real build driver links in -- see backend/cc.ts.
 import { execFile } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -38,6 +38,29 @@ function ccArgv(): string[] {
 // Whether this compiler can actually LINK an AddressSanitizer binary. zig's
 // mingw target compiles the instrumentation and then has no asan runtime to
 // link it against, so the probe has to go all the way to an executable.
+async function startsOk(exe: string): Promise<boolean> {
+  try {
+    await execFileAsync(exe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** `<clang resource dir>/lib/windows`, where clang ships its asan DLL. */
+async function putAsanRuntimeOnPath(cc: string, pre: string[]): Promise<void> {
+  try {
+    const { stdout } = await execFileAsync(cc, [...pre, "-print-resource-dir"]);
+    const libDir = join(stdout.trim(), "lib", "windows");
+    if (existsSync(join(libDir, "clang_rt.asan_dynamic-x86_64.dll"))) {
+      const key = Object.keys(process.env).find((k) => k.toLowerCase() === "path") ?? "PATH";
+      process.env[key] = `${libDir};${process.env[key] ?? ""}`;
+    }
+  } catch {
+    /* no such compiler flag (zig cc): the caller's second probe decides */
+  }
+}
+
 let asanProbe: Promise<boolean> | undefined;
 function asanWorks(): Promise<boolean> {
   return (asanProbe ??= (async () => {
@@ -46,7 +69,21 @@ function asanWorks(): Promise<boolean> {
       const c = join(dir, "p.c");
       await writeFile(c, "int main(void){return 0;}\n");
       const [cc, ...pre] = ccArgv();
-      await execFileAsync(cc!, [...pre, "-fsanitize=address", "-o", join(dir, "p" + exeSuffix), c]);
+      const exe = join(dir, "p" + exeSuffix);
+      await execFileAsync(cc!, [...pre, "-fsanitize=address", "-o", exe, c]);
+      if (process.platform === "win32") {
+        // LINKING is not enough on an MSVC-ABI clang: the asan runtime is a
+        // DLL (clang_rt.asan_dynamic-x86_64.dll) that lives under the
+        // compiler's resource dir, which is not on PATH, so every
+        // sanitized exe built here linked fine and then died at load with
+        // 0xC0000135 (STATUS_DLL_NOT_FOUND, exit 3221225781). Run the
+        // probe; if it cannot start, put the runtime's directory on PATH
+        // (child processes inherit it) and run it again.
+        if (!(await startsOk(exe))) {
+          await putAsanRuntimeOnPath(cc!, pre);
+          if (!(await startsOk(exe))) return false;
+        }
+      }
       return true;
     } catch {
       return false;
