@@ -14572,6 +14572,18 @@
     "<repo>/tests/corpus/8400-member-use-past-the-end-names-the-runtime-key-and-a-fractional-index-misses.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8401-a-const-binding-over-an-absent-value-throws-at-the-member-use-not-the-initializer.ts": {
+   "order": [
+    "<repo>/tests/corpus/8401-a-const-binding-over-an-absent-value-throws-at-the-member-use-not-the-initializer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8402-an-absent-const-binding-survives-closures-generators-async-and-side-effecting-indexes.ts": {
+   "order": [
+    "<repo>/tests/corpus/8402-an-absent-const-binding-survives-closures-generators-async-and-side-effecting-indexes.ts"
+   ],
+   "diags": []
   }
  }
 }
