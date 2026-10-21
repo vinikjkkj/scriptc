@@ -1027,6 +1027,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               e.type,
               `scr_regex_match_all_into(${r.name}, ${args[0]!.name}, ${args[1]!.name})`,
             );
+          case "replaceRowsInto":
+            return E.fallibleTemp(
+              e.type,
+              `scr_regex_replace_rows_into(${r.name}, ${args[0]!.name}, ${args[1]!.name})`,
+            );
           case "search":
             // First-match index or -1 — a plain double; never throws.
             return E.newTemp(e.type, `scr_regex_search(${r.name}, ${args[0]!.name})`);

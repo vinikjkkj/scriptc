@@ -3003,6 +3003,12 @@ export type IrRegexIntrinsicMethod =
    * start index — the row's `.index`, always present (every drained row
    * matched). Same result and throw contract as matchAll. */
   | "matchAllInto"
+  /** The function-replacer desugar's drain: matchAllInto's shape, but with
+   * RegExp.prototype[Symbol.replace]'s lastIndex rules on the ORIGINAL
+   * regex (g: reset to 0 and leave 0, every match; non-g /y: one exec at
+   * lastIndex, storing the end; plain: one exec from 0, no state). Never
+   * throws. */
+  | "replaceRowsInto"
   /** `s.search(re)` — the first match's UTF-16 index, or -1. Symbol.search
    * neither reads nor writes lastIndex (a fresh exec from position 0), so
    * no g/y fence applies: /g is irrelevant and /y anchors at 0 — exactly

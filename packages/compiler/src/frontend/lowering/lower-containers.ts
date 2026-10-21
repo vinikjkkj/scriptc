@@ -6586,15 +6586,12 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       const receiver = L.lowerExpr(access.expression);
       if (receiver.type.kind === "regex") return regexToStringExpr(L, receiver, loc);
     }
-    // `s.match(re)` for non-g/y regexes: Node's exec-shaped result reduced
-    // to the honest slice — the `string[] | null` union holding
-    // [whole match, ...captures] or the null arm. The g-flag match returns
-    // EVERY match (a different shape) and /y is stateful — both fence at
-    // compile time on literal arguments (values reaching the runtime with
-    // those flags abort, the test() stance). `.index`/`.input` reads on
-    // the result fence per member (array-typed value); `.groups` reads
-    // desugar at their access sites when the regex is statically known
-    // (lowerMatchGroupsRead).
+    // `s.match(re)`: Node's exec-shaped result reduced to the honest slice —
+    // the `string[] | null` union holding [whole match, ...captures] or the
+    // null arm. A /g regex answers EVERY match's text (still string[] |
+    // null, lastIndex reset to 0), and /y without g is exec-stateful through
+    // lastIndex (scr_regex_match). `.groups` reads desugar at their access
+    // sites when the regex is statically known (lowerMatchGroupsRead).
     // `s.match(re)` also claims a NULLABLE string receiver (string + unit
     // arms — `process.versions.openssl.match(...)`, the Dict<string>
     // member the node suite's crypto helper reads): the checked
@@ -6614,18 +6611,6 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       const arg0 = call.arguments[0];
       if (!arg0 || L.mapTypeOf(L.typeOf(arg0))?.kind !== "regex") return null; // string-pattern match: the SC2020 fence
       if (call.arguments.length !== 1) return null;
-      let reNode: ts.Expression = arg0;
-      while (ts.isParenthesizedExpression(reNode)) reNode = reNode.expression;
-      if (ts.isRegularExpressionLiteral(reNode)) {
-        const flags = reNode.text.slice(reNode.text.lastIndexOf("/") + 1);
-        if (flags.includes("g") || flags.includes("y")) {
-          L.unsupported(
-            "SC1120",
-            call,
-            "'.match()' with the 'g' or 'y' flag (an every-match array is a different shape — use replaceAll/split, or test() per position)",
-          );
-        }
-      }
       const receiver = nullableStringRecv ? L.lowerExprExpecting(access.expression, STRING) : lowerReceiver();
       const re = L.lowerExpr(arg0);
       // RegExpMatchArray | null maps to the string[] | null union by
@@ -6784,8 +6769,12 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     //
     //   const pattern = new RegExp(`\\b(?:${names.join("|")})\\b`, "g")
     //   return (sql) => sql.replace(pattern, (token) => map[token] ?? token)
-    const flags = lit !== null ? lit.flags : staticRegexFlagsOf(L, reNode);
-    if (flags === null) {
+    const flagsOrNull = lit !== null ? lit.flags : staticRegexFlagsOf(L, reNode);
+    // `replace` no longer needs the flags: the runtime drain applies the
+    // regex's own g/y rules. `replaceAll` still does (a non-global regex
+    // must throw Node's TypeError, which the helper would swallow).
+    const flags = flagsOrNull ?? "";
+    if (flagsOrNull === null && method === "replaceAll") {
       fence(
         "a function replacement value over a regex whose FLAGS the compiler cannot read statically (global-or-once is decided at compile time — write the flags argument as a literal, or bind the regex to a const)",
       );
@@ -6844,29 +6833,13 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         );
       }
     }
-    // The internal regex is the source one with 'g' guaranteed. When the
-    // author already wrote it, the ALREADY-LOWERED operand rides through
-    // (a const binding stays evaluated, exactly as JS evaluates it).
-    // Without the pattern there is no literal to synthesize, so the
-    // completion happens at run time instead — over the source regex's own
-    // `source`, with the STATIC flags plus 'g' (this arm is the branch
-    // where 'g' is known absent, so the concatenation cannot duplicate it
-    // and cannot throw). The value is still built once, at the call.
-    const re: IrExpr = flags!.includes("g")
-      ? reIr
-      : lit !== null
-        ? { kind: "regexLit", pattern: lit.pattern, flags: flags! + "g", type: REGEX, loc }
-        : {
-            kind: "libCall",
-            fn: "regex.new",
-            args: [
-              { kind: "regexIntrinsic", method: "source", receiver: reIr, args: [], type: STRING, loc },
-              { kind: "strLit", value: flags! + "g", type: STRING, loc },
-            ],
-            type: REGEX,
-            loc,
-          };
-    const once = !flags!.includes("g");
+    // The regex rides through unchanged: the replaceRowsInto drain applies
+    // its own g/y/plain lastIndex rules (a plain or sticky non-global regex
+    // yields at most one row).
+    const re: IrExpr = reIr;
+    // The drain itself stops at one row for a non-global regex, so the
+    // helper never caps (and never needs the flags): `once` is always false.
+    const once = false;
     const helper = strReplaceFnHelper(L, arity, once, loc);
     return { kind: "call", callee: helper, args: [receiver, re, fnIr], type: STRING, loc };
   }
@@ -6959,7 +6932,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         localId: "rows.0",
         init: {
           kind: "regexIntrinsic",
-          method: "matchAllInto",
+          method: "replaceRowsInto",
           receiver: ref("s.0", STRING),
           args: [ref("re.0", REGEX), ref("ix.0", ixT)],
           type: rowsT,

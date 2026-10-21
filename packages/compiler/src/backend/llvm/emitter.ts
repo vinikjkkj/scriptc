@@ -14783,6 +14783,8 @@ class LlEmitter {
         // matchAll's companion-index form: args[1] (a number[]) also
         // receives each match's UTF-16 start index.
         return fallible("scr_regex_match_all_into", `ptr ${r.name}, ptr ${args[0]!.name}, ptr ${args[1]!.name}`);
+      case "replaceRowsInto":
+        return fallible("scr_regex_replace_rows_into", `ptr ${r.name}, ptr ${args[0]!.name}, ptr ${args[1]!.name}`);
       case "replaceAll":
         return fallible("scr_regex_replace_all", `ptr ${r.name}, ptr ${args[0]!.name}, ptr ${args[1]!.name}`);
       case "split":
