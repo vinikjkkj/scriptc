@@ -486,12 +486,14 @@ PROGRAM code behind per-member fences, but marks the PACKAGE an offender:
 
 A `!`-asserted field assigned past the constructor's top level -- and, with
 `strictPropertyInitialization` off, a field assigned only in a method -- rides
-`T | undefined`, and reads extract the declared type. The fence survives only
-where the deferral cannot carry the type: a MAP-typed field, since map arms
-cannot join a union.
+`T | undefined`, and reads extract the declared type. A Map, Set or Generator
+field cannot join a union, so its slot stays the plain pointer and NULL (zeroed
+memory) is Node's undefined: a member use throws Node's TypeError at the use,
+and comparisons with undefined/null, truthiness, `typeof`, `??` and `?.` are
+answered from the NULL test. An `unknown` field starts as the dyn undefined.
 
-    tests/diagnostics/unassigned-fields.ts:5
-    tests/diagnostics/spi-off/main.ts:6
+    tests/corpus/8411-definite-assignment-fields-across-every-slot-kind.ts
+    tests/corpus/8412-strict-property-initialization-off-defers-map-fields/main.ts
 
 ---
 
