@@ -105,6 +105,10 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // remaining fence sits on the garbage-input path (pinned below), which
   // ms-cli.ts deliberately never drives.
   test.for([
+    // ms's garbage-input paths: parse() answers undefined against its JSDoc
+    // `@return {Number}` (a bare `return;`); the shadow respells the claim
+    // `{Number|undefined}`, so the slot, the callers and Node agree.
+    ["ms", "ms-garbage-cli.ts"],
     ["escape-string-regexp", "escape-cli.ts"],
     ["slash", "slash-cli.ts"],
     // dualist pins the "node" exports condition: Node runs ./node.js
@@ -339,19 +343,15 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // code instead of a deferred fence. Node answers undefined there, a
   // value the declared representation cannot hold, so each path traps
   // loudly instead of misbehaving. The frontier only moves deliberately.
-  test("ms is refused at build time for the JSDoc-contradicting undefined returns", () => {
+  test("ms compiles with no diagnostics: its JSDoc-contradicting undefined returns widen the claim", () => {
     const { coverage } = analyze(join(pilotRoot, "ms-cli.ts"), { npmStatic: ["ms"] });
     expect(coverage.npmStatic).toEqual([{ package: "ms", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-    // OPEN DEFECT ("tudo funcional"): ms's parse() returns bare `return;` on
-    // its garbage paths against its JSDoc `@return {Number}`. JS hands the
-    // caller undefined, which the declared number slot cannot hold, so each
-    // is a BUILD refusal. They used to be deferred runtime fences, and this
-    // pilot built and ran on the paths that never reach them.
-    expect(coverage.diagnostics.length).toBe(2);
-    for (const d of coverage.diagnostics) {
-      expect(d.message).toMatch(/bare 'return'/);
-    }
+    // parse() returns bare `return;` on its garbage paths against its JSDoc
+    // `@return {Number}`. The fs shadow respells the claim as
+    // `{Number|undefined}` (widenJsdocReturnClaims), including the exported
+    // function that returns parse()'s result, so nothing is refused.
+    expect(coverage.diagnostics.length).toBe(0);
   }, 120_000);
 
   // protobufjs static-module's ONEOF ACCESSOR family. This was pinned in

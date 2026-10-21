@@ -64,7 +64,7 @@ function trackedReadFileOrThrow(path: string): string {
   return text;
 }
 import { dirname } from "node:path";
-import { rewriteBundlerCjsExports } from "./npm-static-rewrite.js";
+import { rewriteBundlerCjsExports, widenJsdocReturnClaims } from "./npm-static-rewrite.js";
 import { npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } from "./shared.js";
 
 let activePackages: ReadonlySet<string> = new Set();
@@ -418,6 +418,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
         const hit = rewriteCache.get(path);
         if (hit !== undefined) return hit ?? undefined;
         let rewritten: string | null = null;
+        let claimsOnly: string | null = null;
         let originalLines = 0;
         try {
           const original = trackedReadFileOrThrow(path);
@@ -435,8 +436,20 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
           } else {
             rewritten = answer;
           }
+          // The JSDoc return claims the body contradicts (widenJsdocReturnClaims)
+          // are respelled in the text both worlds read. A claim-only change adds
+          // no lines, so it does not count as the export-table rewrite above.
+          if (rewritten === null && !(answer !== null && typeof answer === "object")) {
+            claimsOnly = widenJsdocReturnClaims(original, path);
+          } else if (rewritten !== null) {
+            rewritten = widenJsdocReturnClaims(rewritten, path) ?? rewritten;
+          }
         } catch {
           rewritten = null; // unreadable/unparseable: fall through untouched
+        }
+        if (claimsOnly !== null) {
+          rewriteCache.set(path, claimsOnly);
+          return claimsOnly;
         }
         rewriteCache.set(path, rewritten);
         if (rewritten !== null) rewrittenPaths.set(rewriteKeyOf(path), originalLines);
