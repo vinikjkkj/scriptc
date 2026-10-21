@@ -1220,6 +1220,27 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     fns: ["date.getUTCMilliseconds"],
     note: "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart",
   },
+  {
+    id: "stdlib.date.getUTCDay",
+    kind: "stdlib",
+    name: "Date.prototype.getUTCDay",
+    fns: ["date.getUTCDay"],
+    note: "arithmetic over the stored time value only (getDay is this over date.localTime)",
+  },
+  {
+    id: "stdlib.date.localTime",
+    kind: "stdlib",
+    name: "Date.prototype local-time getters (getFullYear .. getMilliseconds, getDay)",
+    fns: ["date.localTime"],
+    note: "LocalTime(t): reads the HOST's zone database (POSIX localtime/gmtime, Windows SystemTimeToTzSpecificLocalTimeEx), so the answer depends on the machine that runs the binary",
+  },
+  {
+    id: "stdlib.date.tzOffset",
+    kind: "stdlib",
+    name: "Date.prototype.getTimezoneOffset",
+    fns: ["date.tzOffset"],
+    note: "the HOST zone's offset at that instant, in minutes",
+  },
   // ── crypto.randomFill (lowerCryptoModuleCall's dedicated arm): the only
   // CSPRNG member with no lowering-table row, because the fill writes into
   // a caller-owned buffer and hands control to a deferred callback rather

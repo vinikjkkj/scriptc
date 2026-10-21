@@ -52,6 +52,10 @@
 #include <stdlib.h>
 #include <time.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "scr_runtime.h"
 
 struct ScrDate {
@@ -129,7 +133,12 @@ typedef struct {
 } ScrDateParts;
 
 static int scr_date_parts(double ms, ScrDateParts *out) {
-  if (!(fabs(ms) <= 8640000000000000.0)) return 0; /* NaN and out of range */
+  /* NaN and out of range.  The bound is one day wider than Date's own:
+   * LocalTime(t) = t + offset legitimately lands up to ~14 h past
+   * +-8.64e15 for a clipped t near the edge, and V8 still answers its
+   * local fields there.  A UTC read can never see such a value, because
+   * TimeClip already ran at construction. */
+  if (!(fabs(ms) <= 8640000000000000.0 + 86400000.0)) return 0;
   double t = trunc(ms);
   double dayd = floor(t / 86400000.0);
   long long msday = (long long)(t - dayd * 86400000.0);
@@ -227,47 +236,117 @@ static double scr_date_days_from_civil_local(long long y, int m, int d) {
  * and NONEXISTENT across a spring-forward. Subtracting two broken-down
  * views of one instant asks no ambiguous question.
  *
- * WHY ONLY THE LIVE CLOCK REACHES HERE. Node carries ICU's full zone
- * HISTORY; the platforms this links against do not agree that they
- * should. Windows' CRT applies the zone's CURRENT rule to every instant,
- * so a past DST period reads an hour off — measured, one instant every
- * ~9 days from 2000 to 2030 on a Windows host in America/Sao_Paulo, 260
- * of 1200 disagreed with Node. That is a divergence the COMPILER cannot
- * see, because the zone database belongs to the machine that runs the
- * binary. So the frontend composes only `new Date().getHours()`, whose
- * instant is the present — the one instant a zone database cannot be
- * wrong about — and fences every arbitrary-millisecond spelling.
+ * ARBITRARY INSTANTS. The frontend now lowers every local-time read
+ * (getHours .. getMilliseconds, getDay, getTimezoneOffset) over a Date
+ * value, so scr_date_tza below is the one place the platforms differ:
+ * POSIX asks localtime/gmtime (full zone history, honours TZ, as Node's
+ * ICU does), Windows asks SystemTimeToTzSpecificLocalTimeEx because the
+ * CRT applies the zone's CURRENT rule to every instant (measured, Windows
+ * host in America/Sao_Paulo: 260 of 1200 instants disagreed with Node).
+ * The guards still answer NaN for anything outside Date's range or the
+ * platform's time_t. Residual, unmeasurable by the Linux lane: Node ships
+ * its own tzdata, so a host whose system tzdata is a different release
+ * can disagree on forecast rules (measured: Africa/Casablanca after 2020,
+ * node tz 2026a vs host 2026c). */
+static double scr_date_civil_ms(long long y, int mo, int d, int h, int mi, int sec) {
+  return scr_date_days_from_civil_local(y, mo, d) * 86400000.0 + (double)h * 3600000.0 + (double)mi * 60000.0 +
+         (double)sec * 1000.0;
+}
+
+/* LocalTZA for the instant `t` (an integral, in-range time value): the
+ * milliseconds LocalTime(t) - t.  Returns 0 when the platform declines the
+ * instant, in which case *out is untouched.
  *
- * The guards below still answer NaN for anything outside Date's range or
- * outside the platform's `time_t` (Windows rejects negative values
- * outright). Nothing the frontend emits can reach them; they are here so
- * that a future caller cannot get a quietly wrong hour instead of a
- * loudly wrong one. */
-static double scr_date_tm_civil_ms(const struct tm *x) {
-  return scr_date_days_from_civil_local((long long)x->tm_year + 1900, x->tm_mon + 1, x->tm_mday) * 86400000.0 +
-         (double)x->tm_hour * 3600000.0 + (double)x->tm_min * 60000.0 + (double)x->tm_sec * 1000.0;
+ * The two arms are separate on purpose and the Windows rule must never
+ * leak into the POSIX arm (or the reverse):
+ *
+ *  - POSIX: break the SAME instant down twice (localtime and gmtime) and
+ *    subtract the civil times.  glibc/musl/macOS carry the zone's full
+ *    history and honour TZ, as Node's ICU does.
+ *  - Windows: the CRT's localtime applies the zone's CURRENT rule to every
+ *    instant (measured: 260 of 1200 instants disagreed with Node in
+ *    America/Sao_Paulo).  SystemTimeToTzSpecificLocalTimeEx with a NULL
+ *    zone consults the registry's dynamic-DST history for the current
+ *    zone, which is the correct per-instant answer.  Its domain is
+ *    FILETIME (1601..30827); an instant outside it is clamped to the
+ *    nearest representable day, so far-past/far-future local fields use
+ *    the boundary year's rule.  Windows ignores the TZ environment
+ *    variable here (Node/ICU honour it); the CI lane runs the machine zone.
+ */
+#ifdef _WIN32
+static int scr_date_tza(double t, double *out) {
+  double secsd = floor(t / 1000.0);
+  double ftsecs = secsd + 11644473600.0; /* seconds since 1601-01-01 */
+  if (ftsecs < 86400.0) ftsecs = 86400.0;
+  if (ftsecs > 900000000000.0) ftsecs = 900000000000.0;
+  ULARGE_INTEGER u;
+  u.QuadPart = (ULONGLONG)ftsecs * 10000000ULL;
+  FILETIME ft;
+  ft.dwLowDateTime = u.LowPart;
+  ft.dwHighDateTime = u.HighPart;
+  SYSTEMTIME ut, lt;
+  if (!FileTimeToSystemTime(&ft, &ut)) return 0;
+  if (!SystemTimeToTzSpecificLocalTimeEx(NULL, &ut, &lt)) return 0;
+  *out = scr_date_civil_ms(lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond) -
+         scr_date_civil_ms(ut.wYear, ut.wMonth, ut.wDay, ut.wHour, ut.wMinute, ut.wSecond);
+  return 1;
+}
+#else
+static int scr_date_tza(double t, double *out) {
+  /* The second the instant falls in, floored -- so a negative ms keeps a
+   * non-negative sub-second remainder. */
+  double secsd = floor(t / 1000.0);
+  if (secsd < -9.2e18 || secsd > 9.2e18) return 0; /* outside any time_t */
+  time_t secs = (time_t)secsd;
+  if ((double)secs != secsd) return 0; /* narrower time_t than the instant */
+  struct tm local_tm, utc_tm;
+  const struct tm *lp = localtime(&secs);
+  if (lp == NULL) return 0;
+  local_tm = *lp;
+  const struct tm *gp = gmtime(&secs);
+  if (gp == NULL) return 0;
+  utc_tm = *gp;
+  *out = scr_date_civil_ms((long long)local_tm.tm_year + 1900, local_tm.tm_mon + 1, local_tm.tm_mday,
+                           local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec) -
+         scr_date_civil_ms((long long)utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday, utc_tm.tm_hour,
+                           utc_tm.tm_min, utc_tm.tm_sec);
+  return 1;
+}
+#endif
+
+/* LocalTime(t) as a time value (t + LocalTZA), NaN when t is NaN/out of
+ * range or the platform declines the instant.  The local field getters are
+ * the UTC getters applied to this. */
+double scr_date_local_time(double ms) {
+  if (!(fabs(ms) <= 8640000000000000.0)) return NAN;
+  double t = trunc(ms);
+  double tza;
+  if (!scr_date_tza(t, &tza)) return NAN;
+  return t + tza;
+}
+
+/* getTimezoneOffset(): (t - LocalTime(t)) / 60000 truncated toward zero --
+ * V8 answers whole minutes even for a sub-minute historical (LMT) offset
+ * (Sao_Paulo before 1914: 186, not 186.4666...). */
+double scr_date_tz_offset(double ms) {
+  if (!(fabs(ms) <= 8640000000000000.0)) return NAN;
+  double t = trunc(ms);
+  double tza;
+  if (!scr_date_tza(t, &tza)) return NAN;
+  double r = trunc(-tza / 60000.0);
+  return r == 0 ? 0 : r;
+}
+
+/* getUTCDay()/getDay() weekday of a time value, 0 = Sunday. */
+double scr_date_utc_day(double ms) {
+  if (!(fabs(ms) <= 8640000000000000.0 + 86400000.0)) return NAN;
+  double days = floor(trunc(ms) / 86400000.0);
+  double w = fmod(days + 4.0, 7.0);
+  if (w < 0) w += 7.0;
+  return w;
 }
 
 double scr_date_get_hours(double ms) {
-  if (!(fabs(ms) <= 8640000000000000.0)) return NAN; /* NaN and out of range */
-  double t = trunc(ms);
-  /* The second the instant falls in, floored — so a negative ms keeps a
-   * non-negative sub-second remainder and the hour never rounds up. */
-  double secsd = floor(t / 1000.0);
-  if (secsd < -9.2e18 || secsd > 9.2e18) return NAN; /* outside any time_t */
-  time_t secs = (time_t)secsd;
-  if ((double)secs != secsd) return NAN; /* narrower time_t than the instant */
-  struct tm local_tm, utc_tm;
-  const struct tm *lp = localtime(&secs);
-  if (lp == NULL) return NAN; /* the platform declines this instant */
-  local_tm = *lp;
-  const struct tm *gp = gmtime(&secs);
-  if (gp == NULL) return NAN;
-  utc_tm = *gp;
-  double tza = scr_date_tm_civil_ms(&local_tm) - scr_date_tm_civil_ms(&utc_tm);
-  double local = t + tza;
-  double dayd = floor(local / 86400000.0);
-  double msday = local - dayd * 86400000.0;
-  return floor(msday / 3600000.0);
+  double l = scr_date_local_time(ms);
+  return scr_date_utc_hours(l);
 }
-
