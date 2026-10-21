@@ -3985,6 +3985,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_url_search_params(${arg(0)})`);
           case "url.search":
             return finish(`scr_url_search(${arg(0)})`);
+          case "url.hash":
+            return finish(`scr_url_hash(${arg(0)})`);
+          case "url.port":
+            return finish(`scr_url_port(${arg(0)})`);
+          case "url.username":
+            return finish(`scr_url_username(${arg(0)})`);
+          case "url.password":
+            return finish(`scr_url_password(${arg(0)})`);
+          case "url.setProtocol":
+            return finish(`scr_url_set_protocol(${arg(0)}, ${arg(1)})`);
           case "sp.get": {
             // `string | null` — the sym.desc pattern with a null arm: the
             // runtime answers a +1 string or NULL.

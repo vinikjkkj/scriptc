@@ -11164,6 +11164,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8204-url-members-and-protocol-setter.js": {
+   "order": [
+    "<repo>/tests/corpus/8204-url-members-and-protocol-setter.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"

@@ -6885,6 +6885,25 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               }
             }
           }
+          // `u.protocol = 'ws:'` — the URL's WHATWG protocol setter (the
+          // other URL members are read-only or hold derived state the
+          // runtime does not model as a write). The receiver is the URL
+          // value itself, so the write mutates the one object in place.
+          if (
+            !expr.left.questionDotToken && expr.left.name.text === "protocol" &&
+            L.mapTypeOf(L.typeOf(expr.left.expression))?.kind === "url"
+          ) {
+            const loc = locOf(expr);
+            const recv = L.lowerExpr(expr.left.expression);
+            if (recv.type.kind === "url") {
+              const value = L.lowerExprExpecting(expr.right, STRING);
+              return {
+                kind: "exprStmt",
+                expr: { kind: "libCall", fn: "url.setProtocol", args: [recv, value], type: VOID, loc },
+                loc,
+              };
+            }
+          }
           // `h.onDone = cb` on a CHECKED-DYNAMIC receiver (a JS `let h =
           // {}` evolving object, an implicit-any param, a dyn member
           // chain): the dyn keyed write — the value converts INTO dyn
