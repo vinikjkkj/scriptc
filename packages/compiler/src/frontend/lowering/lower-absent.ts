@@ -19,7 +19,7 @@
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, F64, IrExpr, IrGlobal, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, isUnitType, strandTrap, typeKey, VOID } from "../../ir/nodes.js";
+import { BOOL, F64, IrExpr, IrGlobal, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, isUnitType, strandTrap, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { checkedJsNumber } from "./lower-exprs.js";
 import { idxMissKeyHelper } from "./lower-containers.js";
@@ -175,12 +175,18 @@ function lowerInit(L: Lowerer, shape: Shape, loc: SrcLoc): Init | null {
  * declaration the ordinary way). */
 export function lowerAbsentLocal(L: Lowerer, decl: ts.VariableDeclaration): IrStmt[] | null {
   if (!ts.isIdentifier(decl.name)) return null;
+  // Syntactic gate FIRST: asking for the declaration's IR type would poison
+  // (SC2008/SC2011) declarations this path never serves.
+  if (shapeOf(L, decl) === null) return null;
   const declType = L.irTypeOf(decl.name);
   const shape = absentFlagCandidate(L, decl, declType);
   if (shape === null) return null;
   const loc = locOf(decl);
   const init = lowerInit(L, shape, loc);
   if (init === null) return null;
+  // A declared type the element/arm type does not equal needs the ordinary
+  // coercion (width subtyping, upcast): not this path.
+  if (!typeEquals(init.type, declType)) return null;
   const okLocal = L.declareHiddenLocal(`${decl.name.text}%ok`, BOOL);
   const v = L.declareLocal(decl.name, decl.name.text, init.type, true);
   const bsym = L.checker.getSymbolAtLocation(decl.name);
@@ -200,8 +206,13 @@ export function lowerAbsentLocal(L: Lowerer, decl: ts.VariableDeclaration): IrSt
 /** File-scope: register the flag global next to the binding's own. */
 export function registerAbsentGlobal(L: Lowerer, decl: ts.VariableDeclaration, g: IrGlobal, symbol: ts.Symbol): IrGlobal | null {
   if (!ts.isIdentifier(decl.name)) return null;
+  // An annotated declaration may need the ordinary coercion (width subtyping):
+  // only the inferred form is certain to keep the element/arm type.
+  if (decl.type !== undefined) return null;
   if (absentFlagCandidate(L, decl, g.type) === null) return null;
-  const ok: IrGlobal = { id: `${g.id}.ok`, name: `${g.name}%ok`, type: BOOL, mutable: true };
+  // Stores ABSENT (zero = present), so a declaration that falls back to the
+  // ordinary path leaves the right default.
+  const ok: IrGlobal = { id: `${g.id}.absent`, name: `${g.name}%absent`, type: BOOL, mutable: true };
   L.globalsList.push(ok);
   L.absentFlags.set(symbol, { sym: null, global: ok });
   return ok;
@@ -214,13 +225,14 @@ export function lowerAbsentGlobal(L: Lowerer, decl: ts.VariableDeclaration, g: I
   const loc = locOf(decl);
   const init = lowerInit(L, shape, loc);
   if (init === null) return null;
+  if (!typeEquals(init.type, g.type)) return null;
   const okT = L.declareHiddenLocal("%absOk", BOOL);
   return {
     kind: "block",
     body: [
       ...init.pre,
       { kind: "varDecl", localId: okT.id, init: init.ok, loc },
-      { kind: "assign", localId: flag.id, value: ref(okT.id, BOOL, loc), loc },
+      { kind: "assign", localId: flag.id, value: { kind: "unary", op: "!", operand: ref(okT.id, BOOL, loc), type: BOOL, loc }, loc },
       { kind: "if", cond: ref(okT.id, BOOL, loc), then: [{ kind: "assign", localId: g.id, value: init.val, loc }], else_: null, loc },
     ],
     loc,
@@ -260,7 +272,7 @@ export function absentRead(L: Lowerer, bsym: ts.Symbol, v: IrExpr, node: ts.Expr
   const af = L.absentFlags.get(bsym);
   if (!af) return null;
   let okE: IrExpr;
-  if (af.global !== null) okE = ref(af.global.id, BOOL, loc);
+  if (af.global !== null) okE = { kind: "unary", op: "!", operand: ref(af.global.id, BOOL, loc), type: BOOL, loc };
   else {
     const fl = L.resolveKey(af.sym!);
     if (fl === null) return null;
