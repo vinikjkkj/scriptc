@@ -14602,6 +14602,12 @@
     "<repo>/tests/corpus/8405-a-let-read-by-a-closure-before-its-assignment-is-undefined.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8406-a-definite-assignment-field-read-earlier-in-the-constructor-is-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/8406-a-definite-assignment-field-read-earlier-in-the-constructor-is-undefined.ts"
+   ],
+   "diags": []
   }
  }
 }
