@@ -2938,6 +2938,11 @@ ScrStr *scr_dyn_object_to_string(const ScrDyn *d) {
   int n = snprintf(buf, sizeof buf, "[object %s]", tag);
   return scr_str_new(buf, (size_t)n);
 }
+/* Is this dyn the handle box of `tag`? (dynMatch / dynArm for a Date leaf.)
+ * Borrowed; never throws. */
+bool scr_dyn_handle_is(const ScrDyn *d, ScrDynHandleTag tag) {
+  return d != NULL && d->kind == SCR_DYN_HANDLE && d->v.handle.tag == tag;
+}
 /* `u instanceof Date` on an unknown value: the Date handle tag. */
 bool scr_dyn_is_date(const ScrDyn *d) {
   return d != NULL && d->kind == SCR_DYN_HANDLE && d->v.handle.tag == SCR_DYNH_DATE;
