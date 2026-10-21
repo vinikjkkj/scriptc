@@ -489,9 +489,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   // fs Buffer pair and zlib.inflateSync ride the may-throw check.
   "buffer.fromStr": "scr_bytes_from_str",
   "buffer.fromDyn": "scr_buffer_from_dyn",
+  "crypto.inputBytes": "scr_crypto_input_bytes",
+  "buffer.concatDyn": "scr_buffer_concat_dyn",
+  "bytes.argChk": "scr_bytes_arg_chk",
   "buffer.concat": "scr_bytes_concat",
   "buffer.concatLen": "scr_bytes_concat_len",
-  "buffer.concatDyn": "scr_buffer_concat_dyn",
   "buffer.concatDynLen": "scr_buffer_concat_dyn_len",
   "buffer.byteLenStr": "scr_bytes_byte_length_str",
   "buffer.isEncoding": "scr_bytes_is_encoding",
