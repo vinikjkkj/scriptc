@@ -21956,6 +21956,23 @@ function arrayLengthCompoundParts(
         };
       }
     }
+    // A STATIC member through the class's own name (`C.n++`, `C.total += x`):
+    // the module global of a static field, or a static accessor pair. No
+    // receiver value exists to evaluate, so the read and the write address
+    // the member directly.
+    if (ts.isPropertyAccessExpression(access)) {
+      const st = L.staticCompoundTarget(access);
+      if (st) {
+        const rhs: IrExpr = rhsNode ? L.lowerExpr(rhsNode) : { kind: "numLit", value: 1, type: F64, loc };
+        const combined = compoundCombine(L, op, st.read, rhs, st.type, access, access, rhsNode ?? access, loc, rhsNode === null);
+        if (!combined) L.unsupported("SC1043", access);
+        return {
+          natural: combined.natural,
+          ...(combined.numericRead ? { numericRead: combined.numericRead } : {}),
+          write: (v) => st.write(combined.toSlot(v)),
+        };
+      }
+    }
     const targetOf = (): FieldTarget | null =>
       ts.isPropertyAccessExpression(access) ? L.fieldTarget(access, true) : symbolFieldTarget(L, access);
     const target = targetOf();
