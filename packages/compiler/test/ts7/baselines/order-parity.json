@@ -11465,6 +11465,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8216-optional-dependency-exports/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8216-optional-dependency-exports/util.js",
+    "<repo>/tests/corpus/8216-optional-dependency-exports/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
