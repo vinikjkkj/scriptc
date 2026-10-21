@@ -3063,7 +3063,7 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
     const entryInit = L.initNameOf.get(L.entry);
     const isAsync = L.asyncInitFiles.has(L.entry);
     const initCall: IrExpr | null =
-      entryInit !== undefined
+      entryInit !== undefined && L.startupCrash === null
         ? {
             kind: "call",
             callee: entryInit,
@@ -3086,11 +3086,9 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
     // rejects — preflight's Node-order resolution walk — or the module-
     // LINK SyntaxError of a named import of a CommonJS export its lexer
     // cannot detect — cjsNamedImportLinkCheck): the graph is refused
-    // before ANY module evaluates, so %main opens with exactly that throw
-    // (message and error class both Node's) and the entry init below it
-    // never runs. The init still lowers — the program must otherwise
-    // compile, exactly like Node parses every module before its
-    // fetch/instantiate phases refuse the graph.
+    // before ANY module evaluates, so %main is exactly that throw
+    // (message and error class both Node's): the entry init is not even
+    // called, and no body of the graph is lowered (Lowerer.run).
     if (L.startupCrash !== null) {
       const crashLoc: SrcLoc = L.startupCrash.loc;
       body.unshift({

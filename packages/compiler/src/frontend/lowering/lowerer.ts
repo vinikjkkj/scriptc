@@ -2669,7 +2669,12 @@ export class Lowerer {
     lowerProfileNote(this.remainder ? "%remainder-collect" : "%emit-collect", performance.now() - __colT);
 
     const functions: IrFunction[] = [];
-    for (const fp of parts) {
+    // Node's startup refusal ends the program before ANY module evaluates, so
+    // no body of the graph can run and none is lowered: %main is the throw and
+    // nothing else (a construct the build could not lower, in a module Node
+    // never gets to evaluate, is not a refusal of THIS program).
+    const startupCrashed = this.startupCrash !== null && !this.remainder;
+    for (const fp of startupCrashed ? [] : parts) {
       const __fpT = performance.now();
       setMintPhase("body:" + fp.sf.fileName);
       for (const decl of fp.fnDecls) {
@@ -2708,7 +2713,7 @@ export class Lowerer {
     // falls out of the nesting. The coverage remainder skips them — they
     // are reachable by definition, already counted by the emit pass.
     if (!this.remainder) {
-      for (const fp of parts) {
+      for (const fp of startupCrashed ? [] : parts) {
         const __ftT = performance.now();
         setMintPhase("init:" + fp.sf.fileName);
         functions.push(this.lowerFileInit(fp.sf, fp.topStmts, this.initNameOf.get(fp.sf)!));
