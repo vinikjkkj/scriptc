@@ -47,12 +47,18 @@ export interface FileParts {
 function literalNeedsDynThis(lit: ts.ObjectLiteralExpression): boolean {
   if (literalMethodsReadThis(lit)) return true;
   for (const p of lit.properties) {
-    if (ts.isPropertyAssignment(p)) {
-      let v: ts.Expression = p.initializer;
-      while (ts.isParenthesizedExpression(v)) v = v.expression;
-      if (ts.isObjectLiteralExpression(v) && literalNeedsDynThis(v)) return true;
-    }
+    if (ts.isPropertyAssignment(p) && exprNeedsDynThis(p.initializer)) return true;
   }
+  return false;
+}
+
+/** An object literal that needs the dyn build, or an array literal holding
+ * one (at any depth through array literals). */
+function exprNeedsDynThis(e0: ts.Expression): boolean {
+  let e = e0;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (ts.isObjectLiteralExpression(e)) return literalNeedsDynThis(e);
+  if (ts.isArrayLiteralExpression(e)) return e.elements.some((el) => !ts.isSpreadElement(el) && exprNeedsDynThis(el));
   return false;
 }
 
@@ -138,6 +144,9 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
         }
       }
     }
+    // An array holding such a literal builds as a dyn array, so the element
+    // keeps its identity (a static array of records would copy it).
+    if (ts.isArrayLiteralExpression(n) && exprNeedsDynThis(n)) L.dynArrayLiterals.add(n);
     if (ts.isObjectLiteralExpression(n) && literalNeedsDynThis(n)) {
       L.dynObjectLiterals.add(n);
       L.dynThisLiterals.add(n);
@@ -161,7 +170,7 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
       let init: ts.Expression = n.initializer;
       while (ts.isParenthesizedExpression(init)) init = init.expression;
-      if (ts.isObjectLiteralExpression(init) && literalNeedsDynThis(init)) {
+      if ((ts.isObjectLiteralExpression(init) || ts.isArrayLiteralExpression(init)) && exprNeedsDynThis(init)) {
         const s = L.checker.getSymbolAtLocation(n.name);
         if (s !== undefined && bindingNeverReassigned(L, s, n)) { syms.push(s); thisSyms.push(s); }
       }
@@ -1331,6 +1340,7 @@ function jsDynHoldableInitializer(L: Lowerer, init: ts.Expression | undefined): 
   if (ts.isNewExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "Proxy" &&
       L.isStdlibGlobal(e.expression, "Proxy")) return true;
   if (ts.isObjectLiteralExpression(e) && L.dynThisLiterals.has(e)) return true;
+  if (ts.isArrayLiteralExpression(e) && L.dynArrayLiterals.has(e)) return true;
   if ((ts.isObjectLiteralExpression(e) || ts.isArrayLiteralExpression(e)) && L.dynProxyTargetLiterals.has(e)) return true;
   if (
     (ts.isCallExpression(e) || ts.isPropertyAccessExpression(e) || ts.isIdentifier(e)) &&

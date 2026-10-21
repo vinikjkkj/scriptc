@@ -1407,10 +1407,12 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * `ctor` is the control: the same member shape on a CONSTRUCTED object
    * binds correctly, so this is specific to the record lowering.
    *
-   * The pin asserts the DIVERGENCE, so whoever closes it gets a red test
-   * pointing at this note rather than a silent baseline drift.
+   * CLOSED: an object literal whose methods read their own `this` (also one
+   * held in an array literal) now builds as a checked-dynamic object, so the
+   * method call binds the receiver exactly as Node does. The pin asserts the
+   * two sides now AGREE, on every row.
    */
-  test("4113: a method on an object literal loses its receiver (price list)", async () => {
+  test("4113: a method on an object literal binds its receiver (closed)", async () => {
     const entry = join(fixturesRoot, "npm/cases/4113-object-literal-method-receiver-on-purpose/main.ts");
     const { coverage } = analyze(entry, { npmStatic: ["litrecv"] });
     expect(coverage.npmStatic).toEqual([{ package: "litrecv", status: "static" }]);
@@ -1426,9 +1428,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     const node = nodeRes.stdout.toString("utf8");
     const native = nativeRes.stdout.toString("utf8");
     expect(node).toBe("lit   = self L\narrEl = self A0\nctor  = self C\n");
-    // THE PRICE, pinned exactly. When this fails, the gap closed.
-    expect(native).toBe("lit   = undefined\narrEl = undefined\nctor  = self C\n");
-    expect(native).not.toBe(node);
+    expect(native).toBe(node);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
