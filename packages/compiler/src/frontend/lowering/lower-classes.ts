@@ -224,7 +224,7 @@ export interface ClassInfo {
    * accessors, keep the fence. `decl` is the declaration itself — the
    * source position and the blame node when there is no initializer to
    * carry either. */
-  staticFields: { name: string; type: IrType; initializer: ts.Expression | undefined; decl: ts.PropertyDeclaration; globalId: string; readonly: boolean }[];
+  staticFields: { name: string; type: IrType; initializer: ts.Expression | undefined; decl: ts.PropertyDeclaration; globalId: string; readonly: boolean; viaPrototype?: true }[];
   /** Static member names this class DECLARES and does NOT lower — static
    * accessors, `static x?: T = e`, an initializer-less static whose type
    * cannot hold undefined. They are not storage, but they ARE own
@@ -982,7 +982,13 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
           !L.isStdlibGlobal(call.expression.expression, "Object")) continue;
       if (call.arguments.length !== 3) continue;
       const [target, key, desc] = [call.arguments[0]!, call.arguments[1]!, call.arguments[2]!];
-      if (!ts.isIdentifier(target) || L.checker.getSymbolAtLocation(target) !== classSymbol) continue;
+      // `C` itself (a static constant) or `C.prototype` (a constant every
+      // instance reads: it registers as the same static field and reads off an
+      // instance lower to it — viaPrototype).
+      const onPrototype =
+        ts.isPropertyAccessExpression(target) && target.name.text === "prototype" && ts.isIdentifier(target.expression) &&
+        L.checker.getSymbolAtLocation(target.expression) === classSymbol;
+      if (!onPrototype && (!ts.isIdentifier(target) || L.checker.getSymbolAtLocation(target) !== classSymbol)) continue;
       if (!ts.isStringLiteral(key) || !ts.isObjectLiteralExpression(desc)) continue;
       const name = key.text;
       if (info.staticFields.some((f) => f.name === name) || info.staticMethods?.has(name) === true ||
@@ -1027,8 +1033,110 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
         decl: call as unknown as ts.PropertyDeclaration,
         globalId,
         readonly: !writable,
+        ...(onPrototype ? { viaPrototype: true as const } : {}),
       });
       L.globalsList.push({ id: globalId, name: `${info.def.jsName ?? info.def.name}.${name}`, type: mapped, mutable: writable });
+      L.lateMethodAssigns.add(call);
+    }
+  }
+
+/** The accessor FAMILY idiom (ws's `onopen` / `onerror` / `onclose` /
+   * `onmessage`):
+   *
+   *     ['open', 'error'].forEach((method) => {
+   *       Object.defineProperty(C.prototype, `on${method}`, {
+   *         enumerable: true, get() {...}, set(handler) {...}
+   *       });
+   *     });
+   *
+   * The loop is a compile-time fact (an array literal of strings), so it
+   * UNROLLS: each literal becomes the accessor pair of a late method of C
+   * (`get:onopen` / `set:onopen`, the same registration as C.prototype.m = fn),
+   * its bodies lowered with `this` retyped to C and the loop variable bound
+   * to that literal (Lowerer.lateMethodConst). The whole forEach statement
+   * then lowers to nothing. Anything off this shape keeps the refusal. */
+  function registerAccessorFamilies(L: Lowerer, info: ClassInfo, decl: ts.ClassDeclaration, classSymbol: ts.Symbol): void {
+    const sf = decl.getSourceFile();
+    for (const stmt of sf.statements) {
+      if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) continue;
+      const call = stmt.expression;
+      if (!ts.isPropertyAccessExpression(call.expression) || call.expression.name.text !== "forEach") continue;
+      const arr = call.expression.expression;
+      if (!ts.isArrayLiteralExpression(arr) || !arr.elements.every((x) => ts.isStringLiteral(x))) continue;
+      const cb = call.arguments[0];
+      if (call.arguments.length !== 1 || cb === undefined || !(ts.isArrowFunction(cb) || ts.isFunctionExpression(cb))) continue;
+      if (cb.parameters.length !== 1 || !ts.isIdentifier(cb.parameters[0]!.name) || !ts.isBlock(cb.body)) continue;
+      const param = cb.parameters[0]!.name as ts.Identifier;
+      const paramSym = L.checker.getSymbolAtLocation(param);
+      if (!paramSym || cb.body.statements.length !== 1) continue;
+      const inner = cb.body.statements[0]!;
+      if (!ts.isExpressionStatement(inner) || !ts.isCallExpression(inner.expression)) continue;
+      const dp = inner.expression;
+      if (!ts.isPropertyAccessExpression(dp.expression) || dp.expression.name.text !== "defineProperty" ||
+          !ts.isIdentifier(dp.expression.expression) || !L.isStdlibGlobal(dp.expression.expression, "Object") ||
+          dp.arguments.length !== 3) continue;
+      const [target, nameExpr, desc] = [dp.arguments[0]!, dp.arguments[1]!, dp.arguments[2]!];
+      if (!ts.isPropertyAccessExpression(target) || target.name.text !== "prototype" || !ts.isIdentifier(target.expression) ||
+          L.checker.getSymbolAtLocation(target.expression) !== classSymbol) continue;
+      if (!ts.isObjectLiteralExpression(desc)) continue;
+      // The name: a template `head${param}tail` or the bare parameter.
+      let head = "";
+      let tail = "";
+      if (ts.isTemplateExpression(nameExpr)) {
+        if (nameExpr.templateSpans.length !== 1) continue;
+        const span = nameExpr.templateSpans[0]!;
+        if (!ts.isIdentifier(span.expression) || L.checker.getSymbolAtLocation(span.expression) !== paramSym) continue;
+        head = nameExpr.head.text;
+        tail = span.literal.text;
+      } else if (!(ts.isIdentifier(nameExpr) && L.checker.getSymbolAtLocation(nameExpr) === paramSym)) {
+        continue;
+      }
+      let getFn: ts.MethodDeclaration | null = null;
+      let setFn: ts.MethodDeclaration | null = null;
+      let ok = true;
+      for (const p of desc.properties) {
+        if (ts.isMethodDeclaration(p) && ts.isIdentifier(p.name) && p.body !== undefined && p.asteriskToken === undefined) {
+          if (p.name.text === "get") getFn = p;
+          else if (p.name.text === "set") setFn = p;
+          else ok = false;
+        } else if (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) &&
+                   (p.name.text === "enumerable" || p.name.text === "configurable") &&
+                   (p.initializer.kind === ts.SyntaxKind.TrueKeyword || p.initializer.kind === ts.SyntaxKind.FalseKeyword)) {
+          // attributes: not observable here
+        } else ok = false;
+      }
+      if (!ok || (getFn === null && setFn === null)) continue;
+      const names = arr.elements.map((x) => `${head}${(x as ts.StringLiteral).text}${tail}`);
+      if (names.some((n) => info.methods.has(`get:${n}`) || info.methods.has(`set:${n}`) || info.fields.has(n) || info.methods.has(n))) continue;
+      let sigs: { get?: ReturnType<Lowerer["lambdaSignature"]>; set?: ReturnType<Lowerer["lambdaSignature"]> };
+      try {
+        sigs = {
+          ...(getFn ? { get: L.lambdaSignature(getFn) } : {}),
+          ...(setFn ? { set: L.lambdaSignature(setFn) } : {}),
+        };
+      } catch (err) {
+        if (err instanceof PoisonError) continue;
+        throw err;
+      }
+      const ownType = L.checker.getDeclaredTypeOfSymbol(classSymbol);
+      const bodies = L.protoClassBodies.get(info.def.name) ?? new Map<string, ts.FunctionExpression>();
+      arr.elements.forEach((x, i) => {
+        const lit = (x as ts.StringLiteral).text;
+        const n = names[i]!;
+        if (getFn && sigs.get) {
+          info.methods.set(`get:${n}`, { params: [], ret: sigs.get.funcType.ret });
+          bodies.set(`get:${n}`, getFn as unknown as ts.FunctionExpression);
+          L.lateMethodConst.set(`${info.def.name}.get:${n}`, { sym: paramSym, value: lit });
+        }
+        if (setFn && sigs.set) {
+          info.methods.set(`set:${n}`, { params: sigs.set.shapes, ret: VOID });
+          bodies.set(`set:${n}`, setFn as unknown as ts.FunctionExpression);
+          L.lateMethodConst.set(`${info.def.name}.set:${n}`, { sym: paramSym, value: lit });
+        }
+      });
+      L.protoClassBodies.set(info.def.name, bodies);
+      if (getFn) L.lateMethodThis.set(getFn, ownType);
+      if (setFn) L.lateMethodThis.set(setFn, ownType);
       L.lateMethodAssigns.add(call);
     }
   }
@@ -1048,6 +1156,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     const sf = decl.getSourceFile();
     if (!isJsSourceFile(sf)) return;
     registerDefinedStatics(L, info, decl, classSymbol);
+    registerAccessorFamilies(L, info, decl, classSymbol);
     for (const stmt of sf.statements) {
       if (!ts.isExpressionStatement(stmt)) continue;
       const e = stmt.expression;
@@ -4080,7 +4189,14 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
                 : rhs
                   ? L.checker.getBaseTypeOfLiteralType(L.checker.getTypeAtLocation(rhs))
                   : undefined;
-              const type = t ? (L.mapTypeOf(t) ?? dynFallbackType(L, lhs, t)) : null;
+              // A slot declared as `this[k] = undefined` and assigned its real
+              // value elsewhere (ws's `this[kWebSocket] = undefined`, set to
+              // the owning WebSocket from another module) has no type of its
+              // own: the declaring assignment says only `undefined`. It is a
+              // checked-dynamic slot, which holds undefined and whatever is
+              // stored later.
+              const undefOnly = t !== undefined && (t.flags & ts.TypeFlags.Undefined) !== 0;
+              const type = undefOnly ? DYN : t ? (L.mapTypeOf(t) ?? dynFallbackType(L, lhs, t)) : null;
               if (!type || type.kind === "void") L.badType(lhs, t ?? L.typeOf(lhs));
               fields.set(key.fieldName, type);
               symbolFields.set(key.sym, key.fieldName);
@@ -6967,10 +7083,13 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     fn: ts.FunctionExpression,): IrFunction | null {
     const prevThis = L.activeThisType;
     L.activeThisType = L.lateMethodThis.get(fn) ?? null;
+    const konst = L.lateMethodConst.get(`${info.def.name}.${mName}`);
+    if (konst !== undefined) L.constIdents.set(konst.sym, konst.value);
     try {
       return withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, fn));
     } finally {
       L.activeThisType = prevThis;
+      if (konst !== undefined) L.constIdents.delete(konst.sym);
     }
   }
 

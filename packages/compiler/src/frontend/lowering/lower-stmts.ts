@@ -6471,10 +6471,46 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
    * assignment, and `({ a, b } = e);` (destructuring ASSIGNMENT, which JS
    * requires parenthesized in statement position) lands in the
    * object-literal-target branch below. */
+  function isAttributeOnlyDefine(L: Lowerer, expr: ts.Expression): boolean {
+    if (!ts.isCallExpression(expr) || !ts.isPropertyAccessExpression(expr.expression)) return false;
+    if (expr.expression.name.text !== "defineProperty" || !ts.isIdentifier(expr.expression.expression) ||
+        !L.isStdlibGlobal(expr.expression.expression, "Object") || expr.arguments.length !== 3) return false;
+    const [target, nameExpr, desc] = [expr.arguments[0]!, expr.arguments[1]!, expr.arguments[2]!];
+    if (!ts.isPropertyAccessExpression(target) || target.name.text !== "prototype" || !ts.isIdentifier(target.expression)) return false;
+    const csym = L.resolveValueSymbol(target.expression);
+    const info = csym ? L.classBySymbol.get(csym) : undefined;
+    if (!info || !ts.isObjectLiteralExpression(desc) || desc.properties.length === 0) return false;
+    for (const p of desc.properties) {
+      if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name) || (p.name.text !== "enumerable" && p.name.text !== "configurable")) return false;
+      if (p.initializer.kind !== ts.SyntaxKind.TrueKeyword && p.initializer.kind !== ts.SyntaxKind.FalseKeyword) return false;
+    }
+    const declared = (n: string): boolean =>
+      L.findMethodOn(info, n) !== null || L.findMethodOn(info, `get:${n}`) !== null || L.findMethodOn(info, `set:${n}`) !== null ||
+      ((): boolean => { for (let c: typeof info | null = info; c; c = c.base) if (c.fields.has(n)) return true; return false; })();
+    if (ts.isStringLiteral(nameExpr)) return declared(nameExpr.text);
+    // the parameter of `[ 'a', 'b' ].forEach((p) => ...)`, every literal declared
+    if (!ts.isIdentifier(nameExpr)) return false;
+    const psym = L.checker.getSymbolAtLocation(nameExpr);
+    const pdecl = psym ? L.checker.valueDeclarationOf(psym) : undefined;
+    if (!pdecl || !ts.isParameter(pdecl)) return false;
+    const fn = pdecl.parent;
+    const call = fn.parent;
+    if (!ts.isCallExpression(call) || !ts.isPropertyAccessExpression(call.expression) || call.expression.name.text !== "forEach") return false;
+    const arr = call.expression.expression;
+    return ts.isArrayLiteralExpression(arr) && arr.elements.length > 0 &&
+      arr.elements.every((x) => ts.isStringLiteral(x) && declared(x.text));
+  }
+
   export function lowerExprStatement(L: Lowerer, expr: ts.Expression): IrStmt {
     // `C.prototype.m = fn` adopted as a late method of C: a definition, not
     // a runtime write (registerLateMethods).
     if (L.lateMethodAssigns.has(expr)) return { kind: "block", body: [], loc: locOf(expr) };
+    // `Object.defineProperty(C.prototype, name, { enumerable: true })`: an
+    // attribute-only change of a prototype property. Enumerability is
+    // observable only by enumerating a class instance, which has no
+    // lowering, so naming a declared member (or the loop variable of a
+    // forEach over declared members) changes nothing a program can see.
+    if (isAttributeOnlyDefine(L, expr)) return { kind: "block", body: [], loc: locOf(expr) };
     const stmtNode = expr.parent;
     while (ts.isParenthesizedExpression(expr)) expr = expr.expression;
     // `module.exports = <expr>` reached as a COMMA OPERAND of a top-level

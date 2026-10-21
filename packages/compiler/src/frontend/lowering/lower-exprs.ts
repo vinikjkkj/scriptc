@@ -501,6 +501,13 @@ export function stdlibGlobalTypeOfAnswer(L: Lowerer, canonical: string, t: ts.Ty
 
 function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     const loc = locOf(expr);
+    // A loop variable of an unrolled accessor family reads as the literal it
+    // is bound to in this body (registerAccessorFamilies).
+    if (L.constIdents.size > 0 && ts.isIdentifier(expr)) {
+      const s = L.checker.getSymbolAtLocation(expr);
+      const v = s !== undefined ? L.constIdents.get(s) : undefined;
+      if (v !== undefined) return { kind: "strLit", value: v, type: STRING, loc };
+    }
 
     // An optional chain's guarded receiver: already evaluated by the
     // enclosing optChain — read the bind temp instead of re-lowering.
@@ -20491,6 +20498,17 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (target) return L.fieldGetExpr(target, locOf(expr), expr);
     if (L.chainBlocked(expr)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(expr.expression));
+    // A constant defined on the class's PROTOTYPE (Object.defineProperty(
+    // C.prototype, 'OPEN', { value })) read off an instance: the one static
+    // field it registered as (registerDefinedStatics). The receiver is a
+    // plain read, so dropping it loses nothing.
+    if (receiverIr?.kind === "object" && expr.questionDotToken === undefined &&
+        (expr.expression.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(expr.expression))) {
+      for (let c = L.classes.get(receiverIr.className) ?? null; c; c = c.base) {
+        const f = c.staticFields.find((s) => s.viaPrototype === true && s.name === expr.name.text);
+        if (f !== undefined) return { kind: "varRef", localId: f.globalId, type: f.type, loc: locOf(expr) };
+      }
+    }
     if (
       receiverIr?.kind === "object" && isJsSourceFile(expr.getSourceFile()) &&
       expr.questionDotToken === undefined &&
