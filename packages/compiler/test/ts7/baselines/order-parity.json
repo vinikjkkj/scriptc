@@ -11158,6 +11158,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8203-static-compound-assignment.js": {
+   "order": [
+    "<repo>/tests/corpus/8203-static-compound-assignment.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
