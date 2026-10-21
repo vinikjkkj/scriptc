@@ -85,8 +85,47 @@ async function buildOnce(tag: string): Promise<string> {
   }
 }
 
+/* A PE the linker stamped. zig's lld writes the link TIME into the COFF
+ * header and a fresh build-id plus the output's own file name (`churn-a.pdb`
+ * vs `churn-b.pdb`) into the CodeView debug record, so two links of
+ * byte-identical inputs differ in those bytes and nowhere else (cc.ts's
+ * optLevelArg comment measured the same 21 bytes). An ELF carries none of
+ * it, which is why "same inputs, same sha256" held on Linux and never on
+ * Windows. Blank exactly those fields, so the comparison still sees every
+ * byte of code and data: an edited header still changes the sha. */
+function unstamped(buf: Buffer): Buffer {
+  if (buf.length < 0x40 || buf.readUInt16LE(0) !== 0x5a4d) return buf;
+  const pe = buf.readUInt32LE(0x3c);
+  if (pe + 24 > buf.length || buf.readUInt32LE(pe) !== 0x00004550) return buf;
+  const out = Buffer.from(buf);
+  out.writeUInt32LE(0, pe + 8); // TimeDateStamp
+  const nsec = out.readUInt16LE(pe + 6);
+  const opt = pe + 24;
+  const secs = opt + out.readUInt16LE(pe + 20);
+  const dir = opt + (out.readUInt16LE(opt) === 0x20b ? 112 : 96) + 6 * 8; // data directory 6: debug
+  const rva = out.readUInt32LE(dir);
+  const size = out.readUInt32LE(dir + 4);
+  if (rva === 0 || size === 0) return out;
+  let off = -1;
+  for (let i = 0; i < nsec; i++) {
+    const sh = secs + i * 40;
+    const va = out.readUInt32LE(sh + 12);
+    const span = Math.max(out.readUInt32LE(sh + 8), out.readUInt32LE(sh + 16));
+    if (rva >= va && rva < va + span) off = out.readUInt32LE(sh + 20) + (rva - va);
+  }
+  if (off < 0) return out;
+  for (let e = 0; e + 28 <= size; e += 28) {
+    const d = off + e;
+    out.writeUInt32LE(0, d + 4); // the entry's own TimeDateStamp
+    const len = out.readUInt32LE(d + 16);
+    const raw = out.readUInt32LE(d + 24);
+    if (raw + len <= out.length) out.fill(0, raw, raw + len); // the CodeView record: GUID, age, pdb name
+  }
+  return out;
+}
+
 function sha(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+  return createHash("sha256").update(unstamped(readFileSync(path))).digest("hex");
 }
 
 async function chunksOf(bin: string): Promise<number> {
