@@ -26,7 +26,7 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -124,6 +124,9 @@ async function makeProject(
   lock: LockKind,
   opts: {
     installed?: Record<string, Record<string, string>>;
+    /** Install pnpm-style: each package under node_modules/.pnpm/<n>@<v>/node_modules/<n>,
+     * siblings of each other, and ONLY `top` linked into node_modules. */
+    pnpmTop?: readonly string[];
   } = {},
 ): Promise<Project> {
   mkdirSync(tmpdir(), { recursive: true });
@@ -148,9 +151,27 @@ async function makeProject(
     integrity[name] = sha512(bytes);
     versions[name] = (JSON.parse(readFileSync(join(src, "package.json"), "utf8")) as { version: string }).version;
     served.set(`https://registry.npmjs.org/${name}/-/${name}-${versions[name]}.tgz`, bytes);
-    const installedDir = join(dir, "node_modules", name);
+    const installedDir =
+      opts.pnpmTop === undefined
+        ? join(dir, "node_modules", name)
+        : join(dir, "node_modules", ".pnpm", `${name}@${versions[name]}`, "node_modules", name);
     cpSync(src, installedDir, { recursive: true });
+    if (opts.pnpmTop?.includes(name) === true) {
+      /* A junction needs no privilege on Windows, where a symlink does. */
+      symlinkSync(installedDir, join(dir, "node_modules", name), "junction");
+    }
     for (const [file, text] of Object.entries(opts.installed?.[name] ?? {})) writeFileSync(join(installedDir, file), text);
+  }
+  if (opts.pnpmTop !== undefined) {
+    /* pnpm links each package's dependencies beside it in its own virtual
+     * store directory; model that for every pair so any host sees the rest. */
+    for (const host of pkgs) {
+      for (const dep of pkgs) {
+        if (dep === host) continue;
+        const target = join(dir, "node_modules", ".pnpm", `${dep}@${versions[dep]}`, "node_modules", dep);
+        symlinkSync(target, join(dir, "node_modules", ".pnpm", `${host}@${versions[host]}`, "node_modules", dep), "junction");
+      }
+    }
   }
   const digestOf = (n: string): string => (lock === "pnpm-wrong-digest" ? sha512(Buffer.from("not the tarball")) : integrity[n]!);
   if (lock === "pnpm" || lock === "pnpm-wrong-digest" || lock === "pnpm-no-integrity" || lock === "pnpm-other-package") {
@@ -403,6 +424,24 @@ describe("provenance: an unattested package reached as a mapped package's depend
     const err = await refusalOf(resolveProvenanceSources(bad.entry));
     expect(err.refusals.map((r) => r.package)).toContain("unattleaf");
     expect(err.refusals[0]!.reason).toContain("INTEGRITY MISMATCH");
+  });
+});
+
+describe("provenance: transitive packages resolve from the REQUIRER, as Node does", () => {
+  const depManifest = join(fixtureDir, "manifest-unattdep.json");
+
+  test("under a pnpm layout a dependency that only the host's own node_modules can see is found and verified", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifest;
+    /* unattmid is linked into node_modules; unattleaf is NOT. It sits beside
+     * unattmid in the virtual store, which is where Node finds it. */
+    const p = await makeProject("unattesteddep/main.ts", ["unattmid", "unattleaf"], "pnpm", { pnpmTop: ["unattmid"] });
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifest;
+    /* Positive control: from the entry's own node_modules the leaf is invisible. */
+    expect(() => readFileSync(join(p.dir, "node_modules", "unattleaf", "package.json"))).toThrow();
+    stubFetch(404);
+    const sources = await resolveProvenanceSources(p.entry);
+    expect(sources.packages.map((x) => x.name).sort()).toEqual(["unattleaf", "unattmid"]);
+    expect(sources.notes.join("\n")).not.toContain("unattleaf: not installed");
   });
 });
 
