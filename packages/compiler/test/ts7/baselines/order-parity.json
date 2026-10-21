@@ -14554,6 +14554,12 @@
     "<repo>/tests/corpus/8406-a-definite-assignment-field-read-earlier-in-the-constructor-is-undefined.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8407-string-plus-over-absent-operands-follows-the-javascript-rules.ts": {
+   "order": [
+    "<repo>/tests/corpus/8407-string-plus-over-absent-operands-follows-the-javascript-rules.ts"
+   ],
+   "diags": []
   }
  }
 }
