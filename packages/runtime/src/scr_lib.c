@@ -5073,6 +5073,8 @@ static bool scr_dec_inc(char *d, int len) {
  * the double's exact expansion. The en-US/latn symbols (",", ".", "∞",
  * "NaN", group size 3) are the whole embedded locale surface. Verified
  * differentially against Node. Result +1; never throws. */
+ScrStr *(*scr_nf_hook_dyn)(const ScrDyn *v, const ScrDyn *locales, const ScrDyn *opts) = NULL;
+
 ScrStr *scr_intl_num_format_en_us(double x) {
   if (isnan(x)) return scr_str_new("NaN", 3);
   if (isinf(x)) {

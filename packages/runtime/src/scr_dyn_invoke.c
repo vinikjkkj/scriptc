@@ -666,40 +666,29 @@ static ScrDyn *dyn_str_create_html(const ScrStr *s, const ScrHtmlWrap *w,
  * takes. The two spellings are one question and answered from one place;
  * protobufjs writes both (`util.isset` uses the method form,
  * `Object.hasOwn` the static), and they must not disagree. */
-/* toLocaleString at the default options and the en-US locale (the one embedded locale): a number groups its
- * integer digits and rounds to three fractions (scr_intl_num_format_en_us), a bigint groups its digits, a string
- * or boolean is its own text, null and undefined are "" INSIDE an array, a Date answers its formatter, and an
+/* toLocaleString(locales, options) on a checked-dynamic value (scr_nf.c is linked whenever dynamic dispatch can name
+ * toLocaleString, and reaches here through scr_nf_hook_*): a number or bigint formats through Intl.NumberFormat, a
+ * string or boolean is its own text, null and undefined are "" INSIDE an array, a Date answers its formatter, and an
  * array joins its elements' answers with ",". Everything else is ToString. NULL with the exception pending. */
-static ScrStr *dyn_locale_str(const ScrDyn *v, int depth) {
+static ScrStr *dyn_locale_str(const ScrDyn *v, int depth, const ScrDyn *locales, const ScrDyn *opts) {
   if (depth > 64) { scr_throw_error_msg(SCR_ERR_RANGE, "Maximum call stack size exceeded", 32); return NULL; }
   switch (v->kind) {
     case SCR_DYN_NULL:
     case SCR_DYN_UNDEF:
       return scr_str_new("", 0);
     case SCR_DYN_NUM:
-      return scr_intl_num_format_en_us(v->v.num);
-    case SCR_DYN_BIG: {
-      ScrStr *s = scr_dyn_big_ops()->to_str(v->v.big, 10);
-      size_t n = s->len, neg = n && s->data[0] == '-', digits = n - neg;
-      char *buf = (char *)malloc(n + digits / 3 + 2);
-      if (!buf) scr_trap("scriptc: out of memory\n");
-      size_t o = 0;
-      if (neg) buf[o++] = '-';
-      for (size_t i = 0; i < digits; i++) {
-        if (i && (digits - i) % 3 == 0) buf[o++] = ',';
-        buf[o++] = s->data[neg + i];
+    case SCR_DYN_BIG:
+      if (scr_nf_hook_dyn == NULL) {
+        if (v->kind == SCR_DYN_NUM) return scr_intl_num_format_en_us(v->v.num);
+        return scr_dyn_string_coerce_js(v);
       }
-      ScrStr *r = scr_str_new(buf, o);
-      free(buf);
-      scr_str_release(s);
-      return r;
-    }
+      return scr_nf_hook_dyn(v, locales, opts);
     case SCR_DYN_ARR: {
       size_t cap = 64, len = 0;
       char *buf = (char *)malloc(cap);
       if (!buf) scr_trap("scriptc: out of memory\n");
       for (size_t i = 0; i < v->v.arr.len; i++) {
-        ScrStr *e = dyn_locale_str(v->v.arr.items[i], depth + 1);
+        ScrStr *e = dyn_locale_str(v->v.arr.items[i], depth + 1, locales, opts);
         if (e == NULL) { free(buf); return NULL; }
         while (len + e->len + 2 > cap) { cap *= 2; buf = (char *)realloc(buf, cap); if (!buf) scr_trap("scriptc: out of memory\n"); }
         if (i) buf[len++] = ',';
@@ -726,13 +715,17 @@ static ScrStr *dyn_locale_str(const ScrDyn *v, int depth) {
   }
 }
 
-/* Are these toLocaleString arguments the default locale and no options (what dyn_locale_str models)? */
+/* Are these toLocaleString arguments the default locale and no options? (all that is answerable without the
+ * number formatter) */
 static bool dyn_locale_args_default(ScrDyn *const *args, size_t argc) {
   if (argc >= 2 && args[1]->kind != SCR_DYN_UNDEF) return false;
   if (argc == 0 || args[0]->kind == SCR_DYN_UNDEF) return true;
   const ScrDyn *l = args[0];
   if (l->kind != SCR_DYN_STR) return false;
   return (l->v.str->len == 5 && memcmp(l->v.str->data, "en-US", 5) == 0) || (l->v.str->len == 2 && memcmp(l->v.str->data, "en", 2) == 0);
+}
+static bool dyn_locale_answerable(ScrDyn *const *args, size_t argc) {
+  return scr_nf_hook_dyn != NULL || dyn_locale_args_default(args, argc);
 }
 
 static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
@@ -1956,8 +1949,8 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_str_release(s);
       return d;
     }
-    if (dyn_name_is(method, "toLocaleString") && dyn_locale_args_default(args, argc)) {
-      ScrStr *s = dyn_locale_str(recv, 0);
+    if (dyn_name_is(method, "toLocaleString") && dyn_locale_answerable(args, argc)) {
+      ScrStr *s = dyn_locale_str(recv, 0, argc >= 1 ? args[0] : NULL, argc >= 2 ? args[1] : NULL);
       if (s == NULL) return NULL;
       ScrDyn *d = scr_dyn_new_str(s);
       scr_str_release(s);
@@ -2029,8 +2022,9 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     }
     /* valueOf falls through to dyn_object_proto_method with every other
      * kind's -- one body, one answer. */
-    if (recv->kind == SCR_DYN_NUM && dyn_name_is(method, "toLocaleString") && dyn_locale_args_default(args, argc)) {
-      ScrStr *s = dyn_locale_str(recv, 0);
+    if ((recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BIG) && dyn_name_is(method, "toLocaleString") && dyn_locale_answerable(args, argc)) {
+      ScrStr *s = dyn_locale_str(recv, 0, argc >= 1 ? args[0] : NULL, argc >= 2 ? args[1] : NULL);
+      if (s == NULL) return NULL;
       ScrDyn *d = scr_dyn_new_str(s);
       scr_str_release(s);
       return d;
@@ -2040,6 +2034,14 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       return NULL;
     }
     return dyn_object_proto_method(recv, method, args, argc, what);
+  }
+
+  if (recv->kind == SCR_DYN_BIG && dyn_name_is(method, "toLocaleString") && dyn_locale_answerable(args, argc)) {
+    ScrStr *s = dyn_locale_str(recv, 0, argc >= 1 ? args[0] : NULL, argc >= 2 ? args[1] : NULL);
+    if (s == NULL) return NULL;
+    ScrDyn *d = scr_dyn_new_str(s);
+    scr_str_release(s);
+    return d;
   }
 
   /* NUM/BOOL/BYTES-remainder: no method of this KIND — but every one of
