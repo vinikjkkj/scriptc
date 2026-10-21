@@ -133,9 +133,10 @@ function byFile(r: ReturnType<typeof analyze>): Record<string, string> {
 
 /* The two sites the gate's absence produces, spelled once: every arm either
  * carries exactly these or exactly none. */
+// `switch (param)` over an untyped parameter compiles now (switch on unknown), so
+// the table read is the one site the gate's absence still produces.
 const FENCED = [
   'SC1090 attested-src/monoarg/index.js:24 "channel"',
-  'SC1100 attested-src/monoarg/index.js:29 "channel"',
 ];
 
 describe("provenance + npm-static: the mono gate answers by package identity", () => {
@@ -190,7 +191,7 @@ describe("provenance + npm-static: the mono gate answers by package identity", (
     const r = await arm();
     expect(r.coverage.npmStatic).toBeUndefined();
     expect(fenceSites(r)).toEqual(FENCED);
-    expect(byFile(r)["attested-src/monoarg/index.js"]).toBe("5/2/0");
+    expect(byFile(r)["attested-src/monoarg/index.js"]).toBe("8/1/0");
   });
 
   /* ARM C -- LEAK. The predicate must consult the NAME, not merely that
@@ -200,7 +201,7 @@ describe("provenance + npm-static: the mono gate answers by package identity", (
     const r = await arm(["some-other-pkg"]);
     expect(r.coverage.npmStatic).toEqual([{ package: "some-other-pkg", status: "static" }]);
     expect(fenceSites(r)).toEqual(FENCED);
-    expect(byFile(r)["attested-src/monoarg/index.js"]).toBe("5/2/0");
+    expect(byFile(r)["attested-src/monoarg/index.js"]).toBe("8/1/0");
   });
 
   /* ARM D -- ROUTE. The ordinary --npm-static lane was never the broken one.

@@ -714,13 +714,17 @@ const FENCED: readonly {
     // The wall, named: a required module used AS A VALUE. Everything in
     // this list needs it, and it is the reason a run-time specifier that
     // DOES resolve cannot be served.
+    // A required table's own members and key walks compile (it reads as the
+    // interned snapshot of module.exports); what stays a wall is IDENTITY of
+    // the module object, which a snapshot cannot answer.
     name: "a literal relative require used as a value",
     src:
       "var m = require('./m.cjs');\n" +
-      "try { console.log('GOT', Object.keys(m).length) } catch (e) { console.log('threw', e.code) }\n",
-    code: "SC1090",
-    nodeSays: "GOT 2",
-    stdout: "threw SC1090\n",
+      "var n = m;\n" +
+      "try { console.log('GOT', String(m === n)) } catch (e) { console.log('threw', e.code) }\n",
+    code: "SC1100",
+    nodeSays: "GOT true",
+    stdout: "threw SC1100\n",
   },
   {
     // The four properties Node DEFINES on the CommonJS `require`
