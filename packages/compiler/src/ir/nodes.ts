@@ -7265,6 +7265,12 @@ export type IrExpr =
    * listed (they never live in the overflow map — the lowering prepends
    * them from the shape). Never throws. */
   | { kind: "recordOvfKeys"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
+  /** Is `key` a LIVE entry of the overflow map of an index-signature record
+   * (scr_map_has_str)? The exact own-key membership of a PURE index shape,
+   * whatever its value type: unlike a widened keyed read it cannot confuse a
+   * missing key with a stored undefined, and it needs no undefined arm on
+   * the value type. `obj` and `key` are borrowed; bool; never throws. */
+  | { kind: "recordOvfHas"; obj: IrExpr; shapeId: string; key: IrExpr; type: IrType; loc: SrcLoc }
   /** The same enumeration as SLOT INDICES: a fresh f64[] of the overflow
    * map's LIVE entry slots, in exactly the JS own-key order recordOvfKeys
    * lists (the runtime's scr_map_slots_js_order). It exists so a generated
