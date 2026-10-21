@@ -1183,8 +1183,22 @@ extern const char scr_stack_margin_is_32kib[];
 /* Forces the symbol to resolve at link from every TU that includes this
  * header -- which is every emitted C unit, so the C lane needs no emitter
  * support at all. `used` keeps it through -O2 and silences the unused
- * warning. */
-__attribute__((used)) static const char *const scr_stack_margin_pin =
+ * warning; `retain` keeps it through the linker's --gc-sections. Without
+ * `retain` the link is built with -ffunction-sections -fdata-sections, the
+ * pin lands in a section nothing references, the linker drops it, and the
+ * undefined reference that IS the check goes with it: a margin mismatch then
+ * links clean (measured: clang 19 and gcc 14, ld.bfd, with and without the
+ * attribute). Compilers without `retain` also lack the section collector
+ * that needs it, or (ld64's dead_strip, the PE linker) honour `used`. */
+#if defined(__has_attribute)
+#if __has_attribute(retain)
+#define SCR_PIN_ATTR __attribute__((used, retain))
+#endif
+#endif
+#ifndef SCR_PIN_ATTR
+#define SCR_PIN_ATTR __attribute__((used))
+#endif
+SCR_PIN_ATTR static const char *const scr_stack_margin_pin =
     SCR_STACK_MARGIN_SYM;
 #endif
 

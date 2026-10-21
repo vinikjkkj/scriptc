@@ -2209,6 +2209,11 @@ class LlEmitter {
       // 149495 on LLVM) and by no assertion.
       `@${stackMarginSymbol()} = external constant [1 x i8]`,
       `@sc_stack_margin_pin = constant ptr @${stackMarginSymbol()}`,
+      // llvm.used (SHF_GNU_RETAIN on ELF, no_dead_strip on Mach-O, kept by
+      // the PE linker's roots) so the link's section garbage collection
+      // cannot drop the pin and, with it, the undefined reference that is
+      // the whole check. The C lane's twin is SCR_PIN_ATTR in scr_runtime.h.
+      `@llvm.used = appending global [1 x ptr] [ptr @sc_stack_margin_pin], section "llvm.metadata"`,
       ``,
       // Type shapes shared with the runtime's C ABI. ScrStr is the header
       // prefix only (the flexible-array tail is concrete per literal);
