@@ -174,16 +174,20 @@ const setCollectionStates: IrType & { kind: "func" } = {
 const indexBagShape: IrRecordShape = {
   id: "r900",
   fields: [{ name: "name", type: STRING }],
-  indexValue: { kind: "regex" },
+  // A fileHandle is no dyn handle kind, so the overflow store's value type
+  // does not convert (a regex used to be the leaf here; it now boxes as a
+  // handle, SCR_DYNH_REGEX, and an index record of boxable values converts).
+  indexValue: { kind: "fileHandle" },
 } as unknown as IrRecordShape;
 
-/** A record carrying a REGEX. It converts IN (a regex is admitted standing
- * alone) and canDynCheckTo's nested walker has no arm for one, so this leaf
- * declines in the OUT direction and only there. */
+/** A record carrying a named stdlib handle (PromiseConstructor, an `opaque`
+ * kind): canDynCheckTo's nested walker has no arm for one, so this leaf
+ * declines in the OUT direction. (A record carrying a regex used to be this
+ * leaf; handle leaves now nest in both directions.) */
 const regexBagShape: IrRecordShape = {
   id: "r901",
   fields: [
-    { name: "pattern", type: { kind: "regex" } as IrType },
+    { name: "ctor", type: { kind: "opaque", name: "PromiseConstructor" } as IrType },
     { name: "version", type: F64 },
   ],
 };
@@ -251,7 +255,7 @@ describe("strandedFuncReason names the half the predicate declined on", () => {
   //
   // The RETURN leaf is an INDEX-SIGNATURE record: canConvertToDyn's record
   // arm refuses `shape.indexValue !== undefined` outright, because an
-  // overflow store's values have no per-key kind to box against.
+  // overflow store's values must themselves convert (a fileHandle does not).
   test("a return the dyn conversion declines is blamed on the return", () => {
     expect(canBoxFuncIntoDyn(getIndexBag, getRecord, getUnion)).toBe(false);
     const why = strandedFuncReason(getIndexBag, getRecord, getUnion);
@@ -259,9 +263,8 @@ describe("strandedFuncReason names the half the predicate declined on", () => {
     expect(why).not.toContain("parameter");
   });
 
-  // The PARAMETER leaf is a record carrying a REGEX. A regex converts IN
-  // standing alone and canDynCheckTo's nested walker has no arm for one, so
-  // this is the out direction declining and nothing else.
+  // The PARAMETER leaf is a record carrying a named stdlib handle, which
+  // canDynCheckTo's nested walker has no arm for: the out direction declining.
   test("a parameter the dyn check declines is blamed on that parameter, by index", () => {
     expect(canBoxFuncIntoDyn(setRegexBag, getRecord, getUnion)).toBe(false);
     expect(strandedFuncReason(setRegexBag, getRecord, getUnion)).toContain("its parameter 1");
