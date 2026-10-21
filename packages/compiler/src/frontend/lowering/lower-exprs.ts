@@ -6629,12 +6629,17 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
       const el = L.mapTypeOf(L.typeOf(e));
       return el !== null && oobTolerantElem(el);
     }
+    // `d.toJSON()` on a Date: null for an invalid Date while the checker says `string`.
+    if (
+      ts.isCallExpression(e) && e.arguments.length === 0 && ts.isPropertyAccessExpression(e.expression) &&
+      e.expression.name.text === "toJSON" && L.mapTypeOf(L.typeOf(e.expression.expression))?.kind === "date"
+    ) return true;
     if (!ts.isIdentifier(e)) return false;
     const t = L.peekLocal(e)?.type ?? L.globalOf(e)?.type ?? null;
     if (t === null) return false;
     // dyn represents undefined directly; a union says so with an arm.
     if (t.kind === "dyn") return true;
-    return t.kind === "union" && L.armTag(t.unionId, UNDEFINED_T) >= 0;
+    return t.kind === "union" && (L.armTag(t.unionId, UNDEFINED_T) >= 0 || L.armTag(t.unionId, NULL_T) >= 0);
   }
 
   /** The receiver IS an index-signature keyed read (`bs["nope"]?.tag`),
