@@ -56,6 +56,7 @@ export const DYN_HANDLE_TAG_NUM: Record<string, number> = {
   regex: 8,
   childStream: 9,
   date: 10,
+  symbol: 11,
 };
 
 /** The tag's numeric value, or the LLVM lane's honest miss.
@@ -832,9 +833,10 @@ export class LlDyn {
         break;
       }
       default: {
-        // A Date leaf: the handle kind and tag (the C walker's arm).
+        // A runtime HANDLE leaf (Symbol, Date, ...): the tag test, the C
+        // walker's arm.
         const h = DYN_HANDLE_KINDS.get(t.kind);
-        if (h && t.kind === "date") {
+        if (h) {
           this.host.declare(`declare zeroext i1 @scr_dyn_handle_is(ptr, i32)`);
           const r = B.tmp();
           B.line(`${r} = call zeroext i1 @scr_dyn_handle_is(ptr %d, i32 ${dynHandleTagNum(t.kind)})`);
@@ -2233,14 +2235,22 @@ export class LlDyn {
         // the match predicate refused these kinds outright, so the arm
         // form refuses them in exactly the same place.
         const h = DYN_HANDLE_KINDS.get(t.kind);
-        if (h && (!soft || t.kind === "date")) {
-          // A DATE arm: the arm form pre-tests the match predicate verbatim.
+        if (h && soft) {
+          // A union ARM / nested leaf: the tag test decides, the unbox cannot
+          // then fail.
+          host.declare(`declare zeroext i1 @scr_dyn_handle_is(ptr, i32)`);
           softPre("dah", () => {
-            host.declare(`declare zeroext i1 @scr_dyn_handle_is(ptr, i32)`);
-            const m = B.tmp();
-            B.line(`${m} = call zeroext i1 @scr_dyn_handle_is(ptr %d, i32 ${dynHandleTagNum(t.kind)})`);
-            return m;
+            const c = B.tmp();
+            B.line(`${c} = call zeroext i1 @scr_dyn_handle_is(ptr %d, i32 ${dynHandleTagNum(t.kind)})`);
+            return c;
           });
+          host.declare(`declare ptr @scr_dyn_handle_unbox(ptr, i32, ptr, ptr)`);
+          const r = B.tmp();
+          B.line(`${r} = call ptr @scr_dyn_handle_unbox(ptr %d, i32 ${dynHandleTagNum(t.kind)}, ptr %path, ptr ${want})`);
+          B.terminate(`ret ptr ${r}`);
+          break;
+        }
+        if (h && !soft) {
           host.declare(`declare ptr @scr_dyn_handle_unbox(ptr, i32, ptr, ptr)`);
           const r = B.tmp();
           B.line(`${r} = call ptr @scr_dyn_handle_unbox(ptr %d, i32 ${dynHandleTagNum(t.kind)}, ptr %path, ptr ${want})`);

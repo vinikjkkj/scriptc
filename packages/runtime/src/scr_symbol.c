@@ -129,3 +129,68 @@ void scr_assert_eq_sym(ScrSym *a, ScrSym *b, bool negated, bool deep,
   scr_str_release(ia);
   scr_str_release(ib);
 }
+
+/* ── the checked-dynamic Symbol handle (SCR_DYNH_SYMBOL) ─────────────────
+ * A symbol crosses into the checked-dynamic tree BY REFERENCE: it is an
+ * immutable identity value, so boxing is a retain and `===` through the box
+ * is the pointer compare the static side already uses (the box compares by
+ * HANDLE identity — one symbol boxed twice is one symbol, and Symbol.for
+ * interns per key). Nothing is copied and nothing can alias.
+ *
+ * The MODELED surface is the part with an exact answer: `toString()`
+ * ("Symbol(desc)"), `valueOf()` (the symbol itself) and `description`. The
+ * conversions a symbol REFUSES in JS (`"" + s`, a template literal, Number(s))
+ * are TypeErrors, and the dyn tree's own string/number coercion sites throw
+ * the loud ladder for a handle that is not a plain object, so none of them
+ * answers a wrong string. */
+static ScrDyn *scr_sym_dynh_invoke(void *h, ScrDyn *self, const char *method,
+                                   ScrDyn *const *args, size_t argc, const char *what) {
+  ScrSym *s = (ScrSym *)h;
+  (void)args;
+  (void)argc;
+  if (strcmp(method, "toString") == 0) {
+    ScrStr *t = scr_sym_to_string(s); /* +1 */
+    ScrDyn *d = scr_dyn_new_str(t);
+    scr_str_release(t);
+    return d;
+  }
+  if (strcmp(method, "valueOf") == 0) return scr_dyn_retain(self);
+  char msg[160];
+  const int n = snprintf(msg, sizeof msg, "%s is not a function", what);
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+  return NULL;
+}
+
+static ScrDyn *scr_sym_dynh_get(void *h, const char *key, size_t key_len) {
+  (void)key_len;
+  if (strcmp(key, "description") == 0) {
+    ScrStr *d = scr_sym_desc((ScrSym *)h); /* +1, or NULL when absent */
+    if (d == NULL) return NULL;             /* undefined — the caller answers it */
+    ScrDyn *r = scr_dyn_new_str(d);
+    scr_str_release(d);
+    return r;
+  }
+  return NULL;
+}
+
+static bool scr_sym_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)h;
+  (void)key;
+  (void)key_len;
+  (void)value;
+  return false;
+}
+
+static const ScrDynHandleOps scr_sym_dynh_ops = {
+  "Symbol",
+  &scr_sym_retain_v,
+  &scr_sym_release_v,
+  &scr_sym_dynh_invoke,
+  &scr_sym_dynh_get,
+  &scr_sym_dynh_set,
+  NULL, /* no pipe destination */
+};
+
+void scr_sym_dyn_install(void) {
+  scr_dyn_handle_install(SCR_DYNH_SYMBOL, &scr_sym_dynh_ops);
+}

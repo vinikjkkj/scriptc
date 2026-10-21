@@ -16440,7 +16440,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // JS-exact (strict equality never coerces; a non-matching dyn kind
         // answers false). dyn vs dyn keeps the fence below.
         const dynSide = left.type.kind === "dyn" ? left : right;
-        const scalarSide = dynSide === left ? right : left;
+        let scalarSide = dynSide === left ? right : left;
+        // dyn vs a HANDLE value (a Symbol, a Date, a socket): the handle boxes
+        // by reference, and the runtime's whole-dyn strict equality compares a
+        // handle box by the HANDLE it carries, so `u === sym` is the pointer
+        // compare the static `a === b` is — one value, one answer on either
+        // side of the boundary.
+        if (dynSide.type.kind === "dyn" && DYN_HANDLE_KINDS.has(scalarSide.type.kind)) {
+          scalarSide = { kind: "dynFrom", value: scalarSide, type: DYN, loc: scalarSide.loc };
+        }
         if (
           dynSide.type.kind === "dyn" &&
           (scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
@@ -16452,8 +16460,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         ) {
           return {
             kind: "dynScalarEq",
-            left,
-            right,
+            left: left === dynSide ? left : scalarSide,
+            right: right === dynSide ? right : scalarSide,
             ...(negated ? { negated: true as const } : {}),
             type: BOOL,
             loc,

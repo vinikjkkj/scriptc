@@ -1880,6 +1880,12 @@ ScrArr *scr_regex_match_all_into(ScrStr *s, ScrRegex *re, ScrArr *indices);
  * is a retain and nothing else. */
 void scr_regex_dyn_install(void);
 
+/* The Symbol handle-dispatch ops (SCR_DYNH_SYMBOL), registered by the emitted
+ * main() exactly when scr_symbol.c is linked (moduleUsesSymbol, the switch
+ * cc.ts links it by). A symbol is immutable and crosses the checked-dynamic
+ * tree BY REFERENCE: identity survives the round trip, nothing is copied. */
+void scr_sym_dyn_install(void);
+
 /* ── maps (scr_map.c) ───────────────────────────────────────────────
  * ES Map<K, V> with the compact-dict layout: a dense, insertion-ordered
  * entries array (deletions become tombstones; compaction happens on growth,
@@ -4380,6 +4386,7 @@ typedef enum {
   SCR_DYNH_REGEX,       /* ScrRegex — RegExp (immutable pattern+flags, by reference) */
   SCR_DYNH_CHILD_STREAM, /* ScrChildStream — child stdio (Readable), on/once("data"|"end") */
   SCR_DYNH_DATE,        /* ScrDate — Date (immutable time value, by reference) */
+  SCR_DYNH_SYMBOL,       /* ScrSym — an ES Symbol (immutable identity value, by reference) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
