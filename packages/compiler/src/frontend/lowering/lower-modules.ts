@@ -20,6 +20,7 @@ import { bindingNeverReassigned, bindingContextualGenericFnNodeOf, bindingGeneri
 import { dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { dynImportBindingDepOf } from "./lower-island.js";
+import { bufferSpeciesAliasDecl } from "./lower-containers.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
@@ -2021,6 +2022,9 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // compile-time plumbing — no global storage; the statement
         // lowering skips it by the same test.
         if (isConst && createRequireBindingDecl(L, decl.name, decl.initializer)) continue;
+        // `const FastBuffer = Buffer[Symbol.species]`: the Buffer class under
+        // another name — no storage (lowerFastBufferNew serves its uses).
+        if (isConst && bufferSpeciesAliasDecl(L, decl.name, decl.initializer)) continue;
         // `const fs = require("node:fs")` through that binding at file
         // scope — a namespace import in const clothing, same story.
         if (isConst && createRequireNamespaceDecl(L, decl.name, decl.initializer)) continue;

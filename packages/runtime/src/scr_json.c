@@ -10091,3 +10091,45 @@ ScrDyn *scr_error_prop_get(ScrError *e, ScrStr *key) {
   }
   return scr_dyn_undefined();
 }
+
+/* `Buffer.from(x)` over a checked-dynamic operand (ws's toBuffer on an untyped
+ * value): a string encodes as UTF-8, a Buffer / Uint8Array / ArrayBuffer is
+ * copied, an array of numbers packs each element through ToUint8 (non-numbers
+ * contribute 0, as Node's array-like path does for NaN); any other kind throws
+ * Node's ERR_INVALID_ARG_TYPE. +1 u8 bytes, flavor left to the caller. */
+ScrBytes *scr_buffer_from_dyn(const ScrDyn *v) {
+  switch (v->kind) {
+    case SCR_DYN_STR: {
+      ScrStr *enc = scr_str_new("utf8", 4);
+      ScrBytes *b = scr_bytes_from_str(v->v.str, enc);
+      scr_str_release(enc);
+      return b;
+    }
+    case SCR_DYN_BYTES:
+    case SCR_DYN_ARRBUF: {
+      const ScrBytes *src = v->v.bytes;
+      size_t n = src->len * scr_bytes_elem_size(src->elem);
+      ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)n);
+      if (n > 0) memcpy(b->data, src->data, n);
+      return b;
+    }
+    case SCR_DYN_ARR: {
+      size_t n = v->v.arr.len;
+      ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)n);
+      for (size_t i = 0; i < n; i++) {
+        const ScrDyn *e = v->v.arr.items[i];
+        double x = e->kind == SCR_DYN_NUM ? e->v.num : 0.0;
+        double m = fmod(trunc(x), 256.0);
+        if (!(m == m)) m = 0.0;
+        if (m < 0) m += 256.0;
+        b->data[i] = (uint8_t)m;
+      }
+      return b;
+    }
+    default:
+      scr_dyn_arg_type_fail("first argument",
+                            "of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object",
+                            v);
+      return NULL;
+  }
+}

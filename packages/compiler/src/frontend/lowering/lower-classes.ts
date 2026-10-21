@@ -12,7 +12,7 @@ import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../t
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { protoClassArmOn, protoClassInfoFor } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
-import { bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
+import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerSearchParamsNew } from "./lower-builtins.js";
 import { requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -8401,6 +8401,8 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     // `new events.EventEmitter()` — the namespace-member (and CJS
     // `require('events').EventEmitter`) construction form: the property's
     // symbol resolves to the same ambient class as the named import.
+    // `new FastBuffer(...)` where FastBuffer = Buffer[Symbol.species].
+    if (isBufferSpeciesCtor(L, expr.expression)) return lowerFastBufferNew(L, expr, loc);
     // `new url.URL(...)` through the node:url namespace: the same
     // construction as the global (lowerUrlNew).
     if (ts.isPropertyAccessExpression(expr.expression)) {

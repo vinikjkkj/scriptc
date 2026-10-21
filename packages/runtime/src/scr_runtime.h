@@ -8825,6 +8825,7 @@ ScrStr *scr_text_decode(const ScrBytes *b);
  * "utf16le" writes LE code units, surrogate pairs included. Borrows
  * both; +1 u8 result. Never throws. */
 ScrBytes *scr_bytes_from_str(const ScrStr *s, const ScrStr *enc);
+ScrBytes *scr_buffer_from_dyn(const struct ScrDyn *v); /* Buffer.from(dyn): +1 u8 bytes (scr_json.c) */
 
 /* Buffer.byteLength(string, enc) — enc NORMALIZED like from_str — and
  * Buffer.isEncoding(name) (case-insensitive over Node's alias set).

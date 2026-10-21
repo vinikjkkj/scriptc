@@ -11279,6 +11279,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8215-buffer-species-and-kind-tests.js": {
+   "order": [
+    "<repo>/tests/corpus/8215-buffer-species-and-kind-tests.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
