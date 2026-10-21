@@ -12,7 +12,7 @@ import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
-import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
+import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
@@ -4042,6 +4042,30 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // never lower; Node never evaluates them). Claimed before every
     // intrinsic and dispatch path: no lowering can answer differently
     // when the root read itself is the crash.
+    // `module.exports.getCodec(x)` / `exports.f(x)` INSIDE the CommonJS file
+    // that attached the member: the read answers the member's export global
+    // (the live member Node reads), and a function-valued one is called through
+    // its value -- the receiver is the exports object, so `this` is not read.
+    if (
+      ts.isPropertyAccessExpression(expr.expression) &&
+      !expr.expression.questionDotToken && expr.questionDotToken === undefined &&
+      isCjsJsFile(expr.getSourceFile()) &&
+      (isModuleExportsAccess(expr.expression.expression) ||
+        (ts.isIdentifier(expr.expression.expression) && expr.expression.expression.text === "exports" &&
+          !L.resolveLocal(expr.expression.expression) && !L.globalOf(expr.expression.expression)))
+    ) {
+      const member = probeLower(L, expr.expression);
+      if (member?.type.kind === "func") {
+        const fparams = member.type.params;
+        const cargs = expr.arguments.map((a, i) => L.lowerArgExpecting(a, fparams[i]));
+        for (let i = cargs.length; i < fparams.length; i++) {
+          const absent = omittedArgFor(L, fparams[i]!, loc);
+          if (!absent) L.unsupported("SC1090", expr, "calls omitting a non-optional parameter of the callee's type");
+          cargs.push(absent);
+        }
+        return { kind: "callValue", callee: member, args: cargs, type: member.type.ret, loc };
+      }
+    }
     {
       const root = ambientUndefVarRootOf(L, expr);
       if (root !== null) {
