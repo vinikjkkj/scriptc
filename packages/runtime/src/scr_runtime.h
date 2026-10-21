@@ -6152,6 +6152,28 @@ ScrStr *scr_fn_to_string(const ScrDyn *d);
  * traps get/set/has/deleteProperty/ownKeys/getOwnPropertyDescriptor/apply;
  * a trap that THROWS propagates. All borrow their arguments. */
 ScrDyn *scr_dyn_proxy_new(const ScrDyn *target, const ScrDyn *handler, bool strict);
+/* The Proxy operations are defined in the gated unit (scr_dyn_invoke.c) and
+ * reached from the always-linked dyn code through this table, which the first
+ * scr_dyn_proxy_new installs. `walk`'s mode is a ScrObjWalk. */
+typedef struct ScrDynProxyOps {
+  ScrDyn *(*get)(ScrDyn *p, const ScrStr *key);
+  void (*set)(ScrDyn *p, ScrStr *key, ScrDyn *value);
+  bool (*has)(ScrDyn *p, const ScrStr *key);
+  bool (*del)(ScrDyn *p, ScrStr *key);
+  ScrDyn *(*call)(const ScrDyn *p, ScrDyn *const *args, size_t argc, const char *what);
+  ScrDyn *(*construct)(const ScrDyn *p, const ScrDyn *args, const ScrStr *what);
+  bool (*is_function)(const ScrDyn *p);
+  ScrDyn *(*walk)(ScrDyn *p, int mode);
+  ScrDyn *(*json_form)(ScrDyn *p);
+  void (*refuse)(const ScrDyn *target, const char *what);
+  ScrDyn *(*trap)(const ScrDyn *p, const char *name, bool *threw);
+} ScrDynProxyOps;
+extern const ScrDynProxyOps *scr_dyn_proxy_ops_ptr;
+ScrDyn *scr_dyn_alloc_proxy(void);
+typedef enum { SCR_OBJWALK_KEYS, SCR_OBJWALK_VALUES, SCR_OBJWALK_ENTRIES } ScrObjWalk;
+void scr_dyn_objwalk_push(ScrDyn *out, ScrObjWalk mode, const char *key, size_t key_len, ScrDyn *value);
+ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode);
+const char *scr_dyn_kind_name(const ScrDyn *d);
 ScrDyn *scr_dyn_proxy_get(ScrDyn *p, const ScrStr *key);
 /* The handler's trap `name` (+1), NULL for none (with *threw true and the
  * exception pending when reading it threw or it is not callable). */

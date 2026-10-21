@@ -125,7 +125,7 @@ const ANSWERING_TABLES: { fn: string; why: string; exempt: string[] }[] = [
     exempt: ["SCR_DYN_ARR", "SCR_DYN_OBJ"],
   },
   {
-    fn: "static const char *scr_dyn_kind_name(const ScrDyn *d)",
+    fn: "const char *scr_dyn_kind_name(const ScrDyn *d)",
     why: 'the tail answers "unknown", so a missing kind is unnamed in every check failure',
     exempt: [],
   },
