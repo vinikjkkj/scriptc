@@ -17891,6 +17891,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     );
   }
 
+  /** The WHATWG URL constructor as a value: the global `URL`, the named
+   * import/require binding of node:url's `URL` (`const { URL } =
+   * require('url')`), or the namespace spelling `url.URL`. All three are
+   * the same constructor in Node. */
+  function isUrlCtorRef(L: Lowerer, e: ts.Expression): boolean {
+    if (ts.isIdentifier(e)) {
+      if (L.isStdlibGlobal(e, "URL")) return true;
+      const bi = L.builtinImportOf(e);
+      return bi !== null && bi.module === "url" && bi.member === "URL";
+    }
+    if (ts.isPropertyAccessExpression(e)) {
+      const bi = L.builtinMemberOf(e);
+      return bi !== null && bi.module === "url" && bi.member === "URL";
+    }
+    return false;
+  }
+
   export function lowerInstanceOf(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     // `x instanceof net.Socket` over a union with a netSocket arm — the
     // h2 compat 'connect' narrowing (lower-server.ts): a union tag test.
@@ -18182,6 +18199,62 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           narrowBridgeArm(left)?.kind === "varRef";
         if (left.type.kind === "date" && pureDateRead) {
           return { kind: "boolLit", value: true, type: BOOL, loc };
+        }
+      }
+      // `x instanceof URL` — the WHATWG URL class (Node's global and
+      // `require('url').URL` alike: the same constructor). Over a union with
+      // a url arm it is the runtime TAG compare, exact against every
+      // sibling kind (`string | URL`, the address parameter of ws's
+      // WebSocket); a url-typed operand folds true, and a STRING / number /
+      // boolean operand folds false — a primitive is not an object, so no
+      // constructor claims it. The folds keep the operand-purity rule of
+      // the class folds above (identifier reads only), and the bridge rule
+      // of the Set fold (a tag-checked narrowing read folds with it).
+      if (
+        isUrlCtorRef(L, expr.right) &&
+        !L.caughtLocalOf(expr.left)
+      ) {
+        const left = L.lowerExpr(expr.left);
+        if (left.type.kind === "union") {
+          const def = L.unions.get(left.type.unionId);
+          const tags = def ? def.arms.flatMap((a, i) => (a.kind === "url" ? [i] : [])) : [];
+          if (tags.length >= 1) {
+            return armTagsTest(L, left, tags, loc);
+          }
+        }
+        const pureUrlRead =
+          left.kind === "varRef" ||
+          (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
+          narrowBridgeArm(left)?.kind === "varRef";
+        if (pureUrlRead && left.type.kind === "url") {
+          return { kind: "boolLit", value: true, type: BOOL, loc };
+        }
+        // Anything else that is statically NOT a URL (a primitive, a record,
+        // a class instance, an array, a union with no url arm) is false.
+        // The operand still evaluates first, for its effects.
+        if (left.type.kind !== "dyn" && left.type.kind !== "jsval" && left.type.kind !== "url" && left.type.kind !== "union") {
+          const result: IrExpr = { kind: "boolLit", value: false, type: BOOL, loc };
+          if (pureUrlRead) return result;
+          return {
+            kind: "seqExpr",
+            stmts: [{ kind: "exprStmt", expr: left, loc: locOf(expr.left) }],
+            result,
+            type: BOOL,
+            loc,
+          };
+        }
+        if (left.type.kind === "union") {
+          const def = L.unions.get(left.type.unionId);
+          if (def && !def.arms.some((a) => a.kind === "dyn" || a.kind === "jsval")) {
+            const result: IrExpr = { kind: "boolLit", value: false, type: BOOL, loc };
+            return {
+              kind: "seqExpr",
+              stmts: [{ kind: "exprStmt", expr: left, loc: locOf(expr.left) }],
+              result,
+              type: BOOL,
+              loc,
+            };
+          }
         }
       }
       // `x instanceof X` where X is a class VALUE (a classval-typed

@@ -11404,6 +11404,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8205-instanceof-url.js": {
+   "order": [
+    "<repo>/tests/corpus/8205-instanceof-url.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
