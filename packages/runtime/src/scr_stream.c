@@ -1065,6 +1065,29 @@ ScrDyn *scr_stream_done_dyn_l(ScrClosure *clo, ScrDyn *const *args, size_t argc)
   return scr_stream_done_dyn_ret();
 }
 
+/* The completion callback of a parameter TYPED `Function` (a JSDoc
+ * `@param {Function} cb` -- ws's Receiver._write): a closure of
+ * func(...dyn)=>dyn, whose ABI is one owned dyn ARRAY packing the call's
+ * arguments. Only the first two entries are ever read (error, data), so
+ * the pack is unpacked into the borrowed-args shape the dyn glue above
+ * already takes and the pack is released here. */
+#define SCR_STREAM_DONE_PACK(K)                                                      \
+  ScrDyn *scr_stream_done_pack_##K(ScrClosure *clo, ScrDyn *pack) {                  \
+    size_t argc = (size_t)scr_dyn_arr_len(pack);                                     \
+    if (argc > 2) argc = 2;                                                          \
+    ScrDyn *args[2] = {NULL, NULL};                                                  \
+    for (size_t i = 0; i < argc; i++) args[i] = scr_dyn_arr_at(pack, (double)i);     \
+    ScrDyn *r = scr_stream_done_dyn_##K(clo, args, argc);                            \
+    scr_dyn_release(pack);                                                           \
+    return r;                                                                        \
+  }
+SCR_STREAM_DONE_PACK(w)
+SCR_STREAM_DONE_PACK(f)
+SCR_STREAM_DONE_PACK(d)
+SCR_STREAM_DONE_PACK(t)
+SCR_STREAM_DONE_PACK(l)
+#undef SCR_STREAM_DONE_PACK
+
 /* Checked-dynamic chunks (the JS lane's push/write of any-typed values):
  * dispatch by dyn tag — bytes copy out, strings convert utf8, null takes
  * the null path (EOF for push; ERR_STREAM_NULL_VALUES for write), and
