@@ -3584,6 +3584,11 @@ class LlEmitter {
       `ptr ${members === null ? "null" : `@${members.sym}`}, i64 ${members === null ? 0 : members.count}, ` +
       `i8 ${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? 1 : 0} }`;
     this.dynClassDescSyms.set(className, { sym, body });
+    // Subclass descriptors join the registry (see the C twin): a base-typed
+    // box can hold a derived instance whose own member table must resolve.
+    for (const [sub, m] of this.classMeta) {
+      if (sub !== className && m.pre > meta.pre && m.pre <= meta.post && canBoxClassIntoDyn(sub)) this.dynClassDesc(sub);
+    }
     return `@${sym}`;
   }
 
