@@ -11828,6 +11828,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8406-a-definite-assignment-field-read-earlier-in-the-constructor-is-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/8406-a-definite-assignment-field-read-earlier-in-the-constructor-is-undefined.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"
