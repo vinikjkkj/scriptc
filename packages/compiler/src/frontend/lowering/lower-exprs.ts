@@ -14444,6 +14444,25 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
         loc: e.loc,
       };
     }
+    if (e.type.kind === "date") {
+      // String(date) / `${date}`: Date.prototype.toString over the time
+      // value (the invalid Date answers "Invalid Date").
+      const ms: IrExpr = { kind: "libCall", fn: "date.value", args: [e], type: F64, loc: e.loc };
+      return { kind: "libCall", fn: "date.toString", args: [ms], type: STRING, loc: e.loc };
+    }
+    if (e.type.kind === "bytes" && e.type.elem === "u8") {
+      // String(buf) / String(u8): by the stamped flavor -- Buffer's utf8
+      // decode, a plain Uint8Array's comma join, a DataView's tag.
+      return { kind: "libCall", fn: "bytes.jsString", args: [e], type: STRING, loc: e.loc };
+    }
+    if (e.type.kind === "map" || e.type.kind === "set") {
+      // Object.prototype.toString's constant: nothing can override it on a
+      // Map or Set here. The operand still evaluates (effects).
+      const text = e.type.kind === "map" ? "[object Map]" : "[object Set]";
+      const lit: IrExpr = { kind: "strLit", value: text, type: STRING, loc: e.loc };
+      if (pureReemittable(e)) return lit;
+      return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: e, loc: e.loc }], result: lit, type: STRING, loc: e.loc };
+    }
     if (e.type.kind === "regex") {
       // `${re}` / String(re) / "" + re: RegExp.prototype.toString, the
       // same lifted helper the explicit `re.toString()` call uses. A regex

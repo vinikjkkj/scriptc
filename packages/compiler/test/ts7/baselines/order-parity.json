@@ -11066,6 +11066,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7847-string-of-date-bytes-map-set-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7847-string-of-date-bytes-map-set-arms.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"

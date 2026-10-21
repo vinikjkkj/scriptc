@@ -7865,6 +7865,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_date_local_time(${arg(0)})`);
           case "date.tzOffset":
             return finish(`scr_date_tz_offset(${arg(0)})`);
+          case "date.toString":
+            // Date.prototype.toString; +1 string, or a catchable Error for a
+            // zone whose long name needs ICU data (may-throw seed set).
+            return finish(`scr_date_to_string(${arg(0)})`);
+          case "bytes.jsString":
+            // String(bytes) by flavor; +1 string, or a catchable Error for an
+            // unstamped value (may-throw seed set).
+            return finish(`scr_bytes_js_string(${arg(0)})`);
           case "text.decode":
             // WHATWG utf-8 decode with the leading BOM stripped
             // (scr_bytes.c). Borrowed bytes; +1 string; never throws.

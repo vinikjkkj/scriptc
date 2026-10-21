@@ -8613,6 +8613,11 @@ void scr_bytes_set_from(ScrBytes *dst, const ScrBytes *src, double offset);
  * "ucs2", "utf-8", ...). Borrows both; +1 result. Never throws (the
  * compiler fences other encodings). */
 ScrStr *scr_bytes_to_str(const ScrBytes *b, const ScrStr *enc);
+/* String(bytes): by stamped flavor -- Buffer decodes utf8, a plain Uint8Array
+ * joins its elements with ",", a DataView is "[object DataView]". An
+ * UNSTAMPED value throws a catchable Error and answers NULL (no producer said
+ * which, so there is no honest answer). Borrows; +1. */
+ScrStr *scr_bytes_js_string(const ScrBytes *b);
 ScrStr *scr_bytes_to_str_range(const ScrBytes *b, const ScrStr *enc, double start, double end);
 
 /* WHATWG TextDecoder.decode over u8 bytes (utf-8, default options): the
