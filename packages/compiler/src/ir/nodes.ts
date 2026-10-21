@@ -6505,7 +6505,11 @@ export type IrExpr =
   /** Element read `a[i]`. Index is f64; a non-integer or out-of-bounds index
    * traps at runtime (JS returns undefined — documented divergence). For
    * refcounted elements the result is a fresh owned (+1) reference. */
-  | { kind: "arrayGet"; arr: IrExpr; index: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "arrayGet"; arr: IrExpr; index: IrExpr; type: IrType;
+      /** NUMBER elements only: a miss (negative, fractional, NaN, or past the
+       * end) answers NaN instead of trapping. The consumer is arithmetic or a
+       * comparison, where Node's `undefined` and NaN behave alike. */
+      nanOnMiss?: true; loc: SrcLoc }
   /** Array method/property on an array receiver: `length` (f64), `push`
    * (VARIADIC like JS — zero or more elem-typed args; every argument
    * evaluates before any appends, then each appends in order; returns the

@@ -2687,6 +2687,8 @@ function validateFunction(
           err(`arrayGet on non-array ${e.arr.type.kind}`, e.loc);
         } else if (!typeEquals(e.type, e.arr.type.elem)) {
           err(`arrayGet result ${e.type.kind} != element ${e.arr.type.elem.kind}`, e.loc);
+        } else if (e.nanOnMiss && e.arr.type.elem.kind !== "f64") {
+          err(`arrayGet nanOnMiss over ${e.arr.type.elem.kind} elements`, e.loc);
         }
         break;
       }
