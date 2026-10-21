@@ -60,7 +60,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { strandTrap, armDiscrimLits, arrayOf, BOOL, internalSlotFields, isRefCounted, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, internalSlotFields, isRefCounted, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -1301,6 +1301,59 @@ export function nullPromisePlaceholderArg(call: ts.CallExpression): boolean {
   }
 }
 
+
+/** Can a read of the `let x!: T` binding run before its first assignment?
+ * The widened `T | undefined` slot costs a boxed union on every write and a
+ * tag test on every read (MEASURED 6-7x on a hot loop), so it is only paid
+ * where the answer is not provably no. PROVEN no when: the declaration sits
+ * in a statement list, a LATER direct statement of that list is `x = <expr>`
+ * with no mention of x in <expr>, every other mention of the name lies
+ * textually after that statement, and none sits inside a hoisted function
+ * declaration (callable from anywhere) nor under an `export`. A mention is
+ * any identifier of the same text (an over-approximation: it can only
+ * widen more, never less). */
+function bangMayReadUnassigned(decl: ts.VariableDeclaration): boolean {
+  if (!ts.isIdentifier(decl.name)) return true;
+  const name = decl.name.text;
+  const list = decl.parent;
+  if (!ts.isVariableDeclarationList(list) || !ts.isVariableStatement(list.parent)) return true;
+  const varStmt = list.parent;
+  if (ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Export) return true;
+  const container = varStmt.parent;
+  if (!(ts.isBlock(container) || ts.isSourceFile(container) || ts.isModuleBlock(container))) return true;
+  const stmts = container.statements;
+  const at = stmts.indexOf(varStmt);
+  if (at < 0) return true;
+  const mentions = (n: ts.Node): boolean => {
+    if (ts.isIdentifier(n) && n.text === name) return true;
+    return ts.forEachChild(n, (c) => (mentions(c) ? true : undefined)) === true;
+  };
+  // A forward reference (a closure created above the declaration).
+  for (let j = 0; j < at; j++) if (mentions(stmts[j]!)) return true;
+  let first = -1;
+  for (let j = at + 1; j < stmts.length && first < 0; j++) {
+    const st = stmts[j]!;
+    if (
+      ts.isExpressionStatement(st) && ts.isBinaryExpression(st.expression) &&
+      st.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(st.expression.left) && st.expression.left.text === name &&
+      !mentions(st.expression.right)
+    ) first = j;
+    else if (mentions(st)) return true; // a mention before the first assignment
+  }
+  if (first < 0) return true;
+  // The declaration's own list siblings (`let a!: T, b = a`) and anything
+  // between the declaration and the assignment were checked above. Hoisted
+  // function declarations anywhere in the container may run at any time.
+  let hoisted = false;
+  const scan = (n: ts.Node): void => {
+    if (hoisted) return;
+    if (ts.isFunctionDeclaration(n) && mentions(n)) { hoisted = true; return; }
+    ts.forEachChild(n, scan);
+  };
+  for (const st of stmts) scan(st);
+  return hoisted;
+}
 export class Lowerer {
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
@@ -1847,6 +1900,12 @@ export class Lowerer {
    * lowerVarDecl consumes the entry when the source declaration arrives and
    * emits the initializing `assign` instead of a fresh declaration. */
   readonly tdzPredeclared = new Map<ts.Symbol, IrLocal>();
+  /** Bindings declared `let x!: T` whose slot was widened to `T | undefined`
+   * (a definite-assignment assertion waives tsc's guarantee, so a read can
+   * still observe Node's undefined). Reads go through lyingRead. */
+  readonly bangSymbols = new Set<ts.Symbol>();
+  readonly lyingResults = new WeakSet<IrExpr>();
+  readonly bindEvidenceBusy = new Set<ts.Node>();
   /** Nested function DECLARATIONS lowered eagerly by the forward-hoisting
    * machinery (predeclareForwardFnDecl — a reference above the declaration
    * in the same function, JS's function hoisting): the statement loop skips
@@ -11502,6 +11561,322 @@ export class Lowerer {
       loc,
     });
     return name;
+  }
+
+
+  /** `let x!: T` (no initializer): the widened slot type `T | undefined`
+   * when T has no representation for Node's `undefined`, else null. Records
+   * the symbol so reads classify through lyingRead. */
+  bangWidens(decl: ts.VariableDeclaration, type: IrType, loc: SrcLoc): IrType | null {
+    if (!ts.isIdentifier(decl.name)) return null;
+    // `let x!: T` (no initializer) or the placeholder spelling `let x: T =
+    // null!` / `= undefined!`: both promise a later assignment while the
+    // slot starts out holding Node's null/undefined.
+    const ph = decl.initializer !== undefined ? this.placeholderUnitOf(decl.initializer) : null;
+    if (decl.initializer !== undefined ? ph === null : decl.exclamationToken === undefined) return null;
+    if (this.unassignedSlotInit(type, loc) !== null) return null;
+    if (
+      type.kind === "dyn" || type.kind === "union" || type.kind === "map" || type.kind === "generator" ||
+      type.kind === "caught" || type.kind === "void" || isUnitType(type)
+    ) return null;
+    const sym = this.checker.getSymbolAtLocation(decl.name);
+    if (!sym) return null;
+    if (!bangMayReadUnassigned(decl)) return null;
+    this.bangSymbols.add(sym);
+    return ph === "null" ? this.withNullArm(type) : this.withUndefinedArm(type);
+  }
+
+  /** A FILE-SCOPE `const y = xs[i]!` / `= xs[i]` / `= m.get(k)!` whose binding
+   * the program prints, tests or conditions: its global slot is registered
+   * before any initializer lowers, so the decision is syntactic. The slot
+   * becomes `T | undefined` and reads classify like a `!` binding's. */
+  lyingBindWidens(decl: ts.VariableDeclaration, type: IrType): IrType | null {
+    if (!ts.isIdentifier(decl.name) || decl.initializer === undefined) return null;
+    const plain = type.kind === "f64" || type.kind === "string" || type.kind === "bool" || type.kind === "object" || type.kind === "record";
+    if (!plain) return null;
+    let e: ts.Expression = decl.initializer;
+    const strip = (x: ts.Expression): ts.Expression => {
+      while (ts.isParenthesizedExpression(x) || ts.isAsExpression(x) || ts.isSatisfiesExpression(x)) x = x.expression;
+      return x;
+    };
+    e = strip(e);
+    let bang = false;
+    if (ts.isNonNullExpression(e)) { bang = true; e = strip(e.expression); }
+    const isElem = ts.isElementAccessExpression(e) && this.mapTypeOf(this.typeOf(e.expression))?.kind === "array";
+    const isCall = bang && ts.isCallExpression(e);
+    if (!isElem && !isCall) return null;
+    if (!this.bindHasEvidence(decl)) return null;
+    const sym = this.checker.getSymbolAtLocation(decl.name);
+    if (!sym) return null;
+    this.bangSymbols.add(sym);
+    return this.withUndefinedArm(type);
+  }
+
+  /** `null!` / `undefined!` (parenthesised or `as`-wrapped forms included):
+   * the placeholder initializer of a field or binding that is assigned
+   * later. Null for anything else. */
+  placeholderUnitOf(init: ts.Expression): "null" | "undefined" | null {
+    let e: ts.Expression = init;
+    for (;;) {
+      if (ts.isParenthesizedExpression(e)) e = e.expression;
+      else if (ts.isAsExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+      else break;
+    }
+    if (!ts.isNonNullExpression(e)) return null;
+    let inner: ts.Expression = e.expression;
+    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+    if (inner.kind === ts.SyntaxKind.NullKeyword) return "null";
+    if (ts.isIdentifier(inner) && inner.text === "undefined") return "undefined";
+    return null;
+  }
+
+  /** The interned union of a UNION type's arms plus undefined. */
+  unionWithUndefinedArm(t: IrType): IrType | null {
+    if (t.kind !== "union") return null;
+    const def = this.unions.get(t.unionId);
+    if (!def || def.arms.some((a) => a.kind === "undefinedT")) return null;
+    const arms = [...def.arms, UNDEFINED_T].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+    return { kind: "union", unionId: this.unions.intern(arms) };
+  }
+
+  /** The interned `T | null` union over a non-union arm type. */
+  withNullArm(t: IrType): IrType {
+    const arms = [t, NULL_T].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+    return { kind: "union", unionId: this.unions.intern(arms) };
+  }
+
+  /** Interned `%lying.prop.<n>(u)`: the receiver read of a slot whose value
+   * is still undefined (or null). Node throws at the property use, with the
+   * property named; so this throws that exact TypeError and otherwise
+   * extracts the declared arm. `what` is the property clause, e.g.
+   * "reading 'length'" or "setting 'id'". */
+  lyingPropHelper(fromId: string, target: IrType, setting: boolean, prop: string, loc: SrcLoc, callText?: string): string | null {
+    const from = this.unions.get(fromId);
+    const tag = this.armTag(fromId, target);
+    if (!from || tag < 0) return null;
+    const key = `lyingprop:${fromId}:${tag}:${setting ? "set" : "get"}:${prop}:${callText ?? ""}`;
+    const existing = this.narrowHelpers.get(key);
+    if (existing) return existing;
+    const name = `%lying.prop.${this.narrowHelpers.size}`;
+    this.narrowHelpers.set(key, name);
+    const fromT: IrType = { kind: "union", unionId: fromId };
+    const u: IrExpr = { kind: "varRef", localId: "u.0", type: fromT, loc };
+    const body: IrStmt[] = [];
+    from.arms.forEach((arm, i) => {
+      if (arm.kind !== "undefinedT" && arm.kind !== "nullT") return;
+      const what = arm.kind === "undefinedT" ? "undefined" : "null";
+      const msg = callText !== undefined
+        ? `${callText} is not a function`
+        : setting
+          ? `Cannot set properties of ${what} (setting '${prop}')`
+          : `Cannot read properties of ${what} (reading '${prop}')`;
+      body.push({
+        kind: "if",
+        cond: { kind: "unionIsTag", unionId: fromId, tag: i, negated: false, value: u, type: BOOL, loc },
+        then: [strandTrap(msg, loc)],
+        else_: null,
+        loc,
+      });
+    });
+    body.push({ kind: "return", value: { kind: "unionNarrow", unionId: fromId, tag, value: u, type: target, loc }, loc });
+    this.liftedFns.push({
+      name,
+      params: [{ localId: "u.0", name: "u", type: fromT }],
+      returnType: target,
+      locals: [{ id: "u.0", name: "u", type: fromT, mutable: true }],
+      body,
+      loc,
+    });
+    return name;
+  }
+
+  /** How a read of a slot that may hold Node's undefined while the checker
+   * says T is CONSUMED, from the parent node: "peel" (the consumer handles
+   * the wider union exactly: printing, templates, typeof, comparisons with
+   * undefined/null, ??, ||, conditions), "num" (arithmetic: undefined is
+   * NaN), a property name (Node throws the member-access TypeError there),
+   * or "narrow" (everything else: the checked extraction). */
+  classifyLyingRead(node: ts.Expression): "peel" | "narrow" | "num" | { prop: string; set: boolean; callText?: string } {
+    let p: ts.Node = node;
+    while (
+      p.parent &&
+      (ts.isParenthesizedExpression(p.parent) || ts.isNonNullExpression(p.parent) ||
+        ts.isSatisfiesExpression(p.parent) || ts.isAsExpression(p.parent))
+    ) p = p.parent;
+    const par = p.parent;
+    if (!par) return "narrow";
+    const isUnit = (e: ts.Expression): boolean => {
+      const f = this.typeOf(e).flags;
+      return (f & (ts.TypeFlags.Undefined | ts.TypeFlags.Null)) !== 0;
+    };
+    // `f()` over a callee that is still undefined/null: Node's "<callee text>
+    // is not a function".
+    if (ts.isCallExpression(par) && par.expression === p && !par.questionDotToken) {
+      return { prop: "", set: false, callText: p.getText() };
+    }
+    if (ts.isPropertyAccessExpression(par) && par.expression === p) {
+      if (par.questionDotToken) return "peel";
+      const gp = par.parent;
+      const set = gp !== undefined && ts.isBinaryExpression(gp) && gp.left === par &&
+        gp.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && gp.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
+      return { prop: par.name.text, set };
+    }
+    if (ts.isElementAccessExpression(par) && par.expression === p) {
+      if (par.questionDotToken) return "peel";
+      const a = par.argumentExpression;
+      if (ts.isStringLiteral(a) || ts.isNumericLiteral(a)) return { prop: a.text, set: false };
+      return "narrow";
+    }
+    if (ts.isTemplateSpan(par) || ts.isTypeOfExpression(par)) return "peel";
+    // `const x = <may be undefined>`: the binding holds the wider value when
+    // the program itself tests it against undefined/null (bindHasEvidence).
+    if (ts.isVariableDeclaration(par) && par.initializer === p && ts.isIdentifier(par.name) && this.bindHasEvidence(par)) return "peel";
+    if (ts.isPrefixUnaryExpression(par)) {
+      if (par.operator === ts.SyntaxKind.ExclamationToken) return "peel";
+      if (par.operator === ts.SyntaxKind.MinusToken || par.operator === ts.SyntaxKind.PlusToken || par.operator === ts.SyntaxKind.TildeToken) return "num";
+    }
+    if (ts.isConditionalExpression(par) && par.condition === p) return "peel";
+    if ((ts.isIfStatement(par) || ts.isWhileStatement(par) || ts.isDoStatement(par)) && par.expression === p) return "peel";
+    if (ts.isCallExpression(par) && par.arguments.includes(p as ts.Expression)) {
+      const c = par.expression;
+      if (ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression) && c.expression.text === "console") return "peel";
+      if (ts.isIdentifier(c) && c.text === "String" && par.arguments.length === 1) return "peel";
+    }
+    if (ts.isBinaryExpression(par)) {
+      const k = par.operatorToken.kind;
+      const other = par.left === p ? par.right : par.left;
+      if (
+        (k === ts.SyntaxKind.EqualsEqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
+          k === ts.SyntaxKind.EqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsToken) && isUnit(other)
+      ) return "peel";
+      if ((k === ts.SyntaxKind.QuestionQuestionToken || k === ts.SyntaxKind.BarBarToken) && par.left === p) return "peel";
+      // String `+` takes the wider value only against an operand that is not
+      // itself a (possibly widened) read: `u + v` over two union-typed operands has no lowering.
+      if (
+        k === ts.SyntaxKind.PlusToken && (this.typeOf(par).flags & ts.TypeFlags.StringLike) !== 0 &&
+        !(function readLike(e: ts.Expression): boolean {
+          if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)) return readLike(e.expression);
+          return ts.isIdentifier(e) || ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e);
+        })(other)
+      ) return "peel";
+      if (
+        k === ts.SyntaxKind.MinusToken || k === ts.SyntaxKind.AsteriskToken || k === ts.SyntaxKind.SlashToken ||
+        k === ts.SyntaxKind.PercentToken || k === ts.SyntaxKind.AsteriskAsteriskToken ||
+        k === ts.SyntaxKind.LessThanToken || k === ts.SyntaxKind.GreaterThanToken ||
+        k === ts.SyntaxKind.LessThanEqualsToken || k === ts.SyntaxKind.GreaterThanEqualsToken ||
+        (k === ts.SyntaxKind.PlusToken && (this.typeOf(par).flags & ts.TypeFlags.NumberLike) !== 0)
+      ) return "num";
+    }
+    return "narrow";
+  }
+
+  /** The read's consumer turns it into TEXT (template span, string `+`,
+   * String(), console.*): `undefined` is then exactly the text "undefined". */
+  isStringifyingConsumer(node: ts.Expression): boolean {
+    let p: ts.Node = node;
+    while (
+      p.parent &&
+      (ts.isParenthesizedExpression(p.parent) || ts.isNonNullExpression(p.parent) ||
+        ts.isSatisfiesExpression(p.parent) || ts.isAsExpression(p.parent))
+    ) p = p.parent;
+    const par = p.parent;
+    if (!par) return false;
+    if (ts.isTemplateSpan(par)) return true;
+    if (ts.isBinaryExpression(par) && par.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      return (this.typeOf(par).flags & ts.TypeFlags.StringLike) !== 0;
+    }
+    if (ts.isCallExpression(par) && par.arguments.includes(p as ts.Expression)) {
+      const c = par.expression;
+      if (ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression) && c.expression.text === "console") return true;
+      if (ts.isIdentifier(c) && c.text === "String" && par.arguments.length === 1) return true;
+    }
+    return false;
+  }
+
+  /** Does the program test the binding declared by `decl` against
+   * undefined/null (=== / !== / == / != , ??, ?., typeof)? Such a test is the
+   * author expecting the value to be absent, so the slot keeps the wider
+   * `T | undefined` (a plain slot cannot say undefined). Without one the slot
+   * stays plain: a union slot costs an allocation per write (MEASURED 6x on a
+   * hot loop). Any identifier of the same text counts: an over-approximation
+   * that can only widen more. */
+  bindHasEvidence(decl: ts.VariableDeclaration): boolean {
+    if (!ts.isIdentifier(decl.name)) return false;
+    if (this.bindEvidenceBusy.has(decl)) return false;
+    this.bindEvidenceBusy.add(decl);
+    try {
+      const name = decl.name.text;
+      const list = decl.parent;
+      if (!ts.isVariableDeclarationList(list) || !ts.isVariableStatement(list.parent)) return false;
+      const container = list.parent.parent;
+      let found = false;
+      const visit = (n: ts.Node): void => {
+        if (found) return;
+        if (ts.isIdentifier(n) && n.text === name && n.pos >= decl.end && n !== decl.name) {
+          // A use the program writes expecting an absent value: printing,
+          // templates, conditions, typeof, ??, ?., == / === against
+          // undefined/null all classify "peel".
+          if (this.classifyLyingRead(n) === "peel") found = true;
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(container);
+      return found;
+    } finally {
+      this.bindEvidenceBusy.delete(decl);
+    }
+  }
+
+  /** The declared (non-unit) arm of a union that holds Node's undefined/null
+   * next to exactly one real arm; null otherwise. */
+  lyingTargetOf(t: IrType): IrType | null {
+    if (t.kind !== "union") return null;
+    const arms = this.unions.get(t.unionId)?.arms ?? [];
+    const real = arms.filter((a) => !isUnitType(a));
+    if (real.length !== 1 || real.length === arms.length) return null;
+    return real[0]!;
+  }
+
+  /** A READ of a slot that may hold Node's undefined/null while the
+   * checker says T: `union` is the raw read. Null when the shape has no
+   * single declared arm (the caller keeps its existing path). */
+  lyingRead(union: IrExpr, node: ts.Expression): IrExpr | null {
+    if (union.type.kind !== "union") return null;
+    let target = this.lyingTargetOf(union.type);
+    if (target === null) {
+      // A union-DECLARED slot widened with undefined (`mode!: A | B`): the
+      // checker's type at the read is the sub-union without the unit arm.
+      const want = this.mapTypeOf(this.typeOf(node));
+      const uid = union.type.unionId;
+      const from = this.unions.get(uid);
+      if (want !== null && want.kind === "union" && from) {
+        const wantArms = this.unions.get(want.unionId)?.arms ?? [];
+        if (
+          wantArms.every((a) => this.armTag(uid, a) >= 0) &&
+          from.arms.some((a) => a.kind === "undefinedT" && this.armTag(want.unionId, a) < 0)
+        ) target = want;
+      }
+    }
+    if (target === null) return null;
+    if (target.kind === "union") {
+      const ctxU = this.classifyLyingRead(node);
+      const doneU = (e: IrExpr): IrExpr => { this.lyingResults.add(e); return e; };
+      if (ctxU === "peel") return doneU(union);
+      const rh = this.unionRetagHelper(union.type.unionId, (target as IrType & { kind: "union" }).unionId, union.loc);
+      return rh ? doneU({ kind: "call", callee: rh, args: [union], type: target, loc: union.loc }) : null;
+    }
+    const ctx = this.classifyLyingRead(node);
+    const loc = union.loc;
+    const done = (e: IrExpr): IrExpr => { this.lyingResults.add(e); return e; };
+    if (ctx === "peel") return done(union);
+    if (typeof ctx === "object") {
+      const h = this.lyingPropHelper(union.type.unionId, target, ctx.set, ctx.prop, loc, ctx.callText);
+      if (h) return done({ kind: "call", callee: h, args: [union], type: target, loc });
+    }
+    const h = ctx === "num"
+      ? this.deferredReadHelper(union.type.unionId, target, loc)
+      : this.narrowedArmHelper(union.type.unionId, target, loc);
+    return h ? done({ kind: "call", callee: h, args: [union], type: target, loc }) : null;
   }
 
   /** The DEFERRED-INIT field read (`stream!: T` assigned past the

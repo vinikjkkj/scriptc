@@ -23,7 +23,7 @@ import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, built
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
-import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, regexToStringExpr, strCharsCall } from "./lower-containers.js";
+import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
 import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf } from "./lower-modules.js";
@@ -603,6 +603,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (inner.type.kind === "union") {
         const target = L.mapTypeOf(L.typeOf(expr));
         if (target && target.kind !== "union" && !typeEquals(target, inner.type)) {
+          // Node does not throw at `x!`; it throws (if at all) where the
+          // value is USED. A union that can hold undefined/null next to the
+          // asserted arm hands its consumer the wider value (lyingRead).
+          const lt = L.lyingTargetOf(inner.type);
+          if (lt !== null && typeEquals(lt, target)) {
+            const lr = L.lyingRead(inner, expr);
+            if (lr) return lr;
+          }
           const helper = L.narrowedArmHelper(inner.type.unionId, target, loc);
           if (helper) {
             return { kind: "call", callee: helper, args: [inner], type: target, loc };
@@ -1284,6 +1292,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       const local = L.resolveLocal(expr);
       if (local) {
         if (local.type.kind === "caught") return L.caughtRead(expr, local, loc);
+        {
+          const bsym = L.checker.getSymbolAtLocation(expr);
+          if (bsym && L.bangSymbols.has(bsym) && local.type.kind === "union") {
+            const lr = L.lyingRead({ kind: "varRef", localId: local.id, type: local.type, loc }, expr);
+            if (lr) return lr;
+          }
+        }
         return L.maybeNarrow({ kind: "varRef", localId: local.id, type: local.type, loc }, expr);
       }
       // `import x = N.y` aliases resolve transparently through globalOf/
@@ -1301,6 +1316,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         if (L.typeNamesUnregisteredClass(g.type)) {
           L.pushDiag(blockedBindingUseDiag(expr.text, loc));
           throw new PoisonError();
+        }
+        {
+          const gsym = L.checker.getSymbolAtLocation(expr);
+          if (gsym && L.bangSymbols.has(gsym) && g.type.kind === "union") {
+            const lr = L.lyingRead({ kind: "varRef", localId: g.id, type: g.type, loc }, expr);
+            if (lr) return lr;
+          }
         }
         return L.maybeNarrow({ kind: "varRef", localId: g.id, type: g.type, loc }, expr);
       }
@@ -4200,6 +4222,9 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
 }
 
   export function maybeNarrow(L: Lowerer, expr: IrExpr, node: ts.Node): IrExpr {
+    // A lyingRead result already answered its consumer: narrowing it again
+    // would re-trap the peeled union.
+    if (L.lyingResults.has(expr)) return expr;
     // A dyn read tsc narrowed to a SCALAR (a typeof test proved the kind):
     // bridge with a VALIDATED extraction — dynCheck, the checked-cast
     // machinery — rather than a trusted one. After the guard the check
@@ -6540,6 +6565,19 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
     if (process.env["SCRIPTC_OPTCHAIN_SLOT_OFF"] === "1") return false;
     let e: ts.Expression = node;
     while (ts.isParenthesizedExpression(e)) e = e.expression;
+    // A deferred-init (`x!: T`) FIELD: the slot is `T | undefined` while the
+    // checker says `T`, so `?.` must test the slot (lyingRead peels it).
+    if (ts.isPropertyAccessExpression(e) && !e.questionDotToken) {
+      const ft = L.fieldTarget(e);
+      return ft !== null && ft.container === "class" &&
+        L.classes.get(ft.className)?.deferredInitFields?.has(ft.field) === true;
+    }
+    // An array ELEMENT read (`xs[i]?.p`): the index can run past the end, and
+    // lowerElementAccess then hands the `?.` the element-or-undefined union.
+    if (ts.isElementAccessExpression(e) && !e.questionDotToken && L.mapTypeOf(L.typeOf(e.expression))?.kind === "array") {
+      const el = L.mapTypeOf(L.typeOf(e));
+      return el !== null && oobTolerantElem(el);
+    }
     if (!ts.isIdentifier(e)) return false;
     const t = L.peekLocal(e)?.type ?? L.globalOf(e)?.type ?? null;
     if (t === null) return false;
@@ -13060,6 +13098,17 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     ) {
       const safe = lowerNpmStaticSafeIndexRead(L, arr as IrExpr & { type: { kind: "array" } }, index, locOf(expr));
       if (safe) return safe;
+    }
+    // An index that can run past the end (`a[i]`, no noUncheckedIndexedAccess)
+    // reads Node's undefined. A consumer that takes it as written gets it
+    // (lowerOobTolerantIndexRead); every other consumer keeps the documented
+    // trap, because its slot is typed T and has no representation for it.
+    if (arr.type.kind === "array") {
+      const cx = L.classifyLyingRead(expr);
+      if (cx !== "narrow") {
+        const tol = lowerOobTolerantIndexRead(L, arr as IrExpr & { type: { kind: "array" } }, index, locOf(expr), cx, cx === "peel" && L.isStringifyingConsumer(expr));
+        if (tol) return tol;
+      }
     }
     // A union-element read narrows like an identifier when the checker has
     // narrowed THIS occurrence (`if (a[0] !== undefined) use(a[0])` — tsc
@@ -21024,6 +21073,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         target.fieldType.kind === "union"
       ) {
         const inner = L.stripUndefinedArm(target.fieldType);
+        if (ts.isExpression(blame)) {
+          const lr = L.lyingRead(read, blame);
+          if (lr) return lr;
+        }
         const helper = L.deferredReadHelper(target.fieldType.unionId, inner, loc);
         if (helper) return { kind: "call", callee: helper, args: [read], type: inner, loc };
       }
@@ -21668,7 +21721,32 @@ function arrayLengthCompoundParts(
     // Through an accessor target this desugars to get, op, set — with the
     // receiver an identifier/this, the observable order matches JS exactly:
     // getter, rhs side effects, setter (verified against Node).
-    const read = L.fieldGetExpr(readTarget, locOf(access), access);
+    let read = L.fieldGetExpr(readTarget, locOf(access), access);
+    // A DEFERRED-INIT field (`n!: number` assigned past the constructor)
+    // holds `T | undefined`: the operator runs on the declared T, reading
+    // the unassigned state as JS does (`undefined++` and `undefined += 1`
+    // are NaN, `undefined += "x"` is "undefinedx"), and the result writes
+    // back through the slot's own wrap.
+    let combineSlotT = readTarget.fieldType;
+    if (
+      readTarget.container === "class" &&
+      L.classes.get(readTarget.className)?.deferredInitFields?.has(readTarget.field) === true
+    ) {
+      const plainT = L.lyingTargetOf(readTarget.fieldType);
+      if (plainT !== null && (plainT.kind === "f64" || plainT.kind === "string") && readTarget.fieldType.kind === "union") {
+        const rawRead: IrExpr = {
+          kind: "fieldGet", obj: readTarget.obj, className: readTarget.className,
+          field: readTarget.field, type: readTarget.fieldType, loc: locOf(access),
+        };
+        if (plainT.kind === "string") {
+          read = L.ensureString(rawRead, access);
+        } else {
+          const h = L.deferredReadHelper(readTarget.fieldType.unionId, plainT, loc);
+          if (h) read = { kind: "call", callee: h, args: [rawRead], type: plainT, loc };
+        }
+        combineSlotT = plainT;
+      }
+    }
     const rhs: IrExpr = rhsNode
       ? L.lowerExpr(rhsNode)
       : { kind: "numLit", value: 1, type: F64, loc };
@@ -21694,7 +21772,7 @@ function arrayLengthCompoundParts(
         `compound assignment through the getter/setter pair '${target.field}', whose halves have different types (it reads as '${L.fmt(target.fieldType)}' and writes as '${L.fmt(compoundWriteT)}' — read, combine and assign in separate statements)`,
       );
     }
-    const combined = compoundCombine(L, op, read, rhs, readTarget.fieldType, access, access, rhsNode ?? access, loc, rhsNode === null);
+    const combined = compoundCombine(L, op, read, rhs, combineSlotT, access, access, rhsNode ?? access, loc, rhsNode === null);
     if (!combined) L.unsupported("SC1043", access);
     // A simple receiver is re-lowered -- identifier/this, so the second
     // evaluation is not observable. A pinned one addresses its hidden local.
@@ -21702,7 +21780,22 @@ function arrayLengthCompoundParts(
       ...(pre.length > 0 ? { pre } : {}),
       natural: combined.natural,
       ...(combined.numericRead ? { numericRead: combined.numericRead } : {}),
-      write: (v) => L.fieldSetStmt(writeTargetOf(), combined.toSlot(v), loc, access),
+      write: (v) => {
+        const slotV = combined.toSlot(v);
+        // The operator ran on the declared T of a deferred-init field: wrap
+        // the result into the field's `T | undefined` slot.
+        if (combineSlotT !== readTarget.fieldType && readTarget.fieldType.kind === "union") {
+          const tag = L.armTag(readTarget.fieldType.unionId, combineSlotT);
+          if (tag >= 0) {
+            return L.fieldSetStmt(
+              writeTargetOf(),
+              { kind: "unionWrap", unionId: readTarget.fieldType.unionId, tag, value: slotV, type: readTarget.fieldType, loc },
+              loc, access,
+            );
+          }
+        }
+        return L.fieldSetStmt(writeTargetOf(), slotV, loc, access);
+      },
     };
   }
 

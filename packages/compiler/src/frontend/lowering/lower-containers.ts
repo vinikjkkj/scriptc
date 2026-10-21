@@ -4,6 +4,7 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { strandTrap } from "../../ir/nodes.js";
 import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
@@ -1425,7 +1426,7 @@ function lowerOptionalDefaultArg(
       };
       const body: IrStmt[] = [
         readLenStmt(arrT, loc),
-        { kind: "if", cond: lt(i, num(0)), then: [{ kind: "return", value: miss, loc }], else_: null, loc },
+        { kind: "if", cond: { kind: "unary", op: "!", operand: { kind: "bin", op: ">=", left: i, right: num(0), type: BOOL, loc }, type: BOOL, loc }, then: [{ kind: "return", value: miss, loc }], else_: null, loc },
         { kind: "if", cond: { kind: "bin", op: ">=", left: i, right: n, type: BOOL, loc }, then: [{ kind: "return", value: miss, loc }], else_: null, loc },
         // A fractional index is a property miss too (floor(i) < i exactly
         // when i has a fraction; negatives already returned above).
@@ -1461,6 +1462,159 @@ function lowerOptionalDefaultArg(
       });
     }
     return { kind: "call", callee: name, args: [arr, index], type: resultT, loc };
+  }
+
+/** The OOB-TOLERANT indexed read `xs[i]` for a consumer that can take
+   * Node's undefined, in program code (the trap divergence 4 stays for every
+   * other consumer). One interned helper per (elem, consumer):
+   *   - "num" over a number element: NaN for a miss (undefined is NaN in
+   *     arithmetic and comparisons) — plain f64, no allocation;
+   *   - a property use: Node's `Cannot read properties of undefined
+   *     (reading 'p')` TypeError for a miss — the plain element otherwise,
+   *     no allocation;
+   *   - "peel": the interned `elem | undefined` union (the printing,
+   *     template, typeof, comparison, ??, || and condition consumers take
+   *     it as written).
+   * Null when the element is union/void/dyn typed (no re-tag story). */
+  /** Element kinds whose `elem | undefined` read every consumer (string
+   * conversion, `?.`, comparisons) already lowers. Others (bigint, sets,
+   * maps, arrays, closures ...) keep the trapping read: their union forms
+   * have no conversion or optional-chain lowering. */
+  export function oobTolerantElem(elem: IrType): boolean {
+    return elem.kind === "f64" || elem.kind === "string" || elem.kind === "bool" ||
+      elem.kind === "object" || elem.kind === "record";
+  }
+
+  export function lowerOobTolerantIndexRead(
+    L: Lowerer,
+    arr: IrExpr & { type: { kind: "array" } },
+    index: IrExpr,
+    loc: SrcLoc,
+    ctx0: "peel" | "num" | { prop: string; set: boolean; callText?: string },
+    stringify = false,
+  ): IrExpr | null {
+    const ctx: "peel" | "num" | { prop: string; set: boolean; callText?: string } = ctx0;
+    const isNum = (): boolean => (ctx as unknown) === "num";
+    const elem = (arr.type as IrType & { kind: "array" }).elem;
+    if (!oobTolerantElem(elem)) return null;
+    if (stringify && elem.kind === "string") {
+      // The consumer turns the value into text (template, string `+`,
+      // String(), console.log): a miss reads "undefined", exactly the text
+      // Node produces, so the string-typed result needs no union.
+      const repeatableS = (e: IrExpr): boolean => e.kind === "varRef" || e.kind === "numLit";
+      if (repeatableS(arr) && repeatableS(index)) {
+        const len: IrExpr = { kind: "arrIntrinsic", method: "length", receiver: arr, args: [], type: F64, loc };
+        const inRange: IrExpr = {
+          kind: "logical", op: "&&",
+          left: { kind: "bin", op: ">=", left: index, right: { kind: "numLit", value: 0, type: F64, loc }, type: BOOL, loc },
+          right: { kind: "bin", op: "<", left: index, right: len, type: BOOL, loc },
+          type: BOOL, loc,
+        };
+        const t: IrExpr = {
+          kind: "ternary", cond: inRange,
+          then: { kind: "arrayGet", arr, index, type: elem, loc },
+          else_: { kind: "strLit", value: "undefined", type: STRING, loc },
+          type: elem, loc,
+        };
+        L.lyingResults.add(t);
+        return t;
+      }
+    }
+    if (ctx === "peel") {
+      const r = lowerNpmStaticSafeIndexRead(L, arr, index, loc);
+      if (r) L.lyingResults.add(r);
+      return r;
+    }
+    if (isNum() && elem.kind !== "f64") return null;
+    if (isNum()) {
+      const g: IrExpr = { kind: "arrayGet", arr, index, type: elem, nanOnMiss: true, loc };
+      L.lyingResults.add(g);
+      return g;
+    }
+    const arrT = arr.type;
+    // The hot case: a plain variable receiver and a plain index are
+    // re-readable, so the guard inlines as `0 <= i < len ? a[i] : miss`
+    // with no call, no extra reference traffic and no libm. The out-of-line
+    // helper below serves every other operand shape.
+    const repeatable = (e: IrExpr): boolean => e.kind === "varRef" || e.kind === "numLit";
+    if (repeatable(arr) && repeatable(index)) {
+      const len: IrExpr = { kind: "arrIntrinsic", method: "length", receiver: arr, args: [], type: F64, loc };
+      const inRange: IrExpr = {
+        kind: "logical", op: "&&",
+        left: { kind: "bin", op: ">=", left: index, right: { kind: "numLit", value: 0, type: F64, loc }, type: BOOL, loc },
+        right: { kind: "bin", op: "<", left: index, right: len, type: BOOL, loc },
+        type: BOOL, loc,
+      };
+      const hit: IrExpr = { kind: "arrayGet", arr, index, type: elem, loc };
+      let miss: IrExpr;
+      if (isNum()) {
+        miss = { kind: "numLit", value: NaN, type: F64, loc };
+      } else {
+        const pc = ctx as { prop: string; set: boolean; callText?: string };
+        const mmsg = pc.callText !== undefined ? `${pc.callText} is not a function` : pc.set
+          ? `Cannot set properties of undefined (setting '${pc.prop}')`
+          : `Cannot read properties of undefined (reading '${pc.prop}')`;
+        const mkey = `idxMiss:${typeKey(elem)}:${mmsg}`;
+        let mname = L.arrHofHelpers.get(mkey);
+        if (!mname) {
+          mname = `%arr.idxMiss.${L.arrHofHelpers.size}`;
+          L.arrHofHelpers.set(mkey, mname);
+          L.liftedFns.push({ name: mname, params: [], returnType: elem, locals: [], body: [strandTrap(mmsg, loc)], loc });
+        }
+        miss = { kind: "call", callee: mname, args: [], type: elem, loc };
+      }
+      const t: IrExpr = { kind: "ternary", cond: inRange, then: hit, else_: miss, type: elem, loc };
+      L.lyingResults.add(t);
+      return t;
+    }
+    const msg = isNum() ? "" : (ctx as { callText?: string }).callText !== undefined ? `${(ctx as { callText: string }).callText} is not a function` : (ctx as { set: boolean; prop: string }).set
+      ? `Cannot set properties of undefined (setting '${(ctx as { prop: string }).prop}')`
+      : `Cannot read properties of undefined (reading '${(ctx as { prop: string }).prop}')`;
+    const key = `idxTol:${typeKey(elem)}:${isNum() ? "num" : msg}`;
+    let name = L.arrHofHelpers.get(key);
+    if (!name) {
+      name = `%arr.idxTol.${L.arrHofHelpers.size}`;
+      L.arrHofHelpers.set(key, name);
+      const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+      const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+      const i = ref("i.0", F64);
+      const n = ref("n.0", F64);
+      const lt = (l: IrExpr, r: IrExpr): IrExpr => ({ kind: "bin", op: "<", left: l, right: r, type: BOOL, loc });
+      const missStmt: IrStmt = isNum()
+        ? { kind: "return", value: num(NaN), loc }
+        : strandTrap(msg, loc);
+      const body: IrStmt[] = [
+        readLenStmt(arrT, loc),
+        { kind: "if", cond: { kind: "unary", op: "!", operand: { kind: "bin", op: ">=", left: i, right: num(0), type: BOOL, loc }, type: BOOL, loc }, then: [missStmt], else_: null, loc },
+        { kind: "if", cond: { kind: "bin", op: ">=", left: i, right: n, type: BOOL, loc }, then: [missStmt], else_: null, loc },
+        {
+          kind: "if",
+          cond: lt({ kind: "libCall", fn: "math.floor", args: [i], type: F64, loc }, i),
+          then: [missStmt],
+          else_: null,
+          loc,
+        },
+        { kind: "return", value: { kind: "arrayGet", arr: ref("a.0", arrT), index: i, type: elem, loc }, loc },
+      ];
+      L.liftedFns.push({
+        name,
+        params: [
+          { localId: "a.0", name: "a", type: arrT },
+          { localId: "i.0", name: "i", type: F64 },
+        ],
+        returnType: elem,
+        locals: [
+          { id: "a.0", name: "a", type: arrT, mutable: true },
+          { id: "i.0", name: "i", type: F64, mutable: true },
+          { id: "n.0", name: "n", type: F64, mutable: false },
+        ],
+        body,
+        loc,
+      });
+    }
+    const out: IrExpr = { kind: "call", callee: name, args: [arr, index], type: elem, loc };
+    L.lyingResults.add(out);
+    return out;
   }
 
 /** Interned synthetic function for one (elem, argument-shape) concat —

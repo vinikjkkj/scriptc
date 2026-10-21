@@ -2144,7 +2144,13 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // one symbol) register exactly one global; later declarations
             // are plain assignments.
             if (!symbol || L.globalsBySymbol.has(symbol)) continue;
-            const window = preDeclarationSlot(L, sf, symbol, nameNode, decl, type);
+            // `let g!: T` at file scope: widened to `T | undefined` and planted
+            // with the undefined arm at module entry (bangWidens), so a read
+            // before the first assignment answers Node's undefined.
+            const bangT = ts.isIdentifier(decl.name) && nameNode === decl.name
+              ? (L.bangWidens(decl, type, locOf(decl)) ?? L.lyingBindWidens(decl, type))
+              : null;
+            const window = bangT !== null ? { type: bangT, tdz: false } : preDeclarationSlot(L, sf, symbol, nameNode, decl, type);
             type = window.type;
             const g: IrGlobal = {
               id: `%g.${tag}${nsPrefix}${nameNode.text}`,
@@ -2178,7 +2184,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // reads the dyn undefined instead of faulting on NULL — the
             // dyn face of let's documented pre-declaration window (Node
             // throws the TDZ ReferenceError there).
-            if (isVarDeclared(decl) || (g.type.kind === "dyn" && g.mutable)) {
+            if (isVarDeclared(decl) || (g.type.kind === "dyn" && g.mutable) || bangT !== null) {
               noteVarGlobalEntryInit(L, sf, g);
             }
           } catch (e) {
