@@ -31,11 +31,12 @@
  *
  * THE ARMED HALF is `twoDifferentlyMappedArms`. It must still REFUSE: adopting
  * an arbitrary arm of `Map<string, number> | Map<number, string>` would key the
- * table one of two incompatible ways and the wrong pick is silent. It is NOT a
- * discriminator on its own -- that union is today refused UPSTREAM by SC2009
- * before the constructor is lowered, so it reads red on every tree -- and that
- * is stated here rather than left for a reader to discover. It is the fence for
- * the day SC2009 stops firing.
+ * table one of two incompatible ways and the wrong pick is silent. Since a
+ * union of several Map arms is admitted (SC2009 no longer fences it), the
+ * refusal comes from THIS site (SC1090, the constructor's own `any` key), so
+ * the test is a live instrument for the guard, like the array sibling's. The
+ * empty `new Map()` under a two-arm context is an OPEN limitation: which arm
+ * to allocate is decided by later uses (a cast to one arm), not by the type.
  *
  * The counts here are `lowerToIr(...).diagnostics`, the same number
  * awaited-void-slot.test.ts reports. The CLI's `blockers:` heading and the
@@ -134,12 +135,8 @@ test("a union with TWO differently-mapped arms still REFUSES", () => {
   // choice between them is unobservable at this site, so the repair adopts
   // NOTHING and the refusal stands.
   //
-  // HONEST LIMIT: this refuses on the fixed tree AND on the reverted one AND
-  // on a tree whose guard is broken, because SC2009 fences the union return
-  // type before the constructor is reached. It is not a discriminator for the
-  // guard; it is the regression fence for the day SC2009 stops firing. The
-  // discriminating evidence for the guard is that `armCount === 1` is the only
-  // adoption condition in the arm walk.
+  // The union itself is admitted now, so the refusal is the constructor's
+  // (SC1090), not SC2009's: the guard is exercised for real.
   const got = lower(`function f(): Map<string, number> | Map<number, string> {
   return new Map()
 }
@@ -147,8 +144,8 @@ f()
 export {}
 `);
   expect(got.lowered).toBe(false);
-  expect(got.rows.some((r) => r.startsWith("SC2009"))).toBe(true);
-  expect(got.rows.some((r) => r.startsWith("SC1090"))).toBe(false);
+  expect(got.rows.some((r) => r.startsWith("SC1090"))).toBe(true);
+  expect(got.rows.some((r) => r.startsWith("SC2009"))).toBe(false);
 });
 
 test("a union COLLAPSING to one map type keeps lowering (the ordering guard)", () => {
