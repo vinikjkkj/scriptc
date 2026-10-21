@@ -8008,8 +8008,12 @@ class LlEmitter {
             this.declare(`declare ptr @scr_dyn_to_primitive_string(ptr)`);
             B.line(`${t} = call ptr @scr_dyn_to_primitive_string(ptr ${v.name})`);
           } else {
+            // `${u}` throws for a Symbol, String(u) answers "Symbol(desc)":
+            // the one place the two spellings differ.
             const helper = this.dyn.dynToStrHelper();
-            B.line(`${t} = call ptr @${helper}(ptr ${v.name})`);
+            const entry = e.hint === "template" ? "scr_dyn_template_to_string" : "scr_dyn_string_explicit";
+            this.declare(`declare ptr @${entry}(ptr, ptr)`);
+            B.line(`${t} = call ptr @${entry}(ptr ${v.name}, ptr @${helper})`);
           }
           const out = this.own({ name: t, type: e.type });
           this.emitPendingCheck();

@@ -14448,7 +14448,7 @@ export function recordArmStringable(L: Lowerer, a: IrType): boolean {
   return true;
 }
 
-export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
+export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitString = false): IrExpr {
     {
       const atWidth = stringConvAtDynWidth(L, e);
       if (atWidth) return { kind: "toString", operand: atWidth, type: STRING, loc: e.loc };
@@ -14617,14 +14617,21 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
     }
     if (e.type.kind === "symbol") {
       // JS splits here: `${sym}` and concatenation THROW a TypeError,
-      // String(sym) answers "Symbol(desc)". One shared lowering cannot
-      // honor both — fence with the sanctioned spelling instead of
-      // guessing the context.
-      L.unsupported(
-        "SC1090",
-        node,
-        "string conversions of symbol values (template literals throw in JS — call .toString() explicitly)",
-      );
+      // String(sym) answers "Symbol(desc)". The caller says which spelling
+      // this is (`explicitString`: the String(x) call), so each answers what
+      // Node answers: SymbolDescriptiveString, or the TypeError the
+      // implicit conversions raise (evaluating the operand first, as JS does).
+      if (explicitString) {
+        return { kind: "libCall", fn: "sym.toString", args: [e], type: STRING, loc: e.loc };
+      }
+      const hidden = L.declareHiddenLocal("%symstr", e.type);
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "varDecl", localId: hidden.id, init: e, loc: e.loc }],
+        result: nodeThrowExpr(1, "", "Cannot convert a Symbol value to a string", STRING, e.loc),
+        type: STRING,
+        loc: e.loc,
+      };
     }
     if (isUnitType(e.type)) {
       // `${undefined}` / "" + null: Node prints "undefined"/"null", but
@@ -14727,10 +14734,16 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       pieces.push({ kind: "strLit", value: expr.head.text, type: STRING, loc });
     }
     for (const span of expr.templateSpans) {
-      pieces.push(
+      const piece =
         stringWrapperToString(L, span.expression) ??
-          L.caughtToString(span.expression) ??
-          L.ensureString(L.lowerExpr(span.expression), span.expression),
+        L.caughtToString(span.expression) ??
+        L.ensureString(L.lowerExpr(span.expression), span.expression);
+      // A template span of an unknown value is ToString, not String(): a Symbol
+      // there throws (the one difference), so the node says which spelling it is.
+      pieces.push(
+        piece.kind === "toString" && piece.operand.type.kind === "dyn" && piece.hint === undefined
+          ? { ...piece, hint: "template" as const }
+          : piece,
       );
       if (span.literal.text !== "") {
         pieces.push({ kind: "strLit", value: span.literal.text, type: STRING, loc: locOf(span.literal) });

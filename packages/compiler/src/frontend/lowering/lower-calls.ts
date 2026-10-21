@@ -4646,7 +4646,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // bool) that a value lowering of the `&&` would fence on.
       if (name === "Boolean") return L.lowerCondition(argNode);
       const arg = L.lowerExpr(argNode);
-      if (name === "String") return L.ensureString(arg, argNode);
+      if (name === "String") return L.ensureString(arg, argNode, true);
       // Number(x) at the READ's slot width, the twin of the rule
       // ensureString has always had (numberConvAtDynWidth, lower-exprs).
       // `Number(node.attrs.size)` on an absent key is NaN in Node and was

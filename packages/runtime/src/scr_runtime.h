@@ -6190,6 +6190,11 @@ ScrDyn *scr_dyn_new_handle(void *h, ScrDynHandleTag tag);
  * identity, no copy); anything else throws the path-annotated catchable
  * TypeError and returns NULL. */
 void *scr_dyn_handle_unbox(const ScrDyn *d, ScrDynHandleTag tag, const ScrDynPath *path, const char *want);
+/* Symbols in the checked-dynamic tree. scr_dyn_is_symbol: the box is a Symbol
+ * handle. scr_dyn_symbol_descriptive: String(sym), "Symbol(desc)" (+1).
+ * scr_dyn_template_to_string: a template span's ToString of an unknown — a
+ * Symbol throws Node's TypeError, anything else is `walker`'s answer. */
+bool scr_dyn_is_symbol(const ScrDyn *d);
 /* Keyed read on a HANDLE box (the emitted sc_dyn_key_get's arm): the
  * tag's modeled properties answer boxed values; everything else answers
  * the undefined singleton (the checked-dynamic tree's own-property stance — SEMANTICS.md)

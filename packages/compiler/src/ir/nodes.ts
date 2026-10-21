@@ -6388,7 +6388,7 @@ export type IrExpr =
    * first, so `"" + o` and `String(o)` answer differently for the same
    * object. Only the `dyn` operand branch reads it; every other operand
    * kind has one conversion. */
-  | { kind: "toString"; operand: IrExpr; hint?: "default"; type: IrType; loc: SrcLoc }
+  | { kind: "toString"; operand: IrExpr; hint?: "default" | "template"; type: IrType; loc: SrcLoc }
   /** Lazily-branched conditional: exactly one arm evaluates. */
   | { kind: "ternary"; cond: IrExpr; then: IrExpr; else_: IrExpr; type: IrType; loc: SrcLoc }
   /** Nullish coalescing `a ?? b` — `logical`'s lazily-branched shape with
