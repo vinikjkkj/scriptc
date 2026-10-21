@@ -93,6 +93,13 @@ async function emitCloseFalseDrain(): Promise<void> {
   const rs = createReadStream(src, { emitClose: false, start: 0, end: 40 });
   rs.on("data", () => {});
   await new Promise<void>((res) => { rs.on("end", () => res()); });
+  // emitClose:false leaves NO 'close' event to wait on, and 'end' arrives
+  // while the autoDestroy's close(2) is still queued on the threadpool, so
+  // the next probe() may or may not find the descriptor returned (Node
+  // measured 12/12 "1" on one starved core, 0/12 once this waits). `closed`
+  // flips only after the descriptor is released, so poll it: the drift then
+  // measures the stream, not the scheduler.
+  while (!rs.closed) await new Promise<void>((res) => { setTimeout(() => res(), 1); });
 }
 async function appendCycle(): Promise<void> {
   const ws = createWriteStream(out, { flags: "a" });
