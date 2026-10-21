@@ -10928,7 +10928,12 @@ export class Lowerer {
       // narrowed from this way, and a wrong guess would admit an arm whose
       // payload is then lifted by a plan that does not exist (the retag
       // itself re-checks that every allowed arm maps).
-      if (a.kind !== "record") return null; // not a narrowing of the source union
+      // And ONLY a narrowed REFERENCE: a guard narrows an identifier, while an
+      // `as` assertion proves nothing (its stranded arms are the lying-cast
+      // trap, which this relaxation must not widen to new site shapes).
+      let site: ts.Node = node;
+      while (ts.isParenthesizedExpression(site)) site = site.expression;
+      if (a.kind !== "record" || !ts.isIdentifier(site)) return null; // not a narrowing of the source union
       let any = false;
       from.arms.forEach((arm, i) => {
         if (arm.kind === "record" && this.widthLiftPlan(arm, a) !== null) {
