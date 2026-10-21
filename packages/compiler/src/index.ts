@@ -24,7 +24,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl,
+import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
   moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -713,6 +713,19 @@ export type ProgramNativeFeatures = Record<string, boolean>;
  * otherwise. It is a parameter rather than something recomputed here because
  * the only honest source for it is the emitter: see the scr_coro.c switch
  * below. */
+function icuFeatureFlags(use: IcuUse): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  if (!use.nf && !use.zone) return out;
+  out["icuNf"] = use.nf;
+  out["icuCurr"] = use.curr;
+  out["icuUnit"] = use.unit;
+  out["icuZone"] = use.zone;
+  const all = use.langs === null || use.langs.includes("");
+  out["icuAll"] = all;
+  if (!all) for (const l of use.langs!) out[`icuLang.${l}`] = true;
+  return out;
+}
+
 function programNativeFeatures(
   mod: IrModule,
   backend: "c" | "llvm",
@@ -896,6 +909,9 @@ function programNativeFeatures(
     dateFmt: moduleUsesDateFmt(mod),
     dateTz: moduleUsesDateTz(mod),
     dateIntl: moduleUsesDateIntl(mod),
+    // The ICU locale data the program carries (cc.ts rebuilds the slice from these flags): the number formatter,
+    // which packages it reads, and one flag per literal language; icuAll when a locale is computed or defaulted.
+    ...icuFeatureFlags(moduleIcuUse(mod)),
     dateDyn: moduleUsesDateDyn(mod),
     opaque: moduleUsesOpaque(mod),
   };

@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { promisify } from "node:util";
+import { icuDataSource } from "./icu-data.js";
+import type { IcuUse } from "../ir/nodes.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -53,6 +55,10 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // The delegation is dyn objects and dyn closures over the fetch
   // transfer, and nothing else -- no socket, no parser, no stream.
   "scr_fetch_dispatch.c": ["scr_fetch_static.c"],
+  // The number formatter reads ICU bundles through scr_ures.c and resolves locale tags in scr_locale.c; the data
+  // unit that supplies scr_ures_image() is generated beside the program.
+  "scr_nf.c": ["scr_locale.c", "scr_ures.c"],
+  "scr_locale.c": ["scr_ures.c"],
   "scr_cipher_key.c": ["scr_asym.c", "scr_cipher_value.c"],
   "scr_cipher_value.c": ["scr_cipher.c"],
   "scr_dc.c": ["scr_async_dyn.c"],
@@ -529,6 +535,15 @@ export interface CcOptions {
   /** The program formats a Date with a locale/options bag (moduleUsesDateIntl): compiles scr_date_intl.c, the
    * generated en-US tables scr_date_intl_en.c and the zone-name sequences scr_date_tznames.c. */
   dateIntl?: boolean;
+  /** What the program asks of the ICU locale data (moduleIcuUse, spelt as flags so they ride the build-cache
+   * metadata): icuNf links the number formatter (scr_nf.c, scr_locale.c, scr_ures.c) with a generated data unit
+   * cut to the packages (icuCurr, icuUnit, icuZone) and the languages (one `icuLang.<code>` flag each, or icuAll)
+   * the program names. */
+  icuNf?: boolean;
+  icuCurr?: boolean;
+  icuUnit?: boolean;
+  icuZone?: boolean;
+  icuAll?: boolean;
   /** A Date and an `unknown` meet (moduleUsesDateDyn): compiles scr_date_dyn.c. */
   dateDyn?: boolean;
   /** The program holds a named stdlib handle, `Blob` or `PromiseConstructor`
@@ -2178,8 +2193,22 @@ async function reclaimDeadObjectKeys(
  * With SCRIPTC_CACHE_DIR set (the test lanes; see the cache block above),
  * unchanged programs skip clang via the binary cache, and misses link the
  * program's own TU against cached per-flavor runtime objects. */
+function icuUseFromOptions(opts: CcOptions): IcuUse | null {
+  if (!opts.icuNf && !opts.icuZone) return null;
+  const langs: string[] = [];
+  for (const k of Object.keys(opts)) if (k.startsWith("icuLang.") && (opts as unknown as Record<string, unknown>)[k] === true) langs.push(k.slice(8));
+  return { nf: opts.icuNf === true, curr: opts.icuCurr === true, unit: opts.icuUnit === true, zone: opts.icuZone === true, langs: opts.icuAll === true ? null : langs.sort() };
+}
+
 export async function compileC(opts: CcOptions): Promise<void> {
   const rtDir = runtimeSrcDir();
+  // The ICU locale data unit: generated beside the program, compiled with it (never through the runtime object cache).
+  let icuFile: string | undefined;
+  const icu = icuUseFromOptions(opts);
+  if (icu !== null) {
+    icuFile = join(dirname(opts.outPath), `${basename(opts.cPath).replace(/\.(c|ll)$/, "")}.icu.c`);
+    await writeFile(icuFile, icuDataSource(rtDir, icu));
+  }
   const dynamic = opts.dynamic ?? false;
   const coro = opts.coro ?? false;
   const regex = opts.regex ?? false;
@@ -2466,6 +2495,14 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(dateIntlUnit
       ? [rt(join(rtDir, "scr_date_intl.c")), rt(join(rtDir, "scr_date_intl_en.c")), rt(join(rtDir, "scr_date_tznames.c"))]
       : []),
+    ...(icuFile !== undefined
+      ? [
+          rt(join(rtDir, "scr_ures.c")),
+          rt(join(rtDir, "scr_locale.c")),
+          ...(opts.icuNf ? [rt(join(rtDir, "scr_nf.c"))] : []),
+          icuFile,
+        ]
+      : []),
     ...(dateUnit
       ? dateTzUnit
         ? [rt(join(rtDir, "scr_date_tz.c")), rt(join(rtDir, "scr_date_tzdb.c"))]
@@ -2669,7 +2706,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     runtimeFingerprint(rtDir),
     readFile(opts.cPath),
     Promise.all(
-      [...(opts.programHeader !== undefined ? [opts.programHeader] : []), ...(opts.programUnits ?? [])]
+      [...(opts.programHeader !== undefined ? [opts.programHeader] : []), ...(opts.programUnits ?? []), ...(icuFile !== undefined ? [icuFile] : [])]
         .map((path) => readFile(path)),
     ),
     Promise.all((opts.linkInputs ?? []).map((path) => readFile(path))),
@@ -2683,6 +2720,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     a === opts.cPath ? "<program.c>"
     : a === opts.outPath ? "<out>"
     : unitSet.has(a) ? "<program.part.c>"
+    : a === icuFile ? "<icu.c>"
     : a,
   );
   const key = createHash("sha256")

@@ -1891,10 +1891,10 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       member === "toLocaleUpperCase"
     ) {
       hint =
-        "locale- and ICU-backed behavior lives outside the static runtime (the localeCompare " +
-        "stance: code-unit order, no collation/locale data) — what lowers: the composed " +
-        'new Intl.NumberFormat("en-US").format(x) and x.toLocaleString("en-US") with default ' +
-        "options; format with template literals, toFixed, and toString otherwise";
+        "collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data " +
+        "are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: " +
+        "number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) " +
+        "for every ICU locale, option and numbering system, and Date toLocale*String at en-US";
     } else if (container === "Object" && member === "assign") {
       hint =
         "spread instead: { ...a, ...b } builds the merged record; what lowers: the empty-target " +
