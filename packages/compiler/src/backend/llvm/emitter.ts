@@ -575,6 +575,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // certificate-free set) and take the generic path's pending check.
   "tlsca.root": "scr_tls_ca_root",
   "tlsca.get": "scr_tls_ca_get",
+  "tlsca.getDyn": "scr_tls_ca_get_dyn",
   "tlsca.set": "scr_tls_ca_set_default",
   // ── node:tls's runtime-options slice and node:dgram: the rows that
   // were the whole of this tier's enumerated refusal list except the two
@@ -17237,31 +17238,6 @@ class LlEmitter {
       this.declare(`declare void @scr_jsval_cast_fail(ptr, ptr)`);
       B.line(`call void @scr_jsval_cast_fail(ptr ${args[0]!.name}, ptr ${args[1]!.name})`);
       const out = this.own({ name: "null", type: e.type });
-      this.emitPendingCheck();
-      return out;
-    }
-    if (e.fn === "tls.caCertsChk") {
-      // ALWAYS throws (Node's getCACertificates type/value ladder, then
-      // the trailing fence), so the IR gives this call THE TYPE OF THE
-      // EXPRESSION IT REPLACED — validate.ts's global.undefRead pattern —
-      // while the runtime entry is `void`. The generic path cannot carry
-      // that pair: it derives the `declare` from the IR result type, so
-      // it would declare a value return over a void callee, read rax as
-      // a result the callee never set, and hand the frame a garbage
-      // pointer to release on the unwind. That is not theory — it is what
-      // this row did on its first run: 2598's five typed TypeErrors came
-      // back as five throws with no name, no code and no message, which
-      // is the differential doing its job on a silently wrong ABI. The C
-      // tier spells the same thing as `(call(...), (T)NULL)`. Like
-      // island.castFail: call, park a typed dummy the pending check
-      // abandons, unwind.
-      const args = e.args.map((a) => this.emitExpr(a));
-      this.declare(`declare void @scr_tls_ca_certs_chk(ptr, ptr)`);
-      B.line(`call void @scr_tls_ca_certs_chk(ptr ${args[0]!.name}, ptr ${args[1]!.name})`);
-      const ty = this.llType(e.type);
-      const out = ty === "void"
-        ? { name: "", type: e.type }
-        : this.own({ name: ty === "double" ? f64Lit(0) : ty === "i1" ? "false" : "null", type: e.type });
       this.emitPendingCheck();
       return out;
     }

@@ -2872,18 +2872,9 @@ function lowerTlsModuleCall(L: Lowerer, expr: ts.CallExpression,
     if (raw.type.kind === "string") {
       return { kind: "libCall", fn: "tlsca.get", args: [raw], type: arrayOf(STRING), loc };
     }
-    if (
-      raw.kind === "unitLit" ||
-      (raw.type.kind !== "dyn" && raw.type.kind !== "union" && L.dynConvertible(raw.type))
-    ) {
-      const t: IrExpr = { kind: "dynFrom", value: raw, type: DYN, loc };
-      return {
-        kind: "libCall",
-        fn: "tls.caCertsChk",
-        args: [t, { kind: "strLit", value: "", type: STRING, loc }],
-        type: L.mapTypeOf(L.typeOf(expr)) ?? DYN,
-        loc,
-      };
+    if (raw.type.kind === "dyn" || raw.kind === "unitLit" || L.dynConvertible(raw.type)) {
+      const t: IrExpr = raw.type.kind === "dyn" ? raw : { kind: "dynFrom", value: raw, type: DYN, loc };
+      return { kind: "libCall", fn: "tlsca.getDyn", args: [t], type: arrayOf(STRING), loc };
     }
   }
   if (bi.member === "createSecureContext") {

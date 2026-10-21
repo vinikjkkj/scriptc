@@ -405,7 +405,7 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     const head = validateSrc.slice(Math.max(0, marker - 900), marker);
     const alwaysThrows = new Set([...head.matchAll(/e\.fn === "([^"]+)"/g)].map((m) => m[1]!));
     alwaysThrows.add("global.undefRead");
-    expect(alwaysThrows.size).toBeGreaterThan(5);
+    expect(alwaysThrows.size).toBeGreaterThan(4);
     const failures = rows
       .filter(([fn, sym]) => alwaysThrows.has(fn) && protos.get(sym)?.ret === "void")
       .map(

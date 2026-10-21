@@ -328,6 +328,23 @@ static ScrArr *scr_ca_default_arr(void) {
   return scr_ca_default;
 }
 
+/* tls.getCACertificates over a run-time value: validateString first
+ * (ERR_INVALID_ARG_TYPE for any other kind), then the real per-type answer. */
+ScrArr *scr_tls_ca_get_dyn(const ScrDyn *type) {
+  if (type->kind == SCR_DYN_UNDEF) {
+    /* An omitted type completes to "default" (the parameter's own default). */
+    ScrStr *d = scr_str_new("default", 7);
+    ScrArr *r = scr_tls_ca_get(d);
+    scr_str_release(d);
+    return r;
+  }
+  if (type->kind != SCR_DYN_STR) {
+    scr_dyn_arg_type_fail("type", "of type string", type);
+    return NULL;
+  }
+  return scr_tls_ca_get(type->v.str);
+}
+
 ScrArr *scr_tls_ca_get(ScrStr *type) {
   ScrArr *arr = NULL;
   if (strcmp(type->data, "default") == 0) arr = scr_ca_default_arr();

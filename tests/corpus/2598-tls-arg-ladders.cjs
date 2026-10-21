@@ -35,4 +35,7 @@ show(() => { tls.createSecureContext({ sessionTimeout: 1.5 }); });
 for (const checkServerIdentity of [undefined, null, 1, true]) {
   show(() => { tls.connect({ checkServerIdentity }); });
 }
+for (const invalid of [1, null, () => {}, true]) {
+  show(() => tls.getCACertificates(invalid));
+}
 show(() => tls.getCACertificates('test'));
