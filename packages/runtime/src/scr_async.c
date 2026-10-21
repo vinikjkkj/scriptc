@@ -4005,33 +4005,40 @@ static void scr_loop_why_report(bool kids, bool io, bool events, bool net, bool 
 }
 #endif
 
-static bool scr_loop_run_inner(ScrPromise *top_level);
-/* True until the first checkpoint after main ran (survives a re-entry after
- * a consumed uncaught exception: the later checkpoints drain ticks first). */
-static bool first_checkpoint = true;
+/* Kept out of line: inlined into the wrapper's loop the optimizer clones the
+ * whole loop body (1.5x its size), which a hello-world binary would pay. */
+#if defined(__GNUC__) || defined(__clang__)
+#define SCR_LOOP_NOINLINE __attribute__((noinline))
+#else
+#define SCR_LOOP_NOINLINE
+#endif
+SCR_LOOP_NOINLINE static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed);
 
 /* The loop, resumed after every escaped throw an 'uncaughtException'
  * listener consumed (Node calls the listener and keeps going); with no
- * listener the exception stays pending and main reports it. */
+ * listener the exception stays pending and main reports it. A resumed pass
+ * is past the first checkpoint: the later checkpoints drain ticks first. */
 bool scr_loop_run(ScrPromise *top_level) {
-  first_checkpoint = true;
+  bool resumed = false;
   for (;;) {
-    bool r = scr_loop_run_inner(top_level);
+    bool r = scr_loop_run_inner(top_level, resumed);
     if (scr_uncaught_listener_fn != NULL && scr_exc_pending()) {
       scr_uncaught_dispatch();
+      resumed = true;
       continue;
     }
     return r;
   }
 }
 
-static bool scr_loop_run_inner(ScrPromise *top_level) {
+static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
   /* The FIRST checkpoint after the synchronous main body runs promise
    * jobs BEFORE the first tick drain: Node's main-module evaluation is
    * itself awaited (the runMain continuation is a microtask queued after
    * the body's own), so microtasks scheduled during the body beat ticks
    * scheduled during the body exactly once, at startup — differentially
    * pinned. Every later checkpoint drains ticks first. */
+  bool first_checkpoint = !resumed;
   bool rejection_failed = false;
   for (;;) {
     if (top_level != NULL && top_level->state == SCR_PROM_REJECTED) break;
