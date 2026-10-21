@@ -12068,12 +12068,13 @@ export class Lowerer {
       if ((k === ts.SyntaxKind.QuestionQuestionToken || k === ts.SyntaxKind.BarBarToken) && par.left === p) return "peel";
       // String `+` takes the wider value only against an operand that is not
       // itself a (possibly widened) read: `u + v` over two union-typed operands has no lowering.
+      const readLike = (e: ts.Expression): boolean => {
+        if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)) return readLike(e.expression);
+        return ts.isIdentifier(e) || ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e);
+      };
       if (
         k === ts.SyntaxKind.PlusToken && (this.typeOf(par).flags & ts.TypeFlags.StringLike) !== 0 &&
-        !(function readLike(e: ts.Expression): boolean {
-          if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)) return readLike(e.expression);
-          return ts.isIdentifier(e) || ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e);
-        })(other)
+        (!readLike(other) || this.plusResultIsText(par, readLike))
       ) return "peel";
       if (
         k === ts.SyntaxKind.MinusToken || k === ts.SyntaxKind.AsteriskToken || k === ts.SyntaxKind.SlashToken ||
@@ -12084,6 +12085,34 @@ export class Lowerer {
       ) return "num";
     }
     return "narrow";
+  }
+
+  /** The string `+` node `plus` has its RESULT consumed as text, so the
+   * number NaN that `undefined + undefined` really is can ride as the text
+   * "NaN" (lowerLyingPlus). A parent `+` qualifies only against a string
+   * operand that is not itself a possibly-absent read (NaN + undefined is
+   * NaN, not "NaNundefined"). */
+  plusResultIsText(plus: ts.BinaryExpression, readLike: (e: ts.Expression) => boolean): boolean {
+    let p: ts.Node = plus;
+    while (
+      p.parent &&
+      (ts.isParenthesizedExpression(p.parent) || ts.isNonNullExpression(p.parent) ||
+        ts.isSatisfiesExpression(p.parent) || ts.isAsExpression(p.parent))
+    ) p = p.parent;
+    const par = p.parent;
+    if (!par) return false;
+    if (ts.isTemplateSpan(par)) return true;
+    if (ts.isCallExpression(par) && par.arguments.includes(p as ts.Expression)) {
+      const c = par.expression;
+      if (ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression) && c.expression.text === "console") return true;
+      if (ts.isIdentifier(c) && c.text === "String" && par.arguments.length === 1) return true;
+    }
+    if (ts.isBinaryExpression(par) && par.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const other = par.left === p ? par.right : par.left;
+      return (this.typeOf(par).flags & ts.TypeFlags.StringLike) !== 0 &&
+        (this.typeOf(other).flags & ts.TypeFlags.StringLike) !== 0 && !readLike(other);
+    }
+    return false;
   }
 
   /** The read's consumer turns it into TEXT (template span, string `+`,
@@ -12099,7 +12128,16 @@ export class Lowerer {
     if (!par) return false;
     if (ts.isTemplateSpan(par)) return true;
     if (ts.isBinaryExpression(par) && par.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-      return (this.typeOf(par).flags & ts.TypeFlags.StringLike) !== 0;
+      // The "undefined" TEXT is exact only against a string operand that
+      // cannot itself be absent: `undefined + 1` is the number NaN and
+      // `undefined + undefined` is NaN too (lowerLyingPlus answers those).
+      const other = par.left === p ? par.right : par.left;
+      const readLike = (e: ts.Expression): boolean => {
+        if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)) return readLike(e.expression);
+        return ts.isIdentifier(e) || ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e);
+      };
+      return (this.typeOf(par).flags & ts.TypeFlags.StringLike) !== 0 &&
+        (this.typeOf(other).flags & ts.TypeFlags.StringLike) !== 0 && !readLike(other);
     }
     if (ts.isCallExpression(par) && par.arguments.includes(p as ts.Expression)) {
       const c = par.expression;

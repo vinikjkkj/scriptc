@@ -22,7 +22,7 @@ import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, built
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
-import { absentRead } from "./lower-absent.js";
+import { absentRead, lowerLyingPlus } from "./lower-absent.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
@@ -16973,6 +16973,11 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const bothNum = left.type.kind === "f64" && right.type.kind === "f64";
     const bothStr = left.type.kind === "string" && right.type.kind === "string";
 
+    // `s + t` over a peeled absent read: see lowerLyingPlus.
+    if (op === ts.SyntaxKind.PlusToken && (left.type.kind === "union" || right.type.kind === "union")) {
+      const lp = lowerLyingPlus(L, left, right, expr, loc);
+      if (lp) return lp;
+    }
     switch (op) {
       case ts.SyntaxKind.PlusToken:
         if (bothNum) return { kind: "bin", op: "+", left, right, type: F64, loc };
