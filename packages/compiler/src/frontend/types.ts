@@ -1446,6 +1446,16 @@ export interface TypeMapperCtx {
    * type `any` is unaffected; only a function TYPE's return, and only while
    * mapType is attempting one constituent of a union, reads this flag. */
   unionArmAnyReturn?: boolean | undefined;
+  /** Mapping a CALLABLE MEMBER of a body-less .d.ts class instance (set only
+   * by mapRecordTypeInner's member loop for such an owner). Inside it, the
+   * library author's lazy `any` reads as the checked-dynamic tier wherever
+   * the existing .d.ts carve-outs already read it so for a bare callable
+   * literal — and that includes types the standard library declares and the
+   * class merely INHERITS (EventEmitter's `(...args: any[]) => void`
+   * listener, `Function` returns). Restricted to types declared in
+   * declaration files, so a program-authored type that reaches the member
+   * through a type argument keeps every refusal. Part of the memo key. */
+  declMember?: boolean | undefined;
   /** This mapping is an ATTEMPT whose failure is discarded by the caller.
    * Refusals collected under it are not the types' own answer and must not
    * reach the memo — the caller's rollback restores registries and the
@@ -1694,7 +1704,7 @@ const mapTypeMemo = new WeakMap<ts.Type, Map<string, { ctx: TypeMapperCtx; resul
  * characters because memoUsableUnder compares them with ===. */
 function memoModeKey(ctx: TypeMapperCtx): string {
   const f = (v: boolean | undefined): string => (v === undefined ? "u" : v ? "t" : "f");
-  return f(ctx.dynamic) + f(ctx.indexUnionOk) + f(ctx.restTupleFromErasure) + f(ctx.unionArmAnyReturn);
+  return f(ctx.dynamic) + f(ctx.indexUnionOk) + f(ctx.restTupleFromErasure) + f(ctx.unionArmAnyReturn) + f(ctx.declMember);
 }
 
 /* ── SCRIPTC_SPEC_AUDIT ────────────────────────────────────────────────────
@@ -1841,7 +1851,8 @@ function memoUsableUnder(entry: TypeMapperCtx, ctx: TypeMapperCtx): boolean {
       entry.dynamic === ctx.dynamic &&
       entry.indexUnionOk === ctx.indexUnionOk &&
       entry.restTupleFromErasure === ctx.restTupleFromErasure &&
-      entry.unionArmAnyReturn === ctx.unionArmAnyReturn)
+      entry.unionArmAnyReturn === ctx.unionArmAnyReturn &&
+      entry.declMember === ctx.declMember)
   );
 }
 
@@ -2382,6 +2393,21 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       !ctx.dynamic && widened.isUnionType() && npmDecls.every((d) => ts.isTypeAliasDeclaration(d));
     if (!dataInterface && !callableLiteral && !dataWithOrdinaryMethods && !bodylessClass && !declUnionAlias) return ctx.dynamic ? JSVAL : null;
   }
+  // A callable type declared in a declaration file (the standard library's
+  // included) while mapping a member of a body-less .d.ts class instance:
+  // the lazy-`any` carve-outs below apply to it exactly as they do to a bare
+  // callable literal from an uncompiled package (see ctx.declMember).
+  if (
+    ctx.declMember === true &&
+    !ctx.dynamic &&
+    !fromUncompiledCallableLiteral &&
+    checker.getCallSignatures(widened).length === 1 &&
+    checker.getConstructSignatures(widened).length === 0 &&
+    checker.getPropertiesOfType(widened).length === 0
+  ) {
+    const dd = npmDecls ?? [];
+    if (dd.length > 0 && dd.every((d) => d.getSourceFile().isDeclarationFile)) fromUncompiledCallableLiteral = true;
+  }
   // NOTE on module NAMESPACE types (`typeof import("./x.mjs")` — what a
   // dynamic import resolves to): non-stdlib ones fall under the rule
   // above (their declarations are the .d.ts SourceFiles themselves).
@@ -2411,6 +2437,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const elemTs = checker.getTypeArguments(widened as ts.TypeReference)[0];
     if (!elemTs) return null;
     let elem = mapType(elemTs, ctx);
+    // `any[]` inside a member of a body-less .d.ts class instance (mysql2's
+    // `writeTextResult(rows?: any[], columns?: any[])`): the library author's
+    // lazy `any`, one array layer out, reads as the checked-dynamic array
+    // exactly like `unknown[]` does (dyn). See ctx.declMember.
+    if (elem === null && ctx.declMember === true && (elemTs.flags & ts.TypeFlags.Any) !== 0) return DYN;
     // `undefined[]` (sparse literals — `[,]` — and explicit annotations):
     // the element rides the unit-only union like a record field would; the
     // VOID mapping is a return-position artifact, not a value.
@@ -4598,6 +4629,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         ["status", "value"],
       ),
     };
+  }
+  // `Function` (EventEmitter's `listeners(): Function[]`,
+  // `listenerCount(name, listener?: Function)`, a record's `query: Function`):
+  // a function of no stated signature is the universal variadic function,
+  // `(...args: unknown[]) => unknown`. Any closure flows in through
+  // funcCoerceAdapter's checked unpack, and a call through it takes and
+  // answers dyn. NOT scoped to a body-less class member: the value flows out
+  // of such a member into ordinary expressions (`c.listeners("x").length`),
+  // whose checker type `Function[]` is mapped again there with no member
+  // context, so the mapping has to hold everywhere or the member's own slot
+  // is unusable.
+  if (!ctx.dynamic && isStdlibInterface("Function")) {
+    return { kind: "func", params: [DYN], ret: DYN, restIn: true };
   }
   if (isStdlibInterface("PromiseRejectedResult")) {
     return {
@@ -8181,6 +8225,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
           ? {
               ...ctx,
               speculative: true,
+              ...(bodylessOwner ? { declMember: true } : {}),
               ...(ctx.resolveTypeParam !== undefined ? { resolveTypeParam: tagOuter(ctx.resolveTypeParam)! } : {}),
               ...(ctx.resolveTypeParamTs !== undefined ? { resolveTypeParamTs: tagOuter(ctx.resolveTypeParamTs)! } : {}),
               ...(ctx.resolveTypeParamTsArms !== undefined ? { resolveTypeParamTsArms: tagOuter(ctx.resolveTypeParamTsArms)! } : {}),
