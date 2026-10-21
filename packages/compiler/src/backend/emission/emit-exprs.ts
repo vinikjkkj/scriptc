@@ -1035,8 +1035,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "setLastIndex":
             E.line(`scr_regex_set_last_index(${r.name}, ${args[0]!.name});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
-          case "lastExecIndex":
-            return E.newTemp(e.type, `scr_regex_last_exec_index()`);
+          case "execIndexOf":
+            return E.newTemp(e.type, `scr_regex_index_of(${r.name})`);
           case "source":
             return E.newTemp(e.type, `scr_regex_source(${r.name})`);
           case "flags":
