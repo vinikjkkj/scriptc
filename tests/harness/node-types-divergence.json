@@ -266,9 +266,9 @@
     },
     {
       "name": "2595-fs-arg-ladders.cjs",
-      "mode": "TYPE",
+      "mode": "FENCE",
       "codes": [
-        "SC0001"
+        "SC2020"
       ]
     },
     {

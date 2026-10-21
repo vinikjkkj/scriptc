@@ -10,7 +10,7 @@
  * rejection, never silence. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { ladderFenceExpr, nodeThrowExpr } from "./lowerer.js";
+import { nodeThrowExpr } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { ABORTSIGNAL_T, arrayOf, BOOL, BYTES_U8, canBoxFuncIntoDyn, canConvertToDyn, DYN, DYN_HANDLE_KINDS, F64, funcOf, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, IrExpr, IrLibFn, IrParam, IrStmt, IrType, NETSERVER_T, NETSOCKET_T, NULL_T, RUNTIME_STREAM_CLASSES, SECURECTX_T, STRING, UNDEFINED_T, SrcLoc, typeKey, VOID } from "../../ir/nodes.js";
 import {
@@ -585,27 +585,6 @@ export function lowerNetModuleCall(L: Lowerer, expr: ts.CallExpression,
     if (args.length >= 1 && ts.isObjectLiteralExpression(args[0]!)) {
       return lowerNetConnectOptions(L, expr, bi.member, loc);
     }
-    // A RUNTIME option bag (a record binding or dyn value — the
-    // invalid-input probes build theirs with computed keys): the
-    // checked-dynamic walk validates Node-order and the compiler-rendered
-    // fence is the post-validation tail.
-    if (args.length === 1 && isJsSourceFile(expr.getSourceFile())) {
-      const t = L.mapTypeOf(L.typeOf(args[0]!));
-      if (t !== null && (t.kind === "dyn" || t.kind === "record")) {
-        const raw = L.lowerExpr(args[0]!);
-        if (raw.type.kind === "dyn" || L.dynConvertible(raw.type)) {
-          const bag: IrExpr = raw.type.kind === "dyn" ? raw : { kind: "dynFrom", value: raw, type: DYN, loc };
-          return {
-            kind: "libCall",
-            fn: "net.connectOptsChk",
-            args: [bag, ladderFenceExpr(L, `${bi.member} with a runtime options record`, expr,
-              "pass the options as an object literal — port, host, autoSelectFamily, autoSelectFamilyAttemptTimeout, and lookup are the supported options")],
-            type: NETSOCKET_T,
-            loc,
-          };
-        }
-      }
-    }
     if (args.length < 1 || args.length > 3) {
       L.noLowering(
         `${bi.member} with ${args.length} arguments`,
@@ -685,36 +664,6 @@ function lowerNetConnectOptions(L: Lowerer, expr: ts.CallExpression, member: str
   const args = expr.arguments;
   const optsNode = args[0] as ts.ObjectLiteralExpression;
   const isJs = isJsSourceFile(expr.getSourceFile());
-  // The checked-dynamic option-bag route (JS sources): a literal with
-  // computed keys (the invalid-input probes' spelling) or an objectMode-
-  // trio member rides WHOLE to the runtime walk — Node's Socket-ctor
-  // validation order (the trio's ERR_INVALID_ARG_VALUE first, then
-  // port/host/autoSelectFamily), with the compiler-rendered fence as the
-  // post-validation tail.
-  if (isJs) {
-    const needsBag = optsNode.properties.some((p) =>
-      (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p)) ||
-      (ts.isPropertyAssignment(p) && ts.isComputedPropertyName(p.name)) ||
-      ["objectMode", "readableObjectMode", "writableObjectMode"].includes(
-        (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
-        (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) ? p.name.text : "",
-      ),
-    );
-    if (needsBag) {
-      const raw = L.lowerExpr(optsNode);
-      if (raw.type.kind === "dyn" || L.dynConvertible(raw.type)) {
-        const bag: IrExpr = raw.type.kind === "dyn" ? raw : { kind: "dynFrom", value: raw, type: DYN, loc };
-        return {
-          kind: "libCall",
-          fn: "net.connectOptsChk",
-          args: [bag, ladderFenceExpr(L, `${member} with these options`, optsNode,
-            "port, host, autoSelectFamily, autoSelectFamilyAttemptTimeout, and lookup are the supported options")],
-          type: NETSOCKET_T,
-          loc,
-        };
-      }
-    }
-  }
   let port: IrExpr | null = null;
   let host: IrExpr | null = null;
   let lookup: IrExpr | null = null;
@@ -2908,30 +2857,30 @@ function lowerTlsModuleCall(L: Lowerer, expr: ts.CallExpression,
   }
   if (bi.member === "getCACertificates" && args.length === 1 && !args.some(ts.isSpreadElement) &&
       isJsSourceFile(expr.getSourceFile())) {
-    // The type-argument ladder (validateString + the documented name
-    // set) for the arguments a JS source can pass and a TS one cannot.
+    // The type-argument ladder for the arguments a JS source can pass and a
+    // TS one cannot, when the argument's type is KNOWN at build time. A
+    // statically non-string argument (a number, boolean or function value,
+    // null, undefined) can never reach the real operation: Node's ERR_INVALID_ARG_TYPE
+    // is the only thing it can do, and tls.caCertsChk throws exactly that
+    // before it looks at anything else (its fence operand is never read for
+    // such an argument). A string is the real operation (tlsca.get answers
+    // the per-type array and throws Node's ERR_INVALID_ARG_VALUE for an
+    // unknown name). An argument whose type is only known at RUN time (a
+    // dynamic value) could reach the real operation through a path this
+    // build has not lowered, so it is refused at build time, never fenced.
     const raw = L.lowerExpr(args[0]!);
-    // A STRING argument is not a ladder case. tlsca.get answers the real
-    // per-type array for a known name AND throws Node's exact
-    // ERR_INVALID_ARG_VALUE ("The argument 'type' is invalid. Received
-    // '...'", scr_tls_ca.c) for an unknown one — both of the ladder's
-    // rungs that a string can reach, plus the answer the ladder cannot
-    // give at all. Sending it down the ladder instead meant the trailing
-    // fence: `tls.getCACertificates('bundled')` in a .js or .cjs source
-    // threw SC2020 "has no compiled implementation" AT RUNTIME, on both
-    // backends, while the identical call in a .ts source returned the
-    // certificates. The comment this replaces said the real CA list has
-    // no lowering; the tlsca.get branch thirty lines below is that
-    // lowering, and it had been there the whole time.
     if (raw.type.kind === "string") {
       return { kind: "libCall", fn: "tlsca.get", args: [raw], type: arrayOf(STRING), loc };
     }
-    if (raw.type.kind === "dyn" || raw.kind === "unitLit" || L.dynConvertible(raw.type)) {
-      const t: IrExpr = raw.type.kind === "dyn" ? raw : { kind: "dynFrom", value: raw, type: DYN, loc };
+    if (
+      raw.kind === "unitLit" ||
+      (raw.type.kind !== "dyn" && raw.type.kind !== "union" && L.dynConvertible(raw.type))
+    ) {
+      const t: IrExpr = { kind: "dynFrom", value: raw, type: DYN, loc };
       return {
         kind: "libCall",
         fn: "tls.caCertsChk",
-        args: [t, ladderFenceExpr(L, "tls.getCACertificates", expr)],
+        args: [t, { kind: "strLit", value: "", type: STRING, loc }],
         type: L.mapTypeOf(L.typeOf(expr)) ?? DYN,
         loc,
       };

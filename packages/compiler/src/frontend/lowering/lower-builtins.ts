@@ -7,7 +7,7 @@ import { builtinModules } from "node:module";
 import { dirname, resolve } from "node:path";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { PoisonError, dynUndefinedExpr, ladderFenceExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
+import { PoisonError, dynUndefinedExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
 import { canonicalBuiltinModule, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
@@ -949,7 +949,6 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       }
       return out;
     };
-    const resultT = L.mapTypeOf(L.typeOf(expr)) ?? DYN;
     const chk = (fn: IrLibFn, chkArgs: IrExpr[], type: IrType): IrExpr =>
       ({ kind: "libCall", fn, args: chkArgs, type, loc });
     if (bi.module === "fs/promises") {
@@ -988,77 +987,10 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         if (pathExpr === null || cbExpr === null) return null;
         return chk("fs.existsChk", [pathExpr, cbExpr], DYN);
       }
-      case "mkdtemp": {
-        // mkdtemp(prefix[, options], callback) — the callback is the
-        // LAST argument (makeCallback runs first, then the prefix).
-        const a = dynArgs([args[0], args.length >= 2 ? args[args.length - 1] : undefined]);
-        return a && chk("fs.mkdtempChk", [...a, ladderFenceExpr(L, "fs.mkdtemp", expr)], resultT);
-      }
-      case "mkdtempSync": {
-        // The table serves the plain string 1-arg form; the ladder takes
-        // every other shape — prefix/encoding validation, then the REAL
-        // mkdtemp when the options leave utf8 semantics.
-        if (args.length === 1 && L.mapTypeOf(L.typeOf(args[0]!))?.kind === "string") return null;
-        if (args.length > 2) return null;
-        const a = dynArgs([args[0], args[1]]);
-        return a && chk("fs.mkdtempSyncChk", [...a, ladderFenceExpr(L, "fs.mkdtempSync with these options", expr)], STRING);
-      }
-      case "readFile": {
-        // readFile(path[, options], callback): callback, assertEncoding,
-        // path — then the async read fences.
-        const a = dynArgs([args[0], args.length >= 3 ? args[1] : undefined, args.length >= 2 ? args[args.length - 1] : undefined]);
-        return a && chk("fs.readFileChk", [...a, ladderFenceExpr(L, "fs.readFile", expr)], resultT);
-      }
-      case "opendirSync": {
-        const a = dynArgs([args[0], args[1]]);
-        return a && chk("fs.opendirChk", [...a, ladderFenceExpr(L, "fs.opendirSync", expr)], resultT);
-      }
-      case "watchFile": {
-        // watchFile(filename[, options], listener): the path first, the
-        // listener's function contract second; real watching fences.
-        const a = dynArgs([args[0], args.length >= 2 ? args[args.length - 1] : undefined]);
-        return a && chk("fs.watchFileChk", [...a, ladderFenceExpr(L, "fs.watchFile", expr)], resultT);
-      }
-      case "lchmod": {
-        // lchmod(path, mode, callback): callback, path, mode — macOS
-        // shapes (non-APPLE answers Node's not-a-function TypeError).
-        const a = dynArgs([args[0], args[1], args[2]]);
-        return a && chk("fs.lchmodChk", [...a, ladderFenceExpr(L, "fs.lchmod", expr)], resultT);
-      }
       case "lchmodSync": {
         if (args.length > 2) return null;
         const a = dynArgs([args[0], args[1]]);
         return a && chk("fs.lchmodSyncChk", a, DYN);
-      }
-      case "read": {
-        // read(fd, buffer, offset, length, position, callback) — the
-        // positional form's full ladder; options-object forms keep the
-        // fence (their misuse arms are not in the target set).
-        if (args.length < 4) return null;
-        const a = dynArgs([args[0], args[1], args[2], args[3], args.length >= 6 ? args[4] : undefined]);
-        return a && chk("fs.readChk", [...a, ladderFenceExpr(L, "fs.read", expr)], resultT);
-      }
-      case "createReadStream":
-      case "createWriteStream": {
-        // The path-only call over a STATICALLY STRING path has a real
-        // lowering now (the BUILTIN_MODULE_FNS row): hand it to the table so
-        // the JS lane gets the same fs-backed stream the TS lane does.
-        //
-        // Everything else keeps this ladder, and the type test is what makes
-        // that true rather than nearly true: `createReadStream(46)` in a JS
-        // source must still throw Node's ERR_INVALID_ARG_TYPE ("The \"path\"
-        // argument must be of type string…"), which only the ladder renders
-        // — routing it to the table turned that into an SC1090 compile fence,
-        // which 2595-fs-arg-ladders.cjs caught. The OPTIONS forms keep it
-        // too: that surface is not implemented, and Node's argument errors
-        // must precede the fence.
-        const bare = args.length < 2 ||
-          (args.length === 2 && ts.isIdentifier(args[1]!) && args[1]!.text === "undefined");
-        const strPath = args[0] !== undefined &&
-          L.mapTypeOf(L.typeOf(args[0]))?.kind === "string";
-        if (bare && strPath) return null;
-        const a = dynArgs([args[0], args[1]]);
-        return a && chk("fs.streamOptsChk", [...a, ladderFenceExpr(L, `fs.${bi.member}`, expr)], resultT);
       }
       default:
         return null;

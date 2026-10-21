@@ -4641,12 +4641,6 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // range ladder runs first, the dial follows.
             E.usesTimers = true;
             return finish(`scr_net_connect_attempt(${arg(0)}, ${arg(1)}, ${arg(2)})`);
-          case "net.connectOptsChk":
-            // The runtime option-bag ladder (always throws — a validation
-            // error or the trailing fence; the error.nodeThrow dummy).
-            return finish(
-              `(scr_net_connect_opts_chk(${arg(0)}, ${arg(1)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
-            );
           case "net.connectCb": {
             E.usesTimers = true;
             const cb = args[2]!;
@@ -4911,11 +4905,6 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_rtc_dc_send_str(${arg(0)}, ${arg(1)})`);
           case "wrtc.dcSendBytes":
             return finish(`scr_rtc_dc_send_bytes(${arg(0)}, ${arg(1)})`);
-          case "dgram.sendChk":
-            E.usesTimers = true; // a validated send implicit-binds
-            return finish(
-              `scr_dgram_send_chk(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)})`,
-            );
           case "dgram.address": {
             // The AddressInfo record, built here from runtime parts (the
             // frontend pinned the {address, family, port} shape). The
@@ -6313,40 +6302,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "fs.existsChk":
             E.usesTimers = true; // the scheduled answer holds the loop open
             return finish(`scr_fs_exists_async(${arg(0)}, ${arg(1)})`);
-          case "fs.mkdtempChk":
-            return finish(
-              `(scr_fs_mkdtemp_chk(${arg(0)}, ${arg(1)}, ${arg(2)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
-            );
-          case "fs.mkdtempSyncChk":
-            return finish(`scr_fs_mkdtemp_sync_chk(${arg(0)}, ${arg(1)}, ${arg(2)})`);
-          case "fs.readFileChk":
-            return finish(
-              `(scr_fs_read_file_chk(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
-            );
-          case "fs.opendirChk":
-            return finish(
-              `(scr_fs_opendir_chk(${arg(0)}, ${arg(1)}, ${arg(2)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
-            );
-          case "fs.watchFileChk":
-            return finish(
-              `(scr_fs_watch_file_chk(${arg(0)}, ${arg(1)}, ${arg(2)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
-            );
-          case "fs.lchmodChk":
-            return finish(
-              `(scr_fs_lchmod_chk(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
-            );
           case "fs.lchmodSyncChk":
             return finish(`scr_fs_lchmod_sync_chk(${arg(0)}, ${arg(1)})`);
           case "fsp.lchmodChk":
             return finish(`scr_fsp_lchmod_chk(${arg(0)}, ${arg(1)})`);
-          case "fs.readChk":
-            return finish(
-              `(scr_fs_read_chk(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
-            );
-          case "fs.streamOptsChk":
-            return finish(
-              `(scr_fs_stream_opts_chk(${arg(0)}, ${arg(1)}, ${arg(2)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
-            );
           case "error.argTypeThrow":
             // Always throws with the runtime-rendered Received tail (the
             // error.nodeThrow dummy pattern). Borrows all three.

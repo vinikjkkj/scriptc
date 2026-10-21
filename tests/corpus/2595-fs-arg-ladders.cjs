@@ -1,18 +1,15 @@
-// The fs argument-validation ladders: misuse of implemented-namespace fs
-// APIs answers Node's exact typed errors (ERR_INVALID_ARG_TYPE /
-// ERR_INVALID_ARG_VALUE / ERR_OUT_OF_RANGE) instead of fencing — exists'
-// callback contract (and its REAL async answers, including the
-// synchronous false for unvalidatable paths, Node's own wart), mkdtemp's
-// prefix slot (the sync form running the real mkdtemp through the ladder),
-// readFile/opendirSync's assertEncoding, watchFile's path/listener pair,
-// createReadStream/createWriteStream's path and options.fd contracts, and
-// fs.read's buffer/fd/offset/length/position ladder. The lchmod family is
-// per-platform like Node itself: macOS validates (cb, path, then mode —
-// octal strings, uint32 range) and non-macOS answers the not-a-function /
-// ERR_METHOD_NOT_IMPLEMENTED shapes.
+// The fs argument-validation ladders that END IN A REAL OPERATION: misuse
+// of these implemented-namespace fs APIs answers Node's exact typed errors
+// (ERR_INVALID_ARG_TYPE / ERR_INVALID_ARG_VALUE / ERR_OUT_OF_RANGE) —
+// exists' callback contract (and its REAL async answers, including the
+// synchronous false for unvalidatable paths, Node's own wart) and the
+// lchmodSync / promises.lchmod value ladders (octal strings, uint32
+// range). The calls whose valid path has no lowering (mkdtemp, readFile,
+// opendirSync, watchFile, the stream option forms, fs.read, lchmod with a
+// callback) are not here: they are refused at compile time, pinned by
+// tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs.
 'use strict';
 const fs = require('fs');
-const os = require('os');
 const { promises } = fs;
 const show = (fn) => {
   try {
@@ -28,44 +25,7 @@ show(() => fs.exists(__filename));
 show(() => fs.exists());
 show(() => fs.exists(__filename, {}));
 
-// mkdtemp/mkdtempSync: prefix validation, then the real operation
-show(() => fs.mkdtempSync(0, {}));
-show(() => fs.mkdtempSync(null, {}));
-show(() => fs.mkdtemp(true, () => {}));
-const made = fs.mkdtempSync(os.tmpdir() + '/scrladder-', {});
-console.log('made', typeof made, made.length > os.tmpdir().length, fs.existsSync(made));
-fs.rmdirSync(made);
-
-// readFile / opendirSync: assertEncoding before everything else
-show(() => fs.readFile('bar.txt', { encoding: 'foo-8' }, () => {}));
-show(() => fs.readFile('bar.txt'));
-show(() => fs.opendirSync('.', { encoding: 'no' }));
-
-// watchFile: path first, listener's function contract second
-show(() => fs.watchFile('./some-file'));
-show(() => fs.watchFile('./another-file', {}, 'bad listener'));
-show(() => fs.watchFile(new Object(), () => {}));
-
-// createReadStream/createWriteStream: options.fd, then the path contract
-show(() => fs.createReadStream(46));
-show(() => fs.createWriteStream(46));
-show(() => fs.createReadStream(null, { fd: 'k' }));
-show(() => fs.createWriteStream(null, { fd: 'k' }));
-
-// fs.read: buffer, fd, offset, length, position — Node's order
-show(() => fs.read(3, 4, 0, 'utf-8', () => {}));
-show(() => fs.read(true, Buffer.allocUnsafe(4), 0, 4, 0, () => {}));
-show(() => fs.read(3, Buffer.allocUnsafe(4), NaN, 4, 0, () => {}));
-show(() => fs.read(3, Buffer.allocUnsafe(4), -1, 4, 0, () => {}));
-show(() => fs.read(3, Buffer.allocUnsafe(4), 0, -1, 0, () => {}));
-show(() => fs.read(3, Buffer.allocUnsafe(4), 0, 4, true, () => {}));
-show(() => fs.read(3, Buffer.allocUnsafe(4), 0, 4, 0.5, () => {}));
-
-// lchmod: per-platform, exactly like Node (macOS validates; the rest
-// answer not-a-function / ERR_METHOD_NOT_IMPLEMENTED)
-show(() => fs.lchmod(__filename));
-show(() => fs.lchmod(__filename, {}));
-show(() => fs.lchmod(false, 0o777, () => {}));
+// lchmodSync: per-platform, exactly like Node
 show(() => fs.lchmodSync(1));
 show(() => fs.lchmodSync([]));
 show(() => fs.lchmodSync(__filename, false));
