@@ -4702,14 +4702,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // spells (`listener: (...args: any[]) => void`, EventEmitter's and
         // mysql2's own listener type): the same library-author `any` the
         // bare-`any` PARAMETER rule just below reads as DYN, one array
-        // layer out. The slot is the array-of-dyn the `unknown[]` spelling
-        // already maps to. Fires only when the ENCLOSING function type
+        // layer out. The slot is the dyn PACK the `unknown[]` spelling maps to
+        // (mapType answers dyn for `unknown[]`: measured, a user-spelled
+        // `(...args: unknown[]) => void` reads params [dyn] with restIn), so
+        // a callable spelled either way is ONE type and the pack ABI,
+        // funcCoerceAdapter's unpack and the dyn call thunks all agree. Fires only when the ENCLOSING function type
         // cleared the .d.ts callable gate, like that rule.
         if (restT === null && fromUncompiledCallableLiteral) {
           const restTs = checker.getTypeOfSymbol(p);
           if (checker.isArrayType(restTs)) {
             const el = checker.getTypeArguments(restTs as ts.TypeReference)[0];
-            if (el !== undefined && (el.flags & ts.TypeFlags.Any) !== 0) restT = arrayOf(DYN);
+            if (el !== undefined && (el.flags & ts.TypeFlags.Any) !== 0) restT = DYN;
           }
         }
         if (process.env["SCRIPTC_REST_WHY"] !== undefined) {

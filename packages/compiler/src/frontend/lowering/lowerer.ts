@@ -10358,7 +10358,18 @@ export class Lowerer {
       fromT.restIn !== true &&
       fromT.params.length > fixedTo &&
       toT.params[fixedTo]!.kind === "dyn" &&
-      fromT.params.slice(fixedTo).every((p) => p.kind === "dyn");
+      // ...and a TYPED extra parameter reads the same element through a
+      // CHECKED cast (`dynCheck`): the checked-dynamic tier's own failure
+      // mode, a TypeError naming the expectation, when the call hands a
+      // value of another type. Node would run the callback with the
+      // mismatched value; no static representation can, which is the
+      // checked-dynamic doctrine for every dyn-to-typed flow. A parameter
+      // type the check cannot build keeps the refusal. This is what lets
+      // `emitter.on('x', (n: number) => ...)` fill a `(...args: any[]) =>
+      // void` listener slot.
+      fromT.params.slice(fixedTo).every(
+        (p) => p.kind === "dyn" || canDynCheckTo(p, (id) => this.shapes.get(id), (id) => this.unions.get(id)),
+      );
     if (toRestIn && fromT.restIn === true) return null;
     if (toRestIn && fromT.params.length > fixedTo && !toRestUnpack) return null;
     // The SOURCE's spelled rest slot: its last parameter is the packed
@@ -10573,13 +10584,14 @@ export class Lowerer {
           // body: a present index answers its value, a missing one answers
           // the undefined dyn value -- which is what Node binds to a
           // parameter the call never reached.
-          return {
+          const elem: IrExpr = {
             kind: "dynKeyGet",
             key: { kind: "strLit", value: String(i - fixedTo), type: STRING, loc },
             value: { kind: "varRef", localId: `a.${fixedTo}`, type: toT.params[fixedTo]!, loc },
             type: DYN,
             loc,
           };
+          return pt.kind === "dyn" ? elem : { kind: "dynCheck", value: elem, type: pt, loc };
         }
         if (i >= fixedTo) {
           // An extra trailing optional param the slot omits: feed undefined,
