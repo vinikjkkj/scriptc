@@ -9963,6 +9963,8 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
         // linked and must not name the dispatch.
         (node.fn === "dyn.hasKey" ||
           node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" || node.fn === "dyn.reflectDefine" ||
+          node.fn === "dyn.proxyNew" || node.fn === "dyn.proxyRevocable" ||
+          node.fn === "dyn.reflectSet" || node.fn === "dyn.reflectDelete" ||
           node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs" ||
           // The per-instance property table of a compiled class instance
           // lives in the same unit as the property definers beside it,
@@ -11587,6 +11589,10 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["dyn.defineProps", "checked-dynamic prototype dispatch"],
   ["dyn.defineProp", "checked-dynamic prototype dispatch"],
   ["dyn.reflectDefine", "checked-dynamic prototype dispatch"],
+  ["dyn.reflectSet", "checked-dynamic prototype dispatch"],
+  ["dyn.reflectDelete", "checked-dynamic prototype dispatch"],
+  ["dyn.proxyNew", "checked-dynamic prototype dispatch"],
+  ["dyn.proxyRevocable", "checked-dynamic prototype dispatch"],
   ["cls.props", "checked-dynamic prototype dispatch"],
   ["dyn.objCreateDescs", "checked-dynamic prototype dispatch"],
   ["dyn.objCreateNullDescs", "checked-dynamic prototype dispatch"],
