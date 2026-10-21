@@ -212,6 +212,75 @@ double scr_buffer_compare_chk(const ScrDyn *a, const ScrDyn *b) {
   return scr_bytes_compare(b1, b2, 0, 0, 0, 0, 0);
 }
 
+/* Buffer.concat over a checked-dynamic list (an untyped `chunks` array of
+ * Buffers): Node's validateArray / per-element ERR_INVALID_ARG_TYPE ladder,
+ * then the same concatenation (and, with a total, the same truncate or
+ * zero-pad) the static form runs. */
+static ScrBytes *scr_buffer_concat_dyn_impl(const ScrDyn *list, const ScrDyn *total_arg) {
+  if (list == NULL || list->kind != SCR_DYN_ARR) {
+    scr_dyn_arg_type_fail("list", "an instance of Array", list);
+    return NULL;
+  }
+  size_t n = (size_t)scr_dyn_arr_len(list);
+  if (n == 0) return scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
+  bool has_total = total_arg != NULL && total_arg->kind != SCR_DYN_UNDEF;
+  double total = 0;
+  if (has_total) {
+    if (total_arg->kind != SCR_DYN_NUM) {
+      scr_dyn_arg_type_fail("length", "of type number", total_arg);
+      return NULL;
+    }
+    total = total_arg->v.num;
+    if (!scr_bytes_validate_off("length", total, 9007199254740991.0)) return NULL;
+  }
+  size_t sum = 0;
+  for (size_t i = 0; i < n; i++) {
+    ScrDyn *e = scr_dyn_arr_at(list, (double)i);
+    if (!has_total && (e->kind == SCR_DYN_NULL || e->kind == SCR_DYN_UNDEF)) {
+      char msg[96];
+      int ml = snprintf(msg, sizeof msg, "Cannot read properties of %s (reading 'length')",
+                        e->kind == SCR_DYN_NULL ? "null" : "undefined");
+      scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)ml);
+      scr_dyn_release(e);
+      return NULL;
+    }
+    if (e->kind == SCR_DYN_BYTES && e->v.bytes != NULL) sum += e->v.bytes->len;
+    scr_dyn_release(e);
+  }
+  for (size_t i = 0; i < n; i++) {
+    ScrDyn *e = scr_dyn_arr_at(list, (double)i);
+    bool ok = e->kind == SCR_DYN_BYTES && e->v.bytes != NULL && e->v.bytes->elem == SCR_BYTES_U8 &&
+              e->v.bytes->flavor != SCR_BF_DATAVIEW;
+    if (!ok) {
+      char name[40];
+      snprintf(name, sizeof name, "list[%zu]", i);
+      scr_dyn_arg_type_fail(name, "an instance of Buffer or Uint8Array", e);
+      scr_dyn_release(e);
+      return NULL;
+    }
+    scr_dyn_release(e);
+  }
+  size_t cap = has_total ? (size_t)total : sum;
+  ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)cap));
+  size_t o = 0;
+  for (size_t i = 0; i < n && o < cap; i++) {
+    ScrDyn *e = scr_dyn_arr_at(list, (double)i);
+    const ScrBytes *part = e->v.bytes;
+    size_t take = part->len < cap - o ? part->len : cap - o;
+    memcpy(out->data + o, part->data, take);
+    o += take;
+    scr_dyn_release(e);
+  }
+  return out;
+}
+
+ScrBytes *scr_buffer_concat_dyn(const ScrDyn *list) { return scr_buffer_concat_dyn_impl(list, NULL); }
+/* `total` is whatever the program passed: undefined means "no total" (JS
+ * treats a missing and an undefined argument alike). */
+ScrBytes *scr_buffer_concat_dyn_len(const ScrDyn *list, const ScrDyn *total) {
+  return scr_buffer_concat_dyn_impl(list, total);
+}
+
 bool scr_bytes_equals_chk(const ScrBytes *recv, const ScrDyn *other) {
   ScrBytes *o = scr_bytes_chk_u8(other, "otherBuffer");
   if (!o) return false;

@@ -4553,6 +4553,11 @@ export type IrLibFn =
    * zero-padded to the total. THROWS Node's 'length' RangeError on a
    * negative/non-integer total (may-throw seed). */
   | "buffer.concatLen"
+  /** Buffer.concat over a checked-dynamic list: Node's list and list[i]
+   * ERR_INVALID_ARG_TYPE ladder, then the static concatenation (concatDynLen
+   * adds the totalLength truncate or zero-pad). Borrows; may throw. */
+  | "buffer.concatDyn"
+  | "buffer.concatDynLen"
   /** The checked-dynamic compare/equals validators (scr_bytes_io.c) —
    * the lowered form when an argument is NOT statically bytes<u8> (the
    * invalid-input probes; a dyn from an untyped JS helper): Node's own
@@ -4596,6 +4601,10 @@ export type IrLibFn =
   | "bytes.markBuffer"
   | "bytes.markPlain"
   | "bytes.isBuffer"
+  /** Buffer.isBuffer over a checked-dynamic value: false for every kind but
+   * a bytes box, whose flavor stamp answers (borrows; throws only for an
+   * unclassified producer, like bytes.isBuffer). */
+  | "dyn.isBuffer"
   /** The THIRD u8 spelling, and the one `instanceof` needs.
    *
    * DataView maps to bytes<u8> (types.ts: "the ONE view kind") so a view
@@ -12272,6 +12281,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "decipher.setAAD",
   "decipher.setAuthTag",
   "buffer.concatLen",
+  "buffer.concatDyn",
+  "buffer.concatDynLen",
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.
   "buffer.compareChk",
@@ -12281,6 +12292,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // the honest answer is a refusal, and it is a RUNTIME one because the
   // flavor is a runtime property. The two marks never throw.
   "bytes.isBuffer",
+  "dyn.isBuffer",
   "bytes.isPlainU8",
   "buffer.newStringFail",
   "fs.toUnixTimestamp",

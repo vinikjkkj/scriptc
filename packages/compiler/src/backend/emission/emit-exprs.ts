@@ -6298,6 +6298,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_bytes_concat(${arg(0)})`);
           case "buffer.concatLen":
             return finish(`scr_bytes_concat_len(${arg(0)}, ${arg(1)})`);
+          case "buffer.concatDyn":
+            return finish(`scr_buffer_concat_dyn(${arg(0)})`);
+          case "buffer.concatDynLen":
+            return finish(`scr_buffer_concat_dyn_len(${arg(0)}, ${arg(1)})`);
           case "buffer.byteLenStr":
             return finish(`scr_bytes_byte_length_str(${arg(0)}, ${arg(1)})`);
           case "buffer.isEncoding":
@@ -6318,6 +6322,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_bytes_is_dataview(${arg(0)})`);
           case "bytes.isBuffer":
             return finish(`scr_bytes_is_buffer(${arg(0)}, ${arg(1)})`);
+          case "dyn.isBuffer":
+            return finish(`scr_dyn_is_buffer(${arg(0)}, ${arg(1)})`);
           case "bytes.isPlainU8":
             return finish(`scr_bytes_is_plain_u8(${arg(0)}, ${arg(1)})`);
           // The checked-dynamic compare/equals validators

@@ -489,6 +489,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "buffer.fromStr": "scr_bytes_from_str",
   "buffer.concat": "scr_bytes_concat",
   "buffer.concatLen": "scr_bytes_concat_len",
+  "buffer.concatDyn": "scr_buffer_concat_dyn",
+  "buffer.concatDynLen": "scr_buffer_concat_dyn_len",
   "buffer.byteLenStr": "scr_bytes_byte_length_str",
   "buffer.isEncoding": "scr_bytes_is_encoding",
   // The Cipher/Decipher constructors. Both entry points are the ones the
@@ -515,6 +517,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "bytes.markPlain": "scr_bytes_mark_plain",
   "bytes.markDataView": "scr_bytes_mark_dataview",
   "bytes.isBuffer": "scr_bytes_is_buffer",
+  "dyn.isBuffer": "scr_dyn_is_buffer",
   "bytes.isDataView": "scr_bytes_is_dataview",
   "bytes.isPlainU8": "scr_bytes_is_plain_u8",
   "buffer.newStringFail": "scr_buffer_new_string_fail",

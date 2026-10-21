@@ -5928,6 +5928,8 @@ bool scr_dyn_loose_eq_num(double n, const ScrDyn *d);
 /* IsLooselyEqual over two dyn values; false with the exception pending when a
  * ToPrimitive user method throws. */
 bool scr_dyn_loose_eq(const ScrDyn *a, const ScrDyn *b);
+/* Buffer.isBuffer over a dyn value (scr_bytes.c). */
+bool scr_dyn_is_buffer(const ScrDyn *d, const ScrStr *why);
 /* JS === over two dyn values: scalars by value, units by kind, everything
  * reference-shaped by node identity. Borrowed; never throws. */
 bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b);
@@ -8789,6 +8791,8 @@ bool scr_bytes_validate_off(const char *name, double value, double max);
  * "of type number", out-of-range numbers the validateOffset RangeError;
  * an undefined offset takes its Node default. All arguments BORROWED. */
 double scr_buffer_compare_chk(const ScrDyn *a, const ScrDyn *b);
+ScrBytes *scr_buffer_concat_dyn(const ScrDyn *list);
+ScrBytes *scr_buffer_concat_dyn_len(const ScrDyn *list, const ScrDyn *total);
 bool scr_bytes_equals_chk(const ScrBytes *recv, const ScrDyn *other);
 double scr_bytes_compare_chk(const ScrBytes *src, const ScrDyn *target,
                              const ScrDyn *ts, const ScrDyn *te,
