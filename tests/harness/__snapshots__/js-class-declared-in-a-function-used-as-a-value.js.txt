@@ -1,0 +1,13 @@
+js-class-declared-in-a-function-used-as-a-value.js:6:3 - error SC1090: class declarations inside functions are not supported yet
+
+  5 | function two() {
+  6 |   class K {}
+    |   ^~~~~~~~~~
+  7 |   return K;
+
+js-class-declared-in-a-function-used-as-a-value.js:7:10 - error SC1090: the reference to 'K' (a binding form with no lowering) is not supported yet
+
+  6 |   class K {}
+  7 |   return K;
+    |          ^
+  8 | }

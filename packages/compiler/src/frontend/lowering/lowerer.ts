@@ -107,7 +107,7 @@ import { settleOrValueArms,
   withUnitArm as withUnitArmCanonical,
 } from "../types.js";
 import { CompoundOp, IslandFnEntry, boundaryIntoIslandMsg, boundaryOutOfIslandMsg, BuiltinModuleFn, builtinConstLit, builtinModuleConstOf, builtinModulesArrayLit, builtinFenceHintOf, builtinModuleFnOf, stdlibMemberFence, isStdlibMember, isStdlibSymbol, isStdlibGlobal, stdlibGlobalMember, nodeTypesOnlySymbol } from "./surfaces.js";
-import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonImports,
+import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collectNpmImports, collectJsonImports,
   collectJsonRequires, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
@@ -1679,6 +1679,11 @@ export class Lowerer {
   readonly paramIrOverrides = new Map<ts.ParameterDeclaration, IrType>();
   /** File → qualifier prefix: "" for the entry, "%mI." otherwise. */
   readonly fileTag = new Map<ts.SourceFile, string>();
+  /** Class declarations written inside a function or block that lower as
+   * module-level classes (lower-modules.ts liftedLocalClasses): they capture
+   * nothing local, carry no static state and are used in ways one evaluation
+   * cannot be told from many. Their statement lowers to nothing. */
+  readonly liftedLocalClasses = new Set<ts.ClassDeclaration>();
   /** Namespace ModuleBlocks this program lowers, filled by splitFiles:
    * "flattened" — an instantiated namespace whose body joined the file's
    * parts (members resolve statically); "typeOnly" — a skipped
@@ -2068,7 +2073,9 @@ export class Lowerer {
   readonly classNamer = (decl: ts.ClassLikeDeclaration): string =>
     ts.isClassExpression(decl)
       ? this.qualify(decl.getSourceFile(), `%cx${decl.getStart()}.${decl.name?.text ?? ""}`)
-      : this.qualify(decl.getSourceFile(), nsPathPrefix(decl) + (decl.name ? decl.name.text : "%anon"));
+      : isNestedClassDeclaration(decl)
+        ? this.qualify(decl.getSourceFile(), `%cl${decl.getStart()}.${decl.name?.text ?? ""}`)
+        : this.qualify(decl.getSourceFile(), nsPathPrefix(decl) + (decl.name ? decl.name.text : "%anon"));
 
   /** Follows import aliases to the original declaration's symbol. Every
    * value reference resolves through here, so it doubles as the flush
