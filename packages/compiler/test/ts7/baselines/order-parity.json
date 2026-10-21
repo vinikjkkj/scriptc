@@ -11192,6 +11192,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8200-js-untyped-method-table/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8200-js-untyped-method-table/lib.js",
+    "<repo>/tests/corpus/8200-js-untyped-method-table/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
