@@ -8349,6 +8349,13 @@ export function canConvertToDyn(
   if (t.kind === "array" && t.elem.kind !== "func") {
     return canConvertToDyn(t.elem, getRecord, getUnion, visiting);
   }
+  // A FUNCTION element boxes through the per-type converter's func case (the
+  // same checked-dynamic function box a record field gets), and only when the
+  // signature is really callable through dyn: a `Function[]` (listeners()) is
+  // an array of `(...unknown[]) => unknown` boxes, never stranded ones.
+  if (t.kind === "array" && t.elem.kind === "func") {
+    return canBoxFuncIntoDyn(t.elem, getRecord, getUnion, visiting);
+  }
   // A RECORD carrying FUNCTION fields — a store bundle handed to an
   // `unknown` parameter. The walker boxes each field by its own kind, so a
   // boxable func field is exactly the union-arm rule above, one container
@@ -8357,7 +8364,18 @@ export function canConvertToDyn(
   // field whose type reaches its own record) the way the bytes walker does.
   if (t.kind === "record") {
     const shape = getRecord(t.shapeId);
-    if (!shape || shape.indexValue !== undefined) return false;
+    if (!shape) return false;
+    // An INDEX-SIGNATURE record converts when its VALUE type does: the emitted
+    // converter walks the overflow store in JS own-key order and boxes every
+    // entry through the value type's own converter (a function value through
+    // the checked-dynamic function box), so the entries DO have a per-key kind
+    // to box against — the one the signature declares. The old refusal said
+    // otherwise and kept `{ [name: string]: Closure }` (mysql2's authPlugins)
+    // out of every dyn crossing. A JSON-safe signature never reached this
+    // line (isJsonSafeType answered above).
+    if (shape.indexValue !== undefined && !canConvertToDyn(shape.indexValue, getRecord, getUnion, visiting)) {
+      return false;
+    }
     // ACCESSOR SLOTS never cross. `%get:x` / `%set:x` are reserved
     // '%'-fields holding CLOSURES (accessorSlotProp), and the func-field
     // rule above — written for a method BUNDLE — admitted them by

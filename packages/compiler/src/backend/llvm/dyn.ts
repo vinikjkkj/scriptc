@@ -2938,6 +2938,14 @@ export class LlDyn {
         B.terminate(`ret ptr ${r}`);
         break;
       }
+      case "func": {
+        // A function ELEMENT of an array or index-signature value: the C
+        // twin's arm (see emit-walkers.ts's toDynHelper).
+        const r = B.tmp();
+        B.line(`${r} = call ptr @${this.dynFuncBoxHelper(t)}(ptr %v, ptr null, ptr null)`);
+        B.terminate(`ret ptr ${r}`);
+        break;
+      }
       default: {
         // Runtime HANDLE kinds box by REFERENCE (identity — no copy):
         // scr_dyn_new_handle retains the borrowed operand through the
