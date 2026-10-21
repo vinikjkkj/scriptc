@@ -2501,6 +2501,13 @@
       "code": "SC2012"
     },
     {
+      "id": "stdlib.promise.constructorValue",
+      "kind": "stdlib",
+      "name": "Promise (as a value)",
+      "status": "static",
+      "note": "the global Promise used as a value fills a PromiseConstructor-typed slot; the singleton carries no members"
+    },
+    {
       "id": "stdlib.set.add",
       "kind": "stdlib",
       "name": "Set.prototype.add",

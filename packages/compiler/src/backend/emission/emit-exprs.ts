@@ -7848,6 +7848,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "date.now":
             // Node's integer milliseconds since epoch. Never throws.
             return finish(`scr_date_now()`);
+          case "opaque.promiseCtor":
+            // The immortal PromiseConstructor singleton; retain/release are no-ops on it.
+            return finish(`scr_opaque_promise_ctor()`);
           case "date.toISOString":
             // +1 string, or Node's "Invalid time value" RangeError
             // (may-throw seed set).

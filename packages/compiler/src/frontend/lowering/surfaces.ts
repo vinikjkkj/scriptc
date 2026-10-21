@@ -1113,6 +1113,13 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     note: "the live clock; the zero-argument new Date() compositions read it too",
   },
   {
+    id: "stdlib.promise.constructorValue",
+    kind: "stdlib",
+    name: "Promise (as a value)",
+    fns: ["opaque.promiseCtor"],
+    note: "the global Promise used as a value fills a PromiseConstructor-typed slot; the singleton carries no members",
+  },
+  {
     id: "stdlib.date.UTC",
     kind: "stdlib",
     name: "Date.UTC",

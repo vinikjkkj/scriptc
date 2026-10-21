@@ -1588,6 +1588,15 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             FinalizationRegistry: "finalization callbacks expose GC timing — genuinely dynamic; release resources explicitly instead",
             eval: "runtime code evaluation cannot be compiled ahead of time",
           };
+          // The bare global `Promise` as a VALUE fills a PromiseConstructor-typed
+          // slot (mysql2's `Connection.promise(impl?)`): the one immortal
+          // singleton. Every MEMBER of it still refuses at its own fence.
+          if (expr.text === "Promise" && stdlibGlobalNameOf(L, expr) === "Promise") {
+            const mapped = L.mapTypeOf(L.typeOf(expr));
+            if (mapped?.kind === "opaque" && mapped.name === "PromiseConstructor") {
+              return { kind: "libCall", fn: "opaque.promiseCtor", args: [], type: mapped, loc };
+            }
+          }
           L.noLowering(expr.text, expr, globalHints[expr.text], sym ?? undefined);
         }
       }

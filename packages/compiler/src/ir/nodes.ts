@@ -344,6 +344,24 @@ export type IrType =
    * cannot produce one. Not cycle-capable: the struct holds a refcount
    * and nothing else, so traceAdapterC answers null. */
   | { kind: "date" }
+  /** A standard-library value type the program can NAME but nothing in this
+   * compiler builds: `Blob`, `PromiseConstructor`. TYPE FIRST, exactly as
+   * `request`, `date` and `rtcPeerConnection` are, and for the same reason: a
+   * record or union that mentions the type has no representation at all
+   * without it, so mysql2's `QueryValues` (a union with a `Blob` arm) and
+   * `Connection.promise(promiseImpl?: PromiseConstructor)` could not map. One
+   * kind with a NAME rather than one kind per type: the representation is the
+   * same refcount-only handle (ScrOpaque, scr_opaque.c), and the name is what
+   * keeps `Blob` and `PromiseConstructor` distinct types (typeKey, typeEquals
+   * and the union arm order all read it).
+   *
+   * Always truthy (a JS object), refcount-only so never a cycle question, no
+   * JSON surface. Every MEMBER still refuses through the standard-library
+   * fence, so the handle is representable and inert. The only producer is a
+   * lowering that names one: the global `Promise` value is the immortal
+   * PromiseConstructor singleton (scr_opaque_promise_ctor); a Blob is never
+   * built, so its pointer is always NULL. */
+  | { kind: "opaque"; name: string }
   /** An `RTCPeerConnection`. Like `request` above it is a TYPE FIRST:
    * mapping it is what lets zapo's `Connection` record -- whose
    * `peerConnection` field is typed `RTCPeerConnection | null` -- compile
@@ -552,6 +570,8 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   // A Date is a JS object: always truthy, INCLUDING new Date(0). That is
   // exactly why this kind is a handle and not the f64 epoch it would fit in.
   "date",
+  // A named standard-library handle (Blob, PromiseConstructor) is a JS object.
+  "opaque",
   // A peer connection and a data channel are JS objects: always truthy.
   "rtcPeerConnection", "rtcDataChannel",
   // A generator object is a JS object: always truthy.
@@ -1166,6 +1186,8 @@ export function typeKey(t: IrType): string {
       return "request";
     case "date":
       return "date";
+    case "opaque":
+      return `opaque:${t.name}`;
     case "rtcPeerConnection":
       return "rtcPeerConnection";
     case "rtcDataChannel":
@@ -1331,6 +1353,8 @@ export function isRefCounted(t: IrType): boolean {
     // A Date. Refcount-only struct with no outward edge, and never
     // constructed -- the same pure-balance case as the two below.
     t.kind === "date" ||
+    // A named stdlib handle: refcount-only struct, never a cycle.
+    t.kind === "opaque" ||
     // The two WebRTC handles. Refcount-only structs with no outward
     // edge, so like bigint and the crypto handles below this is pure
     // balance and never a cycle question.
@@ -5967,6 +5991,11 @@ export type IrLibFn =
    * time value" RangeError on NaN / out-of-range input (may-throw seed).
    * Results: f64 / owned (+1) string. */
   | "date.now"
+  /** The immortal PromiseConstructor singleton (scr_opaque.c): what the bare
+   * global `Promise` identifier lowers to when it is used as a VALUE, so a
+   * `PromiseConstructor`-typed slot (mysql2's `Connection.promise(impl?)`) can be
+   * filled. No arguments; the result is the `opaque` handle, never NULL. */
+  | "opaque.promiseCtor"
   | "date.toISOString"
   /** The composed `new Date(dateString).getTime()` read: one borrowed
    * string, f64 milliseconds since epoch. The parsed grammar is BOUNDED
@@ -7934,6 +7963,9 @@ function isJsonSafeAt(
     // Date as its ISO string; answering anything else would be silently
     // wrong, and a refusal is what says so.
     case "date":
+    // A Blob / PromiseConstructor handle has no honest JSON surface either:
+    // Node serialises a Blob as {} and a constructor not at all.
+    case "opaque":
     // Neither WebRTC handle has an honest JSON surface: nothing
     // constructs one, and its members do not lower.
     case "rtcPeerConnection":
@@ -10346,6 +10378,30 @@ export function moduleUsesDate(mod: IrModule): boolean {
   return found;
 }
 
+/** The program holds a named stdlib handle (`opaque`: Blob, PromiseConstructor)
+ * or produces the PromiseConstructor singleton: compiles scr_opaque.c in. A
+ * LINK GATE, not a fence -- a wrong `false` is a loud unresolved-symbol link
+ * error, never a wrong answer. A record field typed `Blob | undefined` still
+ * emits scr_opaque_release, so the type alone must link the unit. */
+export function moduleUsesOpaque(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "opaque" || (node.kind === "libCall" && node.fn === "opaque.promiseCtor")) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** The program holds an RTCPeerConnection or an RTCDataChannel: compiles
  * scr_wrtc.c in. A LINK GATE, not a fence -- a wrong `false` is a loud
  * unresolved-symbol link error, never a wrong answer.
@@ -11510,6 +11566,7 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["requestInit", "the fetch surface"],
   ["request", "the fetch surface"],
   ["date", "Date values"],
+  ["opaque", "named standard-library handles (Blob, PromiseConstructor)"],
   ["rtcPeerConnection", "the WebRTC data-channel surface"],
   ["rtcDataChannel", "the WebRTC data-channel surface"],
   ["dynInvoke", "checked-dynamic prototype dispatch"],

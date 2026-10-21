@@ -525,6 +525,11 @@ export interface CcOptions {
    * constructs one, but a declared shape still emits its release calls
    * and its box adapters. */
   date?: boolean;
+  /** The program holds a named stdlib handle, `Blob` or `PromiseConstructor`
+   * (moduleUsesOpaque on the IR): compiles scr_opaque.c. Four functions over a
+   * refcount-only struct plus the PromiseConstructor singleton -- a declared
+   * shape still emits its release calls and its box adapters. */
+  opaque?: boolean;
 }
 
 /** Structured compiler-driver failure. Most callers still let this surface
@@ -2133,6 +2138,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // but neither of those units -- see the tlsArchive gate below.
   const rsaPubEnc = opts.rsaPubEnc ?? false;
   const dateUnit = opts.date ?? false;
+  const opaqueUnit = opts.opaque ?? false;
   const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
   const fetchDispatch = (opts.fetchDispatch ?? false) && fetchStatic;
   const abortHttp = (opts.abortHttp ?? false) || fetchAbort;
@@ -2359,6 +2365,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // The Date handle. Ownership pairs only: nothing constructs one, but a
     // program that declares the shape still emits its release calls.
     ...(dateUnit ? [rt(join(rtDir, "scr_date.c"))] : []),
+    ...(opaqueUnit ? [rt(join(rtDir, "scr_opaque.c"))] : []),
     // The WebRTC data-channel handles. Ownership pairs only for now; the
     // handles are never constructed, but a program that declares the
     // shapes still emits their release calls.
