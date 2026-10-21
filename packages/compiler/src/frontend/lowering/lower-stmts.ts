@@ -6389,6 +6389,17 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         body.push(assignExport(prop.name, prop.initializer));
         continue;
       }
+      // NUMERIC-keyed scalar entries (`0x01: 'TINY'`, mysql2's type and
+      // error-code tables): no name can reach them statically, so the
+      // entry owns no storage and no code here -- the table value
+      // (cjsRequireBindingValueOf) reads the literal off the declaration.
+      if (
+        ts.isPropertyAssignment(prop) &&
+        ts.isNumericLiteral(prop.name) &&
+        scalarLiteralInit(prop.initializer)
+      ) {
+        continue;
+      }
       // ACCESSOR entries: no storage and no code here — reads lift the
       // getter as a module-level function and call it per read
       // (cjsExportAccessorRead); writes through the setter keep their
@@ -6413,6 +6424,20 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       );
     }
     return { kind: "block", body, loc };
+  }
+
+/** A scalar literal initializer: number, string, boolean or negated number. */
+  function scalarLiteralInit(init: ts.Expression): boolean {
+    let e = init;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    return (
+      ts.isNumericLiteral(e) ||
+      ts.isStringLiteral(e) ||
+      ts.isNoSubstitutionTemplateLiteral(e) ||
+      e.kind === ts.SyntaxKind.TrueKeyword ||
+      e.kind === ts.SyntaxKind.FalseKeyword ||
+      (ts.isPrefixUnaryExpression(e) && e.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(e.operand))
+    );
   }
 
 /** `module.exports = <single value>` — Node's whole-export REPLACEMENT by a
@@ -10268,6 +10293,15 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const loc = locOf(stmt);
     if (stdlibGlobalNameOf(L, stmt.expression) === "globalThis") {
       return { kind: "block", body: [], loc };
+    }
+    // A `const T = require("./table.js")` binding walked as a value: the
+    // table's checked-dynamic snapshot (cjsRequireBindingValueOf).
+    if (
+      ts.isIdentifier(stmt.expression) &&
+      L.builtinNamespaceModuleOf(stmt.expression) === null &&
+      L.cjsLocalModuleBindingOf(stmt.expression)
+    ) {
+      return lowerForInDyn(L, stmt, labels);
     }
     const recvT = L.mapTypeOf(L.typeOf(stmt.expression));
     if (recvT?.kind === "array") return lowerForInArray(L, stmt, labels);

@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, requireSpecOf, resolveImport } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
@@ -1253,10 +1253,12 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
         L.unsupported("SC1090", prop, `${what} whose export table has an entry that is not \`name: value\``, why);
       }
       const keyNode = prop.name;
-      if (!ts.isIdentifier(keyNode) && !ts.isStringLiteral(keyNode)) {
+      if (!ts.isIdentifier(keyNode) && !ts.isStringLiteral(keyNode) && !ts.isNumericLiteral(keyNode)) {
         L.unsupported("SC1090", prop, `${what} whose export table has a computed key`, why);
       }
-      const exportName = keyNode.text;
+      // A numeric key's property name is the canonical string of its value
+      // (`0x01` names "1").
+      const exportName = ts.isNumericLiteral(keyNode) ? String(Number(keyNode.text)) : keyNode.text;
       const propSym = L.checker.getSymbolAtLocation(keyNode);
       const valueSym = propSym === undefined ? null : L.cjsExportValueSymbol(propSym);
       let value: IrExpr | null = null;
@@ -1314,6 +1316,18 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     const lexed = cjsLexedExportsOf(dep.text, dep.fileName);
     for (const n of lexed.exports) {
       if (named.some((e) => e.name === n)) continue;
+      // A MEMBER export assigned after the table (`module.exports.LONG =
+      // 3`): the module symbol's export table carries it even where the
+      // `export=` type does not, and a member READ resolves through the
+      // same symbol.
+      const memberSym = L.cjsModuleExportSymbol(dep, n);
+      if (memberSym !== undefined) {
+        const memberValue = exportDynValue(L, n, L.cjsExportValueSymbol(memberSym) ?? memberSym, loc);
+        if (memberValue !== null) {
+          bind(n, memberValue);
+          continue;
+        }
+      }
       L.unsupported(
         "SC1090",
         dep,
@@ -1426,6 +1440,36 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
       fields.push({ key: { kind: "strLit", value: exportName, type: STRING, loc }, value });
     }
     return fields;
+  }
+
+  /** A `const m = require("./table.js")` binding used as a VALUE (`m[k]`,
+   * `for (k in m)`, `f(m)`): the namespace object has no static
+   * representation, but the module's `module.exports` object does — the
+   * interned snapshot the dynamic-import builder materializes (its
+   * `default` key IS module.exports). Null when the dep is not a compiled
+   * program module with a static export table, which keeps the original
+   * fence. */
+  export function cjsRequireBindingValueOf(L: Lowerer, expr: ts.Identifier): IrExpr | null {
+    const sym = L.checker.getSymbolAtLocation(expr);
+    const decls = sym ? L.checker.declarationsOf(sym) : [];
+    const decl = decls[0];
+    if (!decl || !ts.isVariableDeclaration(decl) || !decl.initializer) return null;
+    const spec = requireSpecOf(decl.initializer);
+    if (spec === null) return null;
+    const dep = isRelativeSpecifier(spec)
+      ? resolveImport(L.program, decl.getSourceFile(), spec)
+      : npmStaticDepSf7(L.program, decl.getSourceFile(), spec);
+    if (!dep) return null;
+    const loc = locOf(expr);
+    const builder = staticDynNsBuilderOf(L, dep, loc);
+    if (builder === null) return null;
+    return {
+      kind: "dynKeyGet",
+      key: { kind: "strLit", value: "default", type: STRING, loc },
+      value: { kind: "call", callee: builder, args: [], type: DYN, loc },
+      type: DYN,
+      loc,
+    };
   }
 
   function staticDynNsBuilderOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"]): string | null {
