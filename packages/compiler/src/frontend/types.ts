@@ -508,11 +508,25 @@ export class ShapeRegistry {
     return id !== undefined && this.pendingRec.has(id);
   }
 
-  /** The id of the still-pending placeholder a back-reference minted for
-   * `t`, or undefined when there is none (never referenced, or finalized). */
-  pendingIdOf(t: ts.Type): string | undefined {
-    const id = this.recIds.get(t);
-    return id !== undefined && this.pendingRec.has(id) ? id : undefined;
+  /** The checker type whose frame owns the still-pending placeholder `id`, for
+   * diagnostics only (the trace names WHICH enclosing mapping a member's slot
+   * is waiting on). */
+  ownerOfPending(id: string): ts.Type | undefined {
+    for (const [t, rid] of this.recIds) if (rid === id && this.pendingRec.has(id)) return t;
+    return undefined;
+  }
+
+  /** The ids of every still-pending placeholder owned by a frame that is IN
+   * PROGRESS right now (the record being built and every record enclosing it on
+   * the mapping stack). Each of those frames finalizes its placeholder when it
+   * completes. */
+  pendingIdsInProgress(): Set<string> {
+    const out = new Set<string>();
+    for (const t of this.inProgress) {
+      const id = this.recIds.get(t);
+      if (id !== undefined && this.pendingRec.has(id)) out.add(id);
+    }
+    return out;
   }
 
   /** Completes a recursive placeholder with its computed field list and
@@ -7074,9 +7088,10 @@ export function referencesPendingPlaceholder(
   unions: UnionRegistry,
   shapes: ShapeRegistry,
   seen: Set<string> = new Set(),
-  /** A placeholder id that does not count: the enclosing frame's OWN record,
-   * which finalizes (or fails) together with the member that names it. */
-  allowPending?: string,
+  /** Placeholder ids that do not count: those of frames still IN PROGRESS (the
+   * enclosing frame's own record and every record enclosing it), each of which
+   * finalizes its placeholder when it completes. */
+  allowPending?: ReadonlySet<string>,
 ): string | null {
   switch (t.kind) {
     case "union": {
@@ -7090,7 +7105,7 @@ export function referencesPendingPlaceholder(
       return null;
     }
     case "record": {
-      if (shapes.isPending(t.shapeId)) return t.shapeId === allowPending ? null : t.shapeId;
+      if (shapes.isPending(t.shapeId)) return allowPending?.has(t.shapeId) === true ? null : t.shapeId;
       if (seen.has(`r:${t.shapeId}`)) return null;
       seen.add(`r:${t.shapeId}`);
       for (const f of shapes.get(t.shapeId)?.fields ?? []) {
@@ -8415,13 +8430,13 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
           }
         }
         if (generic && pt !== null) {
-          const pend = referencesPendingPlaceholder(pt, ctx.unions, shapes, new Set(), shapes.pendingIdOf(widened));
+          const pend = referencesPendingPlaceholder(pt, ctx.unions, shapes, new Set(), shapes.pendingIdsInProgress());
           if (pend !== null) {
             // The slot would keep a placeholder whose own frame may still
             // fail; the member leaves the shape instead, exactly as it did
             // before it could map at all.
             if (auditBefore) specAuditReport(`PENDMEMBER ${p.name}`, ctx.unions, shapes, sMark, uMark, auditBefore);
-            mapTrace(`PENDMEMBER ${checker.typeToString(widened).slice(0, 40)} . ${p.name} : ${checker.typeToString(fieldTs).slice(0, 70)} -> reaches pending ${pend}`);
+            mapTrace(`PENDMEMBER ${checker.typeToString(widened).slice(0, 40)} . ${p.name} : ${checker.typeToString(fieldTs).slice(0, 70)} -> reaches pending ${pend} (owner ${((o) => (o === undefined ? "?" : checker.typeToString(o).slice(0, 40)))(shapes.ownerOfPending(pend))})`);
             closeSpec(false);
             continue;
           }

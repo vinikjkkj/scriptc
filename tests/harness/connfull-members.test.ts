@@ -371,4 +371,42 @@ console.log(c.run("b", 3), c.run("c", "s"), c.run("d", [1, 2]), c.run("e", { k: 
 `,
     );
   }, 240_000);
+
+  test("two classes whose members return each other keep every member", async () => {
+    // mysql2's callback `Connection.promise()` returns the promise-API class, whose
+    // `connection` is the callback class again. Mapping one while the other is in
+    // progress left the later member reaching the OTHER record's pending placeholder,
+    // and the generic-member path dropped it silently (SCRIPTC_MAP_TRACE: PENDMEMBER
+    // Connection . promise). Measured on the real entry: Connection.promise and
+    // Connection.changeUser.
+    await differential(
+      "cross-cycle",
+      `export declare class PConn {
+  threadId: number;
+  connection: Conn;
+  ping(): void;
+}
+export declare class Conn {
+  threadId: number;
+  promise(): PConn;
+  changeUser(options: { user?: string }, callback?: (err: Error | null) => void): void;
+}
+`,
+      `import type { Conn, PConn } from "./declib.js";
+const c: Conn = {
+  threadId: 1,
+  promise(): PConn { return pc; },
+  changeUser: ((_o: unknown, _cb: unknown): void => { console.log("changeUser"); }) as unknown as Conn["changeUser"],
+};
+const pc: PConn = {
+  threadId: 2,
+  connection: c,
+  ping(): void { console.log("ping"); },
+};
+console.log(c.promise().threadId, pc.connection.threadId, c.promise().connection.promise().threadId);
+c.promise().ping();
+c.changeUser({ user: "u" });
+`,
+    );
+  }, 240_000);
 });
