@@ -6201,6 +6201,8 @@ bool scr_dyn_is_symbol(const ScrDyn *d);
  * scr_json.c). `set_member` is the overflow walk's store (ordinary keys set). */
 void scr_dyn_obj_set_symkey(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v, bool absent_ok);
 void scr_dyn_obj_set_member(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v);
+/* Replays the source object's key order on a converted record (see scr_json.c). `ks` is scr_map_keys_js_order_all of the overflow store. */
+void scr_dyn_obj_apply_key_order(ScrDyn *d, ScrArr *ks);
 ScrStr *scr_dyn_symbol_descriptive(const ScrDyn *d);
 ScrStr *scr_dyn_template_to_string(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn *));
 /* String(unknown) at its explicit call site: a Symbol answers "Symbol(desc)". */

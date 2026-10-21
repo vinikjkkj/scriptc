@@ -128,9 +128,10 @@ main().then(() => console.log("done"));
     // The members `MysqlPool` does not name (a `string | symbol` event slot, `eventNames()` and its
     // symbol result, `listeners(): Function[]`, a config record holding an index-signature record of
     // closures, a symbol-keyed member) are carried, not dropped: read back through `unknown` they
-    // answer what Node answers, and the symbol-keyed one is not an own enumerable key. Key ORDER is
-    // sorted away here on purpose: it is a recorded defect of the overflow design (the pooldyn
-    // report), not a property this test pins.
+    // answer what Node answers, and the symbol-keyed one is not an own enumerable key. The order of a
+    // TYPED enumeration (Object.keys of the narrowed record) is sorted away here on purpose: it is a
+    // recorded defect of the overflow design (the pooldyn report). The order through `unknown` is
+    // pinned: the capture leaves order markers and the conversion replays the source's creation order.
     await differential(
       "pool-extras",
       `export type EV =
@@ -193,6 +194,8 @@ async function main(): Promise<void> {
   await mp.end();
 }
 main().then(() => console.log("done"));
+const asDyn: unknown = mp;
+console.log(Object.keys(asDyn as { [k: string]: unknown }).join(","));
 `,
     );
   }, 480_000);
