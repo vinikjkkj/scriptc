@@ -100,7 +100,14 @@ export function asanLinkable(): boolean {
       "-o",
       join(dir, probeName("p")),
       c,
-    ]);
+    ], {
+      // A probe that is EXPECTED to fail on some toolchains must not print
+      // the linker's complaint: execFileSync forwards the child's stderr to
+      // ours by default, and a CI log then shows `lld-link: error: undefined
+      // symbol: __asan_init` in a job whose failing tests have other
+      // causes. The catch below is the answer; nothing here is a defect.
+      stdio: "pipe",
+    });
     asanProbe = true;
   } catch {
     asanProbe = false;
