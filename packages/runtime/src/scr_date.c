@@ -353,6 +353,135 @@ double scr_date_get_hours(double ms) {
   return scr_date_utc_hours(l);
 }
 
+/* ── the Date component constructor and every setter ────────────────────
+ * ECMA-262 21.4.1 MakeTime/MakeDay/MakeDate over already-number arguments
+ * (tsc pins them), V8's bounds (|year| <= 1e6, |month| <= 1e7 before the
+ * roll), and UTC(t): the INVERSE of LocalTime, which is where wall clocks
+ * stop being a function.
+ *
+ * UTC(tl) asks for the instant whose local reading is tl.  Across a
+ * spring-forward the reading does not exist (no instant answers) and across
+ * a fall-back it exists twice.  The spec's rule for both is "use the offset
+ * BEFORE the transition": a nonexistent reading is interpreted with the
+ * earlier offset (so it lands after the gap), an ambiguous one resolves to
+ * the earlier instant.  Offsets come from scr_date_tza one day either side
+ * of tl, the candidates are validated by asking the zone about the
+ * candidate itself, and the smallest valid candidate wins -- so the answer
+ * rests on the same per-instant source as every getter, never on mktime. */
+static double scr_date_make_time(double h, double mi, double s, double ms) {
+  if (!isfinite(h) || !isfinite(mi) || !isfinite(s) || !isfinite(ms)) return NAN;
+  return ((trunc(h) * 60.0 + trunc(mi)) * 60.0 + trunc(s)) * 1000.0 + trunc(ms);
+}
+
+static double scr_date_make_day(double y, double mo, double d) {
+  if (!isfinite(y) || !isfinite(mo) || !isfinite(d)) return NAN;
+  y = trunc(y);
+  mo = trunc(mo);
+  d = trunc(d);
+  if (y < -1000000.0 || y > 1000000.0 || mo < -10000000.0 || mo > 10000000.0) return NAN;
+  double ym = y + floor(mo / 12.0);
+  int mn = (int)(mo - floor(mo / 12.0) * 12.0);
+  if (fabs(ym) > 1000000.0) return NAN;
+  return scr_date_days_from_civil_local((long long)ym, mn + 1, 1) + (d - 1.0);
+}
+
+static double scr_date_make_date(double day, double time) {
+  if (!isfinite(day) || !isfinite(time)) return NAN;
+  double tv = day * 86400000.0 + time;
+  return isfinite(tv) ? tv : NAN;
+}
+
+static double scr_date_local_to_utc(double tl) {
+  if (!isfinite(tl)) return NAN;
+  double o1, o2;
+  if (!scr_date_tza(tl - 86400000.0, &o1)) return NAN;
+  if (!scr_date_tza(tl + 86400000.0, &o2)) return NAN;
+  double u1 = tl - o1;
+  if (o1 == o2) return u1;
+  double u2 = tl - o2, chk;
+  int v1 = scr_date_tza(u1, &chk) && chk == o1;
+  int v2 = scr_date_tza(u2, &chk) && chk == o2;
+  if (v1 && v2) return u1 < u2 ? u1 : u2;
+  if (v1) return u1;
+  if (v2) return u2;
+  return u1;
+}
+
+/* new Date(y, mo, d, h, mi, s, ms): the 2-digit-year rule, then local time. */
+ScrDate *scr_date_new_parts(double y, double mo, double d, double h, double mi, double s, double ms) {
+  double yr = y;
+  if (!isnan(y)) {
+    double yi = trunc(y);
+    if (yi >= 0 && yi <= 99) yr = 1900.0 + yi;
+  }
+  double fd = scr_date_make_date(scr_date_make_day(yr, mo, d), scr_date_make_time(h, mi, s, ms));
+  return scr_date_new(scr_date_local_to_utc(fd));
+}
+
+/* Setter opcodes: the compiler's date.set literal and the dyn handle share
+ * this table. */
+enum {
+  SCR_DSET_MS, SCR_DSET_SEC, SCR_DSET_MIN, SCR_DSET_HOURS, SCR_DSET_DATE, SCR_DSET_MONTH, SCR_DSET_YEAR,
+  SCR_DSET_UTC_MS, SCR_DSET_UTC_SEC, SCR_DSET_UTC_MIN, SCR_DSET_UTC_HOURS, SCR_DSET_UTC_DATE,
+  SCR_DSET_UTC_MONTH, SCR_DSET_UTC_YEAR, SCR_DSET_TIME, SCR_DSET_YEAR2
+};
+
+double scr_date_set(ScrDate *dt, double op_d, double argc_d, double a0, double a1, double a2, double a3) {
+  int op = (int)op_d, argc = (int)argc_d;
+  double a[4] = {a0, a1, a2, a3};
+  double t = dt->ms;
+  if (op == SCR_DSET_TIME) {
+    dt->ms = scr_date_time_clip(a0);
+    return dt->ms;
+  }
+  int utc = op >= SCR_DSET_UTC_MS && op <= SCR_DSET_UTC_YEAR;
+  int kind = utc ? op - SCR_DSET_UTC_MS : op; /* 0..6 field family */
+  if (op == SCR_DSET_YEAR2) kind = 6;
+  if (isnan(t)) {
+    if (kind != 6) return NAN; /* every setter but the year ones leaves NaN */
+    t = 0;
+  } else if (!utc) {
+    t = scr_date_local_time(t);
+    if (isnan(t)) return NAN;
+  }
+  ScrDateParts p;
+  if (!scr_date_parts(t, &p)) return NAN;
+  double day = floor(t / 86400000.0);
+  double within = t - day * 86400000.0;
+  double Y = (double)p.y, M = (double)p.mo, D = (double)p.d, H = (double)p.h, MI = (double)p.mi,
+         S = (double)p.s, MS = (double)p.ms;
+  double nd, nt;
+  switch (kind) {
+  case 0: /* ms */
+    nd = day; nt = scr_date_make_time(H, MI, S, a[0]); break;
+  case 1: /* sec [, ms] */
+    nd = day; nt = scr_date_make_time(H, MI, a[0], argc > 1 ? a[1] : MS); break;
+  case 2: /* min [, sec [, ms]] */
+    nd = day; nt = scr_date_make_time(H, a[0], argc > 1 ? a[1] : S, argc > 2 ? a[2] : MS); break;
+  case 3: /* hours [, min [, sec [, ms]]] */
+    nd = day;
+    nt = scr_date_make_time(a[0], argc > 1 ? a[1] : MI, argc > 2 ? a[2] : S, argc > 3 ? a[3] : MS);
+    break;
+  case 4: /* date */
+    nd = scr_date_make_day(Y, M, a[0]); nt = within; break;
+  case 5: /* month [, date] */
+    nd = scr_date_make_day(Y, a[0], argc > 1 ? a[1] : D); nt = within; break;
+  default: { /* year [, month [, date]]; setYear: the 2-digit rule */
+    double y = a[0];
+    if (op == SCR_DSET_YEAR2) {
+      if (isnan(y)) { dt->ms = NAN; return NAN; }
+      double yi = trunc(y);
+      if (yi >= 0 && yi <= 99) y = 1900.0 + yi;
+    }
+    nd = scr_date_make_day(y, argc > 1 ? a[1] : M, argc > 2 ? a[2] : D); nt = within; break;
+  }
+  }
+  double nv = scr_date_make_date(nd, nt);
+  double u = utc ? nv : scr_date_local_to_utc(nv);
+  dt->ms = scr_date_time_clip(u);
+  return dt->ms;
+}
+
 /* ── Date.prototype.toString ─────────────────────────────────────────────
  * "Wed Oct 21 2026 03:10:11 GMT-0300 (Brasilia Standard Time)", or
  * "Invalid Date". Everything up to the parenthesis is arithmetic over
@@ -417,11 +546,11 @@ ScrStr *scr_date_to_string(double ms) {
 
 /* ── the checked-dynamic Date handle (SCR_DYNH_DATE) ────────────────────
  * A Date crosses into the checked-dynamic tree BY REFERENCE: the box
- * retains the ScrDate, identity is the handle, and the value is immutable
- * (no setters are modeled), so nothing can alias wrongly. The modeled
+ * retains the ScrDate, identity is the handle, and the setters mutate it in place,
+ * which is what an alias must observe in JS too. The modeled
  * surface is exactly the one the static lowering serves: getTime/valueOf,
  * toISOString, toJSON, toString, the UTC and local field getters,
- * getDay/getUTCDay and getTimezoneOffset. Setters and the remaining
+ * getDay/getUTCDay and getTimezoneOffset. The setters are modeled too; the remaining
  * formatters throw the loud not-supported ladder. */
 static ScrDyn *scr_date_dynh_num(double v) { return scr_dyn_new_num(v); }
 
@@ -429,9 +558,29 @@ static ScrDyn *scr_date_dynh_invoke(void *h, ScrDyn *self, const char *method, S
                                     const char *what) {
   ScrDate *d = (ScrDate *)h;
   (void)self;
-  (void)args;
-  (void)argc;
   double ms = d->ms;
+  {
+    static const struct { const char *name; int op; size_t max; } setters[] = {
+        {"setMilliseconds", SCR_DSET_MS, 1}, {"setSeconds", SCR_DSET_SEC, 2}, {"setMinutes", SCR_DSET_MIN, 3},
+        {"setHours", SCR_DSET_HOURS, 4}, {"setDate", SCR_DSET_DATE, 1}, {"setMonth", SCR_DSET_MONTH, 2},
+        {"setFullYear", SCR_DSET_YEAR, 3}, {"setUTCMilliseconds", SCR_DSET_UTC_MS, 1},
+        {"setUTCSeconds", SCR_DSET_UTC_SEC, 2}, {"setUTCMinutes", SCR_DSET_UTC_MIN, 3},
+        {"setUTCHours", SCR_DSET_UTC_HOURS, 4}, {"setUTCDate", SCR_DSET_UTC_DATE, 1},
+        {"setUTCMonth", SCR_DSET_UTC_MONTH, 2}, {"setUTCFullYear", SCR_DSET_UTC_YEAR, 3},
+        {"setTime", SCR_DSET_TIME, 1}, {"setYear", SCR_DSET_YEAR2, 1},
+    };
+    for (size_t i = 0; i < sizeof setters / sizeof setters[0]; i++) {
+      if (strcmp(method, setters[i].name) != 0) continue;
+      double v[4] = {NAN, NAN, NAN, NAN};
+      size_t n = argc < setters[i].max ? argc : setters[i].max;
+      for (size_t k = 0; k < argc; k++) {
+        double x = scr_dyn_to_number(args[k]); /* every argument is coerced, in order */
+        if (k < n) v[k] = x;
+      }
+      if (argc == 0) n = 0;
+      return scr_date_dynh_num(scr_date_set(d, setters[i].op, (double)n, v[0], v[1], v[2], v[3]));
+    }
+  }
   if (strcmp(method, "getTime") == 0 || strcmp(method, "valueOf") == 0) return scr_date_dynh_num(ms);
   if (strcmp(method, "getUTCFullYear") == 0) return scr_date_dynh_num(scr_date_utc_full_year(ms));
   if (strcmp(method, "getUTCMonth") == 0) return scr_date_dynh_num(scr_date_utc_month(ms));
@@ -469,10 +618,7 @@ static ScrDyn *scr_date_dynh_invoke(void *h, ScrDyn *self, const char *method, S
     return r;
   }
   {
-    static const char *const known[] = {"setTime", "setFullYear", "setMonth", "setDate", "setHours",
-                                        "setMinutes", "setSeconds", "setMilliseconds", "setUTCFullYear",
-                                        "setUTCMonth", "setUTCDate", "setUTCHours", "setUTCMinutes",
-                                        "setUTCSeconds", "setUTCMilliseconds", "toUTCString", "toGMTString",
+    static const char *const known[] = {"toUTCString", "toGMTString",
                                         "toDateString", "toTimeString", "toLocaleString", "toLocaleDateString",
                                         "toLocaleTimeString", "getYear", "setYear", NULL};
     for (size_t i = 0; known[i]; i++) {

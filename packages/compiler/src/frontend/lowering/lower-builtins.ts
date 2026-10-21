@@ -5714,12 +5714,38 @@ let digestInputValueDispatches = 0;
     getDay: "date.getUTCDay",
   };
 
+  /** Setter name -> [opcode (scr_date.c's SCR_DSET_*), max arguments]. */
+  const DATE_SETTERS: Readonly<Record<string, readonly [number, number]>> = {
+    setMilliseconds: [0, 1], setSeconds: [1, 2], setMinutes: [2, 3], setHours: [3, 4],
+    setDate: [4, 1], setMonth: [5, 2], setFullYear: [6, 3],
+    setUTCMilliseconds: [7, 1], setUTCSeconds: [8, 2], setUTCMinutes: [9, 3], setUTCHours: [10, 4],
+    setUTCDate: [11, 1], setUTCMonth: [12, 2], setUTCFullYear: [13, 3],
+    setTime: [14, 1], setYear: [15, 1],
+  };
+
   export function lowerDateMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "date") return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
+    const setter = Object.prototype.hasOwnProperty.call(DATE_SETTERS, name) ? DATE_SETTERS[name]! : undefined;
+    if (setter !== undefined) {
+      const sloc = locOf(call);
+      if (call.arguments.length < 1 || call.arguments.length > setter[1] || call.arguments.some(ts.isSpreadElement)) {
+        L.noLowering(`Date.${name} with ${call.arguments.length} arguments`, call);
+      }
+      const recv = L.lowerExpr(access.expression);
+      const sargs: IrExpr[] = call.arguments.map((a) => L.lowerExprExpecting(a, F64));
+      const argc = sargs.length;
+      while (sargs.length < 4) sargs.push({ kind: "numLit", value: 0, type: F64, loc: sloc });
+      return {
+        kind: "libCall", fn: "date.set",
+        args: [recv, { kind: "numLit", value: setter[0], type: F64, loc: sloc },
+               { kind: "numLit", value: argc, type: F64, loc: sloc }, ...sargs],
+        type: F64, loc: sloc,
+      };
+    }
     const getter = DATE_UTC_GETTERS[name];
     const localGetter = DATE_LOCAL_GETTERS[name];
     const isValue = name === "getTime" || name === "valueOf";
