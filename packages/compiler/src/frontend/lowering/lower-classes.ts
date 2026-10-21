@@ -1173,6 +1173,55 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     }
   }
 
+/** The instance properties of ANOTHER class that the methods this class
+   * BORROWS (`C.prototype.m = D.prototype.n`) read or write through `this`.
+   * The borrowed body lowers under C's layout, so each such property is a
+   * member of C too — JS gives a borrowing class no slot until some write
+   * runs, which is exactly the undefined-armed inferred field the ordinary
+   * method-assigned property collects as. Only properties C does not
+   * declare itself matter; the caller skips those. */
+  function borrowedMethodProps(L: Lowerer, decl: ts.ClassLikeDeclaration): ts.Symbol[] {
+    const sf = decl.getSourceFile();
+    if (!isJsSourceFile(sf) || !ts.isClassDeclaration(decl) || decl.name === undefined) return [];
+    const classSymbol = L.checker.getSymbolAtLocation(decl.name);
+    if (classSymbol === undefined) return [];
+    const out: ts.Symbol[] = [];
+    const seen = new Set<string>();
+    for (const stmt of sf.statements) {
+      if (!ts.isExpressionStatement(stmt)) continue;
+      const e = stmt.expression;
+      if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+      const lhs = e.left;
+      if (
+        !ts.isPropertyAccessExpression(lhs) || !ts.isPropertyAccessExpression(lhs.expression) ||
+        lhs.expression.name.text !== "prototype" || !ts.isIdentifier(lhs.expression.expression) ||
+        L.checker.getSymbolAtLocation(lhs.expression.expression) !== classSymbol
+      ) {
+        continue;
+      }
+      const fn = lateMethodSourceOf(L, e.right);
+      const owner = fn !== null && ts.isMethodDeclaration(fn) ? fn.parent : undefined;
+      if (owner === undefined || !ts.isClassDeclaration(owner) || owner.name === undefined || owner === decl) continue;
+      const ownerSym = L.checker.getSymbolAtLocation(owner.name);
+      if (ownerSym === undefined) continue;
+      const ownerT = L.checker.getDeclaredTypeOfSymbol(ownerSym);
+      const walk = (n: ts.Node): void => {
+        if (n !== fn && (ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n))) return;
+        if (ts.isPropertyAccessExpression(n) && n.expression.kind === ts.SyntaxKind.ThisKeyword && ts.isIdentifier(n.name)) {
+          const name = n.name.text;
+          if (!seen.has(name)) {
+            seen.add(name);
+            const p = L.checker.getPropertyOfType(ownerT, name);
+            if (p !== undefined) out.push(p);
+          }
+        }
+        n.forEachChild(walk);
+      };
+      if (fn !== null) walk(fn);
+    }
+    return out;
+  }
+
 /** `C.prototype.m = <function-like>` at the top level of the file declaring
    * class C: a LATE METHOD. The function becomes `C`'s method `m` exactly as
    * if declared in the body (same module function `%C.m`, the
@@ -4332,7 +4381,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         // computed keys — is undefined until its first write, which these
         // static layouts cannot represent. Named fence, at the first
         // assignment site.
-        for (const p of instType ? L.checker.getPropertiesOfType(instType) : []) {
+        for (const p of [
+          ...(instType ? L.checker.getPropertiesOfType(instType) : []),
+          ...borrowedMethodProps(L, decl),
+        ]) {
           if (fields.has(p.name) || methods.has(p.name)) continue;
           if (methods.has(`get:${p.name}`) || methods.has(`set:${p.name}`)) continue;
           if (base && (base.fields.has(p.name) || L.findMethodOn(base, p.name))) continue;
