@@ -2365,7 +2365,15 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // non-program class exists, so the only values of the type are records
     // the program writes structurally.
     const bodylessClass = isBodylessDeclClassInstance(widened, checker, ctx);
-    if (!dataInterface && !callableLiteral && !dataWithOrdinaryMethods && !bodylessClass) return ctx.dynamic ? JSVAL : null;
+    // A UNION spelled through a type alias declared in the .d.ts
+    // (`type QueryResult = OkPacket | ResultSetHeader | RowDataPacket[] | ...`)
+    // is the same type as the union written out inline, which maps. The alias
+    // makes no claim about engine values of its own: every ARM is mapped
+    // through this same gate by its own symbol, and the union rule decides
+    // whether the arms share a home. Two spellings of one type must map alike.
+    const declUnionAlias =
+      !ctx.dynamic && widened.isUnionType() && npmDecls.every((d) => ts.isTypeAliasDeclaration(d));
+    if (!dataInterface && !callableLiteral && !dataWithOrdinaryMethods && !bodylessClass && !declUnionAlias) return ctx.dynamic ? JSVAL : null;
   }
   // NOTE on module NAMESPACE types (`typeof import("./x.mjs")` — what a
   // dynamic import resolves to): non-stdlib ones fall under the rule
