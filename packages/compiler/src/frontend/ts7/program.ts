@@ -28,6 +28,8 @@ import type { SourceFile } from "typescript/unstable/ast";
 import { CheckerFacade } from "./checker.js";
 import { enumKeyOf, ModuleKind, ModuleResolutionKind, ScriptTarget } from "./enums.js";
 import { tsgoPath } from "../shared.js";
+import { jsDesugar } from "../js-desugar.js";
+import { setServedSourceText } from "../../source-text.js";
 import {
   frontendInputTrackingActive,
   trackedAccessibleEntries,
@@ -88,6 +90,30 @@ function serializeOptions(options: Ts7CompilerOptions): Record<string, unknown> 
 
 let nextConfigId = 0;
 
+/** The desugared text (js-desugar.ts) of a plain-JS file, given the text a
+ * shadow already derived for it (or undefined to read the disk), or the
+ * shadow's own text unchanged when nothing in the file needs desugaring.
+ * Undefined means "serve nothing of mine": not a .js/.cjs file, or no
+ * desugaring applies and no shadow text exists. */
+function desugaredJs(fileName: string, derived: string | undefined): string | undefined {
+  if (!/\.c?js$/.test(fileName) || fileName.endsWith(".d.ts")) return derived;
+  let text = derived;
+  if (text === undefined) {
+    try {
+      text = frontendInputTrackingActive() ? (trackedReadFile(fileName) ?? undefined) : readFileSync(fileName, "utf8");
+    } catch {
+      return derived;
+    }
+    if (text === undefined) return derived;
+  }
+  const out = jsDesugar(fileName, text);
+  if (out === null) return derived;
+  // srcSite (the C emitter) maps a SrcLoc OFFSET back to file:line:col by
+  // reading the file a second time: record what was actually served.
+  setServedSourceText(fileName, out);
+  return out;
+}
+
 /** One spawned tsgo server plus the virtual-FS overlay serving synthesized
  * tsconfigs. Share a host across programs to pay the spawn once; the overlay
  * is a live map, so each createProgram call adds its config before taking
@@ -133,21 +159,22 @@ export class Ts7Host {
         readFile: (fileName) => {
           const virtual = virtualFiles.get(tsgoPath(fileName));
           if (virtual !== undefined) return virtual;
-          if (shadow !== null) {
-            if (shadow.hideFile(fileName)) return null;
-            const replacement = shadow.readFile(fileName);
-            if (replacement !== undefined) {
-              // The shadow SERVES derived bytes — an npm-static-transformed
-              // package.json, a provenance-alias-rewritten source — and it
-              // derived them from the disk through its own helpers. Record the
-              // disk bytes here regardless, so no amount of untracked reading
-              // inside a shadow helper can leave a served file outside the
-              // snapshot. The derivation itself is keyed separately: the
-              // provenance source set and the --npm-static selection are both
-              // in the explicit half of the cache key.
-              if (frontendInputTrackingActive()) trackedReadFile(fileName);
-              return replacement;
-            }
+          if (shadow !== null && shadow.hideFile(fileName)) return null;
+          // The shadow may SERVE derived bytes — an npm-static-transformed
+          // package.json, a provenance-alias-rewritten source — and a plain-JS
+          // source with a spelling that means a sequence of already-modeled
+          // forms is served desugared on top of whatever it derived
+          // (js-desugar.ts). Every other file falls through exactly as before.
+          const replacement = desugaredJs(fileName, shadow?.readFile(fileName));
+          if (replacement !== undefined) {
+            // The bytes served were derived from the disk through helpers of
+            // their own. Record the disk bytes here regardless, so no amount
+            // of untracked reading inside a helper can leave a served file
+            // outside the snapshot. The derivation itself is keyed separately:
+            // the provenance source set and the --npm-static selection are
+            // both in the explicit half of the cache key.
+            if (frontendInputTrackingActive()) trackedReadFile(fileName);
+            return replacement;
           }
           return frontendInputTrackingActive() ? trackedReadFile(fileName) : undefined;
         },
