@@ -91,6 +91,7 @@ export const DK = {
   ARRBUF: 13, /* SCR_DYN_ARRBUF — ArrayBuffer, payload shared by reference */
   BIG: 14, /* SCR_DYN_BIG — a bigint, the digits shared by reference and
             * compared BY VALUE (a primitive, unlike the four above) */
+  PROXY: 16, /* SCR_DYN_PROXY — a Proxy: target and handler, traps run on every property operation */
   MAP: 15, /* SCR_DYN_MAP — a Map or Set, the ScrMap shared by reference
             * beside the interned typeKey that identifies its IR type
             * (ScrMap itself names none: Map<string,number> and
@@ -3678,6 +3679,20 @@ export class LlDyn {
       B.line(`call void @scr_str_release(ptr ${tail})`);
       B.line(`call void @scr_throw_error(i32 1, ptr ${msg}) ; SCR_ERR_TYPE; takes ownership`);
       B.terminate(`ret ptr null`);
+      B.startBlock(lNext);
+    }
+    // PROXY receivers: the get trap (or the target's own answer).
+    {
+      const isPx = B.tmp();
+      B.line(`${isPx} = icmp eq i32 ${kd}, ${DK.PROXY}`);
+      const lPx = B.newLabel("kg.px");
+      const lNext = B.newLabel("kg.n");
+      B.condBr(isPx, lPx, lNext);
+      B.startBlock(lPx);
+      host.declare(`declare ptr @scr_dyn_proxy_get(ptr, ptr)`);
+      const r = B.tmp();
+      B.line(`${r} = call ptr @scr_dyn_proxy_get(ptr %d, ptr %k)`);
+      B.terminate(`ret ptr ${r}`);
       B.startBlock(lNext);
     }
     // ISLAND-held receivers: o[k] reads the REAL engine property (getters

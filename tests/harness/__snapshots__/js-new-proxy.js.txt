@@ -1,8 +1,6 @@
-js-new-proxy.js:6:10 - error SC2020: 'new Proxy' is part of the standard library types but has no scriptc lowering yet
+js-new-proxy.js:8:21 - error SC1090: a Proxy target that is a class instance (a compiled method takes its instance as a typed struct pointer and cannot be handed the proxy as `this`, so the traps would not see the accesses the method makes) — proxy a plain object, or wrap the instance's operations in a handler is not supported yet
 
-  5 | function wrap(target) {
-  6 |   return new Proxy(target, {}).k;
-    |          ^~~~~~~~~~~~~~~~~~~~~
   7 | }
-
-  hint: property-access metaprogramming has no static lowering (every property read must resolve at compile time)
+  8 | const p = new Proxy(new Box(), {});
+    |                     ^~~~~~~~~
+  9 | console.log(p.k);

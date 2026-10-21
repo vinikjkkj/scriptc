@@ -11150,6 +11150,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8100-proxy-get-set-has-delete-traps.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8100-proxy-get-set-has-delete-traps.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8101-proxy-ownkeys-apply-arrays-and-instances.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8101-proxy-ownkeys-apply-arrays-and-instances.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/820-multi-decl.ts": {
    "order": [
     "<repo>/tests/corpus/820-multi-decl.ts"

@@ -357,6 +357,7 @@ static void dyn_notfn_buf(ScrJsonBuf *b, const ScrDyn *cb) {
   case SCR_DYN_OBJINST:
   case SCR_DYN_MAP:
   case SCR_DYN_PROMISE: scr_jb_puts(b, "object"); return;
+  case SCR_DYN_PROXY: scr_jb_puts(b, scr_dyn_proxy_is_function(cb) ? "function" : "object"); return;
   }
 }
 
@@ -909,6 +910,7 @@ static ScrDyn *dyn_bound_intrinsic_thunk(ScrClosure *clo, ScrDyn *const *args, s
  * closed. One table, three callers (read, `in`, call), no drift. */
 bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t key_len) {
   if (recv->kind == SCR_DYN_OBJ && recv->null_proto) return false;
+  if (recv->kind == SCR_DYN_PROXY) return false; /* `in` is the has trap's (or the target's) answer */
   /* A boxed class INSTANCE's members are the emitted table's, and the
    * stored walk cannot see them for exactly the reason a primitive's
    * prototype methods are invisible to it: they are not stored ON the
@@ -987,7 +989,50 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
   return scr_dyn_new_func(clo, dyn_bound_intrinsic_thunk, 0, "()", "bound");
 }
 
+ScrDyn *scr_dyn_proxy_invoke(ScrDyn *p, const ScrStr *key, ScrDyn *const *args, size_t argc, const char *what) {
+  /* [[Get]] through the proxy (the get trap, else the target's own member),
+   * then Call with this = the PROXY — so a method body's own property
+   * accesses run the traps too. A name the target holds only as a prototype
+   * intrinsic (toString, hasOwnProperty, an array's push) is not a stored
+   * function: it runs on the target (its inner accesses bypass the traps). */
+  ScrDyn *f = scr_dyn_proxy_get(p, key);
+  if (f == NULL) return NULL;
+  if (f->kind == SCR_DYN_UNDEF) {
+    bool threw;
+    ScrDyn *gt = scr_dyn_proxy_trap(p, "get", &threw);
+    if (threw) {
+      scr_dyn_release(f);
+      return NULL;
+    }
+    if (gt == NULL) {
+      scr_dyn_release(f);
+      return scr_dyn_invoke(p->v.proxy.target, key->data, args, argc, what);
+    }
+    scr_dyn_release(gt);
+  }
+  if (f->kind != SCR_DYN_FUNC && f->kind != SCR_DYN_PROXY) {
+    scr_dyn_release(f);
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, what);
+    scr_jb_puts(&b, " is not a function");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  scr_dyn_this_push_dyn(p);
+  ScrDyn *r = scr_dyn_call(f, args, argc, what);
+  scr_dyn_this_pop();
+  scr_dyn_release(f);
+  return r;
+}
+
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what) {
+  if (recv->kind == SCR_DYN_PROXY) {
+    ScrStr *k = scr_str_new(method, strlen(method));
+    ScrDyn *r = scr_dyn_proxy_invoke(recv, k, args, argc, what);
+    scr_str_release(k);
+    return r;
+  }
   if (recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) {
     ScrJsonBuf b;
     scr_jb_init(&b);

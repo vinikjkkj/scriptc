@@ -1,8 +1,9 @@
-// new Proxy has no static lowering: a compile error wherever the statement
-// is reachable (it used to compile and throw when the statement ran). A
-// branch the compiler DECIDES is never taken (`globalThis['__scriptc_absent__']
-// !== undefined` is decided false) is not lowered, so it is not refused.
-function wrap(target) {
-  return new Proxy(target, {}).k;
+// new Proxy over a class instance is refused by name: the instance is not a
+// checked-dynamic object, so a trap could not see its own fields.
+class Box {
+  constructor() {
+    this.k = 1;
+  }
 }
-console.log(wrap({ k: 1 }));
+const p = new Proxy(new Box(), {});
+console.log(p.k);

@@ -852,6 +852,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.keySet": "scr_dyn_key_set",
   "dyn.expandoBind": "scr_dyn_expando_bind",
   "dyn.keyDelete": "scr_dyn_key_delete",
+  "dyn.proxyNew": "scr_dyn_proxy_new",
   "dyn.iterPack": "scr_dyn_iter_pack",
   "dyn.arrLen": "scr_dyn_arr_len",
   "dyn.arrAt": "scr_dyn_arr_at",
@@ -10678,6 +10679,21 @@ class LlEmitter {
         const lArr = B.newLabel("dhk.a");
         const lNotObj = B.newLabel("dhk.no");
         const lj = B.newLabel("dhk.j");
+        {
+          // A PROXY answers through its `has` trap (or the target's own answer).
+          const isPx = B.tmp();
+          const lPx = B.newLabel("dhk.px");
+          const lNotPx = B.newLabel("dhk.npx");
+          B.line(`${isPx} = icmp eq i32 ${kd}, ${DK.PROXY}`);
+          B.condBr(isPx, lPx, lNotPx);
+          B.startBlock(lPx);
+          this.declare(`declare zeroext i1 @scr_dyn_proxy_has_cstr(ptr, ptr, i64)`);
+          const pxHas = B.tmp();
+          B.line(`${pxHas} = call zeroext i1 @scr_dyn_proxy_has_cstr(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${Buffer.byteLength(e.key, "utf8")})`);
+          B.line(`store i1 ${pxHas}, ptr ${slot}`);
+          B.br(lj);
+          B.startBlock(lNotPx);
+        }
         const isObj = B.tmp();
         B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
         B.condBr(isObj, lObj, lNotObj);

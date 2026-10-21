@@ -3157,6 +3157,9 @@ export type IrLibFn =
    * own-member presence, ARR answers 'length'/a valid index — exactly
    * the compile-time dynHasKey fold, per value. Never throws. */
   | "dyn.hasKey"
+  /** new Proxy(target, handler, strict): a SCR_DYN_PROXY dyn value. May throw
+   * (a non-object target or handler). */
+  | "dyn.proxyNew"
   /** `new f(...)` over a checked-dynamic FUNCTION value — JS's
    * [[Construct]] for the pre-class constructor idiom (args: the boxed
    * callee, a dyn ARRAY of the already-boxed arguments, and the callee's
@@ -12138,6 +12141,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // throws Node's catchable SyntaxError at construction.
   "regex.new",
   "dyn.keySet",
+  // new Proxy throws on a non-object target/handler; `in` runs a has trap.
+  "dyn.proxyNew",
+  "dyn.hasKey",
   // delete: ToObject on a nullish receiver, and the array-element hole
   // this representation refuses rather than fakes.
   "dyn.keyDelete",

@@ -151,6 +151,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.keySet": { argTypes: [DYN, STRING, DYN], result: VOID },
   "dyn.expandoBind": { argTypes: [DYN, STRING, DYN, DYN], result: VOID },
   "dyn.keyDelete": { argTypes: [DYN, STRING], result: BOOL },
+  "dyn.proxyNew": { argTypes: [DYN, DYN, BOOL], result: DYN },
   "dyn.iterPack": { argTypes: [DYN, STRING], result: DYN },
   "dyn.arrLen": { argTypes: [DYN], result: F64 },
   "dyn.arrAt": { argTypes: [DYN, F64], result: DYN },

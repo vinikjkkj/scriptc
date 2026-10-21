@@ -1644,6 +1644,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    scr_throw_error(SCR_ERR_TYPE, msg); /* takes ownership */`);
     d.push(`    return NULL;`);
     d.push(`  }`);
+    d.push(`  if (d->kind == SCR_DYN_PROXY) return scr_dyn_proxy_get(d, k); /* the get trap, or the target's answer */`);
     d.push(`  if (d->kind == SCR_DYN_OBJ) {`);
     d.push(`    /* JS's [[Get]], whole, in ONE runtime entry point: own`);
     d.push(`     * member, own ACCESSOR (its getter called with \`this\` = d),`);
