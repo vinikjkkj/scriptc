@@ -10971,27 +10971,27 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7800-a-curried-closure-returned-into-a-wider-function-return-slot.ts": {
+  "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts": {
    "order": [
-    "<repo>/tests/corpus/7800-a-curried-closure-returned-into-a-wider-function-return-slot.ts"
+    "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7801-awaiting-a-promise-string-or-string-or-null-union.ts": {
+  "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts": {
    "order": [
-    "<repo>/tests/corpus/7801-awaiting-a-promise-string-or-string-or-null-union.ts"
+    "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7802-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts": {
+  "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts": {
    "order": [
-    "<repo>/tests/corpus/7802-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts"
+    "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7803-a-function-result-widened-into-a-narrower-result-slot.ts": {
+  "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts": {
    "order": [
-    "<repo>/tests/corpus/7803-a-function-result-widened-into-a-narrower-result-slot.ts"
+    "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts"
    ],
    "diags": []
   },
