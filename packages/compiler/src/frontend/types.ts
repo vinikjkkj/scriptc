@@ -91,6 +91,31 @@ export const overflowShapeKeysAsked = new Set<string>();
 
 /** JS's array-index key test — the same one objectIterOverIndexShape
  * applies to declared field names. */
+/** True when a function-like's body reads `this` (nested arrow functions
+ * count, a nested `function`/class/method rebinds it and does not). */
+function functionBodyReadsThis(fn: ts.Node): boolean {
+  if (!ts.isFunctionLike(fn)) return false;
+  const body = (fn as ts.FunctionLikeDeclaration).body;
+  if (body === undefined) return false;
+  let found = false;
+  const walk = (n: ts.Node): void => {
+    if (found) return;
+    if (n.kind === ts.SyntaxKind.ThisKeyword) {
+      found = true;
+      return;
+    }
+    if (
+      ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isMethodDeclaration(n) ||
+      ts.isClassDeclaration(n) || ts.isClassExpression(n)
+    ) {
+      return;
+    }
+    n.forEachChild(walk);
+  };
+  walk(body);
+  return found;
+}
+
 export function isArrayIndexKey(name: string): boolean {
   return /^(0|[1-9][0-9]{0,9})$/.test(name) && Number(name) <= 4294967294;
 }
@@ -4866,9 +4891,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // checked-dynamic slot (implicitDefaultInstance), so the function
       // TYPE of a value built from one (an object-literal method table
       // a module exports) says the same thing instead of refusing.
+      //
+      // A function whose body reads `this` is NOT mapped this way: its table
+      // is a dyn OBJECT (the method runs with the object as `this`, and a
+      // record would hand it a copy), which is what an unmappable function
+      // type has always meant.
       if (pt === null && decl !== undefined && ts.isParameter(decl) && decl.type === undefined &&
           (checker.getTypeOfSymbol(p).flags & ts.TypeFlags.Any) !== 0 &&
-          isJsSourceFile(decl.getSourceFile())) {
+          isJsSourceFile(decl.getSourceFile()) && !functionBodyReadsThis(decl.parent)) {
         pt = DYN;
       }
       // Belt and braces for non-strict type worlds: an optional param's

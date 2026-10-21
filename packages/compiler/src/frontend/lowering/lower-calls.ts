@@ -2842,6 +2842,30 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     }
   }
 
+/** True when an object type has a member (to `depth` levels) whose function
+   * type declares a parameter with no annotation in authored JavaScript. */
+  function hasUntypedFnMember(L: Lowerer, t: ts.Type, depth: number): boolean {
+    if (depth <= 0 || (t.flags & ts.TypeFlags.Object) === 0) return false;
+    if (L.checker.getCallSignatures(t).length > 0) return false;
+    for (const p of L.checker.getPropertiesOfType(t)) {
+      const pt = L.checker.getTypeOfSymbol(p);
+      for (const sig of L.checker.getCallSignatures(pt)) {
+        for (const prm of sig.getParameters()) {
+          const d = L.checker.declarationsOf(prm)[0];
+          if (
+            d !== undefined && ts.isParameter(d) && d.type === undefined &&
+            (L.checker.getTypeOfSymbol(prm).flags & ts.TypeFlags.Any) !== 0 &&
+            isJsSourceFile(d.getSourceFile())
+          ) {
+            return true;
+          }
+        }
+      }
+      if (hasUntypedFnMember(L, pt, depth - 1)) return true;
+    }
+    return false;
+  }
+
 /** True when an IR type may BIND an implicit param (a concrete static
    * type — the checked-dynamic kinds keep the dyn slot, units have no
    * standalone representation). */
@@ -2884,7 +2908,13 @@ const SYMBOLIC_PAIR_BUDGET = 256;
         // bound param forwarded into another implicit call transitively
         // instantiates it (this._initCommandGroup(command)).
         const t = L.checker.getBaseTypeOfLiteralType(L.typeOf(arg));
-        const mapped = L.mapTypeOf(t);
+        // A value whose members are functions with UNTYPED JS parameters (an
+        // object-literal method table) keeps the checked-dynamic slot: the
+        // table is a dyn object whose methods run with the receiver as
+        // `this`, and binding it to the record the function types now map
+        // to would copy it on the way (writes through `this` would land on
+        // the copy). Calls through a const-bound table never cross a slot.
+        const mapped = hasUntypedFnMember(L, t, 2) ? null : L.mapTypeOf(t);
         if (bindableImplicitIr(mapped)) {
           bound = mapped;
           argTypes.set(sym, t);
