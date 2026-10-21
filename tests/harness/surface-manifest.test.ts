@@ -139,7 +139,7 @@ const PROBES: Probe[] = [
   { id: "stdlib.math.sqrt", source: "console.log(Math.sqrt(2));\n" },
   { id: "stdlib.math.cbrt", source: "console.log(Math.cbrt(27));\n" },
   { id: "stdlib.number.toPrecision", source: "const p = 19.99;\nconsole.log(p.toPrecision(4));\n" },
-  { id: "stdlib.string.replace", source: 'console.log("aa".replace("a", "b"));\n' },
+  { id: "stdlib.string.at", source: 'console.log("abc".at(1));\n' },
   { id: "diagnostic.sc2011", source: "const y: any = 1;\nconst z = y * 2;\nconsole.log(0);\n" },
   // status unsupported — refused with the entry's code
   { id: "syntax.debugger-statements", source: "debugger;\nconsole.log(0);\n" },
@@ -150,8 +150,8 @@ const PROBES: Probe[] = [
   },
   // Class-instance field/getter destructures graduated (corpus 2429); the
   // METHOD-extraction refusal carries the sample now.
+  { id: "diagnostic.sc1120", source: 'console.log("a,b".split(/,/, 1));\n' },
   { id: "diagnostic.sc1031", source: "class C {\n  f = 1;\n  m(): number {\n    return this.f;\n  }\n}\nconst { m } = new C();\nconsole.log(m());\n" },
-  { id: "diagnostic.sc1121", source: 'console.log(/ab/g.test("abab"));\n' },
   // (The zlib sample moved to the static group above when the gzip
   // container family graduated in 04eebba; the unsupported class keeps its
   // four samples. brotliCompressSync is NOT a replacement sample: the

@@ -260,6 +260,19 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
     }
   }
   for (const name of Object.keys(ISLAND_SURFACE.string)) {
+    // replace/replaceAll over a string pattern and a string replacement lower
+    // statically (string.replaceStr, scr_str_replace_str); the island entry
+    // remains only for the value-form fence and the --dynamic spelling.
+    if (name === "replace" || name === "replaceAll") {
+      add({
+        id: `stdlib.string.${name}`,
+        kind: "stdlib",
+        name: `string.prototype.${name}`,
+        status: "static",
+        note: "string pattern and string replacement (regex patterns: see the regex surface)",
+      });
+      continue;
+    }
     add({
       id: `stdlib.string.${name}`,
       kind: "stdlib",

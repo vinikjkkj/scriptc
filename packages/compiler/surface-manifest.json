@@ -193,14 +193,6 @@
       "note": "supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \\k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills"
     },
     {
-      "id": "diagnostic.sc1121",
-      "kind": "diagnostic-fence",
-      "name": "'.test()' on a regex with the 'g' or 'y' flag",
-      "status": "unsupported",
-      "code": "SC1121",
-      "note": "g/y regexes carry mutable lastIndex state between calls, which is not modeled; drop the flag for a plain match test, or use replace/replaceAll/split (their iteration is internal)"
-    },
-    {
       "id": "diagnostic.sc2001",
       "kind": "diagnostic-fence",
       "name": "values of types outside the compilable set (bigint and symbol primitives, constructor objects, and library-derived or unresolved generic shapes)",
@@ -2688,15 +2680,15 @@
       "id": "stdlib.string.replace",
       "kind": "stdlib",
       "name": "string.prototype.replace",
-      "status": "dynamic-only",
-      "code": "SC2012"
+      "status": "static",
+      "note": "string pattern and string replacement (regex patterns: see the regex surface)"
     },
     {
       "id": "stdlib.string.replaceAll",
       "kind": "stdlib",
       "name": "string.prototype.replaceAll",
-      "status": "dynamic-only",
-      "code": "SC2012"
+      "status": "static",
+      "note": "string pattern and string replacement (regex patterns: see the regex surface)"
     },
     {
       "id": "stdlib.string.slice",
