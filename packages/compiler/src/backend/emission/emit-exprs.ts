@@ -2494,6 +2494,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const obj = E.emitExpr(e.obj);
         return E.newTemp(e.type, `scr_map_keys_js_order(${obj.name}->${OVERFLOW_MEMBER})`);
       }
+      case "recordOvfHas": {
+        // Own-key membership of the overflow map; both operands borrowed.
+        const obj = E.emitExpr(e.obj);
+        const key = E.emitExpr(e.key);
+        return E.newTemp(e.type, `scr_map_has_str(${obj.name}->${OVERFLOW_MEMBER}, ${key.name})`);
+      }
       case "recordOvfSlots": {
         // The same enumeration as LIVE ENTRY SLOTS - a fresh f64[] snapshot
         // (+1); the record is borrowed.

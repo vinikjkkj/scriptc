@@ -3693,6 +3693,20 @@ function validateFunction(
         }
         break;
       }
+      case "recordOvfHas": {
+        checkExpr(e.obj);
+        checkExpr(e.key);
+        const shape = records.get(e.shapeId);
+        if (!shape) {
+          err(`recordOvfHas on undeclared shape "${e.shapeId}"`, e.loc);
+          break;
+        }
+        if (!shape.indexValue) err(`recordOvfHas on ${e.shapeId}: no index signature`, e.loc);
+        expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordOvfHas receiver");
+        expectType(e.key, STRING, "recordOvfHas key");
+        if (e.type.kind !== "bool") err("recordOvfHas must be bool", e.loc);
+        break;
+      }
       case "recordOvfSlots": {
         checkExpr(e.obj);
         const shape = records.get(e.shapeId);
