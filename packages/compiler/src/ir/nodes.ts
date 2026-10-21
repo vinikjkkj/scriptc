@@ -8234,7 +8234,7 @@ export function canConvertToDyn(
   // type does, which is what lets a deep-copying record carry a class
   // member without the copy lying about it.
   if (t.kind === "object" && canBoxClassIntoDyn(t.className)) return true;
-  if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion);
+  if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
   // A MAP or a SET boxes by REFERENCE (SCR_DYN_MAP): the retained ScrMap
   // plus the interned typeKey of THIS type, a static emitted literal
   // exactly like the FUNC box's `sig`. No condition on the key or value
@@ -8292,12 +8292,26 @@ export function canConvertToDyn(
     // the fence to a declaration and poisoned its use sites. That out-
     // direction now walks func leaves, so the relocation does not happen
     // and the cut has no reason left.
-    return !!def && def.arms.every((a) =>
-      a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion) ||
-      (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion)) ||
-      (a.kind !== "func" &&
-        canConvertToDyn(a, getRecord, getUnion, visiting)),
-    );
+    if (!def) return false;
+    // The recursion guard the record case below already has. A RECURSIVE union
+    // (`V = ... | V[] | { [k: string]: V }`, mysql2's ExecuteValues) re-enters
+    // itself through its own array arm; a union whose arms are all JSON-safe
+    // answers before this point, which is why only one with a non-JSON arm
+    // (bigint, Date, Buffer) ever recursed without end. An in-progress union
+    // answers true: any unconvertible arm is found on its own path.
+    const unionKey = `u:${t.unionId}`;
+    if (visiting.has(unionKey)) return true;
+    visiting.add(unionKey);
+    try {
+      return def.arms.every((a) =>
+        a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion) ||
+        (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion, visiting)) ||
+        (a.kind !== "func" &&
+          canConvertToDyn(a, getRecord, getUnion, visiting)),
+      );
+    } finally {
+      visiting.delete(unionKey);
+    }
   }
   // An ARRAY of a convertible ELEMENT, by the same argument as the union
   // arm above: the emitted array converter pushes `sc_td_<elem>(e)` per
@@ -8904,6 +8918,10 @@ export function canBoxFuncIntoDyn(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
+  /** The caller's recursion guard (canConvertToDyn's `visiting`): a function
+   * whose result is a record that holds that function again (a `this`-returning
+   * method of a mapped class) must not restart the walk at every hop. */
+  visiting?: Set<string>,
 ): boolean {
   return (
     t.kind === "func" &&
@@ -8915,7 +8933,7 @@ export function canBoxFuncIntoDyn(
     // A jsval return converts through the by-reference wrap
     // (dynFromJsval — the thunk's result conversion), so engine-returning
     // callbacks box too: the routed-dispatch lane's flatMap shape.
-    (t.ret.kind === "void" || t.ret.kind === "dyn" || t.ret.kind === "jsval" || canConvertToDyn(t.ret, getRecord, getUnion))
+    (t.ret.kind === "void" || t.ret.kind === "dyn" || t.ret.kind === "jsval" || canConvertToDyn(t.ret, getRecord, getUnion, visiting))
   );
 }
 

@@ -181,4 +181,41 @@ console.log(c.escapeId("t"), c.escapeId(["db", "t"]), calls.length, c.threadId);
 `,
     );
   }, 240_000);
+
+  test("a record holding a recursive union with non-JSON arms and a this-returning member builds", async () => {
+    // The record has a `this`-returning member (a cycle), an optional `this`-returning method
+    // (a union arm that returns the record) and a slot whose parameter is a RECURSIVE union
+    // with a bigint arm. funcCoerceAdapter asks whether that parameter converts to dyn;
+    // canConvertToDyn guarded recursion through records only, so the recursive union (and a
+    // function whose result is the record) restarted the walk at every hop and the compiler
+    // died with "Maximum call stack size exceeded". `run` and `many` are never invoked: an
+    // adapter whose parameters cannot convert throws only when called.
+    await differential(
+      "recursive-union",
+      `export type R = string | bigint | boolean | R[] | { [key: string]: R };
+export declare class Conn {
+  threadId: number;
+  on(event: string, listener: (...args: any[]) => void): this;
+  run(v: R): string;
+  many(vs: R[]): R[];
+  chain?(): this;
+  maybe(cb?: ((err: Error | null, r: R) => void) | undefined): void;
+}
+`,
+      `import type { Conn, R } from "./declib.js";
+const c: Conn = {
+  threadId: 3,
+  on: ((_e: string, _l: unknown): Conn => c) as unknown as Conn["on"],
+  run(v: unknown): string { return Array.isArray(v) ? "array" + v.length : "scalar"; },
+  many(vs: unknown): R[] { return Array.isArray(vs) ? (vs as R[]) : []; },
+  chain: undefined,
+  maybe: ((_cb: unknown): void => {}) as unknown as Conn["maybe"],
+};
+// Building the record is what walked the recursive union (funcCoerceAdapter asks whether
+// each slot parameter converts to dyn). \`run\` and \`many\` are never invoked: an adapter whose
+// parameters cannot convert throws only if called, which is the compiler's own stance.
+console.log(c.threadId, c.chain === undefined, c.on("x", () => {}).threadId);
+`,
+    );
+  }, 240_000);
 });
