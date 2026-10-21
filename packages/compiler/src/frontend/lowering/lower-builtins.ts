@@ -7061,6 +7061,15 @@ let digestInputValueDispatches = 0;
     if (member === "argv") {
       return { kind: "libCall", fn: "process.argv", args: [], type: arrayOf(STRING), loc };
     }
+    // process.exitCode: Node's int32 slot, undefined until assigned. The
+    // runtime answers a dyn (the number or undefined); a typed read
+    // (`number | string | undefined` under @types/node) crosses the
+    // validated dyn boundary like every other dyn-to-static read.
+    if (member === "exitCode") {
+      const raw: IrExpr = { kind: "libCall", fn: "process.exitCodeGet", args: [], type: DYN, loc };
+      const want = L.mapTypeOf(L.typeOf(expr));
+      return want !== null && want.kind !== "dyn" ? L.coerceToExpected(raw, want) : raw;
+    }
     // `process.versions` as a STANDALONE value, in a JavaScript source.
     //
     // The runtime-detection idiom reads the CONTAINER one link before the
@@ -8543,11 +8552,15 @@ let digestInputValueDispatches = 0;
     }
     if (member === "exit") {
       const arg = call.arguments[0];
-      const code: IrExpr =
-        arg !== undefined
-          ? L.lowerExprExpecting(arg, F64)
-          : { kind: "numLit", value: 0, type: F64, loc };
-      return { kind: "libCall", fn: "process.exit", args: [code], type: VOID, loc };
+      // No argument: the status is process.exitCode (0 while unset).
+      if (arg === undefined) return { kind: "libCall", fn: "process.exitDefault", args: [], type: VOID, loc };
+      // A value that is not statically a number goes through the validating
+      // setter at run time (process.exit("x") throws ERR_INVALID_ARG_TYPE).
+      const lowered = L.lowerExpr(arg);
+      if (lowered.type.kind === "f64") return { kind: "libCall", fn: "process.exit", args: [lowered], type: VOID, loc };
+      const boxed = L.coerceToExpected(lowered, DYN);
+      if (boxed.type.kind !== "dyn") L.unsupported("SC1090", arg, `process.exit with a '${L.fmt(lowered.type)}' code`);
+      return { kind: "libCall", fn: "process.exitDyn", args: [boxed], type: VOID, loc };
     }
     return null; // process.argv(...) etc. are tsc errors before lowering
   }

@@ -3119,6 +3119,22 @@ bool scr_process_kill_named(double pid, const ScrStr *signal);
 /* fflush stdout, then _Exit((int)code): no atexit handlers run — the RC
  * audit is deliberately skipped (exiting mid-program leaves live values). */
 void scr_process_exit(double code);
+/* process.exit() with no argument: ends with process.exitCode (or 0). */
+void scr_process_exit_default(void);
+/* process.exit(v) over a dyn value: undefined = no argument, else the
+ * exitCode setter's validation (a bad value throws, nothing exits). */
+void scr_process_exit_dyn(const ScrDyn *v);
+/* process.exitCode (scr_lib.c). The setter validates like Node's (null and
+ * undefined clear it; an integer-valued numeric string converts; other
+ * strings and non-numbers throw ERR_INVALID_ARG_TYPE, a non-integer or
+ * non-finite number ERR_OUT_OF_RANGE) and stores ToInt32. The getter answers
+ * a +1 dyn: the stored number, or undefined while unset. */
+void scr_process_exitcode_set(const ScrDyn *v);
+void scr_process_exitcode_set_f64(double n);
+struct ScrDyn *scr_process_exitcode_get(void);
+double scr_process_exitcode_effective(void);
+bool scr_process_exitcode_is_set(void);
+void scr_exitcode_at_exit(void);
 /* process._exiting: true once the exit sequence began (process.exit or
  * the exit-listener runner set the flag). Never throws. */
 extern bool scr_process_in_exit;

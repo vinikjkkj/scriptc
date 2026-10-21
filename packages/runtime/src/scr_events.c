@@ -591,6 +591,10 @@ void scr_run_exit_listeners(double code) {
   if (scr_exit_ran) return; /* process.exit inside a listener: no recursion */
   scr_exit_ran = true;
   scr_process_in_exit = true; /* process._exiting — Node's flag */
+  /* Node emits 'exit' with `process.exitCode || 0`: a program that set the
+   * code and returned normally hands it to its listeners. An abnormal
+   * status already noted (uncaught throw: 1) arrives non-zero and wins. */
+  if (code == 0) code = scr_process_exitcode_effective();
   for (size_t i = 0; i < scr_exit_n; i++) {
     scr_exit_ls[i].fn(scr_exit_ls[i].cb, code);
     if (scr_exc_pending()) {

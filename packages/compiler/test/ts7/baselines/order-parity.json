@@ -13647,12 +13647,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/js-process-exitcode-assignment.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/js-process-exitcode-assignment.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/js-class-declared-in-a-block-extending-a-stream.js": {
    "order": [
     "<repo>/tests/diagnostics/js-class-declared-in-a-block-extending-a-stream.js"
@@ -13705,6 +13699,18 @@
   "<repo>/tests/corpus/8000-an-implicit-any-arrow-const-read-from-a-function.js": {
    "order": [
     "<repo>/tests/corpus/8000-an-implicit-any-arrow-const-read-from-a-function.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8010-process-exitcode-is-a-validated-int32-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/8010-process-exitcode-is-a-validated-int32-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8011-process-exit-uses-the-exit-code.js": {
+   "order": [
+    "<repo>/tests/corpus/8011-process-exit-uses-the-exit-code.js"
    ],
    "diags": []
   }

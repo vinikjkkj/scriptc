@@ -6675,6 +6675,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Flushes stdout and _Exit()s — never returns (exit handlers,
             // including the RC audit, deliberately do not run).
             return finish(`scr_process_exit(${arg(0)})`);
+          case "process.exitDyn":
+            return finish(`scr_process_exit_dyn(${arg(0)})`);
+          case "process.exitDefault":
+            return finish(`scr_process_exit_default()`);
+          case "process.exitCodeSetF64":
+            return finish(`scr_process_exitcode_set_f64(${arg(0)})`);
+          case "process.exitCodeSet":
+            return finish(`scr_process_exitcode_set(${arg(0)})`);
+          case "process.exitCodeGet":
+            return finish(`scr_process_exitcode_get()`);
           case "timers.setTimeout": {
             // The loop owns the callback until it fires.
             E.usesTimers = true;

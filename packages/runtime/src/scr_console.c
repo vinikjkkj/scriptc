@@ -169,6 +169,9 @@ void scr_init(void) {
    * (registered later, in scr_lib_init) → cycle collection → RC audit →
    * flush. The final collection frees cycles the program dropped, so the
    * audit (and ASan's leak check) see them as freed, not leaked. */
+  /* The status handler goes FIRST so it runs LAST (process.exitCode, which
+   * the 'exit' listeners may still assign): see scr_exitcode_at_exit. */
+  atexit(scr_exitcode_at_exit);
   atexit(scr_flush_at_exit);
 #ifdef SCR_RC_AUDIT
   atexit(scr_rc_audit_at_exit);
