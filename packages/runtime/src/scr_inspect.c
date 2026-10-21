@@ -575,6 +575,8 @@ static size_t insp_utf16_offset(const char *data, size_t len, size_t units, bool
  * indentationLvl - 4, split after each newline; the trailer counts the
  * cut characters. Uses the CURRENT indentation. */
 ScrStr *scr_insp_str(ScrStr *s) {
+  /* A split capture that did not participate is Node's undefined. */
+  if (scr_str_is_absent(s)) return scr_str_new("undefined", 9);
   InspBuf out = {0};
   const char *data = s->data;
   size_t byte_len = s->len;

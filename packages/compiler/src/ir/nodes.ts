@@ -3476,6 +3476,9 @@ export type IrLibFn =
   /** encodeURI: the same Encode() keeping the reserved set and '#'
    * unescaped — total like the component encoder. Borrow; result +1. */
   | "str.encodeUri"
+  /** Is this string the immortal ABSENT string (a split capture group that
+   * did not participate: Node's undefined)? Pointer identity; total, borrows. */
+  | "str.isAbsent"
   /** The WHATWG base64 globals (scr_string.c), Node-global since v16.
    * Arguments are borrowed dyn values — WebIDL ToString runs in the
    * runtime over the dyn kind (String(null) is "null": the html spec's

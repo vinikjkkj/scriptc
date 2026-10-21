@@ -875,6 +875,14 @@ static inline void scr_str_size_check(size_t n) {
 
 ScrStr *scr_str_new(const char *bytes, size_t len); /* returns +1 */
 
+/* The immortal "absent" string: an empty string object whose IDENTITY says
+ * "this array slot is Node's undefined" (a split capture group that did not
+ * participate). Every runtime string function reads it as "" (what join
+ * wants); the compiler tests the identity at the consumers that tell the two
+ * apart (index reads, util.inspect, JSON). Never freed, never mutated. */
+ScrStr *scr_str_absent(void);
+bool scr_str_is_absent(const ScrStr *s);
+
 /* Internal allocators for buffer builders (scr_json.c): a +1 string with
  * UNINITIALIZED data (the builder fills bytes, then len and the NUL), and
  * an rc==1-only realloc that grows capacity in place. Both keep the RC
