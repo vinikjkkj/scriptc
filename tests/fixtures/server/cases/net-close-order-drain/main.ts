@@ -8,7 +8,16 @@
  * first: it belonged to the earlier iteration's close phase, when the
  * server's tick had not been scheduled yet.
  *
- *   client end bytes=200000 / client closed / srv closed
+ *   Windows Node:  client end bytes=200000 / client closed / srv closed
+ *   Linux Node:    srv closed / client end bytes=200000 / client closed
+ *                  (v24.15.0 and v25.9.0, 6/6 each)
+ *
+ * On Linux the server socket has read the client's data and both
+ * directions are shut down, so epoll reports EPOLLIN|EPOLLHUP and libuv
+ * synthesizes the EOF in that same callback; the tick that settles the
+ * server runs before the client's readable event from the same epoll
+ * batch. The compiled program has to reproduce whichever the host Node
+ * does, so this file has no expected-output of its own.
  *
  * This runtime often sees both readiness events in ONE poller drain, so a
  * settle at the sweep head with no notion of iteration prints "srv closed"

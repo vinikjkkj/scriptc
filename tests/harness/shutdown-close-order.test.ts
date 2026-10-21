@@ -47,40 +47,19 @@ const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
  * REPEATS spawns of the compiled lane per case, plus one Node lane. */
 const REPEATS = 15;
 
-/* THE DRAIN CASE IS A MEASUREMENT, NOT A PASS/FAIL, AND THE DEFECT IS OPEN.
+/* RATE-BOUNDED CASES. None today.
  *
- * net-close-order-drain reverses two close callbacks at a low rate under
- * gate load. At 15 runs demanding 15/15 that is a 40% false red per gate --
- * measured: 2 reds in 5 runs of shard 6 implies about 3.4% per run. The
- * cost is not the noise. It is that A REAL FIX WOULD BE UNVERIFIABLE: with
- * a gate that reds 40% of the time by design, nobody can tell "I fixed it"
- * from "I got lucky".
- *
- * WHAT IS KNOWN, so the next person starts here instead of at zero:
- *   - The fixture contains NO async/await, and scr_coro.c is shed entirely
- *     with the stackless knob absent, which is how the gate runs. The
- *     stackless work cannot reach it.
- *   - Reproduction FAILED in six arms. 630 runs under node v22 -- the wrong
- *     lane, since the gate runs v25.9.0 and the differential spawns a bare
- *     `node` -- and 75 runs in the correct lane: 60 on an isolated shard 6
- *     with the gate's environment, 15 in a full six-shard sequence carrying
- *     accumulated state. Zero events. P(0 | 3.4%) over those 75 is ~7.5%.
- *   - So the rate is real and our rigs are not the gate. Three dimensions
- *     where they differed were each found by the rig breaking a test the
- *     gate passes: node version, provenance cache, and the suite collision
- *     documented above. STILL UNTESTED: worktree identity (the gate has its
- *     own node_modules and caches), launch path (Start-Process from pwsh vs
- *     bash), and whatever announces itself next.
- *   - CAUSE UNKNOWN. This is not resolved. It is bounded.
- *
- * So this case runs DRAIN repeats and asserts the mismatch count is within
- * a budget. At 90 runs with a budget of 8: ~1% false red at the current
- * rate, ~97% catch of a regression back to the 17% this file's header
- * records under heavy load. Every other case keeps its exact match -- in
- * particular net-close-order-drained, the DETERMINISTIC sibling that is the
- * real proof the mechanism is gone, is untouched. */
+ * net-close-order-drain used to live here as "a low-rate reversal, budget
+ * 8 of 90". It was never a rate: it diverged 90/90 on Linux against Node
+ * 24.15.0 and 25.9.0, because the native dispatch drain did not run the
+ * tick queue between the poller events of one batch (a drained server's
+ * 'close' waited for the sweep head, behind a client's 'end' delivered in
+ * the same batch). That is fixed in scr_net_dispatch, so the case is an
+ * exact match like every other one. The mechanism is kept for a future
+ * case that is genuinely intermittent: list it as name -> { repeats,
+ * budget } and say, next to it, what has been measured. */
 const RATE_BOUNDED: ReadonlyMap<string, { repeats: number; budget: number }> =
-  new Map([["net-close-order-drain", { repeats: 90, budget: 8 }]]);
+  new Map<string, { repeats: number; budget: number }>();
 
 /* ARMING ONLY. A threshold nobody has watched fail is worth what an unarmed
  * guard is worth, and installing one here of all places would be the joke of
