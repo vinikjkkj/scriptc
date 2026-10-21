@@ -6013,6 +6013,13 @@ export type IrLibFn =
    * applied to date.localTime. */
   | "date.localTime"
   | "date.tzOffset"
+  /** String(date): Date.prototype.toString over a time value. Throws a
+   * catchable Error for a zone whose long display name needs ICU data. */
+  | "date.toString"
+  /** String(bytes): Buffer decodes utf8, a plain Uint8Array joins its
+   * elements with commas, a DataView is "[object DataView]"; an unstamped
+   * value throws a catchable Error (the Buffer-ness is unknown). */
+  | "bytes.jsString"
   /** The fs option forms and friends (scr_lib.c), all throwing catchably
    * like the rest of sync fs. mkdirRecursiveSync is Node's recursive
    * algorithm (try mkdir, EEXIST-dir is fine, ENOENT creates the parent
@@ -9357,7 +9364,11 @@ export function moduleUsesCopying(mod: IrModule): boolean {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown; method?: unknown };
+    const node = v as { kind?: unknown; method?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "bytes.jsString") {
+      found = true;
+      return;
+    }
     if (
       node.kind === "arrIntrinsic" &&
       (node.method === "toReversed" ||
@@ -12169,6 +12180,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "zlib.unzipSync",
   "zlib.inflateRawSync",
   "date.toISOString",
+  "date.toString",
+  "bytes.jsString",
   // The length-mismatch RangeError, which is a contract of the call.
   "crypto.timingSafeEqual",
   "fs.mkdirRecursiveSync",

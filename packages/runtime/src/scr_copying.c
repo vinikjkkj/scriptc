@@ -163,3 +163,29 @@ ScrStr *scr_bytes_join(const ScrBytes *b, const ScrStr *separator) {
   scr_arr_release(values);
   return out;
 }
+
+/* String(bytes) by flavor -- lives beside scr_bytes_join, which it calls, and
+ * links on the same moduleUsesCopying gate (the bytes.jsString libCall). */
+ScrStr *scr_bytes_js_string(const ScrBytes *b) {
+  switch (b->flavor) {
+    case SCR_BF_BUFFER: {
+      ScrStr *enc = scr_str_new("utf8", 4);
+      ScrStr *r = scr_bytes_to_str(b, enc);
+      scr_str_release(enc);
+      return r;
+    }
+    case SCR_BF_PLAIN: {
+      ScrStr *sep = scr_str_new(",", 1);
+      ScrStr *r = scr_bytes_join(b, sep);
+      scr_str_release(sep);
+      return r;
+    }
+    case SCR_BF_DATAVIEW: return scr_str_new("[object DataView]", 17);
+    default: {
+      static const char msg[] = "String() of a byte array whose Buffer-ness is unknown "
+                                "(its producer stamps no flavor)";
+      scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+      return NULL;
+    }
+  }
+}
