@@ -1168,6 +1168,9 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     // and mutable-target aliases fence (lower-namespaces.ts).
     if (ts.isImportEqualsDeclaration(stmt)) return lowerImportEquals(L, stmt);
 
+    // A lifted local class (liftedLocalClasses): collected as a module-level
+    // class, nothing to evaluate where it was written.
+    if (ts.isClassDeclaration(stmt) && L.liftedLocalClasses.has(stmt)) return [];
     const entry = UNSUPPORTED_STMT[stmt.kind];
     if (entry) L.unsupported(entry.code as `SC${number}` & keyof typeof UNSUPPORTED, stmt, entry.feature);
     L.unsupported("SC1090", stmt, `syntax '${ts.SyntaxKind[stmt.kind]}'`);

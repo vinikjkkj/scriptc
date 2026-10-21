@@ -13647,12 +13647,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/js-class-declared-in-a-block-extending-a-stream.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-class-declared-in-a-block-extending-a-stream.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/js-new-proxy.js": {
    "order": [
     "<repo>/tests/diagnostics/js-new-proxy.js"
@@ -13711,6 +13705,30 @@
   "<repo>/tests/corpus/8011-process-exit-uses-the-exit-code.js": {
    "order": [
     "<repo>/tests/corpus/8011-process-exit-uses-the-exit-code.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8021-a-class-declared-inside-a-typed-function.ts": {
+   "order": [
+    "<repo>/tests/corpus/8021-a-class-declared-inside-a-typed-function.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-a-local.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-a-local.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-class-declared-in-a-function-used-as-a-value.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-class-declared-in-a-function-used-as-a-value.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8020-a-class-declared-inside-a-function-or-block.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8020-a-class-declared-inside-a-function-or-block.cjs"
    ],
    "diags": []
   }

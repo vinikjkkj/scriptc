@@ -37,6 +37,114 @@ export interface FileParts {
   topStmts: ts.Statement[];
 }
 
+/** A class DECLARATION that is not at file (or namespace) level: written
+ * inside a function, a method or a block. */
+export function isNestedClassDeclaration(decl: ts.ClassLikeDeclaration): boolean {
+  if (!ts.isClassDeclaration(decl)) return false;
+  const p = decl.parent;
+  return !(ts.isSourceFile(p) || ts.isModuleBlock(p));
+}
+
+const LOCAL_SCOPE_KINDS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.Block, ts.SyntaxKind.CaseBlock, ts.SyntaxKind.CatchClause,
+  ts.SyntaxKind.ForStatement, ts.SyntaxKind.ForInStatement, ts.SyntaxKind.ForOfStatement,
+]);
+
+/** Class declarations nested in a function or block that can lower as
+ * module-level classes with NO change of meaning. A class declared inside a
+ * function is minted afresh by every evaluation, closes over the locals in
+ * scope, and carries its own static state; the lift is exact only where
+ * none of that is observable:
+ *   - nothing the class mentions (body, heritage, computed keys) is a
+ *     function- or block-scoped binding (a capture), or a type parameter of
+ *     an enclosing function;
+ *   - no static field, static block or decorator (declaration-time code);
+ *   - the heritage is a plain name or member access (no call);
+ *   - every use of the name comes textually AFTER the declaration (the
+ *     temporal dead zone cannot be observed), and, unless the declaration
+ *     sits in a block evaluated once (no enclosing function, method or
+ *     loop), is `new C(...)`, `extends C` or a static-method call `C.m()` —
+ *     the uses that cannot compare two evaluations' classes (instanceof,
+ *     the class as a value). */
+function liftedLocalClasses(L: Lowerer, sf: ts.SourceFile): ts.ClassDeclaration[] {
+  const out: ts.ClassDeclaration[] = [];
+  const lifted = new Set<ts.Node>();
+  // Iterative (a deeply nested program must not overflow the stack here).
+  ts.walkPreorder(sf, (n) => {
+    if (ts.isClassDeclaration(n) && isNestedClassDeclaration(n) && liftableLocalClass(L, sf, n, lifted)) {
+      out.push(n);
+      lifted.add(n);
+    }
+    return undefined;
+  });
+  return out;
+}
+
+function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclaration, lifted: Set<ts.Node>): boolean {
+  if (decl.name === undefined || decl.typeParameters !== undefined) return false;
+  if (decoratorNodesOf(decl).length > 0) return false;
+  for (const m of decl.members) {
+    if (decoratorNodesOf(m).length > 0) return false;
+    if (ts.isClassStaticBlockDeclaration(m)) return false;
+    const isStatic = (m as { modifiers?: readonly ts.Node[] }).modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) === true;
+    if (isStatic && !ts.isMethodDeclaration(m)) return false;
+    const mname = (m as unknown as { name?: ts.Node }).name;
+    if (mname !== undefined && ts.isComputedPropertyName(mname as ts.PropertyName)) return false;
+  }
+  const ext = decl.heritageClauses?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword)?.types[0]?.expression;
+  if (ext !== undefined && !ts.isIdentifier(ext) && !ts.isPropertyAccessExpression(ext)) return false;
+  const sym = L.checker.getSymbolAtLocation(decl.name);
+  if (!sym) return false;
+  // Once-evaluated: no function-like, class member or loop above it.
+  let once = true;
+  for (let p: ts.Node | undefined = decl.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
+    if (ts.isFunctionLike(p) || ts.isClassDeclaration(p) || ts.isClassExpression(p) || ts.isForStatement(p) || ts.isForInStatement(p) || ts.isForOfStatement(p) || ts.isWhileStatement(p) || ts.isDoStatement(p)) { once = false; break; }
+  }
+  // Captures.
+  let captured = false;
+  ts.walkPreorder(decl, (n) => {
+    if (captured) return "stop";
+    if (ts.isIdentifier(n)) {
+      const s = L.checker.getSymbolAtLocation(n);
+      if (s !== undefined && s !== sym) {
+        for (const d of L.checker.declarationsOf(s)) {
+          if (d.getSourceFile() !== sf || (d.pos >= decl.pos && d.end <= decl.end)) continue;
+          let inLifted = false;
+          for (let p: ts.Node | undefined = d; p !== undefined; p = p.parent) if (lifted.has(p)) { inLifted = true; break; }
+          if (inLifted) continue;
+          if (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d)) continue;
+          for (let p: ts.Node | undefined = d.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
+            if (ts.isFunctionLike(p) || LOCAL_SCOPE_KINDS.has(p.kind)) { captured = true; return "stop"; }
+          }
+        }
+      }
+    }
+    return undefined;
+  });
+  if (captured) return false;
+  // Uses.
+  const staticMethods = new Set<string>();
+  for (const m of decl.members) {
+    if (ts.isMethodDeclaration(m) && m.name !== undefined && ts.isIdentifier(m.name) &&
+      (m as { modifiers?: readonly ts.Node[] }).modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword)) {
+      staticMethods.add(m.name.text);
+    }
+  }
+  for (const id of identifierIndexOf(sf).get(decl.name.text) ?? []) {
+    if (id === decl.name || L.checker.getSymbolAtLocation(id) !== sym) continue;
+    if (id.pos >= decl.pos && id.end <= decl.end) continue; // self reference inside the class
+    if (id.getStart(sf) < decl.end) return false;
+    if (once) continue;
+    const p = id.parent;
+    if (ts.isNewExpression(p) && p.expression === id) continue;
+    if (ts.isExpressionWithTypeArguments(p) && ts.isHeritageClause(p.parent) && p.parent.token === ts.SyntaxKind.ExtendsKeyword) continue;
+    if (ts.isPropertyAccessExpression(p) && p.expression === id && staticMethods.has(p.name.text) &&
+      ts.isCallExpression(p.parent) && p.parent.expression === p) continue;
+    return false;
+  }
+  return true;
+}
+
 /** Splits each file into function/class declarations and the top-level
    * statements that form its init body. Node's evaluation order (depth-first
    * postorder, entry last), computed by preflight. Single-file programs
@@ -46,6 +154,10 @@ export interface FileParts {
     const files = L.moduleOrder.length > 0 ? L.moduleOrder : [L.entry];
     return files.map((sf) => {
       const fp: FileParts = { sf, fnDecls: [], classDecls: [], topStmts: [] };
+      for (const decl of liftedLocalClasses(L, sf)) {
+        L.liftedLocalClasses.add(decl);
+        fp.classDecls.push(decl);
+      }
       for (const stmt of sf.statements) {
         if (ts.isFunctionDeclaration(stmt)) fp.fnDecls.push(stmt);
         else if (ts.isClassDeclaration(stmt)) fp.classDecls.push(stmt);
