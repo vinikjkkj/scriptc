@@ -2753,6 +2753,11 @@ ScrDyn *scr_stream_done_dyn_f(ScrClosure *clo, ScrDyn *const *args, size_t argc)
 ScrDyn *scr_stream_done_dyn_d(ScrClosure *clo, ScrDyn *const *args, size_t argc);
 ScrDyn *scr_stream_done_dyn_t(ScrClosure *clo, ScrDyn *const *args, size_t argc);
 ScrDyn *scr_stream_done_dyn_l(ScrClosure *clo, ScrDyn *const *args, size_t argc);
+ScrDyn *scr_stream_done_pack_w(ScrClosure *clo, ScrDyn *pack);
+ScrDyn *scr_stream_done_pack_f(ScrClosure *clo, ScrDyn *pack);
+ScrDyn *scr_stream_done_pack_d(ScrClosure *clo, ScrDyn *pack);
+ScrDyn *scr_stream_done_pack_t(ScrClosure *clo, ScrDyn *pack);
+ScrDyn *scr_stream_done_pack_l(ScrClosure *clo, ScrDyn *pack);
 
 /* The readable surface. push/unshift borrow their chunk (strings convert
  * utf8, Node's decodeStrings default); push answers the below-hwm bool. */

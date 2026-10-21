@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, isDynPackFunc } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -13068,7 +13068,7 @@ class LlEmitter {
     const errT = doneT.params[0];
     let errTag = -1;
     if (errT !== undefined) {
-      if (errT.kind !== "union") throw new Error("llvm emitter bug: stream done err param not a union");
+      if (errT.kind !== "union") throw new Error(`llvm emitter bug: stream done err param not a union (${kind}: ${typeKey(doneT)})`);
       const def = this.unionsById.get(errT.unionId);
       errTag = def ? def.arms.findIndex((a) => a.kind === "object") : -1;
       if (errTag < 0) throw new Error("llvm emitter bug: stream done err union lacks its Error arm");
@@ -13344,7 +13344,12 @@ class LlEmitter {
       } else if (isDonePos) {
         const doneKind = kind as "w" | "f" | "d" | "t" | "l"; // "e" has no done position
         if (p.kind !== "func") throw new Error("llvm emitter bug: stream done callback not a func");
-        const doneFn = this.streamDoneFnFor(doneKind, p);
+        // A parameter typed `Function` (func(...dyn)=>dyn): the closure
+        // takes the packed-arguments dyn array, so the runtime's pack glue
+        // is its fn instead of a typed done entry.
+        const packed = isDynPackFunc(p);
+        if (packed) this.declare(`declare ptr @scr_stream_done_pack_${doneKind}(ptr, ptr)`);
+        const doneFn = packed ? `scr_stream_done_pack_${doneKind}` : this.streamDoneFnFor(doneKind, p);
         const clo = doneClosure(`@${doneFn}`, `dn${i}`);
         passed.push(`ptr ${clo}`);
       } else {
