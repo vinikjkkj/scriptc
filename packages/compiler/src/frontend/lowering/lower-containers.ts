@@ -8198,7 +8198,13 @@ function lowerBufferInstanceMethod(L: Lowerer, call: ts.CallExpression,
   }
   if (name === "copy") {
     if (nArgs < 1 || nArgs > 4) L.noLowering(`.copy with ${nArgs} arguments`, call);
-    const target = u8Arg(0);
+    // A checked-dynamic target (a field the checker calls `any`) leaves
+    // through the validated Buffer/Uint8Array exit, the cast `t as Buffer`.
+    let target = L.lowerExpr(args[0]!);
+    if (target.type.kind === "dyn") {
+      target = { kind: "libCall", fn: "bytes.argChk", args: [target, { kind: "strLit", value: "target", type: STRING, loc }], type: BYTES_U8, loc };
+    }
+    if (!(target.type.kind === "bytes" && target.type.elem === "u8")) target = u8Arg(0);
     const idx = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, F64));
     const receiver = L.lowerExpr(access.expression);
     return { kind: "bytesIntrinsic", method: "copy", receiver, args: [target, ...idx], type: F64, loc };
@@ -8455,6 +8461,10 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         list = { kind: "arrayLit", elems, type: arrayOf(BYTES_U8), loc };
       } else {
         list = L.lowerExpr(argNode);
+        // A checked-dynamic list (an `any[]` field of collected chunks):
+        // the validated exit into Buffer[], Node's own contract (every
+        // element a Buffer/Uint8Array).
+        if (list.type.kind === "dyn" && args.length === 1) return { kind: "libCall", fn: "buffer.concatDyn", args: [list], type: BYTES_U8, loc };
         if (!typeEquals(list.type, arrayOf(BYTES_U8))) {
           L.noLowering(
             `Buffer.concat of '${L.fmt(list.type)}' values`,
