@@ -13797,6 +13797,18 @@
     "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-function-with-added-properties.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8080-fs-callback-forms-read-readfile-mkdtemp.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8080-fs-callback-forms-read-readfile-mkdtemp.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8042-a-rest-parameter-arrow-const-read-from-a-function.js": {
+   "order": [
+    "<repo>/tests/corpus/8042-a-rest-parameter-arrow-const-read-from-a-function.js"
+   ],
+   "diags": []
   }
  }
 }
