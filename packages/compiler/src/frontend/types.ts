@@ -4860,6 +4860,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       if (pt === null && fromUncompiledCallableLiteral && (checker.getTypeOfSymbol(p).flags & ts.TypeFlags.Any) !== 0) {
         pt = DYN;
       }
+      // An UNTYPED parameter of authored JavaScript (no annotation, no
+      // JSDoc type: the checker's `any` is implicit, not a spelled hole).
+      // A compiled JS function with such a parameter already takes a
+      // checked-dynamic slot (implicitDefaultInstance), so the function
+      // TYPE of a value built from one (an object-literal method table
+      // a module exports) says the same thing instead of refusing.
+      if (pt === null && decl !== undefined && ts.isParameter(decl) && decl.type === undefined &&
+          (checker.getTypeOfSymbol(p).flags & ts.TypeFlags.Any) !== 0 &&
+          isJsSourceFile(decl.getSourceFile())) {
+        pt = DYN;
+      }
       // Belt and braces for non-strict type worlds: an optional param's
       // ABI slot is always the undefined-armed union (strictNullChecks
       // already spells it that way; arm it here if the world didn't).
