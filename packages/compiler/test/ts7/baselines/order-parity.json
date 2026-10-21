@@ -11229,6 +11229,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8105-regex-match-index-every-binding.ts": {
+   "order": [
+    "<repo>/tests/corpus/8105-regex-match-index-every-binding.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/820-multi-decl.ts": {
    "order": [
     "<repo>/tests/corpus/820-multi-decl.ts"

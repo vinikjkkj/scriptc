@@ -1510,6 +1510,10 @@ typedef struct ScrArr {
    * headers are allocated per history sync and they are monomorphic in the
    * 64-byte size class. See the note above scr_arr_grow. */
   uint8_t vmbacked;
+  /* 1 = this array is a regex match result whose `.index` lives in scr_regex.c's
+   * side table; scr_arr_release tells the table when the array dies. Rides the
+   * same padding as the two bytes above, so sizeof(ScrArr) is unchanged. */
+  uint8_t execidx;
   /* SCR_ELEM_REF only; NULL for every other element kind. elem_trace is
    * non-NULL exactly when the element type carries a cycle header: such
    * arrays are CYCLE-CAPABLE (an element can point back at the array that
@@ -1867,6 +1871,9 @@ ScrRegex *scr_regex_clone(ScrRegex *proto);
  * call by the .index binding. Never throws. */
 ScrArr *scr_regex_exec(ScrStr *s, ScrRegex *re);
 double scr_regex_last_exec_index(void);
+/* `.index` of a match result: the UTF-16 start recorded when exec/match/matchAll built the
+ * array (NaN for an array no regex built). Borrowed. */
+double scr_regex_index_of(ScrArr *m);
 double scr_regex_get_last_index(ScrRegex *re);
 void scr_regex_set_last_index(ScrRegex *re, double v);
 bool scr_regex_test(ScrRegex *re, ScrStr *s); /* /g or /y: stateful through lastIndex like exec */
@@ -8139,6 +8146,7 @@ void scr_weak_key_died(void *key);
  * dead there. scr_weak_new installs it; it is NULL until then, which is
  * also the state in which no key can carry the mark. */
 extern void (*scr_weak_died_hook)(void *key);
+extern void (*scr_arr_idx_died_hook)(void *arr);
 
 /* The per-kind key stamps, one per admitted key kind. Each lives with its
  * own type because each writes a field only that type has. */

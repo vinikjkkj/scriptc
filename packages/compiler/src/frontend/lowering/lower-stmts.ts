@@ -1590,40 +1590,8 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       const drained = lowerMatchAllDrainDecl(L, decl, isConst);
       if (drained) return drained;
       const lowered = L.lowerVarDecl(decl, isLet);
-      if (lowered && isConst && ts.isIdentifier(decl.name) && decl.initializer !== undefined) {
-        const idx = execIndexCompanion(L, decl, lowered);
-        if (idx) return [lowered, idx];
-      }
       return lowered ? [lowered] : [];
     }
-  }
-
-/** `const m = re.exec(s)` (a direct stdlib exec on a regex): the match start
-   * for `m.index`. Right after the declaration (no other statement can run
-   * between, so the runtime's last-exec slot is still this exec's), a hidden
-   * f64 local reads it. Null when the shape does not apply. */
-  function execIndexCompanion(L: Lowerer, decl: ts.VariableDeclaration, lowered: IrStmt): IrStmt | null {
-    if (!ts.isIdentifier(decl.name) || decl.initializer === undefined) return null;
-    let init: ts.Expression = decl.initializer;
-    while (ts.isParenthesizedExpression(init) || ts.isNonNullExpression(init)) init = init.expression;
-    if (!ts.isCallExpression(init) || !ts.isPropertyAccessExpression(init.expression)) return null;
-    if (init.expression.name.text !== "exec" || init.arguments.length !== 1) return null;
-    if (L.mapTypeOf(L.typeOf(init.expression.expression))?.kind !== "regex") return null;
-    if (!L.isStdlibMember(init.expression)) return null;
-    const sym = L.checker.getSymbolAtLocation(decl.name);
-    if (!sym || L.globalsBySymbol.has(sym) || L.tdzPredeclared.has(sym)) return null;
-    if (lowered.kind !== "varDecl") return null;
-    const loc = locOf(decl);
-    const local = L.declareHiddenLocal("%execidx", F64);
-    L.execIndexBindings.set(sym, { localId: local.id, ctx: L.ctx });
-    // The receiver of lastExecIndex is not read; an empty string stands in.
-    const dummy: IrExpr = { kind: "strLit", value: "", type: STRING, loc };
-    return {
-      kind: "varDecl",
-      localId: local.id,
-      init: { kind: "regexIntrinsic", method: "lastExecIndex", receiver: dummy, args: [], type: F64, loc },
-      loc,
-    };
   }
 
 /** The numeric indexed source of a built-in value-iterator expression:

@@ -14768,10 +14768,10 @@ class LlEmitter {
         B.line(`call void @scr_regex_set_last_index(ptr ${r.name}, double ${args[0]!.name})`);
         return { name: "", type: e.type };
       }
-      case "lastExecIndex": {
-        this.declare(`declare double @scr_regex_last_exec_index()`);
+      case "execIndexOf": {
+        this.declare(`declare double @scr_regex_index_of(ptr)`);
         const t = B.tmp();
-        B.line(`${t} = call double @scr_regex_last_exec_index()`);
+        B.line(`${t} = call double @scr_regex_index_of(ptr ${r.name})`);
         return { name: t, type: e.type };
       }
       case "source": {

@@ -414,6 +414,75 @@ bool scr_regex_test(ScrRegex *re, ScrStr *s) {
   return rc == 1;
 }
 
+/* ── the `.index` side table ──────────────────────────────────────────────
+ * A match result is a plain string[]; its `.index` is recorded here, keyed by
+ * the array's address, so it survives every binding form (module-level, field,
+ * element, return value). The array's `execidx` byte makes scr_arr_release
+ * call scr_regex_idx_died, so an address is never reused with a stale entry.
+ * Open addressing, linear probing, backward-shift deletion. */
+typedef struct { ScrArr *key; double idx; } ScrIdxEnt;
+static ScrIdxEnt *scr_idx_tab = NULL;
+static size_t scr_idx_cap = 0, scr_idx_n = 0;
+
+static size_t scr_idx_hash(const void *p) {
+  uintptr_t x = (uintptr_t)p;
+  x ^= x >> 17; x *= 0x9E3779B97F4A7C15ull; x ^= x >> 29;
+  return (size_t)x;
+}
+
+static void scr_idx_insert_raw(ScrArr *k, double v) {
+  size_t i = scr_idx_hash(k) & (scr_idx_cap - 1);
+  while (scr_idx_tab[i].key != NULL && scr_idx_tab[i].key != k) i = (i + 1) & (scr_idx_cap - 1);
+  if (scr_idx_tab[i].key == NULL) scr_idx_n++;
+  scr_idx_tab[i].key = k;
+  scr_idx_tab[i].idx = v;
+}
+
+static void scr_regex_idx_died(void *arr) {
+  if (scr_idx_cap == 0) return;
+  size_t i = scr_idx_hash(arr) & (scr_idx_cap - 1);
+  while (scr_idx_tab[i].key != NULL && scr_idx_tab[i].key != arr) i = (i + 1) & (scr_idx_cap - 1);
+  if (scr_idx_tab[i].key == NULL) return;
+  scr_idx_tab[i].key = NULL;
+  scr_idx_n--;
+  size_t j = (i + 1) & (scr_idx_cap - 1);
+  while (scr_idx_tab[j].key != NULL) { /* re-insert the cluster tail */
+    ScrArr *k = scr_idx_tab[j].key;
+    double v = scr_idx_tab[j].idx;
+    scr_idx_tab[j].key = NULL;
+    scr_idx_n--;
+    scr_idx_insert_raw(k, v);
+    j = (j + 1) & (scr_idx_cap - 1);
+  }
+}
+
+static void scr_regex_note_index(ScrArr *m, double idx) {
+  if (scr_idx_n * 2 >= scr_idx_cap) {
+    size_t ncap = scr_idx_cap ? scr_idx_cap * 2 : 64;
+    ScrIdxEnt *old = scr_idx_tab;
+    size_t ocap = scr_idx_cap;
+    scr_idx_tab = calloc(ncap, sizeof *scr_idx_tab);
+    if (!scr_idx_tab) scr_regex_oom();
+    scr_idx_cap = ncap;
+    scr_idx_n = 0;
+    for (size_t i = 0; i < ocap; i++) if (old[i].key) scr_idx_insert_raw(old[i].key, old[i].idx);
+    free(old);
+  }
+  scr_arr_idx_died_hook = scr_regex_idx_died;
+  m->execidx = 1;
+  scr_idx_insert_raw(m, idx);
+}
+
+double scr_regex_index_of(ScrArr *m) {
+  if (m == NULL || scr_idx_cap == 0) return NAN;
+  size_t i = scr_idx_hash(m) & (scr_idx_cap - 1);
+  while (scr_idx_tab[i].key != NULL) {
+    if (scr_idx_tab[i].key == m) return scr_idx_tab[i].idx;
+    i = (i + 1) & (scr_idx_cap - 1);
+  }
+  return NAN;
+}
+
 /* re.exec(s): the honest string[] slice of the match (match()'s rule:
  * nonparticipating captures are ""), or NULL. */
 ScrArr *scr_regex_exec(ScrStr *s, ScrRegex *re) {
@@ -436,6 +505,7 @@ ScrArr *scr_regex_exec(ScrStr *s, ScrRegex *re) {
             out, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
       }
     }
+    scr_regex_note_index(out, scr_last_exec_idx);
   }
   free(capture);
   free(u);
@@ -477,6 +547,7 @@ ScrArr *scr_regex_match(ScrStr *s, ScrRegex *re) {
             out, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
       }
     }
+    scr_regex_note_index(out, (double)((capture[0] - ubase) >> 1));
   }
   free(capture);
   free(u);
@@ -543,6 +614,7 @@ static ScrArr *scr_regex_match_all_core(ScrStr *s, ScrRegex *re, ScrArr *indices
             row, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
       }
     }
+    scr_regex_note_index(row, (double)start);
     scr_arr_push_ref(out, row);
     if (indices != NULL) scr_arr_push_f64(indices, (double)start);
     pos = end == start ? scr_advance(u, len, end, unicode) : end;

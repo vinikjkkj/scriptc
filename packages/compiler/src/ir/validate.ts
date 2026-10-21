@@ -68,7 +68,7 @@ export const REGEX_INTRINSIC_SIGS: Record<
   exec: { receiver: STRING, argTypes: [REGEX], result: VOID },
   lastIndex: { receiver: REGEX, argTypes: [], result: F64 },
   setLastIndex: { receiver: REGEX, argTypes: [F64], result: VOID },
-  lastExecIndex: { receiver: STRING, argTypes: [], result: F64 },
+  execIndexOf: { receiver: arrayOf(STRING), argTypes: [], result: F64 },
   matchAll: { receiver: STRING, argTypes: [REGEX], result: arrayOf(arrayOf(STRING)) },
   matchAllInto: { receiver: STRING, argTypes: [REGEX, arrayOf(F64)], result: arrayOf(arrayOf(STRING)) },
   search: { receiver: STRING, argTypes: [REGEX], result: F64 },

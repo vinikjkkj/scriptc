@@ -2473,16 +2473,23 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           loc,
         };
       }
-      // `m.index` on a const-stored `re.exec(s)` result reads the hidden
-      // local the declaration filled from scr_regex_last_exec_index right
-      // after the exec (same function only: hidden locals do not cross
-      // closure boundaries). A non-null narrowing is the only way to reach
-      // the read, so the stored value is a real match start.
-      if (expr.name.text === "index" && !expr.questionDotToken && ts.isIdentifier(expr.expression)) {
-        const esym = L.checker.getSymbolAtLocation(expr.expression);
-        const eb = esym !== undefined ? L.execIndexBindings.get(esym) : undefined;
-        if (eb !== undefined && eb.ctx === L.ctx) {
-          return { kind: "varRef", localId: eb.localId, type: F64, loc };
+      // `m.index` on ANY expression typed RegExpExecArray / RegExpMatchArray
+      // (module-level, field, element, returned value, parameter): the match
+      // start the runtime recorded against the result array when exec/match/
+      // matchAll built it (scr_regex_index_of). The binding form is irrelevant:
+      // the array's identity carries it.
+      if (expr.name.text === "index" && !expr.questionDotToken) {
+        const msym = L.typeOf(expr.expression).getSymbol();
+        if (msym !== undefined && (msym.name === "RegExpExecArray" || msym.name === "RegExpMatchArray") &&
+            L.isStdlibSymbol(msym)) {
+          return {
+            kind: "regexIntrinsic",
+            method: "execIndexOf",
+            receiver: L.lowerExpr(expr.expression),
+            args: [],
+            type: F64,
+            loc,
+          };
         }
       }
       // `m.index` on a for-of-over-matchAll binding reads the companion-
