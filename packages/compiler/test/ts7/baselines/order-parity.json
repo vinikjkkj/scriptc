@@ -14590,6 +14590,18 @@
     "<repo>/tests/corpus/8403-compound-assignment-and-increment-on-static-fields.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8404-an-initializer-less-static-reads-undefined-until-its-first-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/8404-an-initializer-less-static-reads-undefined-until-its-first-write.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8405-a-let-read-by-a-closure-before-its-assignment-is-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/8405-a-let-read-by-a-closure-before-its-assignment-is-undefined.ts"
+   ],
+   "diags": []
   }
  }
 }
