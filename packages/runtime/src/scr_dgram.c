@@ -1113,11 +1113,72 @@ static uint32_t scr_dgram_to_u32(const ScrDyn *v) {
 static const char SCR_DGRAM_BUF_EXPECTED[] =
     "of type string or an instance of Buffer, TypedArray, or DataView";
 
-void scr_dgram_send_chk(ScrDgramSocket *s, const ScrDyn *buffer, const ScrDyn *a1,
-                        const ScrDyn *a2, const ScrDyn *a3, const ScrDyn *a4,
-                        const ScrStr *fence) {
+/* The completion callback of send(): Node calls it once the datagram left
+ * (err null, the byte count), one loop turn after the call returns. */
+static void scr_dgram_send_cb_fire(ScrClosure *self) {
+  ScrDyn *cb = scr_box_get_ref(self->caps[0]);
+  ScrDyn *n = scr_box_get_ref(self->caps[1]);
+  ScrDyn *args[2] = {scr_dyn_new_null(), n};
+  ScrDyn *r = scr_dyn_call(cb, args, 2, "the dgram send callback");
+  if (r != NULL) scr_dyn_release(r);
+  scr_dyn_release(args[0]);
+  scr_dyn_release(cb);
+  scr_dyn_release(n);
+}
+
+static void scr_dgram_schedule_send_cb(const ScrDyn *cb, size_t nbytes) {
+  ScrClosure *clo = scr_closure_new((void *)scr_dgram_send_cb_fire, 2);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], scr_dyn_retain((ScrDyn *)cb));
+  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[1], scr_dyn_new_num((double)nbytes));
+  /* libuv queues the completion of a send that went out synchronously onto
+   * its pending list, run at the head of the next loop pass: before that
+   * pass polls (and reads the datagrams the send produced) and before any
+   * timer. The tick queue is the slot of this loop that precedes all of
+   * them; it differs from Node only against promise jobs queued in the same
+   * turn (ticks run first here). */
+  scr_next_tick(clo);
+}
+
+/* The bytes of one send(): a string's UTF-8, a view's window, or a LIST
+ * concatenated element by element (Buffer.concat's order). Caller frees. */
+static char *scr_dgram_gather(const ScrDyn *buffer, bool sliced, size_t off, size_t len, size_t *out_len) {
+  if (buffer->kind == SCR_DYN_ARR) {
+    size_t total = 0;
+    for (size_t i = 0; i < buffer->v.arr.len; i++) {
+      const ScrDyn *e = buffer->v.arr.items[i];
+      total += e->kind == SCR_DYN_STR ? e->v.str->len : (size_t)scr_bytes_byte_len(e->v.bytes);
+    }
+    char *out = malloc(total ? total : 1);
+    if (!out) scr_trap("scriptc: out of memory\n");
+    size_t at = 0;
+    for (size_t i = 0; i < buffer->v.arr.len; i++) {
+      const ScrDyn *e = buffer->v.arr.items[i];
+      size_t n = e->kind == SCR_DYN_STR ? e->v.str->len : (size_t)scr_bytes_byte_len(e->v.bytes);
+      memcpy(out + at, e->kind == SCR_DYN_STR ? (const void *)e->v.str->data : (const void *)e->v.bytes->data, n);
+      at += n;
+    }
+    *out_len = total;
+    return out;
+  }
+  const char *data = buffer->kind == SCR_DYN_STR ? buffer->v.str->data : (const char *)buffer->v.bytes->data;
+  size_t datalen = buffer->kind == SCR_DYN_STR ? buffer->v.str->len : (size_t)scr_bytes_byte_len(buffer->v.bytes);
+  if (sliced) {
+    data += off;
+    datalen = len;
+  }
+  char *out = malloc(datalen ? datalen : 1);
+  if (!out) scr_trap("scriptc: out of memory\n");
+  memcpy(out, data, datalen);
+  *out_len = datalen;
+  return out;
+}
+
+void scr_dgram_send_dyn(ScrDgramSocket *s, const ScrDyn *buffer, const ScrDyn *a1,
+                        const ScrDyn *a2, const ScrDyn *a3, const ScrDyn *a4, const ScrDyn *a5) {
   const ScrDyn *offset = a1, *length = a2, *port = a3, *address = a4;
-  const ScrDyn *callback = scr_dyn_undefined();
+  const ScrDyn *callback = a5;
   bool connected = s->connected;
   bool sliced = false;
   if (!connected) {
@@ -1132,7 +1193,10 @@ void scr_dgram_send_chk(ScrDgramSocket *s, const ScrDyn *buffer, const ScrDyn *a
   } else {
     if (length->kind == SCR_DYN_NUM) {
       sliced = true;
-      if (port->kind == SCR_DYN_FUNC) callback = port;
+      if (port->kind == SCR_DYN_FUNC) {
+        callback = port;
+        port = scr_dyn_undefined(); /* Node: `port = null` */
+      }
     } else {
       callback = offset;
       port = a3;
@@ -1179,7 +1243,11 @@ void scr_dgram_send_chk(ScrDgramSocket *s, const ScrDyn *buffer, const ScrDyn *a
       scr_dgram_throw("Already connected");
       return;
     }
-    scr_throw_lowering_fence(fence); /* connected sends have no lowering yet */
+    size_t n;
+    char *data = scr_dgram_gather(buffer, sliced, slice_off, slice_len, &n);
+    scr_dgram_send_conn_raw(s, data, n);
+    free(data);
+    if (!scr_exc_pending() && callback->kind == SCR_DYN_FUNC) scr_dgram_schedule_send_cb(callback, n);
     return;
   }
   /* validatePort(port, 'Port', false): integers (or numeric strings)
@@ -1218,22 +1286,12 @@ void scr_dgram_send_chk(ScrDgramSocket *s, const ScrDyn *buffer, const ScrDyn *a
     scr_dyn_arg_type_fail("address", "of type string", address);
     return;
   }
-  if (callback->kind == SCR_DYN_FUNC || buffer->kind == SCR_DYN_ARR) {
-    /* completion callbacks and list concatenation have no lowering yet —
-     * refuse loudly after the full validation ladder, never drop */
-    scr_throw_lowering_fence(fence);
-    return;
-  }
-  const char *data = buffer->kind == SCR_DYN_STR ? buffer->v.str->data
-                                                 : (const char *)buffer->v.bytes->data;
-  size_t datalen = buffer->kind == SCR_DYN_STR ? buffer->v.str->len
-                                               : (size_t)scr_bytes_byte_len(buffer->v.bytes);
-  if (sliced) {
-    data += slice_off;
-    datalen = slice_len;
-  }
+  size_t n;
+  char *data = scr_dgram_gather(buffer, sliced, slice_off, slice_len, &n);
   ScrStr *host = address->kind == SCR_DYN_STR ? scr_str_retain(address->v.str)
                                               : scr_str_new("127.0.0.1", 9);
-  scr_dgram_send_raw(s, data, datalen, portnum, host);
+  scr_dgram_send_raw(s, data, n, portnum, host);
   scr_str_release(host);
+  free(data);
+  if (!scr_exc_pending() && callback->kind == SCR_DYN_FUNC) scr_dgram_schedule_send_cb(callback, n);
 }

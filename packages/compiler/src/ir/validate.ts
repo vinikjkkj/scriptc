@@ -577,6 +577,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dgram.sendBytes": { argTypes: [DGRAMSOCK_T, BYTES_U8, F64, STRING], result: VOID },
   "dgram.sendConnStr": { argTypes: [DGRAMSOCK_T, STRING], result: VOID },
   "dgram.sendConnBytes": { argTypes: [DGRAMSOCK_T, BYTES_U8], result: VOID },
+  "dgram.sendDyn": { argTypes: [DGRAMSOCK_T, DYN, DYN, DYN, DYN, DYN, DYN], result: VOID },
   "wrtc.newPeer": { argTypes: [], result: RTCPEERCONNECTION_T },
   "wrtc.pcSignalingState": { argTypes: [RTCPEERCONNECTION_T], result: STRING },
   "wrtc.pcIceConnectionState": { argTypes: [RTCPEERCONNECTION_T], result: STRING },
