@@ -418,6 +418,9 @@ const LIB_FN_SYMS: Record<string, string> = {
   "date.getUTCMinutes": "scr_date_utc_minutes",
   "date.getUTCSeconds": "scr_date_utc_seconds",
   "date.getUTCMilliseconds": "scr_date_utc_ms",
+  "date.getUTCDay": "scr_date_utc_day",
+  "date.localTime": "scr_date_local_time",
+  "date.tzOffset": "scr_date_tz_offset",
   "fs.existsSync": "scr_fs_exists",
   // ── the throwing slice (MAY_THROW_LIB_FNS members): the generic path
   // emits the standard pending check after each — emit-exprs.ts's finish.

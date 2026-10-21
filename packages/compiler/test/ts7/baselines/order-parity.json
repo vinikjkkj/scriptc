@@ -11049,6 +11049,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7840-date-local-getters.ts": {
+   "order": [
+    "<repo>/tests/corpus/7840-date-local-getters.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
