@@ -1555,6 +1555,8 @@ export class Lowerer {
    * idxs[cur] — computed only at an actual read, so a drain row is never
    * touched for bodies that ignore it). */
   readonly matchAllIndexBindings = new Map<ts.Symbol, { idxsLocalId: string; curLocalId: string }>();
+  /** const-stored `re.exec(s)` results -> the hidden f64 local holding the match start (`.index`). */
+  readonly execIndexBindings = new Map<ts.Symbol, { localId: string; ctx: FnCtx }>();
   /** STORED matchAll drains: `const rows = s.matchAll(re)` lowers through
    * matchAllInto with a hidden companion index array, registered here so a
    * later `for (const m of rows)` in the SAME function serves `m.index`
