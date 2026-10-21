@@ -3456,6 +3456,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return scr_dyn_new_promise_adapting(v, &${promiseDynAdapterHelper(E, t.inner)});`);
         break;
       }
+      case "func":
+        // A function ELEMENT of an array or index-signature value (a
+        // `Function[]`, a record of closures): the same checked-dynamic
+        // function box a record field or union arm gets. Only a signature
+        // canBoxFuncIntoDyn admits reaches here (canConvertToDyn's array
+        // and index-value rules ask), so the box is callable, not stranded.
+        d.push(`  return ${dynFuncBoxHelper(E, t)}(v, NULL, NULL);`);
+        break;
       default: {
         // Runtime HANDLE kinds box by REFERENCE (identity — no copy):
         // scr_dyn_new_handle retains the borrowed operand through the
