@@ -8551,6 +8551,54 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
               type: DATE_T, loc,
             };
           }
+          // A checked-dynamic argument (`new Date(str)` over a decoder's
+          // `any` result): the ToPrimitive ladder at run time -- number is
+          // the time value, string parses, undefined is NaN, null is 0,
+          // boolean is 1/0, and an object or array takes its ToString.
+          if (a.type.kind === "dyn") {
+            const key = "dateFromDyn";
+            let name = L.arrHofHelpers.get(key);
+            if (name === undefined) {
+              name = `%date.fromDyn.${L.arrHofHelpers.size}`;
+              L.arrHofHelpers.set(key, name);
+              const dv = (): IrExpr => ({ kind: "varRef", localId: "v.0", type: DYN, loc });
+              const test = (t: "number" | "string" | "undefined" | "null" | "boolean"): IrExpr => ({ kind: "dynTest", test: t, value: dv(), type: BOOL, loc });
+              const ms = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+              const make = (arg: IrExpr): IrStmt => ({ kind: "return", value: { kind: "libCall", fn: "date.new", args: [arg], type: DATE_T, loc }, loc });
+              L.liftedFns.push({
+                name,
+                params: [{ localId: "v.0", name: "v", type: DYN }],
+                returnType: DATE_T,
+                locals: [{ id: "v.0", name: "v", type: DYN, mutable: false }],
+                body: [
+                  { kind: "if", cond: test("number"), then: [make({ kind: "dynCheck", value: dv(), type: F64, loc })], else_: null, loc },
+                  {
+                    kind: "if", cond: test("string"),
+                    then: [{ kind: "return", value: { kind: "libCall", fn: "date.newStr", args: [{ kind: "dynCheck", value: dv(), type: STRING, loc }], type: DATE_T, loc }, loc }],
+                    else_: null, loc,
+                  },
+                  { kind: "if", cond: test("undefined"), then: [make(ms(NaN))], else_: null, loc },
+                  { kind: "if", cond: test("null"), then: [make(ms(0))], else_: null, loc },
+                  {
+                    kind: "if", cond: test("boolean"),
+                    then: [make({ kind: "ternary", cond: { kind: "dynCheck", value: dv(), type: BOOL, loc }, then: ms(1), else_: ms(0), type: F64, loc })],
+                    else_: null, loc,
+                  },
+                  {
+                    kind: "return",
+                    value: {
+                      kind: "libCall", fn: "date.newStr",
+                      args: [{ kind: "libCall", fn: "dyn.toStringCoerce", args: [dv()], type: STRING, loc }],
+                      type: DATE_T, loc,
+                    },
+                    loc,
+                  },
+                ],
+                loc,
+              });
+            }
+            return { kind: "call", callee: name, args: [a], type: DATE_T, loc };
+          }
           L.noLowering(
             `new Date of '${L.fmt(a.type)}' values`,
             dateArgs[0]!,

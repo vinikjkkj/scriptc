@@ -11288,6 +11288,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8225-timer-and-date-over-unknown.js": {
+   "order": [
+    "<repo>/tests/corpus/8225-timer-and-date-over-unknown.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
