@@ -3,10 +3,10 @@
 // `!`-asserted field assigned past the constructor's top level now DEFERS
 // instead of fencing — the slot rides `T | undefined` and reads extract
 // the declared type (corpus 2429; SEMANTICS.md 372) — so `Lazy` compiles.
-// The deferral needs a single-arm declared type the undefined-armed union
-// can carry: a UNION-typed `!` field (the extraction would need a
-// sub-union re-tag) and a MAP-typed one (map arms cannot join a union)
-// keep the fence.
+// A UNION-typed `!` field now defers too (corpus 7815): the slot is the
+// declared union plus an undefined arm, and a read re-tags back to the
+// declared union at its consumer. A MAP-typed one (map arms cannot join a
+// union) keeps the fence.
 
 class Lazy {
   path!: string; // compiles: deferred init — reads checked-extract
@@ -23,7 +23,7 @@ class Eager {
 }
 
 class UnionLazy {
-  mode!: string | null; // fenced: union-typed `!` fields have no deferral
+  mode!: string | null; // compiles: the slot is `string | null | undefined`
   init(): void {
     this.mode = null;
   }
