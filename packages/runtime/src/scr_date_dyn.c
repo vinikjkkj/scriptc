@@ -17,6 +17,74 @@ enum {
   SCR_DSET_UTC_MONTH, SCR_DSET_UTC_YEAR, SCR_DSET_TIME, SCR_DSET_YEAR2
 };
 
+/* toLocale{,Date,Time}String(locales, options) on a dynamic receiver: the dynamic values become the same
+ * string/option-bag the static lowering builds, and scr_date_format_opts (scr_date_intl.c) does the rest.
+ * undefined options are absent; a number, string or boolean options argument has no own keys (ToObject). */
+static ScrDyn *scr_date_dynh_locale_format(double ms, int kind, ScrDyn *const *args, size_t argc) {
+  static const char *const keys[] = {"localeMatcher", "calendar", "numberingSystem", "hour12", "hourCycle",
+                                     "timeZone", "weekday", "era", "year", "month", "day", "dayPeriod", "hour",
+                                     "minute", "second", "fractionalSecondDigits", "timeZoneName",
+                                     "formatMatcher", "dateStyle", "timeStyle", NULL};
+  ScrStr *locale = NULL;
+  if (argc > 0 && args[0]->kind != SCR_DYN_UNDEF) {
+    const ScrDyn *l = args[0];
+    ScrDyn *elem = NULL; /* scr_dyn_arr_at answers +1 */
+    if (l->kind == SCR_DYN_ARR) {
+      double n = scr_dyn_arr_len(l);
+      if (n == 0) l = NULL;
+      else if (n == 1) l = elem = scr_dyn_arr_at(l, 0);
+      else {
+        scr_throw_error_msg(SCR_ERR_ERROR, "toLocaleString with several locales on a dynamic value is not supported yet", 71);
+        return NULL;
+      }
+    }
+    if (l != NULL) {
+      if (l->kind != SCR_DYN_STR) {
+        if (elem) scr_dyn_release(elem);
+        scr_throw_error_msg(SCR_ERR_TYPE, "Incorrect locale information provided", 37);
+        return NULL;
+      }
+      locale = scr_str_retain(l->v.str);
+    }
+    if (elem) scr_dyn_release(elem);
+  }
+  ScrArr *kv = scr_arr_new(SCR_ELEM_STR, 16);
+  const ScrDyn *opts = argc > 1 ? args[1] : NULL;
+  if (opts != NULL && opts->kind == SCR_DYN_NULL) {
+    scr_arr_release(kv);
+    if (locale) scr_str_release(locale);
+    static const char *const names[] = {"Date.prototype.toLocaleString", "Date.prototype.toLocaleDateString", "Date.prototype.toLocaleTimeString"};
+    char msg[160];
+    int n = snprintf(msg, sizeof msg, "%s called on null or undefined", names[kind - 4]);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+    return NULL;
+  }
+  if (opts != NULL && opts->kind == SCR_DYN_OBJ) {
+    for (size_t i = 0; keys[i]; i++) {
+      const ScrDyn *v = scr_dyn_obj_get(opts, keys[i], strlen(keys[i]));
+      if (v == NULL || v->kind == SCR_DYN_UNDEF) continue;
+      ScrStr *s;
+      if (strcmp(keys[i], "hour12") == 0) s = scr_str_new(scr_dyn_truthy(v) ? "true" : "false", scr_dyn_truthy(v) ? 4 : 5);
+      else if (strcmp(keys[i], "fractionalSecondDigits") == 0) {
+        char nb[40];
+        double d = scr_dyn_to_number(v);
+        int n = d != d ? snprintf(nb, sizeof nb, "NaN") : snprintf(nb, sizeof nb, "%.17g", d);
+        s = scr_str_new(nb, (size_t)n);
+      } else s = scr_dyn_string_coerce_js(v);
+      if (s == NULL) { scr_arr_release(kv); if (locale) scr_str_release(locale); return NULL; }
+      scr_arr_push_ref(kv, scr_str_new(keys[i], strlen(keys[i])));
+      scr_arr_push_ref(kv, s);
+    }
+  }
+  ScrStr *r = scr_date_format_opts(ms, (double)kind, locale, kv);
+  scr_arr_release(kv);
+  if (locale) scr_str_release(locale);
+  if (r == NULL) return NULL;
+  ScrDyn *out = scr_dyn_new_str(r);
+  scr_str_release(r);
+  return out;
+}
+
 /* ── the checked-dynamic Date handle (SCR_DYNH_DATE) ────────────────────
  * A Date crosses into the checked-dynamic tree BY REFERENCE: the box
  * retains the ScrDate, identity is the handle, and the setters mutate it in place,
@@ -92,12 +160,7 @@ static ScrDyn *scr_date_dynh_invoke(void *h, ScrDyn *self, const char *method, S
     };
     for (size_t i = 0; i < sizeof fmts / sizeof fmts[0]; i++) {
       if (strcmp(method, fmts[i].name) != 0) continue;
-      if (fmts[i].locale && argc > 0) {
-        char msg[200];
-        int n = snprintf(msg, sizeof msg, "'Date.prototype.%s' with locale or options arguments on a dynamic value is not supported yet", method);
-        scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)n);
-        return NULL;
-      }
+      if (fmts[i].locale && argc > 0) return scr_date_dynh_locale_format(ms, fmts[i].kind, args, argc);
       ScrStr *s = scr_date_format(ms, (double)fmts[i].kind);
       ScrDyn *r = scr_dyn_new_str(s);
       scr_str_release(s);
