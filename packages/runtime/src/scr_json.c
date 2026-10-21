@@ -3504,10 +3504,13 @@ static const char *scr_dyn_typeof_native(const ScrDyn *d) {
   case SCR_DYN_ARR:
   case SCR_DYN_BYTES:
   case SCR_DYN_ARRBUF:
-  case SCR_DYN_HANDLE:
   case SCR_DYN_OBJINST:
   case SCR_DYN_MAP:
   case SCR_DYN_PROMISE: return "object";
+  case SCR_DYN_HANDLE:
+    /* A boxed Symbol is a PRIMITIVE: typeof answers "symbol". Every other
+     * handle (a Date included) is an object. */
+    return d->v.handle.tag == SCR_DYNH_SYMBOL ? "symbol" : "object";
   case SCR_DYN_BOOL: return "boolean";
   case SCR_DYN_NUM: return "number";
   case SCR_DYN_STR: return "string";
@@ -3734,8 +3737,46 @@ static ScrDyn *scr_dyn_json_tojson(const ScrDyn *d, const char *key, size_t key_
  * that drops an object member and prints null in an array slot? Decided
  * from the KIND alone, so the answer is available BEFORE anything is
  * written and the two walkers below need no speculative buffer. */
+bool scr_dyn_is_symbol(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_HANDLE && d->v.handle.tag == SCR_DYNH_SYMBOL;
+}
+
+/* String(sym): SymbolDescriptiveString, "Symbol(desc)". Asked of the tag's own
+ * ops (scr_symbol.c answers; this always-linked unit names no symbol entry
+ * point). +1; the receiver must satisfy scr_dyn_is_symbol. */
+ScrStr *scr_dyn_symbol_descriptive(const ScrDyn *d) {
+  const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
+  ScrDyn *r = ops->invoke(d->v.handle.ptr, (ScrDyn *)d, "toString", NULL, 0, "toString");
+  if (r == NULL) return scr_str_new("", 0);
+  ScrStr *s = r->kind == SCR_DYN_STR ? scr_str_retain(r->v.str) : scr_str_new("", 0);
+  scr_dyn_release(r);
+  return s;
+}
+
+/* String(unknown): a Symbol answers its descriptive string (the one ToString
+ * spelling that does not throw for it), everything else is `walker`'s answer. */
+ScrStr *scr_dyn_string_explicit(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn *)) {
+  if (scr_dyn_is_symbol(d)) return scr_dyn_symbol_descriptive(d);
+  return walker(d);
+}
+
+/* A template literal's ToString of an unknown span: a Symbol throws, everything
+ * else is the per-program String(unknown) walker's answer. */
+ScrStr *scr_dyn_template_to_string(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn *)) {
+  if (scr_dyn_is_symbol(d)) {
+    static const char msg[] = "Cannot convert a Symbol value to a string";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return scr_str_new("", 0);
+  }
+  return walker(d);
+}
+
+/* Is this dyn value ABSENT under stringify — the undefined/function/symbol rule
+ * that drops an object member and prints null in an array slot? A Symbol
+ * serializes like undefined (JSON.stringify(Symbol()) is undefined, an object
+ * member holding one is dropped, an array slot prints null). */
 static bool scr_dyn_json_absent(const ScrDyn *d) {
-  return d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_FUNC ||
+  return d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_FUNC || scr_dyn_is_symbol(d) ||
          (d->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(d, "function"));
 }
 
@@ -3952,6 +3993,8 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
     return true;
   }
   case SCR_DYN_HANDLE:
+    if (scr_dyn_is_symbol(d)) return false; /* absent, like undefined */
+    /* fall through */
   default: {
     const char *msg = "JSON.stringify of a runtime handle is not supported yet";
     scr_throw_error_msg(SCR_ERR_ERROR, msg, strlen(msg));
@@ -4606,6 +4649,14 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
      * differs asks its ops: routing the whole set through invoke would
      * change the I/O tags, whose invoke has no toString arm to answer
      * with, into a "not a function" throw. */
+    if (d->v.handle.tag == SCR_DYNH_SYMBOL) {
+      /* ToString of a Symbol is a TypeError: `"" + sym`, a template literal,
+       * an array join all land here. Only the EXPLICIT String(sym) answers
+       * "Symbol(desc)", and it goes through scr_dyn_symbol_descriptive. */
+      static const char msg[] = "Cannot convert a Symbol value to a string";
+      scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+      return scr_str_new("", 0);
+    }
     if (d->v.handle.tag == SCR_DYNH_REGEX || d->v.handle.tag == SCR_DYNH_DATE) {
       const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
       ScrDyn *r = ops->invoke(d->v.handle.ptr, (ScrDyn *)d, "toString", NULL, 0, "toString");
@@ -6389,6 +6440,10 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
     scr_jb_puts(b, "{}");
     return;
   case SCR_DYN_HANDLE: {
+    if (scr_dyn_is_symbol(d)) { /* an array slot or a bare value: like undefined */
+      scr_jb_puts(b, "null");
+      return;
+    }
     /* Node's JSON.stringify over these classes throws the circular-
      * structure TypeError with a V8 path dump we cannot reproduce —
      * fence loudly instead of a silent-wrong shape (SEMANTICS.md). */

@@ -824,9 +824,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // because it is a different conversion, not a variant of this
           // one. It answers NULL rather than a dummy on a throw, so the
           // temp is the pending-check's own value either way.
+          // The two spellings that differ ONLY for a Symbol: `${u}` throws
+          // (ToString), String(u) answers "Symbol(desc)".
           const call = e.hint === "default"
             ? `scr_dyn_to_primitive_string(${v.name})`
-            : `${E.dynToStrHelper()}(${v.name})`;
+            : e.hint === "template"
+              ? `scr_dyn_template_to_string(${v.name}, ${E.dynToStrHelper()})`
+              : `scr_dyn_string_explicit(${v.name}, ${E.dynToStrHelper()})`;
           const t = E.newTemp(e.type, call);
           E.emitPendingCheck();
           return t;
