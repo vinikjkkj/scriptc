@@ -2243,7 +2243,12 @@ export const TEXT_DRIFT_TOLERANCE = 256;
  * touched: regex.test.ts checks this anchor first and masks the regex one, so
  * the regex figure has not been seen. INFERRED to move by the same -320 (same
  * always-linked object); re-record it from the next Windows run if it fails. */
-export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 544_022 : null;
+/* RE-RECORDED 2026-10-21 for the composed tree (main + sqlesc): 544,022 ->
+ * 544,406, MEASURED by the Windows lane of CI run 39629571866 ("the static
+ * hello-world .text GREW by 384 bytes: 544406 against the recorded 544022").
+ * sqlesc adds +64 to the static text, hidden by the tolerance when it was
+ * measured alone. */
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 544_406 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
