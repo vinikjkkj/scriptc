@@ -2587,7 +2587,24 @@ const char *scr_dyn_inspect_lite(const ScrDyn *v, char *buf, size_t cap) {
   }
   case SCR_DYN_ARR: return "[ ... ]";
   case SCR_DYN_OBJ: return "{ ... }";
-  case SCR_DYN_BYTES: return "<Buffer ...>";
+  case SCR_DYN_BYTES: {
+    const ScrBytes *b = v->v.bytes;
+    if (b->flavor == SCR_BF_BUFFER && b->elem == SCR_BYTES_U8) {
+      /* util.inspect's Buffer: lower-case hex pairs, at most 50, then the
+       * "... N more bytes" tail (singular for one). */
+      size_t n = 0;
+      n += (size_t)snprintf(buf + n, cap - n, "<Buffer ");
+      size_t shown = b->len < 50 ? b->len : 50;
+      for (size_t i = 0; i < shown && n + 4 < cap; i++) n += (size_t)snprintf(buf + n, cap - n, i == 0 ? "%02x" : " %02x", b->data[i]);
+      if (b->len > 50 && n + 32 < cap) {
+        size_t more = b->len - 50;
+        n += (size_t)snprintf(buf + n, cap - n, " ... %zu more byte%s", more, more == 1 ? "" : "s");
+      }
+      snprintf(buf + n, cap - n, ">");
+      return buf;
+    }
+    return "<Buffer ...>";
+  }
   case SCR_DYN_BIG: {
     /* util.inspect KEEPS the suffix where String() drops it — 5n. */
     ScrStr *s = scr_dyn_big_ops()->to_str(v->v.big, 10);
@@ -2604,9 +2621,9 @@ const char *scr_dyn_inspect_lite(const ScrDyn *v, char *buf, size_t cap) {
  * errors.js (a dotted name is a property path). `reason` defaults to
  * "is invalid" when NULL. TypeError, like Node's default. */
 void scr_dyn_arg_value_fail(const char *name, const char *reason, const ScrDyn *got) {
-  char insp[64];
+  char insp[320];
   const char *d = scr_dyn_inspect_lite(got, insp, sizeof insp);
-  char msg[256];
+  char msg[512];
   int len = snprintf(msg, sizeof msg, "The %s '%s' %s. Received %s",
                      strchr(name, '.') != NULL ? "property" : "argument", name,
                      reason != NULL ? reason : "is invalid", d);

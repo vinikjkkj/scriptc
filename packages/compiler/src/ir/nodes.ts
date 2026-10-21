@@ -4632,6 +4632,17 @@ export type IrLibFn =
    * non-APPLE answers Node's not-a-function / ERR_METHOD_NOT_IMPLEMENTED
    * shapes). May-throw seeds, all of them. */
   | "fs.existsChk"
+  /** The callback fs forms and mkdtempSync's option form over dyn arguments
+   * (lib/fs.js argument order; the operation runs one loop turn later for
+   * the callback forms): readFile(path, opts, cb), mkdtemp(prefix, opts, cb),
+   * read(fd, buf, a2, a3, a4, a5, argc), lchmod(path, mode, cb) — all answer
+   * the dyn undefined — and mkdtempSync(prefix, opts) answering the path in
+   * the requested encoding. May-throw seeds. */
+  | "fs.readFileCb"
+  | "fs.mkdtempCb"
+  | "fs.mkdtempSyncOpts"
+  | "fs.readCb"
+  | "fs.lchmodCb"
   | "fs.lchmodSyncChk"
   | "fsp.lchmodChk"
   /** The compiler-resolved ERR_INVALID_ARG_TYPE throw with a RUNTIME-
@@ -11493,6 +11504,10 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   // its fire rides the timer queue (scr_bytes_io.c), which library links
   // exclude — refuse the surface like the rest of the event-loop family.
   ["fs.existsChk", "the async fs callback surface (fs.exists)"],
+  ["fs.readFileCb", "the async fs callback surface (fs.readFile)"],
+  ["fs.mkdtempCb", "the async fs callback surface (fs.mkdtemp)"],
+  ["fs.readCb", "the async fs callback surface (fs.read)"],
+  ["fs.lchmodCb", "the async fs callback surface (fs.lchmod)"],
   // randomFill's callback rides the check phase (scr_random_fill.c), which
   // library links exclude with the rest of the loop — refuse the surface
   // by name instead of owing the embedder scr_set_immediate.
@@ -12198,6 +12213,11 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "buffer.newStringFail",
   "fs.toUnixTimestamp",
   "fs.existsChk",
+  "fs.readFileCb",
+  "fs.mkdtempCb",
+  "fs.mkdtempSyncOpts",
+  "fs.readCb",
+  "fs.lchmodCb",
   "fs.lchmodSyncChk",
   "fsp.lchmodChk",
   "net.connectAttempt",

@@ -3867,6 +3867,8 @@ ScrStr *scr_path_win32_to_namespaced_path(ScrStr *path);
  * The pair behind spawn's fd-stdio form. */
 double scr_fs_open(ScrStr *path, ScrStr *flags);
 double scr_fs_read_sync(double fd, ScrBytes *buf, double offset, double length);
+/* fs.read's positioned read (position < 0: from the current position). */
+double scr_fs_read_at(double fd, ScrBytes *buf, double offset, double length, double position);
 void scr_fs_close(double fd);
 
 /* The fs error SHAPE, shared with the link-gated fs streams. An fs stream
@@ -8730,16 +8732,17 @@ double scr_fs_to_unix_timestamp(const ScrDyn *t);
  * lchmodSync) or the compiler-rendered fence. All borrowed; the Chk
  * forms without results always leave an exception pending. */
 ScrDyn *scr_fs_exists_async(const ScrDyn *path, const ScrDyn *cb);
-void scr_fs_mkdtemp_chk(const ScrDyn *prefix, const ScrDyn *cb, const ScrStr *fence);
-ScrStr *scr_fs_mkdtemp_sync_chk(const ScrDyn *prefix, const ScrDyn *opts, const ScrStr *fence);
-void scr_fs_read_file_chk(const ScrDyn *path, const ScrDyn *opts, const ScrDyn *cb, const ScrStr *fence);
+/* The callback fs forms (lib/fs.js argument order; the operation runs one loop turn later) */
+ScrDyn *scr_fs_read_file_cb(const ScrDyn *path, const ScrDyn *opts, const ScrDyn *cb);
+ScrDyn *scr_fs_mkdtemp_cb(const ScrDyn *prefix, const ScrDyn *opts, const ScrDyn *cb);
+ScrDyn *scr_fs_mkdtemp_sync_opts(const ScrDyn *prefix, const ScrDyn *opts);
+ScrDyn *scr_fs_read_cb(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2, const ScrDyn *a3,
+                       const ScrDyn *a4, const ScrDyn *a5, double argc);
+ScrDyn *scr_fs_lchmod_cb(const ScrDyn *path, const ScrDyn *mode, const ScrDyn *cb);
 void scr_fs_opendir_chk(const ScrDyn *path, const ScrDyn *opts, const ScrStr *fence);
 void scr_fs_watch_file_chk(const ScrDyn *path, const ScrDyn *listener, const ScrStr *fence);
-void scr_fs_lchmod_chk(const ScrDyn *path, const ScrDyn *mode, const ScrDyn *cb, const ScrStr *fence);
 ScrDyn *scr_fs_lchmod_sync_chk(const ScrDyn *path, const ScrDyn *mode);
 ScrPromise *scr_fsp_lchmod_chk(const ScrDyn *path, const ScrDyn *mode);
-void scr_fs_read_chk(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *offset,
-                     const ScrDyn *length, const ScrDyn *position, const ScrStr *fence);
 void scr_fs_stream_opts_chk(const ScrDyn *path, const ScrDyn *opts, const ScrStr *fence);
 /* The checked-dynamic max-listeners ladders (scr_events_emitter.c). */
 ScrEmitter *scr_emitter_set_max_chk(ScrEmitter *em, const ScrDyn *n);

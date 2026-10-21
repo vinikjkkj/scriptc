@@ -6329,6 +6329,20 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "fs.existsChk":
             E.usesTimers = true; // the scheduled answer holds the loop open
             return finish(`scr_fs_exists_async(${arg(0)}, ${arg(1)})`);
+          case "fs.readFileCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_read_file_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "fs.mkdtempCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_mkdtemp_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "fs.mkdtempSyncOpts":
+            return finish(`scr_fs_mkdtemp_sync_opts(${arg(0)}, ${arg(1)})`);
+          case "fs.readCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_read_cb(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)})`);
+          case "fs.lchmodCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_lchmod_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fs.lchmodSyncChk":
             return finish(`scr_fs_lchmod_sync_chk(${arg(0)}, ${arg(1)})`);
           case "fsp.lchmodChk":
