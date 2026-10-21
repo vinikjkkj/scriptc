@@ -9421,7 +9421,10 @@ export function moduleUsesCopying(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; method?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && node.fn === "bytes.jsString") {
+    if (
+      node.kind === "libCall" &&
+      (node.fn === "bytes.jsString" || node.fn === "string.replaceStr" || node.fn === "dyn.objectToString")
+    ) {
       found = true;
       return;
     }
