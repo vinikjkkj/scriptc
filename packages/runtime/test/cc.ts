@@ -335,7 +335,7 @@ export async function materializeHostCases(
   out: string,
   exceptions: ReadonlyMap<string, CaseException> = new Map(),
 ): Promise<{ total: number; rederived: number }> {
-  const committed = readFileSync(committedFile, "utf8").split("\n").filter((l) => l !== "");
+  const committed = readFileSync(committedFile, "utf8").split(/\r?\n/).filter((l) => l !== "");
   const [host, ...probes] = await Promise.all([
     generateCases(gen),
     ...PROBE_CWDS.map((c) => generateCases(gen, c)),
