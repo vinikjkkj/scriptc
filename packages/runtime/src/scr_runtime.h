@@ -1239,7 +1239,6 @@ void scr_undef_global_read(ScrStr *name);
  * +1 or NULL when absent (the compiler's undefined arm). The _msg_code
  * thrower is scr_throw_error_msg with the code stamped on the payload. */
 void scr_error_set_code(ScrError *e, const char *code);
-void scr_fs_throw_nopath(int e, const char *op);
 void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char *path, const char *dest);
 bool scr_error_ext_get(const ScrError *e, double *err_no, const ScrStr **syscall, const ScrStr **path,
                        const ScrStr **dest);
