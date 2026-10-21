@@ -3259,6 +3259,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               d.push(`  scr_dyn_obj_set_slot(d, ${slotLit}, ${slotLen}, ${fv}); /* internal slot: no key */`);
               continue;
             }
+            // A SYMBOL-KEYED member (`[Symbol.asyncDispose]`, spelled
+            // `__@name@id` by the mapper): the dyn tree has string keys only,
+            // and Object.keys / JSON / for-in never list a symbol key, so the
+            // member rides the hidden non-enumerable table under its internal
+            // name. An absent optional one is simply not there.
+            if (f.name.startsWith("__@") && liveBit === null) {
+              d.push(`  scr_dyn_obj_set_symkey(d, ${keyLit}, ${keyLen}, ${fv}, ${isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id)) ? "true" : "false"});`);
+              continue;
+            }
             const setBase = isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
               ? `scr_dyn_obj_set_present_lit(d, ${keyLit}, ${keyLen}, sc_fv);`
               : `scr_dyn_obj_set_lit(d, ${keyLit}, ${keyLen}, sc_fv);`;
@@ -3347,19 +3356,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // JS OWN-KEY order (integer-like keys ascending first) — the same
           // enumeration Object.keys and the JSON writer answer.
           d.push(`  {`);
-          d.push(`    ScrArr *ks = scr_map_keys_js_order(${m});`);
+          d.push(`    ScrArr *ks = scr_map_keys_js_order_all(${m});`);
           d.push(`    for (size_t i = 0; i < ks->len; i++) {`);
           d.push(`      ScrStr *k = (ScrStr *)scr_arr_get_ref(ks, (double)i);`);
           if (iv.kind === "f64" || iv.kind === "bool") {
             d.push(`      ${cDecl(iv, "sv")} = 0;`);
             d.push(`      scr_map_get_str_${iv.kind === "f64" ? "f64" : "bool"}(${m}, k, &sv);`);
-            d.push(`      scr_dyn_obj_set(d, k->data, k->len, scr_dyn_new_${iv.kind === "f64" ? "num" : "bool"}(sv));`);
+            d.push(`      scr_dyn_obj_set_member(d, k->data, k->len, scr_dyn_new_${iv.kind === "f64" ? "num" : "bool"}(sv));`);
           } else if (iv.kind === "dyn") {
             // get_str_ref returns +1 — exactly the ownership obj_set takes.
-            d.push(`      scr_dyn_obj_set(d, k->data, k->len, (ScrDyn *)scr_map_get_str_ref(${m}, k));`);
+            d.push(`      scr_dyn_obj_set_member(d, k->data, k->len, (ScrDyn *)scr_map_get_str_ref(${m}, k));`);
           } else {
             d.push(`      ${cDecl(iv, "e")} = (${cType(iv).trim()})scr_map_get_str_ref(${m}, k);`);
-            d.push(`      scr_dyn_obj_set(d, k->data, k->len, ${E.toDynHelper(iv)}(e));`);
+            d.push(`      scr_dyn_obj_set_member(d, k->data, k->len, ${E.toDynHelper(iv)}(e));`);
             d.push(`      ${releaseCallC(iv, "e")};`);
           }
           d.push(`      scr_str_release(k);`);

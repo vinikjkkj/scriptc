@@ -2364,6 +2364,7 @@ export class LlDyn {
           return b;
         };
         host.declare(`declare void @scr_dyn_obj_set(ptr, ptr, i64, ptr)`);
+        host.declare(`declare void @scr_dyn_obj_set_member(ptr, ptr, i64, ptr)`);
         host.declare(`declare void @scr_dyn_obj_set_lit(ptr, ptr, i64, ptr)`);
         // CYCLE-CAPABLE shapes guard the deep copy: enter TRAPS on a value
         // already being converted (a cyclic value has no finite dyn copy —
@@ -2523,6 +2524,14 @@ export class LlDyn {
             B.line(`call void @scr_dyn_obj_set_slot(ptr ${d}, ptr ${host.cstr(sk)}, i64 ${Buffer.byteLength(sk, "utf8")}, ptr ${conv}) ; slot ${sk}`);
             continue;
           }
+          // A SYMBOL-KEYED member (`__@name@id`): hidden non-enumerable, the C
+          // lane's row (emit-walkers.ts).
+          if (f.name.startsWith("__@") && liveEnd === null) {
+            host.declare(`declare void @scr_dyn_obj_set_symkey(ptr, ptr, i64, ptr, i1 zeroext)`);
+            const absentOk = isUndefinedArmedUnion(f.type, (id: string) => this.host.unionsById.get(id));
+            B.line(`call void @scr_dyn_obj_set_symkey(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}, i1 ${absentOk ? "true" : "false"}) ; ${f.name}`);
+            continue;
+          }
           // No '%'-spelling test: internalSlotFields above is the whole
           // exemption, and it is the STRICTER one - a user's own "%dtype"
           // IS in its shape's declaredOrder, so it is an ordinary key and
@@ -2650,7 +2659,7 @@ export class LlDyn {
         }
         if (shape.indexValue) {
           const iv = shape.indexValue;
-          host.declare(`declare ptr @scr_map_keys_js_order(ptr)`);
+          host.declare(`declare ptr @scr_map_keys_js_order_all(ptr)`);
           host.declare(`declare double @scr_arr_len(ptr)`);
           host.declare(`declare ptr @scr_arr_get_ref(ptr, double)`);
           host.declare(`declare void @scr_str_release(ptr)`);
@@ -2661,7 +2670,7 @@ export class LlDyn {
           B.line(`${ovf} = load ptr, ptr ${ovfp} ; overflow map`);
           const ks = B.tmp();
           const len = B.tmp();
-          B.line(`${ks} = call ptr @scr_map_keys_js_order(ptr ${ovf})`);
+          B.line(`${ks} = call ptr @scr_map_keys_js_order_all(ptr ${ovf})`);
           B.line(`${len} = call double @scr_arr_len(ptr ${ks})`);
           const iSlot = B.slot();
           B.entryAllocas.push(`${iSlot} = alloca double`);
@@ -2703,20 +2712,20 @@ export class LlDyn {
               host.declare(`declare ptr @scr_dyn_new_bool(i1 zeroext)`);
               B.line(`${boxed} = call ptr @scr_dyn_new_bool(i1 ${val})`);
             }
-            B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${kdata}, i64 ${klen}, ptr ${boxed})`);
+            B.line(`call void @scr_dyn_obj_set_member(ptr ${d}, ptr ${kdata}, i64 ${klen}, ptr ${boxed})`);
           } else if (iv.kind === "dyn") {
             // get_str_ref returns +1 — exactly the ownership obj_set takes.
             host.declare(`declare ptr @scr_map_get_str_ref(ptr, ptr)`);
             const hit = B.tmp();
             B.line(`${hit} = call ptr @scr_map_get_str_ref(ptr ${ovf}, ptr ${k})`);
-            B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${kdata}, i64 ${klen}, ptr ${hit})`);
+            B.line(`call void @scr_dyn_obj_set_member(ptr ${d}, ptr ${kdata}, i64 ${klen}, ptr ${hit})`);
           } else {
             host.declare(`declare ptr @scr_map_get_str_ref(ptr, ptr)`);
             const hit = B.tmp();
             B.line(`${hit} = call ptr @scr_map_get_str_ref(ptr ${ovf}, ptr ${k})`);
             const conv = B.tmp();
             B.line(`${conv} = call ptr @${this.toDynHelper(iv)}(ptr ${hit})`);
-            B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${kdata}, i64 ${klen}, ptr ${conv})`);
+            B.line(`call void @scr_dyn_obj_set_member(ptr ${d}, ptr ${kdata}, i64 ${klen}, ptr ${conv})`);
             B.line(`call void ${releaseSym(host, iv)}(ptr ${hit})`);
           }
           B.line(`call void @scr_str_release(ptr ${k})`);
