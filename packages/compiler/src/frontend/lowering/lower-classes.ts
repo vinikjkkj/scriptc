@@ -7640,6 +7640,59 @@ function executorResolveAdoptionUnion(
   return sov;
 }
 
+/** `new URL(input[, base])` — the WHATWG URL construction, shared by the
+ * global spelling and the node:url spellings (`new url.URL(...)`, a
+ * `{ URL }` require/import binding): node's `url.URL` IS the global
+ * constructor. */
+function lowerUrlNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc, symbol: ts.Symbol | undefined | null): IrExpr {
+    const args = expr.arguments ?? [];
+    if (args.length !== 1 && args.length !== 2) {
+      L.noLowering(
+        `new URL with ${args.length} argument${args.length === 1 ? "" : "s"}`,
+        expr,
+        "one absolute-URL string, or an input plus a base, are the supported forms",
+        symbol ?? undefined,
+      );
+    }
+    const input = L.lowerExprExpecting(args[0]!, STRING);
+    if (args.length === 1) {
+      return { kind: "libCall", fn: "url.new", args: [input], type: URL_T, loc };
+    }
+    // new URL(input, base) -- WHATWG relative resolution, in the
+    // runtime, against a PARSED base (scr_url_new_rel). A string base
+    // is that same call with the base parsed first, which is also
+    // Node's order: an unparsable base throws "Invalid URL" before the
+    // input is looked at.
+    //
+    // A base whose type is neither exactly URL nor exactly string --
+    // `string | URL`, or one that admits undefined -- keeps fencing:
+    // there is one runtime entry point and it takes one parsed base,
+    // so a union base would need a runtime dispatch this lowering does
+    // not build. Naming the type is what tells the reader which arm to
+    // narrow.
+    const baseNode = args[1]!;
+    const baseTy = L.mapTypeOf(L.typeOf(baseNode));
+    if (baseTy?.kind !== "url" && baseTy?.kind !== "string") {
+      L.noLowering(
+        `new URL with a '${L.checker.typeToString(L.typeOf(baseNode))}' base`,
+        baseNode,
+        "a URL value or one absolute-URL string is the lowered base -- narrow a 'string | URL' or optional base first",
+        symbol ?? undefined,
+      );
+    }
+    const base: IrExpr =
+      baseTy.kind === "url"
+        ? L.lowerExprExpecting(baseNode, URL_T)
+        : {
+            kind: "libCall",
+            fn: "url.new",
+            args: [L.lowerExprExpecting(baseNode, STRING)],
+            type: URL_T,
+            loc,
+          };
+    return { kind: "libCall", fn: "url.newRel", args: [input, base], type: URL_T, loc };
+}
+
 export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     const loc = locOf(expr);
     /* better-sqlite3's `new Database(path, options?)` — the ONE npm
@@ -7697,6 +7750,14 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     // `new events.EventEmitter()` — the namespace-member (and CJS
     // `require('events').EventEmitter`) construction form: the property's
     // symbol resolves to the same ambient class as the named import.
+    // `new url.URL(...)` through the node:url namespace: the same
+    // construction as the global (lowerUrlNew).
+    if (ts.isPropertyAccessExpression(expr.expression)) {
+      const bi = L.builtinMemberOf(expr.expression);
+      if (bi !== null && bi.module === "url" && bi.member === "URL") {
+        return lowerUrlNew(L, expr, loc, L.checker.getSymbolAtLocation(expr.expression.name) ?? null);
+      }
+    }
     if (ts.isPropertyAccessExpression(expr.expression) && ts.isIdentifier(expr.expression.name)) {
       const memberSym = L.checker.getSymbolAtLocation(expr.expression.name);
       const resolved =
@@ -7943,53 +8004,25 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       if (symbol && symbol.name === "AbortController" && L.isStdlibSymbol(symbol)) {
         return lowerAbortControllerNew(L, expr, loc);
       }
-      if (symbol && symbol.name === "URL" && L.isStdlibSymbol(symbol)) {
-        const args = expr.arguments ?? [];
-        if (args.length !== 1 && args.length !== 2) {
-          L.noLowering(
-            `new URL with ${args.length} argument${args.length === 1 ? "" : "s"}`,
-            expr,
-            "one absolute-URL string, or an input plus a base, are the supported forms",
-            symbol,
-          );
+      // `new URL(...)` through the node:url binding (`const { URL } =
+      // require('url')`, `import { URL } from 'node:url'`, `new url.URL`):
+      // node's `url.URL` IS the global constructor, so the same
+      // construction. The symbol resolves into @types/node's own class,
+      // which is not the lib declaration isStdlibSymbol recognizes.
+      const nodeUrlCtor = (() => {
+        const callee = expr.expression;
+        if (ts.isIdentifier(callee)) {
+          const bi = L.builtinImportOf(callee);
+          return bi !== null && bi.module === "url" && bi.member === "URL";
         }
-        const input = L.lowerExprExpecting(args[0]!, STRING);
-        if (args.length === 1) {
-          return { kind: "libCall", fn: "url.new", args: [input], type: URL_T, loc };
+        if (ts.isPropertyAccessExpression(callee)) {
+          const bi = L.builtinMemberOf(callee);
+          return bi !== null && bi.module === "url" && bi.member === "URL";
         }
-        // new URL(input, base) -- WHATWG relative resolution, in the
-        // runtime, against a PARSED base (scr_url_new_rel). A string base
-        // is that same call with the base parsed first, which is also
-        // Node's order: an unparsable base throws "Invalid URL" before the
-        // input is looked at.
-        //
-        // A base whose type is neither exactly URL nor exactly string --
-        // `string | URL`, or one that admits undefined -- keeps fencing:
-        // there is one runtime entry point and it takes one parsed base,
-        // so a union base would need a runtime dispatch this lowering does
-        // not build. Naming the type is what tells the reader which arm to
-        // narrow.
-        const baseNode = args[1]!;
-        const baseTy = L.mapTypeOf(L.typeOf(baseNode));
-        if (baseTy?.kind !== "url" && baseTy?.kind !== "string") {
-          L.noLowering(
-            `new URL with a '${L.checker.typeToString(L.typeOf(baseNode))}' base`,
-            baseNode,
-            "a URL value or one absolute-URL string is the lowered base -- narrow a 'string | URL' or optional base first",
-            symbol,
-          );
-        }
-        const base: IrExpr =
-          baseTy.kind === "url"
-            ? L.lowerExprExpecting(baseNode, URL_T)
-            : {
-                kind: "libCall",
-                fn: "url.new",
-                args: [L.lowerExprExpecting(baseNode, STRING)],
-                type: URL_T,
-                loc,
-              };
-        return { kind: "libCall", fn: "url.newRel", args: [input, base], type: URL_T, loc };
+        return false;
+      })();
+      if ((symbol && symbol.name === "URL" && L.isStdlibSymbol(symbol)) || nodeUrlCtor) {
+        return lowerUrlNew(L, expr, loc, symbol);
       }
       // `new URLSearchParams(init?)`: the WHATWG list (stdlib provenance —
       // see lowerSearchParamsNew for the lowered init shapes).
