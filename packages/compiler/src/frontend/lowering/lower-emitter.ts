@@ -671,15 +671,24 @@ function lowerDynListenerCall(
       L.noLowering(`'${member}' with a non-function listener`, cbNode);
     }
   } else {
-    const cb = L.lowerExpr(cbNode);
-    if (cb.type.kind !== "func" || !canBoxFuncIntoDyn(cb.type, getRecord, getUnion)) {
-      L.noLowering(
-        `'${member}' with a listener of this signature`,
-        cbNode,
-        "a checked-dynamic listener's own parameters and return must box across the dynamic boundary",
-      );
+    let cb = L.lowerExpr(cbNode);
+    // A `let onError;` assigned its arrow later is an undefined-armed union
+    // in the lowered slot; tsc narrowed this occurrence to the function.
+    if (cb.type.kind === "union") cb = L.maybeNarrow(cb, cbNode);
+    if (cb.type.kind === "dyn") {
+      // The slot lowered checked-dynamic (`let onError;` assigned an arrow
+      // later): the registry keeps the box itself as the entry's identity.
+      cbDyn = cb;
+    } else {
+      if (cb.type.kind !== "func" || !canBoxFuncIntoDyn(cb.type, getRecord, getUnion)) {
+        L.noLowering(
+          `'${member}' with a listener of this signature`,
+          cbNode,
+          "a checked-dynamic listener's own parameters and return must box across the dynamic boundary",
+        );
+      }
+      cbDyn = { kind: "dynFrom", value: cb, type: DYN, loc };
     }
-    cbDyn = { kind: "dynFrom", value: cb, type: DYN, loc };
   }
   return dynListenerRegistration(L, tuple, receiver, name, cbDyn, registering, once, prepend, streamData, loc);
 }
