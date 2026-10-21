@@ -4005,14 +4005,33 @@ static void scr_loop_why_report(bool kids, bool io, bool events, bool net, bool 
 }
 #endif
 
+static bool scr_loop_run_inner(ScrPromise *top_level);
+/* True until the first checkpoint after main ran (survives a re-entry after
+ * a consumed uncaught exception: the later checkpoints drain ticks first). */
+static bool first_checkpoint = true;
+
+/* The loop, resumed after every escaped throw an 'uncaughtException'
+ * listener consumed (Node calls the listener and keeps going); with no
+ * listener the exception stays pending and main reports it. */
 bool scr_loop_run(ScrPromise *top_level) {
+  first_checkpoint = true;
+  for (;;) {
+    bool r = scr_loop_run_inner(top_level);
+    if (scr_uncaught_listener_fn != NULL && scr_exc_pending()) {
+      scr_uncaught_dispatch();
+      continue;
+    }
+    return r;
+  }
+}
+
+static bool scr_loop_run_inner(ScrPromise *top_level) {
   /* The FIRST checkpoint after the synchronous main body runs promise
    * jobs BEFORE the first tick drain: Node's main-module evaluation is
    * itself awaited (the runMain continuation is a microtask queued after
    * the body's own), so microtasks scheduled during the body beat ticks
    * scheduled during the body exactly once, at startup — differentially
    * pinned. Every later checkpoint drains ticks first. */
-  bool first_checkpoint = true;
   bool rejection_failed = false;
   for (;;) {
     if (top_level != NULL && top_level->state == SCR_PROM_REJECTED) break;

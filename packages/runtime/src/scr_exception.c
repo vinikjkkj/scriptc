@@ -325,6 +325,16 @@ static int scr_exit_code_hint = 0;
 void scr_exit_code_note(int code) { scr_exit_code_hint = code; }
 int scr_exit_code_hint_get(void) { return scr_exit_code_hint; }
 
+/* process.on('uncaughtException'): armed (non-NULL) exactly while the
+ * listener registry (scr_async_dyn.c) is non-empty. Called by the emitted
+ * main after the synchronous body and by scr_loop_run's wrapper after a
+ * callback's escaped throw: it hands the pending exception to the listeners
+ * (clearing it), so execution CONTINUES instead of printing and exiting 1. */
+void (*scr_uncaught_listener_fn)(void) = NULL;
+void scr_uncaught_dispatch(void) {
+  if (scr_uncaught_listener_fn != NULL && scr_exc_pending()) scr_uncaught_listener_fn();
+}
+
 void scr_exc_print_uncaught(void) {
   scr_exit_code_note(1);
   /* Settle any runtime-internal stdout fragment before the stderr line when

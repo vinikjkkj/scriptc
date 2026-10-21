@@ -251,6 +251,37 @@ void scr_process_off_rejection_handled(ScrDyn *fn) {
   scr_rjh_sync_hook();
 }
 
+static ScrRejListener *scr_uncx_listeners = NULL;
+static size_t scr_nuncx = 0, scr_uncx_cap = 0;
+static void scr_uncx_dispatch(void);
+
+static void scr_uncx_teardown(void) {
+  for (size_t i = 0; i < scr_nuncx; i++) scr_dyn_release(scr_uncx_listeners[i].fn);
+  free(scr_uncx_listeners);
+  scr_uncx_listeners = NULL;
+  scr_nuncx = scr_uncx_cap = 0;
+}
+
+static void scr_uncx_sync_hook(void) {
+  scr_uncaught_listener_fn = scr_nuncx > 0 ? scr_uncx_dispatch : NULL;
+}
+
+void scr_process_on_uncaught_exception(ScrDyn *fn, bool once) {
+  if (!scr_rej_check_listener(fn)) return;
+  static bool teardown_armed = false;
+  if (!teardown_armed) {
+    teardown_armed = true;
+    atexit(scr_uncx_teardown);
+  }
+  scr_rej_push(&scr_uncx_listeners, &scr_nuncx, &scr_uncx_cap, fn, once);
+  scr_uncx_sync_hook();
+}
+
+void scr_process_off_uncaught_exception(ScrDyn *fn) {
+  scr_rej_remove(scr_uncx_listeners, &scr_nuncx, fn);
+  scr_uncx_sync_hook();
+}
+
 /* One registry pass: call every listener with `args`, removing once-
  * listeners BEFORE their call (Node's once removes at dispatch, so a
  * re-registration inside the listener sticks). The registry is accessed
@@ -295,6 +326,27 @@ static bool scr_urj_dispatch(ScrPromise *p) {
   scr_dyn_release(boxed);
   scr_urj_sync_hook();
   return ok;
+}
+
+/* The escaped throw, delivered as (error, "uncaughtException"). A throw
+ * INSIDE a listener is fatal in Node (exit status 7), after printing it. */
+static void scr_uncx_dispatch(void) {
+  ScrCaught *c = scr_exc_take();
+  ScrDyn *err = scr_caught_to_dyn(c);
+  scr_caught_release(c);
+  ScrStr *os = scr_str_new("uncaughtException", 17);
+  ScrDyn *origin = scr_dyn_new_str(os);
+  scr_str_release(os);
+  ScrDyn *args[2] = {err, origin};
+  bool ok = scr_rej_fire(&scr_uncx_listeners, &scr_nuncx, args, 2);
+  scr_dyn_release(err);
+  scr_dyn_release(origin);
+  scr_uncx_sync_hook();
+  if (!ok) {
+    scr_exc_print_uncaught();
+    fflush(stdout);
+    _Exit(7);
+  }
 }
 
 /* 'rejectionHandled' delivery — (promise), Node's payload. A listener

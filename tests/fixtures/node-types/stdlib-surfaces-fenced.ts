@@ -9,13 +9,9 @@
  * and there is no V8 heap here. 0 would read as a measurement. */
 console.log(process.memoryUsage());
 
-/* uncaughtException is a BEHAVIOUR this runtime cannot honour: an escaped
- * throw prints "Uncaught <error>" and exits 1 AT THE THROW, so a listener
- * could never fire and the loop never resumes. A handler registered and
- * never called is worse than the refusal. */
-process.on("uncaughtException", (err) => {
-  console.error(err);
-});
+/* uncaughtException lowers (corpus 8050); its MONITOR twin does not yet: the
+ * monitor sees the throw and the process still dies, which needs the
+ * print-and-exit path to call listeners first. An open refusal. */
 process.once("uncaughtExceptionMonitor", (err) => {
   console.error(err);
 });

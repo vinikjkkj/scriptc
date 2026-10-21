@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesDate, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
+import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesDate, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
@@ -1904,12 +1904,15 @@ export class CEmitter {
       ...(asyncEntry
         ? [`  ScrPromise *sc_top = ${mangleAsyncSpawn(this.mod.entry)}();`]
         : [`  ${mangleFunction(this.mod.entry)}();`]),
+      // An 'uncaughtException' listener consumes the entry's escaped throw
+      // (the loop then runs on, like Node).
+      ...(!asyncEntry && moduleUsesUncaughtListener(this.mod) ? [`  scr_uncaught_dispatch();`] : []),
       // Uncaught exception from top-level code: Node exits 1.
       ...(this.mayThrow.has(this.mod.entry) && !asyncEntry ? uncaught("  ") : []),
       // The event loop runs to exhaustion (microtasks before timers). A
       // throw escaping a timer callback and unhandled promise rejections
       // both exit 1, like Node.
-      ...(hasAsync || hasGenerators || this.usesTimers || usesIsland
+      ...(hasAsync || hasGenerators || this.usesTimers || usesIsland || moduleCreatesPromises(this.mod)
         ? [
             `  bool sc_loop_rejection = scr_loop_run(${asyncEntry ? "sc_top" : "NULL"});`,
             ...uncaught("  ", asyncEntry),

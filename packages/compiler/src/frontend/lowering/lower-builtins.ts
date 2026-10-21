@@ -8167,14 +8167,32 @@ let digestInputValueDispatches = 0;
       // The hint's advice is compiled and run (tests/fixtures/node-types
       // probes u4/u5): 'exit' listeners DO fire on the uncaught path, with
       // code 1, byte-exact with Node.
+      // 'uncaughtException': the listener crosses as a dyn function; the
+      // escaped throw (the entry's, or a later turn's) is handed to it as
+      // (error, "uncaughtException") and execution continues (Node's
+      // contract). A throw inside the listener is fatal (status 7).
+      if (event === "uncaughtException" && (member === "on" || member === "once" || isOff)) {
+        if (!ts.isExpressionStatement(call.parent)) {
+          L.unsupported(
+            "SC1090",
+            call,
+            "chaining process listener registration (the result is void here — register each listener as its own statement)",
+          );
+        }
+        const cb = dcSubscriberArg(L, call.arguments[1]!);
+        const onceArg: IrExpr = { kind: "boolLit", value: member === "once", type: BOOL, loc };
+        return isOff
+          ? { kind: "libCall", fn: "process.offUncaught", args: [cb], type: VOID, loc }
+          : { kind: "libCall", fn: "process.onUncaught", args: [cb, onceArg], type: VOID, loc };
+      }
       if (
-        (event === "uncaughtException" || event === "uncaughtExceptionMonitor") &&
+        event === "uncaughtExceptionMonitor" &&
         (member === "on" || member === "once" || isOff)
       ) {
         L.noLowering(
           `process.${member}("${event}", ...)`,
           call.arguments[0]!,
-          "there is no dispatch point for it in a compiled binary: an escaped throw prints \"Uncaught <error>\" and exits 1 at the throw, so the listener could never run and the loop never resumes (Node calls the listener and keeps going, which is the difference). What DOES run on that path is 'exit' — process.on('exit', code) fires with code 1 — and 'unhandledRejection' covers an escaped promise; take the rest with try/catch and a .catch on the top-level promise",
+          "the monitor sees the escaped throw and the process still prints it and exits 1; that print-and-exit path does not call listeners first yet. process.on('uncaughtException') lowers (it consumes the throw and the loop continues), and 'exit' listeners fire with code 1 on this path",
           // The provenance, so the report reads honestly: `process.on` is
           // @types/node's declaration in a project that has it, and the
           // fallback's own in a project that does not.

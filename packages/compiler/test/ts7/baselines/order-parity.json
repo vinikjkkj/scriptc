@@ -11126,6 +11126,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8050-process-on-uncaught-exception-consumes-the-throw.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8050-process-on-uncaught-exception-consumes-the-throw.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8051-an-unhandled-rejection-in-a-loop-free-program.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8051-an-unhandled-rejection-in-a-loop-free-program.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/810-do-while.ts": {
    "order": [
     "<repo>/tests/corpus/810-do-while.ts"

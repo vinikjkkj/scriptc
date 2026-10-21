@@ -6673,6 +6673,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_process_exit(${arg(0)})`);
           case "process.exitDyn":
             return finish(`scr_process_exit_dyn(${arg(0)})`);
+          case "process.onUncaught":
+            // An escaped throw in a later turn reaches the listener, so the loop must run.
+            E.usesTimers = true;
+            return finish(`scr_process_on_uncaught_exception(${arg(0)}, ${arg(1)})`);
+          case "process.offUncaught":
+            return finish(`scr_process_off_uncaught_exception(${arg(0)})`);
           case "process.exitDefault":
             return finish(`scr_process_exit_default()`);
           case "process.exitCodeSetF64":

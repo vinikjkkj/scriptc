@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesDate, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesDate, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -399,6 +399,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "process.exiting": "scr_process_exiting",
   "process.exit": "scr_process_exit",
   "process.exitDefault": "scr_process_exit_default",
+  "process.onUncaught": "scr_process_on_uncaught_exception",
+  "process.offUncaught": "scr_process_off_uncaught_exception",
   "process.exitDyn": "scr_process_exit_dyn",
   "process.exitCodeSetF64": "scr_process_exitcode_set_f64",
   "process.exitCodeSet": "scr_process_exitcode_set",
@@ -1331,7 +1333,7 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   // the checkpoint unhandled-rejection report.
   "async.hop", "async.awaitDyn",
   "dc.tcTracePromise",
-  "process.onUnhandledRejection", "process.onRejectionHandled",
+  "process.onUnhandledRejection", "process.onRejectionHandled", "process.onUncaught",
   "timers.queueMicrotaskDyn", "timers.setImmediateFnValue", "timers.immediatePromise",
 ]);
 
@@ -2037,6 +2039,7 @@ class LlEmitter {
     const hasRefGlobals = globals.some((g) => isRefCounted(g.type)) || fnValueProps.length > 0;
     // Declared NOW — the extern block flushes before main assembles.
     if (usesEvents) this.declare(`declare void @scr_events_install()`);
+    if (moduleUsesUncaughtListener(this.mod)) this.declare(`declare void @scr_uncaught_dispatch()`);
     if (usesFsWatch) this.declare(`declare void @scr_watch_install()`);
     if (usesStream) this.declare(`declare void @scr_stream_install()`);
     // No --dynamic guard needed on either backend: `response`/`headers`
@@ -2083,6 +2086,7 @@ class LlEmitter {
     const runsLoop =
       this.usesTimers ||
       this.mod.functions.some((f) => f.async === true || f.generator !== undefined) ||
+      moduleCreatesPromises(this.mod) ||
       usesIsland;
     const uncaughtReleases = entryMayThrow && !asyncEntry ? globalReleaseLines("gu") : [];
     const loopReleasesU = runsLoop ? globalReleaseLines("gl") : [];
@@ -2554,6 +2558,7 @@ class LlEmitter {
       ...(asyncEntry
         ? [`  %top = call ptr @${mangleAsyncSpawn(this.mod.entry)}()`]
         : [`  call void @${mangleFunction(this.mod.entry)}()`]),
+      ...(!asyncEntry && moduleUsesUncaughtListener(this.mod) ? [`  call void @scr_uncaught_dispatch()`] : []),
       // Uncaught exception from top-level code: Node exits 1.
       ...(entryMayThrow && !asyncEntry
         ? [
