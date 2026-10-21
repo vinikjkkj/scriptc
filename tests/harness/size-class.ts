@@ -2306,7 +2306,12 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 544_022 : null;
  * gitignored so git status, the dirty-worktree guard and the treehash are
  * all blind to it. See docs/stackless-sync-generator-results.md 13.2-15.1.
  */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 630_742 : null;
+/* RE-RECORDED 2026-10-21: 630,742 -> 630,422 (-320), measured by the Windows
+ * lane of CI run 39561275700 on the nobesteffort branch (regex.test.ts: "the
+ * regex program .text SHRANK by 320 bytes: 630422 against the recorded
+ * 630742"). Same cause as the static anchor: scr_fence_fatal left the
+ * always-linked scr_error.o. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 630_422 : null;
 
 /** The section-anchor complaint, or null when within tolerance. Same shape as
  * recordedSizeComplaint -- a string, so the caller owns the assertion and this
