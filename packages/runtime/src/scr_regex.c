@@ -23,13 +23,15 @@
  *   temporary registers past the capture slots), unmatched groups leave
  *   NULL pointers, and zero-length matches advance by one code unit — or by
  *   a whole surrogate pair under /u (AdvanceStringIndex).
- * - Statefulness fence: /g regexes carry mutable lastIndex in JS. This
- *   slice supports /g (and /y) only where the iteration is internal —
- *   replace/replaceAll/split; test() on a g/y-flagged regex aborts with a
- *   clear message (the frontend already rejects the cases it can see).
+ * - Statefulness: lastIndex lives on the ScrRegex. exec/test on a /g or /y
+ *   regex read and write it (scr_regex_run); a /g or /y LITERAL is cloned per
+ *   evaluation so two evaluations never share one. match() on a /g regex
+ *   still aborts (an every-match array is a different shape), and
+ *   replace/replaceAll/split/matchAll iterate internally from 0.
  */
 #include "scr_runtime.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -183,6 +185,7 @@ static char *scr_pattern_cesu8(const ScrStr *src, size_t *plen) {
 
 /* The compiled bytecode, compiling (and caching) on first use. */
 static uint8_t *scr_regex_bc(ScrRegex *re) {
+  if (re->proto) return scr_regex_bc(re->proto); /* a clone borrows its literal's */
   if (re->bc) return re->bc;
   int flags = scr_lre_flags(re->flags);
   const char *pat = re->source->data;
@@ -220,10 +223,25 @@ void scr_regex_release(ScrRegex *re) {
   if (--re->rc == 0) {
     scr_str_release(re->source);
     scr_str_release(re->flags);
-    if (re->bc) lre_realloc(lre_opaque(), re->bc, 0);
+    if (re->proto) scr_regex_release(re->proto);
+    else if (re->bc) lre_realloc(lre_opaque(), re->bc, 0);
     free(re);
   }
 }
+
+ScrRegex *scr_regex_clone(ScrRegex *proto) {
+  ScrRegex *re = calloc(1, sizeof *re);
+  if (!re) scr_regex_oom();
+  re->rc = 1;
+  re->source = scr_str_retain(proto->source);
+  re->flags = scr_str_retain(proto->flags);
+  re->proto = proto->proto ? proto->proto : proto;
+  if (re->proto->rc != SIZE_MAX) re->proto->rc++;
+  return re;
+}
+
+double scr_regex_get_last_index(ScrRegex *re) { return re->last_index; }
+void scr_regex_set_last_index(ScrRegex *re, double v) { re->last_index = v; }
 
 void *scr_regex_retain_v(void *re) { return scr_regex_retain(re); }
 void scr_regex_release_v(void *re) { scr_regex_release(re); }
@@ -348,24 +366,80 @@ static int scr_advance(const uint16_t *u, int len, int i, bool unicode) {
 
 /* ── test ─────────────────────────────────────────────────────────────── */
 
+/* ToLength(lastIndex) for exec/test on a /g or /y regex. */
+static double scr_regex_to_length(double v) {
+  if (v != v || v <= 0) return 0;
+  if (v > 9007199254740991.0) return 9007199254740991.0;
+  return floor(v);
+}
+
+static double scr_last_exec_idx = -1;
+double scr_regex_last_exec_index(void) { return scr_last_exec_idx; }
+
+/* RegExpBuiltinExec's core. On a match fills `capture` (caller-allocated) and
+ * answers 1; the caller owns `u`. Stateful regexes read and write lastIndex. */
+static int scr_regex_run(ScrRegex *re, const uint8_t *bc, const uint16_t *u, int len,
+                         uint8_t **capture) {
+  const bool stateful = (lre_get_flags(bc) & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) != 0;
+  int start = 0;
+  if (stateful) {
+    double li = scr_regex_to_length(re->last_index);
+    if (li > (double)len) {
+      re->last_index = 0;
+      scr_last_exec_idx = -1;
+      return 0;
+    }
+    start = (int)li;
+  }
+  int rc = scr_exec(capture, bc, u, start, len);
+  if (rc == 1) {
+    const uint8_t *ubase = (const uint8_t *)u;
+    scr_last_exec_idx = (double)((capture[0] - ubase) >> 1);
+    if (stateful) re->last_index = (double)((capture[1] - ubase) >> 1);
+  } else {
+    scr_last_exec_idx = -1;
+    if (stateful) re->last_index = 0;
+  }
+  return rc;
+}
+
 bool scr_regex_test(ScrRegex *re, ScrStr *s) {
   uint8_t *bc = scr_regex_bc(re);
-  if (lre_get_flags(bc) & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) {
-    /* JS test() on a g/y regex reads AND writes lastIndex — stateful
-     * iteration this slice does not model (the frontend rejects the sites
-     * it can see; values that flow through variables land here). */
-    fflush(stdout);
-    scr_trap("scriptc: test() on a regex with the 'g' or 'y' flag is not "
-             "supported (stateful lastIndex); drop the flag, or use "
-             "replace/replaceAll/split\n");
-  }
   int len;
   uint16_t *u = scr_to_utf16(s, &len);
   uint8_t **capture = scr_capture_alloc(bc);
-  int rc = scr_exec(capture, bc, u, 0, len);
+  int rc = scr_regex_run(re, bc, u, len, capture);
   free(capture);
   free(u);
   return rc == 1;
+}
+
+/* re.exec(s): the honest string[] slice of the match (match()'s rule:
+ * nonparticipating captures are ""), or NULL. */
+ScrArr *scr_regex_exec(ScrStr *s, ScrRegex *re) {
+  uint8_t *bc = scr_regex_bc(re);
+  int len;
+  uint16_t *u = scr_to_utf16(s, &len);
+  uint8_t **capture = scr_capture_alloc(bc);
+  int rc = scr_regex_run(re, bc, u, len, capture);
+  ScrArr *out = NULL;
+  if (rc == 1) {
+    const uint8_t *ubase = (const uint8_t *)u;
+    int count = lre_get_capture_count(bc);
+    out = scr_arr_new(SCR_ELEM_STR, (size_t)count);
+    for (int k = 0; k < count; k++) {
+      const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
+      if (cs == NULL || ce == NULL) {
+        scr_arr_push_ref(out, scr_str_new("", 0));
+      } else {
+        scr_arr_push_ref(
+            out, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
+      }
+    }
+  }
+  free(capture);
+  free(u);
+  return out;
 }
 
 /* ── match ────────────────────────────────────────────────────────────── */
@@ -1187,14 +1261,6 @@ ScrStr *scr_regexp_escape(ScrStr *s) {
  * are checked here first so the dynamic spelling throws the same
  * catchable refusal the frontend gives the static one. */
 
-static bool scr_regex_dynh_stateful(const ScrRegex *re) {
-  for (size_t i = 0; i < re->flags->len; i++) {
-    const char c = re->flags->data[i];
-    if (c == 'g' || c == 'y') return true;
-  }
-  return false;
-}
-
 static bool scr_regex_dynh_has_flag(const ScrRegex *re, char f) {
   for (size_t i = 0; i < re->flags->len; i++) {
     if (re->flags->data[i] == f) return true;
@@ -1234,12 +1300,6 @@ static ScrDyn *scr_regex_dynh_invoke(void *h, ScrDyn *self, const char *method,
   ScrRegex *re = (ScrRegex *)h;
   (void)self;
   if (strcmp(method, "test") == 0) {
-    if (scr_regex_dynh_stateful(re)) {
-      scr_regex_dynh_unsupported(
-          "test", "a 'g' or 'y' regex reads and writes lastIndex, which this slice does not model "
-                  "(drop the flag, or use replace/replaceAll/split)");
-      return NULL;
-    }
     const ScrDyn *a = argc > 0 ? args[0] : scr_dyn_undefined();
     ScrStr *s = scr_dyn_string_coerce_js(a); /* JS ToString, throws propagate */
     if (!s) return NULL;
@@ -1297,23 +1357,19 @@ static ScrDyn *scr_regex_dynh_get(void *h, const char *key, size_t key_len) {
   if (strcmp(key, "unicode") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'u'));
   if (strcmp(key, "sticky") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'y'));
   if (strcmp(key, "hasIndices") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'd'));
-  if (strcmp(key, "lastIndex") == 0) {
-    /* Answering 0 would be right only until someone matched — and this
-     * slice never advances it, so a read is a promise the runtime cannot
-     * keep. */
-    scr_regex_dynh_unsupported("lastIndex", "no lastIndex state is modeled");
-    return NULL;
-  }
+  if (strcmp(key, "lastIndex") == 0) return scr_dyn_new_num(scr_regex_get_last_index(re));
   return NULL; /* not a modeled property — the caller answers undefined */
 }
 
 static bool scr_regex_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
-  (void)h;
   (void)key_len;
-  (void)value;
   if (strcmp(key, "lastIndex") == 0) {
-    scr_regex_dynh_unsupported("lastIndex", "no lastIndex state is modeled");
-    return true; /* handled, with the exception pending */
+    if (value->kind != SCR_DYN_NUM) {
+      scr_regex_dynh_unsupported("lastIndex", "only a number can be stored (ToNumber of other kinds is not modeled)");
+      return true; /* handled, with the exception pending */
+    }
+    scr_regex_set_last_index((ScrRegex *)h, value->v.num);
+    return true;
   }
   return false; /* the caller throws the loud ladder */
 }

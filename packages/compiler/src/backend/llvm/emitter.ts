@@ -2222,7 +2222,7 @@ class LlEmitter {
       // WHOLE struct past the base, so a missing field would shift every
       // capture read as well as being a write past the object.
       `%ScrClosure = type { i64, ptr, i64, ptr, ptr }`,
-      `%ScrRegex = type { i64, ptr, ptr, ptr }`,
+      `%ScrRegex = type { i64, ptr, ptr, ptr, double, ptr }`,
       // ScrArr mirror { rc, len, cap, elem(i32+pad), elem_retain,
       // elem_release, elem_trace, data } — the immortal tagged-template
       // strings objects lay out through it (nothing GEPs into live heap
@@ -2345,7 +2345,7 @@ class LlEmitter {
       // the interned source/flags strings. The bc slot starts null (lazy
       // compile, cached by the runtime) — a mutable global, not constant.
       out.push(
-        `@${re.sym} = internal global %ScrRegex { i64 -1, ptr ${re.src}, ptr ${re.fl}, ptr null } ; ${key.replace(/\n/g, "\\n")}`,
+        `@${re.sym} = internal global %ScrRegex { i64 -1, ptr ${re.src}, ptr ${re.fl}, ptr null, double 0.0, ptr null } ; ${key.replace(/\n/g, "\\n")}`,
       );
     }
     if (this.regexInstances.size > 0) out.push(``);
@@ -8135,6 +8135,14 @@ class LlEmitter {
             fl: this.internLiteral(e.flags),
           };
           this.regexInstances.set(key, re);
+        }
+        if (/[gy]/.test(e.flags)) {
+          // A /g or /y literal carries lastIndex: a fresh +1 heap clone per
+          // evaluation (the C emitter's rule).
+          this.declare(`declare ptr @scr_regex_clone(ptr)`);
+          const t = this.B.tmp();
+          this.B.line(`${t} = call ptr @scr_regex_clone(ptr @${re.sym})`);
+          return this.own({ name: t, type: e.type });
         }
         return this.own({ name: this.retainValue(`@${re.sym}`, e.type), type: e.type });
       }
@@ -14719,6 +14727,7 @@ class LlEmitter {
         B.line(`${t} = call zeroext i1 @scr_regex_test(ptr ${r.name}, ptr ${args[0]!.name})`);
         return { name: t, type: e.type };
       }
+      case "exec":
       case "match": {
         // +1 string[] or NULL from the runtime; the `string[] | null`
         // union wraps type-directedly, the envGet convention.
@@ -14727,15 +14736,33 @@ class LlEmitter {
         const arrTag = def ? def.arms.findIndex((a) => a.kind === "array") : -1;
         const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
         if (arrTag < 0 || nullTag < 0 || !def) throw new Error("llvm emitter bug: match union lacks its arms");
-        this.declare(`declare ptr @scr_regex_match(ptr, ptr)`);
+        const matchSym = method === "exec" ? "scr_regex_exec" : "scr_regex_match";
+        this.declare(`declare ptr @${matchSym}(ptr, ptr)`);
         const raw = B.tmp();
-        B.line(`${raw} = call ptr @scr_regex_match(ptr ${r.name}, ptr ${args[0]!.name})`);
+        B.line(`${raw} = call ptr @${matchSym}(ptr ${r.name}, ptr ${args[0]!.name})`);
         return this.wrapNullable(raw, raw, def.arms[arrTag]!, arrTag, e.type, nullTag);
       }
       case "search": {
         this.declare(`declare double @scr_regex_search(ptr, ptr)`);
         const t = B.tmp();
         B.line(`${t} = call double @scr_regex_search(ptr ${r.name}, ptr ${args[0]!.name})`);
+        return { name: t, type: e.type };
+      }
+      case "lastIndex": {
+        this.declare(`declare double @scr_regex_get_last_index(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call double @scr_regex_get_last_index(ptr ${r.name})`);
+        return { name: t, type: e.type };
+      }
+      case "setLastIndex": {
+        this.declare(`declare void @scr_regex_set_last_index(ptr, double)`);
+        B.line(`call void @scr_regex_set_last_index(ptr ${r.name}, double ${args[0]!.name})`);
+        return { name: "", type: e.type };
+      }
+      case "lastExecIndex": {
+        this.declare(`declare double @scr_regex_last_exec_index()`);
+        const t = B.tmp();
+        B.line(`${t} = call double @scr_regex_last_exec_index()`);
         return { name: t, type: e.type };
       }
       case "source": {
