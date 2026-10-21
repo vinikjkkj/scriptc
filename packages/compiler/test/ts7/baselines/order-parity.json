@@ -11145,6 +11145,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8201-js-nested-require-destructuring/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8201-js-nested-require-destructuring/lib.js",
+    "<repo>/tests/corpus/8201-js-nested-require-destructuring/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
