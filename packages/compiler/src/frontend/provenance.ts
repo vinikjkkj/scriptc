@@ -29,7 +29,7 @@
  * this); unlisted packages still take the live pipeline. */
 
 import { execFile } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { builtinModules } from "node:module";
 import { homedir, tmpdir } from "node:os";
@@ -995,7 +995,13 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
 
   /** All specifiers seen so far, grouped by package name. */
   const specifiersByPackage = new Map<string, Set<string>>();
-  const enqueue = (specs: readonly string[]): string[] => {
+  /** package name -> the installed directory (realpath) of the package whose
+   * source FIRST imported it. Node resolves a bare specifier from the
+   * REQUIRER's location, and under a pnpm layout a transitive dependency is a
+   * sibling in `node_modules/.pnpm/<requirer>/node_modules/`, invisible from
+   * the driver's own node_modules. */
+  const requirerDir = new Map<string, string>();
+  const enqueue = (specs: readonly string[], requirer?: string): string[] => {
     const newNames: string[] = [];
     for (const spec of specs) {
       const name = packageNameOf(spec);
@@ -1003,6 +1009,7 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       if (set === undefined) {
         specifiersByPackage.set(name, (set = new Set()));
         newNames.push(name);
+        if (requirer !== undefined) requirerDir.set(name, requirer);
       }
       set.add(spec);
     }
@@ -1068,7 +1075,13 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
     // The mapped source's own bare imports try the pipeline too (versions
     // resolve from the DRIVER's tree — a prototype heuristic; production
     // wants the package's lockfile).
-    return enqueue(treeBare);
+    let requirer: string | undefined;
+    try {
+      requirer = realpathSync(tree.installed.dir);
+    } catch {
+      requirer = undefined;
+    }
+    return enqueue(treeBare, requirer);
   };
 
   /** `expand`, with the pipeline's never-throw contract around it. */
@@ -1091,7 +1104,8 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       return;
     }
     processed.set(name, null); // claimed; overwritten on success
-    const installed = findInstalled(dirname(entry), name);
+    const from = requirerDir.get(name);
+    const installed = (from !== undefined ? findInstalled(from, name) : null) ?? findInstalled(dirname(entry), name);
     if (installed === null) {
       notes.push(`${name}: not installed under the entry's node_modules; island path used`);
       return;
