@@ -13556,12 +13556,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/spi-off/main.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/spi-off/main.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/spread-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/spread-fences.ts"
@@ -13625,12 +13619,6 @@
   "<repo>/tests/diagnostics/two-fills-of-one-shape-in-two-orders.ts": {
    "order": [
     "<repo>/tests/diagnostics/two-fills-of-one-shape-in-two-orders.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/unassigned-fields.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/unassigned-fields.ts"
    ],
    "diags": []
   },
@@ -14570,6 +14558,24 @@
   "<repo>/tests/corpus/8409-optional-chaining-typeof-and-nullish-over-an-unassigned-map-field.ts": {
    "order": [
     "<repo>/tests/corpus/8409-optional-chaining-typeof-and-nullish-over-an-unassigned-map-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8410-unknown-generator-and-regexp-fields-assigned-past-the-constructor.ts": {
+   "order": [
+    "<repo>/tests/corpus/8410-unknown-generator-and-regexp-fields-assigned-past-the-constructor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8411-definite-assignment-fields-across-every-slot-kind.ts": {
+   "order": [
+    "<repo>/tests/corpus/8411-definite-assignment-fields-across-every-slot-kind.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8412-strict-property-initialization-off-defers-map-fields/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/8412-strict-property-initialization-off-defers-map-fields/main.ts"
    ],
    "diags": []
   }
