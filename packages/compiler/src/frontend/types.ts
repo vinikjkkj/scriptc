@@ -6253,6 +6253,24 @@ function isBodylessDeclClassInstance(
   });
   if (!bodyless) return false;
   if (checker.getCallSignatures(t).length > 0 || checker.getConstructSignatures(t).length > 0) return false;
+  // A class whose OWN declaration advertises a constructor is one programs
+  // build with `new` (mathkit's `Calc`: `constructor(seed: number)`). The
+  // argument for reading the instance as a record is that nothing in a static
+  // build can produce a value of the class; a declared constructor says the
+  // author intends exactly that production, and a record has no constructor
+  // to run. Such a class keeps the nominal fence, so the type of the `new`
+  // result still refuses at its own declaration site instead of being quietly
+  // admitted ahead of the construction refusal. Only the class's OWN members
+  // count: a constructor INHERITED from a base (EventEmitter's
+  // `constructor(options?)`, which every emitter subclass carries) says
+  // nothing about whether this class is built by a program.
+  if (
+    decls.some((d) =>
+      (d as ts.ClassDeclaration).members.some((m) => m.kind === ts.SyntaxKind.Constructor),
+    )
+  ) {
+    return false;
+  }
   return checker.getPropertiesOfType(t).every((p) => {
     const pt = checker.getTypeOfSymbol(p);
     if (checker.getConstructSignatures(pt).length > 0) return false;
