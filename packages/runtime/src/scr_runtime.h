@@ -5935,6 +5935,15 @@ bool scr_dyn_loose_eq_num(double n, const ScrDyn *d);
 /* IsLooselyEqual over two dyn values; false with the exception pending when a
  * ToPrimitive user method throws. */
 bool scr_dyn_loose_eq(const ScrDyn *a, const ScrDyn *b);
+/* The fs argument-ladder helpers scr_bytes_io.c shares with the gated
+ * checked-dynamic extensions unit (scr_dyn_ext.c). */
+void scr_bytes_io_oom(void);
+bool scr_fs_int_range_chk(const ScrDyn *v, const char *name, double min, double max, const char *range);
+bool scr_fs_cb_chk(const ScrDyn *cb, const char *name);
+bool scr_fs_dyn_absent(const ScrDyn *v);
+bool scr_fs_encoding_chk(const ScrDyn *opts);
+bool scr_fs_path_chk(const ScrDyn *p, const char *name);
+
 /* Buffer.isBuffer over a dyn value (scr_bytes.c). */
 bool scr_dyn_is_buffer(const ScrDyn *d, const ScrStr *why);
 /* JS === over two dyn values: scalars by value, units by kind, everything
