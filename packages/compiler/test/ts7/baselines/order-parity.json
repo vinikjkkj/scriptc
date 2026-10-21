@@ -11120,6 +11120,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8041-a-void-call-used-as-a-value.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8041-a-void-call-used-as-a-value.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/810-do-while.ts": {
    "order": [
     "<repo>/tests/corpus/810-do-while.ts"

@@ -1071,6 +1071,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         regexp: "object", generator: "object", classval: "function",
         undefinedT: "undefined", nullT: "object",
         bigint: "bigint", date: "object",
+        void: "undefined",
       };
       const folded = FOLD[operand.type.kind];
       if (folded && droppableStatic(operand)) {
@@ -5485,6 +5486,17 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
     const unit = left.kind === "unitLit" ? left : right.kind === "unitLit" ? right : null;
     if (!unit) return null;
     const other = unit === left ? right : left;
+    if (other.type.kind === "void") {
+      // A void call's value is undefined: it runs for effect and the
+      // comparison is decided by the unit.
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: other, loc }],
+        result: { kind: "boolLit", value: (unit.unit === "undefined") !== negated, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      };
+    }
     if (other.kind === "unitLit") {
       // Two unit literals (`undefined === undefined`): statically decided.
       return { kind: "boolLit", value: (other.unit === unit.unit) !== negated, type: BOOL, loc };
@@ -5540,7 +5552,7 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
     // — the opposite of the never-holds-units fold below — and the IR has
     // no value (nor a sequence form to keep the call's effects). Fall
     // through to the caller's comparison fence instead of folding a lie.
-    if (other.type.kind === "void") return null;
+    // (void operands were decided above: seqExpr carries the call's effects.)
     // An index-signature keyed read is the one operand whose declared type
     // is not the whole story: `attrs.offline` types `string` and a MISSING
     // key still answers undefined at runtime. Test it, do not fold it.
@@ -14459,6 +14471,17 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
       if (armed) return { kind: "toString", operand: armed, type: STRING, loc: e.loc };
     }
     if (e.type.kind === "string") return e;
+    // A void call's value is JS's undefined: it runs for effect, then the
+    // text is "undefined" (String(f()) and `${f()}` over a void function).
+    if (e.type.kind === "void") {
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: e, loc: e.loc }],
+        result: { kind: "strLit", value: "undefined", type: STRING, loc: e.loc },
+        type: STRING,
+        loc: e.loc,
+      };
+    }
     if (e.type.kind === "dyn") {
       // String(u) / `${u}`: a runtime dispatch over the dyn kind — Node's
       // String() exactly (undefined/null texts, JS number formatting,
