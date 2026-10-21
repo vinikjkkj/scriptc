@@ -1093,6 +1093,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.envUnset": { argTypes: [STRING], result: VOID },
   "process.envPairs": { argTypes: [], result: arrayOf(STRING) },
   "process.exit": { argTypes: [F64], result: VOID },
+  "process.exitDefault": { argTypes: [], result: VOID },
+  "process.exitDyn": { argTypes: [DYN], result: VOID },
+  "process.exitCodeSetF64": { argTypes: [F64], result: VOID },
+  "process.exitCodeSet": { argTypes: [DYN], result: VOID },
+  "process.exitCodeGet": { argTypes: [], result: DYN },
   "process.cwd": { argTypes: [], result: STRING },
   "process.pid": { argTypes: [], result: F64 },
   "dyn.this": { argTypes: [], result: DYN },
@@ -6150,7 +6155,7 @@ function alwaysReturns(stmts: IrStmt[], unions: Map<string, IrUnionDef>): boolea
         // like a throw. Mirrors tsc's own never-based reachability, which
         // accepted the function without a trailing return — the
         // parseAsync().catch entry handler ends exactly this way.
-        if (s.expr.kind === "libCall" && s.expr.fn === "process.exit") return true;
+        if (s.expr.kind === "libCall" && (s.expr.fn === "process.exit" || s.expr.fn === "process.exitDefault" || s.expr.fn === "process.exitDyn")) return true;
         break;
       case "tryCatch":
         // Normal completion requires the try body to complete normally (and

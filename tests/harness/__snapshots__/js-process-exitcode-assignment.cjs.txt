@@ -1,6 +1,0 @@
-js-process-exitcode-assignment.cjs:9:5 - error SC1090: assignment to non-variables are not supported yet
-
-   8 |   () => {
-   9 |     process.exitCode = 1;
-     |     ^~~~~~~~~~~~~~~~
-  10 |   },

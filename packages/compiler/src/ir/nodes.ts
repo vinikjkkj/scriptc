@@ -4746,6 +4746,15 @@ export type IrLibFn =
    * array; never throws. */
   | "process.envPairs"
   | "process.exit"
+  /** process.exit() with no argument: ends with process.exitCode (or 0). */
+  | "process.exitDefault"
+  | "process.exitDyn"
+  /** process.exitCode = v over a number / over a dyn value: Node's
+   * validating setter (throws ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE). */
+  | "process.exitCodeSetF64"
+  | "process.exitCodeSet"
+  /** process.exitCode read: a +1 dyn, the stored number or undefined. */
+  | "process.exitCodeGet"
   | "process.cwd"
   /** getpid(2) / getuid(2): zero args → f64. `process.pid` never throws.
    * getuid/getgid answer only on a POSIX target: under a windows triple
@@ -11868,6 +11877,11 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "http.requestConnCb",
   "process.kill",
   "process.killNum",
+  // process.exit(code) validates the code like the exitCode setter does.
+  "process.exit",
+  "process.exitDyn",
+  "process.exitCodeSetF64",
+  "process.exitCodeSet",
   // cpuUsage(prev)'s field validation: negative/non-finite prev fields
   // throw Node's ERR_INVALID_ARG_VALUE RangeError, catchably.
   "process.cpuPrevValidate",

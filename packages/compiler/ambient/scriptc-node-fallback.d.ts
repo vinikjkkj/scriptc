@@ -186,7 +186,10 @@ declare var process: {
    * guard narrows nothing and correct programs fail preflight. The
    * lowering already handles the optional code (bare exit() is exit(0),
    * Node's behavior when exitCode was never set). */
-  exit(code?: number | null): never;
+  exit(code?: number | string | null): never;
+  /* Node's int32 exit-status slot: undefined until assigned; the setter
+   * validates (see scr_process_exitcode_set). */
+  exitCode?: number | string | null | undefined;
   cwd(): string;
   /* The user tick queue: callbacks run before promise jobs at every loop
    * checkpoint (Node's tick-then-microtask order); trailing arguments

@@ -6733,6 +6733,29 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               };
             }
           }
+          // `process.exitCode = v` — Node's validating setter over the int32
+          // slot (numbers, integer-valued numeric strings, null/undefined to
+          // clear; anything else throws catchably at the assignment).
+          if (L.stdlibGlobalMember(expr.left, "process") === "exitCode" && !expr.left.questionDotToken) {
+            const loc = locOf(expr);
+            const value = L.lowerExpr(expr.right);
+            if (value.type.kind === "f64") {
+              return {
+                kind: "exprStmt",
+                expr: { kind: "libCall", fn: "process.exitCodeSetF64", args: [value], type: VOID, loc },
+                loc,
+              };
+            }
+            const boxed = L.coerceToExpected(value, DYN);
+            if (boxed.type.kind !== "dyn") {
+              L.unsupported("SC1090", expr.right, `assigning '${L.fmt(value.type)}' values to process.exitCode`);
+            }
+            return {
+              kind: "exprStmt",
+              expr: { kind: "libCall", fn: "process.exitCodeSet", args: [boxed], type: VOID, loc },
+              loc,
+            };
+          }
           // `process.env.NAME = v` — setenv(3): later env reads and spawned
           // children observe the write, exactly Node. Values are strings
           // (Node stringifies everything; a non-string RHS fences instead

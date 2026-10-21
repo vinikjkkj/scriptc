@@ -1209,12 +1209,101 @@ void scr_os_ifaddrs_free(ScrIfaddrs *s) {
 void (*scr_process_exit_hook)(double code) = NULL;
 void (*scr_stdin_destroy_hook)(void) = NULL;
 
-void scr_process_exit(double code) {
+/* ── process.exitCode ────────────────────────────────────────────────
+ * Node keeps it in an int32 field plus a has-flag (the getter answers
+ * undefined while the flag is clear), and the setter validates before it
+ * stores: null/undefined clear it, an integer-valued numeric STRING is
+ * converted, every other string and every non-number is ERR_INVALID_ARG_TYPE,
+ * a non-integer or non-finite number is ERR_OUT_OF_RANGE, and a value beyond
+ * the safe-integer range is ERR_OUT_OF_RANGE with the range spelled out.
+ * The stored value is ToInt32 of the number (1e10 reads back 1410065408).
+ * (v24.15.0 measured: lab/ec/g.js, g2.js.) The effective status is the
+ * stored value or 0; an uncaught throw or a reported unhandled rejection
+ * (hint != 0) keeps its own status 1, exactly as Node ignores exitCode there. */
+static bool scr_exitcode_has = false;
+static int32_t scr_exitcode_val = 0;
+
+static int32_t scr_exitcode_toint32(double v) {
+  double m = fmod(v, 4294967296.0);
+  if (m < 0) m += 4294967296.0;
+  return (int32_t)(uint32_t)m;
+}
+
+static bool scr_exitcode_set_num(double n) {
+  char recv[48], msg[200];
+  if (!(isfinite(n) && trunc(n) == n)) {
+    scr_num_received(n, recv);
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"code\" is out of range. It must be an integer. Received %s", recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  if (n < -9007199254740991.0 || n > 9007199254740991.0) {
+    scr_num_received(n, recv);
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"code\" is out of range. It must be >= -9007199254740991 && "
+                       "<= 9007199254740991. Received %s", recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  scr_exitcode_has = true;
+  scr_exitcode_val = scr_exitcode_toint32(n);
+  return true;
+}
+
+void scr_process_exitcode_set(const ScrDyn *v) {
+  switch (v->kind) {
+  case SCR_DYN_NULL:
+  case SCR_DYN_UNDEF:
+    scr_exitcode_has = false;
+    scr_exitcode_val = 0;
+    return;
+  case SCR_DYN_NUM:
+    (void)scr_exitcode_set_num(v->v.num);
+    return;
+  case SCR_DYN_STR: {
+    if (v->v.str->len == 0) break;
+    double n = scr_dyn_to_number(v);
+    if (isnan(n)) break;
+    (void)scr_exitcode_set_num(n);
+    return;
+  }
+  default:
+    break;
+  }
+  scr_dyn_arg_type_fail("code", "of type number", v);
+}
+
+void scr_process_exitcode_set_f64(double n) { (void)scr_exitcode_set_num(n); }
+
+ScrDyn *scr_process_exitcode_get(void) {
+  if (!scr_exitcode_has) return scr_dyn_undefined();
+  return scr_dyn_new_num((double)scr_exitcode_val);
+}
+
+/* The status the process ends with when nothing else decided it. */
+double scr_process_exitcode_effective(void) { return scr_exitcode_has ? (double)scr_exitcode_val : 0.0; }
+bool scr_process_exitcode_is_set(void) { return scr_exitcode_has; }
+
+/* The last atexit handler (registered first, by scr_init, so it runs after
+ * the 'exit' listeners, the cycle collection, the RC audit and the stdout
+ * flush): a program that SET process.exitCode and returned normally ends
+ * with it. A noted abnormal status (uncaught throw, unhandled rejection,
+ * the pending-module-root 13) is kept. */
+void scr_exitcode_at_exit(void) {
+  if (scr_exitcode_has && scr_exit_code_hint_get() == 0) {
+    fflush(stdout);
+    _Exit((int)scr_exitcode_val);
+  }
+}
+
+static void scr_process_exit_now(void) {
   /* Node runs 'exit' listeners on explicit process.exit() too — they run
    * HERE, synchronously, before the teardown-free exit below. The hook is
-   * non-NULL only when the events unit is linked (scr_events.c). */
+   * non-NULL only when the events unit is linked (scr_events.c). The code
+   * is re-read afterwards: a listener may assign process.exitCode. */
   scr_process_in_exit = true;
-  if (scr_process_exit_hook != NULL) scr_process_exit_hook(code);
+  if (scr_process_exit_hook != NULL) scr_process_exit_hook(scr_process_exitcode_effective());
   /* _Exit skips atexit handlers on purpose: no further code runs (matching
    * Node), and the RC audit is meaningless mid-program (live values are
    * expected). scr_init's flush-at-exit is also skipped — flush here. */
@@ -1222,7 +1311,25 @@ void scr_process_exit(double code) {
 #ifdef SCR_F64_CENSUS
   { extern void scr_f64_census_flush(void); scr_f64_census_flush(); }
 #endif
-  _Exit((int)code);
+  _Exit((int)scr_process_exitcode_effective());
+}
+
+/* process.exit(code): a given code is assigned to process.exitCode first
+ * (and validated by the same setter, so a bad one throws and does not
+ * exit); process.exit() uses whatever exitCode holds. */
+void scr_process_exit(double code) {
+  if (!scr_exitcode_set_num(code)) return;
+  scr_process_exit_now();
+}
+void scr_process_exit_default(void) { scr_process_exit_now(); }
+/* process.exit(v) over a value of unknown type: undefined is the no-argument
+ * form; anything else goes through the exitCode setter first. */
+void scr_process_exit_dyn(const ScrDyn *v) {
+  if (v->kind != SCR_DYN_UNDEF) {
+    scr_process_exitcode_set(v);
+    if (scr_exc_pending()) return;
+  }
+  scr_process_exit_now();
 }
 
 /* ── the process introspection statics ────────────────────────────────
