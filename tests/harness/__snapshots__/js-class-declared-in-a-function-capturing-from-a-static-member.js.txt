@@ -1,0 +1,13 @@
+js-class-declared-in-a-function-capturing-from-a-static-member.js:5:3 - error SC1090: class declarations inside functions are not supported yet
+
+  4 | function make(n) {
+  5 |   class Box {
+    |   ^~~~~~~~~~~
+  6 |     static twice() {
+
+js-class-declared-in-a-function-capturing-from-a-static-member.js:10:10 - error SC1090: method calls like 'Box.twice' is not supported yet
+
+   9 |   }
+  10 |   return Box.twice();
+     |          ^~~~~~~~~~~
+  11 | }

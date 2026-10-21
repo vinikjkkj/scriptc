@@ -16,7 +16,7 @@ import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } 
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall, requireFnValueDeclType } from "./lower-builtins.js";
-import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf, hasOwnPropertyAliasDecl } from "./lower-calls.js";
+import { bindingNeverReassigned, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { dynImportBindingDepOf } from "./lower-island.js";
@@ -100,8 +100,25 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
   for (let p: ts.Node | undefined = decl.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
     if (ts.isFunctionLike(p) || ts.isClassDeclaration(p) || ts.isClassExpression(p) || ts.isForStatement(p) || ts.isForInStatement(p) || ts.isForOfStatement(p) || ts.isWhileStatement(p) || ts.isDoStatement(p)) { once = false; break; }
   }
-  // Captures.
+  // Captures: a local of an enclosing function or block the class reads. The
+  // class lifts when every one is a binding the program never reassigns (a
+  // parameter, a const, a let/var nothing writes): the instance carries the
+  // VALUES in hidden fields set at construction, which a never-written
+  // binding cannot tell from the binding itself. A read inside a static
+  // member or the heritage clause, or a binding that is written, an inner
+  // function declaration (a hoisted closure), or a destructured name, keeps
+  // the refusal.
   let captured = false;
+  const capSyms: ts.Symbol[] = [];
+  const insideStaticOrHeritage = (n: ts.Node): boolean => {
+    for (let p: ts.Node | undefined = n; p !== undefined && p !== decl; p = p.parent) {
+      if (ts.isHeritageClause(p)) return true;
+      if ((ts.isMethodDeclaration(p) || ts.isPropertyDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)) &&
+        (p as { modifiers?: readonly ts.Node[] }).modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword)) return true;
+      if (ts.isComputedPropertyName(p)) return true;
+    }
+    return false;
+  };
   ts.walkPreorder(decl, (n) => {
     if (captured) return "stop";
     if (ts.isIdentifier(n)) {
@@ -113,15 +130,31 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
           for (let p: ts.Node | undefined = d; p !== undefined; p = p.parent) if (lifted.has(p)) { inLifted = true; break; }
           if (inLifted) continue;
           if (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d)) continue;
+          let local = false;
           for (let p: ts.Node | undefined = d.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
-            if (ts.isFunctionLike(p) || LOCAL_SCOPE_KINDS.has(p.kind)) { captured = true; return "stop"; }
+            if (ts.isFunctionLike(p) || LOCAL_SCOPE_KINDS.has(p.kind)) { local = true; break; }
           }
+          if (!local) continue;
+          // A capture. Only variables and parameters with a plain name qualify.
+          const isVar = ts.isVariableDeclaration(d) && ts.isIdentifier(d.name);
+          const isParam = ts.isParameter(d) && ts.isIdentifier(d.name) && !d.dotDotDotToken;
+          if (
+            (!isVar && !isParam) || insideStaticOrHeritage(n) ||
+            ts.isClassDeclaration(d) || !bindingNeverReassigned(L, s, d)
+          ) {
+            captured = true;
+            return "stop";
+          }
+          if (!capSyms.includes(s)) capSyms.push(s);
         }
       }
     }
     return undefined;
   });
   if (captured) return false;
+  if (capSyms.length > 0 && (ext !== undefined || decl.members.some((m) => ts.isConstructorDeclaration(m) && m.parameters.some((p) => p.dotDotDotToken)))) {
+    return false; // a capturing class neither extends nor takes a rest constructor
+  }
   // Uses.
   const staticMethods = new Set<string>();
   for (const m of decl.members) {
@@ -134,14 +167,18 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
     if (id === decl.name || L.checker.getSymbolAtLocation(id) !== sym) continue;
     if (id.pos >= decl.pos && id.end <= decl.end) continue; // self reference inside the class
     if (id.getStart(sf) < decl.end) return false;
-    if (once) continue;
     const p = id.parent;
+    // A TYPE position (an annotation, a type argument) names the class without
+    // evaluating it.
+    if (ts.isTypeReferenceNode(p)) continue;
+    if (once && capSyms.length === 0) continue;
     if (ts.isNewExpression(p) && p.expression === id) continue;
-    if (ts.isExpressionWithTypeArguments(p) && ts.isHeritageClause(p.parent) && p.parent.token === ts.SyntaxKind.ExtendsKeyword) continue;
+    if (ts.isExpressionWithTypeArguments(p) && ts.isHeritageClause(p.parent) && p.parent.token === ts.SyntaxKind.ExtendsKeyword && capSyms.length === 0) continue;
     if (ts.isPropertyAccessExpression(p) && p.expression === id && staticMethods.has(p.name.text) &&
-      ts.isCallExpression(p.parent) && p.parent.expression === p) continue;
+      ts.isCallExpression(p.parent) && p.parent.expression === p && capSyms.length === 0) continue;
     return false;
   }
+  if (capSyms.length > 0) L.localClassCaptures.set(decl, capSyms);
   return true;
 }
 

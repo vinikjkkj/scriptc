@@ -1684,6 +1684,9 @@ export class Lowerer {
    * nothing local, carry no static state and are used in ways one evaluation
    * cannot be told from many. Their statement lowers to nothing. */
   readonly liftedLocalClasses = new Set<ts.ClassDeclaration>();
+  /** The captured enclosing bindings of each lifted local class (never
+   * written; the instance stores their values). */
+  readonly localClassCaptures = new Map<ts.ClassDeclaration, ts.Symbol[]>();
   /** Namespace ModuleBlocks this program lowers, filled by splitFiles:
    * "flattened" — an instantiated namespace whose body joined the file's
    * parts (members resolve statically); "typeOnly" — a skipped
@@ -13920,6 +13923,43 @@ export class Lowerer {
    * a source position. Without it those fences fell back to
    * `declarationsOf(THIS_BINDING)`, and THIS_BINDING is an object literal
    * cast to ts.Symbol with no declarations array — the ICE. */
+  /** The current value of a captured enclosing binding, read at a `new` site
+   * of the lifted local class that captures it (where it is in scope). */
+  lowerCapturedValue(sym: ts.Symbol, type: IrType, at: ts.Node): IrExpr {
+    const loc = locOf(at);
+    let raw: IrExpr | null = null;
+    const local = this.resolveKey(sym, at);
+    if (local) raw = { kind: "varRef", localId: local.id, type: local.type, loc };
+    if (raw === null) {
+      const g = this.globalsBySymbol.get(sym);
+      if (g) raw = { kind: "varRef", localId: g.id, type: g.type, loc };
+    }
+    if (raw === null) raw = this.capturedClassFieldRead(sym, at);
+    if (raw === null) {
+      this.unsupported("SC1090", at, `constructing a class that captures '${sym.name}' from a scope where '${sym.name}' is not readable`);
+    }
+    return typeEquals(raw.type, type) ? raw : this.coerceInto(at, raw, type);
+  }
+
+  /** A read of captured binding `sym` from inside the lifted local class that
+   * captured it: the hidden field of `this`. Null elsewhere. */
+  capturedClassFieldRead(sym: ts.Symbol, at: ts.Node): IrExpr | null {
+    const cls = this.currentClass;
+    const c = cls?.captures?.find((x) => x.sym === sym);
+    if (cls === null || cls === undefined || c === undefined) return null;
+    const th = this.resolveThis(at);
+    if (!th) return null;
+    const loc = locOf(at);
+    return {
+      kind: "fieldGet",
+      obj: { kind: "varRef", localId: th.id, type: th.type, loc },
+      className: cls.def.name,
+      field: c.field,
+      type: c.type,
+      loc,
+    };
+  }
+
   resolveThis(at?: ts.Node): IrLocal | null {
     return this.resolveKey(THIS_BINDING, undefined, at);
   }

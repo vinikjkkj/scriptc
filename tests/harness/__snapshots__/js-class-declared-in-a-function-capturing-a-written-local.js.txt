@@ -1,0 +1,13 @@
+js-class-declared-in-a-function-capturing-a-written-local.js:7:3 - error SC1090: class declarations inside functions are not supported yet
+
+  6 |   let count = 0;
+  7 |   class Tick {
+    |   ^~~~~~~~~~~~
+  8 |     next() {
+
+js-class-declared-in-a-function-capturing-a-written-local.js:13:10 - error SC1090: method calls like 'new Tick().next' is not supported yet
+
+  12 |   count += 5;
+  13 |   return new Tick().next();
+     |          ^~~~~~~~~~~~~~~~~
+  14 | }
