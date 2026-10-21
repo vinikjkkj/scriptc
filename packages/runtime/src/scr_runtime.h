@@ -7779,6 +7779,11 @@ ScrStr *scr_str_from_char_code_bytes(ScrBytes *codes);
  * member exists to avoid. The compare never short-circuits. */
 bool scr_crypto_timing_safe_equal(const ScrBytes *a, const ScrBytes *b);
 double scr_str_last_index_of(ScrStr *s, ScrStr *needle);
+/* s.replace(pat, rep) / s.replaceAll(pat, rep) over a STRING pattern and a
+ * STRING replacement (scr_lib.c): GetSubstitution without captures ($$, $&,
+ * $`, $'), the empty pattern matching at every code point boundary for
+ * replaceAll. Borrows; +1; never throws. */
+ScrStr *scr_str_replace_str(ScrStr *s, ScrStr *pat, ScrStr *rep, bool all);
 
 /* ── Number statics (scr_lib.c) ───────────────────────────────────────
  * JS-exact by construction: Number.isFinite/isNaN/isInteger/isSafeInteger

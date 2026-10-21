@@ -5418,6 +5418,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         L.lowerTextCodecCall(expr, expr.expression) ??
         L.lowerStringStaticCall(expr, expr.expression) ??
         L.lowerStringLastIndexOfCall(expr, expr.expression) ??
+        L.lowerStringReplaceStrCall(expr, expr.expression) ??
         L.lowerPromiseMethodCall(expr, expr.expression) ??
         // Homogeneous promise-tuple literals claim BEFORE the static path
         // (whose array bound would fence them); Promise.reject follows it
