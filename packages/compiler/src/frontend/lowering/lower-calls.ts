@@ -4054,6 +4054,21 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           !L.resolveLocal(expr.expression.expression) && !L.globalOf(expr.expression.expression)))
     ) {
       const member = probeLower(L, expr.expression);
+      if (member?.type.kind === "dyn") {
+        // A member attached only from inside function bodies: the bag's value,
+        // called with the exports object as the receiver (not read by name).
+        if (expr.arguments.some((a) => ts.isSpreadElement(a))) {
+          L.unsupported("SC1090", expr, "spread arguments in calls through 'unknown' values");
+        }
+        return {
+          kind: "dynCall",
+          callee: member,
+          calleeName: expr.expression.getText(),
+          args: expr.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
+          type: DYN,
+          loc,
+        };
+      }
       if (member?.type.kind === "func") {
         const fparams = member.type.params;
         const cargs = expr.arguments.map((a, i) => L.lowerArgExpecting(a, fparams[i]));

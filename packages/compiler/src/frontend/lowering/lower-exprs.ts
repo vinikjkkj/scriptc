@@ -2188,7 +2188,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (ts.isElementAccessExpression(expr)) return L.lowerElementAccess(expr);
     if (ts.isConditionalExpression(expr)) return lowerTernary(L, expr);
 
-    if (ts.isPropertyAccessExpression(expr)) {
+    if (ts.isPropertyAccessExpression(expr)) {
       // `import.meta.dirname` / `.filename` / `.url` — the ESM spelling of
       // "where is this module". They lower to COMPILE-TIME constants of the
       // source file's own location, which is exactly the choice already
@@ -2563,6 +2563,31 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             (sym ? L.globalsBySymbol.get(sym) : undefined) ??
             (resolved ? L.globalsBySymbol.get(resolved) : undefined);
           if (g) return { kind: "varRef", localId: g.id, type: g.type, loc };
+          // A member tsc knows no symbol for: attached only from inside a function
+          // body (see cjsExportsBagOf). The read is the bag's, undefined when absent.
+          if (cjsMemberOnlyInFunctions(L, sym) && !undeclaredMemberExcluded(expr.name.text)) {
+            const bag = cjsExportsBagOf(L, sf);
+            const bagRef = (): IrExpr => ({ kind: "varRef", localId: bag, type: DYN, loc });
+            return L.maybeNarrow(
+              {
+                kind: "seqExpr",
+                stmts: [
+                  { kind: "assign", localId: bag, value: { kind: "libCall", fn: "cls.propsEnsure", args: [bagRef()], type: DYN, loc }, loc },
+                ],
+                result: {
+                  kind: "dynKeyGet",
+                  key: { kind: "strLit", value: expr.name.text, type: STRING, loc },
+                  optional: true,
+                  value: bagRef(),
+                  type: DYN,
+                  loc,
+                },
+                type: DYN,
+                loc,
+              },
+              expr,
+            );
+          }
         }
       }
       // Namespace-qualified reads (`N.x`, `A.B.C.f`, import= alias
@@ -20544,6 +20569,40 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       L.liftedFns.push({ name, params: irParams, returnType: first.ret, locals, body, loc });
     }
     return { kind: "closure", fnName: name, captures: [], type: funcOf(params, first.ret), loc };
+  }
+
+/** True when `module.exports.<name>` has no symbol, or every place that
+   * attaches it sits inside a function body: no top-level statement registers
+   * storage for it, so the file's bag (cjsExportsBagOf) is its home. A member
+   * that is alias plumbing (an identifier export) is NOT bag material. */
+  export function cjsMemberOnlyInFunctions(L: Lowerer, sym: ts.Symbol | undefined): boolean {
+    if (sym === undefined) return true;
+    if (L.cjsExportValueSymbol(sym) !== null) return false;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length === 0) return true;
+    return decls.every((d) => {
+      for (let p: ts.Node | undefined = d.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
+        if (ts.isFunctionLike(p)) return true;
+      }
+      return false;
+    });
+  }
+
+/** The module-level dyn global that holds the members a CommonJS module attaches
+   * to `module.exports` only from INSIDE function bodies (iconv-lite's
+   * `supportsStreams`, `skipDecodeWarning`, `encodeStream`): tsc records no
+   * symbol for them, so there is no per-member storage. The file's own reads,
+   * writes and calls of such a member meet in this one object; a requirer has
+   * no static name for them and keeps its refusal. Created on first demand;
+   * ids are per file tag so the discovery and emit passes agree. */
+  export function cjsExportsBagOf(L: Lowerer, sf: ts.SourceFile): string {
+    const known = L.cjsExportBags.get(sf);
+    if (known !== undefined) return known;
+    const tag = L.fileTag.get(sf) ?? "";
+    const id = `%g.${tag === "" ? "e." : tag.replace(/^%/, "")}%exportsbag`;
+    L.cjsExportBags.set(sf, id);
+    L.globalsList.push({ id, name: "%exportsbag", type: DYN, mutable: true });
+    return id;
   }
 
 /** Names every object answers from its prototype (`toString`, `hasOwnProperty`,
