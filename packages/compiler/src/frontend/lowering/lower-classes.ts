@@ -896,6 +896,124 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
   return ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e) ? e : null;
 }
 
+/** The function-like `rhs` names, for `C.prototype.m = rhs`: a class METHOD
+   * (`D.prototype.n`), a function declaration, a `function` expression bound
+   * to a const, or an object-literal method reached through a name (a
+   * `{ m() {} }` table's member, including through a destructuring of that
+   * table). Null for anything else (arrows have a lexical `this`, so they
+   * are not methods; async/generator forms keep their fences). */
+  function lateMethodSourceOf(L: Lowerer, rhs: ts.Expression): ts.MethodDeclaration | ts.FunctionExpression | ts.FunctionDeclaration | null {
+    let e: ts.Expression = rhs;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    const plain = (f: ts.MethodDeclaration | ts.FunctionExpression | ts.FunctionDeclaration | undefined): ts.MethodDeclaration | ts.FunctionExpression | ts.FunctionDeclaration | null =>
+      f !== undefined && f.body !== undefined && f.asteriskToken === undefined &&
+      !(ts.canHaveModifiers(f) && ts.getModifiers(f)?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) === true) &&
+      f.typeParameters === undefined
+        ? f
+        : null;
+    const memberOfLiteral = (lit: ts.ObjectLiteralExpression, name: string): ts.MethodDeclaration | ts.FunctionExpression | null => {
+      for (const p of lit.properties) {
+        if (ts.isSpreadAssignment(p) || !p.name || !(ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) || p.name.text !== name) continue;
+        if (ts.isMethodDeclaration(p)) return plain(p) as ts.MethodDeclaration | null;
+        if (ts.isPropertyAssignment(p) && ts.isFunctionExpression(p.initializer)) return plain(p.initializer) as ts.FunctionExpression | null;
+      }
+      return null;
+    };
+    // `D.prototype.n`
+    if (
+      ts.isPropertyAccessExpression(e) && ts.isPropertyAccessExpression(e.expression) &&
+      e.expression.name.text === "prototype" && ts.isIdentifier(e.expression.expression)
+    ) {
+      const sym = L.resolveValueSymbol(e.expression.expression);
+      const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+      if (d !== undefined && ts.isClassDeclaration(d)) {
+        for (const m of d.members) {
+          if (ts.isMethodDeclaration(m) && ts.isIdentifier(m.name) && m.name.text === e.name.text &&
+              !(ts.getModifiers(m)?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) === true)) {
+            return plain(m) as ts.MethodDeclaration | null;
+          }
+        }
+      }
+      return null;
+    }
+    if (ts.isFunctionExpression(e)) return plain(e) as ts.FunctionExpression | null;
+    if (!ts.isIdentifier(e)) return null;
+    const sym = L.resolveValueSymbol(e);
+    const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    if (d === undefined) return null;
+    if (ts.isFunctionDeclaration(d)) return plain(d) as ts.FunctionDeclaration | null;
+    if (ts.isVariableDeclaration(d) && d.initializer !== undefined) {
+      let init: ts.Expression = d.initializer;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      return ts.isFunctionExpression(init) ? (plain(init) as ts.FunctionExpression | null) : null;
+    }
+    // `const { addEventListener } = Table` where Table is an object literal const.
+    if (ts.isBindingElement(d) && d.name !== undefined && ts.isIdentifier(d.name) && ts.isObjectBindingPattern(d.parent)) {
+      const vd = d.parent.parent;
+      if (!ts.isVariableDeclaration(vd) || vd.initializer === undefined || !ts.isIdentifier(vd.initializer)) return null;
+      const tsym = L.resolveValueSymbol(vd.initializer);
+      const td = tsym ? L.checker.valueDeclarationOf(tsym) : undefined;
+      if (td === undefined || !ts.isVariableDeclaration(td) || td.initializer === undefined) return null;
+      let lit: ts.Expression = td.initializer;
+      while (ts.isParenthesizedExpression(lit)) lit = lit.expression;
+      if (!ts.isObjectLiteralExpression(lit)) return null;
+      const key = d.propertyName !== undefined && (ts.isIdentifier(d.propertyName) || ts.isStringLiteral(d.propertyName)) ? d.propertyName.text : d.name.text;
+      return memberOfLiteral(lit, key);
+    }
+    return null;
+  }
+
+/** `C.prototype.m = <function-like>` at the top level of the file declaring
+   * class C: a LATE METHOD. The function becomes `C`'s method `m` exactly as
+   * if declared in the body (same module function `%C.m`, the
+   * prototype-class machinery's registration: info.methods plus
+   * protoClassBodies), and the assignment statement itself lowers to
+   * nothing. The body is lowered under C: when the source is another
+   * class's method or a free function, `this` is retyped to C
+   * (Lowerer.activeThisType), so its field reads resolve against C's own
+   * layout — which is what duck-typed sharing of a method between
+   * unrelated classes means. A name C already declares is not replaced
+   * (the statement keeps its refusal). */
+  function registerLateMethods(L: Lowerer, info: ClassInfo, decl: ts.ClassDeclaration, classSymbol: ts.Symbol): void {
+    const sf = decl.getSourceFile();
+    if (!isJsSourceFile(sf)) return;
+    for (const stmt of sf.statements) {
+      if (!ts.isExpressionStatement(stmt)) continue;
+      const e = stmt.expression;
+      if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+      const lhs = e.left;
+      if (
+        !ts.isPropertyAccessExpression(lhs) || !ts.isIdentifier(lhs.name) ||
+        !ts.isPropertyAccessExpression(lhs.expression) || lhs.expression.name.text !== "prototype" ||
+        !ts.isIdentifier(lhs.expression.expression)
+      ) {
+        continue;
+      }
+      if (L.checker.getSymbolAtLocation(lhs.expression.expression) !== classSymbol) continue;
+      const m = lhs.name.text;
+      if (info.methods.has(m) || info.fields.has(m)) continue;
+      const fn = lateMethodSourceOf(L, e.right);
+      if (fn === null) continue;
+      let sig: ReturnType<Lowerer["lambdaSignature"]>;
+      try {
+        sig = L.lambdaSignature(fn as ts.MethodDeclaration);
+      } catch (err) {
+        if (err instanceof PoisonError) continue;
+        throw err;
+      }
+      if (sig.shapes.some((p) => p.mode === "rest")) continue;
+      info.methods.set(m, { params: sig.shapes, ret: sig.funcType.ret });
+      const bodies = L.protoClassBodies.get(info.def.name) ?? new Map<string, ts.FunctionExpression>();
+      bodies.set(m, fn as ts.FunctionExpression);
+      L.protoClassBodies.set(info.def.name, bodies);
+      L.lateMethodAssigns.add(e);
+      // The class's own checker type stands in for `this` inside a body
+      // written against a different one.
+      const ownType = L.checker.getDeclaredTypeOfSymbol(classSymbol);
+      L.lateMethodThis.set(fn, ownType);
+    }
+  }
+
 /** A function type whose RESULT is a function again (directly or as a union
    * arm), possibly under a union of its own: the shape a JS state machine's
    * `this.next` slot unrolls to. */
@@ -4230,6 +4348,9 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       for (const f of staticFields) {
         L.globalsList.push({ id: f.globalId, name: `${info.def.jsName ?? className}.${f.name}`, type: f.type, mutable: !f.readonly });
       }
+      if (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && classSymbol !== undefined) {
+        registerLateMethods(L, info, decl, classSymbol);
+      }
     }
   }
 
@@ -6773,7 +6894,13 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
    * no call site reached, and the function disappears with it. */
   export function lowerProtoMethodMember(L: Lowerer, info: ClassInfo, mName: string,
     fn: ts.FunctionExpression,): IrFunction | null {
-    return withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, fn));
+    const prevThis = L.activeThisType;
+    L.activeThisType = L.lateMethodThis.get(fn) ?? null;
+    try {
+      return withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, fn));
+    } finally {
+      L.activeThisType = prevThis;
+    }
   }
 
   /** One instance method body as its module function, shared by the declared

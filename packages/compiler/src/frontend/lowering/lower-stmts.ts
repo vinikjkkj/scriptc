@@ -6472,6 +6472,9 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
    * requires parenthesized in statement position) lands in the
    * object-literal-target branch below. */
   export function lowerExprStatement(L: Lowerer, expr: ts.Expression): IrStmt {
+    // `C.prototype.m = fn` adopted as a late method of C: a definition, not
+    // a runtime write (registerLateMethods).
+    if (L.lateMethodAssigns.has(expr)) return { kind: "block", body: [], loc: locOf(expr) };
     const stmtNode = expr.parent;
     while (ts.isParenthesizedExpression(expr)) expr = expr.expression;
     // `module.exports = <expr>` reached as a COMMA OPERAND of a top-level
