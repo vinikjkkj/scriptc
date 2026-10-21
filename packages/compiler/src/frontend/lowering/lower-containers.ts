@@ -6671,6 +6671,24 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       if (name === "split" && call.arguments.length !== 1) {
         L.unsupported("SC1120", call, "'.split()' with a limit argument");
       }
+      // split splices each capture group's text into the result, and a group that did not participate is
+      // `undefined` in Node's array -- which a `string[]` cannot hold (the divergence-51 collapse to "" is what
+      // this compiler refuses to inherit into one more surface): fence a pattern we can prove may skip a group.
+      if (name === "split") {
+        const lit = staticRegexTextOf(L, arg0);
+        const part = lit !== null ? captureParticipationOfPattern(lit.pattern) : null;
+        if (part !== null) {
+          for (let g = 1; g <= part.captureCount; g++) {
+            if (part.always.get(g) !== true) {
+              L.unsupported(
+                "SC1120",
+                arg0,
+                `'.split()' with a capture group this pattern does not always fill (group ${g}; Node puts undefined in the result and a string[] cannot hold it — use a non-capturing group, or a pattern whose groups always participate)`,
+              );
+            }
+          }
+        }
+      }
       const receiver = lowerReceiver();
       const args = call.arguments.map((a) => L.lowerExpr(a));
       if (name !== "split" && args[1]?.type.kind === "func") {

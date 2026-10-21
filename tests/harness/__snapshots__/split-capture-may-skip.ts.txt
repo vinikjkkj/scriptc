@@ -1,0 +1,17 @@
+split-capture-may-skip.ts:4:25 - error SC1120: '.split()' with a capture group this pattern does not always fill (group 1; Node puts undefined in the result and a string[] cannot hold it — use a non-capturing group, or a pattern whose groups always participate) is not supported yet
+
+  3 | // participates, or a non-capturing group, compiles).
+  4 | console.log("a1b".split(/(\d)|(x)/));
+    |                         ^~~~~~~~~~
+  5 | console.log("a,b".split(/(,)?/));
+
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+
+split-capture-may-skip.ts:5:25 - error SC1120: '.split()' with a capture group this pattern does not always fill (group 1; Node puts undefined in the result and a string[] cannot hold it — use a non-capturing group, or a pattern whose groups always participate) is not supported yet
+
+  4 | console.log("a1b".split(/(\d)|(x)/));
+  5 | console.log("a,b".split(/(,)?/));
+    |                         ^~~~~~
+  6 | console.log("a,b".split(/(,)/), "a,b".split(/(?:,)/));
+
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
