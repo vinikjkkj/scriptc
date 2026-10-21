@@ -614,7 +614,8 @@ bool scr_arr_has_index(ScrArr *a, double i) {
     int64_t n = (int64_t)i;
     if ((double)n == i && (uint64_t)n < (uint64_t)a->len) {
       if (a->elem == SCR_ELEM_F64 || a->elem == SCR_ELEM_BOOL) return true;
-      return scr_slot_to_ptr(a->data[n]) != NULL;
+      void *p = scr_slot_to_ptr(a->data[n]);
+      return !(p == NULL);
     }
   }
   return false;
