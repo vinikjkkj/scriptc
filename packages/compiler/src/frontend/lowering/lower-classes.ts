@@ -7656,7 +7656,10 @@ function executorResolveAdoptionUnion(
  * the copy). Trap functions box as dyn functions and are called with the
  * handler as `this`. Null when the call has another shape (falls to the
  * standard fence). */
-function lowerProxyNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc): IrExpr | null {
+export function lowerProxyNew(
+  L: Lowerer, expr: ts.NewExpression | ts.CallExpression, loc: SrcLoc,
+  fn: "dyn.proxyNew" | "dyn.proxyRevocable" = "dyn.proxyNew",
+): IrExpr | null {
   const args = expr.arguments ?? [];
   if (args.length !== 2 || args.some(ts.isSpreadElement)) return null;
   const toDyn = (n0: ts.Expression, what: string): IrExpr => {
@@ -7668,6 +7671,38 @@ function lowerProxyNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc): IrExpr 
     // parameters bind as checked-dynamic values.
     const undo: ts.Node[] = [];
     if (ts.isObjectLiteralExpression(n)) {
+      // The library's contextual type (ProxyHandler<T>) is not the builder
+      // here: the run time reads the literal key by key.
+      L.dynObjectLiterals.add(n);
+      // A trap returns to the run time: its result crosses as a dyn value,
+      // and a literal it returns builds dyn (the library's return type,
+      // ArrayLike<string | symbol> / PropertyDescriptor, is not the builder).
+      for (const prop of n.properties) {
+        const fnNode = ts.isMethodDeclaration(prop) ? prop
+          : ts.isPropertyAssignment(prop) && (ts.isFunctionExpression(prop.initializer) || ts.isArrowFunction(prop.initializer))
+            ? prop.initializer : null;
+        if (fnNode === null || fnNode.body === undefined) continue;
+        L.dynReturnFnNodes.add(fnNode);
+        const walkRet = (b: ts.Node): void => {
+          ts.forEachChild(b, (c) => {
+            if (ts.isFunctionLike(c)) return;
+            if (ts.isReturnStatement(c) && c.expression !== undefined) {
+              let r: ts.Expression = c.expression;
+              while (ts.isParenthesizedExpression(r) || ts.isAsExpression(r)) r = r.expression;
+              if (ts.isObjectLiteralExpression(r)) L.dynObjectLiterals.add(r);
+              else if (ts.isArrayLiteralExpression(r)) L.dynArrayLiterals.add(r);
+            }
+            walkRet(c);
+          });
+        };
+        if (ts.isBlock(fnNode.body)) walkRet(fnNode.body);
+        else {
+          let r: ts.Expression = fnNode.body;
+          while (ts.isParenthesizedExpression(r) || ts.isAsExpression(r)) r = r.expression;
+          if (ts.isObjectLiteralExpression(r)) L.dynObjectLiterals.add(r);
+          else if (ts.isArrayLiteralExpression(r)) L.dynArrayLiterals.add(r);
+        }
+      }
       for (const prop of n.properties) {
         if (ts.isMethodDeclaration(prop)) undo.push(...L.dynParamsOf(prop, true));
         else if (ts.isPropertyAssignment(prop)) undo.push(...L.dynParamsOf(prop.initializer, true));
@@ -7679,7 +7714,10 @@ function lowerProxyNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc): IrExpr 
       raw = lit ? L.lowerExprExpecting(n, DYN) : L.lowerExpr(n);
     } finally {
       L.dynThisInLiterals--;
-      for (const u of undo) L.chainNarrowedType.delete(u);
+      for (const u of undo) {
+        L.chainNarrowedType.delete(u);
+        if (ts.isParameter(u)) L.paramIrOverrides.delete(u);
+      }
     }
     if (raw.type.kind === "dyn") return raw;
     // A scalar crosses so the runtime can throw V8's TypeError for it.
@@ -7714,7 +7752,7 @@ function lowerProxyNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc): IrExpr 
   const handler = toDyn(args[1]!, "handler");
   return {
     kind: "libCall",
-    fn: "dyn.proxyNew",
+    fn,
     args: [target, handler, { kind: "boolLit", value: inStrictCode(expr), type: BOOL, loc }],
     type: DYN,
     loc,

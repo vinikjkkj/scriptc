@@ -11378,6 +11378,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8339-proxy-over-a-typed-record-with-traps.ts": {
+   "order": [
+    "<repo>/tests/corpus/8339-proxy-over-a-typed-record-with-traps.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8340-proxy-over-typed-arrays-and-records-with-all-traps.ts": {
+   "order": [
+    "<repo>/tests/corpus/8340-proxy-over-typed-arrays-and-records-with-all-traps.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8341-proxy-construct-and-define-property-traps.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8341-proxy-construct-and-define-property-traps.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8342-proxy-revocable.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8342-proxy-revocable.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
