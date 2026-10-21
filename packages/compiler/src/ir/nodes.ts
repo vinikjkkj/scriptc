@@ -3780,6 +3780,9 @@ export type IrLibFn =
    * budget runs Node's validateInt32-from-1 ladder and is then inert —
    * the single dial has nothing to time). May-throw. */
   | "net.connectAttempt"
+  /** connect over a RUNTIME argument (a computed-key option bag, a value of
+   * unknown type): Node's validation order, then the dial. May-throw. */
+  | "net.connectDyn"
   | "net.connectCb"
   /** connect({ port, host, autoSelectFamily: true, lookup }) — the
    * caller-resolver dial (portless's createLoopbackConnection): args
@@ -12221,7 +12224,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.lchmodCb",
   "fs.lchmodSyncChk",
   "fsp.lchmodChk",
+  "net.connect",
+  "net.connectCb",
   "net.connectAttempt",
+  "net.connectDyn",
   "net.setAutoSelTimeout",
   "error.argTypeThrow",
   "error.propTypeThrow",

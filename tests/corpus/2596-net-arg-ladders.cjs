@@ -30,3 +30,8 @@ for (const v of [1, 9, 25]) {
   const server = net.createServer();
   show(() => { server.listen({ port: 0, signal: 'INVALID_SIGNAL' }); });
 }
+const invalidKeys = ['objectMode', 'readableObjectMode', 'writableObjectMode'];
+for (const invalidKey of invalidKeys) {
+  const option = { port: 8080, [invalidKey]: true };
+  show(() => { net.createConnection(option); });
+}

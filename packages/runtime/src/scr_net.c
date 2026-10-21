@@ -2019,6 +2019,17 @@ static void scr_net_sock_dial_peer(ScrNetSocket *s) {
 
 ScrNetSocket *scr_net_connect(double port, ScrStr *host /*borrowed, nullable*/,
                                ScrClosure *cb /*moves, nullable*/) {
+  if (!(trunc(port) == port && port >= 0 && port < 65536)) {
+    /* validatePort: Node throws before it creates anything. */
+    ScrDyn *pv = scr_dyn_new_num(port);
+    char detail[96], msg[200];
+    const char *d = scr_dyn_specific_type(pv, detail, sizeof detail);
+    int len = snprintf(msg, sizeof msg, "Port should be >= 0 and < 65536. Received %s.", d);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_SOCKET_BAD_PORT");
+    scr_dyn_release(pv);
+    if (cb) scr_closure_release(cb);
+    return NULL;
+  }
   ScrNetSocket *s = scr_net_sock_new();
   if (cb) scr_net_ls_add(&s->conn_ls, cb, NULL, true);
   s->peer_port = (int)port;
@@ -2112,6 +2123,16 @@ ScrNetSocket *scr_net_connect_attempt(double port, ScrStr *host, const ScrDyn *t
   return scr_net_connect(port, host, NULL);
 }
 
+/* A string that cannot be a port: connect("path") is a unix-socket dial. */
+static bool scr_net_dyn_is_pathy(const ScrDyn *v) {
+  if (v->v.str->len == 0) return true;
+  for (size_t i = 0; i < v->v.str->len; i++) {
+    char c = v->v.str->data[i];
+    if (!((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E' || c == ' ')) return true;
+  }
+  return false;
+}
+
 static bool scr_net_dyn_truthy(const ScrDyn *v) {
   switch (v->kind) {
   case SCR_DYN_UNDEF:
@@ -2123,18 +2144,71 @@ static bool scr_net_dyn_truthy(const ScrDyn *v) {
   }
 }
 
-/* net.connect/createConnection over a RUNTIME option bag (computed keys
- * — the invalid-input probes): Node's Socket-constructor order — the
- * objectMode trio throws ERR_INVALID_ARG_VALUE first, then the port
- * (validatePort), the host's string contract, autoSelectFamily's boolean
- * contract, and the attempt budget. A bag that survives everything meets
- * the compiler-rendered fence: an unmodeled key must refuse loudly, never
- * silently drop. Always leaves an exception pending. */
-void scr_net_connect_opts_chk(const ScrDyn *opts, const ScrStr *fence) {
-  if (opts == NULL || opts->kind != SCR_DYN_OBJ) {
-    scr_dyn_arg_type_fail("options", "of type object",
-                          opts ? opts : scr_dyn_undefined());
-    return;
+/* net.connect/createConnection over a RUNTIME argument (a bag built with
+ * computed keys, a value of unknown type): Node's order — the argument's
+ * own contract first (undefined: ERR_MISSING_ARGS; null, a boolean or a
+ * non-string/non-number scalar: the options.port type error; a number is
+ * the port), then, for a bag, the Socket constructor's — the objectMode
+ * trio (ERR_INVALID_ARG_VALUE), the port (type, then validatePort), the
+ * host's string contract, autoSelectFamily's boolean contract, the attempt
+ * budget — and then the dial. A key the single-dial net unit has no model
+ * for (path, timeout, keepAlive, localAddress, lookup, ...) that a bag
+ * ACTUALLY CARRIES throws a named Error: the bag's contents are known only
+ * here, so the decision cannot be made earlier (class L). +1 socket or NULL
+ * with the exception pending. */
+static void scr_net_missing_args(void) {
+  static const char m[] = "The \"options\" or \"port\" or \"path\" argument must be specified";
+  scr_throw_error_msg_code(SCR_ERR_TYPE, m, sizeof m - 1, "ERR_MISSING_ARGS");
+}
+
+static bool scr_net_port_chk(const ScrDyn *port) {
+  bool ok = false;
+  if (port->kind == SCR_DYN_NUM) {
+    ok = trunc(port->v.num) == port->v.num && port->v.num >= 0 && port->v.num < 65536;
+  } else if (port->kind == SCR_DYN_STR) {
+    ScrStr *ps = scr_str_retain(port->v.str);
+    double n = scr_string_to_number(ps);
+    scr_str_release(ps);
+    ok = port->v.str->len > 0 && n == n && trunc(n) == n && n >= 0 && n < 65536;
+  }
+  if (ok) return true;
+  char detail[96], msg[200];
+  const char *d = scr_dyn_specific_type(port, detail, sizeof detail);
+  int len = snprintf(msg, sizeof msg, "Port should be >= 0 and < 65536. Received %s.", d);
+  scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_SOCKET_BAD_PORT");
+  return false;
+}
+
+static double scr_net_port_num(const ScrDyn *port) {
+  if (port->kind == SCR_DYN_NUM) return port->v.num;
+  ScrStr *ps = scr_str_retain(port->v.str);
+  double n = scr_string_to_number(ps);
+  scr_str_release(ps);
+  return n;
+}
+
+ScrNetSocket *scr_net_connect_dyn(const ScrDyn *opts) {
+  if (opts == NULL || opts->kind == SCR_DYN_UNDEF) {
+    scr_net_missing_args();
+    return NULL;
+  }
+  if (opts->kind == SCR_DYN_NUM || opts->kind == SCR_DYN_STR) {
+    /* connect(port) / connect(path): the number is a port; a string is a
+     * path (unix socket) or a port string when it spells one. */
+    if (opts->kind == SCR_DYN_STR && scr_net_dyn_is_pathy(opts)) {
+      static const char m[] = "net.connect(path) over a run-time string has no lowering (unix sockets)";
+      scr_throw_error_msg_code(SCR_ERR_ERROR, m, sizeof m - 1, "SC2020");
+      return NULL;
+    }
+    if (!scr_net_port_chk(opts)) return NULL;
+    ScrStr *host = scr_str_new("localhost", 9);
+    ScrNetSocket *s = scr_net_connect(scr_net_port_num(opts), host, NULL);
+    scr_str_release(host);
+    return s;
+  }
+  if (opts->kind != SCR_DYN_OBJ) {
+    scr_dyn_prop_type_fail("options.port", "one of type number or string", opts);
+    return NULL;
   }
   static const char *const om[] = { "objectMode", "readableObjectMode", "writableObjectMode" };
   for (size_t i = 0; i < 3; i++) {
@@ -2143,44 +2217,68 @@ void scr_net_connect_opts_chk(const ScrDyn *opts, const ScrStr *fence) {
       char name[48];
       snprintf(name, sizeof name, "options.%s", om[i]);
       scr_dyn_arg_value_fail(name, "is not supported", v);
-      return;
+      return NULL;
     }
   }
   const ScrDyn *port = scr_dyn_obj_get(opts, "port", 4);
-  if (port != NULL && port->kind != SCR_DYN_UNDEF) {
-    bool ok = port->kind == SCR_DYN_NUM && trunc(port->v.num) == port->v.num &&
-              port->v.num >= 0 && port->v.num < 65536;
-    if (!ok && port->kind == SCR_DYN_STR) {
-      ScrStr *ps = scr_str_retain(port->v.str);
-      double n = scr_string_to_number(ps);
-      scr_str_release(ps);
-      ok = n == n && trunc(n) == n && n >= 0 && n < 65536 && port->v.str->len > 0;
+  const ScrDyn *path = scr_dyn_obj_get(opts, "path", 4);
+  bool havePort = port != NULL && port->kind != SCR_DYN_UNDEF;
+  bool havePath = path != NULL && path->kind != SCR_DYN_UNDEF;
+  if (!havePort && !havePath) {
+    scr_net_missing_args();
+    return NULL;
+  }
+  if (havePort) {
+    if (port->kind != SCR_DYN_NUM && port->kind != SCR_DYN_STR) {
+      scr_dyn_prop_type_fail("options.port", "one of type number or string", port);
+      return NULL;
     }
-    if (!ok) {
-      char detail[64], msg[160];
-      const char *d = scr_dyn_specific_type(port, detail, sizeof detail);
-      int len = snprintf(msg, sizeof msg,
-                         "options.port should be >= 0 and < 65536. Received %s", d);
-      scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_SOCKET_BAD_PORT");
-      return;
-    }
+    if (!scr_net_port_chk(port)) return NULL;
   }
   const ScrDyn *host = scr_dyn_obj_get(opts, "host", 4);
   if (host != NULL && host->kind != SCR_DYN_UNDEF && host->kind != SCR_DYN_STR) {
     scr_dyn_prop_type_fail("options.host", "of type string", host);
-    return;
+    return NULL;
   }
   const ScrDyn *asf = scr_dyn_obj_get(opts, "autoSelectFamily", 16);
   if (asf != NULL && asf->kind != SCR_DYN_UNDEF && asf->kind != SCR_DYN_BOOL) {
     scr_dyn_prop_type_fail("options.autoSelectFamily", "of type boolean", asf);
-    return;
+    return NULL;
   }
   const ScrDyn *att = scr_dyn_obj_get(opts, "autoSelectFamilyAttemptTimeout", 30);
   if (att != NULL && att->kind != SCR_DYN_UNDEF &&
       !scr_net_attempt_timeout_chk(att, "options.autoSelectFamilyAttemptTimeout")) {
-    return;
+    return NULL;
   }
-  scr_throw_lowering_fence(fence);
+  /* Keys with no model in the single-dial unit. */
+  static const char *const modeled[] = {
+    "port", "host", "autoSelectFamily", "autoSelectFamilyAttemptTimeout",
+    "objectMode", "readableObjectMode", "writableObjectMode", NULL };
+  for (size_t i = 0; i < opts->v.obj.len; i++) {
+    const ScrDynEntry *e = &opts->v.obj.entries[i];
+    if (e->value->kind == SCR_DYN_UNDEF) continue;
+    bool known = false;
+    for (size_t k = 0; modeled[k] != NULL; k++) {
+      if (strcmp(e->key, modeled[k]) == 0) { known = true; break; }
+    }
+    if (!known) {
+      char msg[160];
+      int len = snprintf(msg, sizeof msg,
+                         "net.connect option '%.60s' over a run-time option bag has no lowering", e->key);
+      scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, "SC2020");
+      return NULL;
+    }
+  }
+  if (!havePort) {
+    static const char m[] = "net.connect option 'path' over a run-time option bag has no lowering";
+    scr_throw_error_msg_code(SCR_ERR_ERROR, m, sizeof m - 1, "SC2020");
+    return NULL;
+  }
+  ScrStr *hs = host != NULL && host->kind == SCR_DYN_STR ? scr_str_retain(host->v.str)
+                                                          : scr_str_new("localhost", 9);
+  ScrNetSocket *s = scr_net_connect(scr_net_port_num(port), hs, NULL);
+  scr_str_release(hs);
+  return s;
 }
 
 /* A dial the caller starts LATER (the http agent's maxSockets queue):
