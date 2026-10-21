@@ -10370,8 +10370,18 @@ export class Lowerer {
       fromT.params.slice(fixedTo).every(
         (p) => p.kind === "dyn" || canDynCheckTo(p, (id) => this.shapes.get(id), (id) => this.unions.get(id)),
       );
-    if (toRestIn && fromT.restIn === true) return null;
-    if (toRestIn && fromT.params.length > fixedTo && !toRestUnpack) return null;
+    // A rest source into a rest slot of the IDENTICAL parameter list (the pack
+    // included) differs from the slot only in its result: `(...args: unknown[])
+    // => void` into `(...args: unknown[]) => unknown`. The pack is forwarded
+    // untouched; nothing is unpacked or repacked. Any other rest-to-rest pair
+    // would have to unpack and repack, and still refuses.
+    const restPassThrough =
+      toRestIn &&
+      fromT.restIn === true &&
+      fromT.params.length === toT.params.length &&
+      fromT.params.every((p, i) => typeEquals(p, toT.params[i]!));
+    if (toRestIn && fromT.restIn === true && !restPassThrough) return null;
+    if (toRestIn && !restPassThrough && fromT.params.length > fixedTo && !toRestUnpack) return null;
     // The SOURCE's spelled rest slot: its last parameter is the packed
     // array, not a positional. `restPack` below builds the slot's
     // arguments from position `fixedFrom` on, exactly the way completeArgs
@@ -10514,6 +10524,7 @@ export class Lowerer {
         return converted;
       };
       const args = fromT.params.map((pt, i): IrExpr => {
+        if (restPassThrough) return slotArg(i, pt);
         // The SOURCE's packed rest slot, built from every slot parameter
         // from `fixedFrom` on — the same three packs completeArgs builds
         // for a direct call (dynArrLit for a checked-dynamic
