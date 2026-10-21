@@ -1,12 +1,13 @@
 // The net argument-validation ladders: misuse of the implemented net
 // surface answers Node's exact typed errors instead of fencing —
 // createServer's options-type contract, the connect option bag's
-// Socket-constructor order (the objectMode trio's ERR_INVALID_ARG_VALUE,
-// host's string contract, autoSelectFamily's boolean contract, the
+// Socket-constructor order (host's string contract, autoSelectFamily's boolean contract, the
 // autoSelectFamilyAttemptTimeout range ladder — validated and then inert,
 // the single-dial simplification), listen's options.signal AbortSignal
 // contract, and the setDefaultAutoSelectFamilyAttemptTimeout value ladder
-// with Node's sub-10ms floor.
+// with Node's sub-10ms floor. (The objectMode trio over a computed key is a
+// runtime option bag, refused at compile time: see
+// tests/diagnostics/js-net-connect-with-a-runtime-option-bag.cjs.)
 'use strict';
 const net = require('net');
 const show = (fn) => { try { fn(); console.log('ok'); } catch (e) { console.log(`${e.name}|${e.code}|${e.message}`); } };
@@ -28,9 +29,4 @@ for (const v of [1, 9, 25]) {
 {
   const server = net.createServer();
   show(() => { server.listen({ port: 0, signal: 'INVALID_SIGNAL' }); });
-}
-const invalidKeys = ['objectMode', 'readableObjectMode', 'writableObjectMode'];
-for (const invalidKey of invalidKeys) {
-  const option = { port: 8080, [invalidKey]: true };
-  show(() => { net.createConnection(option); });
 }

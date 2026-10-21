@@ -13,7 +13,6 @@
  *   ("x.0", "x.1" for shadowing); the IR is scope-flat.
  */
 import { appendFileSync } from "node:fs";
-import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
 import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
@@ -837,27 +836,6 @@ export function nodeThrowExpr(kind: 0 | 1 | 2, code: string, message: string, ty
       { kind: "strLit", value: message, type: STRING, loc },
     ],
     type,
-    loc,
-  };
-}
-
-/** The post-validation fence STRING a validation-ladder Chk libCall
- * throws after its Node-order checks pass: the same SC2020 text the
- * per-statement runtime fence would have thrown (message + "[code at
- * file:line]"), rendered eagerly so the runtime can throw it verbatim
- * (scr_throw_lowering_fence). The diagnostic joins the runtime-fence
- * ledger exactly like a deferred statement fence — nothing silently
- * drops off the coverage report. */
-export function ladderFenceExpr(L: Lowerer, surface: string, node: ts.Node, hint?: string): IrExpr {
-  const loc = locOf(node);
-  const d = noLoweringDiag(surface, loc, hint);
-  L.runtimeFences.push(d);
-  const sf = node.getSourceFile();
-  const pos = ts.getLineAndCharacterOfPosition(sf, loc.start);
-  return {
-    kind: "strLit",
-    value: `${d.message} [${d.code} at ${fenceLocationText(loc.file, pos.line + 1)}]`,
-    type: STRING,
     loc,
   };
 }

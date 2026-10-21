@@ -3761,13 +3761,6 @@ export type IrLibFn =
    * budget runs Node's validateInt32-from-1 ladder and is then inert —
    * the single dial has nothing to time). May-throw. */
   | "net.connectAttempt"
-  /** net.connect/createConnection over a RUNTIME option bag (computed
-   * keys — the invalid-input probes): Node-order validation (the
-   * objectMode trio's ERR_INVALID_ARG_VALUE, validatePort, host string,
-   * autoSelectFamily boolean, the attempt budget), then the trailing
-   * compiler-rendered fence — ALWAYS THROWS (the error.nodeThrow
-   * polymorphic-result carve-out). May-throw seed. */
-  | "net.connectOptsChk"
   | "net.connectCb"
   /** connect({ port, host, autoSelectFamily: true, lookup }) — the
    * caller-resolver dial (portless's createLoopbackConnection): args
@@ -3872,12 +3865,6 @@ export type IrLibFn =
   | "wrtc.dcOnMessage"
   | "wrtc.dcSendStr"
   | "wrtc.dcSendBytes"
-  /** The send argument-validation ladder over dyn arguments (Node's
-   * signature shuffle: slice bounds, list/type contracts, port/address
-   * validation, connected-state errors) — a fully-validated unconnected
-   * single-payload send RUNS; callback/list/connected forms meet the
-   * trailing fence. May-throw. */
-  | "dgram.sendChk"
   | "dgram.address"
   | "dgram.close"
   | "dgram.closeCb"
@@ -4618,26 +4605,16 @@ export type IrLibFn =
    * finite numbers coerce (negatives answer now/1000, Node's shape);
    * everything else throws Node's ERR_INVALID_ARG_TYPE. May-throw. */
   | "fs.toUnixTimestamp"
-  /** The fs argument-validation ladders (checked-dynamic lane): each Chk
-   * replicates its API's Node-order validation over dyn values (Node's
-   * exact typed errors — ERR_INVALID_ARG_TYPE/VALUE, ERR_OUT_OF_RANGE),
-   * and a full pass meets the trailing compiler-rendered SC2020 fence
-   * string — so the ALWAYS-THROW forms take the error.nodeThrow
-   * polymorphic-result carve-out. mkdtempSyncChk and the lchmod sync/
-   * promise pair run the REAL operation on a validated pass instead
-   * (macOS lchmod(2); non-APPLE answers Node's not-a-function /
-   * ERR_METHOD_NOT_IMPLEMENTED shapes). May-throw seeds, all of them. */
+  /** The fs argument-validation ladders (checked-dynamic lane) whose valid
+   * path is a REAL operation: each Chk replicates its API's Node-order
+   * validation over dyn values (Node's exact typed errors —
+   * ERR_INVALID_ARG_TYPE/VALUE, ERR_OUT_OF_RANGE) and then runs it (exists'
+   * callback contract; the lchmod sync/promise pair — macOS lchmod(2);
+   * non-APPLE answers Node's not-a-function / ERR_METHOD_NOT_IMPLEMENTED
+   * shapes). May-throw seeds, all of them. */
   | "fs.existsChk"
-  | "fs.mkdtempChk"
-  | "fs.mkdtempSyncChk"
-  | "fs.readFileChk"
-  | "fs.opendirChk"
-  | "fs.watchFileChk"
-  | "fs.lchmodChk"
   | "fs.lchmodSyncChk"
   | "fsp.lchmodChk"
-  | "fs.readChk"
-  | "fs.streamOptsChk"
   /** The compiler-resolved ERR_INVALID_ARG_TYPE throw with a RUNTIME-
    * rendered Received tail: args [argname, "of type ..." clause, the
    * offending dyn value]. ALWAYS THROWS; polymorphic result (the
@@ -6108,8 +6085,8 @@ export type IrLibFn =
    * syscall is deferred by one stream tick, so an open(2) failure is an
    * 'error' EVENT (a pipeline REJECTS; nothing throws at the call) —
    * these are NOT may-throw. The OPTIONS forms (start/end/encoding/
-   * highWaterMark/flags/fd/autoClose) are not this surface: they keep
-   * the fs.streamOptsChk validation fence. */
+   * highWaterMark/flags/fd/autoClose) are not this surface: they fence
+   * by arity. */
   | "fs.readStream"
   | "fs.readStreamOpts"
   | "fs.writeStreamOpts"
@@ -12091,18 +12068,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "buffer.newStringFail",
   "fs.toUnixTimestamp",
   "fs.existsChk",
-  "fs.mkdtempChk",
-  "fs.mkdtempSyncChk",
-  "fs.readFileChk",
-  "fs.opendirChk",
-  "fs.watchFileChk",
-  "fs.lchmodChk",
   "fs.lchmodSyncChk",
   "fsp.lchmodChk",
-  "fs.readChk",
-  "fs.streamOptsChk",
   "net.connectAttempt",
-  "net.connectOptsChk",
   "net.setAutoSelTimeout",
   "error.argTypeThrow",
   "error.propTypeThrow",
@@ -12138,7 +12106,6 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dgram.sendBytes",
   "dgram.sendConnStr",
   "dgram.sendConnBytes",
-  "dgram.sendChk",
   "dgram.address",
   "dgram.close",
   "dgram.closeCb",

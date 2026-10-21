@@ -9,9 +9,8 @@
  * dgram multicast); its members fence with a named hint. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { ladderFenceExpr } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { BOOL, canBoxFuncIntoDyn, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, SrcLoc, STRING, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { BOOL, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, SrcLoc, STRING, VOID } from "../../ir/nodes.js";
 import { DNS_LOOKUP_DOCUMENTED_OPTIONS, fenceOrDropOptionKey } from "./surfaces.js";
 
 const DGRAM_SURFACE_HINT =
@@ -407,43 +406,6 @@ export function lowerDgramMethodCall(L: Lowerer, call: ts.CallExpression,
       const fn: IrLibFn =
         data.type.kind === "string" ? "dgram.sendConnStr" : "dgram.sendConnBytes";
       return { kind: "libCall", fn, args: [receiver, data], type: VOID, loc };
-    }
-    if (isJsSourceFile(call.getSourceFile()) && args.length <= 5 && !args.some(ts.isSpreadElement)) {
-      const receiver = L.lowerExpr(access.expression);
-      const slots: IrExpr[] = [];
-      let ok = true;
-      for (let i = 0; i < 5; i++) {
-        const n = args[i];
-        if (!n) {
-          slots.push({
-            kind: "dynFrom",
-            value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
-            type: DYN,
-            loc,
-          });
-          continue;
-        }
-        const raw = L.lowerExpr(n);
-        if (raw.type.kind === "dyn") slots.push(raw);
-        else if (raw.kind === "unitLit" || L.dynConvertible(raw.type) ||
-                 (raw.type.kind === "func" &&
-                  canBoxFuncIntoDyn(raw.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)))) {
-          slots.push({ kind: "dynFrom", value: raw, type: DYN, loc });
-        } else {
-          ok = false;
-          break;
-        }
-      }
-      if (ok) {
-        return {
-          kind: "libCall",
-          fn: "dgram.sendChk",
-          args: [receiver, ...slots, ladderFenceExpr(L, `send in this form`, call,
-            "send(msg, port, address) — one string or Buffer datagram — is the lowered form; callback, list, and connected sends have no lowering yet")],
-          type: VOID,
-          loc,
-        };
-      }
     }
     L.noLowering(
       `send with ${args.length} arguments`,

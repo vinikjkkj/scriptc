@@ -1,0 +1,8 @@
+js-tls-getcacertificates-over-a-dynamic-argument.cjs:40:36 - error SC2003: union types must match exactly: expected 'string', got 'boolean | number | () => void | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  39 | for (const invalid of [1, null, () => {}, true]) {
+  40 |   show(() => tls.getCACertificates(invalid));
+     |                                    ^~~~~~~
+  41 | }
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's

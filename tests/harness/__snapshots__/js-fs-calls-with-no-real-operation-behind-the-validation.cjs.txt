@@ -1,0 +1,211 @@
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:35:12 - error SC2020: 'fs.mkdtempSync with 2 arguments' is part of the standard library types but has no scriptc lowering yet
+
+  34 | // mkdtemp/mkdtempSync: prefix validation, then the real operation
+  35 | show(() => fs.mkdtempSync(0, {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~
+  36 | show(() => fs.mkdtempSync(null, {}));
+
+  hint: the supported form takes 1 argument (no options objects)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:36:12 - error SC2020: 'fs.mkdtempSync with 2 arguments' is part of the standard library types but has no scriptc lowering yet
+
+  35 | show(() => fs.mkdtempSync(0, {}));
+  36 | show(() => fs.mkdtempSync(null, {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~
+  37 | show(() => fs.mkdtemp(true, () => {}));
+
+  hint: the supported form takes 1 argument (no options objects)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:37:12 - error SC2020: 'fs.mkdtemp' is part of the standard library types but has no scriptc lowering yet
+
+  36 | show(() => fs.mkdtempSync(null, {}));
+  37 | show(() => fs.mkdtemp(true, () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+  38 | const made = fs.mkdtempSync(os.tmpdir() + '/scrladder-', {});
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:38:14 - error SC2020: 'fs.mkdtempSync with 2 arguments' is part of the standard library types but has no scriptc lowering yet
+
+  37 | show(() => fs.mkdtemp(true, () => {}));
+  38 | const made = fs.mkdtempSync(os.tmpdir() + '/scrladder-', {});
+     |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  39 | console.log('made', typeof made, made.length > os.tmpdir().length, fs.existsSync(made));
+
+  hint: the supported form takes 1 argument (no options objects)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:43:12 - error SC2020: 'fs.readFile' is part of the standard library types but has no scriptc lowering yet
+
+  42 | // readFile / opendirSync: assertEncoding before everything else
+  43 | show(() => fs.readFile('bar.txt', { encoding: 'foo-8' }, () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  44 | show(() => fs.readFile('bar.txt'));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:44:12 - error SC2020: 'fs.readFile' is part of the standard library types but has no scriptc lowering yet
+
+  43 | show(() => fs.readFile('bar.txt', { encoding: 'foo-8' }, () => {}));
+  44 | show(() => fs.readFile('bar.txt'));
+     |            ^~~~~~~~~~~~~~~~~~~~~~
+  45 | show(() => fs.opendirSync('.', { encoding: 'no' }));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:45:12 - error SC2020: 'fs.opendirSync' is part of the standard library types but has no scriptc lowering yet
+
+  44 | show(() => fs.readFile('bar.txt'));
+  45 | show(() => fs.opendirSync('.', { encoding: 'no' }));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  46 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:48:12 - error SC2020: 'fs.watchFile' is part of the standard library types but has no scriptc lowering yet
+
+  47 | // watchFile: path first, listener's function contract second
+  48 | show(() => fs.watchFile('./some-file'));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+  49 | show(() => fs.watchFile('./another-file', {}, 'bad listener'));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:49:12 - error SC2020: 'fs.watchFile' is part of the standard library types but has no scriptc lowering yet
+
+  48 | show(() => fs.watchFile('./some-file'));
+  49 | show(() => fs.watchFile('./another-file', {}, 'bad listener'));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  50 | show(() => fs.watchFile(new Object(), () => {}));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:50:12 - error SC2020: 'fs.watchFile' is part of the standard library types but has no scriptc lowering yet
+
+  49 | show(() => fs.watchFile('./another-file', {}, 'bad listener'));
+  50 | show(() => fs.watchFile(new Object(), () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  51 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:53:32 - error SC1090: 'number' values where 'string' is expected is not supported yet
+
+  52 | // createReadStream/createWriteStream: options.fd, then the path contract
+  53 | show(() => fs.createReadStream(46));
+     |                                ^~
+  54 | show(() => fs.createWriteStream(46));
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:54:33 - error SC1090: 'number' values where 'string' is expected is not supported yet
+
+  53 | show(() => fs.createReadStream(46));
+  54 | show(() => fs.createWriteStream(46));
+     |                                 ^~
+  55 | show(() => fs.createReadStream(null, { fd: 'k' }));
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:55:12 - error SC2020: 'fs.createReadStream with 2 arguments' is part of the standard library types but has no scriptc lowering yet
+
+  54 | show(() => fs.createWriteStream(46));
+  55 | show(() => fs.createReadStream(null, { fd: 'k' }));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  56 | show(() => fs.createWriteStream(null, { fd: 'k' }));
+
+  hint: the supported form takes 1 argument (no options objects)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:56:12 - error SC2020: 'fs.createWriteStream with 2 arguments' is part of the standard library types but has no scriptc lowering yet
+
+  55 | show(() => fs.createReadStream(null, { fd: 'k' }));
+  56 | show(() => fs.createWriteStream(null, { fd: 'k' }));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  57 | 
+
+  hint: the supported form takes 1 argument (no options objects)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:59:12 - error SC2020: 'fs.read' is part of the standard library types but has no scriptc lowering yet
+
+  58 | // fs.read: buffer, fd, offset, length, position — Node's order
+  59 | show(() => fs.read(3, 4, 0, 'utf-8', () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  60 | show(() => fs.read(true, Buffer.allocUnsafe(4), 0, 4, 0, () => {}));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:60:12 - error SC2020: 'fs.read' is part of the standard library types but has no scriptc lowering yet
+
+  59 | show(() => fs.read(3, 4, 0, 'utf-8', () => {}));
+  60 | show(() => fs.read(true, Buffer.allocUnsafe(4), 0, 4, 0, () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  61 | show(() => fs.read(3, Buffer.allocUnsafe(4), NaN, 4, 0, () => {}));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:61:12 - error SC2020: 'fs.read' is part of the standard library types but has no scriptc lowering yet
+
+  60 | show(() => fs.read(true, Buffer.allocUnsafe(4), 0, 4, 0, () => {}));
+  61 | show(() => fs.read(3, Buffer.allocUnsafe(4), NaN, 4, 0, () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  62 | show(() => fs.read(3, Buffer.allocUnsafe(4), -1, 4, 0, () => {}));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:62:12 - error SC2020: 'fs.read' is part of the standard library types but has no scriptc lowering yet
+
+  61 | show(() => fs.read(3, Buffer.allocUnsafe(4), NaN, 4, 0, () => {}));
+  62 | show(() => fs.read(3, Buffer.allocUnsafe(4), -1, 4, 0, () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  63 | show(() => fs.read(3, Buffer.allocUnsafe(4), 0, -1, 0, () => {}));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:63:12 - error SC2020: 'fs.read' is part of the standard library types but has no scriptc lowering yet
+
+  62 | show(() => fs.read(3, Buffer.allocUnsafe(4), -1, 4, 0, () => {}));
+  63 | show(() => fs.read(3, Buffer.allocUnsafe(4), 0, -1, 0, () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  64 | show(() => fs.read(3, Buffer.allocUnsafe(4), 0, 4, true, () => {}));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:64:12 - error SC2020: 'fs.read' is part of the standard library types but has no scriptc lowering yet
+
+  63 | show(() => fs.read(3, Buffer.allocUnsafe(4), 0, -1, 0, () => {}));
+  64 | show(() => fs.read(3, Buffer.allocUnsafe(4), 0, 4, true, () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  65 | show(() => fs.read(3, Buffer.allocUnsafe(4), 0, 4, 0.5, () => {}));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:65:12 - error SC2020: 'fs.read' is part of the standard library types but has no scriptc lowering yet
+
+  64 | show(() => fs.read(3, Buffer.allocUnsafe(4), 0, 4, true, () => {}));
+  65 | show(() => fs.read(3, Buffer.allocUnsafe(4), 0, 4, 0.5, () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  66 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:69:12 - error SC2020: 'fs.lchmod' is part of the standard library types but has no scriptc lowering yet
+
+  68 | // answer not-a-function / ERR_METHOD_NOT_IMPLEMENTED)
+  69 | show(() => fs.lchmod(__filename));
+     |            ^~~~~~~~~~~~~~~~~~~~~
+  70 | show(() => fs.lchmod(__filename, {}));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:70:12 - error SC2020: 'fs.lchmod' is part of the standard library types but has no scriptc lowering yet
+
+  69 | show(() => fs.lchmod(__filename));
+  70 | show(() => fs.lchmod(__filename, {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~
+  71 | show(() => fs.lchmod(false, 0o777, () => {}));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-fs-calls-with-no-real-operation-behind-the-validation.cjs:71:12 - error SC2020: 'fs.lchmod' is part of the standard library types but has no scriptc lowering yet
+
+  70 | show(() => fs.lchmod(__filename, {}));
+  71 | show(() => fs.lchmod(false, 0o777, () => {}));
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  72 | show(() => fs.lchmodSync(1));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)

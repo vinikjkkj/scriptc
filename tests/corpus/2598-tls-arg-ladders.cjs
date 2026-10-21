@@ -7,7 +7,9 @@
 // minVersion/maxVersion's ERR_TLS_INVALID_PROTOCOL_VERSION with %j
 // rendering, tls.connect's checkServerIdentity function contract (a
 // PRESENT key replaces the builtin verifier even holding undefined —
-// Node's defaults spread), and getCACertificates' type/value ladder.
+// Node's defaults spread), and getCACertificates' value ladder. (A
+// getCACertificates argument that is a DYNAMIC value is refused at compile
+// time: tests/diagnostics/js-tls-getcacertificates-over-a-dynamic-argument.cjs.)
 'use strict';
 const tls = require('tls');
 const show = (fn) => { try { fn(); console.log('ok'); } catch (e) { console.log(`${e.name}|${e.code}|${e.message}`); } };
@@ -32,8 +34,5 @@ show(() => { tls.createSecureContext({ sessionTimeout: 2 ** 31 }); });
 show(() => { tls.createSecureContext({ sessionTimeout: 1.5 }); });
 for (const checkServerIdentity of [undefined, null, 1, true]) {
   show(() => { tls.connect({ checkServerIdentity }); });
-}
-for (const invalid of [1, null, () => {}, true]) {
-  show(() => tls.getCACertificates(invalid));
 }
 show(() => tls.getCACertificates('test'));

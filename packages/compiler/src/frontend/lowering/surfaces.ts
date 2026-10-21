@@ -677,8 +677,7 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // over the node:stream machinery (pipe, pipeline, for-await,
     // backpressure and the whole event order are that implementation).
     // The PATH-ONLY form — the options object (start/end/encoding/
-    // highWaterMark/flags/fd/autoClose) fences by arity and keeps the
-    // fs.streamOptsChk validation ladder in the JS lane.
+    // highWaterMark/flags/fd/autoClose) fences by arity.
     createReadStream: {
       fn: "fs.readStream", params: [STRING], result: { kind: "object", className: "%Readable" },
     },
@@ -950,9 +949,6 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
     rmSync: ["fs.rmOptsSync", "fs.rmRetrySync"],
     // The { withFileTypes: true } Dirent form.
     readdirSync: ["fs.readdirTypesSync"],
-    // The JS-source validation-ladder variant (lowerFsLadderCall): the
-    // real mkdtemp runs when the options leave utf8 semantics.
-    mkdtempSync: ["fs.mkdtempSyncChk"],
     // lchmodSync is chmod's no-follow spelling, JS-ladder only (TypeScript
     // callers fence per site); the ladder runs the REAL lchmod on APPLE,
     // so the chmod fence witnesses it — fencing one spelling fences the
