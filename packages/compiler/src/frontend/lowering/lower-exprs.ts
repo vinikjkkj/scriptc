@@ -20916,6 +20916,26 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const viaSubclass = baseInfo === null ? null : lowerUnboundSubclassMethodValue(L, expr, baseInfo);
       if (viaSubclass !== null) return viaSubclass;
     }
+    // `C.prototype.missing` -- a member the class neither declares nor
+    // inherits: JavaScript answers undefined (mysql2's binary_row fills a type
+    // table with `Packet.prototype.readTimestamp`, names Packet never defines).
+    if (
+      isJsSourceFile(expr.getSourceFile()) && expr.questionDotToken === undefined &&
+      ts.isPropertyAccessExpression(expr.expression) && expr.expression.questionDotToken === undefined &&
+      expr.expression.name.text === "prototype" && ts.isIdentifier(expr.expression.expression) &&
+      !undeclaredMemberExcluded(expr.name.text)
+    ) {
+      const ctorT = L.mapTypeOf(L.typeOf(expr.expression.expression));
+      const cinfo = ctorT?.kind === "classval" ? (L.classes.get(ctorT.className) ?? null) : null;
+      if (
+        cinfo !== null && !cinfo.builtinError && cinfo.subclasses.length === 0 &&
+        L.findMethodOn(cinfo, expr.name.text) === null && !cinfo.fields.has(expr.name.text) &&
+        L.findMethodOn(cinfo, `get:${expr.name.text}`) === null &&
+        !cinfo.staticFields.some((s) => s.name === expr.name.text)
+      ) {
+        return dynUndefinedExpr(locOf(expr));
+      }
+    }
     if (
       receiverIr?.kind === "object" && isJsSourceFile(expr.getSourceFile()) &&
       expr.questionDotToken === undefined &&

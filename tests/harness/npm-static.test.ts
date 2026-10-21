@@ -207,6 +207,9 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // memberexports: `module.exports.f(...)` calls to members attached later in the
     // same file (iconv-lite's encode -> getCodec chain).
     ["memberexports", "memberexports-cli.ts"],
+    // protomiss: `Class.prototype.<name>` for a name the class never defines reads
+    // undefined (mysql2's binary_row type table).
+    ["protomiss", "protomiss-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
