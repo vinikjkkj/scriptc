@@ -461,6 +461,7 @@ ScrArr *scr_arr_new(ScrElemKind elem, size_t initial_cap) {
   a->elem_trace = NULL;
   a->data = NULL;
   a->vmbacked = 0;
+  a->execidx = 0;
   if (initial_cap > 0) scr_arr_grow(a, initial_cap);
 #ifdef SCR_RC_AUDIT
   scr_live_arrays++;
@@ -508,6 +509,7 @@ ScrArr *scr_arr_new_ref(void *(*elem_retain)(void *),
   a->elem_trace = elem_trace;
   a->data = NULL;
   a->vmbacked = 0;
+  a->execidx = 0;
   if (initial_cap > 0) scr_arr_grow(a, initial_cap);
 #ifdef SCR_RC_AUDIT
   scr_live_arrays++;
@@ -522,6 +524,8 @@ ScrArr *scr_arr_new_ref(void *(*elem_retain)(void *),
 void scr_arr_weak_mark(void *key) {
   if (key != NULL) ((ScrArr *)key)->weakkey = 1;
 }
+
+void (*scr_arr_idx_died_hook)(void *arr) = NULL;
 
 void scr_arr_release(ScrArr *a) {
   if (!a || a->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
@@ -539,6 +543,7 @@ void scr_arr_release(ScrArr *a) {
      * array and exactly one of the two hooks fires for any given array —
      * the compiler picks the stamp from the real trace fixpoint. */
     if (a->weakkey && scr_weak_died_hook != NULL) scr_weak_died_hook(a);
+    if (a->execidx && scr_arr_idx_died_hook != NULL) scr_arr_idx_died_hook(a);
     if (a->elem_trace) scr_cyc_on_dead(a);
     if (scr_elem_is_ref(a->elem)) {
       for (size_t i = 0; i < a->len; i++) scr_elem_release(a, a->data[i]);
