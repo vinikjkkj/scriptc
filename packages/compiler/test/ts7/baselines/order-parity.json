@@ -11300,6 +11300,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8227-options-bag-defaulted-to-empty-object.js": {
+   "order": [
+    "<repo>/tests/corpus/8227-options-bag-defaulted-to-empty-object.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"

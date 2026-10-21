@@ -4901,6 +4901,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           isJsSourceFile(decl.getSourceFile()) && !functionBodyReadsThis(decl.parent)) {
         pt = DYN;
       }
+      // An options bag defaulted to `{}` in authored JavaScript: the same
+      // checked-dynamic slot the lowering of the function gives it (paramShape).
+      if (decl !== undefined && ts.isParameter(decl) && decl.type === undefined &&
+          decl.initializer !== undefined && ts.isObjectLiteralExpression(decl.initializer) &&
+          decl.initializer.properties.length === 0 && isJsSourceFile(decl.getSourceFile())) {
+        pt = DYN;
+      }
       // Belt and braces for non-strict type worlds: an optional param's
       // ABI slot is always the undefined-armed union (strictNullChecks
       // already spells it that way; arm it here if the world didn't).

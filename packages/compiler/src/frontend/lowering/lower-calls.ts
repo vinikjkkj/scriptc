@@ -389,6 +389,16 @@ export interface GenericInstance {
       if (type.kind !== "array" && type.kind !== "dyn") L.badType(param.name, L.typeOf(param.name));
       return { type, mode: "rest" };
     }
+    // An options bag defaulted to `{}` in authored JavaScript
+    // (`(pluginOptions = {}) => ...`): the literal types the parameter `{}`,
+    // while the callers pass whatever members they like and the body reads
+    // members the empty type has none of. It takes the checked-dynamic slot.
+    if (
+      param.initializer && param.type === undefined && isJsSourceFile(param.getSourceFile()) &&
+      ts.isObjectLiteralExpression(param.initializer) && param.initializer.properties.length === 0
+    ) {
+      return { type: DYN, mode: "omittable", bodyType: DYN };
+    }
     if (param.initializer) {
       const raw = L.irTypeOf(param.name);
       // A DYNAMIC-TIER defaulted param (`function f(x = a)` with `a: any`
