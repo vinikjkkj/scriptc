@@ -4990,28 +4990,6 @@ export type IrLibFn =
    * the replaced expression's own (never materialized — the
    * global.undefRead pattern). May-throw seed. */
   | "error.nodeThrow"
-  /** The compiled CommonJS require with a RUN-TIME specifier: args are
-   * [specifier (dyn, unvalidated - Node checks the argument itself),
-   * the newline-joined set of bare specifier ROOTS the build could not
-   * rule out (leading and trailing newline; EMPTY means the build could
-   * not enumerate, so everything fences), the requiring file native path
-   * for the Require stack line]. Answers TRUE when the build cannot
-   * serve the specifier - the caller then throws the tagged refusal the
-   * site already carried, so the census still sees it where it was - and
-   * THROWS Node own error for every case Node itself rejects
-   * (ERR_INVALID_ARG_TYPE, ERR_INVALID_ARG_VALUE, and the catchable
-   * MODULE_NOT_FOUND). Never answers false. May-throw seed. */
-  | "module.requireVerdict"
-  /** The deferred compile fence as an EXPRESSION: args are [message,
-   * SC code], both string LITERALS, and the emission is the same
-   * scr_throw_error_msg_code call the runtimeFence STATEMENT emits - the
-   * same text, so scripts/tu-census.mjs counts it as the same tagged
-   * refusal. It exists because a fence can now be CONDITIONAL (the
-   * require verdict), and a conditional cannot poison a statement.
-   * ALWAYS THROWS; the result type is the replaced expression own
-   * (never materialized - the global.undefRead pattern). May-throw
-   * seed. */
-  | "error.fenceThrow"
   /** JS ToString over a dyn value WITH the object protocol (a user
    * toString/valueOf member is CALLED and its throw propagates;
    * exhaustion throws "Cannot convert object to primitive value"; units
@@ -7459,32 +7437,7 @@ export type IrExpr =
    * the may-throw seed set (MAY_THROW_LIB_FNS) in their analysis and emit
    * pending checks; process.* members never throw. `process.exit` flushes
    * stdout and terminates the process without running exit handlers. */
-  /** `fence` belongs to ONE fn — error.fenceThrow — and the reason it is a
-   * node FIELD instead of two strLit arguments is the translation-unit
-   * census. A strLit argument is INTERNED as a static ScrStr as well as
-   * inlined into the call, so the "[SCxxxx at file:line]" tag would appear
-   * TWICE in the emitted C for one refusal, and scripts/tu-census.mjs's
-   * closing invariant ("bracket occurrences == tagged coded throws") would
-   * fail — measured, not predicted. Carried here, the text reaches the
-   * emitters and nothing else. */
-  /** `fatal` opts ONE construct out of catchability. A fence is a throw, and
-   * a throw is catchable -- which is the whole value of --best-effort for a
-   * path a program never takes, and a hazard for a path it takes inside a
-   * `try`. protobufjs's inquire() wraps its require in try/catch and returns
-   * null, so the refusal for `require(<run-time specifier>)` is EATEN and the
-   * call answers null where node answers a module, at exit 0 with no
-   * diagnostic (measured on both backends, flagless as well as
-   * --best-effort). With `fatal` the backends emit scr_fence_fatal instead of
-   * scr_throw_error_msg_code: identical message, identical code, but printed
-   * and _Exit(1) rather than thrown, so no catch in the program can turn the
-   * refusal into an answer.
-   *
-   * It is PER CONSTRUCT and must stay that way. A global non-catchable stop
-   * would convert every deferred fence zapo's own code currently catches into
-   * a hard runtime crash, turning working --best-effort builds into failures;
-   * a second construct has to argue for itself, with the measurement of what
-   * would newly crash. */
-  | { kind: "libCall"; fn: IrLibFn; args: IrExpr[]; fence?: { message: string; code: string; fatal?: boolean }; type: IrType; loc: SrcLoc }
+  | { kind: "libCall"; fn: IrLibFn; args: IrExpr[]; type: IrType; loc: SrcLoc }
   /** `JSON.stringify(v)` — type-DIRECTED serialization: `value`'s static IR
    * type must be JSON-safe (f64/string/bool/record/array/union of those,
    * recursively — validated), and backends emit one serializer per type used
@@ -10082,41 +10035,6 @@ export function moduleUsesWeakMap(mod: IrModule): boolean {
   return found;
 }
 
-/** True when the module contains the module.requireVerdict libCall — the
- * link switch that pulls scr_require.c into the binary.
- *
- * Only the RUN-TIME-specifier `require` emits it: a written specifier is
- * answered at build time, by the module edge, the builtin alias, Node's
- * argument error or a compile-time MODULE_NOT_FOUND, and none of those
- * calls into the unit. So a program with no run-time-specifier require
- * links none of the resolution machinery.
- *
- * There is no TYPE half here, unlike moduleUsesSymbol and moduleUsesUrl:
- * the verdict answers a plain bool and leaves no typed local behind, so
- * a fenced statement cannot strand a release call that needs the unit.
- *
- * This gate exists because tests/harness/size-class.ts caught the cost.
- * The machinery started in scr_json.c, which is always linked, and the
- * static hello-world grew 6,144 bytes for a call it can never make. */
-export function moduleUsesRequireVerdict(mod: IrModule): boolean {
-  let found = false;
-  const visit = (v: unknown): void => {
-    if (found || v === null || typeof v !== "object") return;
-    if (Array.isArray(v)) {
-      for (const item of v) visit(item);
-      return;
-    }
-    const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && node.fn === "module.requireVerdict") {
-      found = true;
-      return;
-    }
-    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
-  };
-  visit(mod);
-  return found;
-}
-
 /** True when the module uses the WHATWG URL surface — url.* libCalls or a
  * url-kind type anywhere on the IR (a fenced statement can leave a typed
  * local whose release call still needs scr_url_release linked, the
@@ -11837,11 +11755,6 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "global.undefRead",
   // The compiler-resolved Node-parity throw: always throws, catchably.
   "error.nodeThrow",
-  // The run-time-specifier require: throws Node MODULE_NOT_FOUND and the
-  // two argument errors, catchably.
-  "module.requireVerdict",
-  // The conditional deferred fence: always throws, catchably.
-  "error.fenceThrow",
   // USVString coercion runs user toString/valueOf — throws propagate.
   "dyn.toStringCoerce",
   "child.kill",

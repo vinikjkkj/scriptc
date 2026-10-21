@@ -1123,10 +1123,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // bool; throws for every case Node rejects. The last two are the
   // answers the root set cannot give: neither a 'node:' name nor a '#'
   // import is a bare specifier ROOT.
-  "module.requireVerdict": { argTypes: [DYN, STRING, STRING, STRING, STRING], result: BOOL },
   // Always throws; the result is the replaced expression type (skipped
   // below with the rest of the always-throw family).
-  "error.fenceThrow": { argTypes: [], result: VOID },
   "dyn.toStringCoerce": { argTypes: [DYN], result: STRING },
   // Always throws; the result is the READ's declared type (a typed dummy
   // the unwind abandons) — the libCall case skips the result check.
@@ -4953,10 +4951,7 @@ function validateFunction(
           // of the undefined global mapped to (never materialized).
           break;
         }
-        if (e.fn === "error.nodeThrow" || e.fn === "error.fenceThrow" || e.fn === "error.argTypeThrow" || e.fn === "error.propTypeThrow" ||
-            e.fn === "fs.mkdtempChk" || e.fn === "fs.readFileChk" ||
-            e.fn === "fs.opendirChk" || e.fn === "fs.watchFileChk" || e.fn === "fs.lchmodChk" ||
-            e.fn === "fs.readChk" || e.fn === "fs.streamOptsChk" || e.fn === "net.connectOptsChk" ||
+        if (e.fn === "error.nodeThrow" || e.fn === "error.argTypeThrow" || e.fn === "error.propTypeThrow" ||
             e.fn === "tls.caCertsChk") {
           // Always throws — the result type is the replaced expression's
           // own (never materialized; the global.undefRead pattern). The

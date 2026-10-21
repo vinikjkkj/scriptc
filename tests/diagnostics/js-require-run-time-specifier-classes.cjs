@@ -1,3 +1,6 @@
+// REFUSED AT COMPILE TIME (no --best-effort, no runtime fence): this was
+// tests/corpus/6120-require-run-time-specifier-classes.cjs, a program that used to build and
+// throw its fence when the statement ran. See the snapshot for the diagnostics.
 // The run-time-specifier `require`, one line per specifier CLASS, against
 // Node's own answers. A compiled binary reads no node_modules, so every
 // one of these used to be the same tagged refusal; three of them are name

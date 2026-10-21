@@ -328,15 +328,6 @@ export interface CcOptions {
   /** Pull scr_weak.c in. Set from moduleUsesWeakMap; a program with no
    * WeakMap keeps its exact link line and its exact scr_bytes_release. */
   weak?: boolean;
-  /** The program has a run-time-specifier `require` (the
-   * module.requireVerdict libCall — moduleUsesRequireVerdict on the IR):
-   * compiles scr_require.c into the binary. A WRITTEN specifier never
-   * emits that call, so a program without one links none of the
-   * resolution machinery and keeps its exact link line. The unit started
-   * inside scr_json.c, which is always linked, and size-class.ts caught
-   * the static hello-world paying 6,144 bytes for a call it cannot
-   * make. */
-  requireVerdict?: boolean;
   /** The program uses the WHATWG URL surface (moduleUsesUrl on the IR):
    * compiles scr_url.c into the binary.
    *
@@ -1594,10 +1585,6 @@ export interface LibArchiveOptions {
   /** Pull scr_weak.c in. Set from moduleUsesWeakMap; a program with no
    * WeakMap keeps its exact link line and its exact scr_bytes_release. */
   weak?: boolean;
-  /** The run-time-specifier require verdict (scr_require.c). A library
-   * archive carries it for the same reason a program does: the emitted
-   * module.requireVerdict libCall is an undefined symbol without it. */
-  requireVerdict?: boolean;
   url?: boolean;
   searchParams?: boolean;
   emitter?: boolean;
@@ -1633,7 +1620,6 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...(opts.inspect ? ["scr_inspect.c"] : []),
     ...(opts.symbol ? ["scr_symbol.c"] : []),
     ...(opts.weak ? ["scr_weak.c"] : []),
-    ...(opts.requireVerdict ? ["scr_require.c"] : []),
     ...(opts.searchParams ? ["scr_url_params.c"] : []),
     ...(opts.emitter ? ["scr_events_emitter.c", "scr_dyn_handle.c"] : []),
     // scr_zlib_stream.c is deliberately absent: it needs scr_stream.c,
@@ -2337,9 +2323,6 @@ export async function compileC(opts: CcOptions): Promise<void> {
       : []),
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
     ...(opts.weak ? [rt(join(rtDir, "scr_weak.c"))] : []),
-    // The run-time-specifier require verdict. It calls only header-declared
-    // things from units already in the base set, so it implies nothing.
-    ...(opts.requireVerdict ? [rt(join(rtDir, "scr_require.c"))] : []),
     ...(opts.searchParams ? [rt(join(rtDir, "scr_url_params.c"))] : []),
     // node:querystring's own escape/unescape live in scr_qs.c: the unit
     // names NO scr_url_ symbol (measured — the only mentions in it are

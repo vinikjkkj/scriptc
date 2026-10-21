@@ -1,3 +1,6 @@
+// REFUSED AT COMPILE TIME (no --best-effort, no runtime fence): this was
+// tests/corpus/6100-require-as-a-value.cjs, a program that used to build and
+// throw its fence when the statement ran. See the snapshot for the diagnostics.
 // `require` NOT called: the ambient CommonJS require held as a VALUE.
 //
 // MEASURED ON BOTH BACKENDS BEFORE THE FIX, every `typeof` line below

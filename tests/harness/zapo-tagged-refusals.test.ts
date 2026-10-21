@@ -453,7 +453,6 @@ const CEN = new Map<string, CensusRun>();
 beforeAll(async () => {
   const lab = await mkdtemp(join(tmpdir(), "scriptc-refusal-shapes-"));
   const all = [
-    ...PLANTS.map((p) => ({ name: p.name, ext: p.ext, src: p.src })),
     ...CLOSED.map((p) => ({ name: p.name, ext: p.ext, src: p.src })),
     { name: "clean-control", ext: "ts" as const, src: CLEAN },
   ];
@@ -470,7 +469,7 @@ beforeAll(async () => {
       });
       if (!res.ok) {
         throw new Error(
-          `${p.name} did not build on the ${backend} lane ` +
+          `${p.name} did not build on the ${backend} lane: ` +
             `${res.diagnostics[0]?.code ?? "?"} ${res.diagnostics[0]?.message?.slice(0, 200) ?? "?"}`,
         );
       }
@@ -539,44 +538,40 @@ describe("zapo's tagged refusals, as shapes", () => {
     }
   });
 
-  test.for(PLANTS.map((p) => [p.name, p] as const))("%s", ([, p]) => {
+  // A plant is a program the compiler REFUSES AT COMPILE TIME. There is no
+  // mode that turns the refusal into a runtime throw, so there is no
+  // translation unit to census: the build itself fails, with the tagged
+  // diagnostic. Both directions of the old contract survive: it must still
+  // be refused (a plant that compiles is a closed refusal to record, or a
+  // widening that minted a wrong answer), and it must be the refusal we
+  // think it is.
+  test.for(PLANTS.map((p) => [p.name, p] as const))("%s (refused at compile time)", async ([, p]) => {
     for (const backend of LANES) {
-      const run = CEN.get(`${p.name}:${backend}`)!;
-      expect(run.exit, `${p.name}:${backend}: the census itself failed (exit ${run.exit})`).toBe(0);
-      const d = run.json;
-      expect(d, `${p.name}:${backend}: the census produced no JSON`).not.toBeNull();
-      expect(d!.lane, `${p.name}:${backend}: wrong lane`).toBe(backend);
-      const tagged = d!.rows.filter((r) => r.cat === "REFUSAL.tagged");
-      // Direction 1: it still refuses. A plant that compiles clean is a
-      // CLOSED refusal (update this file and say so) or a widening that
-      // replaced a loud failure with a quiet wrong answer.
+      const dir = await mkdtemp(join(tmpdir(), `scriptc-refusal-plant-${backend}-`));
+      const src = join(dir, `${p.name}.${p.ext}`);
+      await writeFile(src, p.src, "utf8");
+      const res = await compile(src, { outPath: join(dir, "program"), outDir: dir, backend });
       expect(
-        tagged.length,
-        `${p.name}:${backend} no longer carries ANY tagged refusal -- zapo's ${p.zapoSite} ` +
-          `either closed (record it here) or now answers WRONG silently`,
-      ).toBeGreaterThan(0);
-      // Direction 2: it is the refusal we think it is.
-      const hit = tagged.filter((r) =>
-        p.accept.some((a) => r.code === a.code && r.msg.includes(a.fragment)),
+        res.ok,
+        `${p.name}:${backend} compiled -- zapo's ${p.zapoSite} either closed (record it here) ` +
+          `or now answers WRONG silently`,
+      ).toBe(false);
+      const diags = res.ok ? [] : res.diagnostics;
+      const hit = diags.filter((d) =>
+        p.accept.some((a) => d.code === a.code && d.message.includes(a.fragment)),
       );
       expect(
         hit.length,
-        `${p.name}:${backend} refuses, but with none of the expected emitters ` +
+        `${p.name}:${backend} is refused, but with none of the expected emitters ` +
           `[${p.accept.map((a) => `${a.code} / "${a.fragment}"`).join(", ")}]. ` +
-          `Saw: ${tagged.map((r) => `${r.code} ${r.msg.slice(0, 90)}`).join(" | ")}`,
+          `Saw: ${diags.map((d) => `${d.code} ${d.message.slice(0, 90)}`).join(" | ")}`,
       ).toBeGreaterThan(0);
-      // Direction 3, for a site where one refusal has been WITHDRAWN: it
-      // must not have come back. Direction 1 only counts refusals and
-      // direction 2 only matches the survivor, so between them a
-      // resurrected sibling passes unnoticed.
       for (const gone of p.forbid ?? []) {
         expect(
-          tagged.filter((r) => r.msg.includes(gone)).map((r) => `${r.code} ${r.msg.slice(0, 90)}`),
-          `${p.name}:${backend} refuses again on "${gone}" -- that refusal was withdrawn ` +
-            `because the oracle does not refuse there, so this is now a program Node runs ` +
-            `and scriptc does not`,
+          diags.filter((d) => d.message.includes(gone)).map((d) => `${d.code} ${d.message.slice(0, 90)}`),
+          `${p.name}:${backend} refuses again on "${gone}" -- that refusal was withdrawn`,
         ).toEqual([]);
       }
     }
-  });
+  }, 600_000);
 });

@@ -1488,7 +1488,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // requireFnValueOf lifts the same run-time-specifier arm the direct
       // call lowers to (lower-builtins.ts).
       {
-        const rv = requireFnValueOf(L, expr, loc);
+        const rv = requireFnValueOf(L, expr);
         if (rv) return rv;
       }
       {

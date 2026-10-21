@@ -1,0 +1,44 @@
+js-require-taken-as-a-value.cjs:25:11 - error SC2020: 'require taken as a value' is part of the standard library types but has no scriptc lowering yet
+
+  24 | 
+  25 | const r = require;
+     |           ^~~~~~~
+  26 | const arr = [require];
+
+  hint: calling it would need the run-time-specifier require, which has no static lowering: the compiled module graph is fixed at build time
+
+js-require-taken-as-a-value.cjs:26:14 - error SC2020: 'require taken as a value' is part of the standard library types but has no scriptc lowering yet
+
+  25 | const r = require;
+  26 | const arr = [require];
+     |              ^~~~~~~
+  27 | const obj = { q: require };
+
+  hint: calling it would need the run-time-specifier require, which has no static lowering: the compiled module graph is fixed at build time
+
+js-require-taken-as-a-value.cjs:27:18 - error SC2020: 'require taken as a value' is part of the standard library types but has no scriptc lowering yet
+
+  26 | const arr = [require];
+  27 | const obj = { q: require };
+     |                  ^~~~~~~
+  28 | 
+
+  hint: calling it would need the run-time-specifier require, which has no static lowering: the compiled module graph is fixed at build time
+
+js-require-taken-as-a-value.cjs:35:18 - error SC2020: 'require taken as a value' is part of the standard library types but has no scriptc lowering yet
+
+  34 | // Identity: one interned value per program, so the alias IS require.
+  35 | console.log('3', require === r);
+     |                  ^~~~~~~
+  36 | 
+
+  hint: calling it would need the run-time-specifier require, which has no static lowering: the compiled module graph is fixed at build time
+
+js-require-taken-as-a-value.cjs:53:22 - error SC2020: 'require taken as a value' is part of the standard library types but has no scriptc lowering yet
+
+  52 | }
+  53 | console.log('7', use(require));
+     |                      ^~~~~~~
+  54 | 
+
+  hint: calling it would need the run-time-specifier require, which has no static lowering: the compiled module graph is fixed at build time

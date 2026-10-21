@@ -1,0 +1,44 @@
+js-require-self-scope-run-time-specifier/inner/t.cjs:9:7 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+   8 | var out = [];
+   9 | try { require(inner); out.push('inner:resolved'); }
+     |       ^~~~~~~~~~~~~~
+  10 | catch (e) { out.push('inner:' + e.code); }
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value
+
+js-require-self-scope-run-time-specifier/inner/t.cjs:11:7 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+  10 | catch (e) { out.push('inner:' + e.code); }
+  11 | try { require(outer); out.push('outer:resolved'); }
+     |       ^~~~~~~~~~~~~~
+  12 | catch (e) { out.push('outer:' + e.code); }
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value
+
+js-require-self-scope-run-time-specifier/main.cjs:53:7 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+  52 | var own = 'corpus-selfref-scope';
+  53 | try { require(own); console.log('1', 'no throw'); }
+     |       ^~~~~~~~~~~~
+  54 | catch (e) { console.log('1', e.code, String(e.message).split('\n')[0]); }
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value
+
+js-require-self-scope-run-time-specifier/main.cjs:57:7 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+  56 | var sub = 'corpus-selfref-scope/inner';
+  57 | try { require(sub); console.log('2', 'no throw'); }
+     |       ^~~~~~~~~~~~
+  58 | catch (e) { console.log('2', e.code, String(e.message).split('\n')[0]); }
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value
+
+js-require-self-scope-run-time-specifier/main.cjs:62:7 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+  61 | 
+  62 | try { require(42); console.log('4', 'no throw'); } catch (e) { console.log('4', e.code); }
+     |       ^~~~~~~~~~~
+  63 | try { require(''); console.log('5', 'no throw'); } catch (e) { console.log('5', e.code); }
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value

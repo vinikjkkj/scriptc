@@ -51,7 +51,7 @@ import {
 } from "../diagnostics/diagnostic.js";
 import { provenanceDeclSiblings, provenanceSpecTwinsInProgram } from "./provenance-registry.js";
 import { clearResolveCaches, isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
-import { clearNpmResolutionCaches, probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
+import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
 import { isProvenanceSourceFile, isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { provenanceAliasRewrite, readSourceForRewrite } from "./provenance-rewrite.js";
@@ -359,7 +359,6 @@ export function loadProgram(
   // and harness callers reach it; the CLI is one compile per process.
   // Upstream #206 (27729aa2).
   clearResolveCaches();
-  clearNpmResolutionCaches();
   setNpmStaticPackages(opts?.npmStatic ?? []);
   // Workspace-package registrations reset per load (same discipline as the
   // npm-static set), then the opted-in names are probed UP FRONT: a
