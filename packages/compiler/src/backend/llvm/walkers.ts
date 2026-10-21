@@ -182,6 +182,10 @@ export class LlWalkers {
         this.host.declare(`declare void @scr_jb_put_json_str(ptr, ptr)`);
         B.line(`call void @scr_jb_put_json_str(ptr %b, ptr %v)`);
         break;
+      case "date":
+        this.host.declare(`declare void @scr_jb_put_date(ptr, ptr)`);
+        B.line(`call void @scr_jb_put_date(ptr %b, ptr %v) ; toJSON: "iso" or null`);
+        break;
       case "dyn":
         // Overflow values under an `unknown` index signature: the checked-dynamic tree
         // serializes itself (runtime walker). Bare stringify of dyn stays

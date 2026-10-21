@@ -1354,6 +1354,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.jsonDyn": { argTypes: [DYN], result: STRING },
   "insp.str": { argTypes: [STRING], result: STRING },
   "insp.regex": { argTypes: [REGEX], result: STRING },
+  "insp.date": { argTypes: [DATE_T], result: STRING },
   "insp.buffer": { argTypes: [BYTES_U8], result: STRING },
   "insp.error": { argTypes: [null, F64, F64], result: STRING },
   "insp.dyn": { argTypes: [DYN, F64, F64], result: STRING },
@@ -5340,7 +5341,7 @@ function validateFunction(
         // walker serializes it (scr_dyn_format_j), no emitted serializer.
         if (
           e.value.type.kind !== "dyn" &&
-          !isJsonSafeType(e.value.type, (id) => records.get(id), (id) => unions.get(id))
+          !isJsonSafeType(e.value.type, (id) => records.get(id), (id) => unions.get(id), true)
         ) {
           err(`jsonStringify of non-JSON-safe type ${e.value.type.kind}`, e.loc);
         }

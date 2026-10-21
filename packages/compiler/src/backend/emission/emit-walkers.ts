@@ -951,6 +951,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       case "string":
         d.push(`  scr_jb_put_json_str(b, v);`);
         break;
+      case "date":
+        d.push(`  scr_jb_put_date(b, v); /* toJSON: "iso" or null */`);
+        break;
       case "record": {
         const shape = E.recordsById.get(t.shapeId);
         if (!shape) throw new Error(`emitter bug: jsonStringify of unknown shape ${t.shapeId}`);
