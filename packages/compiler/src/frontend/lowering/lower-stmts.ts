@@ -725,13 +725,21 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
       // createServer(h).listen(0, go)` with `go` reading `server`) is a
       // TDZ read until the initializing assign completes — JS exactly.
       if (idx < entry.index || entry.ctx === L.ctx) return false;
-      const type = L.irTypeOf(decl.name);
+      let type = L.irTypeOf(decl.name);
       if (!TDZ_KINDS.has(type.kind) || isUnitType(type)) return false;
       if (assertedLet) {
-        // Only slots with NO representation for undefined (see above): an
-        // undefined-armed binding is readable between the declaration and
-        // the assignment, and today's lowering answers that exactly.
-        if (L.unassignedSlotInit(type, locOf(decl)) !== null) return false;
+        // A slot with no representation for undefined is WIDENED to
+        // `T | undefined` (bangWidens). The box stays EMPTY (NULL) until the
+        // declaration statement runs, so a read in the true dead zone is
+        // still Node's ReferenceError; the declaration then writes the
+        // undefined arm (lowerVarDecl), so a read between the declaration
+        // and the assignment answers undefined, exactly as Node does.
+        const widened = L.bangWidens(decl, type, locOf(decl));
+        if (widened !== null) {
+          type = widened;
+        } else if (L.unassignedSlotInit(type, locOf(decl)) !== null) {
+          return false;
+        }
         // A write above the declaration would be a ReferenceError in JS and
         // a silent fill here.
         if (writeBeforeDecl(L, symbol, decl)) return false;
@@ -4834,6 +4842,12 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // a value it could have held.
     if (pre && !decl.initializer) {
       L.tdzPredeclared.delete(declSymbol!);
+      // A WIDENED `let x!: T` (bangWidens): executing the declaration ends
+      // the dead zone with Node's `undefined`.
+      if (L.bangSymbols.has(declSymbol!)) {
+        const undef = L.unassignedSlotInit(pre.type, locOf(decl));
+        if (undef) return { kind: "assign", localId: pre.id, value: undef, loc: locOf(decl) };
+      }
       return null;
     }
 
@@ -4876,6 +4890,12 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
         type = unitOnlyUnion(L.unions);
       }
       if (type.kind === "void") L.badType(decl.name, L.typeOf(decl.name));
+      // `let x!: T`: the assertion waives tsc's definite-assignment proof,
+      // so a read before the first assignment (a closure, a later-declared
+      // function) observes Node's `undefined`. A slot with no representation
+      // for it (a NULL pointer, a garbage double) is widened to `T |
+      // undefined`; reads go through lyingRead.
+      type = L.bangWidens(decl, type, locOf(decl)) ?? type;
       const local = L.declareLocal(decl.name, decl.name.text, type, isLet);
       // tsc's definite-assignment analysis never guards `any` reads, so
       // uninitialized bindings must hold their world's undefined, never
@@ -5351,6 +5371,23 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
         : null;
     // Slot coercion: `const r: A | B = bValue;` wraps implicitly; width
     // subtyping (`const p: {a: number} = wider;`) is rejected, not coerced.
+    // The initializer handed back Node's possibly-undefined value as written
+    // (lyingRead / lowerOobTolerantIndexRead, because the program tests the
+    // binding against undefined): the binding keeps the wider slot, and its
+    // reads classify like a `!` binding's.
+    {
+      // `let x: T = null!` / `= undefined!`: a placeholder for a later
+      // assignment; the slot holds the null/undefined meanwhile.
+      const phW = L.bangWidens(decl, type, locOf(decl));
+      if (phW !== null) type = phW;
+    }
+    if (ts.isIdentifier(decl.name) && L.lyingResults.has(init) && L.lyingTargetOf(init.type) !== null) {
+      const bsym = L.checker.getSymbolAtLocation(decl.name);
+      if (bsym) {
+        type = init.type;
+        L.bangSymbols.add(bsym);
+      }
+    }
     init = L.coerceInto(decl.initializer, init, type);
     const local = L.declareLocal(decl.name, decl.name.text, type, isLet);
     L.noteKeyRiskBinding(local.id, init);
@@ -7636,9 +7673,44 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
    * variable/global target (pre/post is unobservable there): the
    * `x = x ± 1` desugar, serving the bare-identifier form and the
    * namespace-qualified spelling (`N.x++`). */
+  /** A write target whose slot was widened to `T | undefined` (a `!`
+   * binding): operate on the declared type and re-wrap. The read of the
+   * unassigned state is JS's own: `undefined++` / `undefined += 1` is NaN
+   * (the deferred-read default), and `undefined += "x"` concatenates the
+   * string "undefined". Null for every other target. */
+  function widenedNumericTarget(L: Lowerer, target: { id: string; type: IrType }, loc: SrcLoc, node: ts.Node):
+    { read: IrExpr; plain: IrType; wrap: (e: IrExpr) => IrExpr } | null {
+    if (target.type.kind !== "union" || L.armTag(target.type.unionId, UNDEFINED_T) < 0) return null;
+    const plain = L.stripUndefinedArm(target.type);
+    if (plain.kind !== "f64" && plain.kind !== "string") return null;
+    const slot: IrExpr = { kind: "varRef", localId: target.id, type: target.type, loc };
+    const helper = plain.kind === "f64" ? L.deferredReadHelper(target.type.unionId, plain, loc) : null;
+    const read: IrExpr = plain.kind === "f64"
+      ? (helper ? { kind: "call", callee: helper, args: [slot], type: plain, loc } : slot)
+      : L.ensureString(slot, node);
+    const tag = L.armTag(target.type.unionId, plain);
+    const unionId = target.type.unionId;
+    const wrapT = target.type;
+    return {
+      read,
+      plain,
+      wrap: (e) => ({ kind: "unionWrap", unionId, tag, value: e, type: wrapT, loc }),
+    };
+  }
+
   function lowerIncDecToTarget(L: Lowerer, expr: ts.PrefixUnaryExpression | ts.PostfixUnaryExpression,
     target: { id: string; type: IrType },): IrStmt {
     const loc = locOf(expr);
+    {
+      const w = widenedNumericTarget(L, target, loc, expr.operand);
+      if (w !== null && w.plain.kind === "f64") {
+        const op0 = expr.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
+        const computed0: IrExpr = {
+          kind: "bin", op: op0, left: w.read, right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc,
+        };
+        return { kind: "assign", localId: target.id, value: w.wrap(computed0), loc };
+      }
+    }
     const op = expr.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
     const readTarget: IrExpr = { kind: "varRef", localId: target.id, type: target.type, loc };
     // JS any-origin targets: `++`/`--` are ToNumeric on the READ — the
@@ -7768,11 +7840,13 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
   function lowerCompoundToTarget(L: Lowerer, expr: ts.BinaryExpression, compound: CompoundOp,
     target: { id: string; type: IrType },): IrStmt {
     const loc = locOf(expr);
-    const read: IrExpr = { kind: "varRef", localId: target.id, type: target.type, loc: locOf(expr.left) };
+    const w = widenedNumericTarget(L, target, locOf(expr.left), expr.left);
+    const read: IrExpr = w !== null ? w.read : { kind: "varRef", localId: target.id, type: target.type, loc: locOf(expr.left) };
     const rhs = L.lowerExpr(expr.right);
-    const combined = compoundCombine(L, compound, read, rhs, target.type, expr, expr.left, expr.right, loc);
+    const combined = compoundCombine(L, compound, read, rhs, w !== null ? w.plain : target.type, expr, expr.left, expr.right, loc);
     if (!combined) L.unsupported("SC1043", expr);
-    return { kind: "assign", localId: target.id, value: combined.toSlot(combined.natural), loc };
+    const out = combined.toSlot(combined.natural);
+    return { kind: "assign", localId: target.id, value: w !== null ? w.wrap(out) : out, loc };
   }
 
 /** One destructuring-assignment pattern the island can run: empty object/

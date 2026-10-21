@@ -2372,6 +2372,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
        * strictPropertyInitialization off) — checked against the
        * constructor's top-level assignments after the member loop. */
       const unguardedFields: { node: ts.Node; name: string; why: string }[] = [];
+      /** Fields initialized with the placeholder `null!` / `undefined!`. */
+      const placeholderFields = new Set<string>();
       /** Bare redeclares that STRIPPED the inherited slot's undefined arm
        * (`collection?: string` → `override collection: string`): the slot
        * keeps the union, and reads through THIS class checked-extract the
@@ -3048,8 +3050,25 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               });
             }
           }
-          fields.set(member.name.text, type);
-          fieldOrder.push({ name: member.name.text, type, initializer: member.initializer });
+          // `x: T = null!` / `= undefined!`: the placeholder spelling of a
+          // field assigned later. Node holds null/undefined until then; the
+          // slot rides `T | null` / `T | undefined` exactly like a deferred
+          // `x!: T`, so reads classify at their consumer.
+          const baseT: IrType = type;
+          let slotType: IrType = baseT;
+          const ph = member.initializer !== undefined && member.postfixToken === undefined
+            ? L.placeholderUnitOf(member.initializer)
+            : null;
+          if (
+            ph !== null && !admitsUndefined && !isUnitType(baseT) &&
+            baseT.kind !== "union" && baseT.kind !== "jsval" && baseT.kind !== "dyn" && baseT.kind !== "map" &&
+            baseT.kind !== "generator" && baseT.kind !== "caught"
+          ) {
+            slotType = ph === "null" ? L.withNullArm(baseT) : L.withUndefinedArm(baseT);
+            placeholderFields.add(member.name.text);
+          }
+          fields.set(member.name.text, slotType);
+          fieldOrder.push({ name: member.name.text, type: slotType, initializer: member.initializer });
         } else if (ts.isConstructorDeclaration(member)) {
           // A body-less constructor is an OVERLOAD SIGNATURE: type-world,
           // lowers to nothing — tsc resolved each `new` against the
@@ -3564,6 +3583,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // would read zeroed memory, so it fences instead.
       const deferredInitFields = new Set<string>(base?.deferredInitFields ?? []);
       for (const name of armedRedeclares) deferredInitFields.add(name);
+      for (const name of placeholderFields) deferredInitFields.add(name);
       const collectedFields = new Set<string>(base?.collectedFields ?? []);
       const absentTrackedFields = new Set<string>(base?.absentTrackedFields ?? []);
       if (unguardedFields.length > 0) {
@@ -3593,10 +3613,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           const declared = fields.get(f.name);
           const armable =
             declared !== undefined && !isUnitType(declared) &&
-            declared.kind !== "union" && declared.kind !== "jsval" && declared.kind !== "dyn" &&
+            declared.kind !== "jsval" && declared.kind !== "dyn" &&
             declared.kind !== "map" && declared.kind !== "generator" && declared.kind !== "void" &&
             declared.kind !== "caught";
-          const armed = armable ? L.withUndefinedArm(declared) : null;
+          const armed = armable ? (declared.kind === "union" ? L.unionWithUndefinedArm(declared) : L.withUndefinedArm(declared)) : null;
           if (armed !== null && armed.kind === "union") {
             fields.set(f.name, armed);
             const fo = fieldOrder.find((x) => x.name === f.name);
