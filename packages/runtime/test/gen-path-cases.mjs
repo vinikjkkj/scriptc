@@ -39,7 +39,16 @@ process.chdir("/");
 // the function is enough — no second real directory, and no second drive,
 // has to exist for the probe.
 const probeCwd = process.env.SCR_ORACLE_PROBE_CWD;
-if (probeCwd !== undefined) process.cwd = () => probeCwd;
+if (probeCwd !== undefined) {
+  process.cwd = () => probeCwd;
+  // win32.resolve asks `process.env["=D:"] || process.cwd()` for a drive-
+  // relative path, and on a Windows host libuv's chdir (the one above) has
+  // just set "=<drive>:" to the new directory. That variable would answer
+  // for the probe instead of the cwd being probed, so every case naming the
+  // host's own drive looked cwd-free (`relative("a", "d:/games")`). A POSIX
+  // host has no such variables; deleting them there is a no-op.
+  for (let c = 65; c <= 90; c++) delete process.env[`=${String.fromCharCode(c)}:`];
+}
 
 const hex = (str) => {
   const b = Buffer.from(str, "utf8");
