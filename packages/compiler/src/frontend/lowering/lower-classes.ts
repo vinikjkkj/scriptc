@@ -999,8 +999,9 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       if (!onPrototype && (!ts.isIdentifier(target) || L.checker.getSymbolAtLocation(target) !== classSymbol)) continue;
       if (!ts.isStringLiteral(key) || !ts.isObjectLiteralExpression(desc)) continue;
       const name = key.text;
-      if (info.staticFields.some((f) => f.name === name) || info.staticMethods?.has(name) === true ||
-          info.uncollectedStatics?.has(name) === true || info.staticAccessors?.has(`get:${name}`) === true) continue;
+      if (info.staticMethods?.has(name) === true || info.uncollectedStatics?.has(name) === true ||
+          info.staticAccessors?.has(`get:${name}`) === true) continue;
+      const existing = info.staticFields.find((f) => f.name === name);
       let value: ts.Expression | null = null;
       let writable = false;
       let ok = true;
@@ -1031,6 +1032,16 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       };
       scan(value);
       if (!early) continue;
+      // The same constant defined on the class and on its prototype (ws does
+      // both for CONNECTING..CLOSED): one slot serves both spellings when the
+      // value expression is the same text.
+      if (existing !== undefined) {
+        if (onPrototype && existing.initializer !== undefined && existing.initializer.getText() === value.getText()) {
+          existing.viaPrototype = true;
+          L.lateMethodAssigns.add(call);
+        }
+        continue;
+      }
       const mapped = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.typeOf(value)));
       if (mapped === null || (mapped.kind !== "f64" && mapped.kind !== "string" && mapped.kind !== "bool")) continue;
       const globalId = `%g.s.${L.classNamer(decl)}.${name}`;
@@ -1115,7 +1126,14 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       }
       if (!ok || (getFn === null && setFn === null)) continue;
       const names = arr.elements.map((x) => `${head}${(x as ts.StringLiteral).text}${tail}`);
-      if (names.some((n) => info.methods.has(`get:${n}`) || info.methods.has(`set:${n}`) || info.fields.has(n) || info.methods.has(n))) continue;
+      // A getter the class body itself declares (ws's `get onclose() { return
+      // null; }` placeholders for documentation) is REPLACED by the family's
+      // accessor, as the defineProperty replaces it on the prototype: its own
+      // body drops out of the units (Lowerer.shadowedMembers).
+      if (names.some((n) => info.methods.has(`set:${n}`) || info.fields.has(n) || info.methods.has(n))) continue;
+      for (const n of names) {
+        if (info.methods.has(`get:${n}`)) L.shadowedMembers.add(`${info.def.name}.get:${n}`);
+      }
       let sigs: { get?: ReturnType<Lowerer["lambdaSignature"]>; set?: ReturnType<Lowerer["lambdaSignature"]> };
       try {
         sigs = {
@@ -1199,6 +1217,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       // written against a different one.
       const ownType = L.checker.getDeclaredTypeOfSymbol(classSymbol);
       L.lateMethodThis.set(fn, ownType);
+      if (!L.lateMethodOwner.has(fn)) L.lateMethodOwner.set(fn, { info, mName: m });
     }
   }
 
