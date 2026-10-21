@@ -1,5 +1,5 @@
 // The island-backed ambient surface (Math beyond the static members,
-// number methods, string-pattern replace/at, the Number statics, ...)
+// number methods, string at, the Number statics, ...)
 // typechecks against real static types but executes in the embedded
 // engine: in a static build every use site is its own SC2012 naming the
 // flag — never an ICE, never a link error. (Math.floor/abs/round and the
@@ -11,6 +11,5 @@
 const up = Math.sqrt(2);
 const tau = Math.cbrt(8) * 2;
 const price = (19.99).toPrecision(4);
-const swapped = "banana".replace("an", "AN");
 const ch = "hello".at(0);
 const n = Number.parseFloat("3.14");
