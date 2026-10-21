@@ -9458,9 +9458,9 @@ ScrSecureCtx *scr_tls_create_secure_context(const char *cert, size_t cert_len, c
  * validations first, then the pem walk (+1, or NULL with the exception
  * pending). Borrowed. */
 ScrSecureCtx *scr_tls_create_secure_context_dyn(const ScrDyn *opts);
-/* tls.getCACertificates(type): validateString + the documented name set,
- * then the compiler-rendered fence — always leaves an exception pending. */
-void scr_tls_ca_certs_chk(const ScrDyn *type, const ScrStr *fence);
+/* tls.getCACertificates over a run-time value (scr_tls_ca.c): validateString,
+ * then the real answer; +1 or NULL with the exception pending. */
+struct ScrArr *scr_tls_ca_get_dyn(const ScrDyn *type);
 /* ── AbortSignal ──────────────────────────────────────────────────────
  * The fetch-cancellation slice's handle. Present so that a signal has a
  * TYPE: it is almost always an optional field on an options record the

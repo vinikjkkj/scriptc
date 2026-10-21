@@ -13659,12 +13659,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/js-tls-getcacertificates-over-a-dynamic-argument.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/js-tls-getcacertificates-over-a-dynamic-argument.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/js-require-run-time-specifier-classes.cjs": {
    "order": [
     "<repo>/tests/diagnostics/js-require-run-time-specifier-classes.cjs"

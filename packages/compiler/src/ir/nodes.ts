@@ -4192,10 +4192,11 @@ export type IrLibFn =
    * walk — a validated { cert, key } bag builds the real context.
    * May-throw. */
   | "tls.createSecureContextDyn"
-  /** tls.getCACertificates(type): validateString + the documented name
-   * set, then the trailing compiler-rendered fence — ALWAYS THROWS (the
-   * error.nodeThrow polymorphic-result carve-out). May-throw seed. */
-  | "tls.caCertsChk"
+  /** tls.getCACertificates over a checked-dynamic argument (a JS value whose
+   * type is known only at run time): validateString (ERR_INVALID_ARG_TYPE),
+   * then the real per-type answer (ERR_INVALID_ARG_VALUE for an unknown
+   * name). May-throw seed. */
+  | "tlsca.getDyn"
   /** The CA-store introspection surface (scr_tls_ca.c — its own unit and
    * link gate, "tlsca." NOT "tls.", so a getCACertificates-only binary
    * never pulls mbedTLS): tlsca.get is tls.getCACertificates(type) — the
@@ -11881,7 +11882,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "tls.pemDyn",
   "tls.createServerDyn",
   "tls.createSecureContextDyn",
-  "tls.caCertsChk",
+  "tlsca.getDyn",
   "tls.createServerDynCb",
   "https.createServerDyn",
   "https.createServerDynCb",

@@ -778,7 +778,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // createSecureContext({ cert, key }) mints the opaque SNI-answer handle.
   "tls.createSecureContext": { argTypes: [null, null], result: SECURECTX_T },
   "tls.createSecureContextDyn": { argTypes: [DYN], result: SECURECTX_T },
-  "tls.caCertsChk": { argTypes: [DYN, STRING], result: VOID },
+  "tlsca.getDyn": { argTypes: [DYN], result: arrayOf(STRING) },
   // The CA-store introspection unit (scr_tls_ca.c): per-type cached PEM
   // string arrays and the default-set replacement.
   "tlsca.get": { argTypes: [STRING], result: arrayOf(STRING) },
@@ -4979,8 +4979,7 @@ function validateFunction(
           // of the undefined global mapped to (never materialized).
           break;
         }
-        if (e.fn === "error.nodeThrow" || e.fn === "error.argTypeThrow" || e.fn === "error.propTypeThrow" ||
-            e.fn === "tls.caCertsChk") {
+        if (e.fn === "error.nodeThrow" || e.fn === "error.argTypeThrow" || e.fn === "error.propTypeThrow") {
           // Always throws — the result type is the replaced expression's
           // own (never materialized; the global.undefRead pattern). The
           // fs Chk ladders qualify: every validation failure throws

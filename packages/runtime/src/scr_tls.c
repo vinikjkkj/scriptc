@@ -1479,30 +1479,6 @@ ScrSecureCtx *scr_tls_create_secure_context_dyn(const ScrDyn *opts /*borrowed*/)
   return c;
 }
 
-/* tls.getCACertificates(type): validateString, then the documented name
- * set — an unknown name answers ERR_INVALID_ARG_VALUE; the real CA list
- * has no lowering, so a valid name meets the fence. Always throws. */
-void scr_tls_ca_certs_chk(const ScrDyn *type, const ScrStr *fence) {
-  if (type->kind != SCR_DYN_STR) {
-    scr_dyn_arg_type_fail("type", "of type string", type);
-    return;
-  }
-  static const char *const KNOWN[] = { "default", "system", "bundled", "extra", NULL };
-  bool valid = false;
-  for (size_t i = 0; KNOWN[i] != NULL; i++) {
-    if (type->v.str->len == strlen(KNOWN[i]) &&
-        memcmp(type->v.str->data, KNOWN[i], type->v.str->len) == 0) {
-      valid = true;
-      break;
-    }
-  }
-  if (!valid) {
-    scr_dyn_arg_value_fail("type", NULL, type);
-    return;
-  }
-  scr_throw_lowering_fence(fence);
-}
-
 ScrNetServer *scr_tls_create_server_dyn(const ScrDyn *opts /*borrowed*/,
                                          ScrClosure *handler /*moves, nullable*/,
                                          ScrNetConnFn fn) {

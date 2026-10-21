@@ -5762,11 +5762,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // The runtime option-bag form: Node's typed validations, then
             // the pem walk (throws catchably on both ladders).
             return finish(`scr_tls_create_secure_context_dyn(${arg(0)})`);
-          case "tls.caCertsChk":
-            // Always throws (validation error or the trailing fence).
-            return finish(
-              `(scr_tls_ca_certs_chk(${arg(0)}, ${arg(1)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
-            );
+          case "tlsca.getDyn":
+            return finish(`scr_tls_ca_get_dyn(${arg(0)})`);
           // The CA-store introspection unit (scr_tls_ca.c): cached
           // per-type PEM string arrays (+1 retained answers), and the
           // default-set replacement. get/set are may-throw seeds.

@@ -1374,7 +1374,7 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     id: "node-builtin.tls.getCACertificates",
     kind: "node-builtin",
     name: "tls.getCACertificates",
-    fns: ["tlsca.get"],
+    fns: ["tlsca.get", "tlsca.getDyn"],
     note: "the per-type cached PEM bundle: 'default' and 'extra' additionally read NODE_EXTRA_CA_CERTS, 'system' the platform store",
   },
   {
