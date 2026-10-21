@@ -1,0 +1,17 @@
+# Inputs that tests compare byte-for-byte against LF-generated values or
+# LF-recorded baselines (snapshots, goldens, the surface manifest, and the
+# sources whose byte offsets order-parity and the diagnostics snapshots pin).
+# Windows runners check out with core.autocrlf=true by default, which turned
+# these into CRLF and shifted offsets, goldens and snapshots. `text=auto`
+# leaves binary files alone and never renormalizes a file already committed
+# with CRLF.
+packages/compiler/surface-manifest.json text=auto eol=lf
+packages/compiler/test/ts7/baselines/** text=auto eol=lf
+tests/corpus/** text=auto eol=lf
+tests/diagnostics/** text=auto eol=lf
+tests/fixtures/** text=auto eol=lf
+tests/harness/__snapshots__/** text=auto eol=lf
+
+# Committed with CRLF / mixed endings on purpose: keep the committed bytes.
+tests/corpus/2679-then-two-handlers.ts -text
+tests/fixtures/node-types/node_modules/@types/node/README.md -text
