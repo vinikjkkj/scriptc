@@ -131,6 +131,10 @@ export interface ClassInfo {
    * assigns over a prototype method of the same name (not inherited: the
    * class that assigns declares it). The slot is in `fields`, undefined-armed. */
   shadowFields?: Set<string>;
+  /** The enclosing locals a lifted local class reads, as hidden fields: the
+   * constructor takes their values as trailing parameters and `new C` sites
+   * pass them; reads of the binding inside the class read the field. */
+  captures?: { sym: ts.Symbol; field: string; type: IrType }[];
   /** The subset of `collectedFields` whose undefined arm means ABSENT and
    * nothing else — the slots every ENUMERATION surface has to skip while
    * the arm is live, because in Node the property does not exist until its
@@ -3584,6 +3588,23 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // (conditional branches, assignment in a method, no constructor at
       // all) leaves a window where Node reads undefined and these layouts
       // would read zeroed memory, so it fences instead.
+      // A LIFTED LOCAL CLASS that reads enclosing locals (liftedLocalClasses,
+      // lower-modules.ts): one hidden field per captured binding, set from
+      // hidden trailing constructor parameters. The bindings are never
+      // written, so the stored VALUE is the binding.
+      let captures: { sym: ts.Symbol; field: string; type: IrType }[] | undefined;
+      if (ts.isClassDeclaration(decl) && L.localClassCaptures.has(decl)) {
+        captures = [];
+        L.localClassCaptures.get(decl)!.forEach((cs, i) => {
+          const csT = L.checker.getTypeOfSymbolAtLocation(cs, decl);
+          const mapped = L.mapTypeOf(csT) ?? dynFallbackType(L, decl, csT);
+          if (!mapped || mapped.kind === "void") L.badType(decl, csT);
+          const field = `%cap${i}.${cs.name}`;
+          fields.set(field, mapped);
+          fieldOrder.push({ name: field, type: mapped, initializer: undefined });
+          captures!.push({ sym: cs, field, type: mapped });
+        });
+      }
       const deferredInitFields = new Set<string>(base?.deferredInitFields ?? []);
       for (const name of armedRedeclares) deferredInitFields.add(name);
       for (const name of placeholderFields) deferredInitFields.add(name);
@@ -4152,6 +4173,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ...(collectedFields.size > 0 ? { collectedFields } : {}),
         ...(absentTrackedFields.size > 0 ? { absentTrackedFields } : {}),
         ...(shadowFields.size > 0 ? { shadowFields } : {}),
+        ...(captures !== undefined ? { captures } : {}),
       };
       // GENERIC members get their declaring-class backlink now that the
       // info exists (instance lowering reads it for `this` typing and the
@@ -6213,6 +6235,29 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     return out;
   }
 
+/** The hidden trailing constructor parameters of a capturing lifted class and
+ * the stores that put them in the instance's hidden fields (before anything
+ * else in the constructor can read a captured binding). Pushes the params. */
+function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, params: IrParam[]): IrStmt[] {
+  if (info.captures === undefined) return [];
+  const loc = info.decl ? locOf(info.decl) : { file: "<synthetic>", start: 0, end: 0 };
+  const out: IrStmt[] = [];
+  info.captures.forEach((c, i) => {
+    const local: IrLocal = { id: `cap${i}.0`, name: `cap${i}`, type: c.type, mutable: false };
+    L.ctx.locals.push(local);
+    params.push({ localId: local.id, name: local.name, type: local.type });
+    out.push({
+      kind: "fieldSet",
+      obj: { kind: "varRef", localId: thisLocal.id, type: thisLocal.type, loc },
+      className: info.def.name,
+      field: c.field,
+      value: { kind: "varRef", localId: local.id, type: local.type, loc },
+      loc,
+    });
+  });
+  return out;
+}
+
 /** The constructor function `%C.constructor`. Synthesized when absent: a
    * base class runs just its field initializers; a derived class inherits
    * the base's signature — forward every param to super(), then run own
@@ -6254,6 +6299,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         // defaults on entry, ahead of everything the body does.
         const declared = L.declareParams(info.ctor.parameters, info.ctorParams);
         params.push(...declared.params);
+        body.push(...captureInitStmts(L, info, thisLocal, params));
         body.push(...declared.prologue);
         if (!ctorBase) {
           // Node's base-class order: field initializers run at the start
@@ -6288,6 +6334,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
             if (!(e instanceof PoisonError)) throw e;
           }
         }
+        body.push(...captureInitStmts(L, info, thisLocal, params));
         body.push(...L.fieldInitStmts(info, thisLocal));
       }
       return {
@@ -7401,6 +7448,13 @@ function lowerProgramClassNew(L: Lowerer, expr: ts.NewExpression, info0: ClassIn
   const args = L.inheritsBuiltinErrorCtor(info)
     ? [L.errorMessageArg(expr.arguments ?? [], loc, expr)]
     : L.completeArgs(expr.arguments ?? [], info.ctorParams, loc, expr);
+  // A capturing lifted class: the captured bindings' CURRENT values ride as
+  // the hidden trailing arguments (read at this site, where they are in scope).
+  if (info.captures !== undefined) {
+    for (const c of info.captures) {
+      args.push(L.lowerCapturedValue(c.sym, c.type, expr));
+    }
+  }
   return {
     kind: "new",
     className: info.def.name,

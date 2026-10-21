@@ -13720,12 +13720,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-a-local.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-a-local.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/js-class-declared-in-a-function-used-as-a-value.js": {
    "order": [
     "<repo>/tests/diagnostics/js-class-declared-in-a-function-used-as-a-value.js"
@@ -13801,6 +13795,30 @@
   "<repo>/tests/corpus/8091-dgram-send-callback-list-and-connected-forms.cjs": {
    "order": [
     "<repo>/tests/corpus/8091-dgram-send-callback-list-and-connected-forms.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-a-written-local.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-a-written-local.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8023-a-typed-class-declared-in-a-function-capturing-its-locals.ts": {
+   "order": [
+    "<repo>/tests/corpus/8023-a-typed-class-declared-in-a-function-capturing-its-locals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8022-a-class-declared-in-a-function-capturing-its-locals.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8022-a-class-declared-in-a-function-capturing-its-locals.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-from-a-static-member.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-from-a-static-member.js"
    ],
    "diags": []
   }

@@ -1195,6 +1195,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // Union-typed bindings read through tsc's control-flow narrowing:
       // when the checker types this USE as a single arm, maybeNarrow
       // bridges the tagged representation with a unionNarrow.
+      {
+        const capSym = L.currentClass?.captures !== undefined ? L.checker.getSymbolAtLocation(expr) : undefined;
+        const capRead = capSym ? L.capturedClassFieldRead(capSym, expr) : null;
+        if (capRead) return capRead;
+      }
       const local = L.resolveLocal(expr);
       if (local) {
         if (local.type.kind === "caught") return L.caughtRead(expr, local, loc);
