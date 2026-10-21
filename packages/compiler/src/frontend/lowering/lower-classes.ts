@@ -238,7 +238,7 @@ export interface ClassInfo {
    * accessors, keep the fence. `decl` is the declaration itself — the
    * source position and the blame node when there is no initializer to
    * carry either. */
-  staticFields: { name: string; type: IrType; initializer: ts.Expression | undefined; decl: ts.PropertyDeclaration; globalId: string; readonly: boolean; viaPrototype?: true }[];
+  staticFields: { name: string; type: IrType; initializer: ts.Expression | undefined; decl: ts.PropertyDeclaration; globalId: string; readonly: boolean; viaPrototype?: true; lying?: true }[];
   /** Static member names this class DECLARES and does NOT lower — static
    * accessors, `static x?: T = e`, an initializer-less static whose type
    * cannot hold undefined. They are not storage, but they ARE own
@@ -3032,10 +3032,21 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
                 // says no for every type with no lowering at all, so a
                 // refusal that exists today stays exactly where it is.
                 !modifiers.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword) &&
-                member.postfixToken?.kind !== ts.SyntaxKind.ExclamationToken &&
-                staticTypeAdmitsUndefined(L, member))
+                (staticTypeWidens(L, member) ||
+                  (member.postfixToken?.kind !== ts.SyntaxKind.ExclamationToken &&
+                    staticTypeAdmitsUndefined(L, member))))
           ) {
-            const type = L.irTypeOf(member.name);
+            let type = L.irTypeOf(member.name);
+            // `static n: number;` / `static n!: string`: tsc runs no
+            // definite-assignment check over statics, and Node holds
+            // undefined until the first write. The slot widens to
+            // `T | undefined` and reads classify at their consumer
+            // (lyingRead), exactly like a deferred `x!: T` field.
+            let lying = false;
+            if (!member.initializer && staticTypeWidens(L, member)) {
+              type = L.withUndefinedArm(type);
+              lying = true;
+            }
             if (type.kind === "void") L.badType(member.name, L.typeOf(member.name));
             if (type.kind === "dyn") {
               L.unsupported("SC1090", member.name, "'unknown'-typed static fields");
@@ -3047,6 +3058,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               decl: member,
               globalId: `%g.s.${L.classNamer(decl)}.${member.name.text}`,
               readonly: modifiers.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword),
+              ...(lying ? { lying: true as const } : {}),
             });
           }
           // Async statics collect like any static method: the module
@@ -5051,6 +5063,16 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * undefined. Asked with mapTypeOf, which ANSWERS NULL instead of
    * poisoning, so a static whose type has no lowering at all is not
    * collected and keeps the use-site fence it has today. */
+  /** An initializer-less static whose declared type has a plain slot kind
+   * (number, string, boolean, object, record) and no undefined arm: the
+   * slot widens to `T | undefined` (see the collection site). */
+  function staticTypeWidens(L: Lowerer, member: ts.PropertyDeclaration): boolean {
+    if (member.initializer !== undefined || member.postfixToken?.kind === ts.SyntaxKind.QuestionToken) return false;
+    const mapped = L.mapTypeOf(L.typeOf(member.name));
+    return mapped !== null && (mapped.kind === "f64" || mapped.kind === "string" || mapped.kind === "bool" ||
+      mapped.kind === "object" || mapped.kind === "record");
+  }
+
   function staticTypeAdmitsUndefined(L: Lowerer, member: ts.PropertyDeclaration): boolean {
     const mapped = L.mapTypeOf(L.typeOf(member.name));
     return mapped?.kind === "union" && L.armTag(mapped.unionId, UNDEFINED_T) >= 0;
@@ -5526,6 +5548,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       );
     }
     if (found?.field !== undefined) {
+      if (found.field.lying === true) {
+        const lr = L.lyingRead({ kind: "varRef", localId: found.field.globalId, type: found.field.type, loc }, expr);
+        if (lr) return lr;
+      }
       return L.maybeNarrow(
         { kind: "varRef", localId: found.field.globalId, type: found.field.type, loc },
         expr,
@@ -5602,6 +5628,30 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         );
       }
       if (f.readonly) L.unsupported("SC1090", access, `assigning the readonly static '${name}'`);
+      if (f.lying === true && f.type.kind === "union") {
+        // A widened `static n: number;` slot: the operator runs on the
+        // declared T (undefined reads as NaN / "undefined"), and the result
+        // wraps back into the union.
+        const plainT = L.lyingTargetOf(f.type);
+        if (plainT !== null && (plainT.kind === "f64" || plainT.kind === "string")) {
+          const raw: IrExpr = { kind: "varRef", localId: f.globalId, type: f.type, loc };
+          let pRead: IrExpr | null = null;
+          if (plainT.kind === "string") pRead = L.ensureString(raw, access);
+          else {
+            const h = L.deferredReadHelper(f.type.unionId, plainT, loc);
+            if (h) pRead = { kind: "call", callee: h, args: [raw], type: plainT, loc };
+          }
+          const tag = L.armTag(f.type.unionId, plainT);
+          if (pRead !== null && tag >= 0) {
+            const uid = f.type.unionId;
+            return {
+              type: plainT,
+              read: pRead,
+              write: (v) => ({ kind: "assign", localId: f.globalId, value: { kind: "unionWrap", unionId: uid, tag, value: v, type: f.type, loc }, loc }),
+            };
+          }
+        }
+      }
       return {
         type: f.type,
         read: { kind: "varRef", localId: f.globalId, type: f.type, loc },
@@ -6388,6 +6438,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       );
     }
     if (found.field !== undefined) {
+      if (found.field.lying === true) {
+        const lr = L.lyingRead({ kind: "varRef", localId: found.field.globalId, type: found.field.type, loc }, expr);
+        if (lr) return lr;
+      }
       return L.maybeNarrow(
         { kind: "varRef", localId: found.field.globalId, type: found.field.type, loc },
         expr,
