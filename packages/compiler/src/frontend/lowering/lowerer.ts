@@ -13388,6 +13388,12 @@ export class Lowerer {
    * `this` while such a method's body lowers under C. */
   readonly lateMethodAssigns = new Set<ts.Node>();
   readonly lateMethodThis = new Map<ts.Node, ts.Type>();
+  /** `<Class>.<method name>` members of a class BODY that a late definition
+   * replaced (the class's own declaration no longer lowers). */
+  readonly shadowedMembers = new Set<string>();
+  /** The class and method name an adopted function-like (an object-literal
+   * method, typically) became a late method of. */
+  readonly lateMethodOwner = new Map<ts.Node, { info: ClassInfo; mName: string }>();
   /** An accessor family's loop variable bound to the literal one unrolled
    * body is lowered for (keyed `<Class>.<method name>`), and the bindings
    * active while such a body lowers. */
@@ -13535,6 +13541,7 @@ export class Lowerer {
       if (baseName === null) continue;
       const mName = ts.isMethodDeclaration(fnLike) ? baseName : `${ts.isGetAccessor(fnLike) ? "get" : "set"}:${baseName}`;
       if (!info.methods.get(mName) || !fnLike.body) continue;
+      if (this.shadowedMembers.has(`${info.def.name}.${mName}`)) continue;
       yield { mName, member: fnLike };
     }
   }

@@ -8453,7 +8453,7 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
         // `this` is the receiver — a dyn object models no receiver, and the
         // generic lexical-this walk would silently capture an ENCLOSING
         // method's `this` (the record path's reasoning, verbatim).
-        L.rejectThisInObjectMethod(prop.body!);
+        if (!L.lateMethodOwner.has(prop)) L.rejectThisInObjectMethod(prop.body!);
         // `super` needs a [[HomeObject]] a dyn object has none of; the
         // call-site machinery for it assumes a class body.
         rejectSuperInObjectMethod(L, prop.body!);
@@ -8493,8 +8493,19 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
         : ts.isShorthandPropertyAssignment(prop)
           ? (prop.name as ts.Identifier)
           : prop.initializer;
-      const lowerValue = (): IrExpr =>
-        ts.isMethodDeclaration(prop) ? L.lowerLambda(prop) : L.lowerExpr(valueExpr as ts.Expression);
+      const lowerValue = (): IrExpr => {
+        if (ts.isMethodDeclaration(prop)) {
+          // adopted as a late method of a class: the detached function of
+          // that method (see the record path's twin)
+          const owner = L.lateMethodOwner.get(prop);
+          const ownerSig = owner?.info.methods.get(owner.mName);
+          if (owner !== undefined && ownerSig !== undefined && ownerSig.params.every((p) => p.mode === "required" || p.mode === "omittable")) {
+            return unboundMethodThunk(L, owner.info, owner.mName, { declarer: owner.info, sig: ownerSig }, locOf(prop));
+          }
+          return L.lowerLambda(prop);
+        }
+        return L.lowerExpr(valueExpr as ts.Expression);
+      };
       const raw: IrExpr = lowerValue();
       let v = L.coerceToExpected(raw, DYN);
       // A function MEMBER of a runtime-keyed object literal is created
@@ -9923,7 +9934,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       // lets it through) and records don't model it; the generic
       // lexical-this walk would silently capture an ENCLOSING method's
       // `this`, so any `this` in the body is rejected up front.
-      if (ts.isMethodDeclaration(prop)) L.rejectThisInObjectMethod(prop.body ?? prop);
+      if (ts.isMethodDeclaration(prop) && !L.lateMethodOwner.has(prop)) L.rejectThisInObjectMethod(prop.body ?? prop);
     }
 
     const ctxType0 = L.literalCtxOverride.get(expr) ?? L.checker.getContextualType(expr);
@@ -11828,7 +11839,15 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       } else if (ts.isShorthandPropertyAssignment(prop)) {
         value = L.lowerShorthandValue(prop);
       } else if (ts.isMethodDeclaration(prop)) {
-        value = L.lowerLambda(prop);
+        // A method (written with `this`) that a class adopted as a late
+        // method (WebSocket.prototype.addEventListener = addEventListener):
+        // inside its literal it is the detached function of that class's
+        // method, whose receiver is the call's `this` — not a lambda.
+        const owner = L.lateMethodOwner.get(prop);
+        const ownerSig = owner?.info.methods.get(owner.mName);
+        value = owner !== undefined && ownerSig !== undefined && ownerSig.params.every((p) => (p.mode === "required" || p.mode === "omittable"))
+          ? unboundMethodThunk(L, owner.info, owner.mName, { declarer: owner.info, sig: ownerSig }, locOf(prop))
+          : L.lowerLambda(prop);
       } else {
         L.unsupported("SC1090", prop, `syntax '${ts.SyntaxKind[(prop as ts.Node).kind]}'`);
       }
@@ -20348,12 +20367,18 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const found = L.findMethodOn(info, expr.name.text);
     if (found === null) return lowerUnboundSubclassMethodValue(L, expr, info);
     if (found.sig.abstract === true) return null;
-    if (found.sig.params.some((p) => p.mode !== "required")) return null;
+    if (found.sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable"))) return null;
     // The receiver expression still evaluates (a plain read, no effects
     // when it is `this` or an identifier; anything else is declined).
     if (!(expr.expression.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(expr.expression))) return null;
-    const method = expr.name.text;
-    const loc = locOf(expr);
+    return unboundMethodThunk(L, info, expr.name.text, found, locOf(expr));
+  }
+
+/** The detached-function closure of class method `method` of `info` (see
+   * lowerUnboundClassMethodValue); also what an object-literal method adopted
+   * as a late method becomes inside its literal. */
+  export function unboundMethodThunk(L: Lowerer, info: ClassInfo, method: string,
+    found: { declarer: ClassInfo; sig: { params: ParamShape[]; ret: IrType } }, loc: SrcLoc): IrExpr {
     const virtual = L.overrideBelow(info, method);
     const name = `%unbound.${info.def.name}.${method}`;
     const params = found.sig.params.map((p) => p.type);
@@ -20427,7 +20452,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (decls.length === 0) return null;
     const first = decls[0]!.sig;
     for (const d of decls) {
-      if (d.sig.params.some((p) => p.mode !== "required") || d.sig.params.length !== first.params.length) return null;
+      if (d.sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable")) || d.sig.params.length !== first.params.length) return null;
       if (!typeEquals(d.sig.ret, first.ret) || d.sig.params.some((p, i) => !typeEquals(p.type, first.params[i]!.type))) return null;
     }
     if (!(expr.expression.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(expr.expression))) return null;
