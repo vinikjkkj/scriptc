@@ -10914,8 +10914,29 @@ export class Lowerer {
     const allowed = new Set<number>();
     for (const a of siteArms) {
       const fi = this.armTag(fromId, a);
-      if (fi < 0) return null; // not a narrowing of the source union
-      allowed.add(fi);
+      if (fi >= 0) {
+        allowed.add(fi);
+        continue;
+      }
+      // A user-defined type predicate (`value is Record<string, SqlValue>`)
+      // narrows to its CANDIDATE type, which need not be an arm: tsc keeps
+      // the candidate where the declared arm (`Record<string, unknown>`) is
+      // assignable to it. The arms that can inhabit such a site arm are the
+      // record arms that WIDTH-LIFT into it (the per-entry dynCheck/ovfCapture
+      // the destination retag will perform); anything else stays trappable.
+      // Records only: that is the one family a predicate candidate is
+      // narrowed from this way, and a wrong guess would admit an arm whose
+      // payload is then lifted by a plan that does not exist (the retag
+      // itself re-checks that every allowed arm maps).
+      if (a.kind !== "record") return null; // not a narrowing of the source union
+      let any = false;
+      from.arms.forEach((arm, i) => {
+        if (arm.kind === "record" && this.widthLiftPlan(arm, a) !== null) {
+          allowed.add(i);
+          any = true;
+        }
+      });
+      if (!any) return null;
     }
     const trappable = new Set<number>();
     from.arms.forEach((_, i) => {

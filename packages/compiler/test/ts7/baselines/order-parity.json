@@ -11073,6 +11073,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7846-type-predicate-record-candidate-narrowing.ts": {
+   "order": [
+    "<repo>/tests/corpus/7846-type-predicate-record-candidate-narrowing.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
