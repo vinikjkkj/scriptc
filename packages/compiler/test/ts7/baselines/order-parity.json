@@ -11043,6 +11043,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7835-builtin-names-as-identifiers.ts": {
+   "order": [
+    "<repo>/tests/corpus/7835-builtin-names-as-identifiers.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
