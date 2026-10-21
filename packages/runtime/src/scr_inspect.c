@@ -1069,7 +1069,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       size_t ishown = 0;
       for (size_t i = 0; i < inm; i++) {
         const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
-        if (m->enumerable && m->get != NULL) ishown++;
+        if (!scr_dyn_member_hidden(m, d->v.inst.o)) ishown++;
       }
       if (ishown == 0) {
         InspBuf nb = {0};
@@ -1088,7 +1088,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       bool ithrew = false;
       for (size_t i = 0; i < inm && !ithrew; i++) {
         const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
-        if (!m->enumerable || m->get == NULL) continue;
+        if (scr_dyn_member_hidden(m, d->v.inst.o)) continue;
         ScrDyn *mv = m->get(d->v.inst.o); /* +1 */
         if (mv == NULL) { /* the read threw */
           ithrew = true;

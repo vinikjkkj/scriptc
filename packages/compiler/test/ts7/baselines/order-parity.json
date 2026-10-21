@@ -13768,12 +13768,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-class-instance.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-class-instance.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/js-constructor-function-over-the-classes-own-method.js": {
    "order": [
     "<repo>/tests/diagnostics/js-constructor-function-over-the-classes-own-method.js"
@@ -13783,6 +13777,24 @@
   "<repo>/tests/corpus/8061-a-constructor-assigned-function-shadows-an-inherited-method.cjs": {
    "order": [
     "<repo>/tests/corpus/8061-a-constructor-assigned-function-shadows-an-inherited-method.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8071-own-keys-of-functions-and-classes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8071-own-keys-of-functions-and-classes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8070-own-keys-of-class-instances-through-the-box-registry.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8070-own-keys-of-class-instances-through-the-box-registry.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-function-with-added-properties.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-function-with-added-properties.js"
    ],
    "diags": []
   }

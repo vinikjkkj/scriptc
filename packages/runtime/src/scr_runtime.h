@@ -4504,8 +4504,11 @@ typedef struct ScrDynClassMember {
    * for-in walk report, in declaration order. False for methods: a class
    * method is non-enumerable in JS, which is why `Object.keys(new Box(7))`
    * is ["v"] and not ["v","get"]. */
-  bool enumerable;
+  unsigned char enumerable; /* 0 no, 1 yes, 2 yes UNLESS the value is undefined (a field whose undefined arm means "not assigned yet") */
 } ScrDynClassMember;
+/* True when an enumerating walk must skip this member of `obj`: not
+ * enumerable, a method, or an absent-until-assigned field still undefined. */
+bool scr_dyn_member_hidden(const ScrDynClassMember *m, void *obj);
 
 typedef struct ScrBytes ScrBytes; /* full definition below (C11 repeat) */
 typedef struct ScrClosure ScrClosure; /* full definition below (C11 repeat) */

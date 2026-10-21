@@ -4112,6 +4112,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             ...fieldOrder.filter((f) => f.redeclared !== true).map((f) => ({ name: f.name, type: f.type })),
           ],
           ...(methods.size > 0 ? { methods: [...methods.keys()] } : {}),
+          ...(absentTrackedFields.size > 0 ? { absentFields: [...absentTrackedFields] } : {}),
           ...(abstractClass ? { abstract: true as const } : {}),
           ...((): { abstractMethods?: string[] } => {
             const am = [...methods.entries()].filter(([, s]) => s.abstract === true).map(([n]) => n);

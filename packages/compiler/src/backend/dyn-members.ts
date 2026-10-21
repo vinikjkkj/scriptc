@@ -49,7 +49,7 @@ export type DynMemberRow =
   /** A declared FIELD: the emitter reads the struct slot and boxes it
    * through the toDyn walker the type already has. Enumerable — this is
    * what Object.keys and JSON.stringify report. */
-  | { kind: "field"; name: string; type: IrType }
+  | { kind: "field"; name: string; type: IrType; absentWhenUndefined: boolean }
   /** A GETTER (`get:prop`): the emitter calls `fn` with the instance and
    * boxes the result. NOT enumerable, matching JS. */
   | { kind: "accessor"; name: string; fn: IrFunction }
@@ -133,7 +133,7 @@ export function dynMemberRows(
     // answer the fence exists to refuse.
     if (!canConvertToDyn(f.type, getRecord, getUnion)) continue;
     seen.add(f.name);
-    rows.push({ kind: "field", name: f.name, type: f.type });
+    rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true });
   }
 
   /** The implementation of `m` for THIS class: the nearest declarer at or

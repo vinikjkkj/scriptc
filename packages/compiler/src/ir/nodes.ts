@@ -1579,6 +1579,11 @@ export interface IrClassDef {
    * offsets agree through any static type — then this class's own fields.
    * The validator enforces the prefix property. */
   fields: { name: string; type: IrType }[];
+  /** Field names (inherited included) whose slot's undefined arm means the
+   * property does not EXIST yet (a JS field the constructor assigns only in
+   * a conditional position): enumeration through a dyn box skips them while
+   * the arm is live. */
+  absentFields?: string[];
   /** Method names DECLARED on this class (not inherited), in declaration
    * order. Every entry EXCEPT the ones listed in `abstractMethods` has a
    * module function `%<name>.<method>`; the backend derives vtable layout
