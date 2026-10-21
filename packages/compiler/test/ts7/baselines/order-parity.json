@@ -11834,6 +11834,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8407-string-plus-over-absent-operands-follows-the-javascript-rules.ts": {
+   "order": [
+    "<repo>/tests/corpus/8407-string-plus-over-absent-operands-follows-the-javascript-rules.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"
