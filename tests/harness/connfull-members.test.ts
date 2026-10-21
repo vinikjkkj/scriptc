@@ -289,4 +289,30 @@ console.log(p.escapeId("a"), p.escapeId(["a", "b"]), p.config.limit, log.join(",
 `,
     );
   }, 240_000);
+
+  test("a well-known symbol member of a mapped class can be written and read", async () => {
+    // `[Symbol.dispose](): void` is a REQUIRED member of mysql2's Connection and Pool. A literal
+    // could not spell it (computed symbol keys were refused), and `r[Symbol.dispose]()` was
+    // refused on the read side, so no program could build or call such a value.
+    await differential(
+      "symbol-key",
+      `export declare class Res {
+  name: string;
+  [Symbol.dispose](): void;
+  close(): void;
+}
+`,
+      `import type { Res } from "./declib.js";
+const events: string[] = [];
+const r: Res = {
+  name: "r1",
+  [Symbol.dispose](): void { events.push("dispose"); },
+  close(): void { events.push("close"); },
+};
+r.close();
+r[Symbol.dispose]();
+console.log(r.name, events.join(","));
+`,
+    );
+  }, 240_000);
 });

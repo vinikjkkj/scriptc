@@ -8161,7 +8161,19 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
    * checker type widened still spells one string). Symbol-typed and
    * runtime-valued keys stay out. */
   function literalComputedKey(L: Lowerer, name: ts.ComputedPropertyName): string | null {
-    return foldedStringKeyOf(L, name.expression);
+    const folded = foldedStringKeyOf(L, name.expression);
+    if (folded !== null) return folded;
+    // A WELL-KNOWN SYMBOL key (`[Symbol.dispose]`, `[Symbol.asyncDispose]`) is
+    // a compile-time-known property too: the checker late-binds it under one
+    // name (`__@dispose@<id>`), the same name the declared type's member
+    // carries (`declare class Connection { [Symbol.dispose](): void }`), so a
+    // literal spelling it meets that member's slot. Without this a required
+    // symbol-keyed member of a mapped record could not be written at all.
+    if ((L.typeOf(name.expression).flags & ts.TypeFlags.UniqueESSymbol) !== 0) {
+      const sym = L.checker.getSymbolAtLocation(name);
+      if (sym !== undefined && sym.name.startsWith("__@")) return sym.name;
+    }
+    return null;
   }
 
   /** The DISTINCT property names a computed key can spell when its checker
@@ -12919,11 +12931,18 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     if (L.mapTypeOf(L.typeOf(expr.argumentExpression))?.kind === "symbol") {
       const target = symbolFieldTarget(L, expr);
       if (target) return L.maybeNarrow(L.fieldGetExpr(target, locOf(expr), expr), expr);
-      L.unsupported(
-        "SC1090",
-        expr,
-        "symbol-keyed property access outside class fields keyed by a module-level `const k = Symbol('desc')` (static shapes have no symbol-keyed storage)",
-      );
+      // A well-known symbol (`Symbol.dispose`) the receiver's record declares as
+      // a member (a mapped `declare class` with `[Symbol.dispose](): void`) is an
+      // ordinary field read: fall through to the record read below.
+      const recvIr = L.mapTypeOf(L.typeOf(expr.expression));
+      const recvShape = recvIr?.kind === "record" ? L.shapes.get(recvIr.shapeId) : undefined;
+      if (recvShape === undefined || wellKnownSymbolFieldIn(L, expr.argumentExpression, recvShape) === null) {
+        L.unsupported(
+          "SC1090",
+          expr,
+          "symbol-keyed property access outside class fields keyed by a module-level `const k = Symbol('desc')` (static shapes have no symbol-keyed storage)",
+        );
+      }
     }
     // A never-tainted JS receiver type (neverTaintedJsType — `cmd[1]` on
     // `const cmd = ['pwd', []]`, whose binding lowered checked-dynamic)
@@ -13421,6 +13440,19 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     return { kind: "call", callee: name, args: [obj, key], type: resultT, loc };
   }
 
+  /** The field a WELL-KNOWN SYMBOL key (`r[Symbol.dispose]`) names in a record
+   * shape: the checker late-binds that member under `__@dispose@<id>` (the name
+   * a literal spelling `[Symbol.dispose]` also folds to, literalComputedKey), so
+   * the key reads the one field whose name carries that prefix. Null when the
+   * key is anything else, or the shape holds no such field (or two). */
+  function wellKnownSymbolFieldIn(L: Lowerer, keyNode: ts.Expression, shape: IrRecordShape): string | null {
+    if (!ts.isPropertyAccessExpression(keyNode) || !ts.isIdentifier(keyNode.name)) return null;
+    if (stdlibGlobalNameOf(L, keyNode.expression) !== "Symbol") return null;
+    const prefix = `__@${keyNode.name.text}@`;
+    const hits = shape.fields.filter((f) => f.name.startsWith(prefix));
+    return hits.length === 1 ? hits[0]!.name : null;
+  }
+
   export function lowerRecordKeyRead(L: Lowerer, expr: ts.ElementAccessExpression, shapeId: string, shape: IrRecordShape,): IrExpr {
     const loc = locOf(expr);
     const keyNode = expr.argumentExpression;
@@ -13432,7 +13464,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // const, a keyof-constrained type parameter bound to a literal inside
     // a generic instance) is the same static read — identifier evaluation
     // is pure, so skipping it matches JS exactly.
-    const litKey = recordKeyLiteralText(keyNode) ?? recordKeyTypeLiteralText(L, keyNode);
+    const litKey = recordKeyLiteralText(keyNode) ?? recordKeyTypeLiteralText(L, keyNode) ?? wellKnownSymbolFieldIn(L, keyNode, shape);
     // The receiver lowers FIRST (both branches below read it, and JS
     // evaluates the receiver before the key).
     const obj = L.lowerExpr(expr.expression);
