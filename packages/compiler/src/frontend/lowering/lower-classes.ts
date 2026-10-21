@@ -5039,6 +5039,61 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return { kind: "call", callee: fnName, args: [], type: acc.get.ret, loc };
   }
 
+/** The read/write halves of a COMPOUND assignment (`C.n += 1`, `C.n++`,
+   * `--C.n`) whose target is a static member reached through the class's
+   * own name: a static FIELD (the module global, read and assigned) or a
+   * static accessor PAIR (get, combine, set). Null when the receiver is
+   * not exactly a program class or names neither. Writing an inherited
+   * static through a subclass name creates an OWN property in JS, and a
+   * readonly one throws, so both keep a named fence; an accessor pair whose
+   * halves differ in type cannot run one operator over both (the fence
+   * fieldCompoundParts applies to instance accessors). */
+  export function staticCompoundTarget(L: Lowerer, access: ts.PropertyAccessExpression):
+    { type: IrType; read: IrExpr; write: (v: IrExpr) => IrStmt } | null {
+    if (access.questionDotToken !== undefined || !ts.isIdentifier(access.expression)) return null;
+    const info = exactClassOfReceiver(L, access.expression);
+    if (!info) return null;
+    const name = access.name.text;
+    const loc = locOf(access);
+    const found = findStaticOn(L, info, name);
+    if (found?.field !== undefined) {
+      const f = found.field;
+      if (found.declarer !== info) {
+        L.unsupported(
+          "SC1090",
+          access,
+          `assigning the inherited static '${name}' through a subclass name (JS creates an OWN property on the subclass — assign through '${found.declarer.def.jsName ?? found.declarer.def.name}' instead)`,
+        );
+      }
+      if (f.readonly) L.unsupported("SC1090", access, `assigning the readonly static '${name}'`);
+      return {
+        type: f.type,
+        read: { kind: "varRef", localId: f.globalId, type: f.type, loc },
+        write: (v) => ({ kind: "assign", localId: f.globalId, value: v, loc }),
+      };
+    }
+    if (found !== null) return null;
+    const acc = findStaticAccessorOn(L, info, name);
+    if (!acc?.get || !acc.set || acc.set.params.length !== 1) return null;
+    const writeT = acc.set.params[0]!.type;
+    if (!typeEquals(acc.get.ret, writeT)) {
+      L.unsupported(
+        "SC1090",
+        access,
+        `compound assignment through the static accessor pair '${name}', whose halves have different types (it reads as '${L.fmt(acc.get.ret)}' and writes as '${L.fmt(writeT)}' — read, combine and assign in separate statements)`,
+      );
+    }
+    const getName = `%${acc.declarer.def.name}.static:get:${name}`;
+    const setName = `%${acc.declarer.def.name}.static:set:${name}`;
+    L.noteEdge(getName);
+    L.noteEdge(setName);
+    return {
+      type: acc.get.ret,
+      read: { kind: "call", callee: getName, args: [], type: acc.get.ret, loc },
+      write: (v) => ({ kind: "exprStmt", expr: { kind: "call", callee: setName, args: [v], type: VOID, loc }, loc }),
+    };
+  }
+
 /** The call a static-accessor WRITE statement `C.p = v` lowers to: the
    * setter `%C.static:set:p` with the value coerced into its parameter.
    * Null when no setter exists on the chain (the caller keeps its fences). */
