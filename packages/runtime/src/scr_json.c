@@ -4189,7 +4189,18 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
       else scr_dyn_obj_set(d, "name", 4, scr_dyn_new_str(e->name));
     }
   }
+  /* An fs/uv error's own properties, in Node's order: errno, code, syscall,
+   * path, dest (the side table scr_error_set_ext fills). */
+  double ext_errno = 0;
+  const ScrStr *ext_syscall = NULL, *ext_path = NULL, *ext_dest = NULL;
+  bool has_ext = scr_error_ext_get((const ScrError *)e, &ext_errno, &ext_syscall, &ext_path, &ext_dest);
+  if (has_ext) scr_dyn_obj_set(d, "errno", 5, scr_dyn_new_num(ext_errno));
   if (e->code) scr_dyn_obj_set(d, "code", 4, scr_dyn_new_str(e->code));
+  if (has_ext) {
+    if (ext_syscall) scr_dyn_obj_set(d, "syscall", 7, scr_dyn_new_str((ScrStr *)ext_syscall));
+    if (ext_path) scr_dyn_obj_set(d, "path", 4, scr_dyn_new_str((ScrStr *)ext_path));
+    if (ext_dest) scr_dyn_obj_set(d, "dest", 4, scr_dyn_new_str((ScrStr *)ext_dest));
+  }
   /* DOMException: `code` is the WebIDL legacy NUMBER (never the errno
    * string slot), and the options form's cause crosses as itself. Both are
    * NON-ENUMERABLE in Node — `code` is a prototype getter and `cause` is
@@ -5162,6 +5173,18 @@ static int scr_loose_rec(const ScrDyn *x, const ScrDyn *y) {
 bool scr_dyn_loose_eq(const ScrDyn *a, const ScrDyn *b) {
   if (a == NULL || b == NULL) return false;
   return scr_loose_rec(a, b) == 1;
+}
+
+/* `.errno` / `.syscall` / `.path` / `.dest` of an error: the stamped value
+ * (+1) or the dyn undefined. */
+ScrDyn *scr_error_ext_dyn(ScrError *e, const ScrStr *key) {
+  double err_no = 0;
+  const ScrStr *sys = NULL, *path = NULL, *dest = NULL;
+  if (!scr_error_ext_get(e, &err_no, &sys, &path, &dest)) return scr_dyn_retain(scr_dyn_undefined());
+  const char *k = key->data;
+  if (strcmp(k, "errno") == 0) return scr_dyn_new_num(err_no);
+  const ScrStr *v = strcmp(k, "syscall") == 0 ? sys : strcmp(k, "path") == 0 ? path : strcmp(k, "dest") == 0 ? dest : NULL;
+  return v != NULL ? scr_dyn_new_str((ScrStr *)v) : scr_dyn_retain(scr_dyn_undefined());
 }
 
 ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {

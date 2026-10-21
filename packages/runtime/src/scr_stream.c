@@ -3751,6 +3751,7 @@ static ScrError *scr_fs_error(int e, const char *op, const ScrStr *path) {
   ScrError *err = scr_error_new(SCR_ERR_ERROR, m);
   scr_str_release(m);
   scr_error_set_code(err, name);
+  scr_error_set_ext(err, e, op, shown, NULL);
   return err;
 }
 

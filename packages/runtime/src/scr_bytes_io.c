@@ -51,7 +51,7 @@ ScrBytes *scr_fs_read_file_bytes(ScrStr *path) {
     int e = errno;
     fclose(f);
     free(buf);
-    scr_fs_throw(e, "read", path);
+    scr_fs_throw_nopath(e, "read"); /* a failed read(2) names no path in Node */
     return NULL;
   }
   fclose(f);

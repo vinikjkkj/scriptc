@@ -3248,7 +3248,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // (fs/exec throw sites stamp `code`), so the type maps to the %Error
   // root — `err as NodeJS.ErrnoException` from an Error-typed value is a
   // no-op cast, error-typed listener params accept it, and the `.code`
-  // read has its own lowering (errno/syscall/path stay per-member fences).
+  // read has its own lowering, as do errno/syscall/path/dest (error.ext).
   if (isStdlibInterface("ErrnoException")) return { kind: "object", className: "%Error" };
   // The fetch ambient slice (Response, RequestInit, AbortSignal): island-
   // backed ambient TYPES — the values behind them live in the embedded

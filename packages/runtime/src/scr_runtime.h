@@ -1250,6 +1250,13 @@ void scr_undef_global_read(ScrStr *name);
  * +1 or NULL when absent (the compiler's undefined arm). The _msg_code
  * thrower is scr_throw_error_msg with the code stamped on the payload. */
 void scr_error_set_code(ScrError *e, const char *code);
+void scr_fs_throw_nopath(int e, const char *op);
+void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char *path, const char *dest);
+bool scr_error_ext_get(const ScrError *e, double *err_no, const ScrStr **syscall, const ScrStr **path,
+                       const ScrStr **dest);
+struct ScrDyn *scr_error_ext_dyn(ScrError *e, const ScrStr *key);
+void scr_throw_errno_error(int err_no, const char *code, const char *message, size_t len, const char *syscall,
+                           const char *path, const char *dest);
 ScrStr *scr_error_code(ScrError *e);
 void scr_throw_error_msg_code(int kind, const char *message, size_t len, const char *code);
 /* scr_trap_fmt's catchable twin (SC9003): vsnprintf's `fmt`/varargs into a

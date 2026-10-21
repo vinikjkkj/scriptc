@@ -314,6 +314,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "error.domCode": "scr_domex_code",
   "error.domHasCause": "scr_domex_has_cause",
   "error.domCause": "scr_domex_cause",
+  "error.ext": "scr_error_ext_dyn",
   "error.domClone": "scr_domex_clone",
   "dyn.errInstanceof": "scr_dyn_err_instanceof",
   // The JS operator conversions over dyn operands. They throw on the

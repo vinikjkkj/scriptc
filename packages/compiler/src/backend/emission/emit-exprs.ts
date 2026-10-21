@@ -6905,6 +6905,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "error.domHasCause":
             // `'cause' in e` — the options form's own-property record.
             return finish(`scr_domex_has_cause(${arg(0)})`);
+          case "error.ext":
+            return finish(`scr_error_ext_dyn((ScrError *)${arg(0)}, ${arg(1)})`);
           case "error.domCause":
             // +1 cause dyn value (the dyn undefined when absent).
             return finish(`scr_domex_cause(${arg(0)})`);

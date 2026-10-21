@@ -10,6 +10,7 @@
  */
 #include "scr_runtime.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,12 +63,16 @@ void scr_error_trace(void *e, ScrTraceVisit visit, void *ctx) {
   (void)ctx;
 }
 
+static size_t scr_err_ext_count;
+static void scr_err_ext_drop(ScrError *e);
+
 static void scr_error_gcfree(void *obj) {
   ScrError *e = (ScrError *)obj;
   scr_str_release(e->name);
   scr_str_release(e->message);
   scr_str_release(e->code); /* NULL-safe: absent on most errors */
   scr_str_release(e->stack); /* NULL-safe: absent until `.stack` is read */
+  if (scr_err_ext_count) scr_err_ext_drop(e);
   scr_obj_free_note();
   scr_cyc_free(e);
 }
@@ -99,6 +104,7 @@ static void scr_error_reld(void *obj) {
     scr_str_release(e->message);
     scr_str_release(e->code); /* NULL-safe: absent on most errors */
     scr_str_release(e->stack); /* NULL-safe: absent until `.stack` is read */
+    if (scr_err_ext_count) scr_err_ext_drop(e);
     scr_obj_free_note();
     if (scr_error_traced) scr_cyc_free(e);
     else free(e);
@@ -265,6 +271,126 @@ void scr_throw_error(int kind, ScrStr *message) {
 
 void scr_throw_error_msg(int kind, const char *message, size_t len) {
   scr_throw_error(kind, scr_str_new(message, len));
+}
+
+/* ── the errno/syscall/path/dest properties (NodeJS.ErrnoException) ──────
+ * The layout prefix of ScrError is fixed by the compiler, so the four extra
+ * own properties a fs/uv error carries live in a side table keyed by the
+ * error's address (a short chained hash). Only errors a throw site stamped
+ * have an entry; the count lets every other error skip the lookup on
+ * teardown. */
+typedef struct ScrErrExt {
+  const ScrError *e;
+  double errno_val; /* libuv's NEGATIVE errno */
+  ScrStr *syscall;
+  ScrStr *path;
+  ScrStr *dest;
+  struct ScrErrExt *next;
+} ScrErrExt;
+
+#define SCR_ERR_EXT_BUCKETS 64
+static ScrErrExt *scr_err_ext_tab[SCR_ERR_EXT_BUCKETS];
+static size_t scr_err_ext_count = 0;
+
+static size_t scr_err_ext_hash(const ScrError *e) {
+  return (size_t)(((uintptr_t)e >> 4) % SCR_ERR_EXT_BUCKETS);
+}
+
+static void scr_err_ext_drop(ScrError *e) {
+  ScrErrExt **pp = &scr_err_ext_tab[scr_err_ext_hash(e)];
+  while (*pp != NULL) {
+    if ((*pp)->e == e) {
+      ScrErrExt *x = *pp;
+      *pp = x->next;
+      scr_str_release(x->syscall);
+      scr_str_release(x->path);
+      scr_str_release(x->dest);
+      free(x);
+      scr_err_ext_count--;
+      return;
+    }
+    pp = &(*pp)->next;
+  }
+}
+
+/* The number Node reports in `errno`: libuv's, which is the NEGATED C errno on
+ * POSIX hosts and a table of its own on Windows (uv-errno.h's UV__E* values,
+ * the same ones Node prints: ENOENT -4058, EBADF -4083, ...). The CRT errno
+ * numbers the runtime holds on Windows are translated by name. */
+static double scr_uv_errno(int err_no) {
+#ifdef _WIN32
+  switch (err_no) {
+  case EPERM: return -4048;
+  case ENOENT: return -4058;
+  case EINTR: return -4072;
+  case EIO: return -4070;
+  case EBADF: return -4083;
+  case EAGAIN: return -4088;
+  case ENOMEM: return -4057;
+  case EACCES: return -4092;
+  case EFAULT: return -4074;
+  case EBUSY: return -4082;
+  case EEXIST: return -4075;
+  case EXDEV: return -4037;
+  case ENODEV: return -4059;
+  case ENOTDIR: return -4052;
+  case EISDIR: return -4068;
+  case EINVAL: return -4071;
+  case ENFILE: return -4061;
+  case EMFILE: return -4066;
+  case ENOSPC: return -4055;
+  case ESPIPE: return -4041;
+  case EROFS: return -4043;
+  case EPIPE: return -4047;
+  case ENAMETOOLONG: return -4064;
+  case ENOTEMPTY: return -4051;
+  default: break;
+  }
+#endif
+  return -(double)err_no;
+}
+
+void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char *path, const char *dest) {
+  scr_err_ext_drop(e);
+  ScrErrExt *x = (ScrErrExt *)calloc(1, sizeof *x);
+  if (!x) scr_trap("scriptc: out of memory\n");
+  x->e = e;
+  x->errno_val = scr_uv_errno(err_no);
+  if (syscall) x->syscall = scr_str_new(syscall, strlen(syscall));
+  if (path) x->path = scr_str_new(path, strlen(path));
+  if (dest) x->dest = scr_str_new(dest, strlen(dest));
+  size_t h = scr_err_ext_hash(e);
+  x->next = scr_err_ext_tab[h];
+  scr_err_ext_tab[h] = x;
+  scr_err_ext_count++;
+}
+
+/* Borrowed views of the stamped properties; false when the error carries
+ * none. */
+bool scr_error_ext_get(const ScrError *e, double *err_no, const ScrStr **syscall, const ScrStr **path,
+                       const ScrStr **dest) {
+  if (scr_err_ext_count == 0) return false;
+  for (ScrErrExt *x = scr_err_ext_tab[scr_err_ext_hash(e)]; x != NULL; x = x->next) {
+    if (x->e == e) {
+      *err_no = x->errno_val;
+      *syscall = x->syscall;
+      *path = x->path;
+      *dest = x->dest;
+      return true;
+    }
+  }
+  return false;
+}
+
+/* The fs/uv throw: message, `code`, and the errno/syscall/path/dest set. */
+void scr_throw_errno_error(int err_no, const char *code, const char *message, size_t len, const char *syscall,
+                           const char *path, const char *dest) {
+  ScrStr *msg = scr_str_new(message, len);
+  ScrError *e = scr_error_new(SCR_ERR_ERROR, msg);
+  scr_str_release(msg);
+  scr_error_set_code(e, code);
+  scr_error_set_ext(e, err_no, syscall, path, dest);
+  scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_traced ? &scr_error_trace : NULL);
 }
 
 /* ── the `code` slot (NodeJS.ErrnoException's .code) ─────────────────── */

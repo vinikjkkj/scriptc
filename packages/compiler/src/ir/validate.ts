@@ -1166,6 +1166,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "error.domCode": { argTypes: [null], result: F64 },
   "error.domHasCause": { argTypes: [null], result: BOOL },
   "error.domCause": { argTypes: [null], result: DYN },
+  "error.ext": { argTypes: [null, STRING], result: DYN },
   "error.domClone": { argTypes: [null, DYN], result: VOID },
   "dyn.errInstanceof": { argTypes: [DYN, F64], result: BOOL },
   "dyn.objKeys": { argTypes: [DYN], result: DYN },

@@ -78,12 +78,18 @@ absolute path instead. Same family as the argv[0]/argv[1] story.
     packages/runtime/src/scr_runtime.h:2839
     packages/compiler/src/ir/nodes.ts:4786
 
-### 13 - errno errors carry `code`, but not `errno`/`syscall`/`path`
+### 13 - errno errors carry `code`, `errno`, `syscall`, `path`, `dest`; exotic errnos spell `E<num>`
 
-A failing syscall throws a real `Error` with Node's message text and `code`
-stamped to the errno name; `errno`, `syscall` and `path` stay unrepresented. An
-exotic errno stamps its `E<num>` spelling where Node would carry the uv name.
-The same stamping reaches `'error'` events (spawn, dgram).
+A failing fs syscall throws a real `Error` with Node's message text, `code`
+stamped to the errno name, and (MEASURED against Node v24 on Linux for the
+sync, callback and typed-catch forms) `errno` (libuv's negative number),
+`syscall`, `path` and, for the two-path calls, `dest`, in Node's own-key order
+(`errno, code, syscall, path, dest`). They live in a side table keyed by the
+error (the %Error layout prefix is fixed by the compiler), so `Object.keys`,
+`JSON.stringify` and inspect see them. What still diverges: an exotic errno
+stamps its `E<num>` spelling where Node would carry the uv name; the child,
+kill and dgram throw sites stamp `code` only; the stack-less inspect form
+stays. The same stamping reaches `'error'` events (spawn, dgram).
 
     packages/runtime/src/scr_lib.c:1761
     packages/compiler/src/ir/nodes.ts:5967
