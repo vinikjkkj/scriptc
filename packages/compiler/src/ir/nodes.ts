@@ -981,6 +981,11 @@ export function isSupportedMapValue(t: IrType): boolean {
     // references at all, so no trace, no cycles, ever.
     case "classval":
       return true;
+    // A Date (Record<string, Date>, Map<string, Date>): the regex story
+    // exactly -- a refcounted handle (scr_date_retain_v/release_v), no
+    // outward edge, so nothing to trace and no cycle to reach.
+    case "date":
+      return true;
     // A regex (Map<string, RegExp> — the per-EOL pattern table): the
     // array-element story (scr_regex retain/release adapters, no trace —
     // a regex holds no references), map form.
