@@ -11217,6 +11217,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8103-record-of-date.ts": {
+   "order": [
+    "<repo>/tests/corpus/8103-record-of-date.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/820-multi-decl.ts": {
    "order": [
     "<repo>/tests/corpus/820-multi-decl.ts"
