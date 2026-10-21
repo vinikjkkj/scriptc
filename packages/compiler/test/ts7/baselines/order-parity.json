@@ -11386,6 +11386,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8202-static-accessors.js": {
+   "order": [
+    "<repo>/tests/corpus/8202-static-accessors.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"

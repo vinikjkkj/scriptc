@@ -253,6 +253,17 @@ export interface ClassInfo {
    * member. `this`/`super` inside fence at lowering (JS binds `this` to
    * the RECEIVER class — dynamic). Absent on builtin classes. */
   staticMethods?: Map<string, { params: ParamShape[]; ret: IrType; member: ts.MethodDeclaration }>;
+  /** STATIC accessors, keyed `get:p` / `set:p` (the accessor-colon trick
+   * again: no user identifier spells it, so they never collide with a
+   * method or field of the same property name) and lowered exactly like
+   * static methods as module functions `%C.static:get:p` /
+   * `%C.static:set:p` with no `this` (a static accessor's `this` is the
+   * RECEIVER class — dynamic, so both the body fence and the through-a-
+   * value shadow rules of static methods apply verbatim). `C.p` reads call
+   * the getter, `C.p = v` statements call the setter; a class that
+   * declares only one half answers undefined / ignores the write in JS, so
+   * the missing half keeps the fence. */
+  staticAccessors?: Map<string, { params: ParamShape[]; ret: IrType; member: ts.GetAccessorDeclaration | ts.SetAccessorDeclaration }>;
   /** `static { ... }` blocks, in declaration order. They are DECLARATION-TIME
    * CODE, not shape: JS runs each block once when the class statement
    * evaluates, whether or not anything ever references the class — so their
@@ -2393,6 +2404,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
 
       const staticFields: ClassInfo["staticFields"] = [];
       const staticMethods = new Map<string, { params: ParamShape[]; ret: IrType; member: ts.MethodDeclaration }>();
+      const staticAccessors = new Map<string, { params: ParamShape[]; ret: IrType; member: ts.GetAccessorDeclaration | ts.SetAccessorDeclaration }>();
       const staticBlocks: ts.ClassStaticBlockDeclaration[] = [];
       // GENERIC methods (own type parameters), instance and static: only
       // the SYNTAX is checked here — parameter/return types mention the
@@ -2581,6 +2593,21 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             const { shapes, funcType: ft } = L.lambdaSignature(member);
             staticMethods.set(member.name.text, { params: shapes, ret: ft.ret, member });
           }
+          // STATIC accessors with bodies: module functions like static
+          // methods (staticAccessors above). Their signatures come from the
+          // same lambdaSignature the instance accessors use.
+          if (
+            (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) &&
+            ts.isIdentifier(member.name) &&
+            member.body
+          ) {
+            const { shapes, funcType: ft } = L.lambdaSignature(member);
+            staticAccessors.set(`${ts.isGetAccessorDeclaration(member) ? "get" : "set"}:${member.name.text}`, {
+              params: shapes,
+              ret: ft.ret,
+              member,
+            });
+          }
           // GENERIC static methods monomorphize like top-level generic
           // functions (`%C.static:m%n`), async ones included — a generic
           // async instance is an async module function entered through its
@@ -2616,6 +2643,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             !modifiers.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword) &&
             !staticFields.some((f) => f.name === (member.name as ts.Identifier | ts.PrivateIdentifier).text) &&
             !staticMethods.has((member.name as ts.Identifier | ts.PrivateIdentifier).text) &&
+            !(ts.isIdentifier(member.name) && (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) &&
+              staticAccessors.has(`${ts.isGetAccessorDeclaration(member) ? "get" : "set"}:${member.name.text}`)) &&
             !genericStatics.has((member.name as ts.Identifier | ts.PrivateIdentifier).text)
           ) {
             uncollectedStatics.add((member.name as ts.Identifier | ts.PrivateIdentifier).text);
@@ -4164,6 +4193,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         staticFields,
         ...(uncollectedStatics.size > 0 ? { uncollectedStatics } : {}),
         ...(staticMethods.size > 0 ? { staticMethods } : {}),
+        ...(staticAccessors.size > 0 ? { staticAccessors } : {}),
         ...(staticBlocks.length > 0 ? { staticBlocks } : {}),
         ...(symbolFields.size > 0 ? { symbolFields } : {}),
         ...(hiddenSymbolFields.size > 0 ? { hiddenSymbolFields } : {}),
@@ -4755,8 +4785,33 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       if (field) return { declarer: c, field };
       const method = c.staticMethods?.get(name);
       if (method) return { declarer: c, method };
+      // A static accessor of this name is an own property too: the walk
+      // ends here (findStaticAccessorOn answers it), never at a base's
+      // storage of the same name.
+      if (c.staticAccessors?.has(`get:${name}`) === true || c.staticAccessors?.has(`set:${name}`) === true) return null;
       // An own property this class declares but does not lower ends the
       // walk: JS would read IT, not the base's storage.
+      if (c.uncollectedStatics?.has(name) === true) return null;
+    }
+    return null;
+  }
+
+/** The nearest static ACCESSOR pair of `name` at or above `info` — the
+   * compile-time prototype-chain walk findStaticOn performs, over the
+   * accessor table. A field, method or uncollected static of the same name
+   * on the way up shadows (it is the own property JS would read). The
+   * getter/setter halves come from the declaring class alone (JS looks
+   * the pair up as ONE property: a getter-only subclass accessor hides a
+   * base setter). */
+  export function findStaticAccessorOn(L: Lowerer, info: ClassInfo | null, name: string):
+    | { declarer: ClassInfo; get: { params: ParamShape[]; ret: IrType } | undefined; set: { params: ParamShape[]; ret: IrType } | undefined }
+    | null {
+    for (let c = info; c; c = c.base) {
+      const get = c.staticAccessors?.get(`get:${name}`);
+      const set = c.staticAccessors?.get(`set:${name}`);
+      if (get || set) return { declarer: c, get, set };
+      if (c.staticFields.some((s) => s.name === name)) return null;
+      if (c.staticMethods?.has(name) === true) return null;
       if (c.uncollectedStatics?.has(name) === true) return null;
     }
     return null;
@@ -4771,6 +4826,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       (s) =>
         s.staticFields.some((f) => f.name === name) ||
         s.staticMethods?.has(name) === true ||
+        s.staticAccessors?.has(`get:${name}`) === true ||
+        s.staticAccessors?.has(`set:${name}`) === true ||
         s.genericStatics?.has(name) === true ||
         // A shadow the collection declined to lower is still a shadow:
         // the classval slot can hold that descendant, and the runtime
@@ -4941,6 +4998,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     if (found) {
       return staticMethodValue(L, found.declarer, expr.name.text, found.method, expr, loc);
     }
+    {
+      const acc = staticAccessorRead(L, info, expr, loc, false);
+      if (acc) return acc;
+    }
     // A GENERIC static method as a VALUE: the pinned-value rule verbatim
     // (lowerGenericFnValue) — a slot spelling one concrete signature names
     // an instance, an unpinned reference fences by name.
@@ -4955,6 +5016,47 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       return { kind: "strLit", value: info.def.jsName, type: STRING, loc };
     }
     return null;
+  }
+
+/** `C.p` where p is a static getter: a call of `%C.static:get:p`. Null when
+   * the class chain declares no accessor of that name, or no GETTER (a
+   * setter-only property reads undefined in JS — the use keeps the fence).
+   * Through a class VALUE the read devirtualizes only when no strict
+   * descendant redeclares the member (staticShadowBelow), like methods. */
+  function staticAccessorRead(L: Lowerer, info: ClassInfo, expr: ts.PropertyAccessExpression,
+    loc: SrcLoc, throughValue: boolean,): IrExpr | null {
+    const acc = findStaticAccessorOn(L, info, expr.name.text);
+    if (!acc?.get) return null;
+    if (throughValue && staticShadowBelow(L, info, expr.name.text)) {
+      L.unsupported(
+        "SC1090",
+        expr,
+        `reading the static accessor '${expr.name.text}' through a class value (a subclass of '${info.def.name.replace(/^%|^%m\d+\./, "")}' redeclares it, so the runtime class decides which declaration answers)`,
+      );
+    }
+    const fnName = `%${acc.declarer.def.name}.static:get:${expr.name.text}`;
+    L.noteEdge(fnName);
+    return { kind: "call", callee: fnName, args: [], type: acc.get.ret, loc };
+  }
+
+/** The call a static-accessor WRITE statement `C.p = v` lowers to: the
+   * setter `%C.static:set:p` with the value coerced into its parameter.
+   * Null when no setter exists on the chain (the caller keeps its fences). */
+  export function staticAccessorWrite(L: Lowerer, info: ClassInfo, access: ts.PropertyAccessExpression,
+    rhs: ts.Expression, loc: SrcLoc, throughValue: boolean,): IrExpr | null {
+    const acc = findStaticAccessorOn(L, info, access.name.text);
+    if (!acc?.set || acc.set.params.length !== 1) return null;
+    if (throughValue && staticShadowBelow(L, info, access.name.text)) {
+      L.unsupported(
+        "SC1090",
+        access,
+        `assigning the static accessor '${access.name.text}' through a class value (a subclass of '${info.def.name.replace(/^%|^%m\d+\./, "")}' redeclares it, so the runtime class decides which declaration answers)`,
+      );
+    }
+    const fnName = `%${acc.declarer.def.name}.static:set:${access.name.text}`;
+    L.noteEdge(fnName);
+    const value = L.lowerExprExpecting(rhs, acc.set.params[0]!.type);
+    return { kind: "call", callee: fnName, args: [value], type: VOID, loc };
   }
 
 /** NamedEvaluation's answer for a class expression's `.name`: its own
@@ -5652,10 +5754,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     if (!info) return null;
     const found = findStaticOn(L, info, member);
     if (!found) {
+      const acc = staticAccessorRead(L, info, expr, loc, true);
+      if (acc) return acc;
       L.unsupported(
         "SC1090",
         expr,
-        `the static member '${member}' of class '${info.def.name.replace(/^%|^%m\d+\./, "")}' (static accessors and initializer-less static fields have no lowering, and Function members like .call/.bind/.prototype have no value form)`,
+        `the static member '${member}' of class '${info.def.name.replace(/^%|^%m\d+\./, "")}' (initializer-less static fields and one-sided static accessors have no lowering, and Function members like .call/.bind/.prototype have no value form)`,
       );
     }
     // #private statics read through a class VALUE exactly when the value
@@ -6206,7 +6310,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         poisoned.add(mName);
       }
     }
-    for (const name of info.staticMethods?.keys() ?? []) {
+    for (const name of [...(info.staticMethods?.keys() ?? []), ...(info.staticAccessors?.keys() ?? [])]) {
       if (!L.wantBody(`%${className}.static:${name}`)) continue;
       const fn = lowerStaticMethod(L, info, name);
       if (fn) out.push(fn);
@@ -6758,7 +6862,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
    * method's `this`) and this-binding function forms opaque — the static-
    * block rule verbatim. */
   export function lowerStaticMethod(L: Lowerer, info: ClassInfo, name: string): IrFunction | null {
-    const entry = info.staticMethods?.get(name);
+    const entry = info.staticMethods?.get(name) ?? info.staticAccessors?.get(name);
     if (!entry?.member.body) return null;
     const checkThis = (n: ts.Node): void => {
       if (
