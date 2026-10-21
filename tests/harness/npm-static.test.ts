@@ -59,6 +59,8 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(join(pilotRoot, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
     // the bundler-emitted-CJS mini packages (cases 2465-2469, 2556-2557)
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
+    // the ws-address mini package (case 8210; its own tsconfig dir)
+    ...globSync(join(fixturesRoot, "npm-url/**/*.{js,json,d.ts,ts}")).sort(),
     // the price-list mini packages (cases 4031-4032, 4061-4064) and the
     // computed-key receiver pair (4111-4112)
     ...globSync(
@@ -1920,6 +1922,40 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(rows.get("r9a")).toBe("number122");
     expect(rows.get("r9b")).toBe("object122");
 
+    expect(native).toBe(node);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 8210: the address handling of ws's WebSocket client ----------------
+   *
+   * A plain-JS package taking `string | URL`: the URL class comes from
+   * require('url') (and its namespace spelling), an initializer-less `let`
+   * is assigned from both arms of an `instanceof URL` test, and the
+   * protocol setter rewrites http(s) to ws(s). `--npm-static` compiles the
+   * body once per argument-type instance, so the string instance owns a
+   * DEAD `address instanceof URL` arm and the URL instance a dead
+   * `new URL(address)` arm. Each repair this needs is its own commit; the
+   * program passes only with all of them, and a fence at any of those
+   * sites reads as a nonzero runtimeFences below.
+   *
+   * ZERO-DENOMINATOR GUARD: the fence count is asserted to be exactly 0 AND
+   * the native stdout is asserted equal to a non-empty Node answer, so a
+   * run that compiled nothing cannot pass. */
+  test("8210: string | URL address forms compile statically and match Node", async () => {
+    const entry = join(fixturesRoot, "npm-url/cases/8210-url-address-forms/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["urladdr"] });
+    expect(coverage.npmStatic).toEqual([{ package: "urladdr", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["urladdr"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    expect(node.split("\n").filter((l) => l !== "").length).toBe(6);
     expect(native).toBe(node);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
