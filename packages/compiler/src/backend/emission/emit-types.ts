@@ -984,7 +984,7 @@ export function mapKeyAccess(key: IrType): "f64" | "str" | "ref" {
   // Handle-kind SET elements (identity hashing — isSupportedSetElem);
   // Map keys proper stay f64/string.
   if (key.kind === "object" || key.kind === "record") return "ref";
-  if (key.kind === "netServer" || key.kind === "symbol") return "ref";
+  if (key.kind === "netServer" || key.kind === "symbol" || key.kind === "date") return "ref";
   // Promises hash by reference identity like the rest, and the set that
   // holds them is traced on the key side so the pending-task cycle is
   // collectable (scr_set_new_ref_traced).

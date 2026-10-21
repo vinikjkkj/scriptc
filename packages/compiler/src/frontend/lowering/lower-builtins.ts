@@ -41,7 +41,7 @@ let hkdfSyncCalls = 0;
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { deferredCallThunk, timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
-import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 
 
@@ -5739,6 +5739,68 @@ let digestInputValueDispatches = 0;
     return name;
   }
 
+  /** `d.toJSON()`: the ISO string, or null for an invalid Date (tsc types it `string`; the value is the union
+   * `string | null`, the shape Node returns). A lifted helper so the receiver evaluates once. */
+  function lowerDateToJson(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr {
+    // Where a null can ride (a printed or serialised argument, a comparison with null, a `??`, a declaration that
+    // names a null arm, a template span) the value is the union Node returns. In a position that needs a string
+    // (a receiver, a typed argument or field) the call answers the ISO string and an invalid Date throws the
+    // catchable RangeError scr_date_to_iso raises: tsc types the call `string`, so there is no null slot there.
+    let par: ts.Node = call.parent;
+    while (ts.isParenthesizedExpression(par) || ts.isNonNullExpression(par)) par = par.parent;
+    const nullRides =
+      (ts.isCallExpression(par) && par.arguments.includes(call) &&
+        ts.isPropertyAccessExpression(par.expression) &&
+        ((ts.isIdentifier(par.expression.expression) && par.expression.expression.text === "console") ||
+          (ts.isIdentifier(par.expression.expression) && par.expression.expression.text === "JSON"))) ||
+      (ts.isBinaryExpression(par) &&
+        [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken,
+          ts.SyntaxKind.ExclamationEqualsToken, ts.SyntaxKind.QuestionQuestionToken].includes(par.operatorToken.kind)) ||
+      ts.isTemplateSpan(par) ||
+      (ts.isVariableDeclaration(par) && par.type !== undefined &&
+        (() => {
+          const t = L.mapTypeOf(L.typeOf(par.name));
+          if (t?.kind !== "union") return false;
+          return (L.unions.get(t.unionId)?.arms ?? []).some((a) => a.kind === "nullT");
+        })());
+    if (!nullRides) {
+      const dd = L.lowerExpr(access.expression);
+      const msv: IrExpr = { kind: "libCall", fn: "date.value", args: [dd], type: F64, loc };
+      return { kind: "libCall", fn: "date.toISOString", args: [msv], type: STRING, loc };
+    }
+    const unionId = L.unions.intern([STRING, NULL_T]);
+    const retT: IrType = { kind: "union", unionId };
+    const key = "dateToJSON";
+    let name = L.arrHofHelpers.get(key);
+    if (!name) {
+      name = `%dateToJSON.${L.arrHofHelpers.size}`;
+      L.arrHofHelpers.set(key, name);
+      const d: IrExpr = { kind: "varRef", localId: "d.0", type: DATE_T, loc };
+      const ms: IrExpr = { kind: "libCall", fn: "date.value", args: [d], type: F64, loc };
+      const iso: IrExpr = { kind: "libCall", fn: "date.toISOString", args: [ms], type: STRING, loc };
+      L.liftedFns.push({
+        name,
+        params: [{ localId: "d.0", name: "d", type: DATE_T }],
+        returnType: retT,
+        locals: [{ id: "d.0", name: "d", type: DATE_T, mutable: false }],
+        body: [{
+          kind: "return",
+          value: {
+            kind: "ternary",
+            cond: { kind: "bin", op: "===", left: ms, right: ms, type: BOOL, loc },
+            then: { kind: "unionWrap", unionId, tag: 0, value: iso, type: retT, loc },
+            else_: { kind: "unionWrap", unionId, tag: 1, value: { kind: "unitLit", unit: "null", type: NULL_T, loc }, type: retT, loc },
+            type: retT,
+            loc,
+          },
+          loc,
+        }],
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [L.lowerExpr(access.expression)], type: retT, loc };
+  }
+
   /** `d.toLocaleString(locales, options)` and the Date / Time twins. */
   function lowerDateLocaleCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression, name: string, kind: number): IrExpr {
     const loc = locOf(call);
@@ -5845,6 +5907,7 @@ let digestInputValueDispatches = 0;
     const isValue = name === "getTime" || name === "valueOf";
     const isIso = name === "toISOString";
     const isTzOffset = name === "getTimezoneOffset";
+    if (name === "toJSON" && call.arguments.length === 0) return lowerDateToJson(L, call, access, locOf(call));
     if (!isValue && !isIso && !isTzOffset && getter === undefined && localGetter === undefined) return null;
     if (call.arguments.length !== 0) {
       L.noLowering(`Date.${name} with ${call.arguments.length} arguments`, call);
