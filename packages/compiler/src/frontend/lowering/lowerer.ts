@@ -10492,7 +10492,17 @@ export class Lowerer {
       toT.ret.kind === "record" && fromT.ret.kind === "object"
         ? this.ctorWitnessProjection(fromT.ret.className, toT.ret, loc)
         : null;
-    if (toT.ret.kind !== "void" && !this.coercibleValue(fromT.ret, toT.ret) && classRetProj === null) {
+    // The RESULT's two conversions coercibleValue never learned, both of
+    // which coerceToExpected applies to the call below: the WIDTH family (a
+    // record result copied into the slot's narrower shape, probed the way
+    // the parameter side probes it) and the derived-into-base class upcast.
+    const resultBridges =
+      this.widthLiftPlan(fromT.ret, toT.ret) !== null ||
+      (fromT.ret.kind === "object" &&
+        toT.ret.kind === "object" &&
+        fromT.ret.className !== toT.ret.className &&
+        this.isSubclassOf(fromT.ret.className, toT.ret.className));
+    if (toT.ret.kind !== "void" && !this.coercibleValue(fromT.ret, toT.ret) && classRetProj === null && !resultBridges) {
       if (fromT.ret.kind !== "void") {
         // A RESULT that cannot convert — the strandParams stance, result
         // side (the production/development function-choice ternary: the

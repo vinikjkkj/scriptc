@@ -10989,6 +10989,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7803-a-function-result-widened-into-a-narrower-result-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7803-a-function-result-widened-into-a-narrower-result-slot.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
