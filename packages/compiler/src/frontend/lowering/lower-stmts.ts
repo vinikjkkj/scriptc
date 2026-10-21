@@ -5595,7 +5595,13 @@ function switchDiscAtBridgedLocal(L: Lowerer, stmt: ts.SwitchStatement, disc: Ir
     }
     const dk = disc.type.kind;
     if (dk === "dyn") {
-      L.unsupported("SC1100", stmt.expression, "switch statements on 'unknown' values");
+      // Pin the discriminant to a hidden local when it is not a plain read:
+      // the chain re-reads it at every test.
+      if (pureReemittable(disc)) return lowerUnionSwitch(L, stmt, disc);
+      const tmp = L.declareHiddenLocal("%switchDisc", DYN);
+      const bind: IrStmt = { kind: "varDecl", localId: tmp.id, init: disc, loc: disc.loc };
+      const chain = lowerUnionSwitch(L, stmt, { kind: "varRef", localId: tmp.id, type: DYN, loc: disc.loc });
+      return { kind: "block", body: [bind, chain], loc: locOf(stmt) };
     }
     if (dk === "union") return lowerUnionSwitch(L, stmt, disc);
     if (dk !== "f64" && dk !== "string" && dk !== "bool") {
@@ -5704,9 +5710,15 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
 
   export function lowerUnionSwitch(L: Lowerer, stmt: ts.SwitchStatement, disc: IrExpr): IrStmt {
     const loc = locOf(stmt);
-    if (disc.type.kind !== "union") throw new Error("lowerer bug: non-union disc");
-    const unionType = disc.type;
-    if (!pureReemittable(disc) || !L.eqComparableUnion(unionType.unionId)) {
+    if (disc.type.kind !== "union" && disc.type.kind !== "dyn") throw new Error("lowerer bug: non-union disc");
+    // A CHECKED-DYNAMIC discriminant (`switch (packet.type)` over an
+    // `unknown` / implicit-any value) takes the same chain, its tests the
+    // runtime's strict equality against a scalar literal (dynScalarEq):
+    // a value of any other kind simply matches no case and reaches default,
+    // as in JS.
+    const isDyn = disc.type.kind === "dyn";
+    const unionType = disc.type as IrType & { kind: "union" };
+    if (!pureReemittable(disc) || (!isDyn && !L.eqComparableUnion(unionType.unionId))) {
       L.unsupported(
         "SC1090",
         stmt.expression,
@@ -5761,11 +5773,22 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
           // lacks it (`case null:` on a `number | undefined` — legal TS,
           // never matches; coercing the literal into the union would hit
           // the stranded-arm trap and throw where JS just skips the case).
+          if (isDyn) {
+            const tl = locOf(clause.expression);
+            if (test.kind === "unitLit") {
+              pendingTests.push({ kind: "dynTest", test: test.unit, value: disc, type: BOOL, loc: tl });
+            } else if (test.type.kind === "f64" || test.type.kind === "string" || test.type.kind === "bool" || test.type.kind === "dyn") {
+              pendingTests.push({ kind: "dynScalarEq", left: disc, right: test, type: BOOL, loc: tl });
+            } else {
+              L.unsupported("SC1090", clause.expression, `case tests of '${L.fmt(test.type)}' in a switch on an 'unknown' value`);
+            }
+          }
           const unitTest =
+            isDyn ? null :
             test.kind === "unitLit"
               ? L.lowerUnitComparison(disc, test, false, locOf(clause.expression))
               : null;
-          pendingTests.push(
+          if (!isDyn) pendingTests.push(
             unitTest ??
             // §8.4's non-allocating form; the allocating one below is
             // what `SCRIPTC_CASEEQ_OFF=1` restores.

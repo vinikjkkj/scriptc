@@ -11453,6 +11453,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8214-switch-on-unknown.js": {
+   "order": [
+    "<repo>/tests/corpus/8214-switch-on-unknown.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
