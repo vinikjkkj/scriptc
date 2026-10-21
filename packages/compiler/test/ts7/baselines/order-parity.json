@@ -11410,6 +11410,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8206-evolving-let-keeps-its-type.js": {
+   "order": [
+    "<repo>/tests/corpus/8206-evolving-let-keeps-its-type.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
