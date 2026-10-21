@@ -13434,6 +13434,11 @@ export class Lowerer {
    * `this` while such a method's body lowers under C. */
   readonly lateMethodAssigns = new Set<ts.Node>();
   readonly lateMethodThis = new Map<ts.Node, ts.Type>();
+  /** An accessor family's loop variable bound to the literal one unrolled
+   * body is lowered for (keyed `<Class>.<method name>`), and the bindings
+   * active while such a body lowers. */
+  readonly lateMethodConst = new Map<string, { sym: ts.Symbol; value: string }>();
+  readonly constIdents = new Map<ts.Symbol, string>();
   activeThisType: ts.Type | null = null;
   /** Class expressions whose collection is IN FLIGHT — the reentrancy
    * guard for heritage-demanded collection (lowerClassExpressionInfo). */
