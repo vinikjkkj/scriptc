@@ -2782,6 +2782,16 @@ size_t scr_dyn_objinst_member_count(const ScrDyn *d) {
   return scr_dyn_objinst_class_of(d)->nmembers;
 }
 
+bool scr_dyn_member_hidden(const ScrDynClassMember *m, void *obj) {
+  if (!m->enumerable || m->get == NULL) return true;
+  if (m->enumerable != 2) return false;
+  ScrDyn *v = m->get(obj); /* a plain slot read: no side effects */
+  if (v == NULL) return false; /* threw: the caller's own read reports it */
+  bool absent = v->kind == SCR_DYN_UNDEF;
+  scr_dyn_release(v);
+  return absent;
+}
+
 const ScrDynClassMember *scr_dyn_objinst_member_at(const ScrDyn *d, size_t i) {
   const ScrDynClass *c = scr_dyn_objinst_class_of(d);
   return i < c->nmembers ? &c->members[i] : NULL;
@@ -9142,7 +9152,7 @@ static ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     const size_t nm = scr_dyn_objinst_member_count(v);
     for (size_t i = 0; i < nm; i++) {
       const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
-      if (!m->enumerable || m->get == NULL) continue;
+      if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
       if (mode == SCR_OBJWALK_KEYS) {
         /* KEYS runs nothing -- the OBJ arm's rule: listing a name is not
          * a [[Get]], and reading the field here would be a side effect JS

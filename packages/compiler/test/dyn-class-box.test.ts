@@ -128,9 +128,11 @@ function cMemberTables(c: string): Map<string, string> {
     /(?:static )?const ScrDynClassMember (sc_dclt_\d+)\[\] = \{ \/\* members of [^*]*\*\/\n([\s\S]*?)\n\};/g;
   for (const m of c.matchAll(re)) {
     const rows: { name: string; get: boolean; enumerable: boolean }[] = [];
-    const ent = /\{ "([^"]*)", \d+, (NULL|&\w+), (NULL|&\w+), (true|false) \}/g;
+    // The flag is a u8: true/false for the rows with one answer, 1 or 2 (yes,
+    // or yes unless the value is still undefined) for a declared field.
+    const ent = /\{ "([^"]*)", \d+, (NULL|&\w+), (NULL|&\w+), (true|false|[012]) \}/g;
     for (const e of m[2]!.matchAll(ent)) {
-      rows.push({ name: e[1]!, get: e[2] !== "NULL", enumerable: e[4] === "true" });
+      rows.push({ name: e[1]!, get: e[2] !== "NULL", enumerable: e[4] !== "false" && e[4] !== "0" });
     }
     out.set(m[1]!, memberSummary(rows));
   }
@@ -145,11 +147,11 @@ function llMemberTables(ll: string, cstrs: Map<string, string>): Map<string, str
   for (const m of ll.matchAll(re)) {
     const rows: { name: string; get: boolean; enumerable: boolean }[] = [];
     const ent =
-      /%ScrDynClassMember \{ ptr @(sc_cs_\d+), i64 \d+, ptr (null|@[\w.]+), ptr (null|@[\w.]+), i8 ([01]) \}/g;
+      /%ScrDynClassMember \{ ptr @(sc_cs_\d+), i64 \d+, ptr (null|@[\w.]+), ptr (null|@[\w.]+), i8 ([012]) \}/g;
     for (const e of m[2]!.matchAll(ent)) {
       const nm = cstrs.get(e[1]!);
       if (nm === undefined) throw new Error(`llvm member row names an undefined cstr ${e[1]}`);
-      rows.push({ name: nm, get: e[2] !== "null", enumerable: e[4] === "1" });
+      rows.push({ name: nm, get: e[2] !== "null", enumerable: e[4] !== "0" });
     }
     out.set(m[1]!, memberSummary(rows));
   }

@@ -10,7 +10,7 @@ import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
-import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
 import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
@@ -10751,6 +10751,81 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     }
   }
 
+  /** The own property names of a function value, known at compile time: the
+   * argument names a function declaration, a const initialized by a
+   * function/arrow expression, or a class declaration, and nothing ever adds
+   * a property to it (no member write, no defineProperty/assign through it,
+   * no escape beyond calls and these two walks). Order is the engine's:
+   * length, name, then arguments and caller for sloppy plain functions, then
+   * prototype (plain functions, generators, classes), then a class's static
+   * members in definition order. Null when it cannot be proven. */
+  function functionOwnKeysOf(L: Lowerer, arg: ts.Expression): string[] | null {
+    let e = arg;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isIdentifier(e)) return null;
+    const sym = L.resolveValueSymbol(e);
+    if (!sym) return null;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length !== 1) return null;
+    const d = decls[0]!;
+    let fn: ts.FunctionLikeDeclaration | null = null;
+    let cls: ts.ClassDeclaration | null = null;
+    if (ts.isFunctionDeclaration(d)) fn = d;
+    else if (ts.isClassDeclaration(d)) cls = d;
+    else if (
+      ts.isVariableDeclaration(d) && ts.isIdentifier(d.name) && d.initializer !== undefined &&
+      (ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const) !== 0
+    ) {
+      let init: ts.Expression = d.initializer;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      if (ts.isFunctionExpression(init) || ts.isArrowFunction(init)) fn = init;
+      else if (ts.isClassExpression(init)) return null;
+    }
+    if (fn === null && cls === null) return null;
+    // Every reference must be a plain call, or an argument of one of the two walks.
+    const sf = d.getSourceFile();
+    let escapes = false;
+    ts.walkPreorder(sf, (n) => {
+      if (escapes) return "stop";
+      if (!ts.isIdentifier(n) || n.text !== e.text || n === (d as { name?: ts.Node }).name) return undefined;
+      if (L.resolveValueSymbol(n) !== sym) return undefined;
+      const p = n.parent;
+      if (ts.isCallExpression(p) && p.expression === n) return undefined;
+      if (ts.isNewExpression(p) && p.expression === n && cls !== null) return undefined;
+      if (
+        ts.isCallExpression(p) && p.arguments[0] === n && ts.isPropertyAccessExpression(p.expression) &&
+        (p.expression.name.text === "ownKeys" || p.expression.name.text === "getOwnPropertyNames") &&
+        ts.isIdentifier(p.expression.expression) && (p.expression.expression.text === "Reflect" || p.expression.expression.text === "Object")
+      ) return undefined;
+      escapes = true;
+      return "stop";
+    });
+    if (escapes) return null;
+    if (cls !== null) {
+      const out = ["length", "name", "prototype"];
+      for (const m of cls.members) {
+        const isStatic = (m as { modifiers?: readonly ts.Node[] }).modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) === true;
+        if (!isStatic) continue;
+        if (ts.isClassStaticBlockDeclaration(m)) continue;
+        const nm = (m as unknown as { name?: ts.Node }).name;
+        if (nm === undefined || !(ts.isIdentifier(nm) || ts.isStringLiteral(nm))) return null;
+        if (ts.isGetAccessorDeclaration(m) || ts.isSetAccessorDeclaration(m)) {
+          if (!out.includes(nm.text)) out.push(nm.text);
+          continue;
+        }
+        if (!out.includes(nm.text)) out.push(nm.text);
+      }
+      return out;
+    }
+    const f = fn!;
+    if (ts.isArrowFunction(f)) return ["length", "name"];
+    const isAsync = f.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) === true;
+    if (isAsync && f.asteriskToken === undefined) return ["length", "name"];
+    if (isAsync) return null; // async generators: prototype only, unprobed
+    if (f.asteriskToken !== undefined) return ["length", "name", "prototype"];
+    return inStrictCode(f) ? ["length", "name", "prototype"] : ["length", "name", "arguments", "caller", "prototype"];
+  }
+
   function lowerObjectStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
@@ -11416,6 +11491,20 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         };
       }
     }
+    {
+      const names = member === "getOwnPropertyNames" && call.arguments.length === 1 ? functionOwnKeysOf(L, argNode) : null;
+      if (names !== null) {
+        const nloc = locOf(call);
+        const lit: IrExpr = {
+          kind: "arrayLit",
+          elems: names.map((k): IrExpr => ({ kind: "strLit", value: k, type: STRING, loc: nloc })),
+          type: arrayOf(STRING),
+          loc: nloc,
+        };
+        // The function value itself still evaluates nothing (an identifier read).
+        return lit;
+      }
+    }
     // A CHECKED-DYNAMIC argument — the checker may still spell a record
     // type (the JS file-scope object-literal identity story stores the
     // dyn object), so the LOWERED value's kind is the dispatch: the
@@ -11431,7 +11520,18 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // what the dyn tree's walk answers over the array copied in.
       const isArr =
         objMember === "keys" && probed?.type.kind === "array" && L.dynConvertible(probed.type);
-      if (isDyn || isUnit || isArr) {
+      // A CLASS INSTANCE: its own enumerable keys are the fields of the class
+      // the instance really is (a base-typed value may hold a subclass), which
+      // the dyn box's member table answers through the preorder registry.
+      // A program with a per-instance property table (a run-time-keyed
+      // defineProperty on an instance) keeps the refusal: the box's member
+      // walk does not read that table, so the answer would silently omit
+      // its keys (tests/harness/class-runtime-property-table.test.ts).
+      const isInst =
+        objMember === "keys" && probed?.type.kind === "object" && L.classes.has(probed.type.className) &&
+        canBoxClassIntoDyn(probed.type.className) && L.dynConvertible(probed.type) &&
+        ![...L.classes.values()].some((c) => c.hasPropsTable === true);
+      if (isDyn || isUnit || isArr || isInst) {
         const fn = objMember === "keys" ? "dyn.objKeys" : objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
         let v = L.lowerExpr(argNode);
         if (v.type.kind !== "dyn") v = { kind: "dynFrom", value: v, type: DYN, loc: locOf(call) };

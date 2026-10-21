@@ -4772,7 +4772,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 1 }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.absentWhenUndefined ? 2 : 1} }`);
         continue;
       }
 
