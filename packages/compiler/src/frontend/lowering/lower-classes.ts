@@ -8170,10 +8170,21 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             symbol,
           );
         }
+        // new Date(y, m[, d[, h[, mi[, s[, ms]]]]]): LOCAL wall time. The
+        // inverse of LocalTime is scr_date_local_to_utc (per-instant offsets
+        // from the same source as the getters, the spec's gap/overlap rule).
+        if (dateArgs.length <= 7 && !dateArgs.some(ts.isSpreadElement)) {
+          const parts: IrExpr[] = dateArgs.map((a) => L.lowerExprExpecting(a, F64));
+          const defaults = [0, 0, 1, 0, 0, 0, 0];
+          while (parts.length < 7) {
+            parts.push({ kind: "numLit", value: defaults[parts.length]!, type: F64, loc });
+          }
+          return { kind: "libCall", fn: "date.newParts", args: parts, type: DATE_T, loc };
+        }
         L.noLowering(
-          "new Date with year/month/day arguments",
+          `new Date with ${dateArgs.length} arguments`,
           expr,
-          "the field constructor reads its arguments as LOCAL wall time, and the run host's zone HISTORY is not something this compiler can see: on Windows the CRT applies the zone's current rule to every instant, which disagreed with Node on 259 of 1200 sampled instants. new Date(Date.UTC(y, m, d, ...)) is the exact form and it compiles",
+          "the field constructor takes at most seven numbers (year, month, day, hours, minutes, seconds, ms); a spread argument has no lowering",
           symbol,
         );
       }

@@ -6047,6 +6047,13 @@ export type IrLibFn =
    * carries one stdlib.date.* row per spelling above. */
   | "date.new"
   | "date.newStr"
+  /** new Date(y, mo, d, h, mi, s, ms): LOCAL wall time (2-digit-year rule,
+   * overflow normalisation, UTC(t) with the spec's gap/overlap rule). Reads
+   * the host zone, so it shares the local getters' machine-state story. */
+  | "date.newParts"
+  /** Every Date setter: (receiver, opcode, argc, a0..a3) -> the new time
+   * value; MUTATES the handle. The opcode table lives in scr_date.c. */
+  | "date.set"
   | "date.value"
   | "date.getUTCFullYear"
   | "date.getUTCMonth"

@@ -420,6 +420,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "date.getHours": "scr_date_get_hours",
   "date.new": "scr_date_new",
   "date.newStr": "scr_date_new_str",
+  "date.newParts": "scr_date_new_parts",
+  "date.set": "scr_date_set",
   "date.value": "scr_date_value",
   "date.getUTCFullYear": "scr_date_utc_full_year",
   "date.getUTCMonth": "scr_date_utc_month",

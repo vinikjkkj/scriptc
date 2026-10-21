@@ -1485,6 +1485,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "date.utc": { argTypes: [F64, F64, F64, F64, F64, F64, F64], result: F64 },
   "date.getHours": { argTypes: [F64], result: F64 },
   "date.new": { argTypes: [F64], result: DATE_T },
+  "date.newParts": { argTypes: [F64, F64, F64, F64, F64, F64, F64], result: DATE_T },
+  "date.set": { argTypes: [DATE_T, F64, F64, F64, F64, F64, F64], result: F64 },
   "date.newStr": { argTypes: [STRING], result: DATE_T },
   "date.value": { argTypes: [DATE_T], result: F64 },
   "date.getUTCFullYear": { argTypes: [F64], result: F64 },

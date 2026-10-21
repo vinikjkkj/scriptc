@@ -7893,6 +7893,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "date.new":
             // A Date VALUE: +1 handle over the TimeClipped milliseconds.
             return finish(`scr_date_new(${arg(0)})`);
+          case "date.newParts":
+            // new Date(y, mo, d, h, mi, s, ms): +1 handle, local wall time.
+            return finish(
+              `scr_date_new_parts(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)})`,
+            );
+          case "date.set":
+            // A setter: mutates the borrowed receiver, answers the new time value.
+            return finish(
+              `scr_date_set(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)})`,
+            );
           case "date.newStr":
             // Same, from the BOUNDED date-string grammar date.parseGetTime
             // already runs -- an unparseable string is an invalid Date.
