@@ -1215,6 +1215,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
    * diagnostic points at `blame` (the name for top-level declarations, the
    * whole node for lambda-likes — preserving each caller's historical loc). */
   export function declaredReturnType(L: Lowerer, decl: ts.SignatureDeclaration, blame: ts.Node): IrType {
+    if (L.dynReturnFnNodes.has(decl)) return DYN;
     const sig = L.checker.getSignatureFromDeclaration(decl);
     if (!sig) L.unsupported("SC1090", decl, "this function form");
     const retTsType = L.checker.getReturnTypeOfSignature(sig);
@@ -7694,6 +7695,22 @@ const inliningPredicates = new Set<ts.Symbol>();
     const isAsyncLike =
       !ts.isMethodDeclaration(node) &&
       node.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) === true;
+    // A method of a dyn-built `this` literal that declares no return type:
+    // the checker's inferred return reads the literal's own (possibly
+    // evolving-array) member types, which the dyn object does not keep
+    // (`items: []` makes `return this.items[0]` infer `undefined`), so the
+    // value returns as the checked-dynamic value it is.
+    if (
+      L.dynThisInLiterals > 0 && node.type === undefined && !isAsyncLike && !node.asteriskToken &&
+      (ts.isMethodDeclaration(node) ||
+        (ts.isFunctionExpression(node) && ts.isPropertyAssignment(node.parent)))
+    ) {
+      const lit = node.parent;
+      if (ts.isObjectLiteralExpression(lit) || (ts.isPropertyAssignment(lit) && ts.isObjectLiteralExpression(lit.parent))) {
+        const owner = ts.isObjectLiteralExpression(lit) ? lit : (lit.parent as ts.ObjectLiteralExpression);
+        if (L.dynThisLiterals.has(owner)) ret = DYN;
+      }
+    }
     const innerRet = isAsyncLike && ret.kind === "promise" ? ret.inner : ret;
     // Union-inferred returns adopt too (a mixed-return body inferring a
     // SUB-union of the slot's union — adopting is a no-op when the two

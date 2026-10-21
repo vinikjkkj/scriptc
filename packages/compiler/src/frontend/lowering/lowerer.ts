@@ -1764,6 +1764,12 @@ export class Lowerer {
    * construction — the runtime reads it key by key. Marked by the
    * lowering that knows the position, never inferred. */
   readonly dynObjectLiterals = new Set<ts.ObjectLiteralExpression>();
+  /** The subset of dynObjectLiterals whose methods read their own `this`
+   * (`const o = { n: 1, inc() { this.n++ } }`): built as a dyn object, with
+   * `this` resolving to the ambient receiver a dyn method call binds. */
+  readonly dynThisLiterals = new Set<ts.ObjectLiteralExpression>();
+  /** Functions that return such a literal: their ABI return is dyn. */
+  readonly dynReturnFnNodes = new Set<ts.Node>();
   /** Object literals whose CONTEXTUAL TYPE the lowering supplies, because
    * the checker's own answer at that position is not the slot's.
    *
