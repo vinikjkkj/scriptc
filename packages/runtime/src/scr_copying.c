@@ -304,10 +304,23 @@ ScrStr *scr_dyn_object_to_string(const ScrDyn *d) {
     break;
   case SCR_DYN_OBJ:
     if (scr_dyn_is_error_encoding(d)) { tag = "Error"; break; }
-    for (size_t i = 0; i < d->v.obj.len; i++) {
-      const ScrDynEntry *e = &d->v.obj.entries[i];
-      if (e->key_len > 15 && memcmp(e->key, "__@toStringTag@", 15) == 0 && e->value->kind == SCR_DYN_STR) {
-        const ScrStr *t = e->value->v.str;
+    for (int pass = 0; pass < 2; pass++) {
+     /* pass 1 reads the HIDDEN table: a symbol-keyed member of a converted record is non-enumerable
+      * (scr_dyn_obj_set_symkey), so the tag lives there as a [value, ...] descriptor. */
+     const ScrDyn *src = d;
+     if (pass == 1) {
+       if (scr_dyn_ext(d)->hidden == NULL) break;
+       src = scr_dyn_ext(d)->hidden;
+     }
+     for (size_t i = 0; i < src->v.obj.len; i++) {
+      const ScrDynEntry *e = &src->v.obj.entries[i];
+      const ScrDyn *val = e->value;
+      if (pass == 1) {
+        if (val->kind != SCR_DYN_ARR || val->v.arr.len < 2) continue;
+        val = val->v.arr.items[1];
+      }
+      if (e->key_len > 15 && memcmp(e->key, "__@toStringTag@", 15) == 0 && val->kind == SCR_DYN_STR) {
+        const ScrStr *t = val->v.str;
         ScrStr *out = scr_str_alloc_raw(t->len + 9, t->len + 9);
         memcpy(out->data, "[object ", 8);
         memcpy(out->data + 8, t->data, t->len);
@@ -316,6 +329,7 @@ ScrStr *scr_dyn_object_to_string(const ScrDyn *d) {
         out->data[out->len] = '\0';
         return out;
       }
+     }
     }
     break;
   default: break;
