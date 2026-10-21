@@ -22,6 +22,7 @@ import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { npmCases } from "./npm-cases.js";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { defineEmptyShardTest } from "./shard-guard.js";
 import { exeName } from "./exe.js";
 import { holdScratch } from "./scratch-lease.mjs";
 
@@ -35,7 +36,8 @@ const sanitize = process.env["SCRIPTC_SAN"] === "1";
 // cases (same entries, same argv lists) inside its container. The shard
 // split (SCRIPTC_TEST_SHARD, CI's matrix) is applied HERE, not in the
 // table, so that lane keeps its full list.
-const cases = shardSelect(npmCases(fixturesRoot), (c) => c.name);
+const allCases = npmCases(fixturesRoot);
+const cases = shardSelect(allCases, (c) => c.name);
 
 interface RunResult {
   stdout: Buffer;
@@ -180,6 +182,12 @@ describe(`typed-callback boundary (scriptc-only${sanitize ? ", sanitized" : ""})
 });
 
 describe(`npm differential (${cases.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()})`, () => {
+  defineEmptyShardTest({
+    what: "npm programs",
+    universe: allCases,
+    keyOf: (c) => c.name,
+    selectFor: (spec) => shardSelect(allCases, (c) => c.name, spec),
+  });
   test.for(cases.map((c) => [c.name, c] as const))("%s", async ([, c]) => {
     const binary = await build(c.entry);
     for (const argv of c.argvs ?? [[]]) {

@@ -17,7 +17,8 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
-import { corpusSlice, partSuffix, shardSuffix } from "./shard.js";
+import { corpusSlice, partOf, partSuffix, shardSuffix } from "./shard.js";
+import { defineEmptyShardTest } from "./shard-guard.js";
 import { tapPhase } from "../../packages/compiler/src/phase-tap.js";
 import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-report.js";
 import { oracleIsTrustworthy as oracleTrustworthy } from "./oracle-trust.js";
@@ -36,16 +37,15 @@ const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 // the corpus — the file is this suite's wall-time monster, so vitest's
 // file-granular --shard alone cannot split it. Unset = everything.
 const ENTRY_EXTS = ["ts", "js", "mjs", "cjs"];
+function allCorpusFiles(): string[] {
+  return ENTRY_EXTS.flatMap((ext) => [
+    ...globSync(join(corpusDir, `*.${ext}`)),
+    ...globSync(join(corpusDir, `*/main.${ext}`)),
+  ]).sort();
+}
+const corpusKey = (f: string): string => f.slice(corpusDir.length + 1);
 function corpusFiles(part: number, parts: number): string[] {
-  return corpusSlice(
-    ENTRY_EXTS.flatMap((ext) => [
-      ...globSync(join(corpusDir, `*.${ext}`)),
-      ...globSync(join(corpusDir, `*/main.${ext}`)),
-    ]).sort(),
-    (f) => f.slice(corpusDir.length + 1),
-    part,
-    parts,
-  );
+  return corpusSlice(allCorpusFiles(), corpusKey, part, parts);
 }
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 
@@ -432,6 +432,14 @@ export function defineDifferentialSuite(part = 1, parts = 1): void {
     // live-spawned Node itself can hang under heavy box load (1751's
     // fs.watch stalled five gates on 2026-07-20 while the compiled binary
     // answered in milliseconds every time).
+    const universe = allCorpusFiles();
+    defineEmptyShardTest({
+      what: `corpus programs${partSuffix(part, parts)}`,
+      universe,
+      scope: parts <= 1 ? universe : universe.filter((f) => partOf(corpusKey(f), parts) === part),
+      keyOf: corpusKey,
+      selectFor: (spec) => corpusSlice(universe, corpusKey, part, parts, spec),
+    });
     test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
       "%s",
       { retry: 1 },

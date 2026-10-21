@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { defineEmptyShardTest } from "./shard-guard.js";
 import { exeName } from "./exe.js";
 import { holdScratch } from "./scratch-lease.mjs";
 
@@ -127,19 +128,23 @@ async function build(entry: string): Promise<string> {
  * backslashes on win32, where `split("/").at(-2)` is `undefined` — and the
  * name is the SHARD KEY, so every case would hash to one shard and CI's
  * other two would silently run none of them. No-op elsewhere. */
-const cases = shardSelect(
-  [...globSync(join(fixturesRoot, "cases/*/main.ts")), ...globSync(join(fixturesRoot, "cases/*/main.js"))]
+const allCases = [...globSync(join(fixturesRoot, "cases/*/main.ts")), ...globSync(join(fixturesRoot, "cases/*/main.js"))]
     .map((entry) => entry.split("\\").join("/"))
     .sort()
     .map((entry) => ({
       name: entry.split("/").at(-2)!,
       entry,
       driver: existsSync(join(entry, "../driver.mjs")) ? join(entry, "../driver.mjs") : null,
-    })),
-  (c) => c.name,
-);
+    }));
+const cases = shardSelect(allCases, (c) => c.name);
 
 describe(`server differential (${cases.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()})`, () => {
+  defineEmptyShardTest({
+    what: "server programs",
+    universe: allCases,
+    keyOf: (c) => c.name,
+    selectFor: (spec) => shardSelect(allCases, (c) => c.name, spec),
+  });
   test.for(cases.map((c) => [c.name, c] as const))("%s", async ([, c]) => {
     const binary = await build(c.entry);
     // Sequential, not parallel: both lanes bind ephemeral ports and drive
