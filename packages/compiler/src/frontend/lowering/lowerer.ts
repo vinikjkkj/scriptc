@@ -1905,6 +1905,12 @@ export class Lowerer {
   /** Const bindings whose value may be Node's undefined while the slot stays
    * plain: a shadow bool says whether it exists (lower-absent.ts). */
   readonly absentFlags = new Map<ts.Symbol, import("./lower-absent.js").AbsentFlag>();
+  /** Bool expressions that say "the pointer-backed field is present"
+   * (lower-absent.ts nullableFieldRead): an equality against undefined/null
+   * over one is answered from the bool itself. */
+  readonly presenceResults = new WeakSet<IrExpr>();
+  /** presence bool -> the raw pointer read it was derived from. */
+  readonly presenceReads = new WeakMap<IrExpr, IrExpr>();
   readonly lyingResults = new WeakSet<IrExpr>();
   readonly bindEvidenceBusy = new Set<ts.Node>();
   /** Nested function DECLARATIONS lowered eagerly by the forward-hoisting

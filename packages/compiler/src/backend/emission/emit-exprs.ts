@@ -2337,6 +2337,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.emitPendingCheck();
           }
         }
+        if (e.kind === "fieldGet" && e.nullTest) return E.newTemp(e.type, `(${field} == NULL)`);
         return E.newTemp(e.type, isRefCounted(e.type) ? retainCallC(e.type, field) : field);
       }
       case "recordSlotFilled": {

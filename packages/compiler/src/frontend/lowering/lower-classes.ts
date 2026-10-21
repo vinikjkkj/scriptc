@@ -117,6 +117,10 @@ export interface ClassInfo {
    * unassigned read throws the catchable TypeError instead of yielding
    * an undefined the declared type cannot hold (SEMANTICS.md). */
   deferredInitFields?: Set<string>;
+  /** `cache!: Map<..>` (and Set): pointer-backed fields no union can carry,
+   * assigned past the constructor's top level. The slot stays the plain
+   * pointer; NULL is Node's undefined (lower-absent.ts nullableFieldRead). */
+  nullableFields?: Set<string>;
   /** JS instance properties this class has ONLY because the constructor
    * scan COLLECTED them: assigned in a method, or in a conditional
    * constructor position, and never declared in the class body. They are
@@ -4121,6 +4125,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         });
       }
       const deferredInitFields = new Set<string>(base?.deferredInitFields ?? []);
+      const nullableFields = new Set<string>(base?.nullableFields ?? []);
       for (const name of armedRedeclares) deferredInitFields.add(name);
       for (const name of placeholderFields) deferredInitFields.add(name);
       const collectedFields = new Set<string>(base?.collectedFields ?? []);
@@ -4197,6 +4202,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             const fo = fieldOrder.find((x) => x.name === f.name);
             if (fo) fo.type = armed;
             deferredInitFields.add(f.name);
+            continue;
+          }
+          // A Map/Set slot cannot be a union arm: it stays the plain
+          // pointer, and NULL (zeroed memory) is the pre-assignment state.
+          if (declared !== undefined && (declared.kind === "map" || declared.kind === "set")) {
+            nullableFields.add(f.name);
             continue;
           }
           L.unsupported("SC1090", f.node, f.why);
@@ -4749,6 +4760,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ...(hasPropsTable ? { hasPropsTable: true as const } : {}),
         ...(classDecoratorNodes.length > 0 ? { classDecorators: { nodes: classDecoratorNodes } } : {}),
         ...(deferredInitFields.size > 0 ? { deferredInitFields } : {}),
+        ...(nullableFields.size > 0 ? { nullableFields } : {}),
         ...(collectedFields.size > 0 ? { collectedFields } : {}),
         ...(absentTrackedFields.size > 0 ? { absentTrackedFields } : {}),
         ...(shadowFields.size > 0 ? { shadowFields } : {}),
