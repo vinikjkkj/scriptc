@@ -39,6 +39,7 @@ import ts from "typescript5";
 import { resolveExports } from "./npm.js";
 import { resolveBareModule, resolveRelativeModule } from "./resolve.js";
 import { isRelativeSpecifier, tsgoPath } from "./shared.js";
+import { lockedIntegrityOf, obtainVerifiedTarball, parseSri } from "./provenance-lockfile.js";
 import type { ProvenancePackageSource, ProvenanceSources } from "./provenance-registry.js";
 
 const execFileAsync = promisify(execFile);
@@ -381,7 +382,7 @@ interface Attested {
 async function fetchAttestation(name: string, version: string): Promise<Attested> {
   const url = `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(`${name}@${version}`).replace(/%40/g, "@").replace(/%2F/gi, "/")}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-  if (res.status === 404) throw new Error("no provenance attestation published");
+  if (res.status === 404) throw new AttestationAbsentError();
   if (!res.ok) throw new Error(`attestation fetch failed (HTTP ${res.status})`);
   const body = (await res.json()) as { attestations?: { predicateType?: string; bundle?: { dsseEnvelope?: { payload?: string } } }[] };
   for (const att of body.attestations ?? []) {
@@ -401,88 +402,61 @@ async function fetchAttestation(name: string, version: string): Promise<Attested
   throw new Error("attestation set carries no SLSA provenance predicate");
 }
 
-/* -- the UNATTESTED-LOCAL arm (opt-in, and off unless a package is named) --
+/* -- the UNATTESTED arm: lockfile-verified tarballs --------------------------
  *
- * Three of mysql2's installed dependencies publish NO provenance attestation
- * at all: iconv-lite, long and generate-function each answer HTTP 404 on
- * /-/npm/v1/attestations/<pkg>@<version>, while mysql2 itself and four of its
- * siblings return an SLSA predicate (re-verified live 2026-10-12). There is
- * therefore no attested source tree for the mapper to walk, the mapping is
- * never reached, and each one refuses as `the '<pkg>' module is not supported
- * yet`. That is not a gap in the compiler. It is a property of how those
- * packages are PUBLISHED, and no amount of frontend work closes it.
+ * Some packages publish NO provenance attestation (measured on mysql2@3.24.5's
+ * dependencies: iconv-lite, long and generate-function each answer HTTP 404 on
+ * /-/npm/v1/attestations/<pkg>@<version> while mysql2 itself returns an SLSA
+ * predicate). There is no attested source tree for the mapper to walk. The
+ * claim such a package CAN back is weaker and different: the project's
+ * lockfile records the SRI digest of the published tarball.
  *
- * This arm is the decision to compile the INSTALLED TARBALL of such a package
- * as if it were its source. Everything else in this file exists in order NOT
- * to do that, so the arm is built to be impossible to take by accident and
- * impossible to take quietly:
+ * So when, and only when, the registry answers 404 for the attestation, the
+ * package is compiled from its TARBALL, fetched or read from a cache and
+ * VERIFIED against that lockfile digest (provenance-lockfile.ts). The tree
+ * compiled is the one extracted from the verified bytes, never the
+ * node_modules copy. Nothing in this arm names a package.
  *
- *   NAMED, never inferred. SCRIPTC_PROVENANCE_UNATTESTED lists package names.
- *   Unset or empty is the shipped behaviour and nothing below runs. There is
- *   deliberately NO `1`/`true`/`all` sentinel: the authored-JS gate has one
- *   for a historical reason (env templates predate the whitelist), and
- *   copying it here would let a single character admit every unattested
- *   package in a dependency tree. That is the product's posture reversed, not
- *   a setting changed.
+ *   ABSENT, never merely UNUSABLE. The admitting condition is HTTP 404. An
+ *   attestation that exists and could not be followed, or a registry that did
+ *   not answer, keeps the attested path's answer: UNAVAILABLE IS NOT ABSENT,
+ *   and an offline build never acquires the right to compile tarballs.
  *
- *   ABSENT, never merely UNUSABLE. The admitting condition is the registry
- *   answering 404 -- the package publishes no attestation. An attestation
- *   that exists and could not be fetched, parsed, followed or (when this
- *   prototype grows the signature verification its header lists as a
- *   production gap) VERIFIED is a different answer, and keeps today's
- *   refusal. See attestationIsAbsent for why that distinction is a status
- *   code and not a string compare.
+ *   VERIFIED or REFUSED. A 404 package whose lockfile digest is missing, whose
+ *   bytes cannot be obtained, or whose bytes do not hash to the digest is a
+ *   BUILD-TIME REFUSAL (ProvenanceRefusalError) naming the package and the
+ *   reason. There is no fallback to node_modules and no silent island.
  *
- *   SAID OUT LOUD. A package admitted here is announced with repo
- *   `local://<installed dir>` and commit `unattested`, so the one line the
- *   build prints per mapped package cannot read as an attestation, and a note
- *   names the directory the bytes came from. */
+ *   SAID OUT LOUD. The mapped package's repo reads `npm-tarball://name@ver`
+ *   and its commit is the verified digest, so the one line the build prints
+ *   per mapped package cannot read as an attestation, and a note names the
+ *   lockfile that vouched for it. */
 
-/** Package names SCRIPTC_PROVENANCE_UNATTESTED admits, exactly as spelled.
- *
- * Read on every call rather than cached, for the reason authoredJsAllowlist
- * gives: one process may resolve twice with different settings, and the test
- * suite is the caller that does. */
-function unattestedAllowlist(): ReadonlySet<string> {
-  const raw = process.env["SCRIPTC_PROVENANCE_UNATTESTED"];
-  if (raw === undefined) return new Set();
-  return new Set(raw.split(",").map((e) => e.trim()).filter((e) => e !== ""));
+/** The registry answered HTTP 404: the package publishes no attestation. */
+class AttestationAbsentError extends Error {
+  constructor() {
+    super("no provenance attestation published");
+  }
 }
 
-/** Does npm publish NO attestation for this exact package@version?
- *
- * TRUE on exactly one answer: HTTP 404 from the attestations endpoint. Every
- * other outcome is false, and each one is false for its own reason:
- *
- *   200       an attestation EXISTS. Whatever went wrong after that -- no
- *             SLSA predicate in the set, a source tree that would not fetch,
- *             a package directory not found inside it, and one day a bundle
- *             that does not verify -- is a failure to USE an attestation,
- *             never the absence of one. Admitting those here would make this
- *             arm exactly the hole the rest of the file is shaped to prevent:
- *             a package whose attestation DISAGREES with what it ships would
- *             be compiled anyway, through a door opened for packages that
- *             make no claim at all.
- *   other     the registry declined to answer. A decline is not an answer.
- *   throw     no network, DNS failure, or the 30s timeout. UNAVAILABLE IS NOT
- *             ABSENT: an offline build must not silently acquire the right to
- *             compile unattested tarballs, and an offline build is the normal
- *             state of every test in this suite.
- *
- * This asks the registry a SECOND time rather than reading the first
- * attempt's thrown message. The message is a bare string literal inside
- * fetchAttestation; matching it would couple two places with no compile-time
- * relationship, and the coupling would fail silently the day the wording
- * moves. The status code is the fact itself. The cost is one extra GET per
- * NAMED package, and the names are a list a human typed. */
-async function attestationIsAbsent(name: string, version: string): Promise<boolean> {
-  const url = `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(`${name}@${version}`).replace(/%40/g, "@").replace(/%2F/gi, "/")}`;
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    return res.status === 404;
-  } catch {
-    return false;
+/** A package that publishes no attestation and whose tarball could not be
+ * VERIFIED against the lockfile. Thrown by resolveProvenanceSources after the
+ * whole graph was walked, so every refusal is reported at once. */
+export class ProvenanceRefusalError extends Error {
+  readonly refusals: readonly ProvenanceRefusal[];
+  constructor(refusals: readonly ProvenanceRefusal[]) {
+    super(
+      refusals.map((r) => `provenance: refused ${r.package}@${r.version}: ${r.reason}`).join("\n"),
+    );
+    this.name = "ProvenanceRefusalError";
+    this.refusals = refusals;
   }
+}
+
+export interface ProvenanceRefusal {
+  package: string;
+  version: string;
+  reason: string;
 }
 
 /* ── source fetch (content-addressed by the attested commit) ──────────── */
@@ -497,18 +471,11 @@ function cacheRoot(): string {
   return process.env["SCRIPTC_PROVENANCE_CACHE"] ?? defaultCacheRoot();
 }
 
-/** The cached source tree for an attested commit, fetching it once from
- * codeload (github repos only in the prototype). Returns the tree root. */
-async function fetchSourceTree(repo: string, commit: string): Promise<string> {
-  const dest = join(cacheRoot(), commit);
-  if (isDirectory(dest)) return dest;
-  const m = /github\.com\/([^/]+)\/([^/@#]+)/.exec(repo);
-  if (m === null) throw new Error(`source repository is not a github URL (${repo})`);
-  const url = `https://codeload.github.com/${m[1]}/${m[2]}/tar.gz/${commit}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
-  if (!res.ok) throw new Error(`source fetch failed (HTTP ${res.status} for ${url})`);
-  const bytes = Buffer.from(await res.arrayBuffer());
-  await mkdir(cacheRoot(), { recursive: true });
+/** Extract a gzip tarball (one leading directory stripped) to `dest`,
+ * atomically: into a temp tree first, then renamed into place. A racing
+ * compile that wins the rename leaves identical content. */
+async function extractTarballTo(bytes: Buffer, dest: string): Promise<void> {
+  await mkdir(dirname(dest), { recursive: true });
   const tmp = await mkdtemp(join(tmpdir(), "scriptc-provenance-"));
   try {
     const tarball = join(tmp, "src.tgz");
@@ -570,6 +537,20 @@ async function fetchSourceTree(repo: string, commit: string): Promise<string> {
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
+}
+
+/** The cached source tree for an attested commit, fetching it once from
+ * codeload (github repos only in the prototype). Returns the tree root. */
+async function fetchSourceTree(repo: string, commit: string): Promise<string> {
+  const dest = join(cacheRoot(), commit);
+  if (isDirectory(dest)) return dest;
+  const m = /github\.com\/([^/]+)\/([^/@#]+)/.exec(repo);
+  if (m === null) throw new Error(`source repository is not a github URL (${repo})`);
+  const url = `https://codeload.github.com/${m[1]}/${m[2]}/tar.gz/${commit}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+  if (!res.ok) throw new Error(`source fetch failed (HTTP ${res.status} for ${url})`);
+  const bytes = Buffer.from(await res.arrayBuffer());
+  await extractTarballTo(bytes, dest);
   return dest;
 }
 
@@ -938,6 +919,45 @@ function readManifest(): Map<string, ManifestEntry> {
   return out;
 }
 
+/** The extracted tree of a package's tarball, verified against the lockfile.
+ * Content-addressed by the verified digest: `<cache>/npm-trees/<algo>-<hex>`. */
+async function verifiedTarballTree(
+  entryDir: string,
+  installed: InstalledPackage,
+): Promise<
+  | { ok: true; dir: string; commit: string; lockfile: string; integrity: string }
+  | { ok: false; reason: string }
+> {
+  const lock = lockedIntegrityOf(entryDir, installed.name, installed.version, installed.dir);
+  if (!lock.found) return { ok: false, reason: lock.reason };
+  const sri = parseSri(lock.locked.integrity);
+  if (sri === null) {
+    return {
+      ok: false,
+      reason: `${lock.locked.lockfile} records integrity "${lock.locked.integrity}" for ${installed.name}@${installed.version}, which carries no sha256/sha384/sha512 digest (sha1 is not accepted), so its bytes cannot be verified`,
+    };
+  }
+  const commit = `${sri.algo}-${sri.hex}`;
+  const dest = join(cacheRoot(), "npm-trees", commit);
+  if (!isDirectory(dest)) {
+    const r = await obtainVerifiedTarball(installed.name, installed.version, lock.locked, join(cacheRoot(), "npm-tarballs"));
+    if (!r.ok) return { ok: false, reason: r.reason };
+    try {
+      await extractTarballTo(r.bytes, dest);
+    } catch (e) {
+      return { ok: false, reason: `the verified tarball could not be extracted (${e instanceof Error ? e.message : String(e)})` };
+    }
+  }
+  const pkg = readJson(join(dest, "package.json"));
+  if (pkg === null || pkg["name"] !== installed.name || pkg["version"] !== installed.version) {
+    return {
+      ok: false,
+      reason: `the verified tarball's package.json names ${String(pkg?.["name"])}@${String(pkg?.["version"])}, not ${installed.name}@${installed.version}`,
+    };
+  }
+  return { ok: true, dir: dest, commit, lockfile: lock.locked.lockfile, integrity: lock.locked.integrity };
+}
+
 /** One package whose attested source tree has been LOCATED. The tree is
  * fetched once, but its `entries` map is not final when it is first
  * built — see `expand` and the fixed point below. */
@@ -958,6 +978,9 @@ interface MappedTree {
    * becomes a ProvenancePackageSource and claims its import order). */
   announced: boolean;
   sourceVersion?: string;
+  /** Set when this tree is the VERIFIED TARBALL of a package that publishes no
+   * attestation: the lockfile that vouched for it and the digest it matched. */
+  unattested?: { lockfile: string; integrity: string };
 }
 
 /** Bound on the specifier-discovery fixed point. Each round attempts at
@@ -1027,6 +1050,8 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
    * island diagnostics read it so they can stop advising --dynamic for what
    * is really a network failure. */
   const unfetched = new Set<string>();
+  /** Unattested packages whose tarball could not be verified: build refusals. */
+  const refusals: ProvenanceRefusal[] = [];
   /** package name → located tree (or null after a noted failure). */
   const processed = new Map<string, MappedTree | null>();
   /** Names in the order their tree mapped its first entry. */
@@ -1138,6 +1163,7 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
     let dir: string;
     let repo: string;
     let commit: string;
+    let unattested: MappedTree["unattested"];
     const seeded = manifest.get(name);
     try {
       if (seeded !== undefined) {
@@ -1146,15 +1172,33 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
         commit = seeded.commit ?? "(manifest)";
         if (!isDirectory(dir)) throw new Error(`manifest dir does not exist (${dir})`);
       } else {
-        const attested = await fetchAttestation(installed.name, installed.version);
-        repo = attested.repo;
-        commit = attested.commit;
-        const tree = await fetchSourceTree(repo, commit);
-        const located = locatePackageDir(tree, installed.name);
-        if (located === null) {
-          throw new Error(`package directory not found inside the attested source tree (${tree})`);
+        let attested: Attested | null = null;
+        try {
+          attested = await fetchAttestation(installed.name, installed.version);
+        } catch (e) {
+          if (!(e instanceof AttestationAbsentError)) throw e;
         }
-        dir = located;
+        if (attested === null) {
+          const v = await verifiedTarballTree(entryDir, installed);
+          if (!v.ok) {
+            refusals.push({ package: installed.name, version: installed.version, reason: v.reason });
+            notes.push(`${name}@${installed.version}: no provenance attestation published and its tarball could not be verified (${v.reason}); build refused`);
+            return;
+          }
+          dir = v.dir;
+          repo = `npm-tarball://${installed.name}@${installed.version}`;
+          commit = v.commit;
+          unattested = { lockfile: v.lockfile, integrity: v.integrity };
+        } else {
+          repo = attested.repo;
+          commit = attested.commit;
+          const tree = await fetchSourceTree(repo, commit);
+          const located = locatePackageDir(tree, installed.name);
+          if (located === null) {
+            throw new Error(`package directory not found inside the attested source tree (${tree})`);
+          }
+          dir = located;
+        }
       }
     } catch (e) {
       unfetched.add(name);
@@ -1166,104 +1210,40 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       dir,
       repo,
       commit,
-      aliases: sourceAliasesOf(dir),
+      /* An unattested tree has NO alias table, deliberately: a tsconfig inside
+       * a published tarball describes how the package's SOURCE was built, and
+       * the files compiled here are the published outputs, which carry no
+       * alias specifiers for a table to answer. */
+      aliases: unattested === undefined ? sourceAliasesOf(dir) : undefined,
       entries: {},
       external: {},
       considered: new Set(),
       announced: false,
+      ...(unattested !== undefined ? { unattested } : {}),
     };
     processed.set(name, tree);
-    for (const n of await expandSafely(name, tree)) await mapOne(n);
+    const reached = await expandSafely(name, tree);
+    if (unattested !== undefined) {
+      /* ANNOUNCED or NOTHING HAPPENED: a verified tarball is permission to try,
+       * not a mapping. One with no declaration and no TypeScript beside its
+       * published entry maps to nothing, and a note saying a tarball was
+       * compiled would then be false about the binary. */
+      if (!tree.announced) {
+        processed.set(name, null);
+        notes.push(
+          `${name}@${installed.version}: the tarball verified against ${unattested.lockfile}, but nothing in it maps to a source entry, so NO unattested source was compiled; island path used`,
+        );
+        return;
+      }
+      notes.push(
+        `${name}@${installed.version}: UNATTESTED -- npm publishes no provenance attestation for it. Its tarball was verified against the ${unattested.integrity.split(/\s+/)[0]!.slice(0, 19)}... integrity digest in ${unattested.lockfile} and compiles from the verified bytes (extracted to ${tsgoPath(dir)}), not from node_modules. The lockfile vouches that these are the bytes that were locked; nothing attests which repository or commit they were built from`,
+      );
+    }
+    for (const n of reached) await mapOne(n);
   };
 
   for (const name of enqueue(bareImportsOf([entry]))) {
     await mapOne(name);
-  }
-
-  /* The UNATTESTED-LOCAL second chance. Runs only over packages the loop
-   * above ALREADY ANSWERED WITH A REFUSAL (processed -> null): the attested
-   * path has had its full, unchanged turn at every one of them first, and
-   * this consumes nothing but its leftovers. With the variable unset the
-   * allowlist is empty and the whole block is one Set size check.
-   *
-   * It has its own small fixed point, because a tarball admitted here is
-   * walked like any other mapped tree and that walk can reach a second
-   * unattested package -- iconv-lite's `safer-buffer` is one. Such a
-   * package is admitted only if it too is NAMED; the arm never widens
-   * itself. A package first DISCOVERED by the main fixed point below is
-   * deliberately NOT revisited: the arm would then be re-entered from inside
-   * a loop whose termination argument is about specifiers rather than
-   * packages. Such a package keeps today's refusal, which is the safe
-   * direction -- the failure mode is a blocker that stays, never a tarball
-   * compiled without being asked for. */
-  const unattestedNamed = unattestedAllowlist();
-  const unattestedTried = new Set<string>();
-  while (unattestedNamed.size > 0) {
-    const refused = [...processed]
-      .filter(([n, t]) => t === null && unattestedNamed.has(n) && !unattestedTried.has(n))
-      .map(([n]) => n);
-    if (refused.length === 0) break;
-    for (const name of refused) {
-      unattestedTried.add(name);
-      const installed = findInstalled(entryDir, name);
-      if (installed === null) {
-        notes.push(
-          `${name}: SCRIPTC_PROVENANCE_UNATTESTED names it, but it is not installed under the entry's node_modules; island path used`,
-        );
-        continue;
-      }
-      if (!(await attestationIsAbsent(installed.name, installed.version))) {
-        notes.push(
-          `${name}@${installed.version}: SCRIPTC_PROVENANCE_UNATTESTED names it, but the registry does not answer 404 for its attestation -- it either publishes one or could not be asked, and neither of those is an absent attestation; the attested path's answer stands and the island path is used`,
-        );
-        continue;
-      }
-      const local: MappedTree = {
-        installed,
-        dir: installed.dir,
-        repo: `local://${tsgoPath(installed.dir)}`,
-        commit: "unattested",
-        /* NO alias table, deliberately, and not for lack of a place to read
-         * one. A tsconfig inside a published tarball describes how that
-         * package's SOURCE was built, and the source is precisely what is
-         * absent here: the files being compiled are the built outputs, which
-         * carry no alias specifiers for a table to answer. Reading it would
-         * at best do nothing and at worst point targets at a `src/` the
-         * tarball does not ship. It also keeps every tree admitted here out
-         * of buildAliasScopes, whose grouping key is the COMMIT -- and the
-         * commit below is the same string for all of them. */
-        aliases: undefined,
-        entries: {},
-        external: {},
-        considered: new Set(),
-        announced: false,
-      };
-      processed.set(name, local);
-      const reached = await expandSafely(name, local);
-      /* ANNOUNCED or NOTHING HAPPENED, and the note must not say otherwise.
-       * Being admitted by this arm is permission to try, not a mapping: a
-       * tarball with no declaration and no TypeScript beside its published
-       * entry maps to nothing at all (generate-function@2.3.1 is one, and
-       * expandSafely has already said so by name). Announcing an UNATTESTED
-       * compile for such a package would put a sentence in the build output
-       * that is false about the binary -- the one failure mode this arm is
-       * least allowed to have. Put the refusal back and say what happened. */
-      if (!local.announced) {
-        processed.set(name, null);
-        notes.push(
-          `${name}@${installed.version}: SCRIPTC_PROVENANCE_UNATTESTED names it, but nothing in the installed tarball maps to a source entry, so NO unattested source was compiled and the refusal stands; island path used`,
-        );
-        continue;
-      }
-      /* It is no longer UNFETCHED: nothing was fetched and nothing failed to
-       * fetch. The diagnostics layer reads that set so it can stop advising
-       * around a network failure, and this package did not have one. */
-      unfetched.delete(name);
-      notes.push(
-        `${name}@${installed.version}: UNATTESTED -- npm publishes no provenance attestation for it, and SCRIPTC_PROVENANCE_UNATTESTED named it, so the INSTALLED TARBALL at ${tsgoPath(installed.dir)} compiles as its own source. Nothing attests that those bytes came from any repository or any commit; its provenance line reads local:// and its commit reads 'unattested' for exactly that reason`,
-      );
-      for (const n of reached) await mapOne(n);
-    }
   }
 
   // The fixed point. A located package's specifier set keeps growing as
@@ -1378,5 +1358,6 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
     );
   }
 
+  if (refusals.length > 0) throw new ProvenanceRefusalError(refusals);
   return { packages, notes, unfetched: [...unfetched] };
 }

@@ -60,12 +60,14 @@ This is experimental. Real packages compile statically at high but partial cover
 
 Some packages answer HTTP 404 for `/-/npm/v1/attestations/<pkg>@<version>` — there is no attested tree to fetch, so nothing above reaches them and they keep the engine path. That is a property of how those packages are published, not a gap the compiler can close.
 
-`SCRIPTC_PROVENANCE_UNATTESTED=<pkg[,pkg…]>` is the decision to compile such a package's **installed tarball** as if it were its source. It is named, never inferred — there is no `all` or `1` spelling, and unset is the shipped behaviour. Three properties are worth knowing before using it:
+Under `--provenance-sources` such a package is compiled from its **registry tarball, verified against the integrity digest in your lockfile** (`pnpm-lock.yaml`, `package-lock.json` or `npm-shrinkwrap.json`, found at or above the entry). No flag or package list is involved. Properties worth knowing:
 
-- **Absent, not merely unusable.** The admitting condition is the registry answering 404. A 200 means an attestation exists, and anything that goes wrong after that — no SLSA predicate, a source tree that will not fetch, a missing package directory — is a failure to *use* an attestation, never the absence of one, and keeps the refusal. A throwing probe is a decline too: an offline build never acquires the right to compile unattested tarballs.
-- **It says so.** An admitted package's provenance line reads `local://<installed dir>` with commit `unattested`, and a note names the directory the bytes came from, so no line of build output can be mistaken for an attestation.
-- **Being named buys a try, not a mapping.** A tarball with no declaration beside its published entry maps to nothing; such a package has its refusal put back and the build says that too, rather than claiming a compile that did not happen.
-- **Admitted is not clean.** The tarball's body joins the lowered program and brings its own refusals and deferred throws with it — including ones raised by the package's own `.d.ts`, which nothing read while the package was still refused outright. Naming a package here buys reach into it, not a lower diagnostic count.
+- **Absent, not merely unusable.** The admitting condition is the registry answering 404. A 200 means an attestation exists, and anything that goes wrong after that keeps the refusal. An unreachable registry is a decline, not an absence: an offline build never acquires this path.
+- **Verified or refused.** If the lockfile has no digest for the package (a git, file or link dependency), the bytes cannot be obtained (no network and neither the scriptc nor the npm cache holds them), or they do not hash to the locked digest, the build is refused at build time, naming the package and the reason. There is no fallback to `node_modules`.
+- **The verified bytes are what compiles.** The files come from the tarball, never from the possibly edited `node_modules` copy.
+- **It says so.** The provenance line reads `npm-tarball://<name>@<version>` with the verified digest as its commit, and a note names the lockfile. The lockfile vouches for the bytes, not for the repository or commit they were built from.
+- **A verified tarball buys a try, not a mapping.** A tarball with no declaration and no TypeScript beside its published entry maps to nothing and the build says so.
+- **Mapped is not clean.** The tarball's body joins the lowered program and brings its own refusals and deferred throws with it.
 
 ## Where this scales
 
