@@ -2329,7 +2329,8 @@ function jsFnLiteralSlot(L: Lowerer, decl: ts.VariableDeclaration, nameNode: ts.
       }
     }
   }
-  return dynFallbackType(L, nameNode, L.typeOf(nameNode))?.kind === "func";
+  const k = dynFallbackType(L, nameNode, L.typeOf(nameNode))?.kind;
+  return k === "func" || k === "dyn";
 }
 
 /** True iff this initializer's VALUE is a jsval-element array from a
