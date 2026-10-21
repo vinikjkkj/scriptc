@@ -16,6 +16,7 @@ test("runner settings are read after loading the sandbox environment", () => {
     localTestWorkers: "3",
     localCaseShards: "4",
     sandboxTimeout: "90m",
+    sandboxTimeoutMs: 5_400_000,
   });
 });
 
@@ -26,5 +27,6 @@ test("runner settings retain their documented defaults", () => {
     localTestWorkers: "2",
     localCaseShards: "2",
     sandboxTimeout: "45m",
+    sandboxTimeoutMs: 2_700_000,
   });
 });
