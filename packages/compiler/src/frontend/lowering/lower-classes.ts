@@ -3539,7 +3539,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           const admitsUndefined =
             (type.kind === "union" &&
               (L.unions.get(type.unionId)?.arms.some((a) => a.kind === "undefinedT") ?? false)) ||
-            type.kind === "jsval";
+            type.kind === "jsval" ||
+            // A checked-dynamic (`unknown`) field starts as the dyn undefined
+            // in both backends (undefFieldInitLineC / undefFieldInits).
+            type.kind === "dyn";
           if (!member.initializer && !admitsUndefined) {
             const opts = L.program.getCompilerOptions();
             const spi = opts.strictPropertyInitialization ?? opts.strict ?? false;
@@ -4206,7 +4209,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           }
           // A Map/Set slot cannot be a union arm: it stays the plain
           // pointer, and NULL (zeroed memory) is the pre-assignment state.
-          if (declared !== undefined && (declared.kind === "map" || declared.kind === "set")) {
+          if (declared !== undefined && (declared.kind === "map" || declared.kind === "set" || declared.kind === "generator")) {
             nullableFields.add(f.name);
             continue;
           }
