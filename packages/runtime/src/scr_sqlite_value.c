@@ -643,11 +643,38 @@ static ScrDyn *sv_database_ctor(ScrClosure *clo, ScrDyn *const *args, size_t arg
  * process answers the same module namespace. Two fresh boxes would make
  * `ns.default === ns["module.exports"]` false where Node says true. */
 static ScrDyn *sv_ctor_singleton;
+static ScrDyn *sv_error_singleton;
+
+/* The two singletons hold one reference each for the life of the process. At
+ * exit that reference is released, or the RC audit counts the ctor's closure
+ * and dyn box (and the error class's) as live: `await import("better-sqlite3")`
+ * alone left 2 closures and 2 dyn values behind. atexit is LIFO and scr_init
+ * registered the audit first, so this runs BEFORE the audit. */
+static void sv_singletons_teardown(void) {
+  if (sv_ctor_singleton != NULL) {
+    scr_dyn_release(sv_ctor_singleton);
+    sv_ctor_singleton = NULL;
+  }
+  if (sv_error_singleton != NULL) {
+    scr_dyn_release(sv_error_singleton);
+    sv_error_singleton = NULL;
+  }
+}
+
+static bool sv_teardown_registered;
+
+static void sv_register_teardown(void) {
+  if (!sv_teardown_registered) {
+    sv_teardown_registered = true;
+    atexit(sv_singletons_teardown);
+  }
+}
 
 ScrDyn *scr_sqlite_value_ctor(void) {
   if (sv_ctor_singleton == NULL) {
     ScrClosure *clo = scr_closure_new((void *)&sv_database_ctor, 0);
     sv_ctor_singleton = scr_dyn_new_func(clo, &sv_database_ctor, 1, "%better-sqlite3", "Database");
+    sv_register_teardown();
   }
   return scr_dyn_retain(sv_ctor_singleton);
 }
@@ -669,12 +696,11 @@ static ScrDyn *sv_sqlite_error_ctor(ScrClosure *clo, ScrDyn *const *args, size_t
   return NULL;
 }
 
-static ScrDyn *sv_error_singleton;
-
 ScrDyn *scr_sqlite_value_error_class(void) {
   if (sv_error_singleton == NULL) {
     ScrClosure *clo = scr_closure_new((void *)&sv_sqlite_error_ctor, 0);
     sv_error_singleton = scr_dyn_new_func(clo, &sv_sqlite_error_ctor, 1, "%better-sqlite3", "SqliteError");
+    sv_register_teardown();
   }
   return scr_dyn_retain(sv_error_singleton);
 }
