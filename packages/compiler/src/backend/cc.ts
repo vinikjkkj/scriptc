@@ -997,15 +997,42 @@ function gcFlavor(): string {
   return "-gc";
 }
 
-/** The link-side spelling, per TARGET platform (not host):
+/** SCRIPTC_KEEP_PDB at BUILD time: keep the PDB (and with it the debugger's
+ * and the profiler's symbols) on the zig x86_64-windows-gnu lane, at the price
+ * of the section collector. See gcSectionsLinkArgs. Same contract as the other
+ * build knobs: unset/empty/0 is the default, and it lands in the build-cache
+ * key through the argv. */
+function keepPdbRequested(): boolean {
+  const v = process.env.SCRIPTC_KEEP_PDB;
+  return v !== undefined && v !== "" && v !== "0";
+}
+
+/** The link-side spelling, per TARGET platform:
  *   linux   -Wl,--gc-sections  (GNU ld and lld; zig cc passes it to lld)
- *   darwin  -Wl,-dead_strip    (ld64; also spelled on the engine arm, below)
- * win32 gets nothing here (see the note on the PE linker in the block above:
- * the zig lane's collector is tied to the PDB). */
+ *   darwin  -Wl,-dead_strip    (ld64)
+ *   win32   through zig cc: -Wl,--strip-all, and nothing else can do it.
+ *
+ * WHY STRIP IS THE WIN32 SPELLING. zig 0.16's COFF link hands lld-link /DEBUG
+ * (for the PDB) and no /OPT flag, and lld-link defaults /OPT:REF to OFF under
+ * /DEBUG. zig then refuses the one flag that would override it ("error:
+ * unsupported linker arg: /opt:ref", same for -opt:ref), and accepts
+ * --gc-sections / --no-gc-sections without passing anything on. Measured on a
+ * 3-function C file and on the runtime: with the PDB the unused functions, and
+ * every unreferenced mingw CRT object, stay; -Wl,--strip-all (no /DEBUG)
+ * makes lld-link collect. The cost is that the PE carries no PDB, which
+ * tests/perf's symbolisation tools and a debugger would have read;
+ * SCRIPTC_KEEP_PDB=1 keeps it and gives the collector up.
+ *
+ * Host clang on a Windows host (MSVC ABI, lld-link or link.exe) needs nothing
+ * here: /OPT:REF is the default without /DEBUG, and -ffunction-sections makes
+ * COFF COMDATs that /OPT:REF can drop; the driver passes no -g. */
 function gcSectionsLinkArgs(driver: CcDriver): string[] {
   const platform = targetPlatform(driver);
   if (platform === "linux") return ["-Wl,--gc-sections"];
   if (platform === "darwin") return ["-Wl,-dead_strip"];
+  if (platform === "win32" && driver.argv[0] === "zig" && !keepPdbRequested()) {
+    return ["-Wl,--gc-sections", "-Wl,--strip-all"];
+  }
   return [];
 }
 
