@@ -4371,6 +4371,12 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
       if (narrowed?.kind === "object" && L.classes.get(narrowed.className) !== undefined) {
         return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
       }
+      // `u instanceof Date` over an `unknown`: the Date handle box, extracted
+      // by the validated checked cast (identity preserved: the handle is
+      // retained, not copied).
+      if (narrowed?.kind === "date") {
+        return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
+      }
       return expr;
     }
     // Checker-driven narrowing for classes: tsc types this USE as a
@@ -17924,6 +17930,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           if (tags.length >= 1) {
             return armTagsTest(L, left, tags, loc);
           }
+        }
+        if (left.type.kind === "dyn") {
+          // `u instanceof Date` over an `unknown` operand: the Date handle tag.
+          return { kind: "dynTest", test: "date", value: left, type: BOOL, loc };
         }
         const pureDateRead =
           left.kind === "varRef" ||

@@ -4385,6 +4385,7 @@ typedef enum {
   SCR_DYNH_HTTP_AGENT,  /* ScrHttpAgent — http.Agent / https.Agent */
   SCR_DYNH_REGEX,       /* ScrRegex — RegExp (immutable pattern+flags, by reference) */
   SCR_DYNH_CHILD_STREAM, /* ScrChildStream — child stdio (Readable), on/once("data"|"end") */
+  SCR_DYNH_DATE,        /* ScrDate — Date (immutable time value, by reference) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
@@ -6266,6 +6267,7 @@ const char *scr_dyn_map_cls(const ScrDyn *d);
  * one kind over. Borrowed; never throws. */
 bool scr_dyn_is_map(const ScrDyn *d);
 bool scr_dyn_is_set(const ScrDyn *d);
+bool scr_dyn_is_date(const ScrDyn *d); /* the Date handle tag; borrowed, never throws */
 /* The loud ladder for every operation the box has no layout to answer
  * (keyed access and indexing, `size`, `get`/`has`/`add`, iteration,
  * structuredClone): "<what> on a dynamic Map is not supported yet".
@@ -10181,6 +10183,12 @@ double scr_date_utc_day(double ms);
  * Windows SystemTimeToTzSpecificLocalTimeEx. Never throw. */
 double scr_date_local_time(double ms);
 double scr_date_tz_offset(double ms);
+/* Date.prototype.toString (+1; NULL with a catchable Error when the zone's
+ * long name is not one this runtime can state -- see scr_date.c). */
+ScrStr *scr_date_to_string(double ms);
+/* Registers the Date handle ops (SCR_DYNH_DATE); emitted into main() under
+ * the same moduleUsesDate gate that links scr_date.c. */
+void scr_date_dyn_install(void);
 
 /* The WebRTC ownership pairs. Dead code in every program: nothing
  * constructs either handle yet. */

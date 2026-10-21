@@ -49,7 +49,9 @@
  * getHours section at the bottom. */
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #ifdef _WIN32
@@ -350,3 +352,164 @@ double scr_date_get_hours(double ms) {
   double l = scr_date_local_time(ms);
   return scr_date_utc_hours(l);
 }
+
+/* ── Date.prototype.toString ─────────────────────────────────────────────
+ * "Wed Oct 21 2026 03:10:11 GMT-0300 (Brasilia Standard Time)", or
+ * "Invalid Date". Everything up to the parenthesis is arithmetic over
+ * LocalTime(t). The parenthesised zone LONG NAME is ICU/CLDR data, and no
+ * libc carries it, so only the two zones whose name this file can state
+ * exactly are answered: a host zone whose abbreviation is UTC
+ * ("Coordinated Universal Time") or GMT ("Greenwich Mean Time") at offset
+ * zero (measured against Node: TZ=UTC/Etc/UTC/Etc/UCT -> the first,
+ * TZ=GMT/Africa/Abidjan/Atlantic/Reykjavik -> the second). Any other zone
+ * throws a catchable Error naming the gap instead of printing a wrong
+ * name. OPEN: a CLDR long-name table for the remaining zones. On Windows
+ * only the "UTC" time-zone key is answered. */
+static const char *const scr_date_day_names[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+static const char *const scr_date_month_names[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+static const char *scr_date_zone_long_name(double t, double tza) {
+  if (tza != 0) return NULL;
+#ifdef _WIN32
+  DYNAMIC_TIME_ZONE_INFORMATION z;
+  if (GetDynamicTimeZoneInformation(&z) == TIME_ZONE_ID_INVALID) return NULL;
+  if (wcscmp(z.TimeZoneKeyName, L"UTC") == 0) return "Coordinated Universal Time";
+  return NULL;
+#else
+  double secsd = floor(t / 1000.0);
+  time_t secs = (time_t)secsd;
+  const struct tm *lp = localtime(&secs);
+  if (lp == NULL || lp->tm_zone == NULL) return NULL;
+  if (strcmp(lp->tm_zone, "UTC") == 0) return "Coordinated Universal Time";
+  if (strcmp(lp->tm_zone, "GMT") == 0) return "Greenwich Mean Time";
+  return NULL;
+#endif
+}
+
+ScrStr *scr_date_to_string(double ms) {
+  if (!(fabs(ms) <= 8640000000000000.0)) return scr_str_new("Invalid Date", 12);
+  double t = trunc(ms);
+  double tza;
+  if (!scr_date_tza(t, &tza)) return scr_str_new("Invalid Date", 12);
+  const char *zname = scr_date_zone_long_name(t, tza);
+  if (zname == NULL) {
+    const char *msg =
+        "Date.prototype.toString: the time zone's long display name needs ICU data this runtime does not "
+        "carry (only UTC and GMT zones are answered)";
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, strlen(msg));
+    return NULL;
+  }
+  ScrDateParts p;
+  if (!scr_date_parts(t + tza, &p)) return scr_str_new("Invalid Date", 12);
+  int wd = (int)scr_date_utc_day(t + tza);
+  char buf[160];
+  char ybuf[24];
+  if (p.y < 0) snprintf(ybuf, sizeof ybuf, "-%04lld", -p.y);
+  else snprintf(ybuf, sizeof ybuf, "%04lld", p.y);
+  int off = (int)(tza / 60000.0); /* whole minutes, toward zero */
+  int aoff = off < 0 ? -off : off;
+  int n = snprintf(buf, sizeof buf, "%s %s %02d %s %02d:%02d:%02d GMT%c%02d%02d (%s)", scr_date_day_names[wd],
+                   scr_date_month_names[p.mo], p.d, ybuf, p.h, p.mi, p.s, off < 0 ? '-' : '+', aoff / 60,
+                   aoff % 60, zname);
+  return scr_str_new(buf, (size_t)n);
+}
+
+/* ── the checked-dynamic Date handle (SCR_DYNH_DATE) ────────────────────
+ * A Date crosses into the checked-dynamic tree BY REFERENCE: the box
+ * retains the ScrDate, identity is the handle, and the value is immutable
+ * (no setters are modeled), so nothing can alias wrongly. The modeled
+ * surface is exactly the one the static lowering serves: getTime/valueOf,
+ * toISOString, toJSON, toString, the UTC and local field getters,
+ * getDay/getUTCDay and getTimezoneOffset. Setters and the remaining
+ * formatters throw the loud not-supported ladder. */
+static ScrDyn *scr_date_dynh_num(double v) { return scr_dyn_new_num(v); }
+
+static ScrDyn *scr_date_dynh_invoke(void *h, ScrDyn *self, const char *method, ScrDyn *const *args, size_t argc,
+                                    const char *what) {
+  ScrDate *d = (ScrDate *)h;
+  (void)self;
+  (void)args;
+  (void)argc;
+  double ms = d->ms;
+  if (strcmp(method, "getTime") == 0 || strcmp(method, "valueOf") == 0) return scr_date_dynh_num(ms);
+  if (strcmp(method, "getUTCFullYear") == 0) return scr_date_dynh_num(scr_date_utc_full_year(ms));
+  if (strcmp(method, "getUTCMonth") == 0) return scr_date_dynh_num(scr_date_utc_month(ms));
+  if (strcmp(method, "getUTCDate") == 0) return scr_date_dynh_num(scr_date_utc_date(ms));
+  if (strcmp(method, "getUTCHours") == 0) return scr_date_dynh_num(scr_date_utc_hours(ms));
+  if (strcmp(method, "getUTCMinutes") == 0) return scr_date_dynh_num(scr_date_utc_minutes(ms));
+  if (strcmp(method, "getUTCSeconds") == 0) return scr_date_dynh_num(scr_date_utc_seconds(ms));
+  if (strcmp(method, "getUTCMilliseconds") == 0) return scr_date_dynh_num(scr_date_utc_ms(ms));
+  if (strcmp(method, "getUTCDay") == 0) return scr_date_dynh_num(scr_date_utc_day(ms));
+  if (strcmp(method, "getTimezoneOffset") == 0) return scr_date_dynh_num(scr_date_tz_offset(ms));
+  {
+    double l = scr_date_local_time(ms);
+    if (strcmp(method, "getFullYear") == 0) return scr_date_dynh_num(scr_date_utc_full_year(l));
+    if (strcmp(method, "getMonth") == 0) return scr_date_dynh_num(scr_date_utc_month(l));
+    if (strcmp(method, "getDate") == 0) return scr_date_dynh_num(scr_date_utc_date(l));
+    if (strcmp(method, "getHours") == 0) return scr_date_dynh_num(scr_date_utc_hours(l));
+    if (strcmp(method, "getMinutes") == 0) return scr_date_dynh_num(scr_date_utc_minutes(l));
+    if (strcmp(method, "getSeconds") == 0) return scr_date_dynh_num(scr_date_utc_seconds(l));
+    if (strcmp(method, "getMilliseconds") == 0) return scr_date_dynh_num(scr_date_utc_ms(l));
+    if (strcmp(method, "getDay") == 0) return scr_date_dynh_num(scr_date_utc_day(l));
+  }
+  if (strcmp(method, "toISOString") == 0 || strcmp(method, "toJSON") == 0) {
+    if (strcmp(method, "toJSON") == 0 && !(fabs(ms) <= 8640000000000000.0)) return scr_dyn_new_null();
+    ScrStr *s = scr_date_to_iso(ms); /* +1, or NULL with RangeError pending */
+    if (s == NULL) return NULL;
+    ScrDyn *r = scr_dyn_new_str(s);
+    scr_str_release(s);
+    return r;
+  }
+  if (strcmp(method, "toString") == 0) {
+    ScrStr *s = scr_date_to_string(ms);
+    if (s == NULL) return NULL;
+    ScrDyn *r = scr_dyn_new_str(s);
+    scr_str_release(s);
+    return r;
+  }
+  {
+    static const char *const known[] = {"setTime", "setFullYear", "setMonth", "setDate", "setHours",
+                                        "setMinutes", "setSeconds", "setMilliseconds", "setUTCFullYear",
+                                        "setUTCMonth", "setUTCDate", "setUTCHours", "setUTCMinutes",
+                                        "setUTCSeconds", "setUTCMilliseconds", "toUTCString", "toGMTString",
+                                        "toDateString", "toTimeString", "toLocaleString", "toLocaleDateString",
+                                        "toLocaleTimeString", "getYear", "setYear", NULL};
+    for (size_t i = 0; known[i]; i++) {
+      if (strcmp(method, known[i]) == 0) {
+        char msg[200];
+        int n = snprintf(msg, sizeof msg, "'Date.prototype.%s' on a dynamic value is not supported yet", method);
+        scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)n);
+        return NULL;
+      }
+    }
+  }
+  {
+    char msg[160];
+    int n = snprintf(msg, sizeof msg, "%s is not a function", what);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+  }
+  return NULL;
+}
+
+static ScrDyn *scr_date_dynh_get(void *h, const char *key, size_t key_len) {
+  (void)h;
+  (void)key;
+  (void)key_len;
+  return NULL; /* a Date has no own data properties: the caller answers undefined */
+}
+
+static bool scr_date_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)h;
+  (void)key;
+  (void)key_len;
+  (void)value;
+  return false;
+}
+
+static const ScrDynHandleOps scr_date_dynh_ops = {
+    "Date", &scr_date_retain_v, &scr_date_release_v, &scr_date_dynh_invoke, &scr_date_dynh_get,
+    &scr_date_dynh_set, NULL,
+};
+
+void scr_date_dyn_install(void) { scr_dyn_handle_install(SCR_DYNH_DATE, &scr_date_dynh_ops); }
