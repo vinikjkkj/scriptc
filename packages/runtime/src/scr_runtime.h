@@ -2112,6 +2112,8 @@ ScrMap *scr_set_new_union(void *(*elem_retain)(void *), void (*elem_release)(voi
  * indices first in ascending numeric order, then the rest in insertion
  * order. Fresh ScrStr* array (+1); the map is borrowed. */
 ScrArr *scr_map_keys_js_order(const ScrMap *m);
+/* The same walk INCLUDING symbol-spelled keys (`__@name@id`): the record-to-dyn converter alone asks, to carry them as hidden members. */
+ScrArr *scr_map_keys_js_order_all(const ScrMap *m);
 
 /* The same enumeration as SLOT INDICES (f64) rather than keys: each index
  * addresses one LIVE entry through the scr_map_iter_* accessors, so a
@@ -6140,6 +6142,14 @@ void *scr_dyn_handle_unbox(const ScrDyn *d, ScrDynHandleTag tag, const ScrDynPat
  * scr_dyn_template_to_string: a template span's ToString of an unknown — a
  * Symbol throws Node's TypeError, anything else is `walker`'s answer. */
 bool scr_dyn_is_symbol(const ScrDyn *d);
+/* A symbol-keyed member of a crossing record: hidden, non-enumerable (see
+ * scr_json.c). `set_member` is the overflow walk's store (ordinary keys set). */
+void scr_dyn_obj_set_symkey(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v, bool absent_ok);
+void scr_dyn_obj_set_member(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v);
+ScrStr *scr_dyn_symbol_descriptive(const ScrDyn *d);
+ScrStr *scr_dyn_template_to_string(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn *));
+/* String(unknown) at its explicit call site: a Symbol answers "Symbol(desc)". */
+ScrStr *scr_dyn_string_explicit(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn *));
 /* Keyed read on a HANDLE box (the emitted sc_dyn_key_get's arm): the
  * tag's modeled properties answer boxed values; everything else answers
  * the undefined singleton (the checked-dynamic tree's own-property stance — SEMANTICS.md)
