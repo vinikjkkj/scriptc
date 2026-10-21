@@ -7,7 +7,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
-import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
+import { MAX_GENERIC_INSTANCES, appendImplicitUndefinedReturn, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { protoClassArmOn, protoClassInfoFor } from "./proto-class-consume.js";
@@ -6629,6 +6629,10 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
       const declared = L.declareParams(fnLike.parameters, sig.params);
       params.push(...declared.params);
       const body = [...declared.prologue, ...L.lowerStmts(fnLike.body.statements)];
+      // A body that can complete without `return` answers undefined (a JS
+      // method `if (x) return cb(); this.n++;`): the same trailing return
+      // every function declaration and lambda gets.
+      appendImplicitUndefinedReturn(L, body, bodyReturn, locOf(fnLike));
       const fn: IrFunction = {
         name: `%${className}.${mName}`,
         params,
@@ -6688,6 +6692,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
       entry.member.body.forEachChild(checkThis);
       const declared = L.declareParams(entry.member.parameters, entry.params);
       const body = [...declared.prologue, ...L.lowerStmts(entry.member.body.statements)];
+      appendImplicitUndefinedReturn(L, body, bodyReturn, locOf(entry.member));
       const fn: IrFunction = {
         name: `%${info.def.name}.static:${name}`,
         params: declared.params,

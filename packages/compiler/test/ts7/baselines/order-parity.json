@@ -11120,6 +11120,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8150-method-completes-without-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/8150-method-completes-without-return.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/820-multi-decl.ts": {
    "order": [
     "<repo>/tests/corpus/820-multi-decl.ts"
