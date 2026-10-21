@@ -8383,6 +8383,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
             // fail; the member leaves the shape instead, exactly as it did
             // before it could map at all.
             if (auditBefore) specAuditReport(`PENDMEMBER ${p.name}`, ctx.unions, shapes, sMark, uMark, auditBefore);
+            mapTrace(`PENDMEMBER ${checker.typeToString(widened).slice(0, 40)} . ${p.name} : ${checker.typeToString(fieldTs).slice(0, 70)} -> reaches pending ${pend}`);
             closeSpec(false);
             continue;
           }
