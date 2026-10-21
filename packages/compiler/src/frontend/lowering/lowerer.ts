@@ -1256,6 +1256,29 @@ export function nullPromisePlaceholderArg(call: ts.CallExpression): boolean {
  * declaration (callable from anywhere) nor under an `export`. A mention is
  * any identifier of the same text (an over-approximation: it can only
  * widen more, never less). */
+/** `let x: T;` (no initializer, no `!`): tsc's definite-assignment analysis
+ * guards every DIRECT read, but a read inside a nested function is never
+ * checked. So such a binding can observe Node's `undefined` exactly when a
+ * function-like node in its scope mentions the name (any identifier of the
+ * same text: an over-approximation). */
+function mentionedInNestedFunction(decl: ts.VariableDeclaration): boolean {
+  if (!ts.isIdentifier(decl.name)) return false;
+  if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Let) === 0) return false;
+  const name = decl.name.text;
+  const list = decl.parent;
+  if (!ts.isVariableDeclarationList(list) || !ts.isVariableStatement(list.parent)) return false;
+  const container = list.parent.parent;
+  let found = false;
+  const visit = (n: ts.Node, inFn: boolean): void => {
+    if (found) return;
+    if (inFn && ts.isIdentifier(n) && n.text === name) { found = true; return; }
+    const fn = ts.isFunctionLike(n) || ts.isClassStaticBlockDeclaration(n);
+    ts.forEachChild(n, (c) => visit(c, inFn || fn));
+  };
+  visit(container, false);
+  return found;
+}
+
 function bangMayReadUnassigned(decl: ts.VariableDeclaration): boolean {
   if (!ts.isIdentifier(decl.name)) return true;
   const name = decl.name.text;
@@ -11846,7 +11869,7 @@ export class Lowerer {
     // null!` / `= undefined!`: both promise a later assignment while the
     // slot starts out holding Node's null/undefined.
     const ph = decl.initializer !== undefined ? this.placeholderUnitOf(decl.initializer) : null;
-    if (decl.initializer !== undefined ? ph === null : decl.exclamationToken === undefined) return null;
+    if (decl.initializer !== undefined ? ph === null : (decl.exclamationToken === undefined && !mentionedInNestedFunction(decl))) return null;
     if (this.unassignedSlotInit(type, loc) !== null) return null;
     if (
       type.kind === "dyn" || type.kind === "union" || type.kind === "map" || type.kind === "generator" ||
