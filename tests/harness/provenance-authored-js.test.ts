@@ -38,6 +38,7 @@ import {
   AUTHORED_JS_DEFAULT_PACKAGES,
   analyze,
   compile,
+  ProvenanceRefusalError,
   resolveProvenanceSources,
   setProvenanceSources,
 } from "@scriptc/compiler";
@@ -246,13 +247,31 @@ const depManifest = join(fixtureDir, "manifest-authoreddep.json");
 const depManifestOnly = join(fixtureDir, "manifest-authoreddep-only.json");
 
 describe("provenance: an authored package's own dependency", () => {
-  test("a dependency that cannot map keeps its refusal, naming the module", async () => {
+  test("a dependency that publishes no attestation and has no lockfile digest REFUSES the build, naming it", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifestOnly;
     process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoreddep";
-    setProvenanceSources(await resolveProvenanceSources(depEntry));
-    const { coverage } = analyze(depEntry);
-    const sc1010 = coverage.diagnostics.filter((d) => d.code === "SC1010");
-    expect(sc1010.map((d) => d.message)).toContain("the 'depts' module is not supported yet");
+    /* The registry is stubbed to answer 404 (no attestation) for everything:
+     * `depts` is reached only through the authored package's implementation
+     * twin, nothing locks it, so its bytes cannot be verified. That is a
+     * build-time refusal naming the package, never an island. */
+    const realFetch = globalThis.fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (): Promise<unknown> => ({
+      status: 404,
+      ok: false,
+      json: async () => ({}),
+    });
+    try {
+      let refusal: unknown = null;
+      try {
+        await resolveProvenanceSources(depEntry);
+      } catch (e) {
+        refusal = e;
+      }
+      expect(refusal).toBeInstanceOf(ProvenanceRefusalError);
+      expect((refusal as ProvenanceRefusalError).refusals.map((r) => r.package)).toContain("depts");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   test("the walk reaches it through the implementation twin, and require() resolves it", async () => {

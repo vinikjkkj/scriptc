@@ -4,7 +4,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { analyze, compile, compileC, compileLibrary, renderAll, renderCoverageLines, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
+import { analyze, compile, compileC, compileLibrary, ProvenanceRefusalError, renderAll, renderCoverageLines, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
 import { defaultExecutableName } from "./paths.js";
 
 const USAGE = `scriptc — TypeScript/JavaScript to native executables (experimental)
@@ -50,17 +50,15 @@ Options:
       --provenance-sources
                      EXPERIMENTAL: compile npm dependencies from their
                      provenance-attested SOURCE (fetched at the attested
-                     commit) as static program modules; packages without a
-                     usable attestation keep the island path (a note, never
-                     a failure).
-                     SCRIPTC_PROVENANCE_UNATTESTED=<pkg[,pkg...]> widens it:
-                     each NAMED package whose attestation the registry
-                     answers 404 for compiles from its INSTALLED TARBALL
-                     instead. Nothing attests those bytes came from any
-                     repository or commit, and the build says so -- their
-                     provenance line reads local://<dir> and their commit
-                     reads "unattested". Unset is the shipped behaviour;
-                     there is deliberately no all/1 spelling
+                     commit) as static program modules. A package whose
+                     attestation is unusable keeps the island path (a note).
+                     A package npm publishes NO attestation for (HTTP 404)
+                     compiles from its registry TARBALL, verified against the
+                     integrity digest in the project's pnpm-lock.yaml or
+                     package-lock.json; its provenance line reads
+                     npm-tarball://<name>@<version>. If that digest is
+                     missing, the bytes cannot be obtained, or they do not
+                     hash to it, the build is REFUSED naming the package
   -h, --help         show this help
   -v, --version      print the version
 `;
@@ -211,7 +209,17 @@ async function main(): Promise<number> {
   // source "paths" at creation): attestations and source trees fetch (or
   // ride the content-addressed cache / the offline manifest), the registry
   // installs, and every fallback prints as a note — never a failure.
-  const provenance = values["provenance-sources"] ? await resolveProvenanceSources(input) : null;
+  let provenance: Awaited<ReturnType<typeof resolveProvenanceSources>> | null = null;
+  if (values["provenance-sources"]) {
+    try {
+      provenance = await resolveProvenanceSources(input);
+    } catch (e) {
+      // A package with no attestation whose tarball could not be verified
+      // against the lockfile: refused at build time, never an island.
+      if (e instanceof ProvenanceRefusalError) fail(e.message);
+      throw e;
+    }
+  }
   // ALWAYS, including with null. The registry's own state starts null so a
   // fresh process cannot tell the difference, but the setter also hands the
   // diagnostics layer this run's fetch failures -- and leaving that unset
