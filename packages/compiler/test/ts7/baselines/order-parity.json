@@ -11428,6 +11428,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8209-prototype-assigned-methods.js": {
+   "order": [
+    "<repo>/tests/corpus/8209-prototype-assigned-methods.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
