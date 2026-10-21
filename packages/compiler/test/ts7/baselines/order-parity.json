@@ -11372,6 +11372,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8338-compound-assignment-through-a-computed-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/8338-compound-assignment-through-a-computed-key.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"

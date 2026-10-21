@@ -300,6 +300,8 @@ function diffieHellmanFnValue(L: Lowerer, loc: SrcLoc): IrExpr {
 }
 
 export function lowerExpr(L: Lowerer, expr: ts.Expression): IrExpr {
+    const pre = L.preLowered.size > 0 ? L.preLowered.get(expr) : undefined;
+    if (pre !== undefined) return pre;
     if (lowerExprDepth >= LOWER_EXPR_MAX_DEPTH) {
       L.unsupported("SC1090", expr, `expressions nested deeper than ${LOWER_EXPR_MAX_DEPTH} levels`);
     }
@@ -15215,7 +15217,7 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
         // ToPrimitive branch past the primitives — so an untyped JS
         // operand runs the real conversion (`-'3'` is -3, `-undefined` is
         // NaN) instead of refusing.
-        if (operand.type.kind === "dyn" && (isJsSourceFile(expr.getSourceFile()) || L.anyOrigin(expr.operand))) {
+        if (operand.type.kind === "dyn" && (isJsSourceFile(expr.getSourceFile()) || L.dynOperandOrigin(expr.operand))) {
           tonumWhy(expr, "unary-minus");
           const n: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [operand], type: F64, loc };
           return { kind: "unary", op: "-", operand: n, type: F64, loc };
@@ -15236,7 +15238,7 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
           return { kind: "libCall", fn: "num.fromString", args: [operand], type: F64, loc };
         }
         // Unary `+` over an untyped JS operand IS ToNumber, spelled.
-        if (operand.type.kind === "dyn" && (isJsSourceFile(expr.getSourceFile()) || L.anyOrigin(expr.operand))) {
+        if (operand.type.kind === "dyn" && (isJsSourceFile(expr.getSourceFile()) || L.dynOperandOrigin(expr.operand))) {
           tonumWhy(expr, "unary-plus");
           return { kind: "libCall", fn: "dyn.toNumber", args: [operand], type: F64, loc };
         }
@@ -15259,7 +15261,7 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
         // truncating wrap the f64 node already performs, so the dyn form
         // is the same node with the operand converted (`~'3'` is -4,
         // `~undefined` is -1) — the unary twin of the bitwise six.
-        if (operand.type.kind === "dyn" && (isJsSourceFile(expr.getSourceFile()) || L.anyOrigin(expr.operand))) {
+        if (operand.type.kind === "dyn" && (isJsSourceFile(expr.getSourceFile()) || L.dynOperandOrigin(expr.operand))) {
           tonumWhy(expr, "unary-tilde");
           const n: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [operand], type: F64, loc };
           return { kind: "unary", op: "~", operand: n, type: F64, loc };
@@ -16547,8 +16549,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // whole tier exists to avoid (see dyn.toNumber in nodes.ts).
       if (
         isJsSourceFile(expr.getSourceFile()) ||
-        (left.type.kind === "dyn" && L.anyOrigin(expr.left)) ||
-        (right.type.kind === "dyn" && L.anyOrigin(expr.right))
+        (left.type.kind === "dyn" && L.dynOperandOrigin(expr.left)) ||
+        (right.type.kind === "dyn" && L.dynOperandOrigin(expr.right))
       ) {
         const toNum = (e: IrExpr, why: string): IrExpr => {
           if (e.type.kind !== "dyn") return e;
@@ -21640,8 +21642,8 @@ export function compoundCombine(
   // back through the usual dyn conversion.
   if (
     (isJsSourceFile(blame.getSourceFile()) ||
-      (rhs.type.kind === "dyn" && L.anyOrigin(rhsNode)) ||
-      (slot.kind === "dyn" && L.anyOrigin(leftNode))) &&
+      (rhs.type.kind === "dyn" && L.dynOperandOrigin(rhsNode)) ||
+      (slot.kind === "dyn" && L.dynOperandOrigin(leftNode))) &&
     (slot.kind === "dyn" || rhs.type.kind === "dyn")
   ) {
     const toNum = (e: IrExpr, why: string): IrExpr => {

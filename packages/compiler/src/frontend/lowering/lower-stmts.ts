@@ -7347,6 +7347,13 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           locOf(expr),
         );
       }
+      if (ts.isElementAccessExpression(expr.operand)) {
+        const elem = lowerElemCompoundGeneral(
+          L, expr, expr.operand,
+          expr.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-", null,
+        );
+        if (elem) return elem;
+      }
       if (!ts.isIdentifier(expr.operand)) {
         L.unsupported("SC1090", expr.operand, "increment/decrement of non-variables");
       }
@@ -7562,6 +7569,46 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
    * Numeric elements only: the combined value is the f64 arithmetic the
    * variable path uses, and a typed array's store coerces it to the
    * element kind exactly as a plain `b[i] = v` would. */
+  /** `o[k] op= v` / `o[k]++` over every other receiver (a string-keyed
+   * record, an index-signature store, a checked-dynamic object, an array of
+   * strings or dyn values): the element READ lowers as usual, the combined
+   * value comes from compoundCombine (the variable path's operator rules),
+   * and the ordinary element WRITE lowers with that value standing in for
+   * its right-hand side (Lowerer.preLowered). `node` is the compound
+   * expression (or the ++/-- node); `rhsNode` is its right operand, null for
+   * ++/-- (the operand is 1). */
+  function lowerElemCompoundGeneral(
+    L: Lowerer, node: ts.Node, target: ts.ElementAccessExpression, compound: CompoundOp,
+    rhsNode: ts.Expression | null,
+  ): IrStmt | null {
+    if (target.questionDotToken !== undefined) return null;
+    if (!repeatableRecvExpr(L, target.expression)) return null;
+    if (!repeatableIndexExpr(target.argumentExpression)) return null;
+    const loc = locOf(node);
+    const read0 = L.lowerExpr(target);
+    // An index-signature read answers an ABSENT key with undefined in JS
+    // (`c[k] += 1` stores NaN, `s[k] += "!"` stores "undefined!"); the typed
+    // read has no undefined to answer with, so combine over the dyn-width
+    // read and let the element write coerce the result into its slot.
+    const wide = L.recordKeyReadAtSlotWidth(read0, DYN);
+    const read = wide ?? read0;
+    const rhs: IrExpr = rhsNode !== null ? L.lowerExpr(rhsNode) : { kind: "numLit", value: 1, type: F64, loc };
+    const combined = compoundCombine(L, compound, read, rhs, read.type, node, target, rhsNode ?? target, loc);
+    if (!combined) return null;
+    const value = combined.toSlot(combined.natural);
+    const key: ts.Node = rhsNode ?? node;
+    const fake = Object.create(node, {
+      left: { value: target },
+      right: { value: key },
+    }) as ts.BinaryExpression;
+    L.preLowered.set(key, value);
+    try {
+      return L.lowerElementWrite(fake);
+    } finally {
+      L.preLowered.delete(key);
+    }
+  }
+
   function lowerElemCompound(L: Lowerer, expr: ts.BinaryExpression, compound: CompoundOp): IrStmt | null {
     const target = expr.left as ts.ElementAccessExpression;
     if (target.questionDotToken !== undefined) return null;
@@ -7572,10 +7619,10 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const numericArray = recv.type.kind === "array" && recv.type.elem.kind === "f64";
     // bytes<buf> is an ArrayBuffer: opaque, no elements to index.
     const typedArray = recv.type.kind === "bytes" && recv.type.elem !== "buf";
-    if (!numericArray && !typedArray) return null;
+    if (!numericArray && !typedArray) return lowerElemCompoundGeneral(L, expr, target, compound, expr.right);
     const read = L.lowerExpr(target);
     const rhs = L.lowerExpr(expr.right);
-    if (read.type.kind !== "f64" || rhs.type.kind !== "f64") return null;
+    if (read.type.kind !== "f64" || rhs.type.kind !== "f64") return lowerElemCompoundGeneral(L, expr, target, compound, expr.right);
     const loc = locOf(expr);
     const value: IrExpr = { kind: "bin", op: compound, left: read, right: rhs, type: F64, loc };
     const index = L.lowerExpr(target.argumentExpression);
