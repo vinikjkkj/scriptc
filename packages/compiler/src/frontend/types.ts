@@ -508,6 +508,13 @@ export class ShapeRegistry {
     return id !== undefined && this.pendingRec.has(id);
   }
 
+  /** The id of the still-pending placeholder a back-reference minted for
+   * `t`, or undefined when there is none (never referenced, or finalized). */
+  pendingIdOf(t: ts.Type): string | undefined {
+    const id = this.recIds.get(t);
+    return id !== undefined && this.pendingRec.has(id) ? id : undefined;
+  }
+
   /** Completes a recursive placeholder with its computed field list and
    * registers the structural key (first writer wins — the key may already
    * belong to a structurally identical shape; the recursive id stays
@@ -6901,6 +6908,9 @@ export function referencesPendingPlaceholder(
   unions: UnionRegistry,
   shapes: ShapeRegistry,
   seen: Set<string> = new Set(),
+  /** A placeholder id that does not count: the enclosing frame's OWN record,
+   * which finalizes (or fails) together with the member that names it. */
+  allowPending?: string,
 ): string | null {
   switch (t.kind) {
     case "union": {
@@ -6908,29 +6918,29 @@ export function referencesPendingPlaceholder(
       if (seen.has(`u:${t.unionId}`)) return null;
       seen.add(`u:${t.unionId}`);
       for (const arm of unions.get(t.unionId)?.arms ?? []) {
-        const hit = referencesPendingPlaceholder(arm, unions, shapes, seen);
+        const hit = referencesPendingPlaceholder(arm, unions, shapes, seen, allowPending);
         if (hit) return hit;
       }
       return null;
     }
     case "record": {
-      if (shapes.isPending(t.shapeId)) return t.shapeId;
+      if (shapes.isPending(t.shapeId)) return t.shapeId === allowPending ? null : t.shapeId;
       if (seen.has(`r:${t.shapeId}`)) return null;
       seen.add(`r:${t.shapeId}`);
       for (const f of shapes.get(t.shapeId)?.fields ?? []) {
-        const hit = referencesPendingPlaceholder(f.type, unions, shapes, seen);
+        const hit = referencesPendingPlaceholder(f.type, unions, shapes, seen, allowPending);
         if (hit) return hit;
       }
       return null;
     }
     case "array":
-      return referencesPendingPlaceholder(t.elem, unions, shapes, seen);
+      return referencesPendingPlaceholder(t.elem, unions, shapes, seen, allowPending);
     case "func": {
       for (const p of t.params) {
-        const hit = referencesPendingPlaceholder(p, unions, shapes, seen);
+        const hit = referencesPendingPlaceholder(p, unions, shapes, seen, allowPending);
         if (hit) return hit;
       }
-      return referencesPendingPlaceholder(t.ret, unions, shapes, seen);
+      return referencesPendingPlaceholder(t.ret, unions, shapes, seen, allowPending);
     }
     default:
       return null;
@@ -8150,12 +8160,32 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // WaClientPluginDefinition later read back a null it never earned
       // and WaClientOptions stopped mapping entirely.
       let pt: IrType | null = null;
+      let outerResolverHit = false;
       // The attempt is closed EXACTLY ONCE, on every path out of this block
       // including a throw: the `continue`s below retract it, the finally
       // keeps it. An unclosed mark would leave the registry journaling for
       // the rest of the run.
       try {
-        const tryCtx: TypeMapperCtx = generic ? { ...ctx, speculative: true } : ctx;
+        // Tag every answer the ENCLOSING mapping's type-parameter resolvers
+        // give during this attempt (see the counter restore below): a hit
+        // means the attempt depended on an outer instantiation.
+        const tagOuter = <A, R>(f: ((a: A) => R | null) | undefined): ((a: A) => R | null) | undefined =>
+          f === undefined
+            ? undefined
+            : (a: A): R | null => {
+                const r = f(a);
+                if (r !== null) outerResolverHit = true;
+                return r;
+              };
+        const tryCtx: TypeMapperCtx = generic
+          ? {
+              ...ctx,
+              speculative: true,
+              ...(ctx.resolveTypeParam !== undefined ? { resolveTypeParam: tagOuter(ctx.resolveTypeParam)! } : {}),
+              ...(ctx.resolveTypeParamTs !== undefined ? { resolveTypeParamTs: tagOuter(ctx.resolveTypeParamTs)! } : {}),
+              ...(ctx.resolveTypeParamTsArms !== undefined ? { resolveTypeParamTsArms: tagOuter(ctx.resolveTypeParamTsArms)! } : {}),
+            }
+          : ctx;
         pt = mapType(fieldTs, tryCtx);
         // A field DECLARED in a `.d.ts` whose IMPLEMENTATION twin this build
         // COMPILES: the twin is the only producer the slot can ever have, and
@@ -8187,7 +8217,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
           }
         }
         if (generic && pt !== null) {
-          const pend = referencesPendingPlaceholder(pt, ctx.unions, shapes);
+          const pend = referencesPendingPlaceholder(pt, ctx.unions, shapes, new Set(), shapes.pendingIdOf(widened));
           if (pend !== null) {
             // The slot would keep a placeholder whose own frame may still
             // fail; the member leaves the shape instead, exactly as it did
@@ -8199,6 +8229,22 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
         }
       } finally {
         closeSpec(true);
+      }
+      // A KEPT generic-member attempt resolved type parameters, and each
+      // resolution bumped the sensitivity counters. When no resolver of the
+      // ENCLOSING mapping answered during the attempt (outerResolverHit), every
+      // one of those came from the member's own constraint erasure (constraintErasedCtx binds only the
+      // signature's parameters), which is closed: the answer depends on the
+      // member's declaration and on nothing about the instantiation that
+      // reached this record. Leaving the counters moved made the recursive-
+      // shape fence read the frame as context-sensitive, so a record with a
+      // `this`-returning member AND a generic one (every EventEmitter
+      // subclass) finalized its placeholder and then refused. A failed attempt
+      // already restores them; a kept one restores them too, but only when no
+      // OUTER resolver answered, so nothing but the closed erasure moved them.
+      if (generic && pt !== null && !outerResolverHit) {
+        contextResolutions = ctxResAtTry;
+        memoSensitivity = memoSensAtTry;
       }
       // tsgo PANICS computing `readonly []` through the symbol-type query
       // (the TupleType conversion — the facade's panic fence answers
