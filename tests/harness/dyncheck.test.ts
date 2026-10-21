@@ -1153,37 +1153,42 @@ console.log("recovered");
     expect(r.stdout).toBe("gamma p=P\ngamma q=Q\nTypeError true\nrecovered\n");
   });
 
-  test("a unit smuggled into a PLAIN non-nullable slot throws the stranded trap catchably", async () => {
-    // The stranded-UNIT trap without a union in sight: `null!` / `null as
-    // any as T` into a plain typed slot (string, array, class, function).
-    // Node lets the impossible value ride until it is used; the flow
-    // throws here instead (divergence 38's stance extended — SEMANTICS.md
-    // 335).
+  test("a unit smuggled into a PLAIN non-nullable binding fails at its use with Node's TypeError", async () => {
+    // `null!` / `undefined!` into a plain typed binding (string, array,
+    // function). Node lets the value ride and throws where it is USED, with
+    // its own message; the binding now holds the null/undefined (the
+    // `T | null` / `T | undefined` slot) and the use throws exactly that
+    // TypeError, byte for byte (probed against Node v24.15.0).
     const r = await compileAndRun(
       "plain-stranded-unit-trap",
       `try {
   const s: string = null!;
   console.log("unreachable", s.length);
 } catch (e) {
-  console.log((e as Error).name, (e as Error).message.includes("not representable in a 'string' slot"));
+  console.log((e as Error).name, (e as Error).message);
 }
 try {
   const a: number[] = undefined!;
   console.log("unreachable", a.length);
 } catch (e) {
-  console.log("array:", (e as Error).name);
+  console.log("array:", (e as Error).name, (e as Error).message);
 }
 try {
   const f: () => number = null!;
   console.log("unreachable", f());
 } catch (e) {
-  console.log("func:", (e as Error).name);
+  console.log("func:", (e as Error).name, (e as Error).message);
 }
 console.log("recovered");
 `,
     );
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toBe("TypeError true\narray: TypeError\nfunc: TypeError\nrecovered\n");
+    expect(r.stdout).toBe(
+      "TypeError Cannot read properties of null (reading 'length')\n" +
+        "array: TypeError Cannot read properties of undefined (reading 'length')\n" +
+        "func: TypeError f is not a function\n" +
+        "recovered\n",
+    );
   });
 
   test("a keyed read into a REQUIRED field throws catchably when the map does not hold the key", async () => {
