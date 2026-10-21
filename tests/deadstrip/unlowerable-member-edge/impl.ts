@@ -11,7 +11,7 @@ export class Impl {
         // ON, so the two members AFTER it resolve `onlyBound` and
         // `Sink.take` — whose only edges these are.
         this.value = buildDeps({
-            probe: (): number => Reflect.ownKeys({ a: 1 }).length,
+            probe: (): number => (Reflect.getPrototypeOf({ a: 1 }) === null ? 1 : 0),
             bound: this.onlyBound.bind(this),
             arrow: (n: number): number => this.sink.take(n)
         })

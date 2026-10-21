@@ -10754,8 +10754,13 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
   function lowerObjectStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
-    if (!L.isStdlibGlobal(access.expression, "Object")) return null;
-    const member = access.name.text;
+    // Reflect.ownKeys(o) is the own-NAMES walk (Object.getOwnPropertyNames)
+    // over everything this lowering can hold: no symbol-keyed or
+    // non-enumerable member exists outside it.
+    const reflectOwnKeys =
+      access.name.text === "ownKeys" && call.arguments.length === 1 && L.isStdlibGlobal(access.expression, "Reflect");
+    if (!reflectOwnKeys && !L.isStdlibGlobal(access.expression, "Object")) return null;
+    const member = reflectOwnKeys ? "getOwnPropertyNames" : access.name.text;
     if (member === "defineProperty") {
       const slot = lowerDefinePropHiddenSlot(L, call);
       if (slot) return slot;
@@ -11422,7 +11427,11 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // Unit-typed arguments (Object.keys(null)) ride the same runtime
       // walk: it throws Node's catchable TypeError.
       const isUnit = probed !== null && probed !== undefined && isUnitType(probed.type);
-      if (isDyn || isUnit) {
+      // A static ARRAY's own names are its indices (and `length`), exactly
+      // what the dyn tree's walk answers over the array copied in.
+      const isArr =
+        objMember === "keys" && probed?.type.kind === "array" && L.dynConvertible(probed.type);
+      if (isDyn || isUnit || isArr) {
         const fn = objMember === "keys" ? "dyn.objKeys" : objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
         let v = L.lowerExpr(argNode);
         if (v.type.kind !== "dyn") v = { kind: "dynFrom", value: v, type: DYN, loc: locOf(call) };
@@ -11430,7 +11439,11 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           // The own-NAMES walk, which is the keys walk plus `length` for
           // the two kinds that carry it as an own property.
           const helper = dynOwnNamesHelper(L, locOf(call));
-          return { kind: "call", callee: helper, args: [v], type: DYN, loc: locOf(call) };
+          const names: IrExpr = { kind: "call", callee: helper, args: [v], type: DYN, loc: locOf(call) };
+          // Reflect.ownKeys is typed `(string | symbol)[]`; the dyn tree holds
+          // string keys only, so it crosses as the checked string array and
+          // widens into the checker's element union like any other array.
+          return reflectOwnKeys ? L.coerceToExpected(names, arrayOf(STRING)) : names;
         }
         return { kind: "libCall", fn, args: [v], type: DYN, loc: locOf(call) };
       }
@@ -11492,7 +11505,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // Index-signature (overflow-carrying) shapes: the runtime walk —
       // declared fields first, then the overflow in JS own-key order
       // (lowerObjectIterOverIndexShape in lower-containers).
-      return lowerObjectIterOverIndexShape(L, call, objMember, argIr, shape);
+      return lowerObjectIterOverIndexShape(L, call, objMember, argIr, shape, reflectOwnKeys ? arrayOf(STRING) : undefined);
     }
     const loc = locOf(call);
     const resultT = L.irTypeOf(call);

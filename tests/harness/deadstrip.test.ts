@@ -75,7 +75,7 @@ describe("an unloweraable member is a build error, not a deferred trap", () => {
     const diags = await diagnosticsOf("tests/deadstrip/unlowerable-member-edge/main.ts");
     expect(diags).toHaveLength(1);
     expect(diags[0]).toContain("SC2020");
-    expect(diags[0]).toContain("Reflect.ownKeys");
+    expect(diags[0]).toContain("Reflect.getPrototypeOf");
   });
 });
 
