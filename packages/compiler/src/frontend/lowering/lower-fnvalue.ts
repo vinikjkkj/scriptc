@@ -207,10 +207,20 @@ const BUILTIN_FN_VALUES: Readonly<Record<string, BuiltinFnValue | undefined>> = 
   },
 };
 
+/** OWN-property read of one of the tables above. The tables are plain
+ * object literals, so a bare `table[name]` for an identifier called
+ * `hasOwnProperty`, `toString`, `valueOf` or `constructor` answers the
+ * INHERITED Object.prototype function, which then ran as a "resolver" and
+ * crashed the compiler (sql-escaper's `const hasOwnProperty =
+ * Object.prototype.hasOwnProperty`). */
+function ownRow<T>(table: Readonly<Record<string, T | undefined>>, name: string): T | undefined {
+  return Object.prototype.hasOwnProperty.call(table, name) ? table[name] : undefined;
+}
+
 /** Does `name` have a value form in this build? */
 export function hasBuiltinFnValue(L: Lowerer, name: string): boolean {
-  if (BUILTIN_FN_VALUE_RESOLVERS[name] !== undefined) return !L.dynamic;
-  const entry = BUILTIN_FN_VALUES[name];
+  if (ownRow(BUILTIN_FN_VALUE_RESOLVERS, name) !== undefined) return !L.dynamic;
+  const entry = ownRow(BUILTIN_FN_VALUES, name);
   if (entry === undefined) return false;
   return !(entry.staticOnly === true && L.dynamic);
 }
@@ -220,9 +230,9 @@ export function hasBuiltinFnValue(L: Lowerer, name: string): boolean {
  * checker's. Null when the name has no value form here, or when the
  * resolver refused the shape. */
 function entryFor(L: Lowerer, name: string, mapped: IrType | null): BuiltinFnValue | null {
-  const resolver = BUILTIN_FN_VALUE_RESOLVERS[name];
+  const resolver = ownRow(BUILTIN_FN_VALUE_RESOLVERS, name);
   if (resolver !== undefined) return mapped === null ? null : resolver(L, mapped);
-  return BUILTIN_FN_VALUES[name] ?? null;
+  return ownRow(BUILTIN_FN_VALUES, name) ?? null;
 }
 
 /** THE GATE, and the reason this file cannot produce a silently wrong
