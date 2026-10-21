@@ -11013,6 +11013,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7832-tostring-narrowed-union-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7832-tostring-narrowed-union-arms.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
