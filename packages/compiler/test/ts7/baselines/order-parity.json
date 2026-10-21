@@ -14614,6 +14614,18 @@
     "<repo>/tests/corpus/8407-string-plus-over-absent-operands-follows-the-javascript-rules.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8408-a-map-or-set-field-assigned-past-the-constructor-is-null-until-assigned.ts": {
+   "order": [
+    "<repo>/tests/corpus/8408-a-map-or-set-field-assigned-past-the-constructor-is-null-until-assigned.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8409-optional-chaining-typeof-and-nullish-over-an-unassigned-map-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/8409-optional-chaining-typeof-and-nullish-over-an-unassigned-map-field.ts"
+   ],
+   "diags": []
   }
  }
 }
