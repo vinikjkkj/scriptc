@@ -781,8 +781,7 @@ static bool dyn_str_proto_unimpl(const char *m) {
  * its by-name decline. Fencing them here keeps the two spellings saying
  * the same thing about the same name. */
 static bool dyn_num_proto_unimpl(const char *m) {
-  static const char *names[] = { "toFixed", "toExponential", "toPrecision",
-    "toLocaleString", NULL };
+  static const char *names[] = { "toFixed", "toExponential", "toPrecision", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
@@ -796,7 +795,7 @@ static bool dyn_arr_proto_unimpl(const char *m) {
    * throws "not supported" before that guard can fire. */
   static const char *names[] = { "reduce", "reduceRight", "flat",
     "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
-    "with", "toLocaleString", NULL };
+    "with", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
