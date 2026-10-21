@@ -7835,6 +7835,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_date_utc_seconds(${arg(0)})`);
           case "date.getUTCMilliseconds":
             return finish(`scr_date_utc_ms(${arg(0)})`);
+          case "date.getUTCDay":
+            return finish(`scr_date_utc_day(${arg(0)})`);
+          // LocalTime(t) and getTimezoneOffset read the HOST zone database;
+          // NaN on an invalid Date. Never throw.
+          case "date.localTime":
+            return finish(`scr_date_local_time(${arg(0)})`);
+          case "date.tzOffset":
+            return finish(`scr_date_tz_offset(${arg(0)})`);
           case "text.decode":
             // WHATWG utf-8 decode with the leading BOM stripped
             // (scr_bytes.c). Borrowed bytes; +1 string; never throws.

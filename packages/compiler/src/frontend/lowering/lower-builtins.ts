@@ -5480,6 +5480,19 @@ let digestInputValueDispatches = 0;
     getUTCMinutes: "date.getUTCMinutes",
     getUTCSeconds: "date.getUTCSeconds",
     getUTCMilliseconds: "date.getUTCMilliseconds",
+    getUTCDay: "date.getUTCDay",
+  };
+
+  /** The LOCAL getters: the matching UTC read applied to LocalTime(t). */
+  const DATE_LOCAL_GETTERS: Readonly<Record<string, IrLibFn>> = {
+    getFullYear: "date.getUTCFullYear",
+    getMonth: "date.getUTCMonth",
+    getDate: "date.getUTCDate",
+    getHours: "date.getUTCHours",
+    getMinutes: "date.getUTCMinutes",
+    getSeconds: "date.getUTCSeconds",
+    getMilliseconds: "date.getUTCMilliseconds",
+    getDay: "date.getUTCDay",
   };
 
   export function lowerDateMethodCall(L: Lowerer, call: ts.CallExpression,
@@ -5489,9 +5502,11 @@ let digestInputValueDispatches = 0;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
     const getter = DATE_UTC_GETTERS[name];
+    const localGetter = DATE_LOCAL_GETTERS[name];
     const isValue = name === "getTime" || name === "valueOf";
     const isIso = name === "toISOString";
-    if (!isValue && !isIso && getter === undefined) return null;
+    const isTzOffset = name === "getTimezoneOffset";
+    if (!isValue && !isIso && !isTzOffset && getter === undefined && localGetter === undefined) return null;
     if (call.arguments.length !== 0) {
       L.noLowering(`Date.${name} with ${call.arguments.length} arguments`, call);
     }
@@ -5499,6 +5514,11 @@ let digestInputValueDispatches = 0;
     const recv = L.lowerExpr(access.expression);
     const ms: IrExpr = { kind: "libCall", fn: "date.value", args: [recv], type: F64, loc };
     if (isValue) return ms;
+    if (isTzOffset) return { kind: "libCall", fn: "date.tzOffset", args: [ms], type: F64, loc };
+    if (localGetter !== undefined) {
+      const local: IrExpr = { kind: "libCall", fn: "date.localTime", args: [ms], type: F64, loc };
+      return { kind: "libCall", fn: localGetter, args: [local], type: F64, loc };
+    }
     if (isIso) {
       return { kind: "libCall", fn: "date.toISOString", args: [ms], type: STRING, loc };
     }
@@ -8902,43 +8922,18 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     const sym = L.resolveValueSymbol(recv.expression);
     if (!sym || sym.name !== "Date" || !L.isStdlibSymbol(sym)) return null;
     if (access.name.text === "getHours") {
-      // The composed `new Date().getHours()` read — the LOCAL-time hour,
-      // and the first member on this surface that is not a pure function
-      // of its milliseconds: the answer needs the offset the host's zone
-      // was at that instant, which is a table lookup and not arithmetic.
-      //
-      // ONLY THE ZERO-ARGUMENT FORM, and the reason is measured rather
-      // than cautious. The runtime reads the offset through the
-      // platform's `localtime`, and the platforms disagree about HISTORY:
-      // glibc carries the full zone database, while Windows' CRT applies
-      // the zone's CURRENT rule to every instant. Sampling one instant
-      // every ~9 days from 2000 to 2030 on a Windows host in
-      // America/Sao_Paulo, 260 of 1200 disagreed with Node — every one of
-      // them inside a DST period the zone no longer observes. An
-      // arbitrary-millisecond form would therefore be a SILENT WRONG
-      // ANSWER on one platform and exact on another, and the compiler
-      // cannot tell them apart: the zone database belongs to the machine
-      // that RUNS the binary, not the one that builds it.
-      //
-      // `new Date()` is the one instant no zone database can be wrong
-      // about — the current offset is what the host is using right now,
-      // which is the same thing Node's ICU reports for the present. So
-      // the live-clock form lowers and every other spelling keeps a
-      // fence that names why.
+      // The composed `new Date().getHours()` read -- the LOCAL-time hour of
+      // the live clock. Any `new Date(arg).getHours()` is declined here (null)
+      // and served by lowerDateMethodCall over the Date VALUE, whose local
+      // fields read the host zone database per instant (scr_date.c's
+      // scr_date_tza: POSIX localtime/gmtime, Windows
+      // SystemTimeToTzSpecificLocalTimeEx, which carries zone history where
+      // the CRT's localtime does not).
       if (call.arguments.length !== 0) {
         L.noLowering("getHours with arguments", call);
       }
       const hourCtorArgs = recv.arguments ?? [];
-      if (hourCtorArgs.length !== 0) {
-        L.noLowering(
-          "new Date(...) with an argument composed with .getHours()",
-          recv,
-          "only the live-clock form lowers — new Date().getHours(); the local offset for an " +
-            "arbitrary instant is the RUN host's zone history, which this compiler cannot see " +
-            "(Windows applies the current rule to every instant and disagrees with Node across " +
-            "past DST periods). Read the UTC field instead: new Date(ms).toISOString()",
-        );
-      }
+      if (hourCtorArgs.length !== 0) return null;
       const hourMs: IrExpr = { kind: "libCall", fn: "date.now", args: [], type: F64, loc };
       return { kind: "libCall", fn: "date.getHours", args: [hourMs], type: F64, loc };
     }
