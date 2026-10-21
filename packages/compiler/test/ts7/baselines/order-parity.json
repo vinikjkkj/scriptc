@@ -10983,6 +10983,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7802-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts": {
+   "order": [
+    "<repo>/tests/corpus/7802-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
