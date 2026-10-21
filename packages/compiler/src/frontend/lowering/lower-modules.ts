@@ -84,6 +84,7 @@ function literalMethodsReadThis(lit: ts.ObjectLiteralExpression): boolean {
 function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
   const syms: ts.Symbol[] = [];
   const dynReturnSyms: ts.Symbol[] = [];
+  const thisSyms: ts.Symbol[] = [];
   ts.walkPreorder(sf, (n) => {
     if (
       ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined &&
@@ -96,6 +97,47 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
     // `const o = { n: 1, inc() { this.n++ } }`: the object must stay ONE
     // mutable identity the methods write through, which only the dyn
     // object is (a static record would copy across the receiver).
+    // `new Proxy(user, handler)` over a never-reassigned binding initialized
+    // by an object or array literal: the binding itself becomes the dyn value
+    // (one identity shared by the proxy and every direct use), instead of a
+    // static record the crossing would copy.
+    if (
+      ts.isNewExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "Proxy" &&
+      L.isStdlibGlobal(n.expression, "Proxy") && n.arguments !== undefined && n.arguments.length === 2
+    ) {
+      let t: ts.Expression = n.arguments[0]!;
+      while (ts.isParenthesizedExpression(t) || ts.isAsExpression(t) || ts.isTypeAssertion(t)) t = t.expression;
+      if (ts.isIdentifier(t)) {
+        const ts0 = L.checker.getSymbolAtLocation(t);
+        const decl = ts0 === undefined ? undefined : L.checker.declarationsOf(ts0)[0];
+        if (decl !== undefined && ts.isVariableDeclaration(decl) && ts.isIdentifier(decl.name) && decl.initializer !== undefined) {
+          let init: ts.Expression = decl.initializer;
+          while (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || ts.isTypeAssertion(init)) init = init.expression;
+          if ((ts.isObjectLiteralExpression(init) || ts.isArrayLiteralExpression(init)) && bindingNeverReassigned(L, ts0!, decl)) {
+            syms.push(ts0!);
+            L.dynProxyTargetLiterals.add(init);
+            if (ts.isObjectLiteralExpression(init)) L.dynObjectLiterals.add(init);
+          }
+        }
+      }
+    }
+    // `const { proxy, revoke } = Proxy.revocable(target, handler)`: both
+    // bindings hold checked-dynamic values.
+    if (
+      ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name) && n.initializer !== undefined &&
+      ts.isCallExpression(n.initializer) && ts.isPropertyAccessExpression(n.initializer.expression) &&
+      n.initializer.expression.name.text === "revocable" && ts.isIdentifier(n.initializer.expression.expression) &&
+      n.initializer.expression.expression.text === "Proxy" && L.isStdlibGlobal(n.initializer.expression.expression, "Proxy")
+    ) {
+      if (!L.chainNarrowedType.has(n.initializer)) L.chainNarrowedType.set(n.initializer, L.checker.getAnyType());
+      for (const el of n.name.elements) {
+        const enm = el.name;
+        if (enm !== undefined && ts.isIdentifier(enm)) {
+          const s = L.checker.getSymbolAtLocation(enm);
+          if (s !== undefined && bindingNeverReassigned(L, s, n)) syms.push(s);
+        }
+      }
+    }
     if (ts.isObjectLiteralExpression(n) && literalNeedsDynThis(n)) {
       L.dynObjectLiterals.add(n);
       L.dynThisLiterals.add(n);
@@ -121,7 +163,7 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
       while (ts.isParenthesizedExpression(init)) init = init.expression;
       if (ts.isObjectLiteralExpression(init) && literalNeedsDynThis(init)) {
         const s = L.checker.getSymbolAtLocation(n.name);
-        if (s !== undefined && bindingNeverReassigned(L, s, n)) syms.push(s);
+        if (s !== undefined && bindingNeverReassigned(L, s, n)) { syms.push(s); thisSyms.push(s); }
       }
     }
     return undefined;
@@ -136,7 +178,7 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
           const cs = L.checker.getSymbolAtLocation(init.expression);
           if (cs !== undefined && dynReturnSyms.includes(cs)) {
             const s = L.checker.getSymbolAtLocation(n.name);
-            if (s !== undefined && bindingNeverReassigned(L, s, n)) syms.push(s);
+            if (s !== undefined && bindingNeverReassigned(L, s, n)) { syms.push(s); thisSyms.push(s); }
           }
         }
       }
@@ -149,6 +191,7 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
   // Post-order, so a member chain rooted at a marked binding (`o.x`,
   // `o.a.b`) or at a `this` inside a dyn-built literal's method is any-typed
   // too: the values it reads are checked-dynamic whatever the checker says.
+  const chainRoots = new Set<ts.Node>();
   const mark = (n: ts.Node, inThisLit: boolean): void => {
     const here = inThisLit || (ts.isObjectLiteralExpression(n) && L.dynThisLiterals.has(n));
     ts.forEachChild(n, (c) => {
@@ -163,28 +206,30 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
       const s = L.checker.getSymbolAtLocation(n);
       if (s !== undefined && syms.includes(s) && !L.chainNarrowedType.has(n)) {
         L.chainNarrowedType.set(n, anyT);
+        if (thisSyms.includes(s)) chainRoots.add(n);
       }
     }
     if (n.kind === ts.SyntaxKind.ThisKeyword && inThisLit && !L.chainNarrowedType.has(n)) {
       L.chainNarrowedType.set(n, anyT);
+      chainRoots.add(n);
     }
     if (
       (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) &&
-      L.chainNarrowedType.get(n.expression) === anyT && !L.chainNarrowedType.has(n) &&
-      L.dynThisLiterals.size > 0
+      chainRoots.has(n.expression) && !L.chainNarrowedType.has(n)
     ) {
       L.chainNarrowedType.set(n, anyT);
+      chainRoots.add(n);
     }
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && dynReturnSyms.length > 0 && !L.chainNarrowedType.has(n)) {
       const cs = L.checker.getSymbolAtLocation(n.expression);
-      if (cs !== undefined && dynReturnSyms.includes(cs)) L.chainNarrowedType.set(n, anyT);
+      if (cs !== undefined && dynReturnSyms.includes(cs)) { L.chainNarrowedType.set(n, anyT); chainRoots.add(n); }
     }
     if (
       ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
-      L.chainNarrowedType.get(n.expression) === anyT && !L.chainNarrowedType.has(n) &&
-      L.dynThisLiterals.size > 0
+      chainRoots.has(n.expression) && !L.chainNarrowedType.has(n)
     ) {
       L.chainNarrowedType.set(n, anyT);
+      chainRoots.add(n);
     }
   };
   mark(sf, false);
@@ -1286,6 +1331,7 @@ function jsDynHoldableInitializer(L: Lowerer, init: ts.Expression | undefined): 
   if (ts.isNewExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "Proxy" &&
       L.isStdlibGlobal(e.expression, "Proxy")) return true;
   if (ts.isObjectLiteralExpression(e) && L.dynThisLiterals.has(e)) return true;
+  if ((ts.isObjectLiteralExpression(e) || ts.isArrayLiteralExpression(e)) && L.dynProxyTargetLiterals.has(e)) return true;
   if (
     (ts.isCallExpression(e) || ts.isPropertyAccessExpression(e) || ts.isIdentifier(e)) &&
     (L.typeOf(e).flags & ts.TypeFlags.Any) !== 0

@@ -1770,6 +1770,10 @@ export class Lowerer {
   readonly dynThisLiterals = new Set<ts.ObjectLiteralExpression>();
   /** Functions that return such a literal: their ABI return is dyn. */
   readonly dynReturnFnNodes = new Set<ts.Node>();
+  /** Literals initializing a binding a `new Proxy(binding, ...)` targets. */
+  readonly dynProxyTargetLiterals = new Set<ts.Expression>();
+  /** Array literals a Proxy trap returns: built as dyn arrays. */
+  readonly dynArrayLiterals = new Set<ts.ArrayLiteralExpression>();
   /** Already-lowered values standing in for a node: a compound element
    * write (`o[k] += v`, `o[k]++`) computes the combined value from the
    * element read, then hands the ordinary element-write lowering that value
@@ -13962,6 +13966,10 @@ export class Lowerer {
       if (this.chainNarrowedType.has(p.name)) continue;
       this.chainNarrowedType.set(p.name, this.checker.getAnyType());
       out.push(p.name);
+      if (!this.paramIrOverrides.has(p)) {
+        this.paramIrOverrides.set(p, DYN);
+        out.push(p);
+      }
       const psym = this.resolveValueSymbol(p.name);
       if (psym !== null) {
         ts.walkPreorder(fn.body, (n) => {

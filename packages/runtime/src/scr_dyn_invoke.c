@@ -989,6 +989,151 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
   return scr_dyn_new_func(clo, dyn_bound_intrinsic_thunk, 0, "()", "bound");
 }
 
+/* Array.prototype.push/pop/shift/unshift run as the SPEC's generic algorithm
+ * over the proxy (this = the proxy), so every [[Get]]/[[Set]]/[[Has]]/
+ * [[Delete]] they make is observable through the traps, in the spec's order.
+ * Set and Delete are the throwing forms (Set(O, P, V, true)), so the strict
+ * flag is forced for their duration. Result +1, or NULL with the exception
+ * pending. */
+static double px_arr_len(ScrDyn *p) {
+  ScrStr *k = scr_str_new("length", 6);
+  ScrDyn *l = scr_dyn_proxy_get(p, k);
+  scr_str_release(k);
+  if (l == NULL) return -1;
+  double n = scr_dyn_to_number(l);
+  scr_dyn_release(l);
+  if (scr_exc_pending()) return -1;
+  if (!(n > 0)) return 0;
+  if (n > 9007199254740991.0) n = 9007199254740991.0;
+  return n == n ? (double)(long long)n : 0;
+}
+
+static bool px_arr_set(ScrDyn *p, double idx, ScrDyn *v, bool is_len) {
+  ScrStr *k = is_len ? scr_str_new("length", 6) : scr_f64_to_scrstr(idx);
+  bool saved = p->v.proxy.strict;
+  p->v.proxy.strict = true;
+  scr_dyn_proxy_set(p, k, v);
+  p->v.proxy.strict = saved;
+  scr_str_release(k);
+  return !scr_exc_pending();
+}
+
+static bool px_arr_setnum(ScrDyn *p, double n) {
+  ScrDyn *v = scr_dyn_new_num(n);
+  bool ok = px_arr_set(p, 0, v, true);
+  scr_dyn_release(v);
+  return ok;
+}
+
+static bool px_arr_delete(ScrDyn *p, double idx) {
+  ScrStr *k = scr_f64_to_scrstr(idx);
+  bool saved = p->v.proxy.strict;
+  p->v.proxy.strict = true;
+  (void)scr_dyn_proxy_delete(p, k);
+  p->v.proxy.strict = saved;
+  scr_str_release(k);
+  return !scr_exc_pending();
+}
+
+static ScrDyn *px_arr_get(ScrDyn *p, double idx) {
+  ScrStr *k = scr_f64_to_scrstr(idx);
+  ScrDyn *v = scr_dyn_proxy_get(p, k);
+  scr_str_release(k);
+  return v;
+}
+
+static bool px_arr_has(ScrDyn *p, double idx) {
+  ScrStr *k = scr_f64_to_scrstr(idx);
+  bool h = scr_dyn_proxy_has(p, k);
+  scr_str_release(k);
+  return h;
+}
+
+/* Answers true with *out set (+1 or NULL pending) when `name` is one of the
+ * four mutators. */
+static bool px_array_mutator(ScrDyn *p, const char *name, ScrDyn *const *args, size_t argc, ScrDyn **out) {
+  bool is_push = strcmp(name, "push") == 0, is_pop = strcmp(name, "pop") == 0;
+  bool is_shift = strcmp(name, "shift") == 0, is_unshift = strcmp(name, "unshift") == 0;
+  if (!is_push && !is_pop && !is_shift && !is_unshift) return false;
+  double len = px_arr_len(p);
+  if (len < 0) { *out = NULL; return true; }
+  if (is_push) {
+    for (size_t i = 0; i < argc; i++)
+      if (!px_arr_set(p, len + (double)i, args[i], false)) { *out = NULL; return true; }
+    if (!px_arr_setnum(p, len + (double)argc)) { *out = NULL; return true; }
+    *out = scr_dyn_new_num(len + (double)argc);
+    return true;
+  }
+  if (is_pop) {
+    if (len == 0) {
+      if (!px_arr_setnum(p, 0)) { *out = NULL; return true; }
+      *out = scr_dyn_undefined();
+      return true;
+    }
+    ScrDyn *el = px_arr_get(p, len - 1);
+    if (el == NULL) { *out = NULL; return true; }
+    if (!px_arr_delete(p, len - 1) || !px_arr_setnum(p, len - 1)) {
+      scr_dyn_release(el);
+      *out = NULL;
+      return true;
+    }
+    *out = el;
+    return true;
+  }
+  if (is_shift) {
+    if (len == 0) {
+      if (!px_arr_setnum(p, 0)) { *out = NULL; return true; }
+      *out = scr_dyn_undefined();
+      return true;
+    }
+    ScrDyn *first = px_arr_get(p, 0);
+    if (first == NULL) { *out = NULL; return true; }
+    for (double k = 1; k < len; k++) {
+      if (px_arr_has(p, k)) {
+        ScrDyn *v = px_arr_get(p, k);
+        if (v == NULL) { scr_dyn_release(first); *out = NULL; return true; }
+        bool ok = px_arr_set(p, k - 1, v, false);
+        scr_dyn_release(v);
+        if (!ok) { scr_dyn_release(first); *out = NULL; return true; }
+      } else if (!px_arr_delete(p, k - 1)) {
+        scr_dyn_release(first);
+        *out = NULL;
+        return true;
+      }
+      if (scr_exc_pending()) { scr_dyn_release(first); *out = NULL; return true; }
+    }
+    if (!px_arr_delete(p, len - 1) || !px_arr_setnum(p, len - 1)) {
+      scr_dyn_release(first);
+      *out = NULL;
+      return true;
+    }
+    *out = first;
+    return true;
+  }
+  /* unshift */
+  if (argc > 0) {
+    for (double k = len; k > 0; k--) {
+      double from = k - 1, to = k + (double)argc - 1;
+      if (px_arr_has(p, from)) {
+        ScrDyn *v = px_arr_get(p, from);
+        if (v == NULL) { *out = NULL; return true; }
+        bool ok = px_arr_set(p, to, v, false);
+        scr_dyn_release(v);
+        if (!ok) { *out = NULL; return true; }
+      } else if (!px_arr_delete(p, to)) {
+        *out = NULL;
+        return true;
+      }
+      if (scr_exc_pending()) { *out = NULL; return true; }
+    }
+    for (size_t j = 0; j < argc; j++)
+      if (!px_arr_set(p, (double)j, args[j], false)) { *out = NULL; return true; }
+  }
+  if (!px_arr_setnum(p, len + (double)argc)) { *out = NULL; return true; }
+  *out = scr_dyn_new_num(len + (double)argc);
+  return true;
+}
+
 ScrDyn *scr_dyn_proxy_invoke(ScrDyn *p, const ScrStr *key, ScrDyn *const *args, size_t argc, const char *what) {
   /* [[Get]] through the proxy (the get trap, else the target's own member),
    * then Call with this = the PROXY — so a method body's own property
@@ -997,6 +1142,16 @@ ScrDyn *scr_dyn_proxy_invoke(ScrDyn *p, const ScrStr *key, ScrDyn *const *args, 
    * function: it runs on the target (its inner accesses bypass the traps). */
   ScrDyn *f = scr_dyn_proxy_get(p, key);
   if (f == NULL) return NULL;
+  /* An array target's push/pop/shift/unshift (the intrinsic, not a function
+   * the handler or target substituted) run through the traps. */
+  if (p->v.proxy.target->kind == SCR_DYN_ARR &&
+      (f->kind == SCR_DYN_UNDEF || (f->kind == SCR_DYN_FUNC && f->v.fn.thunk == dyn_bound_intrinsic_thunk))) {
+    ScrDyn *out;
+    if (px_array_mutator(p, key->data, args, argc, &out)) {
+      scr_dyn_release(f);
+      return out;
+    }
+  }
   if (f->kind == SCR_DYN_UNDEF) {
     bool threw;
     ScrDyn *gt = scr_dyn_proxy_trap(p, "get", &threw);
@@ -2169,7 +2324,51 @@ ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs) {
  * parts company with the plural form above — the plural form's three
  * flags are accepted and IGNORED, a grandfathered divergence with
  * shipped consumers that this one does not repeat. */
+/* The defineProperty trap of a proxy (or the target's own definition when
+ * the handler has none). `throw_on_false` is Object.defineProperty's
+ * TypeError; Reflect.defineProperty answers the boolean. */
+static bool dyn_px_define_ex(ScrDyn *p, ScrStr *key, ScrDyn *desc, bool throw_on_false) {
+  bool threw;
+  ScrDyn *trap = scr_dyn_proxy_trap(p, "defineProperty", &threw);
+  if (threw) return false;
+  if (trap == NULL) {
+    ScrDyn *r = scr_dyn_define_prop(p->v.proxy.target, key, desc);
+    if (r == NULL) return false;
+    scr_dyn_release(r);
+    return true;
+  }
+  ScrDyn *k = scr_dyn_new_str(key); /* retains key */
+  ScrDyn *args[3] = {p->v.proxy.target, k, desc};
+  scr_dyn_this_push_dyn(p->v.proxy.handler);
+  ScrDyn *r = scr_dyn_call(trap, args, 3, "defineProperty");
+  scr_dyn_this_pop();
+  scr_dyn_release(k);
+  scr_dyn_release(trap);
+  if (r == NULL) return false;
+  bool ok = scr_dyn_truthy(r);
+  scr_dyn_release(r);
+  if (!ok && throw_on_false) {
+    char msg[320];
+    int n = snprintf(msg, sizeof msg, "'defineProperty' on proxy: trap returned falsish for property '%.200s'", key->data);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+  }
+  return ok;
+}
+
+bool scr_dyn_reflect_define(ScrDyn *target, ScrStr *key, ScrDyn *desc) {
+  if (target->kind == SCR_DYN_PROXY) return dyn_px_define_ex(target, key, desc, false);
+  ScrDyn *r = scr_dyn_define_prop(target, key, desc);
+  if (r == NULL) return false;
+  scr_dyn_release(r);
+  return true;
+}
+
 ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc) {
+  if (target->kind == SCR_DYN_PROXY) {
+    /* Object.defineProperty(proxy, ...) answers the proxy itself. */
+    if (!dyn_px_define_ex(target, key, desc, true)) return NULL;
+    return scr_dyn_retain(target);
+  }
   scr_dyn_isl_fence(target, "Object.defineProperty");
   if (!scr_exc_pending()) scr_dyn_isl_fence(desc, "Object.defineProperty");
   if (scr_exc_pending()) return NULL;

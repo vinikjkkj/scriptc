@@ -27,7 +27,7 @@ import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
-import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
+import { lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
@@ -10845,9 +10845,10 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
 
   function lowerReflectDynCall(L: Lowerer, call: ts.CallExpression, member: string): IrExpr | null {
     const args = call.arguments;
-    const want = member === "set" ? [3, 4] : member === "get" ? [2, 3] : [2, 2];
+    const want = member === "set" ? [3, 4] : member === "get" ? [2, 3] : member === "defineProperty" ? [3, 3] : [2, 2];
     if (args.length < want[0]! || args.length > want[1]!) return null;
     const loc = locOf(call);
+    if (member === "defineProperty") markDescriptorMapLiterals(L, args[2]! as ts.Expression, 0);
     const target = L.lowerExpr(args[0]!);
     if (target.type.kind !== "dyn") return null; // a statically-typed target keeps its fence
     const keyRaw = L.lowerExpr(args[1]!);
@@ -10857,24 +10858,26 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       return { kind: "dynKeyGet", key, value: target, type: DYN, loc };
     }
     if (member === "has") return { kind: "libCall", fn: "dyn.hasKey", args: [target, key], type: BOOL, loc };
-    if (member === "deleteProperty") return { kind: "libCall", fn: "dyn.keyDelete", args: [target, key], type: BOOL, loc };
+    if (member === "deleteProperty") return { kind: "libCall", fn: "dyn.reflectDelete", args: [target, key], type: BOOL, loc };
     const v = L.lowerExpr(args[2]!);
     const value: IrExpr = v.type.kind === "dyn" ? v : L.coerceToExpected(v, DYN);
     if (value.type.kind !== "dyn") return null;
-    // Reflect.set answers true once the write landed (it throws where the
-    // property syntax would).
-    return {
-      kind: "seqExpr",
-      stmts: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [target, key, value], type: VOID, loc }, loc }],
-      result: { kind: "boolLit", value: true, type: BOOL, loc },
-      type: BOOL,
-      loc,
-    };
+    // Reflect.set / defineProperty answer the boolean the operation yields
+    // (a falsish proxy trap is false, not the strict-mode TypeError).
+    return { kind: "libCall", fn: member === "set" ? "dyn.reflectSet" : "dyn.reflectDefine", args: [target, key, value], type: BOOL, loc };
   }
 
   function lowerObjectStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
+    // Proxy.revocable(target, handler): { proxy, revoke }.
+    if (
+      access.name.text === "revocable" && call.arguments.length === 2 &&
+      !call.arguments.some(ts.isSpreadElement) && L.isStdlibGlobal(access.expression, "Proxy")
+    ) {
+      const rv = lowerProxyNew(L, call, locOf(call), "dyn.proxyRevocable");
+      if (rv !== null) return rv;
+    }
     // Reflect.ownKeys(o) is the own-NAMES walk (Object.getOwnPropertyNames)
     // over everything this lowering can hold: no symbol-keyed or
     // non-enumerable member exists outside it.
@@ -10883,7 +10886,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // property syntax performs, with the key as ToPropertyKey's string.
     if (
       L.isStdlibGlobal(access.expression, "Reflect") &&
-      (access.name.text === "get" || access.name.text === "has" || access.name.text === "deleteProperty" || access.name.text === "set") &&
+      (access.name.text === "get" || access.name.text === "has" || access.name.text === "deleteProperty" || access.name.text === "set" ||
+        access.name.text === "defineProperty") &&
       !call.arguments.some(ts.isSpreadElement)
     ) {
       const reflected = lowerReflectDynCall(L, call, access.name.text);

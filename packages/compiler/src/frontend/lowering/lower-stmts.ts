@@ -9693,7 +9693,10 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     // with a nameable callee "<callee> is not a function or its return
     // value is not iterable"; everything else keeps the runtime kind
     // wording. The runtime uses the spelling VERBATIM when non-empty.
-    const headText = (e: ts.Expression): string | null => {
+    const headText = (e0: ts.Expression): string | null => {
+      // Type syntax is erased before V8 prints the head (`n as any` reads `n`).
+      let e = e0;
+      while (ts.isAsExpression(e) || ts.isTypeAssertion(e) || ts.isNonNullExpression(e)) e = e.expression;
       if (ts.isIdentifier(e)) return e.text;
       if (ts.isPropertyAccessExpression(e) && !e.questionDotToken && ts.isIdentifier(e.name)) {
         const base = headText(e.expression);
@@ -9702,7 +9705,9 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       return null;
     };
     const headName = headText(head);
-    const calleeName = ts.isCallExpression(head) ? headText(head.expression) : null;
+    let headCore: ts.Expression = head;
+    while (ts.isAsExpression(headCore) || ts.isTypeAssertion(headCore) || ts.isNonNullExpression(headCore)) headCore = headCore.expression;
+    const calleeName = ts.isCallExpression(headCore) ? headText(headCore.expression) : null;
     const spell =
       headName !== null
         ? `${headName} is not iterable`

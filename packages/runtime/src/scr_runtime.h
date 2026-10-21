@@ -4907,7 +4907,7 @@ struct ScrDyn {
      * would be a silent wrong answer. */
     struct { ScrMap *m; const char *tkey; } map;
     /* SCR_DYN_PROXY: target and handler, both owned and traced. */
-    struct { struct ScrDyn *target; struct ScrDyn *handler; bool strict; } proxy;
+    struct { struct ScrDyn *target; struct ScrDyn *handler; bool strict; bool revoked; } proxy;
   } v;
 };
 
@@ -6154,6 +6154,11 @@ bool scr_dyn_proxy_has(ScrDyn *p, const ScrStr *key);
 bool scr_dyn_proxy_has_cstr(ScrDyn *p, const char *key, size_t len);
 bool scr_dyn_proxy_delete(ScrDyn *p, ScrStr *key);
 ScrDyn *scr_dyn_proxy_call(const ScrDyn *p, ScrDyn *const *args, size_t argc, const char *what);
+ScrDyn *scr_dyn_proxy_construct(const ScrDyn *p, const ScrDyn *args, const ScrStr *what);
+bool scr_dyn_reflect_set(ScrDyn *recv, ScrStr *key, ScrDyn *value);
+bool scr_dyn_reflect_delete(ScrDyn *recv, ScrStr *key);
+bool scr_dyn_reflect_define(ScrDyn *target, ScrStr *key, ScrDyn *desc);
+ScrDyn *scr_dyn_proxy_revocable(const ScrDyn *target, const ScrDyn *handler, bool strict);
 bool scr_dyn_proxy_is_function(const ScrDyn *p);
 /* p.key(args) on a proxy: the get trap supplies the function (called with
  * this = the proxy); with no get trap the call runs on the target. */

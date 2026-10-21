@@ -6418,6 +6418,28 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       scr_dyn_release(old);
       return;
     }
+    /* `a.length = n`: truncate (the dropped elements release) or grow with
+     * undefined, after ToNumber and the uint32 validity check JS runs
+     * (a bad length is the RangeError "Invalid array length"). */
+    if (key->len == 6 && memcmp(key->data, "length", 6) == 0) {
+      double nl = scr_dyn_to_number(value);
+      if (scr_exc_pending()) return;
+      if (!(nl >= 0) || nl > 4294967295.0 || nl != (double)(unsigned long long)nl) {
+        static const char msg[] = "Invalid array length";
+        scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+        return;
+      }
+      size_t want = (size_t)nl;
+      while (recv->v.arr.len > want) {
+        ScrDyn *gone = recv->v.arr.items[recv->v.arr.len - 1];
+        recv->v.arr.len--;
+        scr_dyn_release(gone);
+      }
+      while (recv->v.arr.len < want) {
+        scr_dyn_arr_push(recv, scr_dyn_retain(scr_dyn_undefined()));
+      }
+      return;
+    }
   }
   if (recv->kind == SCR_DYN_HANDLE) {
     scr_dyn_handle_key_set(recv, key, value);
@@ -8996,6 +9018,7 @@ static ScrDyn *scr_u8_construct(const ScrDyn *args) {
 }
 
 ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *what) {
+  if (fn->kind == SCR_DYN_PROXY) return scr_dyn_proxy_construct(fn, args, what);
   if (fn->kind != SCR_DYN_FUNC) {
     ScrJsonBuf b;
     scr_jb_init(&b);
@@ -10062,6 +10085,7 @@ ScrDyn *scr_dyn_proxy_new(const ScrDyn *target, const ScrDyn *handler, bool stri
   p->v.proxy.target = scr_dyn_retain((ScrDyn *)target);
   p->v.proxy.handler = scr_dyn_retain((ScrDyn *)handler);
   p->v.proxy.strict = strict;
+  p->v.proxy.revoked = false;
   return p;
 }
 
@@ -10088,6 +10112,13 @@ static void scr_px_refuse(const ScrDyn *target, const char *what) {
  * when reading it threw or it is not callable. */
 ScrDyn *scr_dyn_proxy_trap(const ScrDyn *p, const char *name, bool *threw) {
   *threw = false;
+  if (p->v.proxy.revoked) {
+    char msg[160];
+    int n = snprintf(msg, sizeof msg, "Cannot perform '%s' on a proxy that has been revoked", name);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+    *threw = true;
+    return NULL;
+  }
   ScrDyn *h = p->v.proxy.handler;
   ScrDyn *t = NULL;
   if (h->kind == SCR_DYN_OBJ) {
@@ -10179,10 +10210,12 @@ ScrDyn *scr_dyn_proxy_get(ScrDyn *p, const ScrStr *key) {
   return r;
 }
 
-void scr_dyn_proxy_set(ScrDyn *p, ScrStr *key, ScrDyn *value) {
+/* [[Set]] on a proxy. Answers the trap's truthiness (true for a trap-less
+ * write that landed); `throw_on_false` is the strict-mode TypeError. */
+static bool scr_px_set_ex(ScrDyn *p, ScrStr *key, ScrDyn *value, bool throw_on_false) {
   bool threw;
   ScrDyn *trap = scr_dyn_proxy_trap(p, "set", &threw);
-  if (threw) return;
+  if (threw) return false;
   if (trap == NULL) {
     ScrDyn *t = p->v.proxy.target;
     if (t->kind == SCR_DYN_PROXY || t->kind == SCR_DYN_OBJ || t->kind == SCR_DYN_ARR || t->kind == SCR_DYN_OBJINST ||
@@ -10191,21 +10224,26 @@ void scr_dyn_proxy_set(ScrDyn *p, ScrStr *key, ScrDyn *value) {
     } else {
       scr_px_refuse(t, "a property write");
     }
-    return;
+    return !scr_exc_pending();
   }
   ScrDyn *k = scr_px_key(key);
   ScrDyn *args[4] = {p->v.proxy.target, k, value, p};
   ScrDyn *r = scr_px_call(p->v.proxy.handler, trap, args, 4);
   scr_dyn_release(k);
   scr_dyn_release(trap);
-  if (r == NULL) return;
+  if (r == NULL) return false;
   bool ok = scr_dyn_truthy(r);
   scr_dyn_release(r);
-  if (!ok && p->v.proxy.strict) {
+  if (!ok && throw_on_false) {
     char msg[320];
     int n = snprintf(msg, sizeof msg, "'set' on proxy: trap returned falsish for property '%.200s'", key->data);
     scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
   }
+  return ok;
+}
+
+void scr_dyn_proxy_set(ScrDyn *p, ScrStr *key, ScrDyn *value) {
+  (void)scr_px_set_ex(p, key, value, p->v.proxy.strict);
 }
 
 bool scr_dyn_proxy_has(ScrDyn *p, const ScrStr *key) {
@@ -10224,7 +10262,13 @@ bool scr_dyn_proxy_has(ScrDyn *p, const ScrStr *key) {
   return ok;
 }
 
+static bool scr_px_delete_ex(ScrDyn *p, ScrStr *key, bool throw_on_false);
+
 bool scr_dyn_proxy_delete(ScrDyn *p, ScrStr *key) {
+  return scr_px_delete_ex(p, key, p->v.proxy.strict);
+}
+
+static bool scr_px_delete_ex(ScrDyn *p, ScrStr *key, bool throw_on_false) {
   bool threw;
   ScrDyn *trap = scr_dyn_proxy_trap(p, "deleteProperty", &threw);
   if (threw) return false;
@@ -10237,13 +10281,82 @@ bool scr_dyn_proxy_delete(ScrDyn *p, ScrStr *key) {
   if (r == NULL) return false;
   bool ok = scr_dyn_truthy(r);
   scr_dyn_release(r);
-  if (!ok && p->v.proxy.strict) {
+  if (!ok && throw_on_false) {
     char msg[320];
     int n = snprintf(msg, sizeof msg, "'deleteProperty' on proxy: trap returned falsish for property '%.200s'", key->data);
     scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
     return false;
   }
   return ok;
+}
+
+/* Reflect.set / Reflect.deleteProperty / Reflect.defineProperty over a dyn
+ * target: the boolean the operation answers, never the strict-mode TypeError
+ * a falsish trap would raise through the property syntax. A write that
+ * cannot land on a non-proxy target keeps its loud refusal. */
+bool scr_dyn_reflect_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
+  if (recv->kind == SCR_DYN_PROXY) return scr_px_set_ex(recv, key, value, false);
+  scr_dyn_key_set(recv, key, value);
+  return !scr_exc_pending();
+}
+
+bool scr_dyn_reflect_delete(ScrDyn *recv, ScrStr *key) {
+  if (recv->kind == SCR_DYN_PROXY) return scr_px_delete_ex(recv, key, false);
+  return scr_dyn_key_delete(recv, key);
+}
+
+/* Proxy.revocable: { proxy, revoke }. Revoking marks the proxy; every
+ * later operation fails at its trap lookup with V8's TypeError. */
+static ScrDyn *scr_px_revoke_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)args;
+  (void)argc;
+  ScrDyn *p = (ScrDyn *)scr_box_get_ref(clo->caps[0]); /* +1 */
+  p->v.proxy.revoked = true;
+  scr_dyn_release(p);
+  return scr_dyn_undefined();
+}
+
+ScrDyn *scr_dyn_proxy_revocable(const ScrDyn *target, const ScrDyn *handler, bool strict) {
+  ScrDyn *p = scr_dyn_proxy_new(target, handler, strict);
+  if (p == NULL) return NULL;
+  ScrClosure *clo = scr_closure_new((void *)scr_px_revoke_thunk, 1);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], scr_dyn_retain(p));
+  ScrDyn *revoke = scr_dyn_new_func(clo, scr_px_revoke_thunk, 0, "()", "");
+  ScrDyn *out = scr_dyn_new_obj();
+  scr_dyn_obj_set(out, "proxy", 5, p);
+  scr_dyn_obj_set(out, "revoke", 6, revoke);
+  return out;
+}
+
+/* new P(...args) on a proxy (the construct trap): the trap is called with
+ * (target, argsArray, newTarget = the proxy) and must answer an object; with
+ * no trap the construction runs on the target. */
+ScrDyn *scr_dyn_proxy_construct(const ScrDyn *pc, const ScrDyn *args, const ScrStr *what) {
+  ScrDyn *p = (ScrDyn *)pc;
+  if (!scr_dyn_proxy_is_function(p)) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, what && what->len ? what->data : "value");
+    scr_jb_puts(&b, " is not a constructor");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  bool threw;
+  ScrDyn *trap = scr_dyn_proxy_trap(p, "construct", &threw);
+  if (threw) return NULL;
+  if (trap == NULL) return scr_dyn_construct(p->v.proxy.target, args, what);
+  ScrDyn *argv[3] = {p->v.proxy.target, (ScrDyn *)args, p};
+  ScrDyn *r = scr_px_call(p->v.proxy.handler, trap, argv, 3);
+  scr_dyn_release(trap);
+  if (r == NULL) return NULL;
+  if (scr_dyn_is_prim(r) || r->kind == SCR_DYN_BIG) {
+    scr_dyn_release(r);
+    static const char msg[] = "proxy [[Construct]] must return an object";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  return r;
 }
 
 ScrDyn *scr_dyn_proxy_call(const ScrDyn *pc, ScrDyn *const *args, size_t argc, const char *what) {

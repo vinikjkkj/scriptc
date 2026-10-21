@@ -2763,6 +2763,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             // A never-tainted receiver type maps (never rides as f64) but
             // its VALUE lowered checked-dynamic — same dyn read.
             neverTaintedJsType(L, expr.expression, L.typeOf(expr.expression)))) ||
+        (L.anyOrigin(expr.expression) && L.mapTypeOf(L.typeOf(expr.expression)) === null) ||
         (expr.name.text === "length" &&
           (L.checkerAnyArray(expr.expression) ||
             (L.checker.isArrayType(L.typeOf(expr.expression)) &&
@@ -7786,6 +7787,19 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
   export function lowerArrayLiteral(L: Lowerer, expr: ts.ArrayLiteralExpression,
     expected?: (IrType & { kind: "array" }) | (IrType & { kind: "record" }),): IrExpr {
     const loc = locOf(expr);
+    if (L.dynArrayLiterals.has(expr)) {
+      const elems = expr.elements.map((el): IrExpr => {
+        if (ts.isSpreadElement(el)) {
+          L.unsupported("SC1090", el, "spread elements in a dynamic (unknown[]) array literal");
+        }
+        const v = L.coerceToExpected(L.lowerExpr(el), DYN);
+        if (v.type.kind !== "dyn") {
+          L.unsupported("SC1101", el, `holding '${L.fmt(v.type)}' values in a dynamic (unknown[]) array literal`);
+        }
+        return v;
+      });
+      return { kind: "dynArrLit", elems, type: DYN, loc };
+    }
     const ctxType = L.checker.getContextualType(expr);
     const tsType = ctxType ?? L.typeOf(expr);
     let mapped = expected ?? L.mapTypeOf(tsType);
@@ -13676,7 +13690,7 @@ export function dynAssertionReceiver(L: Lowerer, node: ts.Expression): IrExpr | 
   // The OPERAND's own type has to already be checked-dynamic.  Asking the
   // checker (not the lowering) keeps this free on every other receiver: a
   // static operand answers here and nothing is lowered twice.
-  if (L.mapTypeOf(L.typeOf(e))?.kind !== "dyn") return null;
+  if (L.mapTypeOf(L.typeOf(e))?.kind !== "dyn" && !L.anyOrigin(e)) return null;
   // ...and the ASSERTED type has to be one whose recovery COPIES.  Only the
   // record and the array have two physically different representations;
   // every other composite crosses the boundary BY REFERENCE and its
@@ -13699,8 +13713,12 @@ export function dynAssertionReceiver(L: Lowerer, node: ts.Expression): IrExpr | 
   // admitted as well: it never recovered in the first place, so routing it
   // here changes nothing and keeps the one row of the family that was
   // always right on the same path as the rest.
-  const targetT = L.mapTypeOf(L.checker.getTypeFromTypeNode(outer.type));
-  if (targetT?.kind !== "record" && targetT?.kind !== "array" && targetT?.kind !== "dyn") return null;
+  const targetTs = L.checker.getTypeFromTypeNode(outer.type);
+  // An `as any` assertion keeps the receiver checked-dynamic: nothing recovers.
+  if ((targetTs.flags & ts.TypeFlags.Any) === 0) {
+    const targetT = L.mapTypeOf(targetTs);
+    if (targetT?.kind !== "record" && targetT?.kind !== "array" && targetT?.kind !== "dyn") return null;
+  }
   const lowered = L.lowerExpr(e);
   return lowered.type.kind === "dyn" ? lowered : null;
 }
@@ -14968,6 +14986,12 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       if (targetTs0.flags & ts.TypeFlags.Any && L.dynamic) {
         return L.jsvalIn(inner, expr.expression);
       }
+      // Without the engine, `x as any` over a value that converts into the
+      // checked-dynamic tree crosses as that dyn value (a record or array
+      // crosses as a marked copy: reads are exact, writes refuse loudly).
+      if (targetTs0.flags & ts.TypeFlags.Any && !L.dynamic && L.dynConvertible(inner.type)) {
+        return { kind: "dynFrom", value: inner, type: DYN, loc: locOf(expr) };
+      }
       // `u as Arm` on a UNION value is `u!`'s spelling with a named arm
       // (`req.headers[h] as string`): the CHECKED single-arm extraction —
       // the asserted arm's payload comes out, any other arm throws the
@@ -15148,6 +15172,9 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       return { kind: "jsExit", value: inner, type: target, loc: locOf(expr) };
     }
     const targetTs = L.checker.getTypeFromTypeNode(expr.type);
+    // `dynValue as any`: the value is already checked-dynamic, so the cast is
+    // pure typing.
+    if (targetTs.flags & ts.TypeFlags.Any) return inner;
     const target = L.mapTypeOf(targetTs);
     if (!target) L.badType(expr.type, targetTs);
     if (target.kind === "dyn") return inner; // `as unknown`: erasure

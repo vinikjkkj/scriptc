@@ -3160,6 +3160,15 @@ export type IrLibFn =
   /** new Proxy(target, handler, strict): a SCR_DYN_PROXY dyn value. May throw
    * (a non-object target or handler). */
   | "dyn.proxyNew"
+  /** Proxy.revocable(target, handler, strict) -> { proxy, revoke } (dyn). */
+  | "dyn.proxyRevocable"
+  /** Reflect.set / deleteProperty / defineProperty over a dyn target: the
+   * boolean the operation answers (a falsish proxy trap is false, never the
+   * strict-mode TypeError). reflectDefine lives in the gated
+   * prototype-dispatch unit with the property definers. */
+  | "dyn.reflectSet"
+  | "dyn.reflectDelete"
+  | "dyn.reflectDefine"
   /** `new f(...)` over a checked-dynamic FUNCTION value — JS's
    * [[Construct]] for the pre-class constructor idiom (args: the boxed
    * callee, a dyn ARRAY of the already-boxed arguments, and the callee's
@@ -10000,7 +10009,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
         // same reason the read's helper does: scr_json.c is always
         // linked and must not name the dispatch.
         (node.fn === "dyn.hasKey" ||
-          node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" ||
+          node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" || node.fn === "dyn.reflectDefine" ||
           node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs" ||
           // The per-instance property table of a compiled class instance
           // lives in the same unit as the property definers beside it,
@@ -11624,6 +11633,7 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   // (scr_dyn_invoke.c → scr_async_dyn.c).
   ["dyn.defineProps", "checked-dynamic prototype dispatch"],
   ["dyn.defineProp", "checked-dynamic prototype dispatch"],
+  ["dyn.reflectDefine", "checked-dynamic prototype dispatch"],
   ["cls.props", "checked-dynamic prototype dispatch"],
   ["dyn.objCreateDescs", "checked-dynamic prototype dispatch"],
   ["dyn.objCreateNullDescs", "checked-dynamic prototype dispatch"],
@@ -12159,6 +12169,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.keySet",
   // new Proxy throws on a non-object target/handler; `in` runs a has trap.
   "dyn.proxyNew",
+  "dyn.proxyRevocable",
+  "dyn.reflectSet",
+  "dyn.reflectDelete",
+  "dyn.reflectDefine",
   "dyn.hasKey",
   // delete: ToObject on a nullish receiver, and the array-element hole
   // this representation refuses rather than fakes.

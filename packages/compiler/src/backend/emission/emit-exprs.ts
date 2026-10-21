@@ -3543,6 +3543,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // member retains the value in); throws Node's TypeErrors on
             // non-object receivers (may-throw seed set).
             return finish(`scr_dyn_key_set(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.proxyRevocable":
+            return finish(`scr_dyn_proxy_revocable(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.reflectSet":
+            return finish(`scr_dyn_reflect_set(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.reflectDelete":
+            return finish(`scr_dyn_reflect_delete(${arg(0)}, ${arg(1)})`);
+          case "dyn.reflectDefine":
+            return finish(`scr_dyn_reflect_define(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "dyn.keyDelete":
             // `delete d[k]` on a dyn receiver: both borrowed, a bool
             // answer, and JS's own-property rule (the chain is never
