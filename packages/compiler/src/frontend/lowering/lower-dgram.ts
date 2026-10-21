@@ -10,7 +10,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { BOOL, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, SrcLoc, STRING, VOID } from "../../ir/nodes.js";
+import { BOOL, canBoxFuncIntoDyn, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, SrcLoc, STRING, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { DNS_LOOKUP_DOCUMENTED_OPTIONS, fenceOrDropOptionKey } from "./surfaces.js";
 
 const DGRAM_SURFACE_HINT =
@@ -406,6 +406,31 @@ export function lowerDgramMethodCall(L: Lowerer, call: ts.CallExpression,
       const fn: IrLibFn =
         data.type.kind === "string" ? "dgram.sendConnStr" : "dgram.sendConnBytes";
       return { kind: "libCall", fn, args: [receiver, data], type: VOID, loc };
+    }
+    if (args.length <= 6 && !args.some(ts.isSpreadElement)) {
+      // Every other shape of Node's send signature rides the dyn ladder: the
+      // runtime validates in Node's order and sends (slices, lists,
+      // callbacks, connected sockets).
+      const receiver = L.lowerExpr(access.expression);
+      const slots: IrExpr[] = [];
+      for (let i = 0; i < 6; i++) {
+        const n = args[i];
+        if (!n) {
+          slots.push({ kind: "dynFrom", value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: DYN, loc });
+          continue;
+        }
+        // A callback literal's parameters bind as checked-dynamic values.
+        const raw = ts.isObjectLiteralExpression(n) ? L.lowerExprExpecting(n, DYN) : L.lowerExpr(n);
+        if (raw.type.kind === "dyn") slots.push(raw);
+        else if (raw.kind === "unitLit" || L.dynConvertible(raw.type) ||
+                 (raw.type.kind === "func" &&
+                  canBoxFuncIntoDyn(raw.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)))) {
+          slots.push({ kind: "dynFrom", value: raw, type: DYN, loc });
+        } else {
+          L.noLowering(`send with a '${L.fmt(raw.type)}' argument`, n, "strings, Buffers, numbers, lists of them and callbacks are the lowered send arguments");
+        }
+      }
+      return { kind: "libCall", fn: "dgram.sendDyn", args: [receiver, ...slots], type: VOID, loc };
     }
     L.noLowering(
       `send with ${args.length} arguments`,

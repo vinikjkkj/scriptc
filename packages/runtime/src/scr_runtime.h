@@ -10464,13 +10464,12 @@ void scr_dgram_send_bytes(ScrDgramSocket *s, ScrBytes *data /*borrowed*/, double
  * which is what Node does -- it validates the absent port first. */
 void scr_dgram_send_conn_str(ScrDgramSocket *s, ScrStr *data /*borrowed*/);
 void scr_dgram_send_conn_bytes(ScrDgramSocket *s, ScrBytes *data /*borrowed*/);
-/* The send argument-validation ladder over dyn arguments (Node's
- * signature shuffle, slice bounds, list/type contracts, port/address
- * validation, and the connected-state errors); a fully-validated
- * unconnected single-payload send RUNS, the rest meet the fence. */
-void scr_dgram_send_chk(ScrDgramSocket *s, const ScrDyn *buffer, const ScrDyn *a1,
-                        const ScrDyn *a2, const ScrDyn *a3, const ScrDyn *a4,
-                        const ScrStr *fence);
+/* send over dyn arguments (Node's signature shuffle, slice bounds, list/type contracts,
+ * port/address validation, the connected-state errors), then the real send:
+ * a single payload, a sliced view, or a LIST concatenated; a completion
+ * callback fires one loop turn later with (null, bytes). Borrowed. */
+void scr_dgram_send_dyn(ScrDgramSocket *s, const ScrDyn *buffer, const ScrDyn *a1,
+                        const ScrDyn *a2, const ScrDyn *a3, const ScrDyn *a4, const ScrDyn *a5);
 /* address() parts: ip THROWS "Not running" before bind/connect (+1
  * otherwise); family/port are only called after ip succeeded. */
 ScrStr *scr_dgram_addr_ip(ScrDgramSocket *s);     /* +1, may throw */

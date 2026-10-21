@@ -3853,6 +3853,10 @@ export type IrLibFn =
    * else. May-throw. */
   | "dgram.sendConnStr"
   | "dgram.sendConnBytes"
+  /** send over dyn arguments (any of Node's argument shapes: offset/length
+   * slices, buffer lists, callbacks, connected sockets): args [socket, 6 dyn
+   * slots]; the runtime validates in Node's order and sends. May-throw. */
+  | "dgram.sendDyn"
   /** The WebRTC peer-connection and data-channel surface. The
    * SYNCHRONOUS half only: construction, the state properties, the
    * channel properties and close. Nothing here touches the network,
@@ -12316,6 +12320,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dgram.sendBytes",
   "dgram.sendConnStr",
   "dgram.sendConnBytes",
+  "dgram.sendDyn",
   "dgram.address",
   "dgram.close",
   "dgram.closeCb",

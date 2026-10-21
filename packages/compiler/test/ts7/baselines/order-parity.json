@@ -13665,12 +13665,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/js-dgram-send-over-dynamic-arguments.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/js-dgram-send-over-dynamic-arguments.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/js-new-proxy.js": {
    "order": [
     "<repo>/tests/diagnostics/js-new-proxy.js"
@@ -13801,6 +13795,12 @@
   "<repo>/tests/corpus/8090-net-connect-over-a-run-time-option-bag.cjs": {
    "order": [
     "<repo>/tests/corpus/8090-net-connect-over-a-run-time-option-bag.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8091-dgram-send-callback-list-and-connected-forms.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8091-dgram-send-callback-list-and-connected-forms.cjs"
    ],
    "diags": []
   }

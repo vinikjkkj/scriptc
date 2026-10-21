@@ -4810,6 +4810,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "dgram.sendConnStr":
             E.usesTimers = true; // a connected socket holds the loop
             return finish(`scr_dgram_send_conn_str(${arg(0)}, ${arg(1)})`);
+          case "dgram.sendDyn":
+            E.usesTimers = true;
+            return finish(`scr_dgram_send_dyn(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)})`);
           case "dgram.sendConnBytes":
             E.usesTimers = true;
             return finish(`scr_dgram_send_conn_bytes(${arg(0)}, ${arg(1)})`);
