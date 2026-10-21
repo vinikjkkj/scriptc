@@ -13637,6 +13637,13 @@ class LlEmitter {
         B.line(`${t} = call double @scr_arr_len(ptr ${r.name})`);
         return { name: t, type: e.type };
       }
+      case "hasIndex": {
+        this.declare(`declare zeroext i1 @scr_arr_has_index(ptr, double)`);
+        const t = B.tmp();
+        const hx = this.emitExpr(e.args[0]!);
+        B.line(`${t} = call zeroext i1 @scr_arr_has_index(ptr ${r.name}, double ${hx.name})`);
+        return { name: t, type: e.type };
+      }
       case "push": {
         // Variadic like JS: every argument evaluates first (left to
         // right), then each appends in order. Ownership of refcounted
