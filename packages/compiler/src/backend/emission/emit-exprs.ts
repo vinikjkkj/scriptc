@@ -964,6 +964,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.internLiteral(e.pattern);
           E.internLiteral(e.flags);
         }
+        // A /g or /y literal carries lastIndex, and JS builds a NEW RegExp
+        // object per evaluation: clone the immortal (a fresh +1 heap regex
+        // sharing its bytecode, lastIndex 0). Every other literal stays the
+        // immortal immutable static.
+        if (/[gy]/.test(e.flags)) return E.newTemp(e.type, `scr_regex_clone(&${sym})`);
         return E.newTemp(e.type, `scr_regex_retain(&${sym})`);
       }
       case "templateStrings": {
@@ -989,6 +994,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         switch (method) {
           case "test":
             return E.newTemp(e.type, `scr_regex_test(${r.name}, ${args[0]!.name})`);
+          case "exec":
           case "match": {
             // +1 string[] or NULL from the runtime; the `string[] | null`
             // union wraps type-directedly, the process.envGet convention.
@@ -999,7 +1005,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             if (arrTag < 0 || nullTag < 0) {
               throw new Error("emitter bug: match union lacks its arms");
             }
-            const m = E.newTemp(arrayOf(STRING), `scr_regex_match(${r.name}, ${args[0]!.name})`);
+            const m = E.newTemp(arrayOf(STRING), `${method === "exec" ? "scr_regex_exec" : "scr_regex_match"}(${r.name}, ${args[0]!.name})`);
             E.moveTemp(m); // moves into the union box when present; NULL otherwise
             const present = `scr_union_new_ref(${arrTag}, ${m.name}, &scr_arr_retain_v, &scr_arr_release_v, NULL)`;
             const absent = E.unitInstanceRef(e.type.unionId, nullTag);
@@ -1020,6 +1026,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "search":
             // First-match index or -1 — a plain double; never throws.
             return E.newTemp(e.type, `scr_regex_search(${r.name}, ${args[0]!.name})`);
+          case "lastIndex":
+            return E.newTemp(e.type, `scr_regex_get_last_index(${r.name})`);
+          case "setLastIndex":
+            E.line(`scr_regex_set_last_index(${r.name}, ${args[0]!.name});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          case "lastExecIndex":
+            return E.newTemp(e.type, `scr_regex_last_exec_index()`);
           case "source":
             return E.newTemp(e.type, `scr_regex_source(${r.name})`);
           case "flags":

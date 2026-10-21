@@ -1826,6 +1826,16 @@ typedef struct ScrRegex {
   ScrStr *source; /* pattern text between the slashes */
   ScrStr *flags;  /* flags text, source order (alphabet fenced to gimsuy) */
   uint8_t *bc;    /* lazily compiled libregexp bytecode; NULL until first use */
+  /* RegExp.prototype.lastIndex, the one piece of mutable state. Only a /g or
+   * /y regex consults it (exec/test); a regex literal with either flag is
+   * CLONED per evaluation (scr_regex_clone), so two evaluations never share
+   * it, and an unflagged literal stays one immortal immutable static. Stored
+   * as the raw JS number (a write of 1.5 reads back 1.5); ToLength runs when
+   * exec reads it. */
+  double last_index;
+  /* Non-NULL for a clone: the immortal static whose compiled bytecode it
+   * borrows (retained for the clone's life). */
+  struct ScrRegex *proto;
 } ScrRegex;
 
 static inline ScrRegex *scr_regex_retain(ScrRegex *re) {
@@ -1844,7 +1854,21 @@ void scr_regex_release_v(void *re);
  * spec's "(?:)" source. Borrows both; +1, NULL after a throw. */
 ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags);
 
-bool scr_regex_test(ScrRegex *re, ScrStr *s); /* aborts on /g or /y */
+/* A fresh +1 heap regex over the immortal literal `proto`: same source, flags
+ * and compiled bytecode, its own lastIndex (0). Emitted for every evaluation
+ * of a /g or /y regex literal, as JS builds a new RegExp object each time. */
+ScrRegex *scr_regex_clone(ScrRegex *proto);
+/* re.exec(s): the honest string[] of [whole, ...captures] or NULL. A /g or /y
+ * regex starts at lastIndex (ToLength) and updates it (end of match, or 0 on
+ * failure or when lastIndex > length); an unflagged regex starts at 0 and
+ * never touches it. Records the match's UTF-16 start in
+ * scr_regex_last_exec_index (-1 on no match), read immediately after the
+ * call by the .index binding. Never throws. */
+ScrArr *scr_regex_exec(ScrStr *s, ScrRegex *re);
+double scr_regex_last_exec_index(void);
+double scr_regex_get_last_index(ScrRegex *re);
+void scr_regex_set_last_index(ScrRegex *re, double v);
+bool scr_regex_test(ScrRegex *re, ScrStr *s); /* /g or /y: stateful through lastIndex like exec */
 /* s.match(re): +1 string[] of [whole, ...captures] (nonparticipating
  * captures hold "" — SEMANTICS.md), or NULL for no match. Aborts on /g
  * or /y like test(). Borrows both. */

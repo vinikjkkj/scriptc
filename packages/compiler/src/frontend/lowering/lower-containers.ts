@@ -6385,42 +6385,26 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     const lowerReceiver = (): IrExpr => (dynReceiver ? dynReceiver() : L.lowerExpr(access.expression));
     const loc = locOf(call);
     if (receiverKind === "regex" && name === "test") {
-      // The statefulness fence, at compile time where the flags are
-      // visible: a literal receiver (possibly parenthesized). Values that
-      // flow through variables hit the same fence at runtime.
-      let recv: ts.Expression = access.expression;
-      while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
-      if (ts.isRegularExpressionLiteral(recv)) {
-        const flags = recv.text.slice(recv.text.lastIndexOf("/") + 1);
-        if (flags.includes("g") || flags.includes("y")) {
-          L.unsupported("SC1121", call);
-        }
-      }
+      // /g and /y are stateful through lastIndex (scr_regex_test), and a
+      // flagged literal is cloned per evaluation, so no fence applies.
       const receiver = L.lowerExpr(access.expression);
       const args = call.arguments.map((a) => L.lowerExpr(a));
       return { kind: "regexIntrinsic", method: "test", receiver, args, type: BOOL, loc };
     }
-    // `re.exec(s)` for non-g/y regexes: spec-identical to `s.match(re)`
-    // (Symbol.match delegates to exec when lastIndex is out of play), so
-    // it lowers to the SAME match intrinsic with the operands swapped —
-    // the honest `string[] | null` slice, nonparticipating captures ""
-    // (match's documented rule). The g/y statefulness fence applies at
-    // compile time on literal receivers, exactly test()'s stance; values
-    // reaching the runtime with those flags abort there.
+    // `re.exec(s)`: the exec intrinsic -- match's honest `string[] | null`
+    // slice (nonparticipating captures "", match's documented rule), with
+    // /g and /y STATEFUL through lastIndex exactly as RegExpBuiltinExec.
     if (receiverKind === "regex" && name === "exec") {
       if (call.arguments.length !== 1) return null; // exec takes exactly the subject
       let recv: ts.Expression = access.expression;
       while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
-      if (ts.isRegularExpressionLiteral(recv)) {
-        const flags = recv.text.slice(recv.text.lastIndexOf("/") + 1);
-        if (flags.includes("g") || flags.includes("y")) {
-          L.unsupported("SC1121", call);
-        }
-      }
+      // /g and /y are stateful through lastIndex (the runtime's scr_regex_exec
+      // and the per-evaluation clone of a flagged literal), so no literal
+      // fence applies.
       const re = L.lowerExpr(access.expression);
       const subject = L.lowerExprExpecting(call.arguments[0]!, STRING);
       const resultT: IrType = { kind: "union", unionId: L.unions.intern([arrayOf(STRING), { kind: "nullT" }]) };
-      return { kind: "regexIntrinsic", method: "match", receiver: subject, args: [re], type: resultT, loc };
+      return { kind: "regexIntrinsic", method: "exec", receiver: subject, args: [re], type: resultT, loc };
     }
     // `re.toString()` — the spec's `"/" + source + "/" + flags`, built from
     // the two intrinsics that already answer those halves. It goes through

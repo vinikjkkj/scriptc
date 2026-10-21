@@ -65,6 +65,10 @@ export const REGEX_INTRINSIC_SIGS: Record<
   // VOID here is the process.envGet sentinel; the regexIntrinsic case
   // checks the union's arms.
   match: { receiver: STRING, argTypes: [REGEX], result: VOID },
+  exec: { receiver: STRING, argTypes: [REGEX], result: VOID },
+  lastIndex: { receiver: REGEX, argTypes: [], result: F64 },
+  setLastIndex: { receiver: REGEX, argTypes: [F64], result: VOID },
+  lastExecIndex: { receiver: STRING, argTypes: [], result: F64 },
   matchAll: { receiver: STRING, argTypes: [REGEX], result: arrayOf(arrayOf(STRING)) },
   matchAllInto: { receiver: STRING, argTypes: [REGEX, arrayOf(F64)], result: arrayOf(arrayOf(STRING)) },
   search: { receiver: STRING, argTypes: [REGEX], result: F64 },
@@ -2625,7 +2629,7 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `regexIntrinsic ${e.method} arg ${i}`);
         });
-        if (e.method === "match") {
+        if (e.method === "match" || e.method === "exec") {
           // The `string[] | null` union (program-dependent id) — checked
           // by arms, like the libCall case checks process.envGet.
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;

@@ -2945,6 +2945,20 @@ export const MAY_THROW_BYTES_METHODS: ReadonlySet<IrBytesIntrinsicMethod> = new 
 export type IrRegexIntrinsicMethod =
   | "test"
   | "match"
+  /** `re.exec(s)` — match's result shape (the honest `string[] | null`
+   * slice), but STATEFUL on a /g or /y regex: it starts at lastIndex and
+   * updates it. Also records the match's start for the `.index` binding
+   * (regex.lastExecIndex). Never throws. */
+  | "exec"
+  /** `re.lastIndex` read: the raw JS number last stored (0 initially). */
+  | "lastIndex"
+  /** `re.lastIndex = v` (args[0], a number); the call is a statement and
+   * its result is void. */
+  | "setLastIndex"
+  /** The UTF-16 start index of the match the IMMEDIATELY preceding exec
+   * produced (-1 for none): the `.index` of a const-stored exec result.
+   * The receiver is an empty string (unused). */
+  | "lastExecIndex"
   /** `s.matchAll(re)` — every match as its honest string[] slice (match's
    * rule), drained EAGERLY into a fresh string[][]: the lazy iterator is
    * unobservable across the lowered surface (strings are immutable; the

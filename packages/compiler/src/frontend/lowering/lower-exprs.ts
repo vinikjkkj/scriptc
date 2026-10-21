@@ -2350,6 +2350,30 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const g = lowerMatchGroupsRead(L, expr);
         if (g !== null) return g;
       }
+      // `re.lastIndex` read: the raw number stored on the regex object.
+      if (expr.name.text === "lastIndex" && !expr.questionDotToken &&
+          L.mapTypeOf(L.typeOf(expr.expression))?.kind === "regex" && L.isStdlibMember(expr)) {
+        return {
+          kind: "regexIntrinsic",
+          method: "lastIndex",
+          receiver: L.lowerExpr(expr.expression),
+          args: [],
+          type: F64,
+          loc,
+        };
+      }
+      // `m.index` on a const-stored `re.exec(s)` result reads the hidden
+      // local the declaration filled from scr_regex_last_exec_index right
+      // after the exec (same function only: hidden locals do not cross
+      // closure boundaries). A non-null narrowing is the only way to reach
+      // the read, so the stored value is a real match start.
+      if (expr.name.text === "index" && !expr.questionDotToken && ts.isIdentifier(expr.expression)) {
+        const esym = L.checker.getSymbolAtLocation(expr.expression);
+        const eb = esym !== undefined ? L.execIndexBindings.get(esym) : undefined;
+        if (eb !== undefined && eb.ctx === L.ctx) {
+          return { kind: "varRef", localId: eb.localId, type: F64, loc };
+        }
+      }
       // `m.index` on a for-of-over-matchAll binding reads the companion-
       // index array at this iteration's cursor — always a number: every
       // drained row matched, so the lib's `.index` is never undefined

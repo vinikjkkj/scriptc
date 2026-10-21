@@ -1153,26 +1153,15 @@ function unionContainerArms(L: Lowerer, recvTs: ts.Type, unionId: string):
     }
   }
 
-/** `re.lastIndex = 0`, and nothing else.
-   *
-   * A compiled regex is IMMUTABLE and carries no lastIndex at all (the
-   * IrType's own comment says so): /g and /y are supported only where the
-   * iteration is internal, `.test()` on one is a compile fence, and
-   * `.exec()`/`.match()` on one is a loud RUNTIME refusal. So in every
-   * program this compiler runs to completion, a regex's lastIndex is
-   * permanently 0 — and READING `.lastIndex` is its own refusal
-   * (SC2020), which closes the only other channel the value could be
-   * observed through.
-   *
-   * In that model, assigning 0 is not "ignored": it is a no-op the way it
-   * is a no-op in Node for the non-global regexes this compiler runs, and
-   * emitting nothing for it is exact. Assigning anything ELSE asks for
-   * state that does not exist, and refuses.
-   *
-   * zapo's `versionPattern.lastIndex = 0` (wa-version-fetcher.ts:220) is
-   * the site: defensive against a caller-supplied /g pattern, on a default
-   * pattern that has no /g. It used to fall to "assignment to
-   * non-variables", which named neither the property nor the reason. */
+/** `re.lastIndex = <number>`: a store into the regex object's lastIndex, the
+   * one piece of state exec/test on a /g or /y regex read and write
+   * (scr_regex_run). A /g or /y literal is cloned per evaluation, so two
+   * evaluations never share it. KNOWN DIVERGENCE: an UNFLAGGED literal is
+   * still one immortal static per (pattern, flags), so a program that
+   * writes lastIndex on an unflagged regex and reads it back through another
+   * site of the same literal text would see the write (JS has two
+   * objects). zapo's `versionPattern.lastIndex = 0` is the site that
+   * motivated the original no-op. */
   function regexLastIndexReset(
     L: Lowerer,
     target: ts.PropertyAccessExpression,
@@ -1182,17 +1171,15 @@ function unionContainerArms(L: Lowerer, recvTs: ts.Type, unionId: string):
     if (target.name.text !== "lastIndex") return null;
     if (L.mapTypeOf(L.typeOf(target.expression))?.kind !== "regex") return null;
     if (!L.isStdlibMember(target)) return null;
-    if (!ts.isNumericLiteral(value) || Number(value.text) !== 0) {
-      L.unsupported(
-        "SC1120",
-        value,
-        "writing a lastIndex other than 0",
-        "a compiled regex carries no lastIndex state: /g and /y are supported only where the " +
-          "iteration is internal, so lastIndex is permanently 0 and writing 0 is a no-op — " +
-          "any other value would need the statefulness this model does not have",
-      );
-    }
-    return { kind: "block", body: [], loc };
+    // lastIndex is real state on the regex object (a /g or /y regex reads
+    // it in exec/test): the write stores the number.
+    const recv = L.lowerExpr(target.expression);
+    const v = L.lowerExprExpecting(value, F64);
+    return {
+      kind: "exprStmt",
+      expr: { kind: "regexIntrinsic", method: "setLastIndex", receiver: recv, args: [v], type: VOID, loc },
+      loc,
+    };
   }
 
 /** True when a reference/assignment fell through resolution because the
@@ -1595,8 +1582,40 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       const drained = lowerMatchAllDrainDecl(L, decl, isConst);
       if (drained) return drained;
       const lowered = L.lowerVarDecl(decl, isLet);
+      if (lowered && isConst && ts.isIdentifier(decl.name) && decl.initializer !== undefined) {
+        const idx = execIndexCompanion(L, decl, lowered);
+        if (idx) return [lowered, idx];
+      }
       return lowered ? [lowered] : [];
     }
+  }
+
+/** `const m = re.exec(s)` (a direct stdlib exec on a regex): the match start
+   * for `m.index`. Right after the declaration (no other statement can run
+   * between, so the runtime's last-exec slot is still this exec's), a hidden
+   * f64 local reads it. Null when the shape does not apply. */
+  function execIndexCompanion(L: Lowerer, decl: ts.VariableDeclaration, lowered: IrStmt): IrStmt | null {
+    if (!ts.isIdentifier(decl.name) || decl.initializer === undefined) return null;
+    let init: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(init) || ts.isNonNullExpression(init)) init = init.expression;
+    if (!ts.isCallExpression(init) || !ts.isPropertyAccessExpression(init.expression)) return null;
+    if (init.expression.name.text !== "exec" || init.arguments.length !== 1) return null;
+    if (L.mapTypeOf(L.typeOf(init.expression.expression))?.kind !== "regex") return null;
+    if (!L.isStdlibMember(init.expression)) return null;
+    const sym = L.checker.getSymbolAtLocation(decl.name);
+    if (!sym || L.globalsBySymbol.has(sym) || L.tdzPredeclared.has(sym)) return null;
+    if (lowered.kind !== "varDecl") return null;
+    const loc = locOf(decl);
+    const local = L.declareHiddenLocal("%execidx", F64);
+    L.execIndexBindings.set(sym, { localId: local.id, ctx: L.ctx });
+    // The receiver of lastExecIndex is not read; an empty string stands in.
+    const dummy: IrExpr = { kind: "strLit", value: "", type: STRING, loc };
+    return {
+      kind: "varDecl",
+      localId: local.id,
+      init: { kind: "regexIntrinsic", method: "lastExecIndex", receiver: dummy, args: [], type: F64, loc },
+      loc,
+    };
   }
 
 /** The numeric indexed source of a built-in value-iterator expression:
