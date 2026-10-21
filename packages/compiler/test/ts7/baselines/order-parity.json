@@ -11852,6 +11852,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8410-unknown-generator-and-regexp-fields-assigned-past-the-constructor.ts": {
+   "order": [
+    "<repo>/tests/corpus/8410-unknown-generator-and-regexp-fields-assigned-past-the-constructor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8411-definite-assignment-fields-across-every-slot-kind.ts": {
+   "order": [
+    "<repo>/tests/corpus/8411-definite-assignment-fields-across-every-slot-kind.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8412-strict-property-initialization-off-defers-map-fields/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/8412-strict-property-initialization-off-defers-map-fields/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"
@@ -13736,12 +13754,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/spi-off/main.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/spi-off/main.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/spread-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/spread-fences.ts"
@@ -13805,12 +13817,6 @@
   "<repo>/tests/diagnostics/two-fills-of-one-shape-in-two-orders.ts": {
    "order": [
     "<repo>/tests/diagnostics/two-fills-of-one-shape-in-two-orders.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/unassigned-fields.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/unassigned-fields.ts"
    ],
    "diags": []
   },
