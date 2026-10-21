@@ -32,7 +32,9 @@ console.log(fMixed(4));
 
 // JS arity through the runtime-arity lane: surplus dropped, missing are
 // undefined.
-const first = (x) => x;
+function first(x) {
+  return x;
+}
 const fFirst = (...args) => first(...args);
 console.log(fDecl(1, 2, 3, 4));
 console.log(`${fFirst()}`);

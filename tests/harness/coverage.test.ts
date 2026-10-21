@@ -57,15 +57,11 @@ test("unreached blockers report in their own group", async () => {
   );
 });
 
-test("unreached JS fences are listed, not just counted (lowerer.ts remainder pass)", async () => {
-  // unusedJsCorner is never called. A JS source file always DEFERS its
-  // compile fences to runtime (isJsSourceFile => deferFences), so the
-  // remainder lowerer that analyzes unreached bodies for coverage produces
-  // runtimeFence statements for `e.code = 42` and `e.fatal = true` exactly
-  // as error-code-slot-write.js proves for the REACHED case — the
-  // remainder's stats.statementsFailed already counts both (feeding
-  // "statements analyzed"/"compile statically" above), so before this fix
-  // the two fences were counted and never named anywhere in the report.
+test("unreached JS blockers are listed, not just counted (lowerer.ts remainder pass)", async () => {
+  // unusedJsCorner is never called. The remainder lowerer that analyzes
+  // unreached bodies for coverage reports `e.code = 42` and `e.fatal = true`
+  // as ordinary blockers of the unreached group (a refusal is never
+  // deferred to a runtime fence), dimmed because a build never lowers them.
   await expect(report(fixture("unreached-js-fences.js"))).toMatchFileSnapshot(
     "__snapshots__/coverage-unreached-js-fences.txt",
   );
@@ -215,7 +211,6 @@ test("a module.exports TABLE entry over a rebindable let keeps its fence", () =>
   const out = report(fixture("cjs-table-export-mutable/main.cjs"));
   expect(out).toContain("exporting the mutable 'let' binding 'n' by reference");
   // Both sites, grouped: one for the rebound let, one for the function write.
-  expect(out).toContain("2 sites");
   expect(out).toMatch(/×2\s+exporting the mutable 'let' binding 'n' by reference/);
 });
 
@@ -232,11 +227,10 @@ test("'exports[<literal>]' lowers; a key only the runtime knows keeps its fence"
   // The refused half, by count: an identifier key, an arithmetic key, a
   // template key, a call-expression key, and `1e400` -- a NumericLiteral
   // whose property name is "Infinity", not its own spelling.
-  expect(out).toContain("5 sites");
   expect(out).toMatch(/×5\s+the reference to 'exports' \(a binding form with no lowering\)/);
   // The admitted half carries no site at all: before the element-access arm
   // this same fixture reported 8.
-  expect(out).not.toContain("8 sites");
+  expect(out).not.toMatch(/×8\s/);
 });
 
 test("a STRING written to an error's `code` lands in ScrError's slot; anything else keeps its fence", () => {
@@ -255,10 +249,9 @@ test("a STRING written to an error's `code` lands in ScrError's slot; anything e
   // Asserting the refused half is what makes a later widening of the
   // general property-write case FAIL this test instead of passing it.
   const out = report(fixture("error-code-slot-write.js"));
-  expect(out).toContain("2 sites");
   expect(out).toMatch(/×2\s+assignment to non-variables/);
   // Before the arm this same fixture reported five.
-  expect(out).not.toContain("5 sites");
+  expect(out).not.toMatch(/×5\s/);
   expect(out).toContain("(83%)");
 });
 
@@ -279,11 +272,10 @@ test("a nested `module.exports.<n> =` assigns the global its own nested READ ans
   // object. Asserting the refusal makes that widening FAIL this test
   // instead of quietly passing it.
   const out = report(fixture("cjs-export-member-nested-write/main.cjs"));
-  expect(out).toContain("2 sites");
   expect(out).toMatch(/×2\s+assignment to non-variables/);
   // Before the arm this same fixture reported five: the three admitted
   // nested writes carried a fence each.
-  expect(out).not.toContain("5 sites");
+  expect(out).not.toMatch(/×5\s/);
 });
 
 test("type errors block analysis", () => {

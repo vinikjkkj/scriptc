@@ -39,11 +39,6 @@ export function defineCoverageCorpusSweep(part = 1, parts = 1): void {
       );
     for (const file of flatEntries) {
       const firstLine = readFileSync(file, "utf8").split("\n", 1)[0] ?? "";
-      // `// @deferred-fences: N` on the first line: a JS program that
-      // DELIBERATELY carries N runtime-fence statements on untaken paths
-      // (the deferred-fence corpus) — it still passes the differential
-      // oracle because the fences never execute.
-      const deferred = /^\/\/ @deferred-fences:\s*(\d+)\s*$/.exec(firstLine);
       const { coverage } = analyze(file, { dynamic: /^\/\/ @dynamic\s*$/.test(firstLine) });
       expect.soft(coverage.diagnostics, file).toEqual([]);
       // …and the IR the analysis lowered must VALIDATE. Until analyze() ran
@@ -56,7 +51,7 @@ export function defineCoverageCorpusSweep(part = 1, parts = 1): void {
       // mutations (a cast spelling a record over a value that is not one)
       // reached it, across four validator sites and three receiver kinds.
       expect.soft(coverage.ice ?? [], file).toEqual([]);
-      expect.soft(coverage.stats.statementsFailed, file).toBe(deferred ? Number(deferred[1]) : 0);
+      expect.soft(coverage.stats.statementsFailed, file).toBe(0);
       if (++n % 10 === 0) await new Promise((r) => setImmediate(r));
     }
     // 1617 corpus files at ~370 ms each. The old 600 s budget was not a

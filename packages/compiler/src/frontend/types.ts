@@ -3815,8 +3815,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // Mapping it is what gives a record MEMBER typed `Date | undefined` a
   // representation. Before this arm existed, zapo voip's `CallStateData`
   // (`connectedAt?: Date`) reported SC2009 on the RECORD TYPE -- a
-  // type-level stop that --best-effort cannot defer, and the last error
-  // between voip's package entry and a binary.
+  // type-level stop (a build error), and the last error between voip's
+  // package entry and a binary.
   //
   // This arm now buys the SHAPE *and* the behaviour -- unlike the WebRTC
   // pair below, which still buys only the shape.

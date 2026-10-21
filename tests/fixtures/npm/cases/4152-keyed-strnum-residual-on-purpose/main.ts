@@ -13,20 +13,19 @@
 //   refusal is a real asymmetry rather than a shared gap: the frontend
 //   answers `s.split("")` from its regex tables and prints Node's `a,b`.
 //
-// rToFixedDot -- the dot twin refuses too (SC1090), so toFixed is the one
-//   name here where both spellings agree and both are wrong. Its element
-//   half now uses the same words the dot half does.
+// rToFixedDot -- the dot twin refuses too (SC1090) at BUILD time, so toFixed
+//   is the one name here where both spellings are wrong. It lives in
+//   main-refused.ts beside this file.
 //
 // rTrulyMissing -- a name no prototype has. The ANSWER is right (a
 //   TypeError) but the MESSAGE is not Node's: this prints the subscript
 //   spelling `s["nope"] is not a function` where Node prints `s.nope is not
 //   a function`. Pre-existing, unchanged by this branch, pinned here
 //   because it is the only remaining Node divergence in the package.
-import { rUpper, rLower, rSplitFenced, rSplitDot, rToFixedFenced, rToFixedDot, rTrulyMissing } from "keyedstrnum"
+import { rUpper, rLower, rSplitFenced, rSplitDot, rToFixedFenced, rTrulyMissing } from "keyedstrnum"
 console.log("rUpper         = " + rUpper())
 console.log("rLower         = " + rLower())
 console.log("rSplitFenced   = " + rSplitFenced())
 console.log("rSplitDot      = " + rSplitDot())
 console.log("rToFixedFenced = " + rToFixedFenced())
-console.log("rToFixedDot    = " + rToFixedDot())
 console.log("rTrulyMissing  = " + rTrulyMissing())

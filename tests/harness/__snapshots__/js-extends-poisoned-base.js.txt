@@ -4,3 +4,31 @@ js-extends-poisoned-base.js:12:5 - error SC1090: constructor-assigned fields sha
   12 |     this.foo = () => {
      |     ^~~~~~~~
   13 |       console.log("called arrow");
+
+js-extends-poisoned-base.js:21:17 - error SC1090: extending classes not declared in the program ('C') is not supported yet
+
+  20 | 
+  21 | class D extends C {
+     |                 ^
+  22 |   foo() {
+
+js-extends-poisoned-base.js:30:13 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  29 | 
+  30 | const obj = new D();
+     |             ^~~~~~~
+  31 | obj.foo();
+
+js-extends-poisoned-base.js:31:1 - error SC1090: method calls like 'obj.foo' is not supported yet
+
+  30 | const obj = new D();
+  31 | obj.foo();
+     | ^~~~~~~~~
+  32 | D.prototype.foo.call(obj);
+
+js-extends-poisoned-base.js:32:1 - error SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'D.prototype.foo(...)') is not supported yet
+
+  31 | obj.foo();
+  32 | D.prototype.foo.call(obj);
+     | ^~~~~~~~~~~~~~~~~~~~~~~~~
+  33 | 

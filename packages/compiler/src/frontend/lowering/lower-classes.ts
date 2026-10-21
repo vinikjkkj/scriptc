@@ -2203,8 +2203,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // object/classval path (types.ts's own `!isDeclarationFile`
           // guard) — nothing needs a ClassInfo here for TYPE-ONLY use,
           // so this class is left UNREGISTERED rather than refused:
-          // quieter than `--best-effort` (no diagnostic is deferred
-          // into a runtime throw; there is nothing deferred at all) and
+          // quieter than a refusal (no diagnostic at all) and
           // safer than fabricating a shape (a later `new` of this name
           // falls straight through to lowerNew's own generic terminal
           // fence, "constructing values other than classes declared in
@@ -6106,8 +6105,8 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
       }
     }
     // Members whose body POISONED: no `%C.m` reached `out`, so no vtable
-    // thunk of `%C.m` may either — it would call an undeclared function,
-    // the one shape --best-effort refuses to defer.
+    // thunk of `%C.m` may either — it would call an undeclared function
+    // (an IR validation failure, SC9001).
     const poisoned = new Set<string>();
     for (const { mName, member } of L.classMethodMembers(info)) {
       if (!always && !L.wantBody(`%${className}.${mName}`)) continue;

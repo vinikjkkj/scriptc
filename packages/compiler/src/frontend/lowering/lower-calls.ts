@@ -3,7 +3,6 @@
  * function/lambda lowering and signature collection, and monomorphizing
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
 import * as ts from "../ts7/adapter.js";
-import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { applyEnumRefill, registerEnumRefill } from "./ir-patch.js";
 import type { EnumRefill } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
@@ -2420,8 +2419,7 @@ const SYMBOLIC_PAIR_BUDGET = 256;
    * recorded return statements' value types into the instance's settled
    * return type, then wrap each return to it — arm values wrap into the
    * union, dyn-convertible values ride dynFrom, and a value that cannot
-   * ride the settled type converts ITS return statement into the standard
-   * per-statement runtime fence (JS sources defer fences to runtime).
+   * ride the settled type poisons the instance (a build refusal).
    *
    * The settled type: the one distinct value type when every return
    * agrees; `T | undefined` when a bare `return;` or possible fallthrough
@@ -2486,38 +2484,20 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     for (const e of infer.entries) {
       if (e.stmt.kind !== "return") continue;
       const st = e.stmt as IrStmt & { kind: "return"; value: IrExpr | null };
-      const diagsBefore = L.diags.length;
-      try {
-        if (st.value === null || st.value === undefined) {
-          if (final.kind === "dyn") st.value = dynUndefinedExpr(st.loc);
-          else if (final.kind === "union") {
-            const wrapped = L.wrappedUndefined(final, st.loc);
-            if (!wrapped) {
-              L.unsupported("SC1090", e.node ?? decl, `bare 'return' in a function whose inferred return type is '${L.fmt(final)}'`);
-            }
-            st.value = wrapped;
+      // A value that cannot ride the settled type poisons the function:
+      // the diagnostic stays on the build (no per-return runtime fence).
+      if (st.value === null || st.value === undefined) {
+        if (final.kind === "dyn") st.value = dynUndefinedExpr(st.loc);
+        else if (final.kind === "union") {
+          const wrapped = L.wrappedUndefined(final, st.loc);
+          if (!wrapped) {
+            L.unsupported("SC1090", e.node ?? decl, `bare 'return' in a function whose inferred return type is '${L.fmt(final)}'`);
           }
-          // void final: bare return stands as-is
-        } else if (!typeEquals(st.value.type, final)) {
-          st.value = L.coerceInto(e.node ?? decl, st.value, final);
+          st.value = wrapped;
         }
-      } catch (err) {
-        if (!(err instanceof PoisonError)) throw err;
-        // The per-return fence: this value cannot ride the settled type —
-        // executing THIS return throws the recorded reason (the JS
-        // per-statement deferral, applied to one return of an instance).
-        const captured = L.diags.splice(diagsBefore);
-        const ice = captured.filter((d) => d.code === "SC9001");
-        if (ice.length > 0) L.diags.push(...ice);
-        L.runtimeFences.push(...captured.filter((d) => d.code !== "SC9001"));
-        const first = captured.find((d) => d.code !== "SC9001");
-        const mutable = st as unknown as Record<string, unknown>;
-        delete mutable["value"];
-        mutable["kind"] = "runtimeFence";
-        mutable["code"] = first?.code ?? "SC1090";
-        mutable["message"] = first
-          ? `${first.message} [${first.code}]`
-          : "this return value has no lowering onto the instance's settled return type [SC1090]";
+        // void final: bare return stands as-is
+      } else if (!typeEquals(st.value.type, final)) {
+        st.value = L.coerceInto(e.node ?? decl, st.value, final);
       }
     }
     return final;
@@ -8474,7 +8454,6 @@ const inliningPredicates = new Set<ts.Symbol>();
     if (isGenerator && funcType.ret.kind === "generator") {
       fnCtx.generator = { yieldT: funcType.ret.yieldT, nextT: funcType.ret.nextT };
     }
-    const diagsBefore = L.diags.length;
     L.fnStack.push(fnCtx);
     try {
       // ARGUMENTS-BOUND parameters: lambdaSignature dropped the declared
@@ -8571,64 +8550,6 @@ const inliningPredicates = new Set<ts.Symbol>();
       if (fnCtx.generator) lifted.generator = fnCtx.generator;
       L.liftedFns.push(lifted);
       return { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
-    } catch (e) {
-      // JS sources defer LAMBDA poisons like function declarations
-      // (lowerFunction's catch, lambda form — entry the function-level
-      // deferral): a fenced concise body (`(list) => new Intl.ListFormat
-      // (...).format(list)` — the error-message list-join idiom) would
-      // otherwise poison the ENCLOSING statement, stopping module init
-      // where Node only stops when the lambda is CALLED. The value
-      // compiles as a capture-free closure over a runtimeFence body —
-      // calling throws the first captured diagnostic at its source
-      // position. ICEs (SC9001) stay compile errors, exactly like
-      // lowerStmts; probe mode (diagSink) keeps the poison.
-      if (!(e instanceof PoisonError)) throw e;
-      if (
-        !isJsSourceFile(node.getSourceFile()) ||
-        L.diagSink !== null ||
-        L.diags.length <= diagsBefore ||
-        L.diags.slice(diagsBefore).some((d) => d.code === "SC9001")
-      ) {
-        throw e;
-      }
-      const captured = L.diags.splice(diagsBefore);
-      L.runtimeFences.push(...captured);
-      const first = captured[0]!;
-      const pos = ts.getLineAndCharacterOfPosition(
-        L.program.getSourceFile(first.loc.file) ?? node.getSourceFile(),
-        first.loc.start,
-      );
-      const params: IrParam[] = funcType.params.map((t, i) => ({ localId: `%pf${i}`, name: `%pf${i}`, type: t }));
-      // A REST-MARKED value type hides one synthetic trailing dyn-array
-      // param in the lifted function (the boxed call thunk fills it) —
-      // the fence lambda must spell that slot too or the validator's
-      // closure-signature check trips (SC9001). Island rest types SPELL
-      // their trailing engine-array param, so funcType.params already
-      // covers those.
-      if (funcType.rest === true && funcType.restAbi !== "jsval") {
-        params.push({ localId: "%pfrest", name: "%pfrest", type: DYN });
-      }
-      const lifted: IrFunction = {
-        name: fnName,
-        jsName,
-        params,
-        returnType: bodyReturn,
-        locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
-        captures: [],
-        body: [
-          {
-            kind: "runtimeFence",
-            code: first.code,
-            message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
-            loc,
-          },
-        ],
-        loc,
-      };
-      if (isAsync) lifted.async = true;
-      if (fnCtx.generator) lifted.generator = fnCtx.generator;
-      L.liftedFns.push(lifted);
-      return { kind: "closure", fnName, captures: [], type: funcType, loc };
     } finally {
       L.fnStack.pop();
     }
@@ -11656,7 +11577,6 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     const ctx = newFnCtx(false, null, null, bodyReturn);
     ctx.isAsync = sig.isAsync === true;
     if (sig.generator !== undefined) ctx.generator = sig.generator;
-    const diagsBefore = L.diags.length;
     L.fnStack.push(ctx);
     try {
       // ARGUMENTS-BOUND parameters: collectSignatureInner dropped the declared
@@ -11692,59 +11612,11 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       return fn;
     } catch (e) {
       // A poison OUTSIDE the per-statement catches (a parameter DEFAULT
-      // whose initializer is fenced, a parameter PATTERN over a class
+      // whose initializer is refused, a parameter PATTERN over a class
       // that never lowered): the diagnostic is already recorded — the
       // function skips, like a signature-blocked one, instead of killing
-      // the whole analysis.
+      // the whole analysis, and the build reports it.
       if (!(e instanceof PoisonError)) throw e;
-      // JS sources defer function-level poisons like statement fences
-      // (the sentence-walker idiom `({ parent: sentenceNode })` over the
-      // #private-fenced AstPath): the function compiles as its OWN
-      // runtimeFence — CALLING it throws the first captured diagnostic
-      // at the declaration's position — so a reachable-but-broken
-      // signature stops the RUN at its own site instead of the build.
-      // ICEs (SC9001) stay compile errors, exactly like lowerStmts.
-      if (
-        isJsSourceFile(decl.getSourceFile()) &&
-        L.diagSink === null &&
-        L.diags.length > diagsBefore &&
-        !L.diags.slice(diagsBefore).some((d) => d.code === "SC9001")
-      ) {
-        const captured = L.diags.splice(diagsBefore);
-        L.runtimeFences.push(...captured);
-        // An ABI type naming a class that never REGISTERED (the sentence-
-        // walker idiom's path type — the #private fence) is fine to emit:
-        // callers CAN lower calls to this symbol (a same-typed param
-        // passes straight through — no construction needed), so the fence
-        // function must exist, and run()'s unregistered-class sweep
-        // rewrites every such slot to the inert f64 placeholder before
-        // emission — caller and fence stay ABI-consistent.
-        const first = captured[0]!;
-        const loc = locOf(decl);
-        const pos = ts.getLineAndCharacterOfPosition(
-          L.program.getSourceFile(first.loc.file) ?? decl.getSourceFile(),
-          first.loc.start,
-        );
-        const params: IrParam[] = sig.params.map((p, i) => ({ localId: `%pf${i}`, name: `%pf${i}`, type: p.type }));
-        const fn: IrFunction = {
-          name: sig.name,
-          params,
-          returnType: bodyReturn,
-          locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
-          body: [
-            {
-              kind: "runtimeFence",
-              code: first.code,
-              message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
-              loc,
-            },
-          ],
-          loc,
-        };
-        if (sig.isAsync) fn.async = true;
-        if (sig.generator !== undefined) fn.generator = sig.generator;
-        return fn;
-      }
       return null;
     } finally {
       L.fnStack.pop();

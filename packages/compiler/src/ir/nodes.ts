@@ -325,8 +325,8 @@ export type IrType =
    * compile at all. zapo's `CallStateData` (voip's `call/call-state.ts`)
    * is the measured case — `connectedAt?: Date`, `acceptedAt?: Date`,
    * `endedAt?: Date` — and before this kind existed the record type
-   * itself reported SC2009, a TYPE-level stop that `--best-effort`
-   * cannot defer, which was the single remaining error between voip's
+   * itself reported SC2009, a TYPE-level stop (a build error), which
+   * was the single remaining error between voip's
    * package entry and a binary.
    *
    * NOTHING in this compiler constructs one. `new Date(...)` as a VALUE
@@ -2492,19 +2492,18 @@ export type IrStmt =
    * tryCatch handler, or out of the function (backends release the frames
    * and scopes the unwind exits — exactly the release-on-jump discipline). */
   | { kind: "throw"; value: IrExpr; loc: SrcLoc }
-  /** A DEFERRED compile fence (JavaScript sources only): the statement's
-   * construct has no static lowering, and JS carries no annotations to
-   * change that — so the fence fires when the statement RUNS instead of
-   * failing the build (the JS-input design: inference gaps land where
-   * `any` lands — honest fences, never silent misbehavior). Executing it
-   * throws a catchable Error whose message names the construct and whose
-   * `code` carries the SC diagnostic code; unwinds exactly like `throw`.
-   * TypeScript sources produce it only as the tsc-unreachable fallthrough
-   * trap (appendImplicitUndefinedReturn's SC9002) — their construct fences
-   * stay compile errors.
+  /** A coded runtime throw the lowering emits for a state the program can
+   * only reach if the compiler is wrong, or that Node throws too: the SC9002
+   * fallthrough guard (appendImplicitUndefinedReturn: tsc proved every path
+   * returns), the SC1031 destructuring of null/undefined (Node's own
+   * TypeError), the representability strand traps. It is NEVER the
+   * deferral of a construct the lowering could not compile: that is a build
+   * error. Executing it throws a catchable Error whose message names the
+   * state and whose `code` carries the SC code; unwinds exactly like
+   * `throw`.
    *
-   * `errKind` picks the runtime error CLASS. It defaults to `Error` — the
-   * deferred construct fence's own class. `"type"` exists for the
+   * `errKind` picks the runtime error CLASS. It defaults to `Error`.
+   * `"type"` exists for the
    * representability strand traps (SC9004), which were `throw new
    * TypeError(...)` built out of `error.new` before they were coded: they
    * keep TypeError so no program that catches one sees a different class,

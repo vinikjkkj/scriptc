@@ -6,8 +6,8 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
-import { requiresDynamicApiDiag, requiresDynamicPackageDiag, fenceLocationText} from "../../diagnostics/diagnostic.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
+import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
@@ -45,55 +45,6 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
    * divergence). Values with no island representation — closures, class
    * instances, promises, un-validated 'unknown' — are rejected with the
    * boundary message. */
-  /** The call-time deferral of a FUNC-value island crossing in a JS
-   * source: captures the just-recorded diagnostic into the runtime-fence
-   * ledger and answers a marshaled host closure that THROWS it when
-   * invoked — building the value compiles; only a call through the
-   * island stops the run. Null (caller rethrows) outside the JS deferral
-   * gate: TypeScript sources, probe mode, ICEs. */
-  export function islandFuncValueFence(L: Lowerer, err: unknown, diagsBefore: number, node: ts.Node): IrExpr | null {
-    if (
-      !(err instanceof PoisonError) ||
-      !isJsSourceFile(node.getSourceFile()) ||
-      L.diagSink !== null ||
-      L.diags.length <= diagsBefore ||
-      L.diags.slice(diagsBefore).some((d) => d.code === "SC9001")
-    ) {
-      return null;
-    }
-    const captured = L.diags.splice(diagsBefore);
-    L.runtimeFences.push(...captured);
-    const first = captured[0]!;
-    const pos = ts.getLineAndCharacterOfPosition(
-      L.program.getSourceFile(first.loc.file) ?? node.getSourceFile(),
-      first.loc.start,
-    );
-    const loc = locOf(node);
-    const fnName = `%fn${L.lambdaCounter++}_islfence`;
-    L.liftedFns.push({
-      name: fnName,
-      params: [],
-      returnType: VOID,
-      locals: [],
-      captures: [],
-      body: [
-        {
-          kind: "runtimeFence",
-          code: first.code,
-          message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
-          loc,
-        },
-      ],
-      loc,
-    });
-    return {
-      kind: "jsMarshal",
-      value: { kind: "closure", fnName, captures: [], type: { kind: "func", params: [], ret: VOID }, loc },
-      type: JSVAL,
-      loc,
-    };
-  }
-
   export function jsvalIn(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
     if (e.type.kind === "jsval") return e;
     // Bare unit literals (`undefined` / `null` in an 'any' slot): the
@@ -122,32 +73,20 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
       e.type.kind === "func" &&
       !canMarshalTypedFuncIntoIsland(e.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
     ) {
-      const diagsBefore = L.diags.length;
-      try {
-        L.unsupported(
-          "SC1090",
-          node,
-          `functions with this signature crossing into dynamically-executed code ` +
-            `(a callback passed to a package/'any' API may take 'any' parameters — ` +
-            `leave them unannotated so contextual typing keeps them 'any' — or parameters ` +
-            `convertible at the boundary (number, string, boolean, JSON-safe ` +
-            `records/arrays/unions, 'T | undefined'), and return 'any', void, number, ` +
-            `string, boolean, a JSON-safe composite, or a Promise of the primitive kinds${
-              e.type.kind === "func" && e.type.params.length > MAX_ISLAND_CALLBACK_ARITY
-                ? `; at most ${MAX_ISLAND_CALLBACK_ARITY} parameters`
-                : ""
-            })`,
-        );
-      } catch (err) {
-        // JS sources defer the crossing like a statement fence, one level
-        // deeper: the slot receives a host closure that THROWS the
-        // diagnostic when INVOKED (the withPlugins aggregation shape —
-        // wrappers built at module init around functions the smoke path
-        // never calls). TypeScript and probe mode keep the poison.
-        const fence = islandFuncValueFence(L, err, diagsBefore, node);
-        if (fence) return fence;
-        throw err;
-      }
+      L.unsupported(
+        "SC1090",
+        node,
+        `functions with this signature crossing into dynamically-executed code ` +
+          `(a callback passed to a package/'any' API may take 'any' parameters — ` +
+          `leave them unannotated so contextual typing keeps them 'any' — or parameters ` +
+          `convertible at the boundary (number, string, boolean, JSON-safe ` +
+          `records/arrays/unions, 'T | undefined'), and return 'any', void, number, ` +
+          `string, boolean, a JSON-safe composite, or a Promise of the primitive kinds${
+            e.type.kind === "func" && e.type.params.length > MAX_ISLAND_CALLBACK_ARITY
+              ? `; at most ${MAX_ISLAND_CALLBACK_ARITY} parameters`
+              : ""
+          })`,
+      );
     }
     // A STATIC promise crossing INTO the island: a real engine thenable
     // settled when the scriptc promise settles (the async-callback return

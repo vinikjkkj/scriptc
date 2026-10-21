@@ -5,7 +5,6 @@
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
 import * as ts from "../ts7/adapter.js";
-import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -754,99 +753,15 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const argsWith: IrExpr[] = [];
         const getters: { name: string; fn: IrExpr; loc: SrcLoc }[] = [];
         let spread: { cond: IrExpr; whenTrue: boolean } | null = null;
-        // A MEMBER a JS file cannot lower or marshal: defer like a
-        // statement fence, shaped by what the member IS. A FUNCTION-shaped
-        // member (a generic function as a value, a signature with
-        // checked-dynamic parameters — the doc-builder public aggregate's
-        // degraded pieces) becomes a host closure that THROWS the captured
-        // diagnostic when invoked — building the aggregate compiles and
-        // only a CALL through the island stops the run. A DATA-shaped
-        // member must NOT become a callable (the retired fence box's
-        // silent wrong answers: typeof said "function", downstream errors
-        // blamed the wrong thing — the withPlugins `plugins:` slot), so it
-        // defines through the engine's getter machinery instead: READING
-        // the member throws the diagnostic — the honest granularity, since
-        // using the value is exactly what cannot be answered. `getterName`
-        // null keeps the closure shape (function-shaped members, and the
-        // conditional-spread arms where getters cannot combine).
-        const islandMemberFence = (diagsBefore: number, err: unknown, valueNode: ts.Node, getterName: string | null = null): IrExpr | null => {
-          if (
-            !(err instanceof PoisonError) ||
-            !isJsSourceFile(expr.getSourceFile()) ||
-            L.diagSink !== null ||
-            L.diags.length <= diagsBefore ||
-            L.diags.slice(diagsBefore).some((d) => d.code === "SC9001")
-          ) {
-            throw err;
-          }
-          const captured = L.diags.splice(diagsBefore);
-          L.runtimeFences.push(...captured);
-          const first = captured[0]!;
-          const pos = ts.getLineAndCharacterOfPosition(
-            L.program.getSourceFile(first.loc.file) ?? expr.getSourceFile(),
-            first.loc.start,
-          );
-          const fnName = `%fn${L.lambdaCounter++}_islfence`;
-          L.liftedFns.push({
-            name: fnName,
-            params: [],
-            returnType: VOID,
-            locals: [],
-            captures: [],
-            body: [
-              {
-                kind: "runtimeFence",
-                code: first.code,
-                message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
-                loc: locOf(valueNode),
-              },
-            ],
-            loc: locOf(valueNode),
-          });
-          const fence: IrExpr = { kind: "closure", fnName, captures: [], type: funcOf([], VOID), loc: locOf(valueNode) };
-          if (getterName !== null) {
-            getters.push({ name: getterName, fn: L.jsvalIn(fence, valueNode), loc: locOf(valueNode) });
-            return null;
-          }
-          return L.jsvalIn(fence, valueNode);
-        };
-        // The member's SHAPE decides the fence's granularity: syntactic
-        // functions and checker-callable values keep the call-time
-        // closure; everything else (call results, awaits, data reads —
-        // the withPlugins `plugins:` shape) fences at the READ.
-        const funcShapedMember = (p: ts.ObjectLiteralElementLike): boolean => {
-          if (ts.isMethodDeclaration(p)) return true;
-          const src: ts.Node | null = ts.isPropertyAssignment(p)
-            ? p.initializer
-            : ts.isShorthandPropertyAssignment(p)
-              ? p.name
-              : null;
-          if (!src || !ts.isExpression(src)) return true; // unknown form: keep the closure shape
-          let inner: ts.Expression = src;
-          while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
-          if (ts.isArrowFunction(inner) || ts.isFunctionExpression(inner)) return true;
-          return L.checker.getCallSignatures(L.typeOf(src)).length > 0;
-        };
         const pushProp = (
           name: ts.Identifier | ts.StringLiteral,
           value: IrExpr,
           valueNode: ts.Node,
           into: IrExpr[][],
         ): void => {
-          const diagsBefore = L.diags.length;
-          let marshaled: IrExpr;
-          try {
-            marshaled = L.jsvalIn(value, valueNode);
-          } catch (err) {
-            // A value that LOWERED but cannot cross (a promise, a class
-            // instance): func-typed values keep the call-time closure;
-            // data-shaped values fence at the read (the getter), unless a
-            // conditional spread owns the literal (getters cannot combine).
-            const asGetter = value.type.kind !== "func" && spread === null;
-            const fence = islandMemberFence(diagsBefore, err, valueNode, asGetter ? name.text : null);
-            if (fence === null) return; // registered as a fence getter — no data property
-            marshaled = fence;
-          }
+          // A value that LOWERED but cannot cross (a promise, a class
+          // instance) is refused by jsvalIn, on the build.
+          const marshaled = L.jsvalIn(value, valueNode);
           for (const args of into) {
             args.push({
               kind: "jsMarshal",
@@ -931,25 +846,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             continue;
           }
           // A member VALUE that cannot lower at all (a generic function
-          // referenced as a value — the aggregate's `align`): the same
-          // call-time fence deferral pushProp applies to marshal failures.
-          let value: IrExpr | null = null;
-          const valueDiagsBefore = L.diags.length;
-          try {
-            value = ts.isPropertyAssignment(prop)
-              ? L.lowerExpr(prop.initializer)
-              : ts.isShorthandPropertyAssignment(prop)
-                ? L.lowerShorthandValue(prop)
-                : ts.isMethodDeclaration(prop) && prop.body
-                  ? (L.rejectThisInObjectMethod(prop.body), L.lowerLambda(prop))
-                  : null;
-          } catch (err) {
-            const nameText =
-              name && (ts.isIdentifier(name) || ts.isStringLiteral(name)) ? name.text : null;
-            const asGetter = nameText !== null && spread === null && !funcShapedMember(prop);
-            value = islandMemberFence(valueDiagsBefore, err, prop, asGetter ? nameText : null);
-            if (value === null) continue; // registered as a fence getter — no data property
-          }
+          // referenced as a value) is a build error.
+          const value: IrExpr | null = ts.isPropertyAssignment(prop)
+            ? L.lowerExpr(prop.initializer)
+            : ts.isShorthandPropertyAssignment(prop)
+              ? L.lowerShorthandValue(prop)
+              : ts.isMethodDeclaration(prop) && prop.body
+                ? (L.rejectThisInObjectMethod(prop.body), L.lowerLambda(prop))
+                : null;
           if (value && name && (ts.isIdentifier(name) || ts.isStringLiteral(name))) {
             pushProp(name, value, prop, [argsWithout, argsWith]);
           } else {
@@ -8501,54 +8405,7 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
           : prop.initializer;
       const lowerValue = (): IrExpr =>
         ts.isMethodDeclaration(prop) ? L.lowerLambda(prop) : L.lowerExpr(valueExpr as ts.Expression);
-      // Lambda values that fail to lower become trap closures (the
-      // per-call fence granularity — fenceClosureProbe) so the object
-      // still builds; everything else keeps the per-property fence below.
-      let raw: IrExpr;
-      const propDiagsBefore = L.diags.length;
-      try {
-        raw = fenceClosureProbe(L, valueExpr, undefined, lowerValue) ?? lowerValue();
-      } catch (err) {
-        // A PURE member read a JS file cannot lower (a namespace object
-        // in an export aggregate): the slot takes a boxed fence closure —
-        // the diagnostics defer to the runtime-fence ledger, the object
-        // builds, and only USING the member stops the run.
-        const pureMember = ts.isIdentifier(valueExpr);
-        if (
-          !(err instanceof PoisonError) ||
-          !pureMember ||
-          L.diagSink !== null ||
-          L.diags.length <= propDiagsBefore ||
-          L.diags.slice(propDiagsBefore).some((d) => d.code === "SC9001")
-        ) {
-          throw err;
-        }
-        const captured = L.diags.splice(propDiagsBefore);
-        L.runtimeFences.push(...captured);
-        const first = captured[0]!;
-        const pos = ts.getLineAndCharacterOfPosition(
-          L.program.getSourceFile(first.loc.file) ?? expr.getSourceFile(),
-          first.loc.start,
-        );
-        const fnName = `%fn${L.lambdaCounter++}_dynfence`;
-        L.liftedFns.push({
-          name: fnName,
-          params: [],
-          returnType: VOID,
-          locals: [],
-          captures: [],
-          body: [
-            {
-              kind: "runtimeFence",
-              code: first.code,
-              message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
-              loc: locOf(prop),
-            },
-          ],
-          loc: locOf(prop),
-        });
-        raw = { kind: "closure", fnName, captures: [], type: funcOf([], VOID), loc: locOf(prop) };
-      }
+      const raw: IrExpr = lowerValue();
       let v = L.coerceToExpected(raw, DYN);
       // A function MEMBER of a runtime-keyed object literal is created
       // right here, so its Function.prototype.toString source text is
@@ -8561,55 +8418,11 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
         if (mSrc !== null) v = { ...v, fnSrc: mSrc };
       }
       if (v.type.kind !== "dyn") {
-        const convDiagsBefore = L.diags.length;
-        try {
-          L.unsupported(
-            "SC1101",
-            valueExpr,
-            `holding '${L.fmt(v.type)}' values in a runtime-keyed (computed-key) object literal`,
-          );
-        } catch (err) {
-          // A member value the checked-dynamic tree cannot hold — a func whose signature
-          // cannot box, an island ('any') handle, a record carrying func
-          // fields (the export aggregate's typed utilities and npm-handle
-          // members): the same call-time fence deferral as an unlowerable
-          // member — the slot takes a boxed fence closure; only USING it
-          // stops the run. Probe mode and ICEs keep the poison.
-          if (
-            !(err instanceof PoisonError) ||
-            L.diagSink !== null ||
-            L.diags.length <= convDiagsBefore ||
-            L.diags.slice(convDiagsBefore).some((d) => d.code === "SC9001")
-          ) {
-            throw err;
-          }
-          const captured = L.diags.splice(convDiagsBefore);
-          L.runtimeFences.push(...captured);
-          const first = captured[0]!;
-          const pos = ts.getLineAndCharacterOfPosition(
-            L.program.getSourceFile(first.loc.file) ?? expr.getSourceFile(),
-            first.loc.start,
-          );
-          const fnName = `%fn${L.lambdaCounter++}_dynfence`;
-          L.liftedFns.push({
-            name: fnName,
-            params: [],
-            returnType: VOID,
-            locals: [],
-            captures: [],
-            body: [
-              {
-                kind: "runtimeFence",
-                code: first.code,
-                message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
-                loc: locOf(prop),
-              },
-            ],
-            loc: locOf(prop),
-          });
-          const fence: IrExpr = { kind: "closure", fnName, captures: [], type: funcOf([], VOID), loc: locOf(prop) };
-          v = L.coerceToExpected(fence, DYN);
-        }
+        L.unsupported(
+          "SC1101",
+          valueExpr,
+          `holding '${L.fmt(v.type)}' values in a runtime-keyed (computed-key) object literal`,
+        );
       }
       fields.push({ key, value: v });
     }
@@ -9016,142 +8829,6 @@ function fenceAccessorSpreadSource(L: Lowerer, prop: ts.Node, srcShape: IrRecord
       prop,
       "object spread of sources carrying get/set accessor properties (Node invokes each getter once during the copy — the field-copy desugar cannot model the calls; bind the reads to consts first)",
     );
-  }
-}
-
-/** A function-valued property initializer whose EVALUATION is observably
- * nothing — the precondition for replacing it with a trap closure, because
- * the substitution keeps the value's type, identity and `typeof` but throws
- * away whatever the expression would have done on the way to producing it.
- * A syntactic lambda qualifies (creating a closure has no side effects);
- * so does `<this|id>.method.bind(<this|id>)`, the collaborator idiom —
- * binding a METHOD over pure references creates a closure and nothing
- * more. An ACCESSOR is excluded by name: its read IS the side effect, and
- * dropping the call would silently change the program. `as`/`satisfies`/
- * parenthesis laundering is transparent — it is exactly what a caller
- * writes when the declared slot is looser than the member
- * (`client.emit.bind(client) as unknown as Ctx['emit']`) and it evaluates
- * to nothing at runtime.
- *
- * A bare identifier read is pure too, but is deliberately NOT admitted: a
- * JS literal's unlowerable identifier member already has a story one step
- * down (lowerObjectLiteral's pure-member catch NARROWS the field away, so
- * each read meets its own per-site fence), and two answers to one shape
- * would be a silent behavior change to the export-aggregate tables that
- * rule was written for.
- *
- * This is the same purity question the generic-callable branch answers for
- * its own drop (`pureInit`, lowerObjectLiteral); kept separate because that
- * one decides whether to DROP a field with no slot, and does not see
- * through casts. */
-function pureFuncValueInit(L: Lowerer, node: ts.Node): boolean {
-  let inner: ts.Node = node;
-  for (;;) {
-    if (ts.isParenthesizedExpression(inner)) inner = inner.expression;
-    else if (ts.isAsExpression(inner) || ts.isSatisfiesExpression(inner)) inner = inner.expression;
-    else break;
-  }
-  if (ts.isArrowFunction(inner) || ts.isFunctionExpression(inner) || ts.isMethodDeclaration(inner)) return true;
-  if (!ts.isCallExpression(inner) || inner.arguments.length !== 1) return false;
-  const callee = inner.expression;
-  if (
-    !ts.isPropertyAccessExpression(callee) ||
-    callee.name.text !== "bind" ||
-    !ts.isPropertyAccessExpression(callee.expression)
-  ) {
-    return false;
-  }
-  const methodAccess = callee.expression;
-  const pureRef = (x: ts.Expression): boolean => x.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(x);
-  if (!pureRef(methodAccess.expression) || !pureRef(inner.arguments[0]!)) return false;
-  const sym = L.checker.getSymbolAtLocation(methodAccess.name);
-  const decls = sym ? L.checker.declarationsOf(sym) : [];
-  if (decls.length === 0) return false;
-  return !decls.some((d) => ts.isGetAccessorDeclaration(d) || ts.isSetAccessorDeclaration(d));
-}
-
-/** The trap-closure fallback for FUNCTION-VALUED object properties: an
- * initializer that fails to lower inside an object literal becomes a
- * closure of the field's exact func type whose body is the runtime fence —
- * the object still BUILDS (commander's `_outputConfiguration` table: the
- * driven writeOut/writeErr entries work; an unloweraable color probe traps
- * only if something CALLS it). The failed initializer's diagnostics move to
- * the runtime-fence inventory, exactly like a fenced statement.
- *
- * WHEN it applies is the deferral rule the whole build already runs on
- * (lowerStmts' `deferFences`): JavaScript sources. WHAT it applies to is the purity rule
- * above: the substitution must not skip work. With a func slot the trap's
- * ABI is the slot's own, so any pure form is admissible; without one the
- * arity has to be read off a syntactic lambda, so only those qualify.
- *
- * Null when the fallback does not apply — the caller lowers normally. ICEs
- * (SC9001) never convert. */
-function fenceClosureProbe(
-  L: Lowerer,
-  node: ts.Node,
-  slotType: IrType | undefined,
-  attempt: () => IrExpr,
-): IrExpr | null {
-  if (!isJsSourceFile(node.getSourceFile())) return null;
-  let inner: ts.Node = node;
-  while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
-  if (slotType !== undefined && slotType.kind !== "func") return null;
-  // The trap's ABI: the field's func slot when one exists; otherwise (the
-  // dyn-object literal path — the value boxes into dyn) the all-dyn
-  // signature of the lambda's own arity, which canBoxFuncIntoDyn always
-  // admits. Only a syntactic lambda can answer that second question, which
-  // is why a slotless field still requires one; a slotted field takes any
-  // pure form (pureFuncValueInit).
-  let fieldType: IrType & { kind: "func" };
-  if (slotType !== undefined) {
-    if (!pureFuncValueInit(L, node)) return null;
-    fieldType = slotType;
-  } else if (ts.isArrowFunction(inner) || ts.isFunctionExpression(inner) || ts.isMethodDeclaration(inner)) {
-    fieldType = { kind: "func", params: inner.parameters.map(() => DYN), ret: DYN };
-  } else {
-    return null;
-  }
-  const diagsBefore = L.diags.length;
-  try {
-    return attempt();
-  } catch (e) {
-    if (!(e instanceof PoisonError)) throw e;
-    const captured = L.diags.splice(diagsBefore);
-    if (captured.some((d) => d.code === "SC9001")) {
-      L.diags.push(...captured);
-      throw e;
-    }
-    L.runtimeFences.push(...captured);
-    const first = captured[0];
-    const loc = locOf(node);
-    if (process.env["SCRIPTC_FENCEFN_WHY"] !== undefined) {
-      console.error(`[fencefn] ${loc.file}:${loc.start} ${first?.code ?? "?"} ${first?.message.slice(0, 90) ?? ""}`);
-    }
-    const params = fieldType.params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
-    const name = `%fence.fn.${L.liftedFns.length}`;
-    L.liftedFns.push({
-      name,
-      params,
-      returnType: fieldType.ret,
-      locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: true })),
-      body: [
-        {
-          kind: "runtimeFence",
-          code: first?.code ?? "SC1090",
-          // CENSUS: this message is the diagnostic's own, BARE — the three
-          // sibling constructors append `[${code} at ${file}:${line}]` and this
-          // one does not, so every refusal that lands here is invisible to a
-          // bracket-keyed trap census.  zapo's `this.emit.bind(this)` is one of
-          // them, and it is what kills a wide entry at its first call
-          // (estado-deeper §3.3).  `scripts/tu-census.mjs` counts it by HOST
-          // name (`%fence.fn.N`) instead; see estado-census2.md.
-          message: first?.message ?? "this function's body has no static lowering",
-          loc,
-        },
-      ],
-      loc,
-    });
-    return { kind: "closure", fnName: name, captures: [], type: fieldType, loc };
   }
 }
 
@@ -12045,8 +11722,6 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
 
       let value: IrExpr;
       let valueNode: ts.Node = prop;
-      const propDiagsBefore = L.diags.length;
-      try {
       if (ts.isPropertyAssignment(prop)) {
         valueNode = prop.initializer;
         // ARRAY-LITERAL initializers route through the expected-type
@@ -12057,42 +11732,15 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         let init: ts.Expression = prop.initializer;
         while (ts.isParenthesizedExpression(init)) init = init.expression;
         value =
-          fenceClosureProbe(L, prop.initializer, fieldType, () => L.lowerExpr(prop.initializer)) ??
-          (fieldType !== undefined && ts.isArrayLiteralExpression(init)
+          fieldType !== undefined && ts.isArrayLiteralExpression(init)
             ? L.lowerExprExpecting(prop.initializer, fieldType)
-            : L.lowerExpr(prop.initializer));
+            : L.lowerExpr(prop.initializer);
       } else if (ts.isShorthandPropertyAssignment(prop)) {
         value = L.lowerShorthandValue(prop);
       } else if (ts.isMethodDeclaration(prop)) {
-        value =
-          fenceClosureProbe(L, prop, fieldType, () => L.lowerLambda(prop)) ?? L.lowerLambda(prop);
+        value = L.lowerLambda(prop);
       } else {
         L.unsupported("SC1090", prop, `syntax '${ts.SyntaxKind[(prop as ts.Node).kind]}'`);
-      }
-      } catch (err) {
-        // A member VALUE a JS file cannot lower (a namespace object in an
-        // export aggregate — the sharedWithCli `errors` member): the
-        // member NARROWS AWAY like a CJS export-table accessor entry —
-        // the diagnostics defer to the runtime-fence ledger, the shape
-        // drops the field, and each READ of it meets its own per-site
-        // fence. Pure member forms only (identifier/shorthand reads);
-        // TypeScript, probe mode, and ICEs keep the poison.
-        const pureMember =
-          ts.isShorthandPropertyAssignment(prop) ||
-          (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.initializer));
-        if (
-          !(err instanceof PoisonError) ||
-          !pureMember ||
-          !isJsSourceFile(expr.getSourceFile()) ||
-          L.diagSink !== null ||
-          L.diags.length <= propDiagsBefore ||
-          L.diags.slice(propDiagsBefore).some((d) => d.code === "SC9001")
-        ) {
-          throw err;
-        }
-        L.runtimeFences.push(...L.diags.splice(propDiagsBefore));
-        droppedNames.add(name);
-        continue;
       }
       if (!fieldType) {
         // Overflow entry: the value flows into the index signature's value
@@ -13461,9 +13109,8 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // `Object.keys(o)` iteration). Neither has one static record shape to
     // key off. When the value can cross into the checked-dynamic tree, read
     // the key there (a missing key answers undefined, exactly JS — and the
-    // `unknown` value type is what the cast promised); otherwise fence (a JS
-    // source or --best-effort defers to a runtime trap, so a path that never
-    // runs still compiles). A value that already IS this shape falls through
+    // `unknown` value type is what the cast promised); otherwise fence (a
+    // build refusal). A value that already IS this shape falls through
     // to the ordinary reads below.
     if (obj.type.kind !== "record" || obj.type.shapeId !== shapeId) {
       if (L.dynConvertible(obj.type)) {
@@ -14908,9 +14555,8 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
    * thinks, and the failure surfaces later at whatever widens it back.
    *
    * Reported as ADVICE and not as a refusal, because the refusal costs
-   * more than the loss: under --best-effort it becomes a runtime throw at
-   * this very statement, so a `push(e as unknown as T)` inside a handler
-   * would stop pushing at all. See assertionDropsMembersDiag.
+   * more than the loss: a `push(e as unknown as T)` inside a handler would
+   * stop building at all. See assertionDropsMembersDiag.
    *
    * Strictly the double form: a single `x as T` between two record types
    * is a checker-legal widening or narrowing and gets its own rules

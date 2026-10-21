@@ -107,7 +107,6 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   test.for([
     ["escape-string-regexp", "escape-cli.ts"],
     ["slash", "slash-cli.ts"],
-    ["ms", "ms-cli.ts"],
     // dualist pins the "node" exports condition: Node runs ./node.js
     // (yaml's browser-vs-node shape) and the opted-in resolution must
     // land on the SAME artifact, never the browser build.
@@ -215,27 +214,17 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // The refusal is a DEFERRED fence (the npm-static contract: an
   // unlowerable statement in an opted-in package becomes a runtime throw),
   // so the program builds and then stops loudly at the named site.
-  test("a receiver whose runtime class may override an untyped method refuses by name", async () => {
+  test("a receiver whose runtime class may override an untyped method refuses by name", () => {
     const entry = join(pilotRoot, "poolish-inexact.ts");
     const { coverage } = analyze(entry, { npmStatic: ["poolish"] });
     expect(coverage.preflightFailed).toBe(false);
     expect(coverage.npmStatic).toEqual([{ package: "poolish", status: "static" }]);
-    expect(coverage.diagnostics).toHaveLength(0); // builds — the fence is runtime
-    const fences = (coverage.runtimeFences ?? []).filter((f) =>
-      /generic method 'end' through a receiver whose runtime class may override it/.test(f.message),
+    // A BUILD refusal: no deferred fence, no binary that links and then
+    // stops at the named site.
+    const refusals = coverage.diagnostics.filter((d) =>
+      /generic method 'end' through a receiver whose runtime class may override it/.test(d.message),
     );
-    expect(fences).toHaveLength(1);
-    // …and the binary really stops there: Node prints three lines, the
-    // compiled program prints none of them and exits non-zero.
-    const binary = await buildStatic(entry, ["poolish"]);
-    const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry]),
-      runBinary(binary, []),
-    ]);
-    expect(nodeRes.exitCode).toBe(0);
-    expect(nodeRes.stdout.toString("utf8")).toContain("Pooled.end[Base.end<p9>]");
-    expect(nativeRes.exitCode).not.toBe(0);
-    expect(nativeRes.stdout.toString("utf8")).not.toContain("Base.end");
+    expect(refusals).toHaveLength(1);
   }, 120_000);
 
   // poolish's ORDER control, and the second reason admitting the override
@@ -248,26 +237,14 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // a silent wrong answer, and it was one: this program built clean and
   // printed the BASE's answer for the subclass instance at exit 0 before
   // the guard. It refuses at the class expression now.
-  test("an override of an untyped method from a class expression refuses by name", async () => {
+  test("an override of an untyped method from a class expression refuses by name", () => {
     const entry = join(pilotRoot, "poolish-late.ts");
     const { coverage } = analyze(entry, { npmStatic: ["poolish"] });
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0); // builds -- the fence is runtime
-    const fences = (coverage.runtimeFences ?? []).filter((f) =>
-      /overriding the inherited generic method 'end' from a class expression/.test(f.message),
+    const refusals = coverage.diagnostics.filter((d) =>
+      /overriding the inherited generic method 'end' from a class expression/.test(d.message),
     );
-    expect(fences).toHaveLength(1);
-    const binary = await buildStatic(entry, ["poolish"]);
-    const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry]),
-      runBinary(binary, []),
-    ]);
-    expect(nodeRes.exitCode).toBe(0);
-    expect(nodeRes.stdout.toString("utf8")).toContain("Late.end<L>");
-    expect(nativeRes.exitCode).not.toBe(0);
-    // the wrong answer this guard exists to prevent, spelled out
-    expect(nativeRes.stdout.toString("utf8")).not.toContain("LateBase.end<L>");
-    expect(nativeRes.stdout.toString("utf8")).not.toContain("Late.end<L>");
+    expect(refusals).toHaveLength(1);
   }, 120_000);
 
   // Tier 1, auto mode: the eligibility heuristics pick escape-string-regexp
@@ -362,15 +339,18 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // code instead of a deferred fence. Node answers undefined there, a
   // value the declared representation cannot hold, so each path traps
   // loudly instead of misbehaving. The frontier only moves deliberately.
-  test("ms compiles static with the JSDoc-contradicting undefined returns pinned", () => {
+  test("ms is refused at build time for the JSDoc-contradicting undefined returns", () => {
     const { coverage } = analyze(join(pilotRoot, "ms-cli.ts"), { npmStatic: ["ms"] });
     expect(coverage.npmStatic).toEqual([{ package: "ms", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
-    const fences = coverage.runtimeFences ?? [];
-    expect(fences.length).toBe(2);
-    for (const f of fences) {
-      expect(f.message).toMatch(/bare 'return'/);
+    // OPEN DEFECT ("tudo funcional"): ms's parse() returns bare `return;` on
+    // its garbage paths against its JSDoc `@return {Number}`. JS hands the
+    // caller undefined, which the declared number slot cannot hold, so each
+    // is a BUILD refusal. They used to be deferred runtime fences, and this
+    // pilot built and ran on the paths that never reach them.
+    expect(coverage.diagnostics.length).toBe(2);
+    for (const d of coverage.diagnostics) {
+      expect(d.message).toMatch(/bare 'return'/);
     }
   }, 120_000);
 
@@ -481,13 +461,18 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // fences are implicit-any FIELD writes of class instances (`cmd.parent
   // = this` — the field inferred `any` from its ctor null) and
   // getter/setter JSDoc union returns (`cmd.name()` → string | Command).
-  test("commander compiles static at the pinned coverage floor", () => {
+  test("commander is refused at build time, at the pinned coverage floor", () => {
     const { coverage } = analyze(join(fixturesRoot, "commander-calc/calc-npm-static.ts"), {
       npmStatic: ["commander"],
     });
     expect(coverage.npmStatic).toEqual([{ package: "commander", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
+    // OPEN DEFECT ("tudo funcional"): commander is REFUSED at build time
+    // while any of the constructs below has no static lowering. The refusals
+    // used to be deferred runtime fences and the package built; the
+    // statement floor is what says how close it is, and the test starts
+    // failing the day the last refusal lowers, so that the pin moves.
+    expect(coverage.diagnostics.length).toBeGreaterThan(0);
     const total = coverage.stats.statementsTotal + (coverage.unreached?.stats.statementsTotal ?? 0);
     const failed = coverage.stats.statementsFailed + (coverage.unreached?.stats.statementsFailed ?? 0);
     expect(total).toBeGreaterThan(1000); // the whole package joined the program
@@ -969,6 +954,17 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
+  test("4114 (refused rows): the dot spellings of reduce and flat on a dyn array are build refusals", () => {
+    const entry = join(fixturesRoot, "npm/cases/4114-keyed-method-call-reach-on-purpose/main-refused.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["keyedreach-refused"] });
+    expect(coverage.npmStatic).toEqual([{ package: "keyedreach-refused", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics.map((d) => d.message).sort()).toEqual([
+      "method calls like 'a.flat' is not supported yet",
+      "method calls like 'a.reduce' is not supported yet",
+    ]);
+  }, 120_000);
+
   /* -- 4153: how many receiver mechanisms are there? (discriminator) -----
    *
    * Three gaps in this repo have each been described as "the receiver
@@ -1043,7 +1039,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
       native.split("\n").filter((l) => l.includes(" = "))
         .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
     );
-    expect(rows.size).toBe(25);
+    expect(rows.size).toBe(24);
 
     // -- CONTROLS. If either of these fails the rest measures nothing.
     expect(rows.get("m1CtorControl")).toBe("obj tag=C");
@@ -1102,12 +1098,22 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
         .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
     );
     const differing = [...rows.keys()].filter((k) => rows.get(k) !== nodeRows.get(k));
-    expect(differing.sort()).toEqual(["m1CallDot", "m1CallDotFromMethod", "m1CallElem"]);
+    expect(differing.sort()).toEqual(["m1CallDot", "m1CallDotFromMethod"]);
 
     // The remaining divergence is asserted, not merely described.
     expect(native).not.toBe(node);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
+
+  test("4153 (refused row): the element spelling over a typed record with a function member is a build refusal", () => {
+    const entry = join(fixturesRoot, "npm/cases/4153-receiver-mechanism-discriminator-on-purpose/main-refused.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["recvmech-refused"] });
+    expect(coverage.npmStatic).toEqual([{ package: "recvmech-refused", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics.map((d) => d.message)).toEqual([
+      "dynamic keyed reads of '{ m: () => string; tag: string }' (the declared fields have no one common type) is not supported yet",
+    ]);
+  }, 120_000);
 
   /* -- 4151: `o[k](...)` reaches String and Number methods --------------
    *
@@ -1246,7 +1252,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
       native.split("\n").filter((l) => l.includes(" = "))
         .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
     );
-    expect(rows.size).toBe(7);
+    expect(rows.size).toBe(6);
     // THE PRICE, pinned exactly. When one of these fails, that gap closed.
     //
     // toUpperCase/toLowerCase are here for a LINK-LINE reason, not a
@@ -1267,6 +1273,14 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(node.includes("rSplitFenced   = a,b")).toBe(true);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
+
+  test("4152 (refused row): toFixed through the dot spelling over a dyn number is a build refusal", () => {
+    const entry = join(fixturesRoot, "npm/cases/4152-keyed-strnum-residual-on-purpose/main-refused.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["keyedstrnum-refused"] });
+    expect(coverage.npmStatic).toEqual([{ package: "keyedstrnum-refused", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics.map((d) => d.message)).toEqual(["method calls like 'n.toFixed' is not supported yet"]);
+  }, 120_000);
 
   /* -- 4242: the dyn prototype-method READ, gridded -----------------------
    *
@@ -1576,11 +1590,10 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     const { coverage } = analyze(entry, { npmStatic: ["bangvoidval"] });
     expect(coverage.npmStatic).toEqual([{ package: "bangvoidval", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0); // it BUILDS; the fence is runtime
-    const fences = coverage.runtimeFences ?? [];
-    expect(fences).toHaveLength(1);
-    expect(fences[0]?.code).toBe("SC2001");
-    expect(fences[0]?.message).toMatch(/values of type 'void' cannot be compiled yet/);
+    // A BUILD refusal: the program does not build at all.
+    expect(coverage.diagnostics).toHaveLength(1);
+    expect(coverage.diagnostics[0]?.code).toBe("SC2001");
+    expect(coverage.diagnostics[0]?.message).toMatch(/values of type 'void' cannot be compiled yet/);
   }, 120_000);
 
   test("4031: a checked cast to a record with a method reads the prototype", async () => {

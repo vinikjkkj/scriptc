@@ -47,11 +47,10 @@
  *   SC6xxx  ADVICE: the program compiles, and something about what it
  *            compiles TO is worth saying anyway. The band exists because
  *            every other code here is fatal by construction — a refusal
- *            stops the build, and under --best-effort it becomes a runtime
- *            throw at the statement, which for a construct that merely
- *            LOSES something is a cure worse than the disease. An SC6xxx
+ *            stops the build, which for a construct that merely LOSES
+ *            something is a cure worse than the disease. An SC6xxx
  *            never reaches `diagnostics`; it rides its own list and can
- *            never fail a build or defer to a fence. SC6001 — a double
+ *            never fail a build. SC6001 — a double
  *            type assertion whose target shape drops members the source
  *            value carries. SC6002 — a record materialised out of a
  *            dynamic value, then enumerated. SC6003 — a class instance
@@ -64,7 +63,7 @@
 import type { SrcLoc } from "../ir/nodes.js";
 import { npmStaticOriginalLineCount } from "../frontend/npm-static.js";
 
-/** The `file:line` a deferred fence carries in its baked message.
+/** The `file:line` a coded runtime throw carries in its baked message.
  *
  * Normally that is exactly the source location. But --npm-static SERVES a
  * REWRITTEN text to the checker and the lowering: recognized export plumbing
@@ -118,8 +117,7 @@ export interface ScrDiagnostic {
    *
    * The distinction is structural, not cosmetic: an advisory is carried
    * on its OWN list from the lowerer outward (LowerResult.advisories) and
-   * never enters `diagnostics`, so it cannot make `module` null, cannot
-   * be spliced into a runtime fence by the --best-effort deferral, and
+   * never enters `diagnostics`, so it cannot make `module` null and
    * cannot be counted as an error by anything downstream. The field is
    * here so the type says what the value is; the LIST is what enforces
    * it. Nothing may promote an advisory into `diagnostics`. */
@@ -158,9 +156,8 @@ const TYPE_RENDER_BUDGET = 160;
  * everywhere in the program, not only at the cast.
  *
  * It is advice and not a refusal on purpose. Refusing would be worse than
- * anything it reports: under --best-effort the refusal becomes a runtime
- * throw at THIS statement, so a `push(e as unknown as T)` inside a message
- * handler would stop pushing anything at all. */
+ * anything it reports: a `push(e as unknown as T)` inside a message handler
+ * would stop building at all. */
 export function assertionOverflowsMembersDiag(
   dropped: string[],
   sourceType: string,

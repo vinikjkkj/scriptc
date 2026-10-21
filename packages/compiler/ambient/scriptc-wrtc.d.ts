@@ -12,8 +12,7 @@
  * declaring them. scriptc forces `lib: ["lib.es2025.d.ts"]`
  * (frontend/program.ts:109), so under scriptc the names do not exist at
  * all and both lines report SC0001 "Cannot find name" — a TYPE-level stop,
- * which is not deferrable by --best-effort and which no per-statement
- * refusal can stand in for. The package is unbuildable rather than
+ * which is a build error that no per-statement refusal can stand in for. The package is unbuildable rather than
  * partially refused.
  *
  * Honouring the project's own `lib` would also supply the names, and was

@@ -120,7 +120,7 @@ import { lowerStreamModuleCall, streamInstanceOfExpr } from "./lower-stream.js";
 import { unifyWidthShapes, type UnifyOutcome } from "./shape-unify.js";
 import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from "./lower-emitter.js";
 import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerFileHandleMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerUint8ArrayPrototypeProperty, lowerUint8ArrayStaticProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall } from "./lower-builtins.js";
-import { isIslandExpr, islandFuncValueFence, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
+import { isIslandExpr, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerNamespaceConditionalCall, namespaceOverrideOf } from "./lower-nsvalue.js";
 import { builtinMemberFnValueOf } from "./lower-fnvalue.js";
@@ -1971,7 +1971,7 @@ export class Lowerer {
   /** ADVICE (the SC6xxx band) — the program compiled, and this says
    * something true about what it compiled to. A SEPARATE list, not a
    * severity filter over `diags`: every gate in this file that decides
-   * fatality, deferral or poison-capture reads `this.diags.length`, and
+   * fatality or poison-capture reads `this.diags.length`, and
    * a non-fatal member of that array would have to be excluded from each
    * of them correctly, forever. Here it cannot reach any of them. */
   readonly advisories: ScrDiagnostic[] = [];
@@ -12395,21 +12395,10 @@ export class Lowerer {
         e = { kind: "call", callee: helper, args: [e], type: expected, loc: e.loc };
       }
     }
-    // A JS FUNC value outside the island marshal set flowing into a
-    // jsval slot (`withPlugins(getSupportInfoWithoutPlugins, 0)` — a
-    // wrapper built at module init around a function the run may never
-    // call): the crossing defers to a call-time fence closure instead of
-    // stopping the statement — jsvalIn's deferral, the implicit-coercion
-    // spelling.
+    // A FUNC value outside the island marshal set flowing into a jsval
+    // slot: the crossing is refused on the build.
     if (expected.kind === "jsval" && e.type.kind === "func" && !typeEquals(e.type, expected)) {
-      const diagsBefore = this.diags.length;
-      try {
-        this.requireExactShape(node, e.type, expected);
-      } catch (err) {
-        const fence = islandFuncValueFence(this, err, diagsBefore, node);
-        if (fence) return fence;
-        throw err;
-      }
+      this.requireExactShape(node, e.type, expected);
       return e;
     }
     // A freshly CONSTRUCTED class instance flowing into the interface
@@ -14022,9 +14011,8 @@ export class Lowerer {
           // the binding through: the shape is a module binding whose only
           // storage is the init function's LOCAL (a typed-but-unmappable
           // const — the file-scope `new Map()` ledger idiom) read from
-          // inside a nested instance. Fence it — in JS the statement
-          // defers to its runtime trap like every collection failure;
-          // asserting here was an ICE on ordinary npm-static JS.
+          // inside a nested instance. Refuse it by name; asserting here
+          // was an ICE on ordinary npm-static JS.
           if (ctx.captures === null) {
             this.unsupported(
               "SC1090",
