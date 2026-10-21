@@ -65,9 +65,17 @@ void scr_error_trace(void *e, ScrTraceVisit visit, void *ctx) {
 
 static size_t scr_err_ext_count;
 static void scr_err_ext_drop(ScrError *e);
+/* The expando bag's teardown hook: scr_json.c owns the dyn object and
+ * installs this before any bag can exist (scr_error_prop_set is the only
+ * producer), so a unit that never links the checked-dynamic tree never sees
+ * a non-NULL `props`. */
+static void (*scr_error_props_drop)(void *obj) = NULL;
+
+void scr_error_install_props_drop(void (*fn)(void *obj)) { scr_error_props_drop = fn; }
 
 static void scr_error_gcfree(void *obj) {
   ScrError *e = (ScrError *)obj;
+  if (e->props != NULL && scr_error_props_drop != NULL) scr_error_props_drop(obj);
   scr_str_release(e->name);
   scr_str_release(e->message);
   scr_str_release(e->code); /* NULL-safe: absent on most errors */
@@ -100,6 +108,7 @@ static void scr_error_reld(void *obj) {
   ScrError *e = (ScrError *)obj;
   if (--e->rc == 0) {
     if (scr_error_traced) scr_cyc_on_dead(e);
+    if (e->props != NULL && scr_error_props_drop != NULL) scr_error_props_drop(obj);
     scr_str_release(e->name);
     scr_str_release(e->message);
     scr_str_release(e->code); /* NULL-safe: absent on most errors */

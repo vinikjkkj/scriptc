@@ -11236,6 +11236,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8207-error-own-properties.js": {
+   "order": [
+    "<repo>/tests/corpus/8207-error-own-properties.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
