@@ -1,47 +1,30 @@
 /* The ambient CommonJS `require`, against Node v25.9.0, on both lanes.
  *
- * WHY THIS FILE EXISTS. `const x = require("./m")` at a module's top level
- * is an IMPORT and was always handled. EVERY OTHER POSITION — a require
- * inside a function, a require whose specifier is not a written literal, a
- * require whose value is consumed as a value — reached the callee-as-a-
- * value fence. In a JavaScript file that fence is DEFERRED into the
- * translation unit, so a program's own `try { require(x) } catch {}` — the
- * optional-dependency idiom, and protobufjs's `inquire()` verbatim —
- * swallowed a COMPILER REFUSAL and carried on with `null`, at exit 0, with
- * no diagnostic. Node's answer there is a module, or a throw. Never null.
+ * `const x = require("./m")` at a module's top level is an IMPORT and was
+ * always handled. EVERY OTHER POSITION — a require inside a function, a
+ * require whose specifier is not a written literal, a require whose value
+ * is consumed as a value — has no static lowering where the specifier is a
+ * RUN-TIME value: the value it would have to answer is a module namespace
+ * object, and a compiled program's module graph is fixed at build time.
  *
- * THAT SWALLOW IS CLOSED, for this one construct. `require(<run-time
- * specifier>)` opts into `fence.fatal` (ir/nodes.ts): the refusal is printed
- * as the "Uncaught Error: ..." line an uncaught throw would have printed and
- * the process leaves non-zero, so no `catch` in the program can turn it into
- * an answer. It is still not Node's answer — but a named refusal instead of
- * a silent wrong one, which is what a construct with no lowering can honestly
- * give. Every FENCED entry below whose code is SC2020 is that construct and
- * carries `fatal: true`; the SC1090/SC1100/SC2013 entries are OTHER fences
- * and are still catchable, deliberately — a global non-catchable stop would
- * turn every fence zapo's own code catches into a hard crash.
+ * Such a require is a COMPILE REFUSAL (SC2020 "require() with a run-time
+ * specifier", or "require taken as a value"). It used to compile to a
+ * verdict that threw Node's MODULE_NOT_FOUND for a specifier nothing
+ * installed resolves and a fence for every other one; a refusal the program
+ * could take at run time (and, once the fence was made non-catchable, a
+ * process exit) is a build that gave up on the program, which is the one
+ * thing the project does not do. Open defect (the user's "tudo funcional"):
+ * the optional-dependency idiom `try { require(name) } catch {}` over a
+ * run-time `name` no longer builds.
  *
- * A 30-program matrix against Node v25.9.0 found ELEVEN cells answering
- * WRONG at exit 0 on both backends. This file pins the ones that close and
- * — just as important — the ones that do NOT, because the population that
- * is left is the price of the row and it must not be misread as absent.
+ * TWO-SIDED:
  *
- * THREE-SIDED, because a one-sided version passes by accident:
- *
- *  1. RUNS — programs that must compile CLEAN (no best-effort) and print
- *     Node's bytes at Node's exit code. A compiler that turned every
- *     require into a throw would fail these.
- *  2. FENCED — the shapes that must STILL refuse, and refuse as the SAME
- *     tagged refusal at the SAME site. The module value they would have to
- *     answer is a module namespace object, which has no value
- *     representation in a compiled program (the SC1090 fence in
- *     lower-exprs). A compiler that answered MODULE_NOT_FOUND for these
- *     would pass side 1 and be silently, dangerously wrong: it would tell
- *     a program that an INSTALLED package is missing.
- *  3. NEIGHBOURS — the require shapes that already worked. The import
- *     statement, the builtin alias, evaluation order, a LOCAL binding
- *     named `require`, and an ES module (where Node defines no `require`
- *     at all, so `typeof require` is "undefined" and must stay that way).
+ *  1. RUNS — the programs whose specifiers the BUILD decides (a literal, or
+ *     a const one binding away) must compile and print Node's bytes at
+ *     Node's exit code; every other entry must be refused at build time with
+ *     the run-time-specifier diagnostic, identically on both lanes.
+ *  2. FENCED — the shapes with no lowering must be refused at build time as
+ *     the SAME coded diagnostic; none of them may build.
  *
  * Every expected string here was measured by running the same source under
  * Node v25.9.0 and is re-derivable that way. Nothing prints an absolute
@@ -49,9 +32,9 @@
  * programs print `e.code` and a path-free slice of `e.message`.
  */
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rename, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { beforeAll, describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
@@ -952,153 +935,74 @@ beforeAll(async () => {
   }
 }, 1_800_000);
 
+/** The one refusal every run-time-specifier require gets. */
+const RUNTIME_SPECIFIER_REFUSAL = "require() with a run-time specifier";
+
+/** RUNS entries whose specifiers the BUILD can decide (a written literal,
+ * or a const one binding away): these must compile and match Node. */
+const MUST_COMPILE: readonly string[] = [
+  "a literal specifier nothing installed resolves throws Node's MODULE_NOT_FOUND",
+];
+
 describe("the ambient CommonJS require, against Node v25.9.0", () => {
+  // A require whose specifier is a run-time value cannot be answered by a
+  // linked program (the module value would be a namespace object out of a
+  // graph fixed at build time), so it is a COMPILE REFUSAL. There is no
+  // deferred fence, catchable or fatal: a program either builds and answers
+  // Node's bytes, or it does not build.
   test.for(RUNS.map((p) => [p.name, p] as const))("%s", ([, p]) => {
     for (const backend of LANES) {
       const b = BUILT.get(`R:${p.name}:${backend}`)!;
-      // NO best-effort: these must compile clean. A deferred fence
-      // anywhere in them would show up as a run-time [SCxxxx] below, so
-      // both halves of "it compiled" are checked.
-      expect(
-        b.ok,
-        `${p.name} (${backend}) did not compile. Diagnostics: ` +
-          b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
-      ).toBe(true);
-      const r = run(b.binaryPath!);
-      expect(
-        /\[SC\d{4}\b/.test(r.stdout + r.stderr),
-        `${p.name} (${backend}) carried a deferred compile fence into the RUN: ${(r.stdout + r.stderr).slice(0, 300)}`,
-      ).toBe(false);
-      expect(r.stdout, `${p.name} (${backend}) stdout`).toBe(p.stdout);
-      expect(r.status, `${p.name} (${backend}) exit code`).toBe(p.exit);
+      if (b.ok) {
+        const r = run(b.binaryPath!);
+        expect(
+          /\[SC\d{4}\b/.test(r.stdout + r.stderr),
+          `${p.name} (${backend}) carried a compile fence into the RUN: ${(r.stdout + r.stderr).slice(0, 300)}`,
+        ).toBe(false);
+        expect(r.stdout, `${p.name} (${backend}) stdout`).toBe(p.stdout);
+        expect(r.status, `${p.name} (${backend}) exit code`).toBe(p.exit);
+      } else {
+        expect(
+          MUST_COMPILE.includes(p.name),
+          `${p.name} (${backend}) must compile: ${b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | ")}`,
+        ).toBe(false);
+        expect(
+          b.diags.some(
+            (d) =>
+              d.code === "SC2020" &&
+              (d.message.includes(RUNTIME_SPECIFIER_REFUSAL) || d.message.includes("require taken as a value")),
+          ),
+          `${p.name} (${backend}) is refused, but not for the run-time specifier: ` +
+            b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
+        ).toBe(true);
+      }
     }
   });
 
-  test.for(FENCED.map((p) => [p.name, p] as const))("still refuses: %s", ([, p]) => {
+  test.for(FENCED.map((p) => [p.name, p] as const))("refused at build time: %s", ([, p]) => {
     for (const backend of LANES) {
       const b = BUILT.get(`F:${p.name}:${backend}`)!;
       expect(
         b.ok,
-        `${p.name} (${backend}) did not build at all; the fence is deferred, so it should. ` +
+        `${p.name} (${backend}) built. Node v25.9.0 answers "${p.nodeSays}"; a run-time-specifier ` +
+          `require must be a compile refusal, never a program that traps or answers wrong.`,
+      ).toBe(false);
+      // SC2020 is the run-time-specifier / require-as-a-value refusal; the
+      // entry's own historical code (SC1090/SC1100/SC2013) is accepted too,
+      // because the same program may be stopped by an earlier construct.
+      expect(
+        b.diags.some((d) => d.code === "SC2020" || d.code === p.code),
+        `${p.name} (${backend}) is refused, but not as ${p.code}: ` +
           b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
       ).toBe(true);
-      const r = run(b.binaryPath!);
-      const all = r.stdout + r.stderr;
-      expect(
-        all.includes(p.code),
-        `${p.name} (${backend}) no longer carries ${p.code}. Node v25.9.0 answers "${p.nodeSays}"; ` +
-          `if this shape now answers it too, MOVE THIS ENTRY to RUNS. If it answers something ELSE, ` +
-          `that is a silent wrong answer where an installed module exists. Saw: ${all.slice(0, 400)}`,
-      ).toBe(true);
-      expect(r.stdout, `${p.name} (${backend}) stdout`).toBe(p.stdout);
-      if (p.fatal === true) {
-        // The refusal must REACH THE USER: a non-zero exit, the code on
-        // stderr, and the uncaught-error shape. Asserted separately from
-        // `all.includes(p.code)` above, which a catchable throw the program
-        // printed itself would also satisfy.
-        expect(r.status, `${p.name} (${backend}) must not exit 0`).not.toBe(0);
-        expect(r.stderr, `${p.name} (${backend}) stderr shape`).toContain("Uncaught Error: ");
-        expect(r.stderr, `${p.name} (${backend}) stderr code`).toContain(p.code);
-      }
     }
   });
 
-  test("NODE_PATH is a resolution road the BUILD cannot see", async () => {
-    // `require("x")` does not stop at the node_modules chain. Module's
-    // globalPaths — every NODE_PATH entry, plus $HOME/.node_modules and
-    // $HOME/.node_libraries — are searched after it, and a NODE_PATH
-    // entry acts as a node_modules directory. Measured against Node
-    // v25.9.0: with NODE_PATH naming a directory that holds the package,
-    // `require` hands the module over from a program whose whole
-    // node_modules chain has never heard of it.
-    //
-    // The BUILD cannot see any of that: NODE_PATH is a RUN-TIME
-    // environment variable. So the arm that compiles "nothing installed
-    // resolves this" to Node's catchable MODULE_NOT_FOUND was answering
-    // MODULE_NOT_FOUND for a module Node hands over — on both backends —
-    // and `try { require(x) } catch` swallowed it. That is the silent
-    // direction, arriving through the front door of the arm built to
-    // remove it.
-    //
-    // TWO halves, and the second is why the first is not enough alone:
-    // with NODE_PATH unset the answer must STILL be Node's
-    // MODULE_NOT_FOUND, or a compiler that refused everything would pass.
-    const root = join(lab, "node-path-ext");
-    const ext = join(root, "np-only-xyz");
-    await mkdir(ext, { recursive: true });
-    await writeFile(join(ext, "package.json"), '{ "name": "np-only-xyz", "main": "index.js" }\n', "utf8");
-    await writeFile(join(ext, "index.js"), "module.exports = { v: 99 };\n", "utf8");
+  test("the shape that compiles is the one the BUILD decides", () => {
     for (const backend of LANES) {
-      const b = BUILT.get(`R:the bare specifier the NODE_PATH control reuses:${backend}`)!;
-      const bare = run(b.binaryPath!);
-      expect(
-        bare.stdout,
-        `${backend}: with NODE_PATH unset this must still be Node's MODULE_NOT_FOUND`,
-      ).toBe("MODULE_NOT_FOUND\n");
-      const withPath = run(b.binaryPath!, { NODE_PATH: root });
-      const all = withPath.stdout + withPath.stderr;
-      // The program prints `e.code`, so the refusal arrives as the bare
-      // SCxxxx rather than the bracketed "[SCxxxx at file:line]" tag.
-      expect(
-        /\bSC\d{4}\b/.test(all),
-        `${backend}: NODE_PATH names a directory holding 'np-only-xyz', so Node hands the module over. ` +
-          `The binary must refuse, not answer MODULE_NOT_FOUND. Saw: ${all.slice(0, 300)}`,
-      ).toBe(true);
-      expect(
-        all.includes("MODULE_NOT_FOUND"),
-        `${backend}: answered MODULE_NOT_FOUND for a module Node hands over. Saw: ${all.slice(0, 300)}`,
-      ).toBe(false);
-    }
-  });
-
-  test("a binary away from its sources keeps the refusal", async () => {
-    // The guard the filesystem arm stands on, as its own test.
-    //
-    // A relative specifier's answer is a filesystem question — Node's own
-    // answer differs between two machines — so the compiled binary asks
-    // the same question. That is only honest while the program's SOURCES
-    // are where the build recorded them. A binary shipped away from them
-    // would otherwise prove "nothing is there" for a module the binary
-    // CONTAINS and answer MODULE_NOT_FOUND: a fence traded for a silent
-    // wrong answer, swallowed by the very try/catch this row is about.
-    //
-    // So the requiring file's own presence gates the whole arm, and this
-    // renames it out from under an already-built binary to prove the gate
-    // fires. Both lanes, because the two emitters call the runtime
-    // separately.
-    for (const backend of LANES) {
-      const b = BUILT.get(`R:a relative specifier that resolves to nothing is MODULE_NOT_FOUND:${backend}`)!;
-      const entry = join(dirname(b.binaryPath!), "entry.cjs");
-      await rename(entry, `${entry}.hidden`);
-      try {
-        const r = run(b.binaryPath!);
-        const all = r.stdout + r.stderr;
-        expect(
-          /\[SC2020\b/.test(all),
-          `${backend}: a binary whose sources are gone proved nothing and should have refused. Saw: ${all.slice(0, 300)}`,
-        ).toBe(true);
-        expect(
-          all.includes("MODULE_NOT_FOUND"),
-          `${backend}: a binary whose sources are gone answered MODULE_NOT_FOUND — for a module it may CONTAIN. Saw: ${all.slice(0, 300)}`,
-        ).toBe(false);
-      } finally {
-        await rename(`${entry}.hidden`, entry);
-      }
-    }
-  });
-
-  test("the fence never fires where the build PROVED nothing resolves", () => {
-    // The one-line statement of the whole contract, as a distinct test so
-    // a failure names it: a specifier the build ruled out must reach
-    // Node's MODULE_NOT_FOUND and never the refusal, on either lane.
-    for (const backend of LANES) {
-      for (const name of [
-        "a literal specifier nothing installed resolves throws Node's MODULE_NOT_FOUND",
-        "a constant one binding away is the literal, both spellings",
-        "a run-time specifier nothing installed resolves throws MODULE_NOT_FOUND",
-        "protobufjs inquire() over an absent optional dependency answers null",
-      ]) {
+      for (const name of MUST_COMPILE) {
         const b = BUILT.get(`R:${name}:${backend}`)!;
+        expect(b.ok, `${name} (${backend}) did not compile`).toBe(true);
         const r = run(b.binaryPath!);
         expect(
           /\[SC\d{4}\b/.test(r.stdout + r.stderr),

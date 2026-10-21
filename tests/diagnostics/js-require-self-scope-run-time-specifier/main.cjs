@@ -1,3 +1,7 @@
+// REFUSED AT COMPILE TIME (no --best-effort, no runtime fence): this was
+// tests/corpus/6101-require-self-scope. Every `require(x)` below has a
+// run-time specifier, which has no static lowering, so the build fails
+// instead of compiling a verdict that throws MODULE_NOT_FOUND.
 // Package SELF-REFERENCE, and the two rules Node applies to it.
 //
 // A compiled binary reads no node_modules at run time, so a run-time

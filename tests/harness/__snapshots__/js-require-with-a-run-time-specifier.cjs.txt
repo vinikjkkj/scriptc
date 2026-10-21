@@ -1,0 +1,44 @@
+js-require-with-a-run-time-specifier.cjs:58:13 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+  57 | try {
+  58 |   var m3b = require(VAR_NAME);
+     |             ^~~~~~~~~~~~~~~~~
+  59 |   console.log('L3b GOT', typeof m3b);
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value
+
+js-require-with-a-run-time-specifier.cjs:67:15 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+  66 |   try {
+  67 |     var mod = require(spec);
+     |               ^~~~~~~~~~~~~
+  68 |     return 'GOT ' + typeof mod;
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value
+
+js-require-with-a-run-time-specifier.cjs:87:5 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+  86 |   try {
+  87 |     require(x);
+     |     ^~~~~~~~~~
+  88 |     return 'GOT';
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value
+
+js-require-with-a-run-time-specifier.cjs:103:7 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+  102 | function spec() { ran = ran + 1; console.log('L14 spec ran', ran); return 'no-such-pkg-xyz'; }
+  103 | try { require(spec()); } catch (e) { console.log('L15', e.code, 'ran', ran); }
+      |       ^~~~~~~~~~~~~~~
+  104 | 
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value
+
+js-require-with-a-run-time-specifier.cjs:112:15 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+  111 |     if (typeof require !== 'function') return null;
+  112 |     var mod = require(moduleName);
+      |               ^~~~~~~~~~~~~~~~~~~
+  113 |     return mod && (mod.length || Object.keys(mod).length) ? mod : null;
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value

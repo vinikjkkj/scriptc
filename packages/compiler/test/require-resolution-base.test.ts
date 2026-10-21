@@ -1,12 +1,11 @@
 /* WHERE NODE IS ASKED FROM - the base a require resolution runs from, and
  * the two rules of package self-reference.
  *
- * A compiled binary reads no node_modules at run time, so every require
- * verdict is decided at BUILD time from what the compiler could see: the
- * set of bare specifier roots that resolve from the requiring file
- * (nodeRequireResolvableRoots), and the per-specifier proof that nothing
- * does (probeNodeRequireRefusal). Both walk node_modules directories
- * upward from the file. Both were walking upward from where the COMPILER
+ * A compiled binary reads no node_modules at run time, so a require whose
+ * specifier is a build-time constant is decided at BUILD time from what the
+ * compiler could see: the per-specifier proof that nothing resolves it
+ * (probeNodeRequireRefusal), which walks node_modules directories upward
+ * from the file. It was walking upward from where the COMPILER
  * holds the file, which under `--provenance-sources` is a bare git
  * checkout in a content-addressed cache under the user's home directory -
  * a tree the running program has never heard of.
@@ -45,7 +44,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { nodeRequireResolvableRoots, probeNodeRequireRefusal, requireResolutionBase } from "../src/frontend/npm.js";
+import { probeNodeRequireRefusal, requireResolutionBase } from "../src/frontend/npm.js";
 import { setProvenanceSources } from "../src/frontend/provenance-registry.js";
 import { nativePath, tsgoPath } from "../src/frontend/shared.js";
 
@@ -131,13 +130,6 @@ describe("a provenance-mapped source resolves from the INSTALLED tree", () => {
     expect(nodeResolve(cacheFile, "resbase-victim")).toBe("MODULE_NOT_FOUND");
   });
 
-  test("the resolvable-root set follows the running program, not the checkout", () => {
-    registerProvenance();
-    const roots = nodeRequireResolvableRoots(cacheFile);
-    expect(roots).not.toBeNull();
-    expect(roots!.has("resbase-victim")).toBe(true);
-    expect(roots!.has("resbase-decoy")).toBe(false);
-  });
 
   test("the per-specifier proof follows it too - and this is the silent one", () => {
     registerProvenance();
@@ -166,17 +158,6 @@ describe("a provenance-mapped source resolves from the INSTALLED tree", () => {
     expect(requireResolutionBase(outsider)).toBe(outsider);
   });
 
-  test("CONTROL: with no registry the same file answers the checkout's chain - the answers this fix removes", () => {
-    setProvenanceSources(null);
-    const roots = nodeRequireResolvableRoots(cacheFile);
-    expect(roots).not.toBeNull();
-    // The decoy is not the program's, and it was in the baked set.
-    expect(roots!.has("resbase-decoy")).toBe(true);
-    // The victim IS the program's, and it was provably absent - which is
-    // what compiles to a MODULE_NOT_FOUND for a module Node hands over.
-    expect(roots!.has("resbase-victim")).toBe(false);
-    expect(probeNodeRequireRefusal(cacheFile, "resbase-victim")).not.toBeNull();
-  });
 });
 
 describe("package self-reference, against Node's two rules", () => {
@@ -205,35 +186,8 @@ describe("package self-reference, against Node's two rules", () => {
     write(innerFile, "\n");
   });
 
-  test('a scope WITH "exports" self-references, and the set says so', () => {
-    setProvenanceSources(null);
-    expect(nodeResolve(withExports, "selfref-withexp")).toContain("main.js");
-    const roots = nodeRequireResolvableRoots(withExports);
-    expect(roots!.has("selfref-withexp")).toBe(true);
-  });
 
-  test('a scope WITHOUT "exports" self-references nothing', () => {
-    setProvenanceSources(null);
-    expect(nodeResolve(noExports, "selfref-noexp")).toBe("MODULE_NOT_FOUND");
-    const roots = nodeRequireResolvableRoots(noExports);
-    expect(roots!.has("selfref-noexp")).toBe(false);
-  });
 
-  test("only the NEAREST enclosing package.json is the file's scope", () => {
-    setProvenanceSources(null);
-    // From inside the nested package, the OUTER name is not resolvable
-    // even though the outer scope has "exports".
-    expect(nodeResolve(innerFile, "selfref-outer")).toBe("MODULE_NOT_FOUND");
-    const inner = nodeRequireResolvableRoots(innerFile);
-    expect(inner!.has("selfref-outer")).toBe(false);
-    expect(inner!.has("selfref-inner")).toBe(false); // inner has no "exports"
-    // OVER-FIRE CONTROL: the same outer name IS resolvable from a file
-    // whose nearest scope is the outer package. Without this the test
-    // above passes for a walk that dropped self-reference entirely.
-    expect(nodeResolve(outerFile, "selfref-outer")).toContain("m.js");
-    const outer = nodeRequireResolvableRoots(outerFile);
-    expect(outer!.has("selfref-outer")).toBe(true);
-  });
 
   test("the PROBE stays conservative about self-scopes, on purpose", () => {
     setProvenanceSources(null);
@@ -246,103 +200,5 @@ describe("package self-reference, against Node's two rules", () => {
     expect(probeNodeRequireRefusal(innerFile, "selfref-outer")).toBeNull();
   });
 
-  test("builtins are resolvable from every file, whatever the scope says", () => {
-    setProvenanceSources(null);
-    const roots = nodeRequireResolvableRoots(noExports);
-    for (const b of ["fs", "path", "vm", "repl"]) {
-      expect(roots!.has(b)).toBe(true);
-      expect(probeNodeRequireRefusal(noExports, b)).toBeNull();
-    }
-  });
 });
 
-/* THE SET FOLLOWS THE DISK, AND IT HAS TO.
- *
- * A recurring proposal, made twice in one session, is that the resolvable-
- * root set should be derived from what the program can REACH - its import
- * graph, or its declared `dependencies` - rather than from what
- * `node_modules` holds. The argument is that a devDependency or an
- * optional peer "is not part of the program", so fencing for it is a
- * refusal the program need not carry.
- *
- * The set does not answer "what does this program use". It answers "what
- * would NODE resolve if you ran this program here", because that is the
- * only question whose wrong answer is observable: everything outside the
- * set compiles to Node's catchable MODULE_NOT_FOUND. Node's CJS resolver
- * reads directories. It has never read a manifest's dependency KIND, and
- * `peerDependenciesMeta.optional` is a switch for the INSTALLER, not for
- * the resolver - it says npm will not error when the package is absent,
- * not that it is absent.
- *
- * So a set filtered by dependency kind would mint MODULE_NOT_FOUND for a
- * package that is sitting right there and that Node hands over. And the
- * idiom on the other side of that throw is exactly the one this whole
- * lowering exists for: an optional dependency is loaded inside a
- * try/catch whose catch means "not installed". Measured in zapo's own
- * library, which does `await import('argo-codec')` and answers
- * `throw new Error('argo-codec not installed')` on failure, and
- * `const WS_OPTIONAL_MODULE = 'ws'` with
- * `'optional dependency "ws" is not installed'`. A compiler that decided
- * those two were "not part of the program" would tell a build that HAS
- * them installed that they are missing, and the program would quietly run
- * a different way. That is the silent wrong answer this file exists to
- * prevent, arriving through the front door.
- *
- * The cells below are three-sided as everywhere else: Node's own resolver
- * decides, and the compiler is compared to it. The last one is the
- * over-fire control - the set follows the disk in BOTH directions, so a
- * package that is DECLARED but not installed must be outside it. */
-describe("the root set follows the disk, not the manifest", () => {
-  let file = "";
-
-  beforeAll(() => {
-    const base = join(root, "kinds");
-    // Declares one real dependency, one dev, one optional peer - and
-    // installs none of them by that route. What is on disk is what counts.
-    write(join(base, "package.json"), JSON.stringify({
-      name: "kinds-app",
-      version: "1.0.0",
-      dependencies: { "kinds-declared-absent": "^1.0.0" },
-      devDependencies: { "kinds-dev": "^1.0.0" },
-      peerDependencies: { "kinds-optpeer": "^1.0.0" },
-      peerDependenciesMeta: { "kinds-optpeer": { optional: true } },
-    }));
-    file = join(base, "main.cjs");
-    write(file, "\n");
-    for (const n of ["kinds-dev", "kinds-optpeer", "kinds-undeclared"]) {
-      write(join(base, "node_modules", n, "package.json"), `{"name":"${n}","version":"1.0.0","main":"index.js"}`);
-      write(join(base, "node_modules", n, "index.js"), "module.exports = 1;\n");
-    }
-    // `kinds-declared-absent` is deliberately NOT installed.
-  });
-
-  test("a devDependency that is INSTALLED is resolvable, so it is in the set", () => {
-    setProvenanceSources(null);
-    expect(nodeResolve(file, "kinds-dev")).toContain("kinds-dev");
-    expect(nodeRequireResolvableRoots(file)!.has("kinds-dev")).toBe(true);
-    expect(probeNodeRequireRefusal(file, "kinds-dev")).toBeNull();
-  });
-
-  test("an OPTIONAL peer that is installed is resolvable, so it is in the set", () => {
-    setProvenanceSources(null);
-    expect(nodeResolve(file, "kinds-optpeer")).toContain("kinds-optpeer");
-    expect(nodeRequireResolvableRoots(file)!.has("kinds-optpeer")).toBe(true);
-    expect(probeNodeRequireRefusal(file, "kinds-optpeer")).toBeNull();
-  });
-
-  test("a package no manifest mentions at all is resolvable, so it is in the set", () => {
-    setProvenanceSources(null);
-    expect(nodeResolve(file, "kinds-undeclared")).toContain("kinds-undeclared");
-    expect(nodeRequireResolvableRoots(file)!.has("kinds-undeclared")).toBe(true);
-  });
-
-  test("OVER-FIRE CONTROL: a DECLARED dependency that is not installed is OUT of the set", () => {
-    setProvenanceSources(null);
-    // Without this cell every assertion above passes for a set containing
-    // everything, which never mints a wrong MODULE_NOT_FOUND and never
-    // answers one either.
-    expect(nodeResolve(file, "kinds-declared-absent")).toBe("MODULE_NOT_FOUND");
-    expect(nodeRequireResolvableRoots(file)!.has("kinds-declared-absent")).toBe(false);
-    expect(probeNodeRequireRefusal(file, "kinds-declared-absent")).not.toBeNull();
-  });
-});

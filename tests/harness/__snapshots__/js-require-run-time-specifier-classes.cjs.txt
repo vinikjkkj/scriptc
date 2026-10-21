@@ -1,0 +1,8 @@
+js-require-run-time-specifier-classes.cjs:21:5 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+  20 |   try {
+  21 |     require(s);
+     |     ^~~~~~~~~~
+  22 |     return "GOT";
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value

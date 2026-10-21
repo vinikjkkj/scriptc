@@ -6029,35 +6029,6 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // +1 string or NULL with the exception pending (user
             // toString/valueOf throws propagate). Borrows the dyn.
             return finish(`scr_dyn_string_coerce_js(${arg(0)})`);
-          case "module.requireVerdict":
-            // The run-time-specifier require: answers whether the BUILD
-            // could not rule the specifier out (the caller then throws the
-            // tagged refusal the site already carried), and throws Node's
-            // own error for everything Node itself rejects. Borrows all
-            // five arguments.
-            return finish(`scr_require_verdict(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
-          case "error.fenceThrow": {
-            // The deferred compile fence as an EXPRESSION, emitted as the
-            // very same scr_throw_error_msg_code text the runtimeFence
-            // STATEMENT emits and from LITERAL arguments — so
-            // scripts/tu-census.mjs reads it as the tagged refusal it is
-            // instead of losing it behind a runtime helper. (Always
-            // throws; the typed dummy is abandoned by the pending check's
-            // unwind, the error.nodeThrow pattern.)
-            if (e.fence === undefined) throw new Error("emitter bug: error.fenceThrow carries no fence");
-            const fenceBytes = Buffer.from(e.fence.message, "utf8");
-            // The NON-CATCHABLE arm (fence.fatal): the identical message and
-            // code, printed as the "Uncaught Error: ..." line an uncaught
-            // throw would have printed, then _Exit(1). Same literal-argument
-            // shape, so scripts/tu-census.mjs reads it as the tagged refusal
-            // it is (its CODED pattern accepts either callee).
-            const fenceCall = e.fence.fatal
-              ? `scr_fence_fatal(${cStringLiteral(fenceBytes)}, ${fenceBytes.length}, "${e.fence.code}")`
-              : `scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStringLiteral(fenceBytes)}, ${fenceBytes.length}, "${e.fence.code}")`;
-            return finish(
-              `(${fenceCall}, ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
-            );
-          }
           case "error.nodeThrow":
             // The compiler-resolved Node-parity throw (always throws —
             // the typed dummy is abandoned by the pending check's
