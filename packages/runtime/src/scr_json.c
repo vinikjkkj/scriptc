@@ -2609,15 +2609,22 @@ const char *scr_dyn_inspect_lite(const ScrDyn *v, char *buf, size_t cap) {
     if (b->flavor == SCR_BF_BUFFER && b->elem == SCR_BYTES_U8) {
       /* util.inspect's Buffer: lower-case hex pairs, at most 50, then the
        * "... N more bytes" tail (singular for one). */
+      static const char hex[] = "0123456789abcdef";
       size_t n = 0;
-      n += (size_t)snprintf(buf + n, cap - n, "<Buffer ");
+      memcpy(buf, "<Buffer ", 8);
+      n = 8;
       size_t shown = b->len < 50 ? b->len : 50;
-      for (size_t i = 0; i < shown && n + 4 < cap; i++) n += (size_t)snprintf(buf + n, cap - n, i == 0 ? "%02x" : " %02x", b->data[i]);
+      for (size_t i = 0; i < shown && n + 4 < cap; i++) {
+        if (i != 0) buf[n++] = ' ';
+        buf[n++] = hex[b->data[i] >> 4];
+        buf[n++] = hex[b->data[i] & 15];
+      }
       if (b->len > 50 && n + 32 < cap) {
         size_t more = b->len - 50;
         n += (size_t)snprintf(buf + n, cap - n, " ... %zu more byte%s", more, more == 1 ? "" : "s");
       }
-      snprintf(buf + n, cap - n, ">");
+      buf[n++] = '>';
+      buf[n] = 0;
       return buf;
     }
     return "<Buffer ...>";
@@ -4202,9 +4209,11 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
   if (has_ext) scr_dyn_obj_set(d, "errno", 5, scr_dyn_new_num(ext_errno));
   if (e->code) scr_dyn_obj_set(d, "code", 4, scr_dyn_new_str(e->code));
   if (has_ext) {
-    if (ext_syscall) scr_dyn_obj_set(d, "syscall", 7, scr_dyn_new_str((ScrStr *)ext_syscall));
-    if (ext_path) scr_dyn_obj_set(d, "path", 4, scr_dyn_new_str((ScrStr *)ext_path));
-    if (ext_dest) scr_dyn_obj_set(d, "dest", 4, scr_dyn_new_str((ScrStr *)ext_dest));
+    const ScrStr *ext_vals[3] = {ext_syscall, ext_path, ext_dest};
+    static const char *const ext_keys[3] = {"syscall", "path", "dest"};
+    for (int i = 0; i < 3; i++) {
+      if (ext_vals[i]) scr_dyn_obj_set(d, ext_keys[i], strlen(ext_keys[i]), scr_dyn_new_str((ScrStr *)ext_vals[i]));
+    }
   }
   /* DOMException: `code` is the WebIDL legacy NUMBER (never the errno
    * string slot), and the options form's cause crosses as itself. Both are

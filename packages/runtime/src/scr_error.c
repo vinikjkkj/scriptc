@@ -288,16 +288,11 @@ typedef struct ScrErrExt {
   struct ScrErrExt *next;
 } ScrErrExt;
 
-#define SCR_ERR_EXT_BUCKETS 64
-static ScrErrExt *scr_err_ext_tab[SCR_ERR_EXT_BUCKETS];
+static ScrErrExt *scr_err_ext_head = NULL;
 static size_t scr_err_ext_count = 0;
 
-static size_t scr_err_ext_hash(const ScrError *e) {
-  return (size_t)(((uintptr_t)e >> 4) % SCR_ERR_EXT_BUCKETS);
-}
-
 static void scr_err_ext_drop(ScrError *e) {
-  ScrErrExt **pp = &scr_err_ext_tab[scr_err_ext_hash(e)];
+  ScrErrExt **pp = &scr_err_ext_head;
   while (*pp != NULL) {
     if ((*pp)->e == e) {
       ScrErrExt *x = *pp;
@@ -359,9 +354,8 @@ void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char 
   if (syscall) x->syscall = scr_str_new(syscall, strlen(syscall));
   if (path) x->path = scr_str_new(path, strlen(path));
   if (dest) x->dest = scr_str_new(dest, strlen(dest));
-  size_t h = scr_err_ext_hash(e);
-  x->next = scr_err_ext_tab[h];
-  scr_err_ext_tab[h] = x;
+  x->next = scr_err_ext_head;
+  scr_err_ext_head = x;
   scr_err_ext_count++;
 }
 
@@ -370,7 +364,7 @@ void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char 
 bool scr_error_ext_get(const ScrError *e, double *err_no, const ScrStr **syscall, const ScrStr **path,
                        const ScrStr **dest) {
   if (scr_err_ext_count == 0) return false;
-  for (ScrErrExt *x = scr_err_ext_tab[scr_err_ext_hash(e)]; x != NULL; x = x->next) {
+  for (ScrErrExt *x = scr_err_ext_head; x != NULL; x = x->next) {
     if (x->e == e) {
       *err_no = x->errno_val;
       *syscall = x->syscall;

@@ -1891,13 +1891,15 @@ void scr_fs_throw(int e, const char *op, const ScrStr *path) {
   const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
   const char *text = scr_errno_text(e);
   char pathbuf[PATH_MAX];
-  const char *shown = scr_fs_err_path(path, pathbuf);
-  size_t cap = strlen(name) + strlen(text) + strlen(op) + strlen(shown) + 8;
+  /* A NULL path is the read(2)/close(2) shape: Node names no path there. */
+  const char *shown = path != NULL ? scr_fs_err_path(path, pathbuf) : NULL;
+  size_t cap = strlen(name) + strlen(text) + strlen(op) + (shown != NULL ? strlen(shown) : 0) + 8;
   char *msg = malloc(cap);
   if (!msg) {
     scr_trap("scriptc: out of memory\n");
   }
-  int len = snprintf(msg, cap, "%s: %s, %s '%s'", name, text, op, shown);
+  int len = shown != NULL ? snprintf(msg, cap, "%s: %s, %s '%s'", name, text, op, shown)
+                          : snprintf(msg, cap, "%s: %s, %s", name, text, op);
   /* A real Error instance (name "Error", message = Node's text) — what a
    * typed catch's `e instanceof Error` + `e.message` observes in Node —
    * with `code` stamped to the errno name (the exotic-errno fallback
@@ -1937,7 +1939,7 @@ ScrStr *scr_fs_read_file(ScrStr *path) {
     int e = errno;
     fclose(f);
     free(buf);
-    scr_fs_throw_nopath(e, "read"); /* a failed read(2) names no path in Node */
+    scr_fs_throw(e, "read", NULL); /* a failed read(2) names no path in Node */
     return NULL;
   }
   fclose(f);
@@ -2588,17 +2590,6 @@ void scr_fs_access(ScrStr *path, double mode) {
   if (access(path->data, m) != 0) scr_fs_throw(errno, "access", path);
 }
 
-/* The no-path variant of the fs error shape — Node's fd reads report
- * "EBADF: bad file descriptor, read" with no quoted path. */
-void scr_fs_throw_nopath(int e, const char *op) {
-  char namebuf[16];
-  const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
-  const char *text = scr_errno_text(e);
-  char msg[256];
-  int len = snprintf(msg, sizeof msg, "%s: %s, %s", name, text, op);
-  scr_throw_errno_error(e, name, msg, (size_t)len, op, NULL, NULL);
-}
-
 /* read(2) loop to EOF from the CURRENT position — Node's
  * readFileSync(fd) semantics for pipes and files alike (the stdin
  * pattern: readFileSync(0, "utf8")). Returns the malloc'd buffer and
@@ -2623,7 +2614,7 @@ static char *scr_read_fd_all(double fd, size_t *out_len) {
       if (errno == EINTR) continue;
       int e = errno;
       free(buf);
-      scr_fs_throw_nopath(e, "read");
+      scr_fs_throw(e, "read", NULL);
       return NULL;
     }
     if (n == 0) break;
