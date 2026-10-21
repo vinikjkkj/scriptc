@@ -2240,6 +2240,13 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 544_342 : null;
  * Recorded separately rather than derived: the two classes do not move
  * together, which is why the file figures are separate too.
  *
+ * RE-RECORDED 2026-10-21: 630,742 -> 631,430 (+688), the win32 CI lane's own
+ * figure (CI run 39561251697, sqlesc c189b2e7: "GREW by 688 bytes: 631430").
+ * Cause: regex exec/test became stateful (lastIndex field, scr_regex_run,
+ * scr_regex_clone, scr_regex_exec), all in scr_regex.c, which this program
+ * links. Not re-measured on this host (Linux, no win32 lane). nobesteffort
+ * is expected to shift this anchor by -320 when it lands; re-record then.
+ *
  * RE-RECORDED 2026-10-19: 630,438 -> 630,742 (+304), measured in
  * RECORDED_LANE with packages/runtime/vendor/.cache cleared first, in the
  * SAME run as STATIC_CLASS_TEXT_RECORDED's 2026-10-19 re-record above --
@@ -2297,7 +2304,7 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 544_342 : null;
  * gitignored so git status, the dirty-worktree guard and the treehash are
  * all blind to it. See docs/stackless-sync-generator-results.md 13.2-15.1.
  */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 630_742 : null;
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 631_430 : null;
 
 /** The section-anchor complaint, or null when within tolerance. Same shape as
  * recordedSizeComplaint -- a string, so the caller owns the assertion and this
