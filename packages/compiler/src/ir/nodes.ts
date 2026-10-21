@@ -7235,7 +7235,7 @@ export type IrExpr =
    * false. `bytes` keeps its meaning -- "this dyn holds u8 bytes", which
    * is what every narrowing extraction wants -- and the instanceof site
    * uses the flavor-aware one. */
-  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set" | "date"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An
@@ -8155,6 +8155,7 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   ["http2Stream", { tag: "SCR_DYNH_H2_STREAM", cls: "Http2Stream" }],
   ["httpClientReq", { tag: "SCR_DYNH_HTTP_CLIENT", cls: "ClientRequest" }],
   ["regex", { tag: "SCR_DYNH_REGEX", cls: "RegExp" }],
+  ["date", { tag: "SCR_DYNH_DATE", cls: "Date" }],
   // child stdio (`child.stdout` / `child.stderr`, and NodeJS.ReadableStream
   // under @types/node — types.ts maps the SPELLING `Readable` here, while
   // the shipped fallback declarations map the same name to the runtime

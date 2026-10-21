@@ -55,6 +55,7 @@ export const DYN_HANDLE_TAG_NUM: Record<string, number> = {
   // mis-tagged handle rather than a build error. See dynHandleTagNum.
   regex: 8,
   childStream: 9,
+  date: 10,
 };
 
 /** The tag's numeric value, or the LLVM lane's honest miss.
