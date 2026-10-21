@@ -994,6 +994,15 @@ typedef struct ScrError {
                     * field of the layout prefix, like `code`: subclass
                     * structs embed it (calloc'd NULL) and their emitted
                     * teardown releases it NULL-guarded. */
+  struct ScrDyn *props; /* The OWN EXPANDO properties a program attaches
+                    * (`err.fatal = true`, `err.errno = 5`): a dyn object,
+                    * NULL until the first write. Fifth field of the layout
+                    * prefix (a DYN-typed `%props` in %Error's compiler def,
+                    * so subclass structs embed it and release it
+                    * NULL-guarded); the runtime-minted kinds drop it through
+                    * a hook scr_json.c installs before any exists, which
+                    * keeps this unit linkable without the checked-dynamic
+                    * tree (the DOMException cause precedent). */
 } ScrError;
 
 enum {
@@ -1032,6 +1041,8 @@ typedef struct ScrDomException {
   ScrStr *stack;   /* the `.stack` memo -- MUST mirror ScrError's prefix:
                     * scr_domex_gcfree tears a DOMException down through
                     * scr_error_gcfree, which releases this slot. */
+  struct ScrDyn *props; /* the own-expando bag -- MUST mirror ScrError's
+                    * prefix (see there). */
   double dom_code; /* the WebIDL legacy code (0 when the name is off-table) */
   bool has_cause;  /* the options form carried a `cause` member */
   struct ScrDyn *cause; /* owned; NULL when has_cause is false */
@@ -1089,6 +1100,14 @@ ScrStr *scr_error_to_string(ScrError *e);
 /* `e.stack` -- the header a zero-frame capture produces, MEMOISED at the
  * first read the way V8 memoises its formatted stack. +1. */
 ScrStr *scr_error_stack(ScrError *e);
+/* Own expando properties on an error object (scr_json.c): both borrow every
+ * argument. set stores a +1 copy of `value` (key "stack" with a string value
+ * replaces the `.stack` memo instead); get answers +1, the dyn undefined for
+ * an absent property, falling back to the errno `code` slot and the stack
+ * memo for those two names. */
+void scr_error_install_props_drop(void (*fn)(void *obj));
+void scr_error_prop_set(ScrError *e, ScrStr *key, struct ScrDyn *value);
+struct ScrDyn *scr_error_prop_get(ScrError *e, ScrStr *key);
 
 ScrError *scr_error_retain(ScrError *e);
 void scr_error_release(ScrError *e); /* dispatches through e->vt */

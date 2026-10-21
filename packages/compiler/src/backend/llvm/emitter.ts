@@ -800,6 +800,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sym.toString": "scr_sym_to_string",
   "error.toString": "scr_error_to_string",
   "error.stack": "scr_error_stack",
+  "error.propSet": "scr_error_prop_set",
+  "error.propGet": "scr_error_prop_get",
   "class.name": "scr_classobj_name",
   // The dyn (ScrDyn dyn) surface (scr_json.c / scr_dyn_invoke.c):
   // json.parse throws the catchable SyntaxError; keySet/toString/
@@ -2248,7 +2250,7 @@ class LlEmitter {
       // on builtin errors and classval loads GEP through these. `stack` is
       // the `.stack` memo (scr_runtime.h), appended LAST so the three field
       // indices above it never move.
-      `%ScrError = type { i64, ptr, ptr, ptr, ptr, ptr }`,
+      `%ScrError = type { i64, ptr, ptr, ptr, ptr, ptr, ptr }`,
       `%ScrClassObj = type { i64, i64, i64, ptr, ptr }`,
       // The SCR_DYN_OBJINST boxing descriptor { name, pre, post, vt,
       // retain, release } — one internal constant per boxed class
