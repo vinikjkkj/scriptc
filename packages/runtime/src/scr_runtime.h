@@ -6284,6 +6284,7 @@ const char *scr_dyn_map_cls(const ScrDyn *d);
 bool scr_dyn_is_map(const ScrDyn *d);
 bool scr_dyn_is_set(const ScrDyn *d);
 ScrStr *scr_dyn_object_to_string(const ScrDyn *d); /* Object.prototype.toString.call over a dyn; +1, never throws */
+bool scr_dyn_handle_is(const ScrDyn *d, ScrDynHandleTag tag);
 bool scr_dyn_is_date(const ScrDyn *d); /* the Date handle tag; borrowed, never throws */
 /* The loud ladder for every operation the box has no layout to answer
  * (keyed access and indexing, `size`, `get`/`has`/`add`, iteration,

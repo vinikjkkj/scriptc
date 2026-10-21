@@ -8855,6 +8855,14 @@ export function canDynCheckTo(
       nestedMemo.set(x, true);
       return true;
     }
+    // A DATE leaf (a union arm or record field of Date type: sql-escaper's
+    // SqlValue): the walkers test the handle tag (scr_dyn_handle_is) and
+    // unbox it by reference. Only Date is admitted nested -- the other
+    // runtime handles keep the standing-alone-only rule.
+    if (x.kind === "date") {
+      nestedMemo.set(x, true);
+      return true;
+    }
     /* The coinductive hit. It is the ONE answer that is not a property of
      * the type alone, so it is never memoised, and it publishes how far up
      * it reached so no ancestor between here and there is memoised either. */
