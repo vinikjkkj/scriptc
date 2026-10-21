@@ -3273,8 +3273,7 @@ function preflight7(load: LoadResult): {
    * module reachable ONLY through a twin was in the PROGRAM and absent from
    * the MODULE ORDER, i.e. never lowered.
    *
-   * Measured on the real zapo-rest entry under --provenance-sources with
-   * SCRIPTC_PROVENANCE_AUTHORED_JS=1: mysql2 maps to its attested
+   * Measured on the real zapo-rest entry under --provenance-sources: mysql2 maps to its attested
    * `promise.d.ts`, whose twin `promise.js` acquires its whole package in
    * sixteen `const X = require('./lib/...')` statements. Of mysql2's 92
    * attested `lib/` files in the program, exactly ONE had a statsByFile key

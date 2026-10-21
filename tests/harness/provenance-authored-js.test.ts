@@ -8,20 +8,13 @@
  * mapping the `.js` directly would compile the values and lose the types — and
  * lets the existing declaration-twin machinery supply the bodies.
  *
- * The mapping is a WHITELIST, not a boolean: AUTHORED_JS_DEFAULT_PACKAGES
- * names the packages it applies to when the environment says nothing, and
- * SCRIPTC_PROVENANCE_AUTHORED_JS overrides it. All four readings of that
- * variable are covered here, because each one is load-bearing for somebody:
- *
- *   unset            the default whitelist  — what ships
- *   `pkg`            exactly that package   — what a consumer opts into
- *   `1`/`true`/`all` every package          — what existing env templates
- *                                             already say, and must keep
- *                                             meaning
- *   `` (empty)       no package at all      — the way to turn it fully off
- *
- * The fixture package is NOT on the default list, which is what lets the
- * unset case assert that the default is a whitelist and not `all`.
+ * The mapping is a STRUCTURAL RULE over the mapped tree and names no package
+ * (there is no list and no environment variable): every TypeScript candidate
+ * has missed, and at the mapped location a `.d.ts` exists with its
+ * implementation beside it. The rule tests below classify one fixture per
+ * SHAPE -- a flat data package, a driver with a subpath `exports` map, a
+ * package built from TypeScript, a package with no declaration -- and a source
+ * scan proves no package name is left in the compiler's provenance logic.
  *
  * The const read is the load-bearing line. When this mapping first landed the
  * twin's module-init function was emitted and never called, so the binary
@@ -30,12 +23,11 @@
  * in the suite covered it; this file is that cover.
  */
 import { execFile } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
 import {
-  AUTHORED_JS_DEFAULT_PACKAGES,
   analyze,
   compile,
   ProvenanceRefusalError,
@@ -78,7 +70,6 @@ async function buildAndRun(name: string, dynamic: boolean): Promise<string> {
  * it was found whichever order the files run in. */
 const PRIOR = {
   manifest: process.env["SCRIPTC_PROVENANCE_MANIFEST"],
-  authored: process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"],
 };
 const restore = (k: string, v: string | undefined): void => {
   if (v === undefined) delete process.env[k];
@@ -88,32 +79,22 @@ const restore = (k: string, v: string | undefined): void => {
 afterEach(() => {
   setProvenanceSources(null);
   restore("SCRIPTC_PROVENANCE_MANIFEST", PRIOR.manifest);
-  restore("SCRIPTC_PROVENANCE_AUTHORED_JS", PRIOR.authored);
 });
 
 describe("provenance: a package that publishes the source it authored", () => {
-  test("a package NOT on the list islands, and the note names it", async () => {
+  test("with NO list anywhere the package maps, and the island build is the control", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    /* Explicit, not assumed: this asserts the SHIPPED DEFAULT, so it must hold
-     * even when the caller ran the whole suite with the variable set. Unset is
-     * the default whitelist, and `authoredjs` is not on it. */
-    delete process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"];
     const sources = await resolveProvenanceSources(entry);
-    /* Not "no packages resolved" — the tree WAS located and fetched. What is
-     * absent is a mapping from the published target to a source file. */
-    expect(sources.packages).toHaveLength(0);
-    expect(sources.notes.join("\n")).toContain(
-      "no source mapping for 'authoredjs' (published target: index.js)",
-    );
-    setProvenanceSources(sources);
-    /* And the island answer is the RIGHT answer, so the gate's default is a
-     * refusal to compile statically, never a wrong number. */
+    expect(sources.packages.map((p) => p.name)).toEqual(["authoredjs"]);
+    expect(sources.notes.join("\n")).not.toContain("no source mapping for 'authoredjs'");
+    /* CONTROL: with no provenance registered the same entry is the island, and
+     * the island's answer is the recorded one. */
+    setProvenanceSources(null);
     expect(await buildAndRun("authoredjs-island", true)).toBe(EXPECTED);
   });
 
-  test("named on the list, the package maps to its declaration half", async () => {
+  test("the package maps to its declaration half", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoredjs";
     const sources = await resolveProvenanceSources(entry);
     expect(sources.packages).toHaveLength(1);
     const pkg = sources.packages[0]!;
@@ -129,9 +110,8 @@ describe("provenance: a package that publishes the source it authored", () => {
     expect(sources.notes.join("\n")).not.toContain("no source mapping for 'authoredjs'");
   });
 
-  test("named on the list, the mapped package compiles STATIC with no blockers", async () => {
+  test("the mapped package compiles STATIC with no blockers", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoredjs";
     setProvenanceSources(await resolveProvenanceSources(entry));
     const { coverage } = analyze(entry);
     expect(coverage.preflightFailed).toBe(false);
@@ -142,12 +122,9 @@ describe("provenance: a package that publishes the source it authored", () => {
     /* The island build first, so the two binaries are compared to each other
      * as well as to the recorded string. */
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    delete process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"];
     const island = await buildAndRun("authoredjs-island2", true);
     expect(island).toBe(EXPECTED);
 
-    setProvenanceSources(null);
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoredjs";
     setProvenanceSources(await resolveProvenanceSources(entry));
     /* dynamic: false — the embedded engine is NOT in this binary, so every
      * value read below came out of the compiled twin. `protocol=5` is the
@@ -157,59 +134,73 @@ describe("provenance: a package that publishes the source it authored", () => {
     expect(fromSource).toBe(EXPECTED);
   });
 
-  /* The four readings of the variable, asserted on the MAPPING rather than on
-   * a build, so they are cheap enough to all be here. `authoredjs` is not on
-   * the default list, so `mapped` is a direct read of what the variable did. */
-  const mapped = async (): Promise<boolean> => {
-    const sources = await resolveProvenanceSources(entry);
-    return sources.packages.some((p) => p.name === "authoredjs");
-  };
+  /* THE RULE, one fixture per shape. Each package is manifest-seeded, so the
+   * classification is a property of its TREE and nothing else: no name, no
+   * attestation, no environment. */
+  const classifyEntry = join(fixtureDir, "cases/classify/main.ts");
+  const classifyManifest = join(fixtureDir, "manifest-classify.json");
+  const posix = (p: string | undefined): string => (p ?? "<none>").split("\\").join("/");
 
-  test("the default list is DATA, and it names the package wam needs", () => {
-    /* If this constant ever changes, the change is the review. It is the whole
-     * blast radius of the shipped default. */
-    expect([...AUTHORED_JS_DEFAULT_PACKAGES]).toStrictEqual(["@vinikjkkj/wa-wam", "mysql2"]);
-    expect(AUTHORED_JS_DEFAULT_PACKAGES).not.toContain("authoredjs");
+  test("RULE: classifies a flat data package, a driver with an exports map, a TS-built package, bare JS, and a shim that is not the published file", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = classifyManifest;
+    const sources = await resolveProvenanceSources(classifyEntry);
+    const byName = new Map(sources.packages.map((p) => [p.name, p]));
+    /* wa-wam's shape: flat index.js + hand-written index.d.ts, one script, no exports. */
+    expect(posix(byName.get("wamshape")?.entries["wamshape"])).toMatch(/attested-src\/wamshape\/index\.d\.ts$/);
+    /* mysql2's shape: an exports map, no `types` field, a subpath. Both the
+     * root and `./promise` map to the declaration half. */
+    expect(posix(byName.get("mysqlshape")?.entries["mysqlshape"])).toMatch(/attested-src\/mysqlshape\/index\.d\.ts$/);
+    expect(posix(byName.get("mysqlshape")?.entries["mysqlshape/promise"])).toMatch(
+      /attested-src\/mysqlshape\/promise\.d\.ts$/,
+    );
+    /* NEGATIVE CONTROL 1: a package built from TypeScript maps to its .ts
+     * source, NOT to a declaration: the authored rule only fires when every
+     * TypeScript candidate missed. */
+    expect(posix(byName.get("greeter")?.entries["greeter"])).toMatch(/attested-src\/greeter\/src\/index\.ts$/);
+    /* Authored JS with NO declaration maps to the published file itself, but
+     * only in the IDENTITY spelling: the tree holds the file at the very path
+     * the package publishes it at. */
+    expect(posix(byName.get("jsonly")?.entries["jsonly"])).toMatch(/attested-src\/jsonly\/index\.js$/);
+    /* NEGATIVE CONTROL 2: the package publishes dist/index.js, which is absent
+     * from the tree, while an unrelated root index.js IS there. Mapping that
+     * shim would compile code the package never ships, so it must not map. */
+    expect(byName.has("distjs")).toBe(false);
+    expect(sources.notes.join("\n")).toContain("no source mapping for 'distjs' (published target: dist/index.js)");
   });
 
-  test("unset means the DEFAULT LIST, not all", async () => {
-    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    delete process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"];
-    expect(await mapped()).toBe(false);
+  test("RULE: bare JavaScript with no declaration compiles STATIC and runs", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = classifyManifest;
+    const bareEntry = join(fixtureDir, "cases/barejs/main.ts");
+    setProvenanceSources(await resolveProvenanceSources(bareEntry));
+    mkdirSync(outDir, { recursive: true });
+    const outPath = join(outDir, process.platform === "win32" ? "barejs.exe" : "barejs");
+    const result = await compile(bareEntry, { outPath, outDir, dynamic: false, backend: "c" });
+    if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+    const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+    expect(stdout).toBe("J=1\n");
   });
 
-  test("an explicit list of one maps exactly that package", async () => {
-    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoredjs";
-    expect(await mapped()).toBe(true);
-    /* A list that names somebody ELSE must not carry this package in with it. */
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "@vinikjkkj/wa-wam,some-other-pkg";
-    setProvenanceSources(null);
-    expect(await mapped()).toBe(false);
-  });
-
-  test("`1` still means ALL, which is what existing env templates say", async () => {
-    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    for (const spelling of ["1", "true", "all", "ALL"]) {
-      process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = spelling;
-      setProvenanceSources(null);
-      expect(await mapped(), "spelling " + spelling).toBe(true);
+  test("RULE: no package name is left in the provenance logic (matcher shown firing)", () => {
+    /* Comments may cite a package as a measured example; BEHAVIOUR keyed on a
+     * name may not. So strip comments, then look for a quoted package name. */
+    const codeOf = (text: string): string =>
+      text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    const NAMES = /["'`](?:@vinikjkkj\/wa-wam|mysql2|zapo-js|@zapo-js\/[a-z-]+|long|iconv-lite|generate-function)["'`]/;
+    /* Positive controls: the matcher fires on the old shape, and on a name
+     * that lives only inside a string. */
+    expect(NAMES.test(codeOf('export const L: readonly string[] = ["@vinikjkkj/wa-wam", "mysql2"];'))).toBe(true);
+    expect(NAMES.test(codeOf('if (pkg === "mysql2") return true; // fine'))).toBe(true);
+    /* ... and ignores the same name in a comment. */
+    expect(NAMES.test(codeOf('/* e.g. "mysql2" */\n// "@vinikjkkj/wa-wam"\nconst x = 1;'))).toBe(false);
+    for (const f of [
+      "packages/compiler/src/frontend/provenance.ts",
+      "packages/compiler/src/frontend/provenance-lockfile.ts",
+      "packages/compiler/src/frontend/provenance-registry.ts",
+    ]) {
+      const code = codeOf(readFileSync(join(repoRoot, f), "utf8"));
+      expect(NAMES.test(code), f).toBe(false);
+      expect(code, f).not.toContain("AUTHORED_JS");
     }
-    /* PRECEDENCE: a value that looks like both spellings resolves to ALL, and
-     * `1` is never read as the name of a package called `1`. */
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "1,some-other-pkg";
-    setProvenanceSources(null);
-    expect(await mapped()).toBe(true);
-  });
-
-  test("empty means NO package, which is how to turn the lane fully off", async () => {
-    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "";
-    expect(await mapped()).toBe(false);
-    /* Whitespace-only is the same statement, not a package named ' '. */
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "  ,  ";
-    setProvenanceSources(null);
-    expect(await mapped()).toBe(false);
   });
 });
 
@@ -249,7 +240,6 @@ const depManifestOnly = join(fixtureDir, "manifest-authoreddep-only.json");
 describe("provenance: an authored package's own dependency", () => {
   test("a dependency that publishes no attestation and has no lockfile digest REFUSES the build, naming it", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifestOnly;
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoreddep";
     /* The registry is stubbed to answer 404 (no attestation) for everything:
      * `depts` is reached only through the authored package's implementation
      * twin, nothing locks it, so its bytes cannot be verified. That is a
@@ -276,7 +266,6 @@ describe("provenance: an authored package's own dependency", () => {
 
   test("the walk reaches it through the implementation twin, and require() resolves it", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifest;
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoreddep";
     const sources = await resolveProvenanceSources(depEntry);
     /* The dependency is in the graph ONLY through the `.d.ts`'s implementation
      * twin: nothing the entry imports names it, and the declaration does not
