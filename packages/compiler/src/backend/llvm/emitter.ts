@@ -1168,6 +1168,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // catchable DOMException InvalidCharacterError (may-throw), and the
   // zero-argument form always throws ERR_MISSING_ARGS.
   "str.encodeUri": "scr_encode_uri",
+  "str.isAbsent": "scr_str_is_absent",
   "str.atob": "scr_atob",
   "str.btoa": "scr_btoa",
   "str.b64Missing": "scr_b64_missing_arg",

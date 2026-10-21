@@ -1452,6 +1452,12 @@ function lowerOptionalDefaultArg(
           loc,
         },
         { kind: "varDecl", localId: "v.0", init: { kind: "arrayGet", arr: ref("a.0", arrT), index: i, type: elem, loc }, loc },
+        // The ABSENT string (a split capture that did not participate) is a miss.
+        ...(elem.kind === "string" ? [{
+          kind: "if" as const,
+          cond: { kind: "libCall" as const, fn: "str.isAbsent" as const, args: [v], type: BOOL, loc },
+          then: [{ kind: "return" as const, value: miss, loc }], else_: null, loc,
+        }] : []),
         {
           kind: "return",
           value: { kind: "unionWrap", unionId: resultT.unionId, tag: foundTag, value: v, type: resultT, loc },
@@ -1511,6 +1517,16 @@ function lowerOptionalDefaultArg(
     const isNum = (): boolean => (ctx as unknown) === "num";
     const elem = (arr.type as IrType & { kind: "array" }).elem;
     if (!oobTolerantElem(elem)) return null;
+    // A string element can be the ABSENT string (a split capture group that
+    // did not participate: Node's undefined); it reads as a miss too.
+    const withPresent = (inRange: IrExpr): IrExpr => elem.kind !== "string" ? inRange : {
+      kind: "logical", op: "&&", left: inRange,
+      right: {
+        kind: "unary", op: "!", type: BOOL, loc,
+        operand: { kind: "libCall", fn: "str.isAbsent", args: [{ kind: "arrayGet", arr, index, type: elem, loc }], type: BOOL, loc },
+      },
+      type: BOOL, loc,
+    };
     if (stringify && elem.kind === "string") {
       // The consumer turns the value into text (template, string `+`,
       // String(), console.log): a miss reads "undefined", exactly the text
@@ -1525,7 +1541,7 @@ function lowerOptionalDefaultArg(
           type: BOOL, loc,
         };
         const t: IrExpr = {
-          kind: "ternary", cond: inRange,
+          kind: "ternary", cond: withPresent(inRange),
           then: { kind: "arrayGet", arr, index, type: elem, loc },
           else_: { kind: "strLit", value: "undefined", type: STRING, loc },
           type: elem, loc,
@@ -1577,7 +1593,7 @@ function lowerOptionalDefaultArg(
         }
         miss = { kind: "call", callee: mname, args: [], type: elem, loc };
       }
-      const t: IrExpr = { kind: "ternary", cond: inRange, then: hit, else_: miss, type: elem, loc };
+      const t: IrExpr = { kind: "ternary", cond: withPresent(inRange), then: hit, else_: miss, type: elem, loc };
       L.lyingResults.add(t);
       return t;
     }
@@ -1608,6 +1624,11 @@ function lowerOptionalDefaultArg(
           else_: null,
           loc,
         },
+        ...(elem.kind === "string" ? [{
+          kind: "if" as const,
+          cond: { kind: "libCall" as const, fn: "str.isAbsent" as const, args: [{ kind: "arrayGet" as const, arr: ref("a.0", arrT), index: i, type: elem, loc }], type: BOOL, loc },
+          then: [missStmt], else_: null, loc,
+        }] : []),
         { kind: "return", value: { kind: "arrayGet", arr: ref("a.0", arrT), index: i, type: elem, loc }, loc },
       ];
       L.liftedFns.push({
@@ -6670,24 +6691,6 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       // fenced with the regex-surface code (its hint lists what works).
       if (name === "split" && call.arguments.length !== 1) {
         L.unsupported("SC1120", call, "'.split()' with a limit argument");
-      }
-      // split splices each capture group's text into the result, and a group that did not participate is
-      // `undefined` in Node's array -- which a `string[]` cannot hold (the divergence-51 collapse to "" is what
-      // this compiler refuses to inherit into one more surface): fence a pattern we can prove may skip a group.
-      if (name === "split") {
-        const lit = staticRegexTextOf(L, arg0);
-        const part = lit !== null ? captureParticipationOfPattern(lit.pattern) : null;
-        if (part !== null) {
-          for (let g = 1; g <= part.captureCount; g++) {
-            if (part.always.get(g) !== true) {
-              L.unsupported(
-                "SC1120",
-                arg0,
-                `'.split()' with a capture group this pattern does not always fill (group ${g}; Node puts undefined in the result and a string[] cannot hold it — use a non-capturing group, or a pattern whose groups always participate)`,
-              );
-            }
-          }
-        }
       }
       const receiver = lowerReceiver();
       const args = call.arguments.map((a) => L.lowerExpr(a));

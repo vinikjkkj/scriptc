@@ -3886,6 +3886,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_str_decode_uri_component(${arg(0)})`);
           case "str.encodeUri":
             return finish(`scr_encode_uri(${arg(0)})`);
+          case "str.isAbsent":
+            return finish(`scr_str_is_absent(${arg(0)})`);
           // RegExp.escape (scr_string.c): total per-code-point escape —
           // borrows, +1 result, never throws.
           case "regexp.escape":

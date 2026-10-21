@@ -253,6 +253,8 @@ void scr_jb_put_f64(ScrJsonBuf *b, double v) {
 }
 
 void scr_jb_put_json_str(ScrJsonBuf *b, const ScrStr *s) {
+  /* An absent array slot (undefined) serializes as null. */
+  if (scr_str_is_absent(s)) { scr_jb_puts(b, "null"); return; }
 #ifdef SCR_ARRCEN_ON
   scr_arrcen_note(SCR_ARRCEN_JSONSTR, (long long)s->len);
 #endif

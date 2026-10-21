@@ -828,8 +828,8 @@ ScrStr *scr_regex_replace_all(ScrStr *s, ScrRegex *re, ScrStr *rep) {
 ScrArr *scr_regex_split(ScrStr *s, ScrRegex *re) {
   uint8_t *bc = scr_regex_bc(re);
   /* JS splices every capture group's value into the result after each
-   * piece. A nonparticipating group holds "" (match()'s documented rule:
-   * the slice is a plain string[], Node's slot would be undefined). */
+   * piece. A nonparticipating group is the ABSENT string (empty, but its
+   * identity is Node's undefined: scr_str_absent). */
   const int capture_count = lre_get_capture_count(bc);
   int re_flags = lre_get_flags(bc);
   bool unicode = (re_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)) != 0;
@@ -873,7 +873,7 @@ ScrArr *scr_regex_split(ScrStr *s, ScrRegex *re) {
       for (int k = 1; k < capture_count; k++) {
         const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
         if (cs == NULL || ce == NULL) {
-          scr_arr_push_ref(out, scr_str_new("", 0));
+          scr_arr_push_ref(out, scr_str_absent());
         } else {
           scr_arr_push_ref(
               out, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
