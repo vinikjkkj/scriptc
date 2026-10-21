@@ -1,10 +1,13 @@
 scriptc coverage tests/diagnostics/npm-imports/main.ts
 
   statements analyzed   6
-  compile statically    3  (50%)
+  compile statically    2  (33%)
 
   runs with --dynamic   6 sites (embeds a JS engine, ~620KB — static stays the default)
       ×3  values from the 'mathkit' package run in the embedded dynamic engine, which this build does not include  SC2013
       ×1  importing 'mathkit' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there  SC2013
       ×1  importing '@acme/units' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there  SC2013
       ×1  values from the '@acme/units' package run in the embedded dynamic engine, which this build does not include  SC2013
+
+  blockers:
+      ×1  calling 'calc.value' (it has no compiled implementation: its module 'mathkit' ships only a declaration file; this call cannot run in a static build)  SC1090
