@@ -21,10 +21,6 @@ export interface CoverageInput {
   dynamic?: boolean;
   stats: LowerStats;
   diagnostics: ScrDiagnostic[];
-  /** JS statements whose compile fences deferred to RUNTIME (runtimeFence
-   * statements): the program builds, but executing one throws — the
-   * report lists them so nothing hides. */
-  runtimeFences?: ScrDiagnostic[];
   /** SC6xxx ADVICE: constructs that DID compile, reported because what
    * they compiled to is not what the source says (a double assertion that
    * dropped members). Never blockers — they are listed apart so the
@@ -32,12 +28,8 @@ export interface CoverageInput {
   advisories?: ScrDiagnostic[];
   /** The unreached remainder: bodies nothing on the entry path reaches,
    * lowered in a throwaway analysis pass. Its blockers cannot fail a
-   * build — the report shows them as a secondary, dimmed group.
-   * runtimeFences: that same remainder's JS statements whose compile
-   * fences deferred to runtime instead of blocking — also dimmed, also
-   * incapable of failing a build, but named rather than folded silently
-   * into the top-line statement counts the way they used to be. */
-  unreached?: { stats: LowerStats; diagnostics: ScrDiagnostic[]; runtimeFences: ScrDiagnostic[] };
+   * build — the report shows them as a secondary, dimmed group. */
+  unreached?: { stats: LowerStats; diagnostics: ScrDiagnostic[] };
   /** --dynamic only: every Node builtin the embedded npm graph imports —
    * what the island must provide for this program (unshimmed ones also
    * appear as SC2030 blockers, EXCEPT lazily-reached ones, which embed
@@ -316,47 +308,6 @@ export function renderCoverageLines(input: CoverageInput, opts: { color?: boolea
       );
     }
     for (const note of prov.notes) out.push(`    ${c(YELLOW, "note")}  ${note}`);
-    out.push("");
-  }
-
-  // JS statements whose fences DEFERRED to runtime (the runtimeFence
-  // statements the module carries): they compile, but executing one
-  // throws its SC-coded error — the report lists them so a "compiling"
-  // JS program never hides its dynamic gaps.
-  const fences = input.runtimeFences ?? [];
-  if (fences.length > 0) {
-    const grouped = groupBlockers(fences);
-    const widestF = alignWidth(grouped.map((b) => b.what.length));
-    out.push(
-      `  ${c(YELLOW, "deferred to runtime")}   ${fences.length} site${fences.length === 1 ? "" : "s"} ${c(DIM, "(JS statements that throw their fence if executed)")}`,
-    );
-    for (const b of grouped) {
-      out.push(
-        `    ${c(YELLOW, `×${b.count}`.padStart(4))}  ${b.what.padEnd(widestF)}  ${c(DIM, b.code)}`,
-      );
-    }
-    out.push("");
-  }
-
-  // The same thing, in code nothing on the entry path reaches: a JS
-  // statement there still defers its compile fence instead of blocking
-  // (deferFences does not consult reachability), and the remainder pass's
-  // stats.statementsFailed already folded these into the top-line counts
-  // above — unlike unreachedBlockers below, nothing rendered which sites
-  // they were. Dimmed like unreachedBlockers, for the same reason: never
-  // lowered by a build, so it can never fail one either.
-  const unreachedFences = un?.runtimeFences ?? [];
-  if (unreachedFences.length > 0) {
-    const grouped = groupBlockers(unreachedFences);
-    const widestUF = alignWidth(grouped.map((b) => b.what.length));
-    out.push(
-      `  ${c(DIM, "deferred to runtime, in unreached code")}   ${unreachedFences.length} site${unreachedFences.length === 1 ? "" : "s"} ${c(DIM, "(never lowered — cannot fail a build)")}`,
-    );
-    for (const b of grouped) {
-      out.push(
-        `    ${c(DIM, `×${b.count}`.padStart(4))}  ${c(DIM, b.what.padEnd(widestUF))}  ${c(DIM, b.code)}`,
-      );
-    }
     out.push("");
   }
 

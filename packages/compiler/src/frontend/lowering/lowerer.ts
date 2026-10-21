@@ -393,9 +393,6 @@ export interface LowerResult {
   /** Present iff diagnostics is empty. */
   module: IrModule | null;
   diagnostics: ScrDiagnostic[];
-  /** JS statements whose compile fences DEFERRED to runtime (runtimeFence
-   * statements in the module) — off the build, on the coverage report. */
-  runtimeFences: ScrDiagnostic[];
   /** SC6xxx ADVICE — the program compiled and these say something true
    * about what it compiled to. Never fatal: `module` is non-null with a
    * non-empty list, and nothing here may ever move a row into
@@ -409,14 +406,8 @@ export interface LowerResult {
    * consts in fetched source modules — off the build, on the report. */
   provenanceElided?: ScrDiagnostic[];
   /** Coverage only (LowerOptions.coverage): the unreached remainder,
-   * lowered in a throwaway pass — blockers in it can never fail a build.
-   * runtimeFences: JS statements in that same remainder whose compile
-   * fences deferred to runtime — never lowered by a build either, but
-   * still a construct the report must name (nothing else does: the
-   * reached-code `runtimeFences` field above only covers the entry path,
-   * and the remainder's own `stats.statementsFailed` counts these sites
-   * without saying what they are). */
-  unreached?: { diagnostics: ScrDiagnostic[]; stats: LowerStats; runtimeFences: ScrDiagnostic[] };
+   * lowered in a throwaway pass — blockers in it can never fail a build. */
+  unreached?: { diagnostics: ScrDiagnostic[]; stats: LowerStats };
   /** --dynamic only: every Node builtin the embedded npm graph imports,
    * shimmed or not — the coverage report's island honesty. */
   npmBuiltins?: NpmBuiltinUse[];
@@ -708,7 +699,7 @@ export function lowerToIr(
   const rem = remainder.run();
   return {
     ...result,
-    unreached: { diagnostics: rem.diagnostics, stats: rem.stats, runtimeFences: rem.runtimeFences },
+    unreached: { diagnostics: rem.diagnostics, stats: rem.stats },
   };
 }
 
@@ -1942,10 +1933,6 @@ export class Lowerer {
   /** Non-null redirects pushDiag into a capture buffer (the deferred
    * collection wrapper). */
   diagSink: ScrDiagnostic[] | null = null;
-  /** Diagnostics converted into runtimeFence statements (JS sources —
-   * see lowerStmts): off the build, preserved here so coverage reporting
-   * can still name every deferred fence. */
-  readonly runtimeFences: ScrDiagnostic[] = [];
   /** ADVICE (the SC6xxx band) — the program compiled, and this says
    * something true about what it compiled to. A SEPARATE list, not a
    * severity filter over `diags`: every gate in this file that decides
@@ -2811,7 +2798,6 @@ export class Lowerer {
       return {
         module: null,
         diagnostics: this.diags,
-        runtimeFences: this.runtimeFences,
         advisories: this.advisories,
         stats: this.stats,
         ...(this.statsByFile.size > 0 ? { statsByFile: this.statsByFile } : {}),
@@ -2934,7 +2920,6 @@ export class Lowerer {
     return {
       module,
       diagnostics: this.diags,
-      runtimeFences: this.runtimeFences,
       advisories: this.advisories,
       stats: this.stats,
       ...(this.statsByFile.size > 0 ? { statsByFile: this.statsByFile } : {}),
