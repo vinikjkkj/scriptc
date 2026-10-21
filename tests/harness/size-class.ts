@@ -1844,7 +1844,12 @@ export const STATIC_CLASS_RECORDED = platform === "win32" ? 116_736 : null;
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 211_456 : null;
+/* RE-RECORDED 2026-10-21 (pooldyn): 211,456 -> 211,968 (+512, one alignment unit; .text +32, inside its anchor
+ * tolerance). Measured with the zig windows-gnu cross build (SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu), which
+ * reproduced main's recorded 211,456 byte-exact on origin/main bb2a04bf, on the test's own regex program. The static
+ * hello-world did NOT move (116,736 on main and on this branch): under gcsections the Symbol/Date dyn handles are not linked
+ * into it. Cause of the regex program's unit: the always-linked dyn string/JSON paths now test for a Symbol handle. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 211_968 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
