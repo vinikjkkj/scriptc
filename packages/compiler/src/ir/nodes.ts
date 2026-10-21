@@ -6062,6 +6062,8 @@ export type IrLibFn =
    * per spec). Borrowed args; +1 string / plain f64; neither throws. */
   | "string.fromCharCode"
   | "string.lastIndexOf"
+  /** s.replace(str, str) / s.replaceAll(str, str); args [s, pat, rep, all]. */
+  | "string.replaceStr"
   /** String.raw(template, ...subs): the raw literals array (a string[]
    * read off the template record) interleaved with the PRE-STRINGIFIED
    * substitutions (the frontend applies the static ToString and packs
