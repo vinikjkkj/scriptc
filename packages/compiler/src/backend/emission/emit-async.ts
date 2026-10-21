@@ -5,7 +5,7 @@ import { appendLines, type CEmitter } from "./emitter.js";
 import { emitGenCoroSpawn } from "./emit-gen-coro.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleChildDataThunk, mangleChildExitThunk, mangleCloseBindThunk, mangleCloseOverrideWrap, mangleConnectSockThunk, mangleDgramMsgThunk, mangleDnsLookupThunk, mangleField, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRaceThunk, mangleRawParam, mangleNetLookupAnswerThunk, mangleEmitterInvokeThunk, mangleStreamCbThunk, mangleStreamDoneFn, mangleRecordNew, mangleRecordRelease, mangleRecordStruct, mangleResolveThunk, mangleSniAnswerThunk, mangleTrampoline } from "../mangle.js";
 import { cDecl, cType, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
-import { IrFunction, IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { IrFunction, IrType, isDynPackFunc, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 /** Per-async-function machinery: an argument pack, a fiber trampoline
    * (unpacks, runs the ordinary compiled body, settles the promise), and a
@@ -1364,7 +1364,7 @@ export function streamCbThunkFor(E: CEmitter, kind: "r" | "w" | "f" | "d" | "t" 
       passed.push(`sc_eu`);
     } else if (isDonePos) {
       const doneKind = kind as "w" | "f" | "d" | "t" | "l"; // "e" has no done position
-      const doneFn = streamDoneFnFor(E, doneKind, p);
+      const doneFn = p.kind === "func" && isDynPackFunc(p) ? `scr_stream_done_pack_${doneKind}` : streamDoneFnFor(E, doneKind, p);
       body.push(
         `  ScrClosure *sc_done = scr_closure_new((void *)&${doneFn}, 1);`,
         `  sc_done->caps[0] = scr_box_new_obj(&scr_stream_retain_v, &scr_stream_release_v, &scr_stream_trace);`,
