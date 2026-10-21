@@ -10971,6 +10971,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7800-a-curried-closure-returned-into-a-wider-function-return-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7800-a-curried-closure-returned-into-a-wider-function-return-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7801-awaiting-a-promise-string-or-string-or-null-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/7801-awaiting-a-promise-string-or-string-or-null-union.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
