@@ -11312,6 +11312,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8220-borrowed-methods-share-fields.js": {
+   "order": [
+    "<repo>/tests/corpus/8220-borrowed-methods-share-fields.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8221-emit-error-unknown-payload.js": {
+   "order": [
+    "<repo>/tests/corpus/8221-emit-error-unknown-payload.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8222-base-class-reads-subclass-fields.js": {
+   "order": [
+    "<repo>/tests/corpus/8222-base-class-reads-subclass-fields.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
