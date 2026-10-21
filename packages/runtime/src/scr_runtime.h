@@ -67,6 +67,28 @@ typedef unsigned short mode_t;
 #define S_ISFIFO(m) (((m) & _S_IFMT) == _S_IFIFO)
 #define S_ISCHR(m)  (((m) & _S_IFMT) == _S_IFCHR)
 #define S_ISBLK(m)  ((void)(m), 0)
+
+/* clock_gettime / nanosleep / <dirent.h>: mingw-w64 ships all three (its
+ * <time.h> pulls in pthread_time.h, and it has a <dirent.h>); the UCRT
+ * has none of them. Declared here so every TU compiles unchanged, and
+ * defined in scr_win.c under the same _MSC_VER guard, so the mingw
+ * lane keeps its own CRT's versions and links nothing new. The dirent
+ * shape is the mingw one on purpose: no d_type (scr_lib.c's DT_REG arm
+ * stays out, its lstat fallback answers), d_name is the ANSI find-data
+ * name, "." and ".." are returned like any entry. */
+typedef int clockid_t;
+#define CLOCK_REALTIME  0
+#define CLOCK_MONOTONIC 1
+int clock_gettime(clockid_t id, struct timespec *ts);
+int nanosleep(const struct timespec *req, struct timespec *rem);
+
+struct dirent {
+  char d_name[260]; /* MAX_PATH */
+};
+typedef struct ScrMsvcDir DIR;
+DIR *opendir(const char *path);
+struct dirent *readdir(DIR *d);
+int closedir(DIR *d);
 #endif
 #endif
 
