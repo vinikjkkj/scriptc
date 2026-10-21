@@ -5269,6 +5269,7 @@ export class Lowerer {
   }
 
   typeOf(node: ts.Node): ts.Type {
+    if (this.activeThisType !== null && node.kind === ts.SyntaxKind.ThisKeyword) return this.activeThisType;
     // Inside an optional-chain body the guarded receiver is typed by its
     // NON-NULLISH type (the chain's tag test proved it), so every
     // receiver-kind check downstream sees the narrowed arm.
@@ -13428,6 +13429,12 @@ export class Lowerer {
    * (`p.prototype.int64 = p.prototype.uint64`) is two module functions over
    * one source body. */
   readonly protoClassBodies = new Map<string, Map<string, ts.FunctionExpression>>();
+  /** `C.prototype.m = fn` statements adopted as late methods of C (the
+   * assignment lowers to nothing), and the checker type that stands in for
+   * `this` while such a method's body lowers under C. */
+  readonly lateMethodAssigns = new Set<ts.Node>();
+  readonly lateMethodThis = new Map<ts.Node, ts.Type>();
+  activeThisType: ts.Type | null = null;
   /** Class expressions whose collection is IN FLIGHT — the reentrancy
    * guard for heritage-demanded collection (lowerClassExpressionInfo). */
   readonly collectingExprClasses = new Set<ts.ClassExpression>();
