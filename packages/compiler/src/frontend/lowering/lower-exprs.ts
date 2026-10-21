@@ -22,7 +22,7 @@ import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, built
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
-import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall } from "./lower-containers.js";
+import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
 import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf } from "./lower-modules.js";
@@ -14839,6 +14839,14 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       // those keys FIRST across the whole object and the overflow walk
       // emits them LAST. Deny the shape key rather than answer in the
       // wrong order (see overflowShapeKeysDenied).
+      //
+      // ovfGrantViable is a DIAGNOSTIC aid only (SCRIPTC_OVF_WHY): a member
+      // the store cannot carry must never silently shrink the value, so the
+      // grant is still named and the capture helper's refusal (SC2002) says
+      // which member has no checked-dynamic representation.
+      if (process.env["SCRIPTC_OVF_WHY"] !== undefined && !ovfGrantViable(L, fromId, toId)) {
+        console.error(`OVFGRANT ${fromId}->${toId}: the capture cannot carry every moved member`);
+      }
       if (moved.some((n) => isArrayIndexKey(n))) overflowShapeKeysDenied.add(overflowShapeKey(to.fields));
       else overflowShapeKeys.add(overflowShapeKey(to.fields));
     }

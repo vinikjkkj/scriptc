@@ -9295,8 +9295,23 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     const from = L.shapes.get(fromId);
     const to = L.shapes.get(toId);
     if (!from || !to?.indexValue || from.tuple || to.tuple) return false;
+    return ovfCaptureGate(L, from, to, to.indexValue);
+  }
+
+  /** Would the overflow capture into `toId` plan if the grant gave it a dyn
+   * portion? The same gate ovfCapturePlannable applies, asked of a shape that
+   * has no index signature YET: the question the grant must answer before it
+   * names a destination, because a grant the capture cannot honor turns a
+   * width flow that copies today into an SC2002 refusal. */
+  export function ovfGrantViable(L: Lowerer, fromId: string, toId: string): boolean {
+    const from = L.shapes.get(fromId);
+    const to = L.shapes.get(toId);
+    if (!from || !to || to.indexValue !== undefined || from.tuple || to.tuple) return false;
+    return ovfCaptureGate(L, from, to, DYN);
+  }
+
+  function ovfCaptureGate(L: Lowerer, from: IrRecordShape, to: IrRecordShape, tIv: IrType): boolean {
     const fIv = from.indexValue ?? null;
-    const tIv = to.indexValue;
     const slotOk = (t: IrType): boolean =>
       typeEquals(t, tIv) ||
       (tIv.kind === "dyn" && (t.kind === "dyn" || L.dynConvertible(t))) ||
@@ -9369,6 +9384,12 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     if (!from || !to?.indexValue || from.tuple || to.tuple) return null;
     const fIv = from.indexValue ?? null;
     const tIv = to.indexValue;
+    // SCRIPTC_OVF_WHY: every gate this planner declines on, named. The
+    // refusal that reaches the user is SC2002 with no detail for this pair.
+    const ovfWhy = (gate: string, what: string): null => {
+      if (process.env["SCRIPTC_OVF_WHY"] !== undefined) console.error(`OVFCAPTURE declines ${fromId}->${toId} at ${gate}: ${what}`);
+      return null;
+    };
     // How a source value enters the target's value slot: identity, the
     // dyn conversion, or a width lift (wrap/retag/nested reshape).
     const slotLift = (t: IrType): WidthLift | "dyn" | "dyncheck" | null => {
@@ -9380,7 +9401,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     };
     // The overflow value slot must line up (sources without an index
     // signature have no overflow to carry over).
-    if (fIv && slotLift(fIv) === null) return null;
+    if (fIv && slotLift(fIv) === null) return ovfWhy("overflow-value", `source overflow slot '${L.fmt(fIv)}' has no entry into '${L.fmt(tIv)}'`);
     // Target declared fields initialize one of two ways. A same-named
     // SOURCE declared field whose type lifts initializes the slot DIRECTLY
     // (consumed — no keyed write below): the declared half of a width flow
@@ -9416,10 +9437,10 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         inits.push({ name: tf.name, kind: "undefDyn" });
         continue;
       }
-      if (tf.type.kind !== "union") return null;
+      if (tf.type.kind !== "union") return ovfWhy("declared-field", `target field '${tf.name}' (${L.fmt(tf.type).slice(0, 200)}) has no lifting source field${sf ? ` (source '${L.fmt(sf.type).slice(0, 200)}')` : " (source lacks it)"}`);
       const utag = L.armTag(tf.type.unionId, UNDEFINED_T);
-      if (utag < 0) return null;
-      if (tIv.kind === "dyn" ? !L.dynConvertible(tf.type) : !typeEquals(tf.type, tIv)) return null;
+      if (utag < 0) return ovfWhy("declared-field-undef", `target field '${tf.name}' has no undefined arm`);
+      if (tIv.kind === "dyn" ? !L.dynConvertible(tf.type) : !typeEquals(tf.type, tIv)) return ovfWhy("declared-field-slot", `target field '${tf.name}' does not fit the value slot`);
       inits.push({ name: tf.name, kind: "undef", unionId: tf.type.unionId, utag });
     }
     // Every source declared field must flow into the keyed-write slot —
@@ -9436,7 +9457,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     for (const ff of orderedFields) {
       if (consumed.has(ff.name)) continue; // direct-initialized above
       const lift = slotLift(ff.type);
-      if (lift === null) return null;
+      if (lift === null) return ovfWhy("source-field", `source member '${ff.name}' (${L.fmt(ff.type).slice(0, 200)}) cannot enter the overflow slot${tIv.kind === "dyn" ? `: ${L.dynConvertRefusal(ff.type).slice(0, 300)}` : ""}`);
       fieldLifts.set(ff.name, lift);
     }
     // DISPATCH writes — keys that can hit a declared target slot: the
@@ -9453,8 +9474,9 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       fIv !== undefined ||
       orderedFields.some((ff) => !consumed.has(ff.name) && to.fields.some((f) => f.name === ff.name));
     if (dispatchWrites) {
-      if (!to.fields.every((f) => (tIv.kind === "dyn" ? isDynSlot(f.type, tIv) || L.dynConvertible(f.type) : typeEquals(f.type, tIv)))) {
-        return null;
+      const bad = to.fields.find((f) => !(tIv.kind === "dyn" ? isDynSlot(f.type, tIv) || L.dynConvertible(f.type) : typeEquals(f.type, tIv)));
+      if (bad !== undefined) {
+        return ovfWhy("dispatch-write", `a key may collide with target field '${bad.name}' (${L.fmt(bad.type).slice(0, 200)}), which does not fit the value slot`);
       }
     }
     const key = `ovf:${fromId}:${toId}`;
