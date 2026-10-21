@@ -11441,6 +11441,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8212-define-property-static-constants.js": {
+   "order": [
+    "<repo>/tests/corpus/8212-define-property-static-constants.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
