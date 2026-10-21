@@ -271,11 +271,8 @@ describe("the SECOND statement the blocked declaration was hiding", () => {
   // missed. It is here because a row that closes while the census grows is
   // the failure this whole subject has already produced twice.
   //
-  // A compiled regex is IMMUTABLE and has no lastIndex: /g and /y lower
-  // only where the iteration is internal, `.exec()` on one is a loud
-  // RUNTIME refusal, and READING `.lastIndex` is a compile refusal. So
-  // lastIndex is permanently 0 in every program this compiler runs to
-  // completion, writing 0 is exact, and writing anything else refuses.
+  // lastIndex is real state on the regex object now (scr_regex_run): the
+  // reset is a store, and any other value is stored and read back too.
   test(
     "a lastIndex reset behaves exactly as Node's does, on both lanes",
     async () => {
@@ -315,23 +312,39 @@ describe("the SECOND statement the blocked declaration was hiding", () => {
   );
 
   test(
-    "writing a NON-zero lastIndex refuses — the state does not exist",
+    "writing a NON-zero lastIndex and reading it behave exactly as Node's do, on both lanes",
     async () => {
-      const codes = await refusalCodes(
-        "lastindex-nonzero",
-        "const r = /a(\\d)/\nr.lastIndex = 5\nconsole.log('x')\n",
-      );
-      expect(codes.length, "a non-zero lastIndex write must refuse").toBeGreaterThan(0);
-      expect(codes).toContain("SC1120");
-      // And READING it still refuses, which is what makes the zero-write a
-      // no-op rather than a dropped store: close that channel and the
-      // value can never be observed.
-      const read = await refusalCodes(
-        "lastindex-read",
-        "const r = /a(\\d)/\nconsole.log(r.lastIndex)\n",
-      );
-      expect(read.length, "reading lastIndex must still refuse").toBeGreaterThan(0);
-      expect(read).toContain("SC2020");
+      const src = [
+        "function f(): string {",
+        "  const r = /a(\\d)/g",
+        "  r.lastIndex = 5",
+        "  const a = String(r.lastIndex)",
+        "  const m = r.exec('a1 a2 a3')",
+        "  const b = m === null ? 'null' : m[0]",
+        "  r.lastIndex = 3",
+        "  const c = r.exec('a1 a2 a3')",
+        "  return a + '|' + b + '|' + (c === null ? 'null' : c[0] + '@' + c.index + '/' + r.lastIndex)",
+        "}",
+        "console.log(f())",
+        "",
+      ].join("\n");
+      for (const backend of ["c", "llvm"] as const) {
+        const dir = stage(`lastindex-nonzero-${backend}`, src);
+        const built = await compile(join(dir, "main.ts"), {
+          outPath: join(dir, exeName("program")),
+          outDir: dir,
+          backend,
+        });
+        expect(
+          built.ok,
+          `${backend}: the lastIndex write must compile:\n` +
+            (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+        ).toBe(true);
+        const mine = await run(built.binaryPath!, [], dir);
+        const node = await run(process.execPath, [join(dir, "main.ts")], dir);
+        expect(node.stdout.trim()).toBe("5|a3|a2@3/5");
+        expect(mine.stdout, `${backend}: differs from Node`).toBe(node.stdout);
+      }
     },
     900_000,
   );

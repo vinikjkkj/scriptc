@@ -8,9 +8,10 @@
  * without /g, split with capture groups), the CESU-8 pattern re-encoding
  * for non-/u astral patterns, and the UTF-16 buffer round-trip.
  *
- * Special mode: --crash-global-test calls test() on a /g regex and must
- * abort() after printing the statefulness fence message (checked by
- * regex.test.ts, like test_string.c's --crash-repeat).
+ * Special mode: --global-test-stateful runs test() four times over "aaa" on a
+ * /g regex and prints "<result> <lastIndex>" per call: lastIndex is real
+ * state, exactly as RegExpBuiltinExec (checked by regex.test.ts against the
+ * same sequence run under Node).
  */
 #include "../src/scr_runtime.h"
 
@@ -279,10 +280,14 @@ static void test_split(void) {
 }
 
 int main(int argc, char **argv) {
-  if (argc > 1 && strcmp(argv[1], "--crash-global-test") == 0) {
+  if (argc > 1 && strcmp(argv[1], "--global-test-stateful") == 0) {
     ScrStr *s = S("aaa");
-    scr_regex_test(&re_a_g, s); /* must abort with the fence message */
-    fprintf(stderr, "UNREACHABLE: g-flagged test returned\n");
+    scr_regex_set_last_index(&re_a_g, 0);
+    for (int i = 0; i < 4; i++) {
+      bool r = scr_regex_test(&re_a_g, s);
+      printf("%s %g\n", r ? "true" : "false", scr_regex_get_last_index(&re_a_g));
+    }
+    scr_str_release(s);
     return 0;
   }
 

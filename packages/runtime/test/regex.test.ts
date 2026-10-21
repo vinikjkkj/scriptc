@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, expectAbort, expectCasesPassed, exeSuffix } from "./cc.js";
+import { ccCompile, expectCasesPassed, exeSuffix } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -53,15 +53,12 @@ test("regex runtime: matching, substitutions, split, throws, RC accounting", asy
   expectCasesPassed(stderr);
 });
 
-test("test() on a g-flagged regex aborts with the statefulness fence", async () => {
-  const err = await execFileAsync(bin, ["--crash-global-test"]).then(
-    () => {
-      throw new Error("expected scr_regex_test to abort");
-    },
-    (e: Error & { signal?: string; stderr?: string }) => e,
-  );
-  expectAbort(err);
-  expect(err.stderr).toContain(
-    "scriptc: test() on a regex with the 'g' or 'y' flag is not supported",
-  );
+test("test() on a g-flagged regex is stateful through lastIndex, like Node", async () => {
+  const { stdout } = await execFileAsync(bin, ["--global-test-stateful"]);
+  const node = await execFileAsync(process.execPath, [
+    "-e",
+    'const r=/a/g;for(let i=0;i<4;i++){const t=r.test("aaa");console.log(t+" "+r.lastIndex)}',
+  ]);
+  expect(stdout).toBe(node.stdout);
+  expect(stdout).toBe("true 1\ntrue 2\ntrue 3\nfalse 0\n");
 });
