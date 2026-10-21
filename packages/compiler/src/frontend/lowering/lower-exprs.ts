@@ -21259,13 +21259,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (!(t.flags & (ts.TypeFlags.UniqueESSymbol | ts.TypeFlags.ESSymbol))) return null;
     const sym = L.resolveValueSymbol(key);
     const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
-    if (!sym || !decl || !ts.isVariableDeclaration(decl)) return null;
-    if (!(ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const)) return null;
-    // Module level only: a unique-symbol const inside a FUNCTION is a
-    // fresh runtime identity per call — one static slot would conflate
-    // what JS keeps distinct.
-    if (!ts.isVariableStatement(decl.parent.parent) || !ts.isSourceFile(decl.parent.parent.parent)) return null;
-    const init = decl.initializer;
+    if (!sym || !decl) return null;
+    // A symbol exported through a CommonJS table (`module.exports = {
+    // kWebSocket: Symbol('websocket') }`, which importers bind by name or
+    // destructure): the property's initializer IS the module-level
+    // `Symbol(...)` call, evaluated once when the exporter's body runs, and
+    // every importer's alias resolves to this one property symbol.
+    const tableProp =
+      ts.isPropertyAssignment(decl) && ts.isObjectLiteralExpression(decl.parent) && isCjsExportTableLiteral(decl.parent);
+    if (!tableProp) {
+      if (!ts.isVariableDeclaration(decl)) return null;
+      if (!(ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const)) return null;
+      // Module level only: a unique-symbol const inside a FUNCTION is a
+      // fresh runtime identity per call — one static slot would conflate
+      // what JS keeps distinct.
+      if (!ts.isVariableStatement(decl.parent.parent) || !ts.isSourceFile(decl.parent.parent.parent)) return null;
+    }
+    const init = tableProp ? (decl as ts.PropertyAssignment).initializer : (decl as ts.VariableDeclaration).initializer;
     if (!init || !ts.isCallExpression(init) || init.questionDotToken) return null;
     if (!ts.isIdentifier(init.expression) || init.expression.text !== "Symbol") return null;
     if (!L.isStdlibSymbol(L.checker.getSymbolAtLocation(init.expression))) return null;
