@@ -2892,6 +2892,15 @@ bool scr_dyn_is_map(const ScrDyn *d) {
 bool scr_dyn_is_set(const ScrDyn *d) {
   return d != NULL && d->kind == SCR_DYN_MAP && d->v.map.tkey[0] == 's';
 }
+/* Is this dyn the handle box of `tag`? (dynMatch / dynArm for a Date leaf.)
+ * Borrowed; never throws. */
+bool scr_dyn_handle_is(const ScrDyn *d, ScrDynHandleTag tag) {
+  return d != NULL && d->kind == SCR_DYN_HANDLE && d->v.handle.tag == tag;
+}
+/* `u instanceof Date` on an unknown value: the Date handle tag. */
+bool scr_dyn_is_date(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_HANDLE && d->v.handle.tag == SCR_DYNH_DATE;
+}
 
 bool scr_dyn_map_fence(const ScrDyn *d, const char *what) {
   ScrJsonBuf b;
@@ -3682,6 +3691,13 @@ static ScrDyn *scr_dyn_json_tojson(const ScrDyn *d, const char *key, size_t key_
     ScrDyn *ir = cm->call(d->v.inst.o, &ikarg, 1, "toJSON");
     scr_dyn_release(ikarg);
     return ir;
+  }
+  if (d->kind == SCR_DYN_HANDLE && d->v.handle.tag == SCR_DYNH_DATE) {
+    /* Date.prototype.toJSON: the ISO string, or null for an invalid Date.
+     * The one handle with a hook; asked through its ops like regex's
+     * toString, so this always-linked unit names no Date entry point. */
+    const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
+    return ops->invoke(d->v.handle.ptr, (ScrDyn *)d, "toJSON", NULL, 0, "toJSON");
   }
   if (d->kind != SCR_DYN_OBJ) return NULL;
   /* BORROWED both — own member first, then the prototype chain: JS's
@@ -4590,7 +4606,7 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
      * differs asks its ops: routing the whole set through invoke would
      * change the I/O tags, whose invoke has no toString arm to answer
      * with, into a "not a function" throw. */
-    if (d->v.handle.tag == SCR_DYNH_REGEX) {
+    if (d->v.handle.tag == SCR_DYNH_REGEX || d->v.handle.tag == SCR_DYNH_DATE) {
       const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
       ScrDyn *r = ops->invoke(d->v.handle.ptr, (ScrDyn *)d, "toString", NULL, 0, "toString");
       if (r == NULL) return scr_str_new("", 0); /* threw — pending */

@@ -557,6 +557,14 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
           d.push(`  case ${i}: return scr_str_retain((ScrStr *)&${sym});`);
           break;
         }
+        case "map":
+        case "set": {
+          // Object.prototype.toString's constant, exactly Node's
+          // String(new Map()) / String(new Set()).
+          const sym = E.internLiteral(arm.kind === "map" ? "[object Map]" : "[object Set]");
+          d.push(`  case ${i}: return scr_str_retain((ScrStr *)&${sym});`);
+          break;
+        }
         default:
           throw new Error(`emitter bug: ToString of union with a ${arm.kind} arm (frontend fences these)`);
       }
@@ -1393,8 +1401,16 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return scr_dyn_objinst_is(d, ${meta.pre}, ${meta.post});`);
         break;
       }
-      default:
+      default: {
+        // A Date leaf: the handle kind and tag, nothing more (the box holds
+        // the retained ScrDate by reference).
+        const h = DYN_HANDLE_KINDS.get(t.kind);
+        if (h && t.kind === "date") {
+          d.push(`  return scr_dyn_handle_is(d, ${h.tag});`);
+          break;
+        }
         throw new Error(`emitter bug: dynMatch of non-JSON type ${t.kind}`);
+      }
     }
     d.push(`}`, ``);
     // SCRIPTC_KINDGATE_MATCH does NOT live here any more, and where it went
@@ -2956,7 +2972,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // form refuses them in exactly the same place and with the same
         // shape of message.
         const h = DYN_HANDLE_KINDS.get(t.kind);
-        if (h && !soft) {
+        if (h && (!soft || t.kind === "date")) {
+          // A DATE arm (the one handle admitted as a union arm): the arm form
+          // pre-tests the match predicate verbatim, so the unbox cannot fail.
+          if (soft) d.push(`  if (!scr_dyn_handle_is(d, ${h.tag})) { *ok = false; return NULL; }`);
           d.push(`  return (${cType(t).trim()})scr_dyn_handle_unbox(d, ${h.tag}, path, ${want});`);
           break;
         }

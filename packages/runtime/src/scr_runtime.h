@@ -1826,6 +1826,16 @@ typedef struct ScrRegex {
   ScrStr *source; /* pattern text between the slashes */
   ScrStr *flags;  /* flags text, source order (alphabet fenced to gimsuy) */
   uint8_t *bc;    /* lazily compiled libregexp bytecode; NULL until first use */
+  /* RegExp.prototype.lastIndex, the one piece of mutable state. Only a /g or
+   * /y regex consults it (exec/test); a regex literal with either flag is
+   * CLONED per evaluation (scr_regex_clone), so two evaluations never share
+   * it, and an unflagged literal stays one immortal immutable static. Stored
+   * as the raw JS number (a write of 1.5 reads back 1.5); ToLength runs when
+   * exec reads it. */
+  double last_index;
+  /* Non-NULL for a clone: the immortal static whose compiled bytecode it
+   * borrows (retained for the clone's life). */
+  struct ScrRegex *proto;
 } ScrRegex;
 
 static inline ScrRegex *scr_regex_retain(ScrRegex *re) {
@@ -1844,7 +1854,21 @@ void scr_regex_release_v(void *re);
  * spec's "(?:)" source. Borrows both; +1, NULL after a throw. */
 ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags);
 
-bool scr_regex_test(ScrRegex *re, ScrStr *s); /* aborts on /g or /y */
+/* A fresh +1 heap regex over the immortal literal `proto`: same source, flags
+ * and compiled bytecode, its own lastIndex (0). Emitted for every evaluation
+ * of a /g or /y regex literal, as JS builds a new RegExp object each time. */
+ScrRegex *scr_regex_clone(ScrRegex *proto);
+/* re.exec(s): the honest string[] of [whole, ...captures] or NULL. A /g or /y
+ * regex starts at lastIndex (ToLength) and updates it (end of match, or 0 on
+ * failure or when lastIndex > length); an unflagged regex starts at 0 and
+ * never touches it. Records the match's UTF-16 start in
+ * scr_regex_last_exec_index (-1 on no match), read immediately after the
+ * call by the .index binding. Never throws. */
+ScrArr *scr_regex_exec(ScrStr *s, ScrRegex *re);
+double scr_regex_last_exec_index(void);
+double scr_regex_get_last_index(ScrRegex *re);
+void scr_regex_set_last_index(ScrRegex *re, double v);
+bool scr_regex_test(ScrRegex *re, ScrStr *s); /* /g or /y: stateful through lastIndex like exec */
 /* s.match(re): +1 string[] of [whole, ...captures] (nonparticipating
  * captures hold "" — SEMANTICS.md), or NULL for no match. Aborts on /g
  * or /y like test(). Borrows both. */
@@ -1919,7 +1943,10 @@ void scr_regex_dyn_install(void);
  * server registry) is honest hashed storage. REF keys carry their own
  * retain/release adapters (scr_set_new_ref); only SETS use the kind so
  * far — the Map-key surface stays f64/string. */
-typedef enum { SCR_MAP_KEY_F64, SCR_MAP_KEY_STR, SCR_MAP_KEY_REF } ScrMapKeyKind;
+/* SCR_MAP_KEY_UNION: a Set whose element is a union. Keys are ScrUnion
+ * boxes under the REF key API (retain/release adapters, borrowed probes),
+ * but hashed and compared by the VALUE the box carries (scr_set_new_union). */
+typedef enum { SCR_MAP_KEY_F64, SCR_MAP_KEY_STR, SCR_MAP_KEY_REF, SCR_MAP_KEY_UNION } ScrMapKeyKind;
 typedef enum { SCR_MAP_VAL_F64, SCR_MAP_VAL_BOOL, SCR_MAP_VAL_REF } ScrMapValKind;
 
 /* Exactly two 8-byte slots and NO padding. The liveness bit used to sit
@@ -1951,6 +1978,8 @@ typedef struct ScrMap {
    * val_trace does) and moves its keys from the teardown's release list
    * into the trace -- the two must agree or the keys are freed twice. */
   ScrTraceFn key_trace;
+  /* SCR_MAP_KEY_UNION only: one class byte per union arm (see scr_map.c). */
+  const ScrStr *key_classes;
   size_t nentries; /* dense entries used, tombstones included */
   size_t nlive;    /* live entries (Map.size) */
   size_t ecap;     /* entries capacity */
@@ -2087,6 +2116,12 @@ ScrMap *scr_set_new_ref(void *(*elem_retain)(void *), void (*elem_release)(void 
  * has to be headered too and its trace has to visit the elements. */
 ScrMap *scr_set_new_ref_traced(void *(*elem_retain)(void *), void (*elem_release)(void *),
                                ScrTraceFn elem_trace);
+/* A Set whose element is a UNION (SCR_MAP_KEY_UNION): the boxes are
+ * compared by the value they carry. `classes` is the per-arm class string
+ * the compiler interns (see scr_map.c); elem_trace is NULL unless an
+ * element can point back at the set. */
+ScrMap *scr_set_new_union(void *(*elem_retain)(void *), void (*elem_release)(void *),
+                          ScrTraceFn elem_trace, const ScrStr *classes);
 
 /* The live STRING keys of a map in JS OWN-KEY ORDER (Object.keys/values/
  * entries over an index-signature record's overflow): canonical array
@@ -4366,6 +4401,7 @@ typedef enum {
   SCR_DYNH_HTTP_AGENT,  /* ScrHttpAgent — http.Agent / https.Agent */
   SCR_DYNH_REGEX,       /* ScrRegex — RegExp (immutable pattern+flags, by reference) */
   SCR_DYNH_CHILD_STREAM, /* ScrChildStream — child stdio (Readable), on/once("data"|"end") */
+  SCR_DYNH_DATE,        /* ScrDate — Date (immutable time value, by reference) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
@@ -6247,6 +6283,9 @@ const char *scr_dyn_map_cls(const ScrDyn *d);
  * one kind over. Borrowed; never throws. */
 bool scr_dyn_is_map(const ScrDyn *d);
 bool scr_dyn_is_set(const ScrDyn *d);
+ScrStr *scr_dyn_object_to_string(const ScrDyn *d); /* Object.prototype.toString.call over a dyn; +1, never throws */
+bool scr_dyn_handle_is(const ScrDyn *d, ScrDynHandleTag tag);
+bool scr_dyn_is_date(const ScrDyn *d); /* the Date handle tag; borrowed, never throws */
 /* The loud ladder for every operation the box has no layout to answer
  * (keyed access and indexing, `size`, `get`/`has`/`add`, iteration,
  * structuredClone): "<what> on a dynamic Map is not supported yet".
@@ -7762,6 +7801,11 @@ ScrStr *scr_str_from_char_code_bytes(ScrBytes *codes);
  * member exists to avoid. The compare never short-circuits. */
 bool scr_crypto_timing_safe_equal(const ScrBytes *a, const ScrBytes *b);
 double scr_str_last_index_of(ScrStr *s, ScrStr *needle);
+/* s.replace(pat, rep) / s.replaceAll(pat, rep) over a STRING pattern and a
+ * STRING replacement (scr_lib.c): GetSubstitution without captures ($$, $&,
+ * $`, $'), the empty pattern matching at every code point boundary for
+ * replaceAll. Borrows; +1; never throws. */
+ScrStr *scr_str_replace_str(ScrStr *s, ScrStr *pat, ScrStr *rep, bool all);
 
 /* ── Number statics (scr_lib.c) ───────────────────────────────────────
  * JS-exact by construction: Number.isFinite/isNaN/isInteger/isSafeInteger
@@ -8566,6 +8610,11 @@ void scr_bytes_set_from(ScrBytes *dst, const ScrBytes *src, double offset);
  * "ucs2", "utf-8", ...). Borrows both; +1 result. Never throws (the
  * compiler fences other encodings). */
 ScrStr *scr_bytes_to_str(const ScrBytes *b, const ScrStr *enc);
+/* String(bytes): by stamped flavor -- Buffer decodes utf8, a plain Uint8Array
+ * joins its elements with ",", a DataView is "[object DataView]". An
+ * UNSTAMPED value throws a catchable Error and answers NULL (no producer said
+ * which, so there is no honest answer). Borrows; +1. */
+ScrStr *scr_bytes_js_string(const ScrBytes *b);
 ScrStr *scr_bytes_to_str_range(const ScrBytes *b, const ScrStr *enc, double start, double end);
 
 /* WHATWG TextDecoder.decode over u8 bytes (utf-8, default options): the
@@ -10155,6 +10204,19 @@ double scr_date_utc_hours(double ms);
 double scr_date_utc_minutes(double ms);
 double scr_date_utc_seconds(double ms);
 double scr_date_utc_ms(double ms);
+double scr_date_utc_day(double ms);
+/* LOCAL time (scr_date.c): LocalTime(t) as a time value -- the local
+ * field getters are the UTC getters over it -- and getTimezoneOffset.
+ * NaN for an invalid Date. Host zone database: POSIX localtime/gmtime,
+ * Windows SystemTimeToTzSpecificLocalTimeEx. Never throw. */
+double scr_date_local_time(double ms);
+double scr_date_tz_offset(double ms);
+/* Date.prototype.toString (+1; NULL with a catchable Error when the zone's
+ * long name is not one this runtime can state -- see scr_date.c). */
+ScrStr *scr_date_to_string(double ms);
+/* Registers the Date handle ops (SCR_DYNH_DATE); emitted into main() under
+ * the same moduleUsesDate gate that links scr_date.c. */
+void scr_date_dyn_install(void);
 
 /* The WebRTC ownership pairs. Dead code in every program: nothing
  * constructs either handle yet. */

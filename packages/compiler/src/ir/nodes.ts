@@ -912,6 +912,13 @@ export function isSupportedSetElem(t: IrType): boolean {
     isSupportedMapKey(t) ||
     t.kind === "netServer" ||
     t.kind === "symbol" ||
+    // A UNION element (`Set<string | number | Foo[]>`, mysql2's SqlValue):
+    // the boxed value is hashed and compared by the VALUE it carries --
+    // strings by content, numbers by SameValueZero, bigints by value, every
+    // object arm by identity (SCR_MAP_KEY_UNION). Not a new idea of
+    // equality: it is `===` over the union's arms plus the -0/NaN rule Set
+    // adds, and the arm decides which.
+    t.kind === "union" ||
     // Promises key by reference identity like every other heap value, and
     // the pending-task idiom (`set.add(p); p.finally(() => set.delete(p))`)
     // is what asks for it. That closure captures BOTH, so the pair is a
@@ -1050,47 +1057,11 @@ export function funcOf(params: IrType[], ret: IrType): IrType {
   return { kind: "func", params, ret };
 }
 
-/** The union FUNC/SET/MAP-arm sibling rule, shared by the frontend's union
- * builders and the validator: FUNC arms are valid beside ANY sibling —
- * `typeof x === "function"` narrows against data arms, unit tag tests
- * cover the nullable-callback shape, and between func arms closures
- * compare by pointer identity per tag (unionEq), so `x === String` is the
- * narrowing (the primitive-constructor tables' `StringConstructor |
- * NumberConstructor` field, and LinkOptions' `false | ((s: string) =>
- * string)`).
- *
- * A SET arm follows the func rule for the same reason, one constructor
- * over: `x instanceof Set` IS its narrowing test, and over a union that
- * test is the runtime TAG compare (lowerInstanceOf's Set arm) — exact
- * against every sibling kind, where `typeof` answers "object" for the
- * whole object-flavored family and splits nothing. Reads inside the
- * branch bridge through maybeNarrow's tag-CHECKED %union.narrow, so a
- * narrowing the runtime cannot confirm throws the catchable TypeError
- * rather than reading one arm's payload through another's slot.
- *
- * The one shape with no test is a SECOND set arm: `instanceof Set`
- * answers true for both `Set<string>` and `Set<number>`, and nothing
- * else separates them — the promise rule's "a second promise arm stays
- * refused", exactly.
- *
- * A MAP arm now follows the SET rule exactly, one constructor further:
- * `instanceof Map` lowers to the same runtime TAG compare
- * (lowerInstanceOf's Map arm, mirroring its Set arm), so it needs no more
- * than a SET arm does. The unit-only carve-out predates that lowering —
- * admitting the arm beside data siblings ahead of it would have admitted a
- * union no program could narrow, which is why it stayed unit-only until
- * the lowering existed. The one shape with no test is a SECOND map arm,
- * for the identical reason a second Set arm has none: `instanceof Map`
- * answers true for both `Map<string, A>` and `Map<string, B>`, and
- * nothing else separates them. */
-export function unionFuncSetArmsOk(arms: IrType[]): boolean {
-  return arms.every((a, i) => {
-    if (a.kind === "map") return !arms.some((b, j) => j !== i && b.kind === "map");
-    if (a.kind === "set") return !arms.some((b, j) => j !== i && b.kind === "set");
-    return true;
-  });
-}
-
+/* The union func/set/map-arm sibling rule is gone: every one of these arms has a
+ * narrowing test (typeof "function", instanceof Set, instanceof Map -- the tag
+ * compare, exact against every sibling), and SEVERAL arms of one constructor
+ * are told apart by member dispatch on the tag (lowerUnionContainerDispatch),
+ * so no arm combination is refused here. */
 /** Canonical, injective text form of an IrType — the building block of
  * shape/union identity keys, generic-function instantiation keys, and the
  * backend's per-type helper interning (jsonStringify/dynCheck walkers).
@@ -2998,6 +2969,20 @@ export const MAY_THROW_BYTES_METHODS: ReadonlySet<IrBytesIntrinsicMethod> = new 
 export type IrRegexIntrinsicMethod =
   | "test"
   | "match"
+  /** `re.exec(s)` — match's result shape (the honest `string[] | null`
+   * slice), but STATEFUL on a /g or /y regex: it starts at lastIndex and
+   * updates it. Also records the match's start for the `.index` binding
+   * (regex.lastExecIndex). Never throws. */
+  | "exec"
+  /** `re.lastIndex` read: the raw JS number last stored (0 initially). */
+  | "lastIndex"
+  /** `re.lastIndex = v` (args[0], a number); the call is a statement and
+   * its result is void. */
+  | "setLastIndex"
+  /** The UTF-16 start index of the match the IMMEDIATELY preceding exec
+   * produced (-1 for none): the `.index` of a const-stored exec result.
+   * The receiver is an empty string (unused). */
+  | "lastExecIndex"
   /** `s.matchAll(re)` — every match as its honest string[] slice (match's
    * rule), drained EAGERLY into a fresh string[][]: the lazy iterator is
    * unobservable across the lowered surface (strings are immutable; the
@@ -5209,6 +5194,8 @@ export type IrLibFn =
    * ("Cannot convert undefined or null to object"). */
   | "dyn.objKeys"
   | "dyn.hasOwn"
+  /** Object.prototype.toString.call(v) over a dyn operand: "[object Tag]". */
+  | "dyn.objectToString"
   | "dyn.assign"
   /** Variadic Object.assign over CHECKED-DYNAMIC targets (`Object.assign(
    * {}, ...arr.map(f), tail)` — the option-table merge): the lowering
@@ -6047,6 +6034,21 @@ export type IrLibFn =
   | "date.getUTCMinutes"
   | "date.getUTCSeconds"
   | "date.getUTCMilliseconds"
+  /** getUTCDay/getDay's weekday over a time value, pure arithmetic. */
+  | "date.getUTCDay"
+  /** LocalTime(t) as a time value, and getTimezoneOffset: both read the
+   * HOST's zone database (scr_date.c), so unlike the UTC reads above they
+   * are machine state. The local field getters lower as the UTC getters
+   * applied to date.localTime. */
+  | "date.localTime"
+  | "date.tzOffset"
+  /** String(date): Date.prototype.toString over a time value. Throws a
+   * catchable Error for a zone whose long display name needs ICU data. */
+  | "date.toString"
+  /** String(bytes): Buffer decodes utf8, a plain Uint8Array joins its
+   * elements with commas, a DataView is "[object DataView]"; an unstamped
+   * value throws a catchable Error (the Buffer-ness is unknown). */
+  | "bytes.jsString"
   /** The fs option forms and friends (scr_lib.c), all throwing catchably
    * like the rest of sync fs. mkdirRecursiveSync is Node's recursive
    * algorithm (try mkdir, EEXIST-dir is fine, ENOENT creates the parent
@@ -6106,6 +6108,8 @@ export type IrLibFn =
    * per spec). Borrowed args; +1 string / plain f64; neither throws. */
   | "string.fromCharCode"
   | "string.lastIndexOf"
+  /** s.replace(str, str) / s.replaceAll(str, str); args [s, pat, rep, all]. */
+  | "string.replaceStr"
   /** String.raw(template, ...subs): the raw literals array (a string[]
    * read off the template record) interleaved with the PRE-STRINGIFIED
    * substitutions (the frontend applies the static ToString and packs
@@ -7252,7 +7256,7 @@ export type IrExpr =
    * false. `bytes` keeps its meaning -- "this dyn holds u8 bytes", which
    * is what every narrowing extraction wants -- and the instanceof site
    * uses the flavor-aware one. */
-  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set" | "date"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An
@@ -7328,6 +7332,12 @@ export type IrExpr =
    * listed (they never live in the overflow map — the lowering prepends
    * them from the shape). Never throws. */
   | { kind: "recordOvfKeys"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
+  /** Is `key` a LIVE entry of the overflow map of an index-signature record
+   * (scr_map_has_str)? The exact own-key membership of a PURE index shape,
+   * whatever its value type: unlike a widened keyed read it cannot confuse a
+   * missing key with a stored undefined, and it needs no undefined arm on
+   * the value type. `obj` and `key` are borrowed; bool; never throws. */
+  | { kind: "recordOvfHas"; obj: IrExpr; shapeId: string; key: IrExpr; type: IrType; loc: SrcLoc }
   /** The same enumeration as SLOT INDICES: a fresh f64[] of the overflow
    * map's LIVE entry slots, in exactly the JS own-key order recordOvfKeys
    * lists (the runtime's scr_map_slots_js_order). It exists so a generated
@@ -8166,6 +8176,7 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   ["http2Stream", { tag: "SCR_DYNH_H2_STREAM", cls: "Http2Stream" }],
   ["httpClientReq", { tag: "SCR_DYNH_HTTP_CLIENT", cls: "ClientRequest" }],
   ["regex", { tag: "SCR_DYNH_REGEX", cls: "RegExp" }],
+  ["date", { tag: "SCR_DYNH_DATE", cls: "Date" }],
   // child stdio (`child.stdout` / `child.stderr`, and NodeJS.ReadableStream
   // under @types/node — types.ts maps the SPELLING `Readable` here, while
   // the shipped fallback declarations map the same name to the runtime
@@ -8333,6 +8344,15 @@ export function canConvertToDyn(
   }
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
+    // The recursive knot, union-flavored: a union whose arms reach the same
+    // union again (`type V = string | V[] | Map<string, V>`) is being
+    // decided already further up the walk. Answer true HERE and let the
+    // rest of the arms decide -- any arm that cannot convert still makes
+    // the outermost `every` false. Without the guard the walk never
+    // terminated: a Maximum-call-stack crash of the compiler itself.
+    const knot = `union:${t.unionId}`;
+    if (visiting.has(knot)) return true;
+    visiting.add(knot);
     // JSON-safe arms box as before; BOXABLE FUNCTION arms join them (the
     // invalid-input probes iterate `[1, null, () => {}, true]` — the
     // union's func arm crosses through the checked-dynamic function
@@ -8890,6 +8910,14 @@ export function canDynCheckTo(
       nestedMemo.set(x, true);
       return true;
     }
+    // A DATE leaf (a union arm or record field of Date type: sql-escaper's
+    // SqlValue): the walkers test the handle tag (scr_dyn_handle_is) and
+    // unbox it by reference. Only Date is admitted nested -- the other
+    // runtime handles keep the standing-alone-only rule.
+    if (x.kind === "date") {
+      nestedMemo.set(x, true);
+      return true;
+    }
     /* The coinductive hit. It is the ONE answer that is not a property of
      * the type alone, so it is never memoised, and it publishes how far up
      * it reached so no ancestor between here and there is memoised either. */
@@ -9388,7 +9416,14 @@ export function moduleUsesCopying(mod: IrModule): boolean {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown; method?: unknown };
+    const node = v as { kind?: unknown; method?: unknown; fn?: unknown };
+    if (
+      node.kind === "libCall" &&
+      (node.fn === "bytes.jsString" || node.fn === "string.replaceStr" || node.fn === "dyn.objectToString")
+    ) {
+      found = true;
+      return;
+    }
     if (
       node.kind === "arrIntrinsic" &&
       (node.method === "toReversed" ||
@@ -10368,7 +10403,10 @@ export function moduleUsesDate(mod: IrModule): boolean {
       found = true;
       return;
     }
-    if (node.kind === "libCall" && node.fn === "date.getHours") {
+    if (
+      node.kind === "libCall" &&
+      (node.fn === "date.getHours" || node.fn === "date.localTime" || node.fn === "date.tzOffset")
+    ) {
       found = true;
       return;
     }
@@ -12222,6 +12260,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "zlib.unzipSync",
   "zlib.inflateRawSync",
   "date.toISOString",
+  "date.toString",
+  "bytes.jsString",
   // The length-mismatch RangeError, which is a contract of the call.
   "crypto.timingSafeEqual",
   "fs.mkdirRecursiveSync",

@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs";
 import * as ts from "./ts7/adapter.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isUnitType, JSVAL, mapOf, weakMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, unionFuncSetArmsOk, VOID } from "../ir/nodes.js";
+import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isUnitType, JSVAL, mapOf, weakMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
 import { isSqliteTypesPath } from "./shared.js";
@@ -6899,9 +6899,6 @@ export function erasedUnionOfArms(arms: readonly ts.Type[], ctx: TypeMapperCtx):
         arm.kind === "generator" || arm.kind === "asyncGenerator") {
       return null;
     }
-    if ((arm.kind === "func" || arm.kind === "set" || arm.kind === "map") && !unionFuncSetArmsOk(distinct)) {
-      return null;
-    }
   }
   return { kind: "union", unionId: ctx.unions.intern(distinct) };
 }
@@ -8648,25 +8645,15 @@ function typeofSplitsFromObject(arm: IrType): boolean {
  * on its own must not acquire one by arriving inside a promise. */
 function unionArmsHaveHomes(arms: IrType[], unions: UnionRegistry): boolean {
   return !arms.some(
-    (a, i) =>
+    (a) =>
       a.kind === "void" || a.kind === "union" ||
-      // MAP arms now follow the SET rule: `instanceof Map` lowers to the
-      // runtime TAG compare (lowerInstanceOf's Map arm, mirroring its Set
-      // arm) one constructor further than REGEX below, so a map arm maps
-      // beside any sibling except a SECOND map arm, which that test
-      // answers true for as well and nothing else separates (same reason
-      // a second Set arm stays out). REGEX arms map anywhere: `x
-      // instanceof RegExp` is their narrowing test (the skip-utility
-      // `string | RegExp` shape), and the arm rides the ref machinery
-      // like array regex elements. SET arms map anywhere too — `x
-      // instanceof Set` is the same test one constructor over, and over
-      // a union it lowers to the runtime TAG compare (lowerInstanceOf's
-      // Set arm) — except beside a SECOND set arm, which that test
-      // answers true for as well and nothing else separates.
-      // unionFuncSetArmsOk is this rule under its own name (the
-      // validator's copy) and MUST move in lockstep with this one.
-      (a.kind === "map" && arms.some((c, j) => j !== i && c.kind === "map")) ||
-      (a.kind === "set" && arms.some((c, j) => j !== i && c.kind === "set")) ||
+      // MAP and SET arms map anywhere, in any number: `instanceof Map` /
+      // `instanceof Set` lower to the runtime TAG compare (an OR over the
+      // arms when several share the constructor), and members dispatch on
+      // the tag (lowerUnionContainerDispatch). REGEX arms map anywhere
+      // too: `x instanceof RegExp` is their narrowing test (the
+      // skip-utility `string | RegExp` shape), and the arm rides the ref
+      // machinery like array regex elements.
       a.kind === "dyn" ||
       // Generator arms follow the map/set rule: no narrowing test.
       a.kind === "generator" ||
@@ -8702,7 +8689,7 @@ function unionArmsHaveHomes(arms: IrType[], unions: UnionRegistry): boolean {
 
 /** Arm kinds with no home in a compiled union (mapTypeInner's union rule):
  * no runtime narrowing test exists against sibling data arms. */
-function armHasUnionHome(arm: IrType, siblingCount: number, siblings: IrType[]): boolean {
+function armHasUnionHome(arm: IrType): boolean {
   switch (arm.kind) {
     case "void":
     case "union":
@@ -8710,17 +8697,10 @@ function armHasUnionHome(arm: IrType, siblingCount: number, siblings: IrType[]):
     case "generator":
     case "dyn":
       return false;
-    // Map arms: anywhere except beside a SECOND map arm — same rule as
-    // Set, one constructor over: `instanceof Map` is the tag test, and it
-    // answers true for both of those. MUST stay in lockstep with Set's
-    // case immediately below and with unionArmsHaveHomes/
-    // unionFuncSetArmsOk's copies of this same rule.
-    case "map":
-      return !siblings.some((s) => s.kind === "map");
-    // Set arms: anywhere except beside a SECOND set arm — `instanceof Set`
-    // is the tag test, and it answers true for both of those.
-    case "set":
-      return !siblings.some((s) => s.kind === "set");
+    // Map and Set arms: anywhere, in any number (`instanceof Map` / `Set` is
+    // the tag test, an OR over the arms; members dispatch on the tag).
+    // Falls to the default with every other kind that has a home. MUST stay
+    // in lockstep with unionArmsHaveHomes.
     // Promise arms map beside unit siblings (the promise-or-absent shape)
     // and beside exactly ONE data sibling that IS their payload (the
     // settle-or-value contract `T | Promise<T>`, whose only consumer is
@@ -8850,14 +8830,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
           continue;
         }
       }
-      const siblings = mappedArms.flatMap(({ p, mapped: m }) => (p === part || m === null ? [] : [m]));
-      if (mapped.kind === "set" && siblings.some((s) => s.kind === "set")) {
-        return `the union shape is supported, but a union carrying two Set arms has no runtime test to tell '${text(part)}' from the other one ('instanceof Set' answers true for both, and 'typeof' answers "object" for every arm here)`;
-      }
-      if (mapped.kind === "map" && siblings.some((s) => s.kind === "map")) {
-        return `the union shape is supported, but a union carrying two Map arms has no runtime test to tell '${text(part)}' from the other one ('instanceof Map' answers true for both, and 'typeof' answers "object" for every arm here)`;
-      }
-      if (!armHasUnionHome(mapped, dataArms.length - 1, siblings)) {
+      if (!armHasUnionHome(mapped)) {
         return `the union shape is supported, but '${text(part)}' arms have no home in a compiled union yet (no runtime narrowing test exists against sibling arms)`;
       }
     }

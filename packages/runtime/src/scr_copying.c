@@ -3,6 +3,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* ES2023 Array/TypedArray copying methods and the typed-array-to-number[]
  * bridge live in their own archive member. Programs that do not use this
@@ -162,4 +164,163 @@ ScrStr *scr_bytes_join(const ScrBytes *b, const ScrStr *separator) {
   ScrStr *out = scr_arr_join(values, (ScrStr *)separator);
   scr_arr_release(values);
   return out;
+}
+
+/* String(bytes) by flavor -- lives beside scr_bytes_join, which it calls, and
+ * links on the same moduleUsesCopying gate (the bytes.jsString libCall). */
+ScrStr *scr_bytes_js_string(const ScrBytes *b) {
+  switch (b->flavor) {
+    case SCR_BF_BUFFER: {
+      ScrStr *enc = scr_str_new("utf8", 4);
+      ScrStr *r = scr_bytes_to_str(b, enc);
+      scr_str_release(enc);
+      return r;
+    }
+    case SCR_BF_PLAIN: {
+      ScrStr *sep = scr_str_new(",", 1);
+      ScrStr *r = scr_bytes_join(b, sep);
+      scr_str_release(sep);
+      return r;
+    }
+    case SCR_BF_DATAVIEW: return scr_str_new("[object DataView]", 17);
+    default: {
+      static const char msg[] = "String() of a byte array whose Buffer-ness is unknown "
+                                "(its producer stamps no flavor)";
+      scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+      return NULL;
+    }
+  }
+}
+
+/* ── string-pattern replace (the string.replaceStr libCall) ─ gated with this
+ * unit, like bytes.jsString above, so a program that never uses it does not
+ * carry it. */
+/* s.replace(pat, rep) / s.replaceAll(pat, rep) with STRING pattern and STRING
+ * replacement. The match is a byte search (valid UTF-8 is self-synchronising,
+ * so a match always lies on code point boundaries); the replacement text goes
+ * through GetSubstitution with no captures: `$$` -> `$`, `$&` -> the match,
+ * `$\`` -> the text before it, `$'` -> the text after it, and every other `$`
+ * (including `$1`, `$<name>`) stays literal. An empty pattern matches at every
+ * code point boundary for replaceAll (`"abc".replaceAll("", "-")` is
+ * "-a-b-c-") and at 0 for replace. KNOWN DIVERGENCE: JS positions are UTF-16
+ * units, so for an astral character V8 would also insert between its two
+ * surrogate halves; a lone surrogate is unrepresentable in this runtime's
+ * UTF-8 strings, so insertion happens at code point boundaries only.
+ * Borrows all three; +1. */
+static void scr_repl_put(char **buf, size_t *len, size_t *cap, const char *p, size_t n) {
+  if (*len + n + 1 > *cap) {
+    size_t nc = *cap ? *cap : 64;
+    while (nc < *len + n + 1) nc *= 2;
+    char *nb = (char *)realloc(*buf, nc);
+    if (!nb) scr_trap("scriptc: out of memory\n");
+    *buf = nb;
+    *cap = nc;
+  }
+  if (n) memcpy(*buf + *len, p, n);
+  *len += n;
+}
+
+static void scr_repl_substitute(char **buf, size_t *len, size_t *cap, const ScrStr *s, size_t pos,
+                                size_t mlen, const ScrStr *rep) {
+  const char *r = rep->data;
+  size_t rl = rep->len;
+  for (size_t i = 0; i < rl; i++) {
+    if (r[i] == '$' && i + 1 < rl) {
+      char c = r[i + 1];
+      if (c == '$') { scr_repl_put(buf, len, cap, "$", 1); i++; continue; }
+      if (c == '&') { scr_repl_put(buf, len, cap, s->data + pos, mlen); i++; continue; }
+      if (c == '`') { scr_repl_put(buf, len, cap, s->data, pos); i++; continue; }
+      if (c == '\'') { scr_repl_put(buf, len, cap, s->data + pos + mlen, s->len - pos - mlen); i++; continue; }
+    }
+    scr_repl_put(buf, len, cap, r + i, 1);
+  }
+}
+
+ScrStr *scr_str_replace_str(ScrStr *s, ScrStr *pat, ScrStr *rep, bool all) {
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  size_t from = 0; /* bytes of s already copied */
+  size_t plen = pat->len;
+  if (plen == 0) {
+    size_t i = 0;
+    for (;;) {
+      scr_repl_put(&buf, &len, &cap, s->data + from, i - from);
+      from = i;
+      scr_repl_substitute(&buf, &len, &cap, s, i, 0, rep);
+      if (!all || i >= s->len) break;
+      /* copy one whole code point, then the next boundary */
+      size_t step = 1;
+      unsigned char c = (unsigned char)s->data[i];
+      if (c >= 0xF0) step = 4; else if (c >= 0xE0) step = 3; else if (c >= 0xC0) step = 2;
+      if (i + step > s->len) step = s->len - i;
+      i += step;
+    }
+    scr_repl_put(&buf, &len, &cap, s->data + from, s->len - from);
+  } else {
+    size_t i = 0;
+    while (i + plen <= s->len) {
+      const char *hit = (const char *)memchr(s->data + i, pat->data[0], s->len - i - plen + 1);
+      if (!hit) break;
+      size_t at = (size_t)(hit - s->data);
+      if (memcmp(s->data + at, pat->data, plen) != 0) { i = at + 1; continue; }
+      scr_repl_put(&buf, &len, &cap, s->data + from, at - from);
+      scr_repl_substitute(&buf, &len, &cap, s, at, plen, rep);
+      from = at + plen;
+      i = from;
+      if (!all) break;
+    }
+    scr_repl_put(&buf, &len, &cap, s->data + from, s->len - from);
+  }
+  ScrStr *out = scr_str_new(buf ? buf : "", len);
+  free(buf);
+  return out;
+}
+
+/* ── Object.prototype.toString.call over a dyn (the dyn.objectToString libCall) ─ gated
+ * with this unit for the same reason. */
+/* Object.prototype.toString.call(v) over a dyn value: "[object Tag]".
+ * Builtin tags by kind (Buffer and Uint8Array both answer Uint8Array, an
+ * error encoding answers Error); an OBJ whose own string member is keyed by
+ * the well-known Symbol.toStringTag (the compiler spells that key
+ * "__@toStringTag@<id>") answers its value. Borrowed; +1; never throws. */
+ScrStr *scr_dyn_object_to_string(const ScrDyn *d) {
+  const char *tag = "Object";
+  switch (d->kind) {
+  case SCR_DYN_NULL: tag = "Null"; break;
+  case SCR_DYN_UNDEF: tag = "Undefined"; break;
+  case SCR_DYN_BOOL: tag = "Boolean"; break;
+  case SCR_DYN_NUM: tag = "Number"; break;
+  case SCR_DYN_STR: tag = "String"; break;
+  case SCR_DYN_ARR: tag = "Array"; break;
+  case SCR_DYN_BYTES: tag = "Uint8Array"; break;
+  case SCR_DYN_ARRBUF: tag = "ArrayBuffer"; break;
+  case SCR_DYN_FUNC: tag = "Function"; break;
+  case SCR_DYN_PROMISE: tag = "Promise"; break;
+  case SCR_DYN_BIG: tag = "BigInt"; break;
+  case SCR_DYN_MAP: tag = d->v.map.tkey[0] == 's' ? "Set" : "Map"; break;
+  case SCR_DYN_HANDLE:
+    if (d->v.handle.tag == SCR_DYNH_DATE) tag = "Date";
+    else if (d->v.handle.tag == SCR_DYNH_REGEX) tag = "RegExp";
+    break;
+  case SCR_DYN_OBJ:
+    if (scr_dyn_is_error_encoding(d)) { tag = "Error"; break; }
+    for (size_t i = 0; i < d->v.obj.len; i++) {
+      const ScrDynEntry *e = &d->v.obj.entries[i];
+      if (e->key_len > 15 && memcmp(e->key, "__@toStringTag@", 15) == 0 && e->value->kind == SCR_DYN_STR) {
+        const ScrStr *t = e->value->v.str;
+        ScrStr *out = scr_str_alloc_raw(t->len + 9, t->len + 9);
+        memcpy(out->data, "[object ", 8);
+        memcpy(out->data + 8, t->data, t->len);
+        out->data[8 + t->len] = ']';
+        out->len = (uint32_t)(t->len + 9);
+        out->data[out->len] = '\0';
+        return out;
+      }
+    }
+    break;
+  default: break;
+  }
+  char buf[48];
+  int n = snprintf(buf, sizeof buf, "[object %s]", tag);
+  return scr_str_new(buf, (size_t)n);
 }

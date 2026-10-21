@@ -230,11 +230,86 @@ static uint64_t scr_map_slot_from_ptr(void *p) { return (uint64_t)(uintptr_t)p; 
 
 static void *scr_map_slot_to_ptr(uint64_t s) { return (void *)(uintptr_t)s; }
 
+/* UNION keys (a Set whose element type is a union): the stored key is a
+ * ScrUnion box, and SameValueZero over the union's value is decided by the
+ * ARM the box carries. The compiler hands the set one class byte per arm
+ * (key_classes, an interned string of '0'..'3'):
+ *   '0'  scalar slot -- number, boolean or a unit arm. The slot is compared
+ *        and hashed as the normalized double (-0 is +0, one NaN); a boolean
+ *        slot is 0 or 1 and a unit slot is 0, none of which the
+ *        normalization touches, so one rule serves all three;
+ *   '1'  string, by content;
+ *   '2'  bigint, by value;
+ *   '3'  every other arm is a JS object, compared by reference identity
+ *        (SameValueZero on references), exactly as REF keys are.
+ * Two boxes of different arms are never equal; the tag decides first. */
+static char scr_map_union_class(const ScrMap *m, const ScrUnion *u) {
+  return m->key_classes != NULL && u->tag < m->key_classes->len ? m->key_classes->data[u->tag] : '3';
+}
+
+static uint64_t scr_map_union_scalar_bits(const ScrUnion *u) {
+  double d;
+  memcpy(&d, &u->slot, sizeof d);
+  return scr_map_f64_bits(d);
+}
+
+static uint64_t scr_map_hash_union(const ScrMap *m, const ScrUnion *u) {
+  uint64_t parts[2];
+  parts[0] = (uint64_t)u->tag;
+  switch (scr_map_union_class(m, u)) {
+    case '0':
+      parts[1] = scr_map_union_scalar_bits(u);
+      break;
+    case '1':
+      parts[1] = scr_map_hash_str((const ScrStr *)scr_union_peek(u));
+      break;
+    case '2': {
+      const ScrBigInt *b = (const ScrBigInt *)scr_union_peek(u);
+      uint64_t h = scr_map_fnv1a((const unsigned char *)b->limbs, b->n * sizeof(uint32_t));
+      parts[1] = h ^ (uint64_t)(b->sign < 0 ? 1 : 0);
+      break;
+    }
+    default:
+      parts[1] = (uint64_t)(uintptr_t)scr_union_peek(u);
+      break;
+  }
+  return scr_map_fnv1a((const unsigned char *)parts, sizeof parts);
+}
+
+static bool scr_map_union_eq(const ScrMap *m, const ScrUnion *a, const ScrUnion *b) {
+  if (a == b) return true;
+  if (a->tag != b->tag) return false;
+  switch (scr_map_union_class(m, a)) {
+    case '0':
+      return scr_map_union_scalar_bits(a) == scr_map_union_scalar_bits(b);
+    case '1':
+      return scr_str_eq((const ScrStr *)scr_union_peek(a), (const ScrStr *)scr_union_peek(b));
+    case '2': {
+      const ScrBigInt *x = (const ScrBigInt *)scr_union_peek(a);
+      const ScrBigInt *y = (const ScrBigInt *)scr_union_peek(b);
+      return x->sign == y->sign && x->n == y->n &&
+             memcmp(x->limbs, y->limbs, x->n * sizeof(uint32_t)) == 0;
+    }
+    default:
+      return scr_union_peek(a) == scr_union_peek(b);
+  }
+}
+
+/* The hash of one STORED or PROBE key slot, by the map's key kind. */
+static uint64_t scr_map_hash_slot(const ScrMap *m, uint64_t key) {
+  if (m->key_kind == SCR_MAP_KEY_STR) return scr_map_hash_str((const ScrStr *)scr_map_slot_to_ptr(key));
+  if (m->key_kind == SCR_MAP_KEY_UNION) return scr_map_hash_union(m, (const ScrUnion *)scr_map_slot_to_ptr(key));
+  return scr_map_fnv1a((const unsigned char *)&key, 8);
+}
+
 /* Stored keys are pre-normalized, so bit equality IS SameValueZero for f64
  * keys (probe keys normalize through the same function). */
 static bool scr_map_key_eq(const ScrMap *m, uint64_t stored, uint64_t probe) {
   /* f64 keys are pre-normalized and REF keys are pointers, so bit equality
    * IS the honest compare for both (SameValueZero; reference identity). */
+  if (m->key_kind == SCR_MAP_KEY_UNION)
+    return scr_map_union_eq(m, (const ScrUnion *)scr_map_slot_to_ptr(stored),
+                            (const ScrUnion *)scr_map_slot_to_ptr(probe));
   if (m->key_kind != SCR_MAP_KEY_STR) return stored == probe;
   return scr_str_eq((ScrStr *)scr_map_slot_to_ptr(stored),
                      (ScrStr *)scr_map_slot_to_ptr(probe));
@@ -265,9 +340,7 @@ static void scr_map_rebuild_buckets(ScrMap *m, size_t nbuckets) {
   size_t mask = nbuckets - 1;
   for (size_t e = 0; e < m->nentries; e++) {
     if (!m->live[e]) continue;
-    uint64_t hash = m->key_kind != SCR_MAP_KEY_STR
-                        ? scr_map_fnv1a((const unsigned char *)&m->entries[e].key, 8)
-                        : scr_map_hash_str((ScrStr *)scr_map_slot_to_ptr(m->entries[e].key));
+    uint64_t hash = scr_map_hash_slot(m, m->entries[e].key);
     size_t i = hash & mask;
     while (buckets[i] != SCR_MAP_BUCKET_EMPTY) i = (i + 1) & mask;
     buckets[i] = (uint32_t)e;
@@ -492,7 +565,7 @@ static void scr_map_reserve_append(ScrMap *m) {
 static void scr_map_release_key(ScrMap *m, uint64_t key) {
   if (m->key_kind == SCR_MAP_KEY_STR) {
     scr_str_release((ScrStr *)scr_map_slot_to_ptr(key));
-  } else if (m->key_kind == SCR_MAP_KEY_REF) {
+  } else if (m->key_kind == SCR_MAP_KEY_REF || m->key_kind == SCR_MAP_KEY_UNION) {
     m->key_release(scr_map_slot_to_ptr(key));
   }
 }
@@ -673,7 +746,7 @@ bool scr_map_delete_str(ScrMap *m, const ScrStr *key) {
  * SCR_MAP_KEY_REF note). Probes never retain; storage does. */
 static size_t scr_map_find_ref(const ScrMap *m, const void *key) {
   uint64_t k = scr_map_slot_from_ptr((void *)key);
-  return scr_map_find(m, scr_map_fnv1a((const unsigned char *)&k, 8), k);
+  return scr_map_find(m, scr_map_hash_slot(m, k), k);
 }
 
 bool scr_map_has_ref(const ScrMap *m, const void *key) {
@@ -706,7 +779,7 @@ static void scr_map_set(ScrMap *m, uint64_t hash, uint64_t key, uint64_t val) {
   m->nlive++;
   if (m->key_kind == SCR_MAP_KEY_STR) {
     scr_str_retain((ScrStr *)scr_map_slot_to_ptr(key)); /* key is borrowed */
-  } else if (m->key_kind == SCR_MAP_KEY_REF) {
+  } else if (m->key_kind == SCR_MAP_KEY_REF || m->key_kind == SCR_MAP_KEY_UNION) {
     m->key_retain(scr_map_slot_to_ptr(key)); /* key is borrowed */
   }
   size_t mask = m->nbuckets - 1;
@@ -750,7 +823,7 @@ void scr_map_set_str_ref(ScrMap *m, ScrStr *key, void *v) {
 
 void scr_map_set_ref_f64(ScrMap *m, void *key, double v) {
   uint64_t k = scr_map_slot_from_ptr(key);
-  scr_map_set(m, scr_map_fnv1a((const unsigned char *)&k, 8), k, scr_map_slot_from_f64(v));
+  scr_map_set(m, scr_map_hash_slot(m, k), k, scr_map_slot_from_f64(v));
 }
 
 /* REF-KEY maps: the key is a refcounted pointer hashed and compared by
@@ -759,7 +832,7 @@ void scr_map_set_ref_f64(ScrMap *m, void *key, double v) {
  * these are the Map half, mirroring the _str_ family one for one. */
 static void scr_map_set_ref_key(ScrMap *m, void *key, uint64_t val) {
   uint64_t k = scr_map_slot_from_ptr(key);
-  scr_map_set(m, scr_map_fnv1a((const unsigned char *)&k, 8), k, val);
+  scr_map_set(m, scr_map_hash_slot(m, k), k, val);
 }
 
 void scr_map_set_ref_bool(ScrMap *m, void *key, bool v) {
@@ -821,6 +894,32 @@ ScrMap *scr_set_new_ref_traced(void *(*elem_retain)(void *), void (*elem_release
 #ifdef SCR_RC_AUDIT
   scr_live_maps++;
 #endif
+  return m;
+}
+
+/* A Set whose element type is a UNION: elements are ScrUnion boxes compared
+ * by the VALUE the box carries (see scr_map_hash_union). `classes` is the
+ * compiler's per-arm class string; it is an interned immortal literal, so
+ * the set borrows it. `elem_trace` is non-NULL when an element can point
+ * back at the set (an array/Map/Set/record arm), exactly as for REF sets. */
+ScrMap *scr_set_new_union(void *(*elem_retain)(void *), void (*elem_release)(void *),
+                          ScrTraceFn elem_trace, const ScrStr *classes) {
+  ScrMap *m;
+  if (elem_trace) {
+    m = scr_cyc_alloc(sizeof *m, &scr_map_trace, &scr_map_gcfree);
+    m->rc = 1;
+    m->val_kind = SCR_MAP_VAL_F64;
+#ifdef SCR_RC_AUDIT
+    scr_live_maps++;
+#endif
+  } else {
+    m = scr_map_new(SCR_MAP_KEY_UNION, SCR_MAP_VAL_F64, NULL, NULL, NULL);
+  }
+  m->key_kind = SCR_MAP_KEY_UNION;
+  m->key_retain = elem_retain;
+  m->key_release = elem_release;
+  m->key_trace = elem_trace;
+  m->key_classes = classes;
   return m;
 }
 
@@ -941,7 +1040,7 @@ void scr_set_add_all(ScrMap *set, ScrArr *values) {
       ScrStr *s = (ScrStr *)scr_arr_get_ref(values, (double)i); /* +1 */
       scr_map_set_str_f64(set, s, 0);                           /* borrows; retains stored copy */
       scr_str_release(s);
-    } else if (set->key_kind == SCR_MAP_KEY_REF) {
+    } else if (set->key_kind == SCR_MAP_KEY_REF || set->key_kind == SCR_MAP_KEY_UNION) {
       void *p = scr_arr_get_ref(values, (double)i); /* +1 */
       scr_map_set_ref_f64(set, p, 0);               /* borrows; retains stored copy */
       set->key_release(p);

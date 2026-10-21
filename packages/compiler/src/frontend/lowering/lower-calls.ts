@@ -5478,6 +5478,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         L.lowerTextCodecCall(expr, expr.expression) ??
         L.lowerStringStaticCall(expr, expr.expression) ??
         L.lowerStringLastIndexOfCall(expr, expr.expression) ??
+        L.lowerStringReplaceStrCall(expr, expr.expression) ??
         L.lowerPromiseMethodCall(expr, expr.expression) ??
         // Homogeneous promise-tuple literals claim BEFORE the static path
         // (whose array bound would fence them); Promise.reject follows it
@@ -6839,6 +6840,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       (a) =>
         a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
         (a.kind === "bytes" && a.elem === "u8") ||
+        a.kind === "map" || a.kind === "set" ||
         recordArmStringable(L, a),
     );
     if (!stringable) return null;
@@ -10103,6 +10105,65 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     return bindingNeverReassigned(L, sym, decls[0]!);
   }
 
+  /** `Object.prototype.toString` written as a member access (the expression,
+   * not the call), with `Object` the stdlib global. */
+  function isObjectProtoToStringMember(L: Lowerer, e: ts.Expression): boolean {
+    let x: ts.Expression = e;
+    while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+    if (!ts.isPropertyAccessExpression(x) || x.name.text !== "toString") return false;
+    const proto = x.expression;
+    if (!ts.isPropertyAccessExpression(proto) || proto.name.text !== "prototype") return false;
+    return ts.isIdentifier(proto.expression) && L.isStdlibGlobal(proto.expression, "Object");
+  }
+
+  /** The `[[Class]]` tag a statically typed operand always answers, or null
+   * when it is not a function of the type alone. */
+  function staticObjectTag(L: Lowerer, t: IrType): string | null {
+    switch (t.kind) {
+      case "f64": return "Number";
+      case "string": return "String";
+      case "bool": return "Boolean";
+      case "bigint": return "BigInt";
+      case "array": return "Array";
+      case "map": return "Map";
+      case "set": return "Set";
+      case "date": return "Date";
+      case "regex": return "RegExp";
+      case "func": return "Function";
+      case "promise": return "Promise";
+      case "bytes": return t.elem === "u8" || t.elem === "buf" ? "Uint8Array" : null;
+      case "undefinedT": return "Undefined";
+      case "nullT": return "Null";
+      case "record": {
+        const shape = L.shapes.get(t.shapeId);
+        if (!shape || shape.indexValue || shape.tuple) return null;
+        if (shape.fields.some((f) => f.name.startsWith("__@toStringTag@"))) return null;
+        return "Object";
+      }
+      default: return null;
+    }
+  }
+
+  function lowerObjectProtoToStringCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    const loc = locOf(call);
+    const argNode = call.arguments[0];
+    if (argNode === undefined) return { kind: "strLit", value: "[object Undefined]", type: STRING, loc };
+    const v = L.lowerExpr(argNode);
+    const droppable = v.kind === "varRef" || v.kind === "strLit" || v.kind === "numLit" || v.kind === "boolLit" || v.kind === "unitLit";
+    if (v.type.kind === "dyn") {
+      return { kind: "libCall", fn: "dyn.objectToString", args: [v], type: STRING, loc };
+    }
+    const tag = staticObjectTag(L, v.type);
+    if (tag !== null && droppable) {
+      return { kind: "strLit", value: `[object ${tag}]`, type: STRING, loc };
+    }
+    if (canConvertToDyn(v.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+      const boxed: IrExpr = { kind: "dynFrom", value: v, type: DYN, loc };
+      return { kind: "libCall", fn: "dyn.objectToString", args: [boxed], type: STRING, loc };
+    }
+    return null;
+  }
+
   export function lowerHasOwnOver(L: Lowerer, call: ts.CallExpression, recvNode: ts.Expression,
     keyNode: ts.Expression,): IrExpr | null {
     const probed = probeLower(L, recvNode);
@@ -10160,10 +10221,24 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const iv = shape.indexValue;
       if (iv.kind === "dyn" || isUnitType(iv)) return null;
       const atWidth = L.withUndefinedArmOf(iv);
+      const widenable =
+        atWidth !== null &&
+        atWidth.kind === "union" &&
+        L.armTag(atWidth.unionId, UNDEFINED_T) >= 0 &&
+        L.armTag(atWidth.unionId, iv) >= 0;
+      if (!widenable) {
+        // A value type that is already a union (`Record<string, SqlValue>`)
+        // cannot be read back at the widened width (the undefined arm would
+        // flatten into its arms), but the question was only ever "is this
+        // key a live entry of the overflow map": ask the map.
+        const recv = L.lowerExpr(recvNode);
+        if (recv.type.kind !== "record") return null; // probe/lower drift
+        const k = keyOf();
+        if (k === null) return null;
+        return { kind: "recordOvfHas", obj: recv, shapeId: recv.type.shapeId, key: k, type: BOOL, loc };
+      }
       if (atWidth === null || atWidth.kind !== "union") return null;
       const utag = L.armTag(atWidth.unionId, UNDEFINED_T);
-      if (utag < 0) return null;
-      if (L.armTag(atWidth.unionId, iv) < 0) return null;
       const receiver = L.lowerExpr(recvNode);
       if (receiver.type.kind !== "record") return null; // probe/lower drift
       const key = keyOf();
@@ -12799,6 +12874,17 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             }
           }
         }
+      }
+      // `Object.prototype.toString.call(v)` -- the classic `[[Class]]` probe
+      // (`'[object Date]'`). Its answer is a pure function of the value's
+      // kind, so a statically typed operand folds to the tag at compile
+      // time (kinds whose tag is not constant -- a record carrying a
+      // Symbol.toStringTag member -- and every union go through the dyn
+      // walk instead, which reads the runtime kind).
+      if (name === "call" && isObjectProtoToStringMember(L, access.expression) && call.arguments.length <= 1 &&
+        !call.arguments.some((a) => ts.isSpreadElement(a))) {
+        const own = lowerObjectProtoToStringCall(L, call);
+        if (own) return own;
       }
       // `X.hasOwnProperty.call(o, k)` — by a wide margin the most common
       // `Function.prototype.call` in real JavaScript, and NOT a `this`

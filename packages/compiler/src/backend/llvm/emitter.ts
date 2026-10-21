@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesDate, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -133,7 +133,7 @@ import {
 } from "./classes.js";
 import { DK, LlDyn } from "./dyn.js";
 import { emitNpmEmbeddingLl } from "./island.js";
-import { rcAdapters } from "../emission/emit-types.js";
+import { rcAdapters, unionKeyClasses } from "../emission/emit-types.js";
 import { resetSrcSiteCache, srcSite } from "../emission/emitter.js";
 import { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
@@ -339,6 +339,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "number.isInteger": "scr_num_is_integer",
   "number.isSafeInteger": "scr_num_is_safe_integer",
   "string.lastIndexOf": "scr_str_last_index_of",
+  "string.replaceStr": "scr_str_replace_str",
   "string.raw": "scr_str_raw",
   "path.join": "scr_path_join",
   "path.resolve": "scr_path_resolve",
@@ -418,6 +419,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   "date.getUTCMinutes": "scr_date_utc_minutes",
   "date.getUTCSeconds": "scr_date_utc_seconds",
   "date.getUTCMilliseconds": "scr_date_utc_ms",
+  "date.getUTCDay": "scr_date_utc_day",
+  "date.localTime": "scr_date_local_time",
+  "date.tzOffset": "scr_date_tz_offset",
+  "date.toString": "scr_date_to_string",
+  "bytes.jsString": "scr_bytes_js_string",
   "fs.existsSync": "scr_fs_exists",
   // ── the throwing slice (MAY_THROW_LIB_FNS members): the generic path
   // emits the standard pending check after each — emit-exprs.ts's finish.
@@ -1143,6 +1149,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // (catchable SyntaxError) — all may-throw generics over the checked-dynamic tree.
   "dyn.objKeys": "scr_dyn_obj_keys",
   "dyn.hasOwn": "scr_dyn_has_own",
+  "dyn.objectToString": "scr_dyn_object_to_string",
   "dyn.assign": "scr_dyn_assign",
   // variadic Object.assign: the source pack (push never throws; the
   // spread flatten throws V8's spread-call TypeErrors) and the final
@@ -1967,6 +1974,7 @@ class LlEmitter {
     // Regex-surface programs stamp the RegExp handle-dispatch ops, gated
     // on the same moduleUsesRegex switch cc.ts links scr_regex.c by.
     const usesRegex = moduleUsesRegex(this.mod);
+    const usesDate = moduleUsesDate(this.mod);
     // Child-stdio programs stamp the child-stream handle-dispatch ops so
     // `child.stdout` can cross into the checked-dynamic tree by reference.
     // scr_child.c is always linked, so this gates only the install call.
@@ -2046,6 +2054,7 @@ class LlEmitter {
     if (embedsZlib) this.declare(`declare void @scr_zlib_island_install()`);
     if (embedsHttpClient) this.declare(`declare void @scr_net_island_install()`);
     if (usesRegex) this.declare(`declare void @scr_regex_dyn_install()`);
+    if (usesDate) this.declare(`declare void @scr_date_dyn_install()`);
     if (usesChildStream) this.declare(`declare void @scr_child_stream_dyn_install()`);
     if (usesFetch) this.declare(`declare void @scr_fetch_install()`);
     if (usesEvents && hasRefGlobals) {
@@ -2219,7 +2228,7 @@ class LlEmitter {
       // WHOLE struct past the base, so a missing field would shift every
       // capture read as well as being a write past the object.
       `%ScrClosure = type { i64, ptr, i64, ptr, ptr }`,
-      `%ScrRegex = type { i64, ptr, ptr, ptr }`,
+      `%ScrRegex = type { i64, ptr, ptr, ptr, double, ptr }`,
       // ScrArr mirror { rc, len, cap, elem(i32+pad), elem_retain,
       // elem_release, elem_trace, data } — the immortal tagged-template
       // strings objects lay out through it (nothing GEPs into live heap
@@ -2342,7 +2351,7 @@ class LlEmitter {
       // the interned source/flags strings. The bc slot starts null (lazy
       // compile, cached by the runtime) — a mutable global, not constant.
       out.push(
-        `@${re.sym} = internal global %ScrRegex { i64 -1, ptr ${re.src}, ptr ${re.fl}, ptr null } ; ${key.replace(/\n/g, "\\n")}`,
+        `@${re.sym} = internal global %ScrRegex { i64 -1, ptr ${re.src}, ptr ${re.fl}, ptr null, double 0.0, ptr null } ; ${key.replace(/\n/g, "\\n")}`,
       );
     }
     if (this.regexInstances.size > 0) out.push(``);
@@ -2511,6 +2520,7 @@ class LlEmitter {
       ...(usesNet ? [`  call void @scr_net_install()`, `  call void @scr_net_dyn_install()`] : []),
       ...(usesHttp ? [`  call void @scr_http_dyn_install()`] : []),
       ...(usesRegex ? [`  call void @scr_regex_dyn_install()`] : []),
+      ...(usesDate ? [`  call void @scr_date_dyn_install()`] : []),
       ...(usesChildStream ? [`  call void @scr_child_stream_dyn_install()`] : []),
       ...(usesStream ? [`  call void @scr_stream_install()`] : []),
       // The C twin's row: the static fetch's abort seam.
@@ -7929,6 +7939,12 @@ class LlEmitter {
                 B.line(`store ptr ${this.retainValue(sym, e.type)}, ptr ${slot}`);
                 break;
               }
+              case "map":
+              case "set": {
+                const sym = this.internLiteral(arm.kind === "map" ? "[object Map]" : "[object Set]");
+                B.line(`store ptr ${this.retainValue(sym, e.type)}, ptr ${slot}`);
+                break;
+              }
               default:
                 throw new LlvmUnsupportedError(`toString:union:${arm.kind}`, e.loc);
             }
@@ -8124,6 +8140,14 @@ class LlEmitter {
             fl: this.internLiteral(e.flags),
           };
           this.regexInstances.set(key, re);
+        }
+        if (/[gy]/.test(e.flags)) {
+          // A /g or /y literal carries lastIndex: a fresh +1 heap clone per
+          // evaluation (the C emitter's rule).
+          this.declare(`declare ptr @scr_regex_clone(ptr)`);
+          const t = this.B.tmp();
+          this.B.line(`${t} = call ptr @scr_regex_clone(ptr @${re.sym})`);
+          return this.own({ name: t, type: e.type });
         }
         return this.own({ name: this.retainValue(`@${re.sym}`, e.type), type: e.type });
       }
@@ -8375,6 +8399,16 @@ class LlEmitter {
         const t = B.tmp();
         B.line(`${t} = call ptr @scr_map_keys_js_order(ptr ${ovf})`);
         return this.own({ name: t, type: e.type });
+      }
+      case "recordOvfHas": {
+        // Own-key membership of the overflow map; both operands borrowed.
+        const obj = this.emitExpr(e.obj);
+        const key = this.emitExpr(e.key);
+        const ovf = this.recordOvfPtr(obj.name, e.shapeId);
+        this.declare(`declare zeroext i1 @scr_map_has_str(ptr, ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call zeroext i1 @scr_map_has_str(ptr ${ovf}, ptr ${key.name})`);
+        return { name: t, type: e.type };
       }
       case "recordOvfSlots": {
         // The same enumeration as LIVE ENTRY SLOTS - a fresh f64[] snapshot
@@ -10831,7 +10865,7 @@ class LlEmitter {
             this.declare(`declare zeroext i1 @scr_dyn_is_u8array(ptr)`);
             test = B.tmp();
             B.line(`${test} = call zeroext i1 @scr_dyn_is_u8array(ptr ${d.name})`);
-          } else if (e.test === "map" || e.test === "set") {
+          } else if (e.test === "map" || e.test === "set" || e.test === "date") {
             // `u instanceof Map` / `u instanceof Set`: DK.MAP (SCR_DYN_MAP)
             // is shared by both, so the kind compare alone cannot tell
             // them apart. One runtime predicate per word, shared with the
@@ -14140,7 +14174,17 @@ class LlEmitter {
     const B = this.B;
     const kAcc = mapKeyAccess(e.type.elem);
     const s = B.tmp();
-    if (kAcc === "ref") {
+    if (kAcc === "ref" && e.type.elem.kind === "union") {
+      // A UNION element: boxes are compared by the value they carry, and
+      // the runtime needs one class byte per arm to know how.
+      const unionDef = this.unionsById.get(e.type.elem.unionId);
+      if (!unionDef) throw new Error("llvm emitter bug: set element union has no def");
+      const rc = vAdapters(this, e.type.elem);
+      const trace = traceAdapter(this, e.type.elem);
+      const classes = this.internLiteral(unionKeyClasses(unionDef.arms));
+      this.declare(`declare ptr @scr_set_new_union(ptr, ptr, ptr, ptr)`);
+      B.line(`${s} = call ptr @scr_set_new_union(ptr ${rc.retain}, ptr ${rc.release}, ptr ${trace ?? "null"}, ptr ${classes})`);
+    } else if (kAcc === "ref") {
       const rc = vAdapters(this, e.type.elem);
       // A cycle-capable ELEMENT can hold the set right back, so the set
       // needs the collector header and a trace that visits the KEY side
@@ -14688,6 +14732,7 @@ class LlEmitter {
         B.line(`${t} = call zeroext i1 @scr_regex_test(ptr ${r.name}, ptr ${args[0]!.name})`);
         return { name: t, type: e.type };
       }
+      case "exec":
       case "match": {
         // +1 string[] or NULL from the runtime; the `string[] | null`
         // union wraps type-directedly, the envGet convention.
@@ -14696,15 +14741,33 @@ class LlEmitter {
         const arrTag = def ? def.arms.findIndex((a) => a.kind === "array") : -1;
         const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
         if (arrTag < 0 || nullTag < 0 || !def) throw new Error("llvm emitter bug: match union lacks its arms");
-        this.declare(`declare ptr @scr_regex_match(ptr, ptr)`);
+        const matchSym = method === "exec" ? "scr_regex_exec" : "scr_regex_match";
+        this.declare(`declare ptr @${matchSym}(ptr, ptr)`);
         const raw = B.tmp();
-        B.line(`${raw} = call ptr @scr_regex_match(ptr ${r.name}, ptr ${args[0]!.name})`);
+        B.line(`${raw} = call ptr @${matchSym}(ptr ${r.name}, ptr ${args[0]!.name})`);
         return this.wrapNullable(raw, raw, def.arms[arrTag]!, arrTag, e.type, nullTag);
       }
       case "search": {
         this.declare(`declare double @scr_regex_search(ptr, ptr)`);
         const t = B.tmp();
         B.line(`${t} = call double @scr_regex_search(ptr ${r.name}, ptr ${args[0]!.name})`);
+        return { name: t, type: e.type };
+      }
+      case "lastIndex": {
+        this.declare(`declare double @scr_regex_get_last_index(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call double @scr_regex_get_last_index(ptr ${r.name})`);
+        return { name: t, type: e.type };
+      }
+      case "setLastIndex": {
+        this.declare(`declare void @scr_regex_set_last_index(ptr, double)`);
+        B.line(`call void @scr_regex_set_last_index(ptr ${r.name}, double ${args[0]!.name})`);
+        return { name: "", type: e.type };
+      }
+      case "lastExecIndex": {
+        this.declare(`declare double @scr_regex_last_exec_index()`);
+        const t = B.tmp();
+        B.line(`${t} = call double @scr_regex_last_exec_index()`);
         return { name: t, type: e.type };
       }
       case "source": {

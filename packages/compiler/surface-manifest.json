@@ -2129,6 +2129,13 @@
       "note": "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart"
     },
     {
+      "id": "stdlib.date.getUTCDay",
+      "kind": "stdlib",
+      "name": "Date.prototype.getUTCDay",
+      "status": "static",
+      "note": "arithmetic over the stored time value only (getDay is this over date.localTime)"
+    },
+    {
       "id": "stdlib.date.getUTCFullYear",
       "kind": "stdlib",
       "name": "Date.prototype.getUTCFullYear",
@@ -2171,6 +2178,13 @@
       "note": "arithmetic over the stored time value only, unlike stdlib.date.getHours's LOCAL counterpart"
     },
     {
+      "id": "stdlib.date.localTime",
+      "kind": "stdlib",
+      "name": "Date.prototype local-time getters (getFullYear .. getMilliseconds, getDay)",
+      "status": "static",
+      "note": "LocalTime(t): reads the HOST's zone database (POSIX localtime/gmtime, Windows SystemTimeToTzSpecificLocalTimeEx), so the answer depends on the machine that runs the binary"
+    },
+    {
       "id": "stdlib.date.new",
       "kind": "stdlib",
       "name": "Date constructor (number/copy forms)",
@@ -2197,6 +2211,20 @@
       "name": "Date.prototype.toISOString",
       "status": "static",
       "note": "the composed new Date(ms?).toISOString() form"
+    },
+    {
+      "id": "stdlib.date.toString",
+      "kind": "stdlib",
+      "name": "Date.prototype.toString (and String(date))",
+      "status": "static",
+      "note": "local-time text with the host zone's offset and long name (UTC and GMT zones only)"
+    },
+    {
+      "id": "stdlib.date.tzOffset",
+      "kind": "stdlib",
+      "name": "Date.prototype.getTimezoneOffset",
+      "status": "static",
+      "note": "the HOST zone's offset at that instant, in minutes"
     },
     {
       "id": "stdlib.date.value",

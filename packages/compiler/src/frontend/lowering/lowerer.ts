@@ -119,7 +119,7 @@ import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowe
 import { lowerStreamModuleCall, streamInstanceOfExpr } from "./lower-stream.js";
 import { unifyWidthShapes, type UnifyOutcome } from "./shape-unify.js";
 import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from "./lower-emitter.js";
-import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerFileHandleMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerUint8ArrayPrototypeProperty, lowerUint8ArrayStaticProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall } from "./lower-builtins.js";
+import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerFileHandleMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerUint8ArrayPrototypeProperty, lowerUint8ArrayStaticProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerStringReplaceStrCall, lowerPromiseStaticCall } from "./lower-builtins.js";
 import { isIslandExpr, islandFuncValueFence, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerNamespaceConditionalCall, namespaceOverrideOf } from "./lower-nsvalue.js";
@@ -1560,6 +1560,8 @@ export class Lowerer {
    * idxs[cur] — computed only at an actual read, so a drain row is never
    * touched for bodies that ignore it). */
   readonly matchAllIndexBindings = new Map<ts.Symbol, { idxsLocalId: string; curLocalId: string }>();
+  /** const-stored `re.exec(s)` results -> the hidden f64 local holding the match start (`.index`). */
+  readonly execIndexBindings = new Map<ts.Symbol, { localId: string; ctx: FnCtx }>();
   /** STORED matchAll drains: `const rows = s.matchAll(re)` lowers through
    * matchAllInto with a hidden companion index array, registered here so a
    * later `for (const m of rows)` in the SAME function serves `m.index`
@@ -10935,8 +10937,34 @@ export class Lowerer {
     const allowed = new Set<number>();
     for (const a of siteArms) {
       const fi = this.armTag(fromId, a);
-      if (fi < 0) return null; // not a narrowing of the source union
-      allowed.add(fi);
+      if (fi >= 0) {
+        allowed.add(fi);
+        continue;
+      }
+      // A user-defined type predicate (`value is Record<string, SqlValue>`)
+      // narrows to its CANDIDATE type, which need not be an arm: tsc keeps
+      // the candidate where the declared arm (`Record<string, unknown>`) is
+      // assignable to it. The arms that can inhabit such a site arm are the
+      // record arms that WIDTH-LIFT into it (the per-entry dynCheck/ovfCapture
+      // the destination retag will perform); anything else stays trappable.
+      // Records only: that is the one family a predicate candidate is
+      // narrowed from this way, and a wrong guess would admit an arm whose
+      // payload is then lifted by a plan that does not exist (the retag
+      // itself re-checks that every allowed arm maps).
+      // And ONLY a narrowed REFERENCE: a guard narrows an identifier, while an
+      // `as` assertion proves nothing (its stranded arms are the lying-cast
+      // trap, which this relaxation must not widen to new site shapes).
+      let site: ts.Node = node;
+      while (ts.isParenthesizedExpression(site)) site = site.expression;
+      if (a.kind !== "record" || !ts.isIdentifier(site)) return null; // not a narrowing of the source union
+      let any = false;
+      from.arms.forEach((arm, i) => {
+        if (arm.kind === "record" && this.widthLiftPlan(arm, a) !== null) {
+          allowed.add(i);
+          any = true;
+        }
+      });
+      if (!any) return null;
     }
     const trappable = new Set<number>();
     from.arms.forEach((_, i) => {
@@ -14957,8 +14985,10 @@ export class Lowerer {
     mapT: IrType & { kind: "map" },
     arity: number,
     fnRet: IrType,
-    loc: SrcLoc,): IrFunction {
-    return buildMapForEachFn(this, name, mapT, arity, fnRet, loc);
+    loc: SrcLoc,
+    cbValue?: IrType,
+    cbKey?: IrType,): IrFunction {
+    return buildMapForEachFn(this, name, mapT, arity, fnRet, loc, cbValue, cbKey);
   }
 
   lowerSetMethodCall(call: ts.CallExpression,
@@ -14976,8 +15006,9 @@ export class Lowerer {
     setT: IrType & { kind: "set" },
     arity: number,
     fnRet: IrType,
-    loc: SrcLoc,): IrFunction {
-    return buildSetForEachFn(this, name, setT, arity, fnRet, loc);
+    loc: SrcLoc,
+    cbElem?: IrType,): IrFunction {
+    return buildSetForEachFn(this, name, setT, arity, fnRet, loc, cbElem);
   }
 
   lowerRegexLiteral(expr: ts.RegularExpressionLiteral): IrExpr {
@@ -15759,6 +15790,11 @@ export class Lowerer {
   lowerStringLastIndexOfCall(call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     return lowerStringLastIndexOfCall(this, call, access);
+  }
+
+  lowerStringReplaceStrCall(call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    return lowerStringReplaceStrCall(this, call, access);
   }
 
   lowerFilterNarrowCall(call: ts.CallExpression,

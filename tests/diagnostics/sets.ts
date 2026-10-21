@@ -22,20 +22,14 @@ function useBad(s: Set<boolean>): number {
 
 // Sets as union arms DO have a narrowing test now — `x instanceof Set` is
 // the union's tag compare — so a set arm sits beside units and beside data
-// siblings alike. Map arms keep the unit-only rule.
+// siblings alike. Map arms follow the same rule (`x instanceof Map` is the
+// same tag compare), and SEVERAL set or map arms compile too (the tag test
+// answers for all of them; members dispatch on the tag).
 function maybeSet(cond: boolean): Set<string> | undefined {
   return undefined;
 }
 
-// The one set-arm shape with no test: TWO of them. `instanceof Set` answers
-// true for both, `typeof` answers "object" for both, and nothing else
-// separates a `Set<string>` from a `Set<number>` at run time.
-function twoSets(cond: boolean): Set<string> | Set<number> {
-  return cond ? new Set<string>() : new Set<number>();
-}
-
-// A MAP arm beside a data sibling keeps its own fence — no lowering emits
-// `instanceof Map`, so the rule would be ahead of the test.
+// A MAP arm beside a data sibling: `instanceof Map` lowers to the tag compare.
 function mapArm(cond: boolean): string | Map<string, number> {
   return cond ? "s" : new Map<string, number>();
 }
@@ -55,5 +49,4 @@ const adder = s.add;
 // them relevant; these references are what makes them count.
 useBad(new Set<boolean>());
 maybeSet(true);
-twoSets(true);
 mapArm(true);

@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, DATE_T, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, DATE_T, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -65,6 +65,10 @@ export const REGEX_INTRINSIC_SIGS: Record<
   // VOID here is the process.envGet sentinel; the regexIntrinsic case
   // checks the union's arms.
   match: { receiver: STRING, argTypes: [REGEX], result: VOID },
+  exec: { receiver: STRING, argTypes: [REGEX], result: VOID },
+  lastIndex: { receiver: REGEX, argTypes: [], result: F64 },
+  setLastIndex: { receiver: REGEX, argTypes: [F64], result: VOID },
+  lastExecIndex: { receiver: STRING, argTypes: [], result: F64 },
   matchAll: { receiver: STRING, argTypes: [REGEX], result: arrayOf(arrayOf(STRING)) },
   matchAllInto: { receiver: STRING, argTypes: [REGEX, arrayOf(F64)], result: arrayOf(arrayOf(STRING)) },
   search: { receiver: STRING, argTypes: [REGEX], result: F64 },
@@ -1155,6 +1159,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.errInstanceof": { argTypes: [DYN, F64], result: BOOL },
   "dyn.objKeys": { argTypes: [DYN], result: DYN },
   "dyn.hasOwn": { argTypes: [DYN, STRING], result: BOOL },
+  "dyn.objectToString": { argTypes: [DYN], result: STRING },
   "dyn.assign": { argTypes: [DYN, DYN], result: DYN },
   "dyn.packPush": { argTypes: [DYN, DYN], result: VOID },
   "dyn.packPushSpread": { argTypes: [DYN, DYN, STRING], result: VOID },
@@ -1477,6 +1482,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "date.getUTCMinutes": { argTypes: [F64], result: F64 },
   "date.getUTCSeconds": { argTypes: [F64], result: F64 },
   "date.getUTCMilliseconds": { argTypes: [F64], result: F64 },
+  "date.getUTCDay": { argTypes: [F64], result: F64 },
+  "date.localTime": { argTypes: [F64], result: F64 },
+  "date.tzOffset": { argTypes: [F64], result: F64 },
+  "date.toString": { argTypes: [F64], result: STRING },
+  "bytes.jsString": { argTypes: [BYTES_U8], result: STRING },
   "text.decode": { argTypes: [BYTES_U8], result: STRING },
   "fs.mkdirRecursiveSync": { argTypes: [STRING], result: VOID },
   "fs.rmOptsSync": { argTypes: [STRING, BOOL, BOOL], result: VOID },
@@ -1495,6 +1505,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // form) — checked in the libCall case.
   "string.fromCharCode": { argTypes: [null], result: STRING },
   "string.lastIndexOf": { argTypes: [STRING, STRING], result: F64 },
+  "string.replaceStr": { argTypes: [STRING, STRING, STRING, BOOL], result: STRING },
   "string.raw": { argTypes: [arrayOf(STRING), arrayOf(STRING)], result: STRING },
 };
 
@@ -1795,24 +1806,15 @@ export function validateModule(mod: IrModule): IrValidationError[] {
     u.arms.forEach((arm, i) => {
       // The unit kinds (undefinedT/nullT) are valid arms — union membership
       // is the ONLY place they may appear; void/union/map/dyn/jsval
-      // stay out (maps have no discriminant to narrow on). Func/set arm
-      // sibling rules live in unionFuncSetArmsOk (shared with the frontend's
-      // union builders): a func arm allows unit and FUNC siblings (the
-      // nullable-callback shape, and the primitive-constructor tables where
-      // closure pointer identity per tag is the narrowing); a SET arm
-      // allows any sibling but a second set arm (`instanceof Set` is its
-      // narrowing test and over a union it is the tag compare, but it
-      // answers true for both of two Set arms); a MAP arm follows the
-      // same rule, one constructor over (`instanceof Map` lowers to the
-      // identical tag compare) — any sibling but a second map arm.
+      // stay out (a map arm is the container `instanceof Map` tests, so a
+      // map is an arm, never a union of its own). Func, set and map arms
+      // are valid beside any sibling, in any number: typeof "function",
+      // `instanceof Set` and `instanceof Map` are the narrowing tests (over
+      // a union, the tag compare — an OR when several arms share the
+      // constructor), and members of several same-constructor arms
+      // dispatch on the tag (lowerUnionContainerDispatch).
       if (arm.kind === "void" || arm.kind === "union" || arm.kind === "dyn" || arm.kind === "jsval" || arm.kind === "generator" || arm.kind === "asyncGenerator") {
         errors.push({ message: `union ${u.id}: arm ${i} is ${arm.kind}`, loc: noLoc });
-      }
-      if (
-        (arm.kind === "func" || arm.kind === "set" || arm.kind === "map") &&
-        !unionFuncSetArmsOk(u.arms)
-      ) {
-        errors.push({ message: `union ${u.id}: ${arm.kind} arm ${i} beside non-unit arms`, loc: noLoc });
       }
       if (arm.kind === "record" && !recordsById.has(arm.shapeId)) {
         errors.push({
@@ -2407,8 +2409,15 @@ function validateFunction(
         // the LLVM emitter, so the three cannot disagree — and the
         // multi-arm form is admitted only over RECORD arms, the shape the
         // body's per-arm field read serves.
-        if (rest.length > 1 && !rest.every((a) => a.kind === "record")) {
-          err("multi-arm optChain receiver must have record non-unit arms", e.loc);
+        // (or MAP arms, or SET arms: the body dispatches the member on the
+        // tag — lowerUnionContainerDispatch.)
+        if (
+          rest.length > 1 &&
+          !rest.every((a) => a.kind === "record") &&
+          !rest.every((a) => a.kind === "map") &&
+          !rest.every((a) => a.kind === "set")
+        ) {
+          err("multi-arm optChain receiver must have record, map or set non-unit arms", e.loc);
           break;
         }
         if (activeChains.has(e.id)) err(`optChain id "${e.id}" shadows an active chain`, e.loc);
@@ -2547,6 +2556,8 @@ function validateFunction(
                 a.kind === "undefinedT" || a.kind === "nullT" ||
                 a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
                 (a.kind === "bytes" && a.elem === "u8") ||
+                // Map/Set arms: Object.prototype.toString's constant too.
+                a.kind === "map" || a.kind === "set" ||
                 // A plain data RECORD arm: Object.prototype.toString's
                 // constant, decidable here for the same reason the LONE
                 // record operand is — not a tuple (which prints its
@@ -2622,7 +2633,7 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `regexIntrinsic ${e.method} arg ${i}`);
         });
-        if (e.method === "match") {
+        if (e.method === "match" || e.method === "exec") {
           // The `string[] | null` union (program-dependent id) — checked
           // by arms, like the libCall case checks process.envGet.
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
@@ -3686,6 +3697,20 @@ function validateFunction(
         if (e.type.kind !== "array" || e.type.elem.kind !== "string") {
           err("recordOvfKeys must be string[]", e.loc);
         }
+        break;
+      }
+      case "recordOvfHas": {
+        checkExpr(e.obj);
+        checkExpr(e.key);
+        const shape = records.get(e.shapeId);
+        if (!shape) {
+          err(`recordOvfHas on undeclared shape "${e.shapeId}"`, e.loc);
+          break;
+        }
+        if (!shape.indexValue) err(`recordOvfHas on ${e.shapeId}: no index signature`, e.loc);
+        expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordOvfHas receiver");
+        expectType(e.key, STRING, "recordOvfHas key");
+        if (e.type.kind !== "bool") err("recordOvfHas must be bool", e.loc);
         break;
       }
       case "recordOvfSlots": {

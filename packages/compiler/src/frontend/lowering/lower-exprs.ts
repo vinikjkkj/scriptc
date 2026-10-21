@@ -8,7 +8,7 @@ import * as ts from "../ts7/adapter.js";
 import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { dynImportBindingDeclOf } from "./lower-island.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
@@ -1158,6 +1158,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         map: "object", set: "object", promise: "object", bytes: "object",
         regexp: "object", generator: "object", classval: "function",
         undefinedT: "undefined", nullT: "object",
+        bigint: "bigint", date: "object",
       };
       const folded = FOLD[operand.type.kind];
       if (folded && droppableStatic(operand)) {
@@ -2357,6 +2358,30 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       {
         const g = lowerMatchGroupsRead(L, expr);
         if (g !== null) return g;
+      }
+      // `re.lastIndex` read: the raw number stored on the regex object.
+      if (expr.name.text === "lastIndex" && !expr.questionDotToken &&
+          L.mapTypeOf(L.typeOf(expr.expression))?.kind === "regex" && L.isStdlibMember(expr)) {
+        return {
+          kind: "regexIntrinsic",
+          method: "lastIndex",
+          receiver: L.lowerExpr(expr.expression),
+          args: [],
+          type: F64,
+          loc,
+        };
+      }
+      // `m.index` on a const-stored `re.exec(s)` result reads the hidden
+      // local the declaration filled from scr_regex_last_exec_index right
+      // after the exec (same function only: hidden locals do not cross
+      // closure boundaries). A non-null narrowing is the only way to reach
+      // the read, so the stored value is a real match start.
+      if (expr.name.text === "index" && !expr.questionDotToken && ts.isIdentifier(expr.expression)) {
+        const esym = L.checker.getSymbolAtLocation(expr.expression);
+        const eb = esym !== undefined ? L.execIndexBindings.get(esym) : undefined;
+        if (eb !== undefined && eb.ctx === L.ctx) {
+          return { kind: "varRef", localId: eb.localId, type: F64, loc };
+        }
       }
       // `m.index` on a for-of-over-matchAll binding reads the companion-
       // index array at this iteration's cursor — always a number: every
@@ -4361,6 +4386,12 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
       if (narrowed?.kind === "object" && L.classes.get(narrowed.className) !== undefined) {
         return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
       }
+      // `u instanceof Date` over an `unknown`: the Date handle box, extracted
+      // by the validated checked cast (identity preserved: the handle is
+      // retained, not copied).
+      if (narrowed?.kind === "date") {
+        return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
+      }
       return expr;
     }
     // Checker-driven narrowing for classes: tsc types this USE as a
@@ -5379,7 +5410,7 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
  * Falls back to the un-narrowed union when the helper declines (target not
  * a non-unit arm — already excluded by the callers), which fences loudly
  * downstream rather than admitting an unchecked read. */
-  function checkedArmBridge(L: Lowerer, value: IrExpr, arm: IrType, loc: SrcLoc): IrExpr {
+  export function checkedArmBridge(L: Lowerer, value: IrExpr, arm: IrType, loc: SrcLoc): IrExpr {
     if (value.type.kind !== "union") return value;
     const helper = L.narrowedArmHelper(value.type.unionId, arm, loc);
     if (!helper) return value;
@@ -6862,11 +6893,20 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // (`a?.b.c`) would carry the sub-union past a second step. And every
     // surviving arm must be a RECORD — the shape whose per-arm field read
     // lowerUnionFieldRead serves.
-    const subUnionRecv =
+    // The same shape over SEVERAL MAPS (or several SETS) is served by
+    // lowerUnionContainerDispatch, which dispatches the member on the tag:
+    // `p?.size` and the single-step method call `p?.get(k)`.
+    const containerArms =
       rest.length > 1 &&
-      dotNode === expr &&
-      ts.isPropertyAccessExpression(expr) &&
-      rest.every((a) => a.kind === "record");
+      (rest.every((a) => a.kind === "map") || rest.every((a) => a.kind === "set")) &&
+      ((dotNode === expr && ts.isPropertyAccessExpression(expr)) ||
+        (ts.isCallExpression(expr) && expr.expression === dotNode && ts.isPropertyAccessExpression(dotNode)));
+    const subUnionRecv =
+      containerArms ||
+      (rest.length > 1 &&
+        dotNode === expr &&
+        ts.isPropertyAccessExpression(expr) &&
+        rest.every((a) => a.kind === "record"));
     if (rest.length !== 1 && !subUnionRecv) {
       L.unsupported(
         "SC1090",
@@ -7213,6 +7253,12 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
 
   export function lowerIntrinsicProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (L.chainBlocked(expr)) return null;
+    if (expr.name.text === "size") {
+      for (const k of ["map", "set"] as const) {
+        const d = lowerUnionContainerDispatch(L, expr, expr, k, () => lowerIntrinsicProperty(L, expr));
+        if (d) return d;
+      }
+    }
     // `m.entries().next().value` — the take-the-first-entry idiom. The
     // iterator is never STORED here, so no iterator object has to exist:
     // entries()/keys()/values() already lower to a drained array of the
@@ -8154,6 +8200,25 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // stay one name (the standard trust-the-checker bet); a cast that
     // WIDENS to string un-late-binds the property, its type is no literal,
     // and the fence stays.
+    // `[Symbol.toStringTag]: v` -- the well-known key. The checker late-binds
+    // it as the property `__@toStringTag@<id>`; the record shape carries that
+    // exact spelling as a declared field, so the key folds to the name the
+    // enclosing literal's own type gave the property.
+    if (
+      ts.isPropertyAccessExpression(expr) &&
+      L.stdlibGlobalMember(expr, "Symbol") === "toStringTag" &&
+      expr.parent !== undefined &&
+      ts.isComputedPropertyName(expr.parent) &&
+      expr.parent.parent !== undefined &&
+      expr.parent.parent.parent !== undefined &&
+      ts.isObjectLiteralExpression(expr.parent.parent.parent)
+    ) {
+      const lit = expr.parent.parent.parent;
+      for (const p of L.checker.getPropertiesOfType(L.typeOf(lit))) {
+        if (/^__@toStringTag@\d+$/.test(p.name)) return p.name;
+      }
+      return null;
+    }
     if (!pureKeyExpr(L, expr)) return null;
     return literalKeySpellingOf(L.typeOf(expr));
   }
@@ -12805,6 +12870,26 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // (symbol parameters, Symbol.for consts), and keys no class declares
     // — the layouts are compile-time field lists.
     if (L.mapTypeOf(L.typeOf(expr.argumentExpression))?.kind === "symbol") {
+      // `rec[Symbol.toStringTag]` over a record whose shape carries that
+      // well-known key as a declared field (TypeScript spells it
+      // `__@toStringTag@<id>`): an ordinary field read of the slot.
+      {
+        const key = expr.argumentExpression;
+        if (ts.isPropertyAccessExpression(key) && L.stdlibGlobalMember(key, "Symbol") === "toStringTag" &&
+            !expr.questionDotToken) {
+          const obj = L.lowerExpr(expr.expression);
+          if (obj.type.kind === "record") {
+            const shape = L.shapes.get(obj.type.shapeId);
+            const f = shape?.fields.find((x) => /^__@toStringTag@\d+$/.test(x.name));
+            if (shape && f) {
+              return L.maybeNarrow(
+                { kind: "recordGet", obj, shapeId: obj.type.shapeId, field: f.name, type: f.type, loc: locOf(expr) },
+                expr,
+              );
+            }
+          }
+        }
+      }
       const target = symbolFieldTarget(L, expr);
       if (target) return L.maybeNarrow(L.fieldGetExpr(target, locOf(expr), expr), expr);
       // A well-known symbol (`Symbol.dispose`) the receiver's record declares as
@@ -14537,6 +14622,33 @@ export function numberConvAtDynWidth(L: Lowerer, e: IrExpr): IrExpr | null {
   return L.recordKeyReadAtSlotWidth(e, DYN);
 }
 
+/** The tags of the union `e`'s arms that the CHECKER's narrowed type at
+ * `node` still allows, or null when the narrowed type is not a union that
+ * maps onto arms of `e`'s own union (no narrowing, a lone arm -- which
+ * maybeNarrow already bridges --, or a type with no arm to match). Arms
+ * match by IR type equality, in the union's own order. */
+function narrowedArmTags(L: Lowerer, e: IrExpr, node: ts.Node): number[] | null {
+  if (e.type.kind !== "union" || !ts.isExpression(node)) return null;
+  const def = L.unions.get(e.type.unionId);
+  if (!def) return null;
+  const t = L.typeOf(node);
+  const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
+  const tags = new Set<number>();
+  for (const part of parts) {
+    // Standalone undefined/null map to void/the unit-only union, never to
+    // the unit ARMS a union carries, so they are named directly.
+    const m =
+      (part.flags & ts.TypeFlags.Undefined) !== 0 ? UNDEFINED_T
+      : (part.flags & ts.TypeFlags.Null) !== 0 ? NULL_T
+      : L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(part));
+    if (m === null) return null;
+    const tag = L.armTag(e.type.unionId, m);
+    if (tag < 0) return null;
+    tags.add(tag);
+  }
+  return [...tags].sort((a, b) => a - b);
+}
+
 /** Is this union ARM a record the per-union `sc_us_*` ToString helper can
  * answer for — and arm its hidden toString slot if so. Exported because
  * BOTH spellings of the operation ask it: the conversion (`${u}`,
@@ -14582,6 +14694,39 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
     if (e.type.kind === "jsval") {
       // String(v) in the engine — JS-exact (and Node-exact in templates).
       return { kind: "jsOp", op: "toStr", args: [e], type: STRING, loc: e.loc };
+    }
+    if (e.type.kind === "bigint") {
+      // `${n}` / "" + n / String(n) over a bigint: the DIGITS, no `n`
+      // suffix (the suffix belongs to inspect). String(n) and n.toString()
+      // already lowered through big.str; the interpolation and
+      // concatenation spellings fell through to the "cannot be compiled
+      // yet" refusal, so one conversion answered and its siblings did not.
+      return {
+        kind: "libCall",
+        fn: "big.str",
+        args: [e, { kind: "numLit", value: 10, type: F64, loc: e.loc }],
+        type: STRING,
+        loc: e.loc,
+      };
+    }
+    if (e.type.kind === "date") {
+      // String(date) / `${date}`: Date.prototype.toString over the time
+      // value (the invalid Date answers "Invalid Date").
+      const ms: IrExpr = { kind: "libCall", fn: "date.value", args: [e], type: F64, loc: e.loc };
+      return { kind: "libCall", fn: "date.toString", args: [ms], type: STRING, loc: e.loc };
+    }
+    if (e.type.kind === "bytes" && e.type.elem === "u8") {
+      // String(buf) / String(u8): by the stamped flavor -- Buffer's utf8
+      // decode, a plain Uint8Array's comma join, a DataView's tag.
+      return { kind: "libCall", fn: "bytes.jsString", args: [e], type: STRING, loc: e.loc };
+    }
+    if (e.type.kind === "map" || e.type.kind === "set") {
+      // Object.prototype.toString's constant: nothing can override it on a
+      // Map or Set here. The operand still evaluates (effects).
+      const text = e.type.kind === "map" ? "[object Map]" : "[object Set]";
+      const lit: IrExpr = { kind: "strLit", value: text, type: STRING, loc: e.loc };
+      if (pureReemittable(e)) return lit;
+      return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: e, loc: e.loc }], result: lit, type: STRING, loc: e.loc };
     }
     if (e.type.kind === "regex") {
       // `${re}` / String(re) / "" + re: RegExp.prototype.toString, the
@@ -14640,10 +14785,55 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
         (a) =>
           a.kind === "undefinedT" || a.kind === "nullT" ||
           a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
+          // A Map/Set arm prints Object.prototype.toString's constant
+          // ("[object Map]" / "[object Set]"): nothing in the runtime can
+          // override it, so the arm is decidable from the tag alone. A
+          // narrowed `number | boolean` read of `V | Map<string, V>` keeps
+          // the whole union's representation, so this arm is reachable in
+          // the helper even though the branch can never hit it.
+          a.kind === "map" || a.kind === "set" ||
           recordArmStringable(L, a),
       );
       if (stringable) {
         return { kind: "toString", operand: e, type: STRING, loc: e.loc };
+      }
+      // The checker NARROWED this read to some of the union's arms (a
+      // `typeof v === "number" || typeof v === "bigint"` guard over a
+      // union that also carries Buffer/Date/array arms), but a narrowing
+      // to several arms keeps the WHOLE union's representation. The
+      // per-union helper above would have to answer every arm, including
+      // the ones the guard proved impossible. Dispatch on the tag instead:
+      // each REACHABLE arm converts through its own single-arm rule, and
+      // an arm the narrowing excludes never gets a case at all.
+      const reach = narrowedArmTags(L, e, node) ?? def?.arms.map((_, i) => i) ?? null;
+      if (def && reach !== null && reach.length > 0) {
+        const unionId = e.type.unionId;
+        const stmts: IrStmt[] = [];
+        let src: IrExpr = e;
+        if (reach.length > 1 && !pureReemittable(e)) {
+          const tmp = L.declareHiddenLocal("%strArm", e.type);
+          stmts.push({ kind: "varDecl", localId: tmp.id, init: e, loc: e.loc });
+          src = { kind: "varRef", localId: tmp.id, type: e.type, loc: e.loc };
+        }
+        const armStr = (tag: number): IrExpr => {
+          const arm = def.arms[tag]!;
+          if (arm.kind === "undefinedT") return { kind: "strLit", value: "undefined", type: STRING, loc: e.loc };
+          if (arm.kind === "nullT") return { kind: "strLit", value: "null", type: STRING, loc: e.loc };
+          const payload: IrExpr = { kind: "unionNarrow", unionId, tag, value: src, type: arm, loc: e.loc };
+          return ensureString(L, payload, node);
+        };
+        let result = armStr(reach[reach.length - 1]!);
+        for (const tag of reach.slice(0, -1).reverse()) {
+          result = {
+            kind: "ternary",
+            cond: { kind: "unionIsTag", unionId, tag, negated: false, value: src, type: BOOL, loc: e.loc },
+            then: armStr(tag),
+            else_: result,
+            type: STRING,
+            loc: e.loc,
+          };
+        }
+        return stmts.length === 0 ? result : { kind: "seqExpr", stmts, result, type: STRING, loc: e.loc };
       }
       L.unsupported(
         "SC1090",
@@ -15486,6 +15676,129 @@ export function checkedJsNumber(L: Lowerer, node: ts.Node, value: IrExpr): IrExp
  * to hold it. */
 function setValRhs(L: Lowerer, value: IrExpr): IrExpr {
   return isUnitType(value.type) ? L.coerceToExpected(value, unitOnlyUnion(L.unions)) : value;
+}
+
+/** A method call or `size` read whose receiver is a UNION OF SEVERAL MAPS (or
+ * SETS): `Map<string, number> | Map<string, string>`. tsc types the members
+ * by joining the arms' signatures (`get` answers `number | string |
+ * undefined`, `size` is a number), but each arm is a different native
+ * container, so the call dispatches on the runtime tag: the receiver is
+ * bound once, and for each arm the SAME call node is lowered with the
+ * receiver replaced by that arm's tag-checked extraction and its type
+ * replaced by the arm's own (the optional-chain override channels,
+ * chainRecvByNode and chainNarrowedType). Each arm's result is widened to
+ * the type tsc gave the whole call. Null when the receiver is not such a
+ * union.
+ *
+ * A void result (set/add/clear/forEach) cannot ride a ternary, so the chain
+ * is a bool-typed ternary of seqExprs and is refused outside statement
+ * position. */
+export function lowerUnionContainerDispatch(
+  L: Lowerer,
+  node: ts.CallExpression | ts.PropertyAccessExpression,
+  access: ts.PropertyAccessExpression,
+  kind: "map" | "set",
+  lowerOne: () => IrExpr | null,
+): IrExpr | null {
+  const recvNode = access.expression;
+  const recvTs = L.typeOf(recvNode);
+  if (!recvTs.isUnionType()) return null;
+  const parts = ts.constituentTypes(recvTs);
+  if (parts.length < 2) return null;
+  const armIrs = parts.map((t: ts.Type) => L.mapTypeOf(t));
+  if (!armIrs.every((a: IrType | null) => a !== null && a.kind === kind)) return null;
+  if (L.chainBlocked(access, ...(ts.isCallExpression(node) ? [node] : []))) return null;
+  if (!L.isStdlibMember(access)) return null;
+  const loc = locOf(node);
+  const name = access.name.text;
+  const isCall = ts.isCallExpression(node);
+  const voidResult = isCall && (name === "set" || name === "add" || name === "clear" || name === "forEach");
+  if (voidResult && !(ts.isExpressionStatement(node.parent))) {
+    L.noLowering(
+      `.${name}() on a union of ${kind}s in value position`,
+      node,
+      "the per-arm dispatch of a void call is a statement — call it as its own statement",
+    );
+  }
+  const joined: IrType = voidResult ? VOID : L.irTypeOf(node);
+  const recv = L.lowerExpr(recvNode);
+  if (recv.type.kind !== "union") return null;
+  const unionId = recv.type.unionId;
+  const tags = armIrs.map((a: IrType | null) => L.armTag(unionId, a!));
+  if (tags.some((t: number) => t < 0)) return null;
+  const stmts: IrStmt[] = [];
+  let src: IrExpr = recv;
+  if (!pureReemittable(recv)) {
+    const tmp = L.declareHiddenLocal("%armRecv", recv.type);
+    stmts.push({ kind: "varDecl", localId: tmp.id, init: recv, loc });
+    src = { kind: "varRef", localId: tmp.id, type: recv.type, loc };
+  }
+  const results: IrExpr[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const bridge = checkedArmBridge(L, src, armIrs[i]!, loc);
+    const hadRecv = L.chainRecvByNode.get(recvNode);
+    const hadRecvTs = L.chainNarrowedType.get(recvNode);
+    const hadNode = L.chainNarrowedType.get(node);
+    L.chainRecvByNode.set(recvNode, bridge);
+    L.chainNarrowedType.set(recvNode, parts[i]!);
+    try {
+      const member = L.checker.getPropertyOfType(parts[i]!, name);
+      if (member) {
+        const mt = L.checker.getTypeOfSymbolAtLocation(member, node);
+        if (isCall) {
+          const sig = L.checker.getCallSignatures(mt)[0];
+          if (sig) L.chainNarrowedType.set(node, L.checker.getReturnTypeOfSignature(sig));
+        } else {
+          L.chainNarrowedType.set(node, mt);
+        }
+      }
+      const one = lowerOne();
+      if (one === null) return null;
+      results.push(joined.kind === "void" ? one : L.coerceToExpected(one, joined));
+    } finally {
+      if (hadRecv) L.chainRecvByNode.set(recvNode, hadRecv); else L.chainRecvByNode.delete(recvNode);
+      if (hadRecvTs) L.chainNarrowedType.set(recvNode, hadRecvTs); else L.chainNarrowedType.delete(recvNode);
+      if (hadNode) L.chainNarrowedType.set(node, hadNode); else L.chainNarrowedType.delete(node);
+    }
+  }
+  const asBool = (e: IrExpr): IrExpr =>
+    joined.kind === "void"
+      ? { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: e, loc }], result: { kind: "boolLit", value: true, type: BOOL, loc }, type: BOOL, loc }
+      : e;
+  const outT: IrType = joined.kind === "void" ? BOOL : joined;
+  let chain: IrExpr = asBool(results[results.length - 1]!);
+  for (let i = results.length - 2; i >= 0; i--) {
+    chain = {
+      kind: "ternary",
+      cond: { kind: "unionIsTag", unionId, tag: tags[i]!, negated: false, value: src, type: BOOL, loc },
+      then: asBool(results[i]!),
+      else_: chain,
+      type: outT,
+      loc,
+    };
+  }
+  return stmts.length === 0 ? chain : { kind: "seqExpr", stmts, result: chain, type: outT, loc };
+}
+
+
+/** `value` is one of the union arms `tags`: one unionIsTag, or their OR when
+ * several arms share a constructor (`Map<string, number> | Map<string, string>`
+ * answers `instanceof Map` true for both). An operand that cannot be
+ * re-emitted is bound once to a hidden local. */
+export function armTagsTest(L: Lowerer, value: IrExpr, tags: number[], loc: SrcLoc): IrExpr {
+  const unionId = (value.type as { unionId: string }).unionId;
+  const stmts: IrStmt[] = [];
+  let src: IrExpr = value;
+  if (tags.length > 1 && !pureReemittable(value)) {
+    const tmp = L.declareHiddenLocal("%armTags", value.type);
+    stmts.push({ kind: "varDecl", localId: tmp.id, init: value, loc });
+    src = { kind: "varRef", localId: tmp.id, type: value.type, loc };
+  }
+  let test: IrExpr = { kind: "unionIsTag", unionId, tag: tags[0]!, negated: false, value: src, type: BOOL, loc };
+  for (const t of tags.slice(1)) {
+    test = { kind: "logical", op: "||", left: test, right: { kind: "unionIsTag", unionId, tag: t, negated: false, value: src, type: BOOL, loc }, type: BOOL, loc };
+  }
+  return stmts.length === 0 ? test : { kind: "seqExpr", stmts, result: test, type: BOOL, loc };
 }
 
 export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
@@ -16970,7 +17283,20 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       case "httpClientReq": case "secureCtx": case "fsWatcher":
       case "childStream": case "procStream":
       case "object": case "record": case "promise":
+      // A Date is an object. It is TYPE-FIRST in this compiler (nothing
+      // constructs one yet), but a union that carries a Date arm -- mysql2's
+      // SqlValue -- still needs its typeof chain: the arm can never hold a
+      // value, so answering "object" for it is exact and never a guess.
+      case "date": case "weakmap": case "http2Session": case "http2Stream":
+      case "dgramSocket": case "testCtx": case "sqliteDb": case "sqliteStmt":
+      case "abortSignal": case "abortController": case "response":
+      case "headers": case "requestInit": case "request":
+      case "rtcPeerConnection": case "rtcDataChannel": case "keyobj":
+      case "hash": case "hmac": case "cipher": case "decipher":
+      case "generator": case "asyncGenerator":
         return "object";
+      case "bigint": return "bigint";
+      case "classval": return "function";
       default:
         return null;
     }
@@ -17794,7 +18120,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
       // `x instanceof Set` over a union with a set arm — the RegExp rule
       // one constructor over, and the test that gives a SET arm a union
-      // home at all (unionFuncSetArmsOk). `typeof` answers "object" for
+      // home at all. `typeof` answers "object" for
       // a set and for every object-flavored sibling alike, so this is the
       // only thing that separates them; over a union it is the runtime
       // TAG compare, which is exact against EVERY sibling kind, not just
@@ -17805,10 +18131,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // Reads in the true branch bridge through maybeNarrow's tag-CHECKED
       // %union.narrow, so nothing here is a trusted reinterpret.
       //
-      // TWO set arms are refused upstream (no test tells them apart), so
-      // the one-hit rule below is the only case that can arise from a
-      // compiled union; the guard stays anyway because a union built by
-      // some other route must never silently pick the first Set.
+      // SEVERAL set arms share the constructor (`Set<number> | Set<string>`):
+      // `instanceof Set` answers true for each of them, so the test is the
+      // OR of their tags (armTagsTest), and members dispatch per arm
+      // (lowerUnionContainerDispatch).
       if (
         ts.isIdentifier(expr.right) &&
         L.isStdlibGlobal(expr.right, "Set") &&
@@ -17818,8 +18144,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (left.type.kind === "union") {
           const def = L.unions.get(left.type.unionId);
           const tags = def ? def.arms.flatMap((a, i) => (a.kind === "set" ? [i] : [])) : [];
-          if (tags.length === 1) {
-            return { kind: "unionIsTag", unionId: left.type.unionId, tag: tags[0]!, negated: false, value: left, type: BOOL, loc };
+          if (tags.length >= 1) {
+            return armTagsTest(L, left, tags, loc);
           }
         }
         // `u instanceof Set` over a DYN (`unknown`) operand -- the
@@ -17847,7 +18173,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
       // `x instanceof Map` over a union with a map arm — the Set rule one
       // constructor over, now that the MAP arm's union-home rule
-      // (unionFuncSetArmsOk / unionArmsHaveHomes / armHasUnionHome) admits
+      // (unionArmsHaveHomes / armHasUnionHome) admits
       // it beside data siblings, not just beside units: `typeof` answers
       // "object" for a map and for every object-flavored sibling alike, so
       // this is the only thing that separates them; over a union it is the
@@ -17859,11 +18185,9 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // Reads in the true branch bridge through maybeNarrow's tag-CHECKED
       // %union.narrow, so nothing here is a trusted reinterpret.
       //
-      // TWO map arms are refused upstream (no test tells them apart, same
-      // as two Set arms), so the one-hit rule below is the only case that
-      // can arise from a compiled union; the guard stays anyway because a
-      // union built by some other route must never silently pick the first
-      // Map.
+      // SEVERAL map arms (`Map<string, number> | Map<string, string>`) are
+      // the same story as several Set arms: the test is the OR of the arm
+      // tags (armTagsTest).
       if (
         ts.isIdentifier(expr.right) &&
         L.isStdlibGlobal(expr.right, "Map") &&
@@ -17873,8 +18197,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (left.type.kind === "union") {
           const def = L.unions.get(left.type.unionId);
           const tags = def ? def.arms.flatMap((a, i) => (a.kind === "map" ? [i] : [])) : [];
-          if (tags.length === 1) {
-            return { kind: "unionIsTag", unionId: left.type.unionId, tag: tags[0]!, negated: false, value: left, type: BOOL, loc };
+          if (tags.length >= 1) {
+            return armTagsTest(L, left, tags, loc);
           }
         }
         // `u instanceof Map` over a DYN (`unknown`) operand -- sql-escaper's
@@ -17893,6 +18217,38 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
           narrowBridgeArm(left)?.kind === "varRef";
         if (left.type.kind === "map" && pureMapRead) {
+          return { kind: "boolLit", value: true, type: BOOL, loc };
+        }
+      }
+      // `x instanceof Date` over a union with a Date arm -- the Map/Set rule
+      // one constructor over. sql-escaper's SqlValue carries a Date arm and
+      // asks `currentValue instanceof Date`; `typeof` answers "object" for a
+      // Date and every object-flavored sibling alike, so the tag compare is
+      // the only thing that separates them. A Date can only be CONSTRUCTED
+      // through the composed forms today, so the arm is never inhabited by a
+      // value this test could misjudge; the test is still exact (tag).
+      if (
+        ts.isIdentifier(expr.right) &&
+        L.isStdlibGlobal(expr.right, "Date") &&
+        !L.caughtLocalOf(expr.left)
+      ) {
+        const left = L.lowerExpr(expr.left);
+        if (left.type.kind === "union") {
+          const def = L.unions.get(left.type.unionId);
+          const tags = def ? def.arms.flatMap((a, i) => (a.kind === "date" ? [i] : [])) : [];
+          if (tags.length >= 1) {
+            return armTagsTest(L, left, tags, loc);
+          }
+        }
+        if (left.type.kind === "dyn") {
+          // `u instanceof Date` over an `unknown` operand: the Date handle tag.
+          return { kind: "dynTest", test: "date", value: left, type: BOOL, loc };
+        }
+        const pureDateRead =
+          left.kind === "varRef" ||
+          (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
+          narrowBridgeArm(left)?.kind === "varRef";
+        if (left.type.kind === "date" && pureDateRead) {
           return { kind: "boolLit", value: true, type: BOOL, loc };
         }
       }
@@ -20420,8 +20776,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (joinArms.length === 0) return null;
     if (
       joinArms.length > 1 &&
-      (!unionFuncSetArmsOk(joinArms) ||
-        joinArms.some((a) => a.kind === "map" || a.kind === "dyn" || a.kind === "jsval" || a.kind === "generator" || a.kind === "caught"))
+      joinArms.some((a) => a.kind === "map" || a.kind === "dyn" || a.kind === "jsval" || a.kind === "generator" || a.kind === "caught")
     ) {
       return null;
     }
@@ -20550,13 +20905,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (joinArms.length === 0) return null;
     // The join must be a BUILDABLE union: arm kinds the union invariants
     // admit (no map/dyn/jsval/generator arms; func arms only beside
-    // func/unit siblings — unionFuncSetArmsOk, the validator's rule). A
+    // func/unit siblings). A
     // join mixing, say, a func answer with data answers has no union to
     // surface as; the caller owns the fence message.
     if (
       joinArms.length > 1 &&
-      (!unionFuncSetArmsOk(joinArms) ||
-        joinArms.some((a) => a.kind === "map" || a.kind === "dyn" || a.kind === "jsval" || a.kind === "generator" || a.kind === "caught"))
+      joinArms.some((a) => a.kind === "map" || a.kind === "dyn" || a.kind === "jsval" || a.kind === "generator" || a.kind === "caught")
     ) {
       return null;
     }

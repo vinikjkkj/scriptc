@@ -7,7 +7,7 @@ import { emitCoroYield } from "./emit-gen-coro.js";
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel, srcSite } from "./emitter.js";
 import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
-import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
+import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
@@ -964,6 +964,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.internLiteral(e.pattern);
           E.internLiteral(e.flags);
         }
+        // A /g or /y literal carries lastIndex, and JS builds a NEW RegExp
+        // object per evaluation: clone the immortal (a fresh +1 heap regex
+        // sharing its bytecode, lastIndex 0). Every other literal stays the
+        // immortal immutable static.
+        if (/[gy]/.test(e.flags)) return E.newTemp(e.type, `scr_regex_clone(&${sym})`);
         return E.newTemp(e.type, `scr_regex_retain(&${sym})`);
       }
       case "templateStrings": {
@@ -989,6 +994,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         switch (method) {
           case "test":
             return E.newTemp(e.type, `scr_regex_test(${r.name}, ${args[0]!.name})`);
+          case "exec":
           case "match": {
             // +1 string[] or NULL from the runtime; the `string[] | null`
             // union wraps type-directedly, the process.envGet convention.
@@ -999,7 +1005,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             if (arrTag < 0 || nullTag < 0) {
               throw new Error("emitter bug: match union lacks its arms");
             }
-            const m = E.newTemp(arrayOf(STRING), `scr_regex_match(${r.name}, ${args[0]!.name})`);
+            const m = E.newTemp(arrayOf(STRING), `${method === "exec" ? "scr_regex_exec" : "scr_regex_match"}(${r.name}, ${args[0]!.name})`);
             E.moveTemp(m); // moves into the union box when present; NULL otherwise
             const present = `scr_union_new_ref(${arrTag}, ${m.name}, &scr_arr_retain_v, &scr_arr_release_v, NULL)`;
             const absent = E.unitInstanceRef(e.type.unionId, nullTag);
@@ -1020,6 +1026,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "search":
             // First-match index or -1 — a plain double; never throws.
             return E.newTemp(e.type, `scr_regex_search(${r.name}, ${args[0]!.name})`);
+          case "lastIndex":
+            return E.newTemp(e.type, `scr_regex_get_last_index(${r.name})`);
+          case "setLastIndex":
+            E.line(`scr_regex_set_last_index(${r.name}, ${args[0]!.name});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          case "lastExecIndex":
+            return E.newTemp(e.type, `scr_regex_last_exec_index()`);
           case "source":
             return E.newTemp(e.type, `scr_regex_source(${r.name})`);
           case "flags":
@@ -1958,9 +1971,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // at construction — the scr_arr_new_ref technique.
         const elemAcc = mapKeyAccess(e.type.elem);
         const rcAdapters = elemAcc === "ref" ? vAdapters(e.type.elem) : null;
+        const unionDef = e.type.elem.kind === "union" ? E.unionsById.get(e.type.elem.unionId) : undefined;
+        if (e.type.elem.kind === "union" && !unionDef) throw new Error("emitter bug: set element union has no def");
         const s = E.newTemp(
           e.type,
-          rcAdapters
+          rcAdapters && unionDef
+            ? // A UNION element: the runtime compares boxes by the value
+              // they carry, and needs one class byte per arm to know how.
+              `scr_set_new_union(&${rcAdapters.retain}, &${rcAdapters.release}, ` +
+                `${E.traceAdapterC(e.type.elem) !== null ? `&${E.traceAdapterC(e.type.elem)}` : "NULL"}, ` +
+                `(const ScrStr *)&${E.internLiteral(unionKeyClasses(unionDef.arms))})`
+            : rcAdapters
             ? // A cycle-capable ELEMENT can hold the set back, and a Set
               // keeps its elements on the KEY side -- so the set needs the
               // header and the key-visiting trace, not the plain form.
@@ -2484,6 +2505,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // string[] snapshot (+1); the record is borrowed.
         const obj = E.emitExpr(e.obj);
         return E.newTemp(e.type, `scr_map_keys_js_order(${obj.name}->${OVERFLOW_MEMBER})`);
+      }
+      case "recordOvfHas": {
+        // Own-key membership of the overflow map; both operands borrowed.
+        const obj = E.emitExpr(e.obj);
+        const key = E.emitExpr(e.key);
+        return E.newTemp(e.type, `scr_map_has_str(${obj.name}->${OVERFLOW_MEMBER}, ${key.name})`);
       }
       case "recordOvfSlots": {
         // The same enumeration as LIVE ENTRY SLOTS - a fresh f64[] snapshot
@@ -3053,7 +3080,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                             // rides SCR_DYN_BYTES too. One runtime
                             // predicate, shared with the LLVM lane.
                             `scr_dyn_is_u8array(${d.name})`
-                          : e.test === "map" || e.test === "set"
+                          : e.test === "map" || e.test === "set" || e.test === "date"
                             ? // `instanceof Map` / `instanceof Set` on an
                               // unknown value: SCR_DYN_MAP is shared by
                               // both, so the kind compare alone cannot
@@ -6998,6 +7025,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Object.hasOwn over a dyn receiver (throws on nullish, like
             // Node's ToObject).
             return finish(`scr_dyn_has_own(${arg(0)}, ${arg(1)})`);
+          case "dyn.objectToString":
+            // Object.prototype.toString.call over a dyn operand; +1 string.
+            return finish(`scr_dyn_object_to_string(${arg(0)})`);
           case "dyn.objValues":
             return finish(`scr_dyn_obj_values(${arg(0)})`);
           case "dyn.objEntries":
@@ -7896,6 +7926,22 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_date_utc_seconds(${arg(0)})`);
           case "date.getUTCMilliseconds":
             return finish(`scr_date_utc_ms(${arg(0)})`);
+          case "date.getUTCDay":
+            return finish(`scr_date_utc_day(${arg(0)})`);
+          // LocalTime(t) and getTimezoneOffset read the HOST zone database;
+          // NaN on an invalid Date. Never throw.
+          case "date.localTime":
+            return finish(`scr_date_local_time(${arg(0)})`);
+          case "date.tzOffset":
+            return finish(`scr_date_tz_offset(${arg(0)})`);
+          case "date.toString":
+            // Date.prototype.toString; +1 string, or a catchable Error for a
+            // zone whose long name needs ICU data (may-throw seed set).
+            return finish(`scr_date_to_string(${arg(0)})`);
+          case "bytes.jsString":
+            // String(bytes) by flavor; +1 string, or a catchable Error for an
+            // unstamped value (may-throw seed set).
+            return finish(`scr_bytes_js_string(${arg(0)})`);
           case "text.decode":
             // WHATWG utf-8 decode with the leading BOM stripped
             // (scr_bytes.c). Borrowed bytes; +1 string; never throws.
@@ -7972,6 +8018,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             );
           case "string.lastIndexOf":
             return finish(`scr_str_last_index_of(${arg(0)}, ${arg(1)})`);
+          case "string.replaceStr":
+            // s.replace(str, str) / s.replaceAll(str, str); +1 string.
+            return finish(`scr_str_replace_str(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "string.raw":
             // Raw literals + pre-stringified substitutions; +1 string.
             return finish(`scr_str_raw(${arg(0)}, ${arg(1)})`);

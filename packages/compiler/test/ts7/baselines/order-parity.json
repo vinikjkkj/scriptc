@@ -10971,6 +10971,132 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7800-map-union-two-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7800-map-union-two-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7801-set-union-two-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7801-set-union-two-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7802-map-union-string-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/7802-map-union-string-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7803-map-union-recursive-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/7803-map-union-recursive-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7804-map-union-object-property.ts": {
+   "order": [
+    "<repo>/tests/corpus/7804-map-union-object-property.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7830-typeof-union-date-bigint-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7830-typeof-union-date-bigint-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7831-bigint-concat-and-template.ts": {
+   "order": [
+    "<repo>/tests/corpus/7831-bigint-concat-and-template.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7832-tostring-narrowed-union-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7832-tostring-narrowed-union-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7833-set-of-union-elements.ts": {
+   "order": [
+    "<repo>/tests/corpus/7833-set-of-union-elements.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7834-recursive-union-to-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/7834-recursive-union-to-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7835-builtin-names-as-identifiers.ts": {
+   "order": [
+    "<repo>/tests/corpus/7835-builtin-names-as-identifiers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7840-date-local-getters.ts": {
+   "order": [
+    "<repo>/tests/corpus/7840-date-local-getters.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7841-hasownproperty-call-union-index.ts": {
+   "order": [
+    "<repo>/tests/corpus/7841-hasownproperty-call-union-index.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7842-date-in-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/7842-date-in-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7843-object-prototype-tostring-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/7843-object-prototype-tostring-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7844-regex-exec-index-lastindex.ts": {
+   "order": [
+    "<repo>/tests/corpus/7844-regex-exec-index-lastindex.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7845-date-leaf-in-checked-casts.ts": {
+   "order": [
+    "<repo>/tests/corpus/7845-date-leaf-in-checked-casts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7846-type-predicate-record-candidate-narrowing.ts": {
+   "order": [
+    "<repo>/tests/corpus/7846-type-predicate-record-candidate-narrowing.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7847-string-of-date-bytes-map-set-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7847-string-of-date-bytes-map-set-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7848-symbol-tostringtag-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/7848-symbol-tostringtag-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7849-string-replace-string-pattern.ts": {
+   "order": [
+    "<repo>/tests/corpus/7849-string-replace-string-pattern.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -11729,12 +11855,6 @@
   "<repo>/tests/diagnostics/dataview.ts": {
    "order": [
     "<repo>/tests/diagnostics/dataview.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/date-get-hours-only-composes-with-the-live-clock.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/date-get-hours-only-composes-with-the-live-clock.ts"
    ],
    "diags": []
   },
