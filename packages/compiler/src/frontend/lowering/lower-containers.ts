@@ -8622,8 +8622,11 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
   export function lowerObjectIterOverIndexShape(L: Lowerer, call: ts.CallExpression,
     member: "keys" | "values" | "entries",
     argIr: IrType & { kind: "record" },
-    shape: IrRecordShape,): IrExpr {
-    const resultT = L.irTypeOf(call);
+    shape: IrRecordShape,
+    /** Reflect.ownKeys: the keys ARE strings here (the checker's
+     * `(string | symbol)[]` widens a string array at the use). */
+    resultOverride?: IrType,): IrExpr {
+    const resultT = resultOverride ?? L.irTypeOf(call);
     if (resultT.kind !== "array") L.badType(call, L.typeOf(call)); // defensive
     return objectIterOverIndexShape(L, call, member, argIr, shape, L.lowerExpr(call.arguments[0]!), resultT, locOf(call));
   }

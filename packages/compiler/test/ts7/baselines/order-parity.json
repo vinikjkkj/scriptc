@@ -13731,6 +13731,24 @@
     "<repo>/tests/corpus/8020-a-class-declared-inside-a-function-or-block.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8030-reflect-ownkeys-over-records-and-arrays.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8030-reflect-ownkeys-over-records-and-arrays.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8031-reflect-ownkeys-typed.ts": {
+   "order": [
+    "<repo>/tests/corpus/8031-reflect-ownkeys-typed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-class-instance.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-class-instance.js"
+   ],
+   "diags": []
   }
  }
 }
