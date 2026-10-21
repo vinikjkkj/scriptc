@@ -2892,52 +2892,6 @@ bool scr_dyn_is_map(const ScrDyn *d) {
 bool scr_dyn_is_set(const ScrDyn *d) {
   return d != NULL && d->kind == SCR_DYN_MAP && d->v.map.tkey[0] == 's';
 }
-/* Object.prototype.toString.call(v) over a dyn value: "[object Tag]".
- * Builtin tags by kind (Buffer and Uint8Array both answer Uint8Array, an
- * error encoding answers Error); an OBJ whose own string member is keyed by
- * the well-known Symbol.toStringTag (the compiler spells that key
- * "__@toStringTag@<id>") answers its value. Borrowed; +1; never throws. */
-ScrStr *scr_dyn_object_to_string(const ScrDyn *d) {
-  const char *tag = "Object";
-  switch (d->kind) {
-  case SCR_DYN_NULL: tag = "Null"; break;
-  case SCR_DYN_UNDEF: tag = "Undefined"; break;
-  case SCR_DYN_BOOL: tag = "Boolean"; break;
-  case SCR_DYN_NUM: tag = "Number"; break;
-  case SCR_DYN_STR: tag = "String"; break;
-  case SCR_DYN_ARR: tag = "Array"; break;
-  case SCR_DYN_BYTES: tag = "Uint8Array"; break;
-  case SCR_DYN_ARRBUF: tag = "ArrayBuffer"; break;
-  case SCR_DYN_FUNC: tag = "Function"; break;
-  case SCR_DYN_PROMISE: tag = "Promise"; break;
-  case SCR_DYN_BIG: tag = "BigInt"; break;
-  case SCR_DYN_MAP: tag = d->v.map.tkey[0] == 's' ? "Set" : "Map"; break;
-  case SCR_DYN_HANDLE:
-    if (d->v.handle.tag == SCR_DYNH_DATE) tag = "Date";
-    else if (d->v.handle.tag == SCR_DYNH_REGEX) tag = "RegExp";
-    break;
-  case SCR_DYN_OBJ:
-    if (scr_dyn_is_error_encoding(d)) { tag = "Error"; break; }
-    for (size_t i = 0; i < d->v.obj.len; i++) {
-      const ScrDynEntry *e = &d->v.obj.entries[i];
-      if (e->key_len > 15 && memcmp(e->key, "__@toStringTag@", 15) == 0 && e->value->kind == SCR_DYN_STR) {
-        const ScrStr *t = e->value->v.str;
-        ScrStr *out = scr_str_alloc_raw(t->len + 9, t->len + 9);
-        memcpy(out->data, "[object ", 8);
-        memcpy(out->data + 8, t->data, t->len);
-        out->data[8 + t->len] = ']';
-        out->len = (uint32_t)(t->len + 9);
-        out->data[out->len] = '\0';
-        return out;
-      }
-    }
-    break;
-  default: break;
-  }
-  char buf[48];
-  int n = snprintf(buf, sizeof buf, "[object %s]", tag);
-  return scr_str_new(buf, (size_t)n);
-}
 /* Is this dyn the handle box of `tag`? (dynMatch / dynArm for a Date leaf.)
  * Borrowed; never throws. */
 bool scr_dyn_handle_is(const ScrDyn *d, ScrDynHandleTag tag) {
