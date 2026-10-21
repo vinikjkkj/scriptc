@@ -111,7 +111,7 @@ export { validateSidecar } from "./library/sidecar-validate.js";
 export { BUILD_ID_SEED, SOURCE_HASH_SEED, hex16, lengthPrefixedStream, wyhash64 } from "./library/wyhash.js";
 export { ISLAND_SURFACE, type IslandFnEntry } from "./frontend/lowering/surfaces.js";
 export { ambientDtsPath, overridesDtsPath } from "./frontend/program.js";
-export { AUTHORED_JS_DEFAULT_PACKAGES, ProvenanceRefusalError, resolveProvenanceSources } from "./frontend/provenance.js";
+export { ProvenanceRefusalError, resolveProvenanceSources } from "./frontend/provenance.js";
 export {
   setProvenanceSources,
   type ProvenancePackageSource,

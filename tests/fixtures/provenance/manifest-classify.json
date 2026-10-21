@@ -1,0 +1,29 @@
+{
+  "packages": {
+    "greeter": {
+      "dir": "./attested-src/greeter",
+      "commit": "0000000000000000000000000000000000000000",
+      "repo": "https://github.com/example/greeter"
+    },
+    "wamshape": {
+      "dir": "./attested-src/wamshape",
+      "commit": "3333333333333333333333333333333333333333",
+      "repo": "https://github.com/example/wamshape"
+    },
+    "mysqlshape": {
+      "dir": "./attested-src/mysqlshape",
+      "commit": "4444444444444444444444444444444444444444",
+      "repo": "https://github.com/example/mysqlshape"
+    },
+    "jsonly": {
+      "dir": "./attested-src/jsonly",
+      "commit": "5555555555555555555555555555555555555555",
+      "repo": "https://github.com/example/jsonly"
+    },
+    "distjs": {
+      "dir": "./attested-src/distjs",
+      "commit": "6666666666666666666666666666666666666666",
+      "repo": "https://github.com/example/distjs"
+    }
+  }
+}

@@ -22,8 +22,8 @@
  * `implicitMonoFile` starts with `isJsSourceFile`, so a provenance package
  * mapped to TypeScript source can never reach the gate at all. The ONE lane
  * whose provenance-mapped files are JavaScript is the authored-JS mapping
- * (provenance.ts's authoredJsAllowlist / authoredJsEntry, selected by
- * SCRIPTC_PROVENANCE_AUTHORED_JS): it maps the package to its hand-written
+ * (provenance.ts's authoredJsEntry, a structural rule over the mapped tree
+ * that names no package): it maps the package to its hand-written
  * `.d.ts` and the declaration-twin machinery pulls the sibling `.js` in as
  * program source. That is the route this file drives, and it is the route the
  * defect was measured on.
@@ -86,7 +86,6 @@ const rel = (p: string): string => {
  * caller set for the whole run. Same discipline as the sibling suite. */
 const PRIOR = {
   manifest: process.env["SCRIPTC_PROVENANCE_MANIFEST"],
-  authored: process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"],
 };
 const restore = (k: string, v: string | undefined): void => {
   if (v === undefined) delete process.env[k];
@@ -96,17 +95,12 @@ const restore = (k: string, v: string | undefined): void => {
 afterEach(() => {
   setProvenanceSources(null);
   restore("SCRIPTC_PROVENANCE_MANIFEST", PRIOR.manifest);
-  restore("SCRIPTC_PROVENANCE_AUTHORED_JS", PRIOR.authored);
 });
 
 /** Installs the authored-JS provenance mapping for `monoarg` and analyzes the
  * entry. `npmStatic` undefined is the flagless lane. */
 async function arm(npmStatic?: readonly string[]): Promise<ReturnType<typeof analyze>> {
   process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-  /* Named through the ENVIRONMENT. AUTHORED_JS_DEFAULT_PACKAGES is a reviewed
-   * constant and provenance-authored-js.test.ts exists to make changing it a
-   * human decision; this file touches neither. */
-  process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "monoarg";
   setProvenanceSources(await resolveProvenanceSources(entry));
   return analyze(entry, npmStatic === undefined ? {} : { npmStatic });
 }
@@ -214,7 +208,6 @@ describe("provenance + npm-static: the mono gate answers by package identity", (
    * and arm A proves nothing about package identity. */
   test("D: the ordinary --npm-static route (no provenance) was never broken", () => {
     delete process.env["SCRIPTC_PROVENANCE_MANIFEST"];
-    delete process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"];
     setProvenanceSources(null);
     const r = analyze(entry, { npmStatic: ["monoarg"] });
     expect(r.coverage.provenance?.packages ?? []).toEqual([]);
@@ -234,7 +227,6 @@ describe("provenance + npm-static: the mono gate answers by package identity", (
    * gate on it builds, and Node's output is the oracle. */
   test("the static binary runs, and matches Node", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "monoarg";
     setProvenanceSources(await resolveProvenanceSources(entry));
     mkdirSync(outDir, { recursive: true });
     const outPath = join(outDir, exeName("monoarg"));

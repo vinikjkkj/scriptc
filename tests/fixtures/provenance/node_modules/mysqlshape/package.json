@@ -1,0 +1,7 @@
+{
+  "name": "mysqlshape",
+  "version": "4.2.0",
+  "main": "index.js",
+  "exports": { ".": "./index.js", "./package.json": "./package.json", "./promise": "./promise.js", "./promise.js": "./promise.js" },
+  "scripts": { "test": "node test.js", "src:build": "node build-src.js" }
+}
