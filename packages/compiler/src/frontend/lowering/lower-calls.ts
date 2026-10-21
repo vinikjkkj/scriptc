@@ -10161,10 +10161,24 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const iv = shape.indexValue;
       if (iv.kind === "dyn" || isUnitType(iv)) return null;
       const atWidth = L.withUndefinedArmOf(iv);
+      const widenable =
+        atWidth !== null &&
+        atWidth.kind === "union" &&
+        L.armTag(atWidth.unionId, UNDEFINED_T) >= 0 &&
+        L.armTag(atWidth.unionId, iv) >= 0;
+      if (!widenable) {
+        // A value type that is already a union (`Record<string, SqlValue>`)
+        // cannot be read back at the widened width (the undefined arm would
+        // flatten into its arms), but the question was only ever "is this
+        // key a live entry of the overflow map": ask the map.
+        const recv = L.lowerExpr(recvNode);
+        if (recv.type.kind !== "record") return null; // probe/lower drift
+        const k = keyOf();
+        if (k === null) return null;
+        return { kind: "recordOvfHas", obj: recv, shapeId: recv.type.shapeId, key: k, type: BOOL, loc };
+      }
       if (atWidth === null || atWidth.kind !== "union") return null;
       const utag = L.armTag(atWidth.unionId, UNDEFINED_T);
-      if (utag < 0) return null;
-      if (L.armTag(atWidth.unionId, iv) < 0) return null;
       const receiver = L.lowerExpr(recvNode);
       if (receiver.type.kind !== "record") return null; // probe/lower drift
       const key = keyOf();

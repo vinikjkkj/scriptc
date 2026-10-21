@@ -8383,6 +8383,16 @@ class LlEmitter {
         B.line(`${t} = call ptr @scr_map_keys_js_order(ptr ${ovf})`);
         return this.own({ name: t, type: e.type });
       }
+      case "recordOvfHas": {
+        // Own-key membership of the overflow map; both operands borrowed.
+        const obj = this.emitExpr(e.obj);
+        const key = this.emitExpr(e.key);
+        const ovf = this.recordOvfPtr(obj.name, e.shapeId);
+        this.declare(`declare zeroext i1 @scr_map_has_str(ptr, ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call zeroext i1 @scr_map_has_str(ptr ${ovf}, ptr ${key.name})`);
+        return { name: t, type: e.type };
+      }
       case "recordOvfSlots": {
         // The same enumeration as LIVE ENTRY SLOTS - a fresh f64[] snapshot
         // (+1); the record is borrowed.
