@@ -8145,7 +8145,7 @@ class LlEmitter {
           };
           this.regexInstances.set(key, re);
         }
-        if (/[gy]/.test(e.flags)) {
+        if (/[gy]/.test(e.flags) || e.fresh === true) {
           // A /g or /y literal carries lastIndex: a fresh +1 heap clone per
           // evaluation (the C emitter's rule).
           this.declare(`declare ptr @scr_regex_clone(ptr)`);

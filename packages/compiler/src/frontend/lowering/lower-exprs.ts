@@ -19897,7 +19897,33 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // fence above rejected still reaches the IR validator instead of
     // being silently dropped out of an already-erroring program.
     const ordered = [..."dgimsuvy"].filter((f) => flags.includes(f)).join("");
-    return { kind: "regexLit", pattern, flags: ordered, type: REGEX, loc: locOf(expr) };
+    // JS builds a NEW RegExp object per evaluation of a literal. That is
+    // observable only when the object can outlive the expression: bound,
+    // stored, returned, or handed to code that may keep it (lastIndex, ===).
+    // A literal consumed in place -- `/x/.test(s)`, `s.replace(/x/, ..)` --
+    // never escapes, so it keeps the shared immortal static. Every other
+    // position asks for a fresh object (`fresh`); /g and /y literals are
+    // always fresh (their lastIndex is real state).
+    let cur: ts.Node = expr;
+    let par: ts.Node = expr.parent;
+    while (
+      ts.isParenthesizedExpression(par) || ts.isNonNullExpression(par) || ts.isAsExpression(par) ||
+      ts.isSatisfiesExpression(par) || ts.isAssertionExpression(par)
+    ) {
+      cur = par;
+      par = par.parent;
+    }
+    let inPlace = false;
+    if (ts.isPropertyAccessExpression(par) && par.expression === cur) {
+      inPlace = true;
+    } else if (
+      ts.isCallExpression(par) && par.arguments.includes(cur as ts.Expression) &&
+      ts.isPropertyAccessExpression(par.expression) &&
+      L.mapTypeOf(L.typeOf(par.expression.expression))?.kind === "string" && L.isStdlibMember(par.expression)
+    ) {
+      inPlace = true;
+    }
+    return { kind: "regexLit", pattern, flags: ordered, ...(inPlace ? {} : { fresh: true }), type: REGEX, loc: locOf(expr) };
   }
 
 /** The pattern's named capture groups, in source order: each `(?<name>`

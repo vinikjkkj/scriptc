@@ -11223,6 +11223,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8104-regex-literal-fresh-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/8104-regex-literal-fresh-object.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/820-multi-decl.ts": {
    "order": [
     "<repo>/tests/corpus/820-multi-decl.ts"

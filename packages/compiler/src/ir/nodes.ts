@@ -6542,7 +6542,7 @@ export type IrExpr =
    * (a pattern the engine rejects aborts with a clear message; Node throws
    * SyntaxError at parse time — documented divergence). Result is +1 (a
    * no-op retain on the immortal). */
-  | { kind: "regexLit"; pattern: string; flags: string; type: IrType; loc: SrcLoc }
+  | { kind: "regexLit"; pattern: string; flags: string; fresh?: boolean; type: IrType; loc: SrcLoc }
   /** The strings object of a tagged template `tag\`a${x}b\`` — the COOKED
    * span texts. `key` is a per-SITE identity (the spec canonicalizes the
    * template object per template-literal occurrence, so two sites with

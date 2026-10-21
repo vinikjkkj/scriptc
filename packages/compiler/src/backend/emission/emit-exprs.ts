@@ -968,7 +968,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // object per evaluation: clone the immortal (a fresh +1 heap regex
         // sharing its bytecode, lastIndex 0). Every other literal stays the
         // immortal immutable static.
-        if (/[gy]/.test(e.flags)) return E.newTemp(e.type, `scr_regex_clone(&${sym})`);
+        if (/[gy]/.test(e.flags) || e.fresh === true) return E.newTemp(e.type, `scr_regex_clone(&${sym})`);
         return E.newTemp(e.type, `scr_regex_retain(&${sym})`);
       }
       case "templateStrings": {
