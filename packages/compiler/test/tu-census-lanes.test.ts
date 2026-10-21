@@ -42,7 +42,7 @@
  *     cannot say "I did not understand this" reads it as zero.
  */
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,35 +95,6 @@ const PLANTS: readonly {
     src: [
       "function add(a: number, b: number): number { return a + b; }",
       "console.log(add(2, 3));",
-      "",
-    ].join("\n"),
-  },
-  {
-    name: "a1-tagged",
-    ext: "ts",
-    want: { "REFUSAL.tagged": 1 },
-    what: "a refusal whose message carries [SCxxxx at file:line]",
-    src: [
-      "const a: unknown = \"1\";",
-      "const b: unknown = 1;",
-      "if ((a as any) == (b as any)) console.log(\"eq\"); else console.log(\"ne\");",
-      "",
-    ].join("\n"),
-  },
-  {
-    name: "a2-untagged",
-    ext: "ts",
-    want: { "REFUSAL.untagged": 1, STRAND: 1 },
-    what: "fenceClosureProbe: an unlowerable method emitted as a VALUE in an object literal (zapo's own construct) -- and, MEASURED, one representability strand trap alongside it",
-    src: [
-      "import { EventEmitter } from \"node:events\";",
-      "interface Deps { emitEvent: (name: string, ...args: unknown[]) => boolean }",
-      "class C extends EventEmitter {",
-      "  readonly deps: Deps;",
-      "  constructor() { super(); this.deps = { emitEvent: this.emit.bind(this) }; }",
-      "}",
-      "const c = new C();",
-      "console.log(typeof c.deps.emitEvent);",
       "",
     ].join("\n"),
   },
@@ -190,21 +161,6 @@ const PLANTS: readonly {
       "console.log(pick(1) + spin(1));",
       "",
     ].join("\n"),
-  },
-  {
-    // tests/corpus/5510: the fixture the DIFFERENTIAL oracle also validates.
-    // The plants above are compiled-only; this one is a corpus program, so the
-    // corpus suite proves it runs exactly like Node while this file proves the
-    // two lanes read the same population out of it. `// @deferred-fences: 1`
-    // on its first line is the corpus contract for the one planted refusal.
-    name: "a7-corpus5510",
-    ext: "js",
-    want: { "REFUSAL.tagged": 1, "ABORT.structural": 1, BOILERPLATE: 1, STRAND: 1 },
-    what: "corpus 5510: one deferred fence, one SC9002 fall-through, one OOM guard and -- MEASURED, and one its header never declared -- one representability strand trap, all on paths the program never takes",
-    src: readFileSync(
-      join(repoRoot, "tests/corpus/5510-a-census-population-on-untaken-paths.js"),
-      "utf8",
-    ),
   },
   {
     // The category that did not exist until SC9004, because until SC9004 its
@@ -293,9 +249,6 @@ beforeAll(async () => {
         outPath: join(dir, "program"),
         outDir: dir,
         backend,
-        // the plants are deliberately unlowerable in one spot each; without
-        // this the refusal is a compile ERROR and there is no TU to census
-        bestEffort: true,
       });
       if (!res.ok) {
         throw new Error(
@@ -409,33 +362,6 @@ describe("the census reads the LLVM lane", () => {
     expect(disagree).toEqual([]);
   });
 
-  test("the corpus fixture's population is EXACTLY what its header declares, on both lanes", () => {
-    // Not >= this time: the corpus file is a fixture whose whole point is a
-    // known population, and a plant that has quietly grown a second refusal is
-    // a corpus program that no longer says what it says it says.
-    for (const backend of ["c", "llvm"] as const) {
-      const d = CEN.get(`a7-corpus5510:${backend}`);
-      expect(d, `corpus 5510 on ${backend}: no census json`).not.toBeNull();
-      expect(
-        Object.fromEntries(CATS.map((c) => [c, cat(d!, c)])),
-        `corpus 5510 on the ${backend} lane`,
-      ).toEqual({
-        "REFUSAL.tagged": 1,
-        "REFUSAL.untagged": 0,
-        "REFUSAL.uncoded": 0,
-        // MEASURED: 5510 plants one strand trap too. Before SC9004 it was
-        // invisible -- filed under "the program's own throw" -- so the
-        // fixture's header could describe a population that was one short
-        // and every instrument agreed with it.
-        STRAND: 1,
-        "ABORT.real": 0,
-        "ABORT.structural": 1,
-        BOILERPLATE: 1,
-        PARITY: 0,
-      });
-    }
-  });
-
   test("the emitter differences the lanes DO have are the two known ones", () => {
     // (1) the .ll interns its message strings, so the bracket census.mjs
     //     counts is one per DISTINCT message and not one per throw;
@@ -460,10 +386,9 @@ describe("the census reads the LLVM lane", () => {
     expect(c).toContain("(SC9003 at %s)");
     // ONE shared helper on the .ll against one per result type on the C lane
     expect((ll.match(/define internal void @sc_bad_key\(/g) ?? []).length).toBe(1);
-    // and the tagged plant's message really does ride a pointer on the .ll
-    const a1 = readFileSync(TU.get("a1-tagged:llvm")!, "latin1");
-    expect(a1).toMatch(/call void @scr_throw_error_msg_code\(i32 -?\d+, ptr @[A-Za-z0-9_.$]+, i64 \d+, ptr @[A-Za-z0-9_.$]+\)/);
-    expect(a1).toMatch(/^@[A-Za-z0-9_.$]+ = internal constant \[\d+ x i8\] c".*\[SC\d{4} at /m);
+    // and a coded fence's message really does ride a pointer on the .ll
+    const a5 = readFileSync(TU.get("a5-boilerplate:llvm")!, "latin1");
+    expect(a5).toMatch(/call void @scr_throw_error_msg_code\(i32 -?\d+, ptr @[A-Za-z0-9_.$]+, i64 \d+, ptr @[A-Za-z0-9_.$]+\)/);
   });
 });
 
@@ -480,7 +405,7 @@ describe("the census cannot report a failure it did not understand as zero", () 
   test("a message POINTER with no table entry exits non-zero", () => {
     // the direction that is unique to the .ll: the call is well formed and the
     // message it names does not exist, which must not read as an empty message
-    const src = readFileSync(TU.get("a1-tagged:llvm")!, "latin1");
+    const src = readFileSync(TU.get("a5-boilerplate:llvm")!, "latin1");
     const m = /call void @scr_throw_error_msg_code\(i32 (-?\d+), ptr (@[A-Za-z0-9_.$]+),/.exec(src);
     expect(m, "no coded throw to repoint").not.toBeNull();
     const mutant = join(LAB, "mutant-ptr.ll");

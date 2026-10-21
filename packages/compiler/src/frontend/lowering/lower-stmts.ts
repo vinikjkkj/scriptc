@@ -395,12 +395,7 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     // position — instead of failing the whole build). TypeScript keeps
     // compile fences. ICEs (SC9001) always stay compile errors.
     const sf = stmts[0]?.getSourceFile();
-    // --best-effort opens the JS-source deferral to TypeScript too: a
-    // statement whose construct has no static lowering compiles to a
-    // runtime fence instead of failing the build, so a program builds as
-    // long as every statement it RUNS lowers (the reachable-but-never-run
-    // teardown/plugin/pairing paths never throw). ICEs stay compile errors.
-    const deferFences = (sf !== undefined && isJsSourceFile(sf)) || L.bestEffort;
+    const deferFences = sf !== undefined && isJsSourceFile(sf);
     // Register this list as open for the forward-capture machinery: a
     // nested function lowering mid-list may pre-declare a LATER const of
     // this list as a TDZ box (predeclareForwardCapture), pushing the

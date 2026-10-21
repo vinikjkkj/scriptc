@@ -460,16 +460,6 @@ export interface LowerOptions {
    * imports; without this option ambient declarations keep Node's ordinary
    * ReferenceError behavior. */
   ffiImports?: readonly IrFfiImport[];
-  /** --best-effort: a STATEMENT whose construct has no static lowering
-   * compiles to a runtime fence (a catchable, SC-coded throw at the
-   * statement's position) instead of failing the build — the JS-input
-   * deferral rule, opened to TypeScript sources on request. The build then
-   * succeeds as long as every REACHED-and-RUN statement lowers; a statement
-   * the program never runs (a plugin install, a teardown path the entry
-   * never takes) never throws. ICEs (SC9001) and declaration/type fences
-   * (a signature that cannot map) stay compile errors — only per-statement
-   * construct fences defer. */
-  bestEffort?: boolean;
 }
 
 /** The Lowerer's pass configuration (see lowerToIr). */
@@ -496,9 +486,6 @@ export interface LowererMode {
   /** Program-validated ambient declaration symbols for each FFI name.
    * Undefined in discovery's legacy call-local validation path. */
   ffiBindingSymbols?: ReadonlyMap<string, ReadonlySet<ts.Symbol>>;
-  /** --best-effort (LowerOptions.bestEffort): defer per-statement construct
-   * fences to runtime in TypeScript sources too. */
-  bestEffort?: boolean;
 }
 
 /** Build lowering runs in two passes over the same ts.Program:
@@ -600,7 +587,6 @@ export function lowerToIr(
   overflowShapeKeysDenied.clear();
   overflowShapeKeysAsked.clear();
   const targetPlatform = options.targetPlatform ?? process.platform;
-  const bestEffort = options.bestEffort ?? false;
   const startupCrash = options.startupCrash ?? null;
   // Modules reachable only through dynamic import() of the program's own
   // files join the compiled graph here, ONCE, before any pass constructs
@@ -627,7 +613,6 @@ export function lowerToIr(
   const ffiImports = options.ffiImports ?? [];
   const validation = new Lowerer(program, entry, moduleOrder, dynamic, {
     targetPlatform,
-    bestEffort,
     ffiImports,
   });
   const ffiValidation = validateFfiImports(validation);
@@ -638,16 +623,6 @@ export function lowerToIr(
   //    shadowing a configured ambient name is mistaken for FFI while
   //    computing reachability, even though emit would correctly lower it
   //    as ordinary TypeScript.
-  //  - the same DEFERRAL rule (bestEffort): --best-effort makes emit lower
-  //    PAST a construct that has no lowering — the statement becomes a
-  //    runtime fence, or a function-valued object member becomes a trap
-  //    closure — so emit reaches resolution sites that a poisoning
-  //    discovery pass abandoned. Every edge between the poison and the end
-  //    of that statement is then missing from `reachable`, the callee is
-  //    never emitted, and the call emit DID produce validates as
-  //    "call to undeclared function": an SC9001 ICE that --best-effort
-  //    cannot defer, in a build whose whole point was deferral. Discovery
-  //    must defer wherever emit defers.
   //
   // FFI-free builds reuse the validation lowerer (validation is an
   // immediate no-op there), retaining the historical two-pass
@@ -656,7 +631,6 @@ export function lowerToIr(
     ? validation
     : new Lowerer(program, entry, moduleOrder, dynamic, {
         targetPlatform,
-        bestEffort,
         ffiImports,
         ffiBindingSymbols: ffiValidation.symbolsByName,
       });
@@ -668,7 +642,6 @@ export function lowerToIr(
   const emit = new Lowerer(program, entry, moduleOrder, dynamic, {
     reachable,
     targetPlatform,
-    bestEffort,
     startupCrash,
     ffiImports,
     ffiBindingSymbols: ffiValidation.symbolsByName,
@@ -1961,7 +1934,6 @@ export class Lowerer {
    * selects the platform-keyed builtin surfaces (builtinModuleFnsOf /
    * builtinModuleConstOf in surfaces.ts). */
   readonly targetPlatform: string;
-  readonly bestEffort: boolean;
   /** LowererMode.startupCrash — buildMain opens %main with the throw. */
   readonly startupCrash: StartupCrash | null;
   /** Outbound native bindings by their source-level ambient name. */
@@ -2037,7 +2009,6 @@ export class Lowerer {
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();
     this.targetPlatform = mode.targetPlatform ?? process.platform;
-    this.bestEffort = mode.bestEffort ?? false;
     this.startupCrash = mode.startupCrash ?? null;
     this.ffiImports = mode.ffiImports ?? [];
     this.ffiImportsByName = new Map(this.ffiImports.map((entry) => [entry.name, entry]));

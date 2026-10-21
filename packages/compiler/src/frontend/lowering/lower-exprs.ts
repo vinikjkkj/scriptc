@@ -9079,9 +9079,7 @@ function pureFuncValueInit(L: Lowerer, node: ts.Node): boolean {
  * the runtime-fence inventory, exactly like a fenced statement.
  *
  * WHEN it applies is the deferral rule the whole build already runs on
- * (lowerStmts' `deferFences`): JavaScript sources always — no annotation
- * exists there to change what lowers — and TypeScript under --best-effort,
- * which asks for exactly this trade. WHAT it applies to is the purity rule
+ * (lowerStmts' `deferFences`): JavaScript sources. WHAT it applies to is the purity rule
  * above: the substitution must not skip work. With a func slot the trap's
  * ABI is the slot's own, so any pure form is admissible; without one the
  * arity has to be read off a syntactic lambda, so only those qualify.
@@ -9094,7 +9092,7 @@ function fenceClosureProbe(
   slotType: IrType | undefined,
   attempt: () => IrExpr,
 ): IrExpr | null {
-  if (!isJsSourceFile(node.getSourceFile()) && !L.bestEffort) return null;
+  if (!isJsSourceFile(node.getSourceFile())) return null;
   let inner: ts.Node = node;
   while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
   if (slotType !== undefined && slotType.kind !== "func") return null;
