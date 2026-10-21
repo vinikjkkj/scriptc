@@ -1030,47 +1030,11 @@ export function funcOf(params: IrType[], ret: IrType): IrType {
   return { kind: "func", params, ret };
 }
 
-/** The union FUNC/SET/MAP-arm sibling rule, shared by the frontend's union
- * builders and the validator: FUNC arms are valid beside ANY sibling —
- * `typeof x === "function"` narrows against data arms, unit tag tests
- * cover the nullable-callback shape, and between func arms closures
- * compare by pointer identity per tag (unionEq), so `x === String` is the
- * narrowing (the primitive-constructor tables' `StringConstructor |
- * NumberConstructor` field, and LinkOptions' `false | ((s: string) =>
- * string)`).
- *
- * A SET arm follows the func rule for the same reason, one constructor
- * over: `x instanceof Set` IS its narrowing test, and over a union that
- * test is the runtime TAG compare (lowerInstanceOf's Set arm) — exact
- * against every sibling kind, where `typeof` answers "object" for the
- * whole object-flavored family and splits nothing. Reads inside the
- * branch bridge through maybeNarrow's tag-CHECKED %union.narrow, so a
- * narrowing the runtime cannot confirm throws the catchable TypeError
- * rather than reading one arm's payload through another's slot.
- *
- * The one shape with no test is a SECOND set arm: `instanceof Set`
- * answers true for both `Set<string>` and `Set<number>`, and nothing
- * else separates them — the promise rule's "a second promise arm stays
- * refused", exactly.
- *
- * A MAP arm now follows the SET rule exactly, one constructor further:
- * `instanceof Map` lowers to the same runtime TAG compare
- * (lowerInstanceOf's Map arm, mirroring its Set arm), so it needs no more
- * than a SET arm does. The unit-only carve-out predates that lowering —
- * admitting the arm beside data siblings ahead of it would have admitted a
- * union no program could narrow, which is why it stayed unit-only until
- * the lowering existed. The one shape with no test is a SECOND map arm,
- * for the identical reason a second Set arm has none: `instanceof Map`
- * answers true for both `Map<string, A>` and `Map<string, B>`, and
- * nothing else separates them. */
-export function unionFuncSetArmsOk(arms: IrType[]): boolean {
-  return arms.every((a, i) => {
-    if (a.kind === "map") return !arms.some((b, j) => j !== i && b.kind === "map");
-    if (a.kind === "set") return !arms.some((b, j) => j !== i && b.kind === "set");
-    return true;
-  });
-}
-
+/* The union func/set/map-arm sibling rule is gone: every one of these arms has a
+ * narrowing test (typeof "function", instanceof Set, instanceof Map -- the tag
+ * compare, exact against every sibling), and SEVERAL arms of one constructor
+ * are told apart by member dispatch on the tag (lowerUnionContainerDispatch),
+ * so no arm combination is refused here. */
 /** Canonical, injective text form of an IrType — the building block of
  * shape/union identity keys, generic-function instantiation keys, and the
  * backend's per-type helper interning (jsonStringify/dynCheck walkers).

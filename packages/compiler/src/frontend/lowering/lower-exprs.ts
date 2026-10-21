@@ -8,7 +8,7 @@ import * as ts from "../ts7/adapter.js";
 import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { dynImportBindingDeclOf } from "./lower-island.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
@@ -17898,7 +17898,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
       // `x instanceof Set` over a union with a set arm — the RegExp rule
       // one constructor over, and the test that gives a SET arm a union
-      // home at all (unionFuncSetArmsOk). `typeof` answers "object" for
+      // home at all. `typeof` answers "object" for
       // a set and for every object-flavored sibling alike, so this is the
       // only thing that separates them; over a union it is the runtime
       // TAG compare, which is exact against EVERY sibling kind, not just
@@ -17951,7 +17951,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
       // `x instanceof Map` over a union with a map arm — the Set rule one
       // constructor over, now that the MAP arm's union-home rule
-      // (unionFuncSetArmsOk / unionArmsHaveHomes / armHasUnionHome) admits
+      // (unionArmsHaveHomes / armHasUnionHome) admits
       // it beside data siblings, not just beside units: `typeof` answers
       // "object" for a map and for every object-flavored sibling alike, so
       // this is the only thing that separates them; over a union it is the
@@ -20522,8 +20522,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (joinArms.length === 0) return null;
     if (
       joinArms.length > 1 &&
-      (!unionFuncSetArmsOk(joinArms) ||
-        joinArms.some((a) => a.kind === "map" || a.kind === "dyn" || a.kind === "jsval" || a.kind === "generator" || a.kind === "caught"))
+      joinArms.some((a) => a.kind === "map" || a.kind === "dyn" || a.kind === "jsval" || a.kind === "generator" || a.kind === "caught")
     ) {
       return null;
     }
@@ -20652,13 +20651,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (joinArms.length === 0) return null;
     // The join must be a BUILDABLE union: arm kinds the union invariants
     // admit (no map/dyn/jsval/generator arms; func arms only beside
-    // func/unit siblings — unionFuncSetArmsOk, the validator's rule). A
+    // func/unit siblings). A
     // join mixing, say, a func answer with data answers has no union to
     // surface as; the caller owns the fence message.
     if (
       joinArms.length > 1 &&
-      (!unionFuncSetArmsOk(joinArms) ||
-        joinArms.some((a) => a.kind === "map" || a.kind === "dyn" || a.kind === "jsval" || a.kind === "generator" || a.kind === "caught"))
+      joinArms.some((a) => a.kind === "map" || a.kind === "dyn" || a.kind === "jsval" || a.kind === "generator" || a.kind === "caught")
     ) {
       return null;
     }
