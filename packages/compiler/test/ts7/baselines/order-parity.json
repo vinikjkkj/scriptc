@@ -10946,6 +10946,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7800-map-union-two-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7800-map-union-two-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7801-set-union-two-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7801-set-union-two-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7802-map-union-string-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/7802-map-union-string-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7803-map-union-recursive-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/7803-map-union-recursive-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7804-map-union-object-property.ts": {
+   "order": [
+    "<repo>/tests/corpus/7804-map-union-object-property.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7810-a-definite-assignment-local-reads-undefined-before-its-assignment.ts": {
    "order": [
     "<repo>/tests/corpus/7810-a-definite-assignment-local-reads-undefined-before-its-assignment.ts"
@@ -10985,6 +11015,30 @@
   "<repo>/tests/corpus/7816-placeholder-initializers-and-compound-assignment-on-deferred-fields.ts": {
    "order": [
     "<repo>/tests/corpus/7816-placeholder-initializers-and-compound-assignment-on-deferred-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts": {
+   "order": [
+    "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts"
    ],
    "diags": []
   },
@@ -11114,6 +11168,78 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/810-do-while.ts": {
+   "order": [
+    "<repo>/tests/corpus/810-do-while.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/820-multi-decl.ts": {
+   "order": [
+    "<repo>/tests/corpus/820-multi-decl.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/830-let-uninitialized.ts": {
+   "order": [
+    "<repo>/tests/corpus/830-let-uninitialized.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8300-an-implicit-any-arrow-const-read-from-a-function.js": {
+   "order": [
+    "<repo>/tests/corpus/8300-an-implicit-any-arrow-const-read-from-a-function.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8301-process-exitcode-is-a-validated-int32-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/8301-process-exitcode-is-a-validated-int32-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8302-process-exit-uses-the-exit-code.js": {
+   "order": [
+    "<repo>/tests/corpus/8302-process-exit-uses-the-exit-code.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8303-a-class-declared-inside-a-function-or-block.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8303-a-class-declared-inside-a-function-or-block.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8304-a-class-declared-inside-a-typed-function.ts": {
+   "order": [
+    "<repo>/tests/corpus/8304-a-class-declared-inside-a-typed-function.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8305-a-class-declared-in-a-function-capturing-its-locals.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8305-a-class-declared-in-a-function-capturing-its-locals.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8306-a-typed-class-declared-in-a-function-capturing-its-locals.ts": {
+   "order": [
+    "<repo>/tests/corpus/8306-a-typed-class-declared-in-a-function-capturing-its-locals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8307-reflect-ownkeys-over-records-and-arrays.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8307-reflect-ownkeys-over-records-and-arrays.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8308-reflect-ownkeys-typed.ts": {
+   "order": [
+    "<repo>/tests/corpus/8308-reflect-ownkeys-typed.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8309-an-implicit-any-callback-by-reference-to-array-hofs.cjs": {
    "order": [
     "<repo>/tests/corpus/8309-an-implicit-any-callback-by-reference-to-array-hofs.cjs"
@@ -11123,6 +11249,12 @@
   "<repo>/tests/corpus/8310-a-void-call-used-as-a-value.cjs": {
    "order": [
     "<repo>/tests/corpus/8310-a-void-call-used-as-a-value.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8311-a-rest-parameter-arrow-const-read-from-a-function.js": {
+   "order": [
+    "<repo>/tests/corpus/8311-a-rest-parameter-arrow-const-read-from-a-function.js"
    ],
    "diags": []
   },
@@ -11144,9 +11276,39 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/810-do-while.ts": {
+  "<repo>/tests/corpus/8315-a-constructor-assigned-function-shadows-an-inherited-method.cjs": {
    "order": [
-    "<repo>/tests/corpus/810-do-while.ts"
+    "<repo>/tests/corpus/8315-a-constructor-assigned-function-shadows-an-inherited-method.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8316-own-keys-of-class-instances-through-the-box-registry.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8316-own-keys-of-class-instances-through-the-box-registry.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8317-own-keys-of-functions-and-classes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8317-own-keys-of-functions-and-classes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8318-fs-callback-forms-read-readfile-mkdtemp.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8318-fs-callback-forms-read-readfile-mkdtemp.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8319-net-connect-over-a-run-time-option-bag.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8319-net-connect-over-a-run-time-option-bag.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8320-dgram-send-callback-list-and-connected-forms.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8320-dgram-send-callback-list-and-connected-forms.cjs"
    ],
    "diags": []
   },
@@ -11162,15 +11324,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/820-multi-decl.ts": {
+  "<repo>/tests/corpus/8330-arithmetic-between-a-number-and-an-any-value.ts": {
    "order": [
-    "<repo>/tests/corpus/820-multi-decl.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/830-let-uninitialized.ts": {
-   "order": [
-    "<repo>/tests/corpus/830-let-uninitialized.ts"
+    "<repo>/tests/corpus/8330-arithmetic-between-a-number-and-an-any-value.ts"
    ],
    "diags": []
   },
@@ -12370,9 +12526,76 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-a-written-local.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-a-written-local.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-from-a-static-member.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-from-a-static-member.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-class-declared-in-a-function-used-as-a-value.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-class-declared-in-a-function-used-as-a-value.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-constructor-function-over-the-classes-own-method.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-constructor-function-over-the-classes-own-method.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/js-extends-poisoned-base.js": {
    "order": [
     "<repo>/tests/diagnostics/js-extends-poisoned-base.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-new-proxy.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-new-proxy.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-function-with-added-properties.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-function-with-added-properties.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-run-time-specifier-classes.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-run-time-specifier-classes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/main.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/inner/t.cjs",
+    "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-with-a-run-time-specifier.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-with-a-run-time-specifier.cjs"
    ],
    "diags": []
   },
@@ -13614,223 +13837,6 @@
   "<repo>/tests/fixtures/node-types/streams.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts": {
-   "order": [
-    "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts": {
-   "order": [
-    "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts": {
-   "order": [
-    "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts": {
-   "order": [
-    "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7800-map-union-two-arms.ts": {
-   "order": [
-    "<repo>/tests/corpus/7800-map-union-two-arms.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7801-set-union-two-arms.ts": {
-   "order": [
-    "<repo>/tests/corpus/7801-set-union-two-arms.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7802-map-union-string-arm.ts": {
-   "order": [
-    "<repo>/tests/corpus/7802-map-union-string-arm.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7803-map-union-recursive-value.ts": {
-   "order": [
-    "<repo>/tests/corpus/7803-map-union-recursive-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7804-map-union-object-property.ts": {
-   "order": [
-    "<repo>/tests/corpus/7804-map-union-object-property.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-require-run-time-specifier-classes.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/js-require-run-time-specifier-classes.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-new-proxy.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-new-proxy.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/main.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/inner/t.cjs",
-    "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-require-with-a-run-time-specifier.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/js-require-with-a-run-time-specifier.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8300-an-implicit-any-arrow-const-read-from-a-function.js": {
-   "order": [
-    "<repo>/tests/corpus/8300-an-implicit-any-arrow-const-read-from-a-function.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8301-process-exitcode-is-a-validated-int32-slot.js": {
-   "order": [
-    "<repo>/tests/corpus/8301-process-exitcode-is-a-validated-int32-slot.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8302-process-exit-uses-the-exit-code.js": {
-   "order": [
-    "<repo>/tests/corpus/8302-process-exit-uses-the-exit-code.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8304-a-class-declared-inside-a-typed-function.ts": {
-   "order": [
-    "<repo>/tests/corpus/8304-a-class-declared-inside-a-typed-function.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-class-declared-in-a-function-used-as-a-value.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-class-declared-in-a-function-used-as-a-value.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8303-a-class-declared-inside-a-function-or-block.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8303-a-class-declared-inside-a-function-or-block.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8307-reflect-ownkeys-over-records-and-arrays.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8307-reflect-ownkeys-over-records-and-arrays.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8308-reflect-ownkeys-typed.ts": {
-   "order": [
-    "<repo>/tests/corpus/8308-reflect-ownkeys-typed.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-constructor-function-over-the-classes-own-method.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-constructor-function-over-the-classes-own-method.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8315-a-constructor-assigned-function-shadows-an-inherited-method.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8315-a-constructor-assigned-function-shadows-an-inherited-method.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8317-own-keys-of-functions-and-classes.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8317-own-keys-of-functions-and-classes.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8316-own-keys-of-class-instances-through-the-box-registry.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8316-own-keys-of-class-instances-through-the-box-registry.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-function-with-added-properties.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-function-with-added-properties.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8318-fs-callback-forms-read-readfile-mkdtemp.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8318-fs-callback-forms-read-readfile-mkdtemp.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8311-a-rest-parameter-arrow-const-read-from-a-function.js": {
-   "order": [
-    "<repo>/tests/corpus/8311-a-rest-parameter-arrow-const-read-from-a-function.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8319-net-connect-over-a-run-time-option-bag.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8319-net-connect-over-a-run-time-option-bag.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8320-dgram-send-callback-list-and-connected-forms.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8320-dgram-send-callback-list-and-connected-forms.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-a-written-local.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-a-written-local.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8306-a-typed-class-declared-in-a-function-capturing-its-locals.ts": {
-   "order": [
-    "<repo>/tests/corpus/8306-a-typed-class-declared-in-a-function-capturing-its-locals.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8305-a-class-declared-in-a-function-capturing-its-locals.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8305-a-class-declared-in-a-function-capturing-its-locals.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-from-a-static-member.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-class-declared-in-a-function-capturing-from-a-static-member.js"
    ],
    "diags": []
   }

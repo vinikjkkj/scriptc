@@ -11,9 +11,9 @@
   ],
   "typesVersion": "24.13.3",
   "counts": {
-    "total": 48,
+    "total": 47,
     "TYPE": 34,
-    "FENCE": 14
+    "FENCE": 13
   },
   "fenceClusters": {
     "NOTE": [
@@ -44,7 +44,6 @@
       "1448-stream-columns.ts: SC2020 process.stdout/stderr.columns as a plain number",
       "1567-server-close-override.ts: SC1090 optional/defaulted parameters as a value",
       "1686-stream-readable-paused.ts: SC1090 method calls like 'rest.toString'",
-      "1693-stream-pipe-backpressure.ts: SC1043 comparing non-number, non-string values",
       "1770-assert-dyn-strict.ts: SC2020 assert.strictEqual across number/string",
       "2462-qs-stringify.ts: SC2020 querystring.stringify over a wide value union",
       "(CLOSED by block/elemresolve: 2620-ee-override-once-order.ts and 2622-ee-override-filter.ts, SC1090 .join() element type - the checker's element was wider than the array's own, and .join's joinable-union test read the checker's)",
@@ -102,9 +101,7 @@
       "name": "1565-spawn-pipe-streams.ts",
       "mode": "FENCE",
       "codes": [
-        "SC1043",
         "SC1090",
-        "SC2011",
         "SC2020"
       ]
     },
@@ -142,13 +139,6 @@
       "mode": "FENCE",
       "codes": [
         "SC1090"
-      ]
-    },
-    {
-      "name": "1693-stream-pipe-backpressure.ts",
-      "mode": "FENCE",
-      "codes": [
-        "SC1043"
       ]
     },
     {

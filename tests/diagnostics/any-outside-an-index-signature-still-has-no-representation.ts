@@ -19,12 +19,6 @@ const arr: any[] = [1, "x"];
 // an `any` MEMBER of a record: same
 const rec = { item: {} as any, width: "10px" };
 
-// arithmetic on an `any`-typed READ out of an admitted store: the store
-// hands back a checked-dynamic value, and `+`/`*` on one have no static
-// operand types to pick an operation from
-console.log(admitted.a + 1);
-console.log(admitted.a * 2);
-
 // Object.entries over the admitted store: the checker's element type is
 // the TUPLE `[string, any]`, whose second slot is named. Object.keys,
 // for...in, `in`, delete, spread and JSON.stringify all compile over it.
