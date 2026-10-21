@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { caseFileSize, ccCompile, expectAbort, expectCasesPassed, exeSuffix } from "./cc.js";
+import { caseFileSize, ccCompile, expectAbort, exeSuffix } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -45,45 +45,51 @@ beforeAll(async () => {
 // ASCII, Latin-1, CJK, astral, and combining-mark strings, including the
 // documented lone-surrogate → U+FFFD divergence.
 //
-// On macOS every committed case matches byte-for-byte. On Linux (glibc,
-// measured on the sandbox-suite lane's AL2023 clang 15) exactly two
-// parseInt cases — giant base-36 inputs whose magnitude assembly rides
-// libm — land one ulp away from V8's correctly-rounded conversion.
-// scr_number.c is pinned and shared across every consumer, so the
-// divergence is documented HERE as an allowlist keyed by exact input and
-// exact divergent output: a third value, a new failing case, or a future
-// conversion fix all fail loudly.
-const LINUX_PARSEINT_ULP: ReadonlyMap<string, string> = new Map([
-  [
-    // parseInt("9007199254740993", 36): Node 1.9896986116031812e+24,
-    // glibc lane 1.9896986116031807e+24.
-    "parseInt(39303037313939323534373430393933 ; 36)",
-    "312e39383936393836313136303331383037652b3234",
-  ],
-  [
-    // parseInt("123456789012345678901234567890", 36):
-    // Node 1.436287679432363e+45, glibc lane 1.4362876794323633e+45.
-    "parseInt(313233343536373839303132333435363738393031323334353637383930 ; 36)",
-    "312e34333632383736373934333233363333652b3435",
-  ],
+// Exactly two parseInt cases are recorded for the host that generated the
+// file, not for every host: giant base-36 inputs. V8 assembles them with
+// one double multiply-add per 5-digit chunk (`number * multiplier + part`),
+// and whether that is one rounding (a fused multiply-add) or two depends on
+// the CPU the V8 binary was built for. The committed values are the fused
+// ones (an arm64 Mac); Node on x86-64 (Linux, the Windows runners, CI's
+// pinned v24.15.0, and v22/v25 here) answers with the unfused ones, and so
+// does the port, which reproduces V8's loop and fuses exactly when its own
+// compiler does. MEASURED: gen-string-cases.mjs regenerated under Node
+// 22.18, 24.15 and 25.9 on x86-64 differs from the committed file in these
+// two lines only, and the replacement bytes are the port's.
+//
+// So the committed bytes are not a portable oracle for these two inputs and
+// the right oracle is the running host's own Node, which is what this test
+// asks. The allowlist is keyed by exact input: a third mismatching case, or
+// either of these disagreeing with THIS host's Node, still fails loudly.
+const HOST_ARCH_PARSEINT: ReadonlySet<string> = new Set([
+  // parseInt("9007199254740993", 36): fused 1.9896986116031812e+24,
+  // unfused 1.9896986116031807e+24.
+  "parseInt(39303037313939323534373430393933 ; 36)",
+  // parseInt("123456789012345678901234567890", 36): fused
+  // 1.436287679432363e+45, unfused 1.4362876794323633e+45.
+  "parseInt(313233343536373839303132333435363738393031323334353637383930 ; 36)",
 ]);
+
+/** What this host's Node says for a `parseInt(<hex> ; 36)` mismatch key, as hex of String(result). */
+function hostParseInt36(key: string): string {
+  const m = /^parseInt\(([0-9a-f]+) ; 36\)$/.exec(key);
+  expect(m, `not a radix-36 parseInt key: ${key}`).not.toBeNull();
+  const input = Buffer.from(m![1]!, "hex").toString("utf8");
+  return Buffer.from(String(parseInt(input, 36)), "utf8").toString("hex");
+}
 
 test("string methods match Node on committed oracle cases", async () => {
   const r = await execFileAsync(bin, [casesFile]).then(
     (v) => ({ stderr: v.stderr }),
     (e: Error & { stderr?: string }) => ({ stderr: e.stderr ?? "" }),
   );
-  const stderr = r.stderr.trim();
-  if (process.platform !== "linux") {
-    expectCasesPassed(stderr, { cases: casesFile, extra: BUILTIN_CASES });
-    return;
-  }
-  const lines = stderr.split("\n");
+  const lines = r.stderr.trim().split("\n").map((l) => l.trimEnd());
   const mismatches = lines.filter((l) => l.startsWith("MISMATCH "));
   for (const line of mismatches) {
     const m = /^MISMATCH (.+) expected=[0-9a-f]* got=([0-9a-f]*)$/.exec(line);
     expect(m, `unparseable mismatch line: ${line}`).not.toBeNull();
-    expect(LINUX_PARSEINT_ULP.get(m![1]!), line).toBe(m![2]);
+    expect(HOST_ARCH_PARSEINT.has(m![1]!), `not a host-arch-dependent case: ${line}`).toBe(true);
+    expect(m![2], `${m![1]} vs this host's Node: ${line}`).toBe(hostParseInt36(m![1]!));
   }
   // The harness prints at most 20 mismatch lines; the pass-count tail is
   // the ground truth that NOTHING beyond the printed (allowlisted) set
@@ -95,7 +101,7 @@ test("string methods match Node on committed oracle cases", async () => {
   // subset the harness happened to reach.
   expect(Number(t![2]), "cases run vs the committed corpus").toBe(caseFileSize(casesFile) + BUILTIN_CASES);
   expect(Number(t![2]) - Number(t![1]), "failed-case count").toBe(mismatches.length);
-  expect(mismatches.length).toBeLessThanOrEqual(LINUX_PARSEINT_ULP.size);
+  expect(mismatches.length).toBeLessThanOrEqual(HOST_ARCH_PARSEINT.size);
 });
 
 // repeat(count) with count < 0 or Infinity is a RangeError in JS; scriptc
