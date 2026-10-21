@@ -1880,6 +1880,9 @@ export class Lowerer {
    * (a definite-assignment assertion waives tsc's guarantee, so a read can
    * still observe Node's undefined). Reads go through lyingRead. */
   readonly bangSymbols = new Set<ts.Symbol>();
+  /** Const bindings whose value may be Node's undefined while the slot stays
+   * plain: a shadow bool says whether it exists (lower-absent.ts). */
+  readonly absentFlags = new Map<ts.Symbol, import("./lower-absent.js").AbsentFlag>();
   readonly lyingResults = new WeakSet<IrExpr>();
   readonly bindEvidenceBusy = new Set<ts.Node>();
   /** Nested function DECLARATIONS lowered eagerly by the forward-hoisting

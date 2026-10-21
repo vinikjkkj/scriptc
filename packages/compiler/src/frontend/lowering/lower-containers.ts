@@ -1508,7 +1508,7 @@ function lowerOptionalDefaultArg(
   /** The key-carrying member-use miss: Node's message names the key's VALUE
    * (`a[i][j]` past the end reads "(reading '3')"), so the throw takes the
    * key as an argument. Returns the interned helper's name. */
-  function idxMissKeyHelper(L: Lowerer, elem: IrType, keyT: IrType, set: boolean, loc: SrcLoc): string {
+  export function idxMissKeyHelper(L: Lowerer, elem: IrType, keyT: IrType, set: boolean, loc: SrcLoc): string {
     const key = `idxMissK:${typeKey(elem)}:${typeKey(keyT)}:${set ? "set" : "get"}`;
     let name = L.arrHofHelpers.get(key);
     if (name) return name;

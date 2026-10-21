@@ -2637,6 +2637,10 @@ export type IrStmt =
  * the fresh array. */
 export type IrArrIntrinsicMethod =
   | "length"
+  /** `hasIndex(i)` -> bool: `i` is an integer in [0, length). The exact
+   * question behind Node's `a[i] !== undefined` for a dense array (a
+   * negative, fractional, NaN or past-the-end index reads undefined). */
+  | "hasIndex"
   /** `a.length = n` — JS's two-in-one: shrinking DROPS the tail
    * (refcounted elements release), growing appends ABSENT slots, n equal
    * to the current length is a no-op. Which one happens is a RUNTIME
