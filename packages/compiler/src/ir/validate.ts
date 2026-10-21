@@ -2406,8 +2406,15 @@ function validateFunction(
         // the LLVM emitter, so the three cannot disagree — and the
         // multi-arm form is admitted only over RECORD arms, the shape the
         // body's per-arm field read serves.
-        if (rest.length > 1 && !rest.every((a) => a.kind === "record")) {
-          err("multi-arm optChain receiver must have record non-unit arms", e.loc);
+        // (or MAP arms, or SET arms: the body dispatches the member on the
+        // tag — lowerUnionContainerDispatch.)
+        if (
+          rest.length > 1 &&
+          !rest.every((a) => a.kind === "record") &&
+          !rest.every((a) => a.kind === "map") &&
+          !rest.every((a) => a.kind === "set")
+        ) {
+          err("multi-arm optChain receiver must have record, map or set non-unit arms", e.loc);
           break;
         }
         if (activeChains.has(e.id)) err(`optChain id "${e.id}" shadows an active chain`, e.loc);

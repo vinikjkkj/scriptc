@@ -14934,8 +14934,10 @@ export class Lowerer {
     mapT: IrType & { kind: "map" },
     arity: number,
     fnRet: IrType,
-    loc: SrcLoc,): IrFunction {
-    return buildMapForEachFn(this, name, mapT, arity, fnRet, loc);
+    loc: SrcLoc,
+    cbValue?: IrType,
+    cbKey?: IrType,): IrFunction {
+    return buildMapForEachFn(this, name, mapT, arity, fnRet, loc, cbValue, cbKey);
   }
 
   lowerSetMethodCall(call: ts.CallExpression,
@@ -14953,8 +14955,9 @@ export class Lowerer {
     setT: IrType & { kind: "set" },
     arity: number,
     fnRet: IrType,
-    loc: SrcLoc,): IrFunction {
-    return buildSetForEachFn(this, name, setT, arity, fnRet, loc);
+    loc: SrcLoc,
+    cbElem?: IrType,): IrFunction {
+    return buildSetForEachFn(this, name, setT, arity, fnRet, loc, cbElem);
   }
 
   lowerRegexLiteral(expr: ts.RegularExpressionLiteral): IrExpr {
