@@ -67,9 +67,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* Node: IncomingMessage's readableHighWaterMark is 16384, not the 65536
- * byte default a bare `new Readable()` gets. Measured against v25.9.0. */
-#define SCR_HTTP_BODY_HWM 16384
+/* Node: an IncomingMessage takes its socket's readableHighWaterMark, which
+ * is the stream default (getDefaultHighWaterMark): 65536 on Linux, 16384 on
+ * win32. Measured against v22.18.0, v24.15.0 and v25.9.0 on Linux: all
+ * 65536. */
+#define SCR_HTTP_BODY_HWM SCR_STREAM_DEFAULT_HWM
 
 static void scr_http_body_oom(void) {
   fputs("scriptc: out of memory\n", stderr);

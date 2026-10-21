@@ -16,6 +16,17 @@
 #include <string.h>    /* memcpy in the inline slot accessors */
 #include <sys/types.h> /* ssize_t in the transport ops table */
 
+/* Node v24's stream default (lib/internal/streams/state.js — 64 KiB
+ * since nodejs/node#52037, EXCEPT win32, where the very same line keeps
+ * the old 16 KiB: `process.platform === 'win32' ? 16 * 1024 : 64 * 1024`.
+ * The triple decides at compile time, like the path/EOL bindings). */
+#ifdef _WIN32
+#define SCR_STREAM_DEFAULT_HWM 16384
+#else
+#define SCR_STREAM_DEFAULT_HWM 65536
+#endif
+
+
 /* ── win32 libc shims (scr_win.c; see the windows portability inventory) ──
  * The POSIX/BSD functions the runtime calls that mingw-w64's CRT does not
  * provide: stpcpy (POSIX.1-2008; scr_number.c's digit writer), the

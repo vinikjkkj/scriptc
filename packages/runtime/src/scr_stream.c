@@ -88,15 +88,6 @@
 #define O_SYNC 0
 #endif
 
-/* Node v24's stream default (lib/internal/streams/state.js — 64 KiB
- * since nodejs/node#52037, EXCEPT win32, where the very same line keeps
- * the old 16 KiB: `process.platform === 'win32' ? 16 * 1024 : 64 * 1024`.
- * The triple decides at compile time, like the path/EOL bindings). */
-#ifdef _WIN32
-#define SCR_STREAM_DEFAULT_HWM 16384
-#else
-#define SCR_STREAM_DEFAULT_HWM 65536
-#endif
 
 static void scr_stream_oom(void) {
   fputs("scriptc: out of memory\n", stderr);

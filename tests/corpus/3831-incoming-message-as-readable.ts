@@ -10,9 +10,10 @@
 //   * IDENTITY. `f(res)` twice must answer the SAME stream, or a
 //     response with two readers grows two independent bodies. The view
 //     is memoized on the request; case A is the check.
-//   * `readableHighWaterMark` is 16384 on an IncomingMessage, not the
-//     65536 a bare `new Readable()` gets. Case A prints it, because a
-//     view built with the wrong default paces a large body differently.
+//   * `readableHighWaterMark` on an IncomingMessage is its socket's, the
+//     stream default (65536 on Linux, as for a bare `new Readable()`; v22,
+//     v24 and v25 agree). Case A prints it, because a view built with the
+//     wrong default paces a large body differently.
 //   * BACKPRESSURE. Case F pulls 160 KB through the seam; the adapter
 //     pauses the request when push() answers false and resumes it from
 //     _read, so a wrong answer here is a lost or duplicated chunk, not
