@@ -9048,6 +9048,14 @@ export function dynRestApplyable(t: IrType & { kind: "func" }): boolean {
   return t.restIn === true && t.params.length === 1 && t.params[0]!.kind === "dyn";
 }
 
+/** A stream completion callback typed `Function` (JSDoc `@param {Function}
+ * cb`): the one func shape a stream done closure can take besides the typed
+ * (error?: Error | null) => void -- its ABI is the packed-arguments dyn
+ * array and it answers a dyn. */
+export function isDynPackFunc(t: IrType & { kind: "func" }): boolean {
+  return dynRestApplyable(t) && t.ret.kind === "dyn";
+}
+
 export function canAdaptDynFuncTo(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,

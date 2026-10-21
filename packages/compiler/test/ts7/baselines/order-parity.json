@@ -11091,6 +11091,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8151-stream-done-callback-typed-function.js": {
+   "order": [
+    "<repo>/tests/corpus/8151-stream-done-callback-typed-function.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/820-multi-decl.ts": {
    "order": [
     "<repo>/tests/corpus/820-multi-decl.ts"
