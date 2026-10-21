@@ -10099,6 +10099,43 @@ ScrDyn *scr_error_prop_get(ScrError *e, ScrStr *key) {
  * copied, an array of numbers packs each element through ToUint8 (non-numbers
  * contribute 0, as Node's array-like path does for NaN); any other kind throws
  * Node's ERR_INVALID_ARG_TYPE. +1 u8 bytes, flavor left to the caller. */
+/* crypto Hash/Hmac `update(data)` over a checked-dynamic value: Node accepts a
+ * string (hashed as UTF-8) or a Buffer/TypedArray/DataView (its bytes) and
+ * throws ERR_INVALID_ARG_TYPE for everything else, an ArrayBuffer and an
+ * array of numbers included. +1 u8 bytes, or NULL with the exception pending. */
+ScrBytes *scr_crypto_input_bytes(const ScrDyn *v) {
+  switch (v->kind) {
+    case SCR_DYN_STR: {
+      ScrStr *enc = scr_str_new("utf8", 4);
+      ScrBytes *b = scr_bytes_from_str(v->v.str, enc);
+      scr_str_release(enc);
+      return b;
+    }
+    case SCR_DYN_BYTES: {
+      const ScrBytes *src = v->v.bytes;
+      size_t n = src->len * scr_bytes_elem_size(src->elem);
+      ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)n);
+      if (n > 0) memcpy(b->data, src->data, n);
+      return b;
+    }
+    default:
+      scr_dyn_arg_type_fail("data",
+                            "of type string or an instance of Buffer, TypedArray, or DataView",
+                            v);
+      return NULL;
+  }
+}
+
+/* A checked-dynamic Buffer/Uint8Array argument (`buf.copy(target)`): the same
+ * shared payload, +1. Anything else throws ERR_INVALID_ARG_TYPE naming `name`. */
+ScrBytes *scr_bytes_arg_chk(const ScrDyn *v, const ScrStr *name) {
+  if (v->kind == SCR_DYN_BYTES && v->v.bytes->elem == SCR_BYTES_U8) {
+    return scr_bytes_retain(v->v.bytes);
+  }
+  scr_dyn_arg_type_fail(name->data, "an instance of Buffer or Uint8Array", v);
+  return NULL;
+}
+
 ScrBytes *scr_buffer_from_dyn(const ScrDyn *v) {
   switch (v->kind) {
     case SCR_DYN_STR: {

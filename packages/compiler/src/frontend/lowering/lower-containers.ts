@@ -8206,7 +8206,13 @@ function lowerBufferInstanceMethod(L: Lowerer, call: ts.CallExpression,
   }
   if (name === "copy") {
     if (nArgs < 1 || nArgs > 4) L.noLowering(`.copy with ${nArgs} arguments`, call);
-    const target = u8Arg(0);
+    // A checked-dynamic target (a field the checker calls `any`) leaves
+    // through the validated Buffer/Uint8Array exit, the cast `t as Buffer`.
+    let target = L.lowerExpr(args[0]!);
+    if (target.type.kind === "dyn") {
+      target = { kind: "libCall", fn: "bytes.argChk", args: [target, { kind: "strLit", value: "target", type: STRING, loc }], type: BYTES_U8, loc };
+    }
+    if (!(target.type.kind === "bytes" && target.type.elem === "u8")) target = u8Arg(0);
     const idx = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, F64));
     const receiver = L.lowerExpr(access.expression);
     return { kind: "bytesIntrinsic", method: "copy", receiver, args: [target, ...idx], type: F64, loc };

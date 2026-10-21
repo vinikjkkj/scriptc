@@ -4589,6 +4589,14 @@ export type IrLibFn =
    * a copy for bytes / ArrayBuffer, a ToUint8 pack for an array, Node's
    * ERR_INVALID_ARG_TYPE otherwise. Borrowed dyn in, +1 u8 bytes out. May throw. */
   | "buffer.fromDyn"
+  /** A checked-dynamic Hash/Hmac update input (scr_json.c): UTF-8 bytes for a
+   * string, the bytes of a typed array, Node's ERR_INVALID_ARG_TYPE otherwise.
+   * Borrowed dyn in, +1 u8 bytes out. May throw. */
+  | "crypto.inputBytes"
+  /** A checked-dynamic Buffer/Uint8Array argument (`buf.copy(target)`): the same
+   * payload +1 when it is a Uint8Array, ERR_INVALID_ARG_TYPE naming the string
+   * argument otherwise. May throw. */
+  | "bytes.argChk"
   | "buffer.concat"
   /** Buffer.byteLength(string, enc) — enc a NORMALIZED literal like
    * fromStr's — and Buffer.isEncoding(name) over a runtime string
@@ -12571,6 +12579,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.
   "buffer.compareChk",
   "buffer.fromDyn",
+  "crypto.inputBytes",
+  "bytes.argChk",
   "bytes.equalsChk",
   "bytes.compareChk",
   // Reading the Buffer-ness of a value whose producer nobody classified:

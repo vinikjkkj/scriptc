@@ -11510,6 +11510,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8223-hash-update-over-unknown.js": {
+   "order": [
+    "<repo>/tests/corpus/8223-hash-update-over-unknown.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8224-buffer-copy-concat-over-unknown.js": {
+   "order": [
+    "<repo>/tests/corpus/8224-buffer-copy-concat-over-unknown.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"

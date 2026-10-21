@@ -4669,6 +4669,17 @@ let digestInputValueDispatches = 0;
     return probed;
   }
 
+/** A Hash/Hmac update input the checker leaves untyped (`any`/`unknown`): when
+   * the LOWERED value is checked-dynamic, the bytes come out through the
+   * runtime's validated exit (string -> UTF-8, typed array -> its bytes,
+   * ERR_INVALID_ARG_TYPE otherwise — Node's own ladder). Null for every
+   * other lowered type. */
+  function dynDigestInput(L: Lowerer, dataNode: ts.Expression): IrExpr | null {
+    const probed = probeLower(L, dataNode);
+    if (!probed || probed.type.kind !== "dyn") return null;
+    return { kind: "libCall", fn: "crypto.inputBytes", args: [probed], type: BYTES_U8, loc: locOf(dataNode) };
+  }
+
 /** The composed hash chain — `createHash("sha256").update(data).digest("hex")`
    * — fused into ONE libCall: the Hash handle never materializes (no Hash
    * type exists in the value model), exactly the randomBytesToString
@@ -4763,6 +4774,12 @@ let digestInputValueDispatches = 0;
         }
         const fn: IrLibFn = bytes ? "crypto.hashDigestBytes" : "crypto.hashDigestStr";
         return { kind: "libCall", fn, args: [alg, data, enc], type: STRING, loc };
+      }
+      const dynData = dynDigestInput(L, dataNode);
+      if (dynData) {
+        const enc = bare ? null : L.lowerExprExpecting(call.arguments[0]!, STRING);
+        if (enc === null) return { kind: "libCall", fn: "crypto.hashDigestBytesRaw", args: [alg, dynData], type: BYTES_U8, loc };
+        return { kind: "libCall", fn: "crypto.hashDigestBytes", args: [alg, dynData, enc], type: STRING, loc };
       }
     }
     L.noLowering(
@@ -4905,6 +4922,11 @@ let digestInputValueDispatches = 0;
             ? (isHash ? "crypto.hashUpdateBytes" : "crypto.hmacUpdateBytes")
             : (isHash ? "crypto.hashUpdateStr" : "crypto.hmacUpdateStr");
           return { kind: "libCall", fn, args: [recv, data], type: self, loc };
+        }
+        const dynData = dynDigestInput(L, dataNode);
+        if (dynData) {
+          const fn: IrLibFn = isHash ? "crypto.hashUpdateBytes" : "crypto.hmacUpdateBytes";
+          return { kind: "libCall", fn, args: [recv, dynData], type: self, loc };
         }
       }
       L.noLowering(

@@ -6330,6 +6330,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_bytes_from_str(${arg(0)}, ${arg(1)})`);
           case "buffer.fromDyn":
             return finish(`scr_buffer_from_dyn(${arg(0)})`);
+          case "crypto.inputBytes":
+            return finish(`scr_crypto_input_bytes(${arg(0)})`);
+          case "bytes.argChk":
+            return finish(`scr_bytes_arg_chk(${arg(0)}, ${arg(1)})`);
           case "buffer.concat":
             return finish(`scr_bytes_concat(${arg(0)})`);
           case "buffer.concatLen":
