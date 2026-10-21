@@ -140,19 +140,24 @@ describe("provenance: two-flavor dist and type-only edges", () => {
   });
 
   test("the generic-method cascade behind a type-only subpath import clears", async () => {
-    // Armed first: with the flag OFF this program refuses, and the
-    // refusals are the cascade's two halves. A probe that cannot show
-    // the failure cannot be believed when it shows the fix.
+    // This probe used to be armed by a REFUSAL with the flag OFF: the
+    // dist .d.ts spells `Logger.warn(message: string): void` as a METHOD
+    // signature, which an uncompiled .d.ts could not carry, so Logger was an
+    // island value, Coord had no compiled declaration and every call of its
+    // generic method `commit` refused (SC2013 + SC1090). A method-spelled
+    // signature of an uncompiled .d.ts now maps exactly like its arrow-spelled
+    // twin, Logger is a record the program builds (`const sink: Logger =
+    // {...}`), and the program compiles without provenance too. The
+    // fixture can no longer show the failure it was written to show: of the
+    // shapes tried as a replacement member on Logger (an Error callback, Set,
+    // Record, Buffer, Date, symbol, a self reference, a Writable, a
+    // settle-or-value promise, an index signature) only `Function` still
+    // refuses, and it refuses from source as well. So the flag-OFF half pins
+    // the NEW truth and the provenance half below stays the real check
+    // (preflight clean, zero diagnostics, binary output equal to Node's).
     setProvenanceSources(null);
     const before = analyze(cascadeEntry).coverage;
-    expect(before.diagnostics.length).toBeGreaterThan(0);
-    const codes = new Set(before.diagnostics.map((d) => d.code));
-    expect(codes.has("SC2013")).toBe(true);
-    expect(
-      before.diagnostics.some(
-        (d) => d.code === "SC1090" && d.message.includes("generic method 'commit'"),
-      ),
-    ).toBe(true);
+    expect(before.diagnostics).toHaveLength(0);
 
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
     const sources = await resolveProvenanceSources(cascadeEntry);
