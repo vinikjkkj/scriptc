@@ -286,12 +286,14 @@ ScrBigInt *scr_big_rem(const ScrBigInt *a, const ScrBigInt *b) {
 
 ScrBigInt *scr_big_pow(const ScrBigInt *a, const ScrBigInt *b) {
   if (b->sign < 0) {
-    /* V8's wording, which is what Node prints: "positive", not
-     * "non-negative" — the zero exponent is handled below and never
-     * reaches here, so the two phrasings describe the same guard and
-     * only one of them matches the oracle. Invisible until the
-     * may-throw seed made the message reachable by a `catch`. */
-    scr_throw_error_msg(SCR_ERR_RANGE, "Exponent must be positive", 25);
+    /* The oracle is the PINNED Node (v24.15.0, .node-version), whose V8
+     * formats this RangeError with a missing template argument: it prints
+     * "undefined must be positive". Measured on v24.15.0 and v22.18.0:
+     *   2n ** -1n -> RangeError: undefined must be positive
+     * and on v25.9.0 it prints "Exponent must be positive". The runtime
+     * follows the pin, so the v25 wording would fail the corpus program
+     * 2881-bigint-throwing-operators. The literal is 26 bytes long. */
+    scr_throw_error_msg(SCR_ERR_RANGE, "undefined must be positive", 26);
     return scr_big_zero();
   }
   if (b->sign == 0) return scr_big_from_u64_signed(1, 1);
