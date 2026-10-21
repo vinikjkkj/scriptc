@@ -7934,6 +7934,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_date_local_time(${arg(0)})`);
           case "date.tzOffset":
             return finish(`scr_date_tz_offset(${arg(0)})`);
+          case "date.format":
+            // toDateString/toTimeString/toUTCString/toLocale*String; +1, never throws.
+            return finish(`scr_date_format(${arg(0)}, ${arg(1)})`);
           case "date.toString":
             // Date.prototype.toString; +1 string, or a catchable Error for a
             // zone whose long name needs ICU data (may-throw seed set).
