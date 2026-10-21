@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, DATE_T, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, DATE_T, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -1794,24 +1794,15 @@ export function validateModule(mod: IrModule): IrValidationError[] {
     u.arms.forEach((arm, i) => {
       // The unit kinds (undefinedT/nullT) are valid arms — union membership
       // is the ONLY place they may appear; void/union/map/dyn/jsval
-      // stay out (maps have no discriminant to narrow on). Func/set arm
-      // sibling rules live in unionFuncSetArmsOk (shared with the frontend's
-      // union builders): a func arm allows unit and FUNC siblings (the
-      // nullable-callback shape, and the primitive-constructor tables where
-      // closure pointer identity per tag is the narrowing); a SET arm
-      // allows any sibling but a second set arm (`instanceof Set` is its
-      // narrowing test and over a union it is the tag compare, but it
-      // answers true for both of two Set arms); a MAP arm follows the
-      // same rule, one constructor over (`instanceof Map` lowers to the
-      // identical tag compare) — any sibling but a second map arm.
+      // stay out (a map arm is the container `instanceof Map` tests, so a
+      // map is an arm, never a union of its own). Func, set and map arms
+      // are valid beside any sibling, in any number: typeof "function",
+      // `instanceof Set` and `instanceof Map` are the narrowing tests (over
+      // a union, the tag compare — an OR when several arms share the
+      // constructor), and members of several same-constructor arms
+      // dispatch on the tag (lowerUnionContainerDispatch).
       if (arm.kind === "void" || arm.kind === "union" || arm.kind === "dyn" || arm.kind === "jsval" || arm.kind === "generator" || arm.kind === "asyncGenerator") {
         errors.push({ message: `union ${u.id}: arm ${i} is ${arm.kind}`, loc: noLoc });
-      }
-      if (
-        (arm.kind === "func" || arm.kind === "set" || arm.kind === "map") &&
-        !unionFuncSetArmsOk(u.arms)
-      ) {
-        errors.push({ message: `union ${u.id}: ${arm.kind} arm ${i} beside non-unit arms`, loc: noLoc });
       }
       if (arm.kind === "record" && !recordsById.has(arm.shapeId)) {
         errors.push({
