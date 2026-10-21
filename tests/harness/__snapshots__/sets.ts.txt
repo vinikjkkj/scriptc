@@ -32,15 +32,6 @@ sets.ts:33:10 - error SC2009: values of type 'Set<string> | Set<number>' cannot 
 
   hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
-sets.ts:39:10 - error SC2009: values of type 'string | Map<string, number>' cannot be compiled: the union shape is supported, but 'Map<string, number>' arms have no home in a compiled union yet (no runtime narrowing test exists against sibling arms)
-
-  38 | // `instanceof Map`, so the rule would be ahead of the test.
-  39 | function mapArm(cond: boolean): string | Map<string, number> {
-     |          ^~~~~~
-  40 |   return cond ? "s" : new Map<string, number>();
-
-  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
 sets.ts:49:28 - error SC1090: JSON.stringify of 'Set<string>' values (only number, string, boolean, records, arrays, unions of those, and 'unknown' stringify) are not supported yet
 
   48 | const s = new Set<string>();
@@ -72,12 +63,3 @@ sets.ts:58:1 - error SC2004: uses of 'twoSets' inherit the blocker on its declar
   59 | mapArm(true);
 
   hint: the declaration of 'twoSets' did not compile — fix the diagnostic reported there and these sites clear with it
-
-sets.ts:59:1 - error SC2004: uses of 'mapArm' inherit the blocker on its declaration
-
-  58 | twoSets(true);
-  59 | mapArm(true);
-     | ^~~~~~
-  60 | 
-
-  hint: the declaration of 'mapArm' did not compile — fix the diagnostic reported there and these sites clear with it
