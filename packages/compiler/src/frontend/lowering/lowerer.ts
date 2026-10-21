@@ -9894,6 +9894,14 @@ export class Lowerer {
     if (dst.kind === "promise" && src.kind === "promise") {
       return this.coercibleValue(src.inner, dst.inner);
     }
+    // A FUNCTION value converts through funcCoerceAdapter exactly when its
+    // signature is clean-adaptable. Without this clause a function-typed
+    // RESULT (the curried closure `(m) => (d) => string` into a slot
+    // `(m) => (d) => string | null`) or PARAMETER of an adapted function was
+    // judged unconvertible, so the outer adapter stranded the call with a
+    // runtime TypeError. The recursion is structural (each level compares
+    // strictly smaller types), so any currying depth lowers.
+    if (dst.kind === "func" && src.kind === "func") return this.cleanFuncAdaptable(src, dst);
     if (dst.kind === "union") {
       if (src.kind === "union") return this.unionRetagMappable(src.unionId, dst.unionId);
       if (src.kind === "void") return this.armTag(dst.unionId, UNDEFINED_T) >= 0;
