@@ -4748,6 +4748,9 @@ export type IrLibFn =
   | "process.exit"
   /** process.exit() with no argument: ends with process.exitCode (or 0). */
   | "process.exitDefault"
+  /** process.on/once/off("uncaughtException", fn): fn crosses as a dyn function. */
+  | "process.onUncaught"
+  | "process.offUncaught"
   | "process.exitDyn"
   /** process.exitCode = v over a number / over a dyn value: Node's
    * validating setter (throws ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE). */
@@ -9839,6 +9842,54 @@ export function moduleUsesDc(mod: IrModule): boolean {
   return found;
 }
 
+/** True when the module registers an 'uncaughtException' listener. */
+export function moduleUsesUncaughtListener(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "process.onUncaught") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** True when the module creates a promise outside an async function
+ * (`Promise.reject(e)`, `new Promise(...)`, `Promise.withResolvers()`, the
+ * combinators). Node runs its event loop for every program, and a rejection
+ * nobody handled by the end of the loop's first checkpoint is fatal (exit 1);
+ * a binary with no async function, timer or generator would otherwise return
+ * from main without ever reporting it. */
+export function moduleCreatesPromises(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; name?: unknown };
+    if (
+      node.kind === "newPromise" || node.kind === "promiseWithResolvers" ||
+      (node.kind === "intrinsic" && typeof node.name === "string" && node.name.startsWith("promise."))
+    ) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module contains any assert libCall — the link switch
  * that pulls scr_assert.c into the binary (cc.ts). scr_regex.c calls the
  * assert throw/inspect helpers (assert.match lives there), so the regex
@@ -9990,6 +10041,7 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
   const fns = new Set([
     "async.awaitDyn", "timers.immediatePromise",
     "process.onUnhandledRejection", "process.offUnhandledRejection",
+    "process.onUncaught", "process.offUncaught",
     "process.onRejectionHandled", "process.offRejectionHandled",
     "process.onWarning", "process.offWarning", "process.emitWarning",
     "als.new", "als.get", "als.run", "als.exitRun", "als.enterWith", "als.disable",
@@ -11792,6 +11844,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dc.tcTracePromise",
   "process.onUnhandledRejection",
   "process.onRejectionHandled",
+  "process.onUncaught",
   "async.awaitDyn",
   "als.run",
   "als.exitRun",

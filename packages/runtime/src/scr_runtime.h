@@ -3044,6 +3044,11 @@ ScrDyn *scr_caught_to_dyn(const ScrCaught *c);
  * "Uncaught <value>" to stderr (strings raw, numbers JS-exact, booleans
  * true/false, ref payloads as "[object]"), and releases the payload. */
 void scr_exc_print_uncaught(void);
+/* The 'uncaughtException' seam (scr_exception.c / scr_async_dyn.c). */
+extern void (*scr_uncaught_listener_fn)(void);
+void scr_uncaught_dispatch(void);
+void scr_process_on_uncaught_exception(ScrDyn *fn, bool once);
+void scr_process_off_uncaught_exception(ScrDyn *fn);
 
 /* ── standard library: process + node:fs (scr_lib.c) ─────────────────
  * Called once at the top of main, right after scr_init: stashes argc/argv

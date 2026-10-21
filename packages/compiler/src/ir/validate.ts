@@ -1094,6 +1094,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.envPairs": { argTypes: [], result: arrayOf(STRING) },
   "process.exit": { argTypes: [F64], result: VOID },
   "process.exitDefault": { argTypes: [], result: VOID },
+  "process.onUncaught": { argTypes: [DYN, BOOL], result: VOID },
+  "process.offUncaught": { argTypes: [DYN], result: VOID },
   "process.exitDyn": { argTypes: [DYN], result: VOID },
   "process.exitCodeSetF64": { argTypes: [F64], result: VOID },
   "process.exitCodeSet": { argTypes: [DYN], result: VOID },
