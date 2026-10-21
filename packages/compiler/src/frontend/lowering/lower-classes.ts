@@ -963,6 +963,76 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     return null;
   }
 
+/** `Object.defineProperty(C, 'NAME', { enumerable: true, value: <expr> })` at
+   * the top level of the file declaring class C: a STATIC CONSTANT (ws's
+   * WebSocket.CONNECTING / OPEN / CLOSING / CLOSED). It registers as a static
+   * field of C — readonly unless the descriptor says `writable: true` — and
+   * the statement lowers to nothing; the field takes its value where the
+   * class's statics initialize, so the value expression may mention only
+   * what is declared textually BEFORE the class (anything later would read
+   * a not-yet-initialized binding there). The value must map to a number,
+   * string or boolean. Everything else keeps the refusal. */
+  function registerDefinedStatics(L: Lowerer, info: ClassInfo, decl: ts.ClassDeclaration, classSymbol: ts.Symbol): void {
+    const sf = decl.getSourceFile();
+    for (const stmt of sf.statements) {
+      if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) continue;
+      const call = stmt.expression;
+      if (!ts.isPropertyAccessExpression(call.expression) || call.expression.name.text !== "defineProperty") continue;
+      if (!ts.isIdentifier(call.expression.expression) || call.expression.expression.text !== "Object" ||
+          !L.isStdlibGlobal(call.expression.expression, "Object")) continue;
+      if (call.arguments.length !== 3) continue;
+      const [target, key, desc] = [call.arguments[0]!, call.arguments[1]!, call.arguments[2]!];
+      if (!ts.isIdentifier(target) || L.checker.getSymbolAtLocation(target) !== classSymbol) continue;
+      if (!ts.isStringLiteral(key) || !ts.isObjectLiteralExpression(desc)) continue;
+      const name = key.text;
+      if (info.staticFields.some((f) => f.name === name) || info.staticMethods?.has(name) === true ||
+          info.uncollectedStatics?.has(name) === true || info.staticAccessors?.has(`get:${name}`) === true) continue;
+      let value: ts.Expression | null = null;
+      let writable = false;
+      let ok = true;
+      for (const p of desc.properties) {
+        if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name)) { ok = false; break; }
+        const k = p.name.text;
+        const init = p.initializer;
+        if (k === "value") value = init;
+        else if (k === "enumerable" || k === "configurable") {
+          if (init.kind !== ts.SyntaxKind.TrueKeyword && init.kind !== ts.SyntaxKind.FalseKeyword) { ok = false; break; }
+        } else if (k === "writable") {
+          if (init.kind !== ts.SyntaxKind.TrueKeyword && init.kind !== ts.SyntaxKind.FalseKeyword) { ok = false; break; }
+          writable = init.kind === ts.SyntaxKind.TrueKeyword;
+        } else { ok = false; break; }
+      }
+      if (!ok || value === null) continue;
+      // Only bindings declared before the class: the value is evaluated where
+      // the class's statics initialize.
+      let early = true;
+      const scan = (n: ts.Node): void => {
+        if (!early) return;
+        if (ts.isIdentifier(n) && !(ts.isPropertyAccessExpression(n.parent) && n.parent.name === n)) {
+          const s = L.checker.getSymbolAtLocation(n);
+          const d = s ? L.checker.valueDeclarationOf(s) : undefined;
+          if (d !== undefined && d.getSourceFile() === sf && d.getStart() >= decl.getStart()) early = false;
+        }
+        n.forEachChild(scan);
+      };
+      scan(value);
+      if (!early) continue;
+      const mapped = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.typeOf(value)));
+      if (mapped === null || (mapped.kind !== "f64" && mapped.kind !== "string" && mapped.kind !== "bool")) continue;
+      const globalId = `%g.s.${L.classNamer(decl)}.${name}`;
+      info.staticFields.push({
+        name,
+        type: mapped,
+        initializer: value,
+        decl: call as unknown as ts.PropertyDeclaration,
+        globalId,
+        readonly: !writable,
+      });
+      L.globalsList.push({ id: globalId, name: `${info.def.jsName ?? info.def.name}.${name}`, type: mapped, mutable: writable });
+      L.lateMethodAssigns.add(call);
+    }
+  }
+
 /** `C.prototype.m = <function-like>` at the top level of the file declaring
    * class C: a LATE METHOD. The function becomes `C`'s method `m` exactly as
    * if declared in the body (same module function `%C.m`, the
@@ -977,6 +1047,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
   function registerLateMethods(L: Lowerer, info: ClassInfo, decl: ts.ClassDeclaration, classSymbol: ts.Symbol): void {
     const sf = decl.getSourceFile();
     if (!isJsSourceFile(sf)) return;
+    registerDefinedStatics(L, info, decl, classSymbol);
     for (const stmt of sf.statements) {
       if (!ts.isExpressionStatement(stmt)) continue;
       const e = stmt.expression;
