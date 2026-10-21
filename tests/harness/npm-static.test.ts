@@ -197,6 +197,9 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // untyped parameter, the untyped-local `.length`, and a required table read
     // as a value (mysql2: connection.connectionId, leftPad, constants/types).
     ["expando", "expando-cli.ts"],
+    // memberexports: `module.exports.f(...)` calls to members attached later in the
+    // same file (iconv-lite's encode -> getCodec chain).
+    ["memberexports", "memberexports-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
