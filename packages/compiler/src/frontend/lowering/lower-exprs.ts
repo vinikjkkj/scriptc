@@ -1166,6 +1166,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         map: "object", set: "object", promise: "object", bytes: "object",
         regexp: "object", generator: "object", classval: "function",
         undefinedT: "undefined", nullT: "object",
+        bigint: "bigint", date: "object",
       };
       const folded = FOLD[operand.type.kind];
       if (folded && droppableStatic(operand)) {
@@ -17244,7 +17245,20 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       case "httpClientReq": case "secureCtx": case "fsWatcher":
       case "childStream": case "procStream":
       case "object": case "record": case "promise":
+      // A Date is an object. It is TYPE-FIRST in this compiler (nothing
+      // constructs one yet), but a union that carries a Date arm -- mysql2's
+      // SqlValue -- still needs its typeof chain: the arm can never hold a
+      // value, so answering "object" for it is exact and never a guess.
+      case "date": case "weakmap": case "http2Session": case "http2Stream":
+      case "dgramSocket": case "testCtx": case "sqliteDb": case "sqliteStmt":
+      case "abortSignal": case "abortController": case "response":
+      case "headers": case "requestInit": case "request":
+      case "rtcPeerConnection": case "rtcDataChannel": case "keyobj":
+      case "hash": case "hmac": case "cipher": case "decipher":
+      case "generator": case "asyncGenerator":
         return "object";
+      case "bigint": return "bigint";
+      case "classval": return "function";
       default:
         return null;
     }
