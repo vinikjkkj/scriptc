@@ -6943,6 +6943,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Object.hasOwn over a dyn receiver (throws on nullish, like
             // Node's ToObject).
             return finish(`scr_dyn_has_own(${arg(0)}, ${arg(1)})`);
+          case "dyn.objectToString":
+            // Object.prototype.toString.call over a dyn operand; +1 string.
+            return finish(`scr_dyn_object_to_string(${arg(0)})`);
           case "dyn.objValues":
             return finish(`scr_dyn_obj_values(${arg(0)})`);
           case "dyn.objEntries":
