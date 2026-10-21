@@ -174,6 +174,13 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
             L.stats.statementsIsland++;
             if (sf !== undefined) L.bumpFileStat(sf.fileName, "island");
           }
+          // `const bufferUtil = require('bufferutil')` of a package nothing
+          // installed is Node's MODULE_NOT_FOUND at that statement: the rest
+          // of the block never runs (ws's optional-dependency try body,
+          // whose `module.exports.mask = function ...` assignments follow).
+          // They are not lowered, unless one declares something that hoists
+          // out of the block.
+          if (i < stmts.length - 1 && statementAlwaysThrowsOnRequire(stmt) && stmts.slice(i + 1).every(deadBranchSkippable)) break;
         } catch (e) {
           // A Go panic inside tsgo, surfaced by the sync channel as a
           // thrown Error (server intact — the prefetch fence's finding):
@@ -978,6 +985,22 @@ function domExceptionRooted(L: Lowerer, className: string): boolean {
  * skipping it would drop a binding the rest of the function can read; both
  * keep the branch lowered. Nested function bodies are not entered (their
  * own `var`s belong to them). */
+/** A statement whose only effect is a binding or bare `require("pkg")` of a
+ * non-builtin, non-relative package that cannot be resolved: it throws
+ * MODULE_NOT_FOUND every time it runs. */
+function statementAlwaysThrowsOnRequire(stmt: ts.Statement): boolean {
+  let init: ts.Expression | undefined;
+  if (ts.isVariableStatement(stmt) && stmt.declarationList.declarations.length === 1) {
+    init = stmt.declarationList.declarations[0]!.initializer;
+  } else if (ts.isExpressionStatement(stmt)) {
+    init = stmt.expression;
+  }
+  if (init === undefined) return false;
+  const spec = requireSpecOf(init);
+  if (spec === null || isRelativeSpecifier(spec) || canonicalBuiltinModule(spec) !== null) return false;
+  return probeNodeRequireRefusal(stmt.getSourceFile().fileName, spec) !== null;
+}
+
 function deadBranchSkippable(node: ts.Node): boolean {
   let ok = true;
   const walk = (n: ts.Node): void => {
