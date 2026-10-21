@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesDate, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -1969,6 +1969,7 @@ class LlEmitter {
     // Regex-surface programs stamp the RegExp handle-dispatch ops, gated
     // on the same moduleUsesRegex switch cc.ts links scr_regex.c by.
     const usesRegex = moduleUsesRegex(this.mod);
+    const usesDate = moduleUsesDate(this.mod);
     // Child-stdio programs stamp the child-stream handle-dispatch ops so
     // `child.stdout` can cross into the checked-dynamic tree by reference.
     // scr_child.c is always linked, so this gates only the install call.
@@ -2048,6 +2049,7 @@ class LlEmitter {
     if (embedsZlib) this.declare(`declare void @scr_zlib_island_install()`);
     if (embedsHttpClient) this.declare(`declare void @scr_net_island_install()`);
     if (usesRegex) this.declare(`declare void @scr_regex_dyn_install()`);
+    if (usesDate) this.declare(`declare void @scr_date_dyn_install()`);
     if (usesChildStream) this.declare(`declare void @scr_child_stream_dyn_install()`);
     if (usesFetch) this.declare(`declare void @scr_fetch_install()`);
     if (usesEvents && hasRefGlobals) {
@@ -2513,6 +2515,7 @@ class LlEmitter {
       ...(usesNet ? [`  call void @scr_net_install()`, `  call void @scr_net_dyn_install()`] : []),
       ...(usesHttp ? [`  call void @scr_http_dyn_install()`] : []),
       ...(usesRegex ? [`  call void @scr_regex_dyn_install()`] : []),
+      ...(usesDate ? [`  call void @scr_date_dyn_install()`] : []),
       ...(usesChildStream ? [`  call void @scr_child_stream_dyn_install()`] : []),
       ...(usesStream ? [`  call void @scr_stream_install()`] : []),
       // The C twin's row: the static fetch's abort seam.
@@ -10848,7 +10851,7 @@ class LlEmitter {
             this.declare(`declare zeroext i1 @scr_dyn_is_u8array(ptr)`);
             test = B.tmp();
             B.line(`${test} = call zeroext i1 @scr_dyn_is_u8array(ptr ${d.name})`);
-          } else if (e.test === "map" || e.test === "set") {
+          } else if (e.test === "map" || e.test === "set" || e.test === "date") {
             // `u instanceof Map` / `u instanceof Set`: DK.MAP (SCR_DYN_MAP)
             // is shared by both, so the kind compare alone cannot tell
             // them apart. One runtime predicate per word, shared with the
