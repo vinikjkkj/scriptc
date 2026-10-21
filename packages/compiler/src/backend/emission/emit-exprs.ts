@@ -2987,7 +2987,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // disagree: `f.k = 1` then `f.k` answers 1 while `"k" in f`
         // still said false.
         const fnTest = `scr_dyn_fn_has(${d.name}, ${keyLit}, ${keyBytes.length})`;
-        const stored = `(${d.name}->kind == SCR_DYN_OBJ ? (${objTest}) : ${d.name}->kind == SCR_DYN_ARR ? (${arrTest}) : ${d.name}->kind == SCR_DYN_FUNC ? (${fnTest}) : scr_dyn_isl_fence(${d.name}, "'in'"))`;
+        // A PROXY answers through its `has` trap (or the target's own answer).
+        const proxyTest = `scr_dyn_proxy_has_cstr(${d.name}, ${keyLit}, ${keyBytes.length})`;
+        const stored = `(${d.name}->kind == SCR_DYN_PROXY ? (${proxyTest}) : ${d.name}->kind == SCR_DYN_OBJ ? (${objTest}) : ${d.name}->kind == SCR_DYN_ARR ? (${arrTest}) : ${d.name}->kind == SCR_DYN_FUNC ? (${fnTest}) : scr_dyn_isl_fence(${d.name}, "'in'"))`;
         // ...and the PROTOTYPE methods that are not stored anywhere:
         // Object.prototype's and every primitive prototype's live as
         // dispatch arms in scr_dyn_invoke.c, so the stored walk above
@@ -3501,6 +3503,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Both borrowed, result +1; an ACCESSOR runs its getter, so
             // this is in the may-throw seed set.
             return finish(`scr_cls_props_get(${arg(0)}, ${arg(1)})`);
+          case "dyn.proxyNew":
+            return finish(`scr_dyn_proxy_new(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "dyn.hasKey":
             // `k in v` with a runtime key: the dyn presence answer (both
             // borrowed, no allocation, never throws). The _full spelling

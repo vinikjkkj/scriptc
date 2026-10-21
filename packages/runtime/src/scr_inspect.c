@@ -1122,6 +1122,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
       return iout;
     }
+    case SCR_DYN_PROXY:
+      /* util.inspect (showProxy false) prints the TARGET, running no trap. */
+      return scr_insp_dyn(d->v.proxy.target, recurse, depth);
     case SCR_DYN_MAP: {
       /* Node prints `Map(1) { 'a' => 1 }` / `Set(1) { 'a' }` — the
        * ENTRIES, rendered by their own types. The box carries the

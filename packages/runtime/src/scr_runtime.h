@@ -4368,6 +4368,16 @@ typedef enum {
    * Enum position: LAST — the LLVM backend hardcodes the kind numbers,
    * so a new kind APPENDS and nothing renumbers. */
   SCR_DYN_MAP,
+  /* A JS PROXY: `new Proxy(target, handler)`. The box owns +1 on both (traced:
+   * a cycle through a proxy collects like any other). Every property operation
+   * the dyn tree performs on it — keyed read/write, `in`, delete, own keys,
+   * a call, a method invocation — runs the handler's trap with the target as
+   * the first argument, or the operation on the target when the handler has no
+   * such trap (scr_dyn_proxy_*). `strict` records whether the creating code was
+   * strict: a falsish `set`/`deleteProperty` trap answer throws there and is
+   * silent in sloppy code. Enum position: after SCR_DYN_MAP — the LLVM backend
+   * hardcodes kind numbers, so a new kind appends. */
+  SCR_DYN_PROXY,
   /* NOT A KIND. The count, so per-kind tables size themselves and a new
    * kind cannot silently overrun one. It exists because adding
    * SCR_DYN_MAP DID overrun one: the RC audit's `scr_dyn_live_by_kind`
@@ -4876,6 +4886,8 @@ struct ScrDyn {
      * the same job. See the kind's comment for why a bare `ScrMap *`
      * would be a silent wrong answer. */
     struct { ScrMap *m; const char *tkey; } map;
+    /* SCR_DYN_PROXY: target and handler, both owned and traced. */
+    struct { struct ScrDyn *target; struct ScrDyn *handler; bool strict; } proxy;
   } v;
 };
 
@@ -6103,6 +6115,24 @@ ScrStr *scr_fn_to_string(const ScrDyn *d);
  * callee spelling) and returns NULL; a function kind delegates to the
  * boxed thunk (per-arg checks live there). `args` entries are BORROWED;
  * the result is owned (+1), or NULL with the exception pending. */
+/* Proxy (scr_json.c). new: +1, or NULL with the TypeError pending. The
+ * operations answer exactly the trap-or-target forms of the spec for the
+ * traps get/set/has/deleteProperty/ownKeys/getOwnPropertyDescriptor/apply;
+ * a trap that THROWS propagates. All borrow their arguments. */
+ScrDyn *scr_dyn_proxy_new(const ScrDyn *target, const ScrDyn *handler, bool strict);
+ScrDyn *scr_dyn_proxy_get(ScrDyn *p, const ScrStr *key);
+/* The handler's trap `name` (+1), NULL for none (with *threw true and the
+ * exception pending when reading it threw or it is not callable). */
+ScrDyn *scr_dyn_proxy_trap(const ScrDyn *p, const char *name, bool *threw);
+void scr_dyn_proxy_set(ScrDyn *p, ScrStr *key, ScrDyn *value);
+bool scr_dyn_proxy_has(ScrDyn *p, const ScrStr *key);
+bool scr_dyn_proxy_has_cstr(ScrDyn *p, const char *key, size_t len);
+bool scr_dyn_proxy_delete(ScrDyn *p, ScrStr *key);
+ScrDyn *scr_dyn_proxy_call(const ScrDyn *p, ScrDyn *const *args, size_t argc, const char *what);
+bool scr_dyn_proxy_is_function(const ScrDyn *p);
+/* p.key(args) on a proxy: the get trap supplies the function (called with
+ * this = the proxy); with no get trap the call runs on the target. */
+ScrDyn *scr_dyn_proxy_invoke(ScrDyn *p, const ScrStr *key, ScrDyn *const *args, size_t argc, const char *what);
 ScrDyn *scr_dyn_call(const ScrDyn *d, ScrDyn *const *args, size_t argc, const char *what);
 /* scr_dyn_call over a dyn ARRAY's elements (the spread-application form —
  * `f(...args)` after the emitted argument array is built): argv IS the

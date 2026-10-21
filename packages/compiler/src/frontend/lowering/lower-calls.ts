@@ -8046,7 +8046,7 @@ const inliningPredicates = new Set<ts.Symbol>();
    * The module test is `isCjsJsFile`, not `ts.isExternalModule`: tsgo marks
    * CommonJS files as external modules too, and a `.cjs` script is sloppy no
    * matter what its export surface looks like. */
-  function inStrictCode(node: ts.Node): boolean {
+  export function inStrictCode(node: ts.Node): boolean {
     const hasUseStrict = (stmts: readonly ts.Statement[]): boolean => {
       for (const s of stmts) {
         // The directive prologue ends at the first non-string-literal
@@ -10826,12 +10826,52 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     return inStrictCode(f) ? ["length", "name", "prototype"] : ["length", "name", "arguments", "caller", "prototype"];
   }
 
+  function lowerReflectDynCall(L: Lowerer, call: ts.CallExpression, member: string): IrExpr | null {
+    const args = call.arguments;
+    const want = member === "set" ? [3, 4] : member === "get" ? [2, 3] : [2, 2];
+    if (args.length < want[0]! || args.length > want[1]!) return null;
+    const loc = locOf(call);
+    const target = L.lowerExpr(args[0]!);
+    if (target.type.kind !== "dyn") return null; // a statically-typed target keeps its fence
+    const keyRaw = L.lowerExpr(args[1]!);
+    if (keyRaw.type.kind !== "dyn" && keyRaw.type.kind !== "string" && keyRaw.type.kind !== "f64") return null;
+    const key: IrExpr = keyRaw.type.kind === "string" ? keyRaw : L.ensureString(keyRaw, args[1]!);
+    if (member === "get") {
+      return { kind: "dynKeyGet", key, value: target, type: DYN, loc };
+    }
+    if (member === "has") return { kind: "libCall", fn: "dyn.hasKey", args: [target, key], type: BOOL, loc };
+    if (member === "deleteProperty") return { kind: "libCall", fn: "dyn.keyDelete", args: [target, key], type: BOOL, loc };
+    const v = L.lowerExpr(args[2]!);
+    const value: IrExpr = v.type.kind === "dyn" ? v : L.coerceToExpected(v, DYN);
+    if (value.type.kind !== "dyn") return null;
+    // Reflect.set answers true once the write landed (it throws where the
+    // property syntax would).
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [target, key, value], type: VOID, loc }, loc }],
+      result: { kind: "boolLit", value: true, type: BOOL, loc },
+      type: BOOL,
+      loc,
+    };
+  }
+
   function lowerObjectStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
     // Reflect.ownKeys(o) is the own-NAMES walk (Object.getOwnPropertyNames)
     // over everything this lowering can hold: no symbol-keyed or
     // non-enumerable member exists outside it.
+    // Reflect.get / set / has / deleteProperty over a checked-dynamic target
+    // (a Proxy's trap body, an untyped object): the same operations the
+    // property syntax performs, with the key as ToPropertyKey's string.
+    if (
+      L.isStdlibGlobal(access.expression, "Reflect") &&
+      (access.name.text === "get" || access.name.text === "has" || access.name.text === "deleteProperty" || access.name.text === "set") &&
+      !call.arguments.some(ts.isSpreadElement)
+    ) {
+      const reflected = lowerReflectDynCall(L, call, access.name.text);
+      if (reflected !== null) return reflected;
+    }
     const reflectOwnKeys =
       access.name.text === "ownKeys" && call.arguments.length === 1 && L.isStdlibGlobal(access.expression, "Reflect");
     if (!reflectOwnKeys && !L.isStdlibGlobal(access.expression, "Object")) return null;

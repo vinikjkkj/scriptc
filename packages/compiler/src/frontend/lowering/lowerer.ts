@@ -1684,6 +1684,9 @@ export class Lowerer {
    * nothing local, carry no static state and are used in ways one evaluation
    * cannot be told from many. Their statement lowers to nothing. */
   readonly liftedLocalClasses = new Set<ts.ClassDeclaration>();
+  /** >0 while lowering the handler/target literals of `new Proxy(...)`: `this`
+   * in their methods is the ambient receiver the run time binds (dyn.this). */
+  dynThisInLiterals = 0;
   /** The captured enclosing bindings of each lifted local class (never
    * written; the instance stores their values). */
   readonly localClassCaptures = new Map<ts.ClassDeclaration, ts.Symbol[]>();
@@ -13849,6 +13852,35 @@ export class Lowerer {
    * a source position. Without it those fences fell back to
    * `declarationsOf(THIS_BINDING)`, and THIS_BINDING is an object literal
    * cast to ts.Symbol with no declarations array — the ICE. */
+  /** Binds the unannotated parameters of a function literal (an arrow, a
+   * function expression, a method) as checked-dynamic values and every read
+   * of them in the body as `unknown`, whatever the contextual (overload)
+   * type says: the caller of the function is the run time. Returns the nodes
+   * to release with chainNarrowedType.delete once the literal is lowered. */
+  dynParamsOf(node: ts.Node, includeAnnotated = false): ts.Node[] {
+    const out: ts.Node[] = [];
+    const fn = ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isMethodDeclaration(node) ? node : null;
+    if (fn === null || fn.body === undefined) return out;
+    for (const p of fn.parameters) {
+      if (!ts.isIdentifier(p.name) || (p.type && !includeAnnotated) || p.initializer || p.dotDotDotToken) continue;
+      if (this.chainNarrowedType.has(p.name)) continue;
+      this.chainNarrowedType.set(p.name, this.checker.getAnyType());
+      out.push(p.name);
+      const psym = this.resolveValueSymbol(p.name);
+      if (psym !== null) {
+        ts.walkPreorder(fn.body, (n) => {
+          if (ts.isIdentifier(n) && n.text === (p.name as ts.Identifier).text && this.resolveValueSymbol(n) === psym &&
+              !this.chainNarrowedType.has(n)) {
+            this.chainNarrowedType.set(n, this.checker.getAnyType());
+            out.push(n);
+          }
+          return undefined;
+        });
+      }
+    }
+    return out;
+  }
+
   /** The current value of a captured enclosing binding, read at a `new` site
    * of the lifted local class that captures it (where it is in scope). */
   lowerCapturedValue(sym: ts.Symbol, type: IrType, at: ts.Node): IrExpr {

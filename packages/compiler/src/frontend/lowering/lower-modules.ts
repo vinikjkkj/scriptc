@@ -37,6 +37,37 @@ export interface FileParts {
   topStmts: ts.Statement[];
 }
 
+/** A binding initialized by `new Proxy(...)` holds a checked-dynamic PROXY value
+ * whatever its checker type is (the target's `{ a: number }`): every property
+ * operation on it has to take the dyn path to reach the traps. Each read of
+ * such a binding is therefore typed `any` for the lowering. Registered once
+ * per file, before any body lowers. */
+function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
+  const syms: ts.Symbol[] = [];
+  ts.walkPreorder(sf, (n) => {
+    if (
+      ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined &&
+      ts.isNewExpression(n.initializer) && ts.isIdentifier(n.initializer.expression) &&
+      n.initializer.expression.text === "Proxy" && L.isStdlibGlobal(n.initializer.expression, "Proxy")
+    ) {
+      const s = L.checker.getSymbolAtLocation(n.name);
+      if (s !== undefined && bindingNeverReassigned(L, s, n)) syms.push(s);
+    }
+    return undefined;
+  });
+  if (syms.length === 0) return;
+  const names = new Set(syms.map((s) => s.name));
+  ts.walkPreorder(sf, (n) => {
+    if (ts.isIdentifier(n) && names.has(n.text)) {
+      const s = L.checker.getSymbolAtLocation(n);
+      if (s !== undefined && syms.includes(s) && !L.chainNarrowedType.has(n)) {
+        L.chainNarrowedType.set(n, L.checker.getAnyType());
+      }
+    }
+    return undefined;
+  });
+}
+
 /** A class DECLARATION that is not at file (or namespace) level: written
  * inside a function, a method or a block. */
 export function isNestedClassDeclaration(decl: ts.ClassLikeDeclaration): boolean {
@@ -191,6 +222,7 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
     const files = L.moduleOrder.length > 0 ? L.moduleOrder : [L.entry];
     return files.map((sf) => {
       const fp: FileParts = { sf, fnDecls: [], classDecls: [], topStmts: [] };
+      markProxyBindings(L, sf);
       for (const decl of liftedLocalClasses(L, sf)) {
         L.liftedLocalClasses.add(decl);
         fp.classDecls.push(decl);
@@ -1128,6 +1160,9 @@ function jsDynHoldableInitializer(L: Lowerer, init: ts.Expression | undefined): 
   while (ts.isParenthesizedExpression(e)) e = e.expression;
   if (e.kind === ts.SyntaxKind.NullKeyword) return true;
   if (ts.isIdentifier(e) && e.text === "undefined") return true;
+  // `new Proxy(...)`: a checked-dynamic PROXY value whatever its checker type.
+  if (ts.isNewExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "Proxy" &&
+      L.isStdlibGlobal(e.expression, "Proxy")) return true;
   if (
     (ts.isCallExpression(e) || ts.isPropertyAccessExpression(e) || ts.isIdentifier(e)) &&
     (L.typeOf(e).flags & ts.TypeFlags.Any) !== 0

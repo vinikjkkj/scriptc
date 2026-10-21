@@ -626,6 +626,9 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
 }
 
 static void scr_dyn_handle_release(void *h, ScrDynHandleTag tag);
+/* Proxy helpers (defined at the end of this file) used by the kind arms above them. */
+static ScrDyn *scr_dyn_proxy_json_form(ScrDyn *p);
+static void scr_px_refuse(const ScrDyn *target, const char *what);
 
 /* The traced children: every one is a ScrDyn or a ScrClosure, so every one
  * carries a header (or is immortal, which the visit filter skips). */
@@ -649,6 +652,10 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
     break;
   case SCR_DYN_FUNC:
     visit(d->v.fn.clo, ctx);
+    break;
+  case SCR_DYN_PROXY:
+    visit(d->v.proxy.target, ctx);
+    visit(d->v.proxy.handler, ctx);
     break;
   default:
     break; /* scalars, strings, bytes, handles, promises, jsvals, bigints,
@@ -865,6 +872,10 @@ void scr_dyn_release(ScrDyn *d) {
      * the same always-linked core as this file, so unlike the three arms
      * above there is no installed-ops indirection to go through. */
     scr_map_release(d->v.map.m);
+    break;
+  case SCR_DYN_PROXY:
+    scr_dyn_release(d->v.proxy.target);
+    scr_dyn_release(d->v.proxy.handler);
     break;
   default:
     break; /* null/bool/num have no children */
@@ -2391,6 +2402,7 @@ ScrDyn *scr_dyn_call(const ScrDyn *d, ScrDyn *const *args, size_t argc, const ch
     (void)what;
     return scr_dyn_jsval_ops()->call(d->v.jsval.cell, args, argc);
   }
+  if (d->kind == SCR_DYN_PROXY) return scr_dyn_proxy_call(d, args, argc, what);
   if (d->kind != SCR_DYN_FUNC) {
     ScrJsonBuf b;
     scr_jb_init(&b);
@@ -3310,6 +3322,7 @@ bool scr_dyn_truthy(const ScrDyn *d) {
   case SCR_DYN_HANDLE:
   case SCR_DYN_OBJINST: /* a class instance is a JS object: always truthy */
   case SCR_DYN_MAP: /* a Map/Set is a JS object — an EMPTY one too */
+  case SCR_DYN_PROXY:
   case SCR_DYN_PROMISE: return true;
   case SCR_DYN_BIG:
     /* The ONE non-scalar kind whose truthiness is not constant: 0n is
@@ -3535,6 +3548,7 @@ static const char *scr_dyn_typeof_native(const ScrDyn *d) {
   case SCR_DYN_OBJINST:
   case SCR_DYN_MAP:
   case SCR_DYN_PROMISE: return "object";
+  case SCR_DYN_PROXY: return scr_dyn_proxy_is_function(d) ? "function" : "object";
   case SCR_DYN_BOOL: return "boolean";
   case SCR_DYN_NUM: return "number";
   case SCR_DYN_STR: return "string";
@@ -3928,6 +3942,15 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * keeps a Map out of isJsonSafeType is exactly what JS asks for. */
     scr_jb_puts(b, "{}");
     return true;
+  case SCR_DYN_PROXY: {
+    /* JSON.stringify reads a proxy through its traps (ownKeys, the
+     * descriptor, get); the snapshot those reads produce is what is written. */
+    ScrDyn *form = scr_dyn_proxy_json_form((ScrDyn *)d);
+    if (form == NULL) return true; /* pending exception; caller checks */
+    bool r = scr_dyn_json_write_raw(b, form);
+    scr_dyn_release(form);
+    return r;
+  }
   case SCR_DYN_BIG:
     /* Node THROWS here, and the throw IS the answer rather than a fence
      * standing in for one: JSON has no bigint and JSON.stringify(5n) is
@@ -4691,6 +4714,20 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
   case SCR_DYN_PROMISE:
     /* Object.prototype.toString with the Promise @@toStringTag. */
     return scr_str_new("[object Promise]", 16);
+  case SCR_DYN_PROXY: {
+    /* ToPrimitive reads the proxy through its get trap (Symbol.toPrimitive,
+     * toString, valueOf), which this runtime has no symbol keys to ask. With
+     * no get trap the answer is the target's own. */
+    bool threw;
+    ScrDyn *gt = scr_dyn_proxy_trap(d, "get", &threw);
+    if (threw) return scr_str_new("", 0);
+    if (gt != NULL) {
+      scr_dyn_release(gt);
+      scr_px_refuse(d->v.proxy.target, "converting a Proxy with a get trap to a string");
+      return scr_str_new("", 0);
+    }
+    return scr_dyn_to_string(d->v.proxy.target, NULL);
+  }
   case SCR_DYN_ARR: {
     ScrStr *out = scr_str_new("", 0);
     for (size_t i = 0; i < d->v.arr.len; i++) {
@@ -5773,6 +5810,7 @@ static void scr_jb_put_recv_ctor(ScrJsonBuf *b, const ScrDyn *recv) {
  * than answered wrongly. Other kinds carry no own properties a delete
  * could remove, so they answer true like JS. Both borrowed. */
 bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
+  if (recv != NULL && recv->kind == SCR_DYN_PROXY) return scr_dyn_proxy_delete(recv, key);
   if (recv == NULL || recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) {
     ScrJsonBuf sb;
     scr_jb_init(&sb);
@@ -5975,6 +6013,7 @@ static bool dyn_canonical_index(const ScrStr *key, size_t *out) {
  * models no Object.prototype — the pre-existing divergence
  * estado-objmodel.md §4d named, unchanged. */
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
+  if (v->kind == SCR_DYN_PROXY) return scr_dyn_proxy_has((ScrDyn *)v, key);
   if (v->kind == SCR_DYN_OBJ) {
     /* One walk, accessors included: an accessor IS a property, so `in`
      * answers true for it even though Object.keys skips it. */
@@ -6040,6 +6079,10 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
 #ifdef SCR_DYNCEN_ON
   scr_dyncen_note_korigin(SCR_DYNCEN_KO_KEYSET);
 #endif
+  if (recv->kind == SCR_DYN_PROXY) {
+    scr_dyn_proxy_set(recv, key, value);
+    return;
+  }
   if (recv->static_copy) {
     if (recv->module_ns) {
       scr_dyn_module_ns_refuse("assigning a property");
@@ -6439,6 +6482,16 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * are none either. The sibling writer's arm, same measurement. */
     scr_jb_puts(b, "{}");
     return;
+  case SCR_DYN_PROXY: {
+    ScrDyn *form = scr_dyn_proxy_json_form((ScrDyn *)d);
+    if (form == NULL) {
+      scr_jb_puts(b, "null"); /* the pending throw wins */
+      return;
+    }
+    scr_jb_put_dyn_raw(b, form);
+    scr_dyn_release(form);
+    return;
+  }
   case SCR_DYN_BIG:
     /* V8's own TypeError, not a scriptc fence — see the sibling writer. */
     scr_dyn_big_json_throw();
@@ -6602,6 +6655,7 @@ static const char *scr_dyn_kind_name(const ScrDyn *d) {
     * slot. Two DIFFERENT map types still both say "Map", which is what
     * Node's own vocabulary has to offer; the path names the site. */
   case SCR_DYN_PROMISE: return "Promise"; /* "got Promise" */
+  case SCR_DYN_PROXY: return "Proxy";
   case SCR_DYN_JSVAL: return "an island value"; /* "got an island value" — validated
     * extraction of engine-held values has no armed route yet (lane
     * dom-jsval-long-tail); the failure names the world honestly. */
@@ -7144,6 +7198,7 @@ void scr_dyn_release_v(void *d) { scr_dyn_release((ScrDyn *)d); }
 bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
   if (a->kind != b->kind) return false;
   switch (a->kind) {
+  case SCR_DYN_PROXY: return a == b; /* a proxy is its own identity */
   case SCR_DYN_UNDEF:
   case SCR_DYN_NULL: return true;
   case SCR_DYN_BOOL: return a->v.b == b->v.b;
@@ -9102,7 +9157,10 @@ static void scr_dyn_objwalk_push(ScrDyn *out, ScrObjWalk mode, const char *key,
   }
 }
 
+static ScrDyn *scr_dyn_proxy_walk(ScrDyn *p, ScrObjWalk mode);
+
 static ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
+  if (v->kind == SCR_DYN_PROXY) return scr_dyn_proxy_walk((ScrDyn *)v, mode);
   if (v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) {
     static const char msg[] = "Cannot convert undefined or null to object";
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
@@ -9763,4 +9821,396 @@ ScrStr *scr_b64_missing_arg(void) {
   scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1,
                            "ERR_MISSING_ARGS");
   return NULL;
+}
+
+/* ── Proxy (SCR_DYN_PROXY) ─────────────────────────────────────────────
+ * `new Proxy(target, handler)`. A proxy is an object whose property
+ * operations call the handler's TRAPS: get, set, has, deleteProperty,
+ * ownKeys, getOwnPropertyDescriptor and apply are implemented; a trap the
+ * handler does not carry runs the operation on the target. A trap that
+ * throws propagates; the spec's INVARIANT checks (a non-configurable target
+ * property constraining a trap's answer) are not performed, and the traps
+ * defineProperty, getPrototypeOf, setPrototypeOf, isExtensible,
+ * preventExtensions and construct are not dispatched (an operation that
+ * would need one meets the target directly or a named refusal). */
+
+static bool scr_px_is_object(const ScrDyn *v) {
+  switch (v->kind) {
+  case SCR_DYN_OBJ: case SCR_DYN_ARR: case SCR_DYN_FUNC: case SCR_DYN_OBJINST:
+  case SCR_DYN_MAP: case SCR_DYN_BYTES: case SCR_DYN_ARRBUF: case SCR_DYN_HANDLE:
+  case SCR_DYN_PROMISE: case SCR_DYN_JSVAL: case SCR_DYN_PROXY:
+    return true;
+  default:
+    return false;
+  }
+}
+
+ScrDyn *scr_dyn_proxy_new(const ScrDyn *target, const ScrDyn *handler, bool strict) {
+  if (!scr_px_is_object(target) || !scr_px_is_object(handler)) {
+    static const char msg[] = "Cannot create proxy with a non-object as target or handler";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  if (target->kind == SCR_DYN_OBJINST || handler->kind == SCR_DYN_OBJINST) {
+    /* A compiled method takes its instance as a typed struct pointer: it
+     * cannot be handed the proxy as `this`, so the traps would be bypassed
+     * for every access the method makes. Refused by name rather than
+     * silently answering differently. */
+    static const char msg[] = "a Proxy over (or handled by) a class instance is not supported yet: its methods run with the instance itself as `this`, so the traps would not see the accesses they make";
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+    return NULL;
+  }
+  ScrDyn *p = scr_dyn_alloc(SCR_DYN_PROXY);
+  p->v.proxy.target = scr_dyn_retain((ScrDyn *)target);
+  p->v.proxy.handler = scr_dyn_retain((ScrDyn *)handler);
+  p->v.proxy.strict = strict;
+  return p;
+}
+
+bool scr_dyn_proxy_has_cstr(ScrDyn *p, const char *key, size_t len) {
+  ScrStr *k = scr_str_new(key, len);
+  bool r = scr_dyn_proxy_has(p, k);
+  scr_str_release(k);
+  return r;
+}
+
+bool scr_dyn_proxy_is_function(const ScrDyn *p) {
+  const ScrDyn *t = p->v.proxy.target;
+  return t->kind == SCR_DYN_FUNC || (t->kind == SCR_DYN_PROXY && scr_dyn_proxy_is_function(t));
+}
+
+static void scr_px_refuse(const ScrDyn *target, const char *what) {
+  char msg[200];
+  int n = snprintf(msg, sizeof msg, "%s through a Proxy over this kind of target (%s) is not supported yet", what,
+                   scr_dyn_kind_name(target));
+  scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)n);
+}
+
+/* The handler's trap (+1), NULL for none; NULL with the exception pending
+ * when reading it threw or it is not callable. */
+ScrDyn *scr_dyn_proxy_trap(const ScrDyn *p, const char *name, bool *threw) {
+  *threw = false;
+  ScrDyn *h = p->v.proxy.handler;
+  ScrDyn *t = NULL;
+  if (h->kind == SCR_DYN_OBJ) {
+    t = scr_dyn_obj_key_get(h, name, strlen(name));
+  } else if (h->kind == SCR_DYN_PROXY) {
+    ScrStr *k = scr_str_new(name, strlen(name));
+    t = scr_dyn_proxy_get(h, k);
+    scr_str_release(k);
+  } else {
+    scr_px_refuse(h, "reading a trap");
+    *threw = true;
+    return NULL;
+  }
+  if (t == NULL) {
+    *threw = true;
+    return NULL;
+  }
+  if (t->kind == SCR_DYN_UNDEF || t->kind == SCR_DYN_NULL) {
+    scr_dyn_release(t);
+    return NULL;
+  }
+  if (t->kind != SCR_DYN_FUNC && t->kind != SCR_DYN_PROXY) {
+    ScrStr *shown = scr_dyn_to_string(t, NULL);
+    char msg[320];
+    int n = snprintf(msg, sizeof msg, "'%.120s' returned for property '%s' of object '#<Object>' is not a function",
+                     shown != NULL ? shown->data : "?", name);
+    if (shown != NULL) scr_str_release(shown);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+    scr_dyn_release(t);
+    *threw = true;
+    return NULL;
+  }
+  return t;
+}
+
+static ScrDyn *scr_px_call(ScrDyn *handler, ScrDyn *trap, ScrDyn **args, size_t n) {
+  scr_dyn_this_push_dyn(handler);
+  ScrDyn *r = scr_dyn_call(trap, args, n, "proxy trap");
+  scr_dyn_this_pop();
+  return r;
+}
+
+static ScrDyn *scr_px_key(const ScrStr *k) {
+  return scr_dyn_new_str((ScrStr *)k); /* retains */
+}
+
+/* [[Get]] on the target itself. */
+static ScrDyn *scr_px_target_get(ScrDyn *t, const ScrStr *key) {
+  switch (t->kind) {
+  case SCR_DYN_OBJ:
+    return scr_dyn_obj_key_get(t, key->data, key->len);
+  case SCR_DYN_ARR: {
+    if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return scr_dyn_new_num((double)t->v.arr.len);
+    double idx;
+    if (scr_dyn_key_is_index(key->data, key->len, &idx) && idx < (double)t->v.arr.len) {
+      return scr_dyn_retain(t->v.arr.items[(size_t)idx]);
+    }
+    return scr_dyn_retain(scr_dyn_undefined());
+  }
+  case SCR_DYN_FUNC: {
+    ScrDyn *v = scr_dyn_fn_get(t, key->data, key->len);
+    return v != NULL ? v : scr_dyn_retain(scr_dyn_undefined());
+  }
+  case SCR_DYN_OBJINST: {
+    const ScrDynClassMember *m = scr_dyn_objinst_member(t, key->data, key->len);
+    if (m == NULL) return scr_dyn_retain(scr_dyn_undefined());
+    if (m->get != NULL) return m->get(t->v.inst.o);
+    scr_px_refuse(t, "reading a method as a value");
+    return NULL;
+  }
+  case SCR_DYN_PROXY:
+    return scr_dyn_proxy_get(t, key);
+  default:
+    scr_px_refuse(t, "a property read");
+    return NULL;
+  }
+}
+
+ScrDyn *scr_dyn_proxy_get(ScrDyn *p, const ScrStr *key) {
+  bool threw;
+  ScrDyn *trap = scr_dyn_proxy_trap(p, "get", &threw);
+  if (threw) return NULL;
+  if (trap == NULL) return scr_px_target_get(p->v.proxy.target, key);
+  ScrDyn *k = scr_px_key(key);
+  ScrDyn *args[3] = {p->v.proxy.target, k, p};
+  ScrDyn *r = scr_px_call(p->v.proxy.handler, trap, args, 3);
+  scr_dyn_release(k);
+  scr_dyn_release(trap);
+  return r;
+}
+
+void scr_dyn_proxy_set(ScrDyn *p, ScrStr *key, ScrDyn *value) {
+  bool threw;
+  ScrDyn *trap = scr_dyn_proxy_trap(p, "set", &threw);
+  if (threw) return;
+  if (trap == NULL) {
+    ScrDyn *t = p->v.proxy.target;
+    if (t->kind == SCR_DYN_PROXY || t->kind == SCR_DYN_OBJ || t->kind == SCR_DYN_ARR || t->kind == SCR_DYN_OBJINST ||
+        t->kind == SCR_DYN_FUNC) {
+      scr_dyn_key_set(t, key, value);
+    } else {
+      scr_px_refuse(t, "a property write");
+    }
+    return;
+  }
+  ScrDyn *k = scr_px_key(key);
+  ScrDyn *args[4] = {p->v.proxy.target, k, value, p};
+  ScrDyn *r = scr_px_call(p->v.proxy.handler, trap, args, 4);
+  scr_dyn_release(k);
+  scr_dyn_release(trap);
+  if (r == NULL) return;
+  bool ok = scr_dyn_truthy(r);
+  scr_dyn_release(r);
+  if (!ok && p->v.proxy.strict) {
+    char msg[320];
+    int n = snprintf(msg, sizeof msg, "'set' on proxy: trap returned falsish for property '%.200s'", key->data);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+  }
+}
+
+bool scr_dyn_proxy_has(ScrDyn *p, const ScrStr *key) {
+  bool threw;
+  ScrDyn *trap = scr_dyn_proxy_trap(p, "has", &threw);
+  if (threw) return false;
+  if (trap == NULL) return scr_dyn_has_key(p->v.proxy.target, key);
+  ScrDyn *k = scr_px_key(key);
+  ScrDyn *args[2] = {p->v.proxy.target, k};
+  ScrDyn *r = scr_px_call(p->v.proxy.handler, trap, args, 2);
+  scr_dyn_release(k);
+  scr_dyn_release(trap);
+  if (r == NULL) return false;
+  bool ok = scr_dyn_truthy(r);
+  scr_dyn_release(r);
+  return ok;
+}
+
+bool scr_dyn_proxy_delete(ScrDyn *p, ScrStr *key) {
+  bool threw;
+  ScrDyn *trap = scr_dyn_proxy_trap(p, "deleteProperty", &threw);
+  if (threw) return false;
+  if (trap == NULL) return scr_dyn_key_delete(p->v.proxy.target, key);
+  ScrDyn *k = scr_px_key(key);
+  ScrDyn *args[2] = {p->v.proxy.target, k};
+  ScrDyn *r = scr_px_call(p->v.proxy.handler, trap, args, 2);
+  scr_dyn_release(k);
+  scr_dyn_release(trap);
+  if (r == NULL) return false;
+  bool ok = scr_dyn_truthy(r);
+  scr_dyn_release(r);
+  if (!ok && p->v.proxy.strict) {
+    char msg[320];
+    int n = snprintf(msg, sizeof msg, "'deleteProperty' on proxy: trap returned falsish for property '%.200s'", key->data);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+    return false;
+  }
+  return ok;
+}
+
+ScrDyn *scr_dyn_proxy_call(const ScrDyn *pc, ScrDyn *const *args, size_t argc, const char *what) {
+  ScrDyn *p = (ScrDyn *)pc;
+  if (!scr_dyn_proxy_is_function(p)) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, what);
+    scr_jb_puts(&b, " is not a function");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  bool threw;
+  ScrDyn *trap = scr_dyn_proxy_trap(p, "apply", &threw);
+  if (threw) return NULL;
+  if (trap == NULL) return scr_dyn_call(p->v.proxy.target, args, argc, what);
+  ScrDyn *list = scr_dyn_new_arr();
+  for (size_t i = 0; i < argc; i++) scr_dyn_arr_push(list, scr_dyn_retain(args[i]));
+  ScrDyn *thisArg = scr_dyn_retain(scr_dyn_undefined());
+  ScrDyn *targs[3] = {p->v.proxy.target, thisArg, list};
+  ScrDyn *r = scr_px_call(p->v.proxy.handler, trap, targs, 3);
+  scr_dyn_release(thisArg);
+  scr_dyn_release(list);
+  scr_dyn_release(trap);
+  return r;
+}
+
+/* An own ENUMERABLE string key of the target (the default [[GetOwnProperty]]
+ * answer Object.keys needs once ownKeys named the key). */
+static bool scr_px_target_enumerable(ScrDyn *t, const ScrStr *key) {
+  switch (t->kind) {
+  case SCR_DYN_OBJ:
+    return scr_dyn_obj_get(t, key->data, key->len) != NULL;
+  case SCR_DYN_ARR: {
+    double idx;
+    return scr_dyn_key_is_index(key->data, key->len, &idx) && idx < (double)t->v.arr.len;
+  }
+  case SCR_DYN_OBJINST: {
+    const ScrDynClassMember *m = scr_dyn_objinst_member(t, key->data, key->len);
+    return m != NULL && m->enumerable != 0 && m->get != NULL;
+  }
+  case SCR_DYN_PROXY: {
+    ScrDyn *keys = scr_dyn_proxy_walk(t, SCR_OBJWALK_KEYS);
+    if (keys == NULL) return false;
+    bool found = false;
+    for (size_t i = 0; i < keys->v.arr.len && !found; i++) {
+      const ScrDyn *e = keys->v.arr.items[i];
+      found = e->kind == SCR_DYN_STR && e->v.str->len == key->len && memcmp(e->v.str->data, key->data, key->len) == 0;
+    }
+    scr_dyn_release(keys);
+    return found;
+  }
+  default:
+    return false;
+  }
+}
+
+/* Object.keys / values / entries over a proxy: [[OwnPropertyKeys]] (the
+ * ownKeys trap, else the target's), each key filtered by
+ * [[GetOwnProperty]]'s enumerable bit (the getOwnPropertyDescriptor trap,
+ * else the target's), and for values/entries a [[Get]] through the get
+ * trap per key. */
+static ScrDyn *scr_dyn_proxy_walk(ScrDyn *p, ScrObjWalk mode) {
+  bool threw;
+  ScrDyn *target = p->v.proxy.target;
+  ScrDyn *own = scr_dyn_proxy_trap(p, "ownKeys", &threw);
+  if (threw) return NULL;
+  ScrDyn *keys;
+  if (own != NULL) {
+    ScrDyn *targs[1] = {target};
+    keys = scr_px_call(p->v.proxy.handler, own, targs, 1);
+    scr_dyn_release(own);
+    if (keys == NULL) return NULL;
+    if (keys->kind != SCR_DYN_ARR) {
+      static const char msg[] = "CreateListFromArrayLike called on non-object";
+      scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+      scr_dyn_release(keys);
+      return NULL;
+    }
+  } else {
+    keys = scr_dyn_objwalk(target, SCR_OBJWALK_KEYS);
+    if (keys == NULL) return NULL;
+  }
+  ScrDyn *gopd = scr_dyn_proxy_trap(p, "getOwnPropertyDescriptor", &threw);
+  if (threw) {
+    scr_dyn_release(keys);
+    return NULL;
+  }
+  ScrDyn *out = scr_dyn_new_arr();
+  ScrDyn *failed = NULL;
+  for (size_t i = 0; i < keys->v.arr.len && failed == NULL; i++) {
+    ScrDyn *kd = keys->v.arr.items[i];
+    if (kd->kind != SCR_DYN_STR) continue; /* symbols are not string keys */
+    ScrStr *key = kd->v.str;
+    bool enumerable;
+    if (gopd != NULL) {
+      ScrDyn *args[2] = {target, kd};
+      ScrDyn *desc = scr_px_call(p->v.proxy.handler, gopd, args, 2);
+      if (desc == NULL) { failed = out; break; }
+      enumerable = false;
+      if (desc->kind == SCR_DYN_OBJ) {
+        const ScrDyn *en = scr_dyn_obj_get(desc, "enumerable", 10);
+        enumerable = en != NULL && scr_dyn_truthy(en);
+      }
+      scr_dyn_release(desc);
+    } else {
+      enumerable = own == NULL ? true : scr_px_target_enumerable(target, key);
+    }
+    if (!enumerable) continue;
+    if (mode == SCR_OBJWALK_KEYS) {
+      scr_dyn_arr_push(out, scr_dyn_retain(kd));
+      continue;
+    }
+    ScrDyn *val = scr_dyn_proxy_get(p, key);
+    if (val == NULL) { failed = out; break; }
+    scr_dyn_objwalk_push(out, mode, key->data, key->len, val);
+    scr_dyn_release(val);
+  }
+  scr_dyn_release(keys);
+  if (gopd != NULL) scr_dyn_release(gopd);
+  if (failed != NULL) {
+    scr_dyn_release(out);
+    return NULL;
+  }
+  return out;
+}
+
+/* The value JSON.stringify sees through a proxy: a fresh ARRAY (target is an
+ * array: length, then each index, through the get trap) or OBJECT (the
+ * enumerable own string keys through ownKeys/descriptor/get). +1. */
+static ScrDyn *scr_dyn_proxy_json_form(ScrDyn *p) {
+  ScrDyn *root = p->v.proxy.target;
+  while (root->kind == SCR_DYN_PROXY) root = root->v.proxy.target;
+  if (root->kind == SCR_DYN_ARR) {
+    ScrStr *lk = scr_str_new("length", 6);
+    ScrDyn *len = scr_dyn_proxy_get(p, lk);
+    scr_str_release(lk);
+    if (len == NULL) return NULL;
+    double n = len->kind == SCR_DYN_NUM ? len->v.num : 0;
+    scr_dyn_release(len);
+    ScrDyn *out = scr_dyn_new_arr();
+    for (size_t i = 0; i < (size_t)n; i++) {
+      char buf[32];
+      int bl = snprintf(buf, sizeof buf, "%zu", i);
+      ScrStr *ik = scr_str_new(buf, (size_t)bl);
+      ScrDyn *v = scr_dyn_proxy_get(p, ik);
+      scr_str_release(ik);
+      if (v == NULL) {
+        scr_dyn_release(out);
+        return NULL;
+      }
+      scr_dyn_arr_push(out, v);
+    }
+    return out;
+  }
+  ScrDyn *entries = scr_dyn_proxy_walk(p, SCR_OBJWALK_ENTRIES);
+  if (entries == NULL) return NULL;
+  ScrDyn *out = scr_dyn_new_obj();
+  for (size_t i = 0; i < entries->v.arr.len; i++) {
+    ScrDyn *pair = entries->v.arr.items[i];
+    ScrDyn *k = pair->v.arr.items[0];
+    ScrStr *ks = scr_str_retain(k->v.str);
+    scr_dyn_obj_set(out, ks->data, ks->len, scr_dyn_retain(pair->v.arr.items[1]));
+    scr_str_release(ks);
+  }
+  scr_dyn_release(entries);
+  return out;
 }

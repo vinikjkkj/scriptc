@@ -12510,6 +12510,9 @@ function resetsThis(n: ts.Node): boolean {
    * dynInvoke fallback). Loosening this walk without that one turns a
    * located refusal into a silent wrong value. */
   export function rejectThisInObjectMethod(L: Lowerer, node: ts.Node): void {
+    // Inside a literal a Proxy trap table is built from: the run time calls
+    // each trap with the handler as the ambient receiver (dyn.this).
+    if (L.dynThisInLiterals > 0) return;
     rejectThisInObjectMethodIn(L, node, L.peekThis() === null);
   }
 

@@ -5,9 +5,9 @@
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { BOOL, canBoxFuncIntoDyn, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
-import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
+import { MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { protoClassArmOn, protoClassInfoFor } from "./proto-class-consume.js";
@@ -7649,6 +7649,78 @@ function executorResolveAdoptionUnion(
   return sov;
 }
 
+/** `new Proxy(target, handler)`: a checked-dynamic PROXY value (dyn.proxyNew).
+ * Both arguments cross as dyn values; an object/array literal is built as a
+ * dyn object/array in place, so the target keeps its identity (a static
+ * record or array binding would be COPIED across and the proxy would write
+ * the copy). Trap functions box as dyn functions and are called with the
+ * handler as `this`. Null when the call has another shape (falls to the
+ * standard fence). */
+function lowerProxyNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc): IrExpr | null {
+  const args = expr.arguments ?? [];
+  if (args.length !== 2 || args.some(ts.isSpreadElement)) return null;
+  const toDyn = (n0: ts.Expression, what: string): IrExpr => {
+    let n = n0;
+    while (ts.isParenthesizedExpression(n) || ts.isAsExpression(n) || ts.isTypeAssertion(n)) n = n.expression;
+    const lit = ts.isObjectLiteralExpression(n) || ts.isArrayLiteralExpression(n);
+    // The trap functions of a handler literal (and any function literal
+    // member of a target) are called by the run time: their untyped
+    // parameters bind as checked-dynamic values.
+    const undo: ts.Node[] = [];
+    if (ts.isObjectLiteralExpression(n)) {
+      for (const prop of n.properties) {
+        if (ts.isMethodDeclaration(prop)) undo.push(...L.dynParamsOf(prop, true));
+        else if (ts.isPropertyAssignment(prop)) undo.push(...L.dynParamsOf(prop.initializer, true));
+      }
+    }
+    let raw: IrExpr;
+    L.dynThisInLiterals++;
+    try {
+      raw = lit ? L.lowerExprExpecting(n, DYN) : L.lowerExpr(n);
+    } finally {
+      L.dynThisInLiterals--;
+      for (const u of undo) L.chainNarrowedType.delete(u);
+    }
+    if (raw.type.kind === "dyn") return raw;
+    // A scalar crosses so the runtime can throw V8's TypeError for it.
+    if (raw.kind === "unitLit" || raw.type.kind === "f64" || raw.type.kind === "string" || raw.type.kind === "bool") {
+      return { kind: "dynFrom", value: raw, type: DYN, loc };
+    }
+    if (raw.type.kind === "object") {
+      L.unsupported(
+        "SC1090",
+        n,
+        `a Proxy ${what} that is a class instance (a compiled method takes its instance as a typed struct pointer and cannot be handed the proxy as \`this\`, so the traps would not see the accesses the method makes) — proxy a plain object, or wrap the instance's operations in a handler`,
+      );
+    }
+    if (
+      raw.type.kind === "array" || raw.type.kind === "record" ||
+      raw.type.kind === "func" || raw.type.kind === "map" || raw.type.kind === "set"
+    ) {
+      if (raw.type.kind === "record" || raw.type.kind === "array") {
+        L.unsupported(
+          "SC1090",
+          n,
+          `a Proxy ${what} that is a statically-typed ${raw.type.kind} value (the crossing into the checked-dynamic tree copies it, so the proxy and the original would diverge) — write the ${what} as a literal inside new Proxy(...), or hold it as an untyped value`,
+        );
+      }
+      if (L.dynConvertible(raw.type) || (raw.type.kind === "func" && canBoxFuncIntoDyn(raw.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)))) {
+        return { kind: "dynFrom", value: raw, type: DYN, loc };
+      }
+    }
+    L.noLowering(`new Proxy over a '${L.fmt(raw.type)}' ${what}`, n, "objects, arrays, class instances and functions are the lowered proxy targets and handlers");
+  };
+  const target = toDyn(args[0]!, "target");
+  const handler = toDyn(args[1]!, "handler");
+  return {
+    kind: "libCall",
+    fn: "dyn.proxyNew",
+    args: [target, handler, { kind: "boolLit", value: inStrictCode(expr), type: BOOL, loc }],
+    type: DYN,
+    loc,
+  };
+}
+
 export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     const loc = locOf(expr);
     /* better-sqlite3's `new Database(path, options?)` — the ONE npm
@@ -8944,6 +9016,10 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
               return { kind: "libCall", fn: "buffer.newStringFail", args: [got], type: bytesOf("u8"), loc };
             }
           }
+        }
+        if (expr.expression.text === "Proxy") {
+          const px = lowerProxyNew(L, expr, loc);
+          if (px !== null) return px;
         }
         const ctorHints: Record<string, string | undefined> = {
           RegExp: "use a regex literal (/pattern/flags) — constructed regexes have no lowering",
