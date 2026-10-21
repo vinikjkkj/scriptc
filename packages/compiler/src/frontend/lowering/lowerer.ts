@@ -11934,7 +11934,7 @@ export class Lowerer {
    * undefined/null, ??, ||, conditions), "num" (arithmetic: undefined is
    * NaN), a property name (Node throws the member-access TypeError there),
    * or "narrow" (everything else: the checked extraction). */
-  classifyLyingRead(node: ts.Expression): "peel" | "narrow" | "num" | { prop: string; set: boolean; callText?: string } {
+  classifyLyingRead(node: ts.Expression): "peel" | "narrow" | "num" | { prop: string; set: boolean; callText?: string; dynKey?: ts.Expression } {
     let p: ts.Node = node;
     while (
       p.parent &&
@@ -11962,7 +11962,23 @@ export class Lowerer {
     if (ts.isElementAccessExpression(par) && par.expression === p) {
       if (par.questionDotToken) return "peel";
       const a = par.argumentExpression;
-      if (ts.isStringLiteral(a) || ts.isNumericLiteral(a)) return { prop: a.text, set: false };
+      const gp = par.parent;
+      const set = gp !== undefined && ts.isBinaryExpression(gp) && gp.left === par &&
+        gp.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && gp.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
+      if (ts.isStringLiteral(a) || ts.isNumericLiteral(a)) return { prop: a.text, set };
+      // A runtime key: Node's message names the key's VALUE. Only a key that
+      // is pure (re-evaluating it cannot differ) is carried; the throw
+      // helper then takes it as an argument.
+      const pure = (e: ts.Expression): boolean => {
+        if (ts.isParenthesizedExpression(e)) return pure(e.expression);
+        if (ts.isIdentifier(e) || ts.isNumericLiteral(e) || ts.isStringLiteral(e)) return true;
+        if (ts.isPropertyAccessExpression(e)) return pure(e.expression);
+        return false;
+      };
+      const kf = this.typeOf(a).flags;
+      if (pure(a) && (kf & (ts.TypeFlags.NumberLike | ts.TypeFlags.StringLike)) !== 0 && (kf & ~(ts.TypeFlags.NumberLike | ts.TypeFlags.StringLike)) === 0) {
+        return { prop: "", set, dynKey: a };
+      }
       return "narrow";
     }
     if (ts.isTemplateSpan(par) || ts.isTypeOfExpression(par)) return "peel";
@@ -12107,7 +12123,7 @@ export class Lowerer {
     const loc = union.loc;
     const done = (e: IrExpr): IrExpr => { this.lyingResults.add(e); return e; };
     if (ctx === "peel") return done(union);
-    if (typeof ctx === "object") {
+    if (typeof ctx === "object" && ctx.dynKey === undefined) {
       const h = this.lyingPropHelper(union.type.unionId, target, ctx.set, ctx.prop, loc, ctx.callText);
       if (h) return done({ kind: "call", callee: h, args: [union], type: target, loc });
     }

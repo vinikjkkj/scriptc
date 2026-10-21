@@ -1505,18 +1505,58 @@ function lowerOptionalDefaultArg(
       elem.kind === "object" || elem.kind === "record";
   }
 
+  /** The key-carrying member-use miss: Node's message names the key's VALUE
+   * (`a[i][j]` past the end reads "(reading '3')"), so the throw takes the
+   * key as an argument. Returns the interned helper's name. */
+  function idxMissKeyHelper(L: Lowerer, elem: IrType, keyT: IrType, set: boolean, loc: SrcLoc): string {
+    const key = `idxMissK:${typeKey(elem)}:${typeKey(keyT)}:${set ? "set" : "get"}`;
+    let name = L.arrHofHelpers.get(key);
+    if (name) return name;
+    name = `%arr.idxMissK.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, name);
+    const k: IrExpr = { kind: "varRef", localId: "k.0", type: keyT, loc };
+    const ks: IrExpr = keyT.kind === "string" ? k : { kind: "toString", operand: k, type: STRING, loc };
+    const str = (v: string): IrExpr => ({ kind: "strLit", value: v, type: STRING, loc });
+    const cat = (l: IrExpr, r: IrExpr): IrExpr => ({ kind: "strConcat", left: l, right: r, type: STRING, loc });
+    const prefix = set ? "Cannot set properties of undefined (setting '" : "Cannot read properties of undefined (reading '";
+    L.liftedFns.push({
+      name,
+      params: [{ localId: "k.0", name: "k", type: keyT }],
+      returnType: elem,
+      locals: [{ id: "k.0", name: "k", type: keyT, mutable: false }],
+      body: [{
+        kind: "throw",
+        value: {
+          kind: "libCall", fn: "error.new", args: [cat(cat(str(prefix), ks), str("')"))],
+          type: { kind: "object", className: "%TypeError" }, loc,
+        },
+        loc,
+      }],
+      loc,
+    });
+    return name;
+  }
+
   export function lowerOobTolerantIndexRead(
     L: Lowerer,
     arr: IrExpr & { type: { kind: "array" } },
     index: IrExpr,
     loc: SrcLoc,
-    ctx0: "peel" | "num" | { prop: string; set: boolean; callText?: string },
+    ctx0: "peel" | "num" | { prop: string; set: boolean; callText?: string; dynKey?: ts.Expression },
     stringify = false,
   ): IrExpr | null {
-    const ctx: "peel" | "num" | { prop: string; set: boolean; callText?: string } = ctx0;
+    const ctx: "peel" | "num" | { prop: string; set: boolean; callText?: string; dynKey?: ts.Expression } = ctx0;
     const isNum = (): boolean => (ctx as unknown) === "num";
     const elem = (arr.type as IrType & { kind: "array" }).elem;
-    if (!oobTolerantElem(elem)) return null;
+    // A member use or a call takes the plain element (a miss throws), so no
+    // `elem | undefined` form is needed: every element kind qualifies.
+    if (!oobTolerantElem(elem) && typeof ctx !== "object") return null;
+    // A runtime key rides into the throw (its value is part of the message).
+    let dynKeyIr: IrExpr | null = null;
+    if (typeof ctx === "object" && ctx.dynKey !== undefined) {
+      dynKeyIr = L.lowerExpr(ctx.dynKey);
+      if (dynKeyIr.type.kind !== "f64" && dynKeyIr.type.kind !== "string") return null;
+    }
     // A string element can be the ABSENT string (a split capture group that
     // did not participate: Node's undefined); it reads as a miss too.
     const withPresent = (inRange: IrExpr): IrExpr => elem.kind !== "string" ? inRange : {
@@ -1571,8 +1611,20 @@ function lowerOptionalDefaultArg(
       const len: IrExpr = { kind: "arrIntrinsic", method: "length", receiver: arr, args: [], type: F64, loc };
       const inRange: IrExpr = {
         kind: "logical", op: "&&",
-        left: { kind: "bin", op: ">=", left: index, right: { kind: "numLit", value: 0, type: F64, loc }, type: BOOL, loc },
-        right: { kind: "bin", op: "<", left: index, right: len, type: BOOL, loc },
+        left: {
+          kind: "logical", op: "&&",
+          left: { kind: "bin", op: ">=", left: index, right: { kind: "numLit", value: 0, type: F64, loc }, type: BOOL, loc },
+          right: { kind: "bin", op: "<", left: index, right: len, type: BOOL, loc },
+          type: BOOL, loc,
+        },
+        // A fractional index is not an element (JS reads the property "1.5").
+        // `(i | 0) === i` is the integer test without a libm call (an index
+        // past 2^31 is past the end anyway).
+        right: {
+          kind: "bin", op: "===",
+          left: { kind: "bin", op: "|", left: index, right: { kind: "numLit", value: 0, type: F64, loc }, type: F64, loc },
+          right: index, type: BOOL, loc,
+        },
         type: BOOL, loc,
       };
       const hit: IrExpr = { kind: "arrayGet", arr, index, type: elem, loc };
@@ -1585,6 +1637,9 @@ function lowerOptionalDefaultArg(
           ? `Cannot set properties of undefined (setting '${pc.prop}')`
           : `Cannot read properties of undefined (reading '${pc.prop}')`;
         const mkey = `idxMiss:${typeKey(elem)}:${mmsg}`;
+        if (dynKeyIr !== null) {
+          miss = { kind: "call", callee: idxMissKeyHelper(L, elem, dynKeyIr.type, pc.set, loc), args: [dynKeyIr], type: elem, loc };
+        } else {
         let mname = L.arrHofHelpers.get(mkey);
         if (!mname) {
           mname = `%arr.idxMiss.${L.arrHofHelpers.size}`;
@@ -1592,6 +1647,7 @@ function lowerOptionalDefaultArg(
           L.liftedFns.push({ name: mname, params: [], returnType: elem, locals: [], body: [strandTrap(mmsg, loc)], loc });
         }
         miss = { kind: "call", callee: mname, args: [], type: elem, loc };
+        }
       }
       const t: IrExpr = { kind: "ternary", cond: withPresent(inRange), then: hit, else_: miss, type: elem, loc };
       L.lyingResults.add(t);
@@ -1600,7 +1656,7 @@ function lowerOptionalDefaultArg(
     const msg = isNum() ? "" : (ctx as { callText?: string }).callText !== undefined ? `${(ctx as { callText: string }).callText} is not a function` : (ctx as { set: boolean; prop: string }).set
       ? `Cannot set properties of undefined (setting '${(ctx as { prop: string }).prop}')`
       : `Cannot read properties of undefined (reading '${(ctx as { prop: string }).prop}')`;
-    const key = `idxTol:${typeKey(elem)}:${isNum() ? "num" : msg}`;
+    const key = `idxTol:${typeKey(elem)}:${isNum() ? "num" : msg}${dynKeyIr !== null ? `:k${typeKey(dynKeyIr.type)}${(ctx as { set: boolean }).set ? "s" : "g"}` : ""}`;
     let name = L.arrHofHelpers.get(key);
     if (!name) {
       name = `%arr.idxTol.${L.arrHofHelpers.size}`;
@@ -1612,7 +1668,9 @@ function lowerOptionalDefaultArg(
       const lt = (l: IrExpr, r: IrExpr): IrExpr => ({ kind: "bin", op: "<", left: l, right: r, type: BOOL, loc });
       const missStmt: IrStmt = isNum()
         ? { kind: "return", value: num(NaN), loc }
-        : strandTrap(msg, loc);
+        : dynKeyIr !== null
+          ? { kind: "return", value: { kind: "call", callee: idxMissKeyHelper(L, elem, dynKeyIr.type, (ctx as { set: boolean }).set, loc), args: [ref("k.0", dynKeyIr.type)], type: elem, loc }, loc }
+          : strandTrap(msg, loc);
       const body: IrStmt[] = [
         readLenStmt(arrT, loc),
         { kind: "if", cond: { kind: "unary", op: "!", operand: { kind: "bin", op: ">=", left: i, right: num(0), type: BOOL, loc }, type: BOOL, loc }, then: [missStmt], else_: null, loc },
@@ -1636,18 +1694,20 @@ function lowerOptionalDefaultArg(
         params: [
           { localId: "a.0", name: "a", type: arrT },
           { localId: "i.0", name: "i", type: F64 },
+          ...(dynKeyIr !== null ? [{ localId: "k.0", name: "k", type: dynKeyIr.type }] : []),
         ],
         returnType: elem,
         locals: [
           { id: "a.0", name: "a", type: arrT, mutable: true },
           { id: "i.0", name: "i", type: F64, mutable: true },
           { id: "n.0", name: "n", type: F64, mutable: false },
+          ...(dynKeyIr !== null ? [{ id: "k.0", name: "k", type: dynKeyIr.type, mutable: false }] : []),
         ],
         body,
         loc,
       });
     }
-    const out: IrExpr = { kind: "call", callee: name, args: [arr, index], type: elem, loc };
+    const out: IrExpr = { kind: "call", callee: name, args: dynKeyIr !== null ? [arr, index, dynKeyIr] : [arr, index], type: elem, loc };
     L.lyingResults.add(out);
     return out;
   }
