@@ -11114,33 +11114,33 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8040-an-implicit-any-callback-by-reference-to-array-hofs.cjs": {
+  "<repo>/tests/corpus/8309-an-implicit-any-callback-by-reference-to-array-hofs.cjs": {
    "order": [
-    "<repo>/tests/corpus/8040-an-implicit-any-callback-by-reference-to-array-hofs.cjs"
+    "<repo>/tests/corpus/8309-an-implicit-any-callback-by-reference-to-array-hofs.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8041-a-void-call-used-as-a-value.cjs": {
+  "<repo>/tests/corpus/8310-a-void-call-used-as-a-value.cjs": {
    "order": [
-    "<repo>/tests/corpus/8041-a-void-call-used-as-a-value.cjs"
+    "<repo>/tests/corpus/8310-a-void-call-used-as-a-value.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8050-process-on-uncaught-exception-consumes-the-throw.cjs": {
+  "<repo>/tests/corpus/8312-process-on-uncaught-exception-consumes-the-throw.cjs": {
    "order": [
-    "<repo>/tests/corpus/8050-process-on-uncaught-exception-consumes-the-throw.cjs"
+    "<repo>/tests/corpus/8312-process-on-uncaught-exception-consumes-the-throw.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8051-an-unhandled-rejection-in-a-loop-free-program.cjs": {
+  "<repo>/tests/corpus/8313-an-unhandled-rejection-in-a-loop-free-program.cjs": {
    "order": [
-    "<repo>/tests/corpus/8051-an-unhandled-rejection-in-a-loop-free-program.cjs"
+    "<repo>/tests/corpus/8313-an-unhandled-rejection-in-a-loop-free-program.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8060-a-method-called-through-a-dynamic-box-dispatches-to-the-subclass.cjs": {
+  "<repo>/tests/corpus/8314-a-method-called-through-a-dynamic-box-dispatches-to-the-subclass.cjs": {
    "order": [
-    "<repo>/tests/corpus/8060-a-method-called-through-a-dynamic-box-dispatches-to-the-subclass.cjs"
+    "<repo>/tests/corpus/8314-a-method-called-through-a-dynamic-box-dispatches-to-the-subclass.cjs"
    ],
    "diags": []
   },
@@ -11150,15 +11150,15 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8100-proxy-get-set-has-delete-traps.cjs": {
+  "<repo>/tests/corpus/8321-proxy-get-set-has-delete-traps.cjs": {
    "order": [
-    "<repo>/tests/corpus/8100-proxy-get-set-has-delete-traps.cjs"
+    "<repo>/tests/corpus/8321-proxy-get-set-has-delete-traps.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8101-proxy-ownkeys-apply-arrays-and-instances.cjs": {
+  "<repo>/tests/corpus/8322-proxy-ownkeys-apply-arrays-and-instances.cjs": {
    "order": [
-    "<repo>/tests/corpus/8101-proxy-ownkeys-apply-arrays-and-instances.cjs"
+    "<repo>/tests/corpus/8322-proxy-ownkeys-apply-arrays-and-instances.cjs"
    ],
    "diags": []
   },
@@ -13708,27 +13708,27 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8000-an-implicit-any-arrow-const-read-from-a-function.js": {
+  "<repo>/tests/corpus/8300-an-implicit-any-arrow-const-read-from-a-function.js": {
    "order": [
-    "<repo>/tests/corpus/8000-an-implicit-any-arrow-const-read-from-a-function.js"
+    "<repo>/tests/corpus/8300-an-implicit-any-arrow-const-read-from-a-function.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8010-process-exitcode-is-a-validated-int32-slot.js": {
+  "<repo>/tests/corpus/8301-process-exitcode-is-a-validated-int32-slot.js": {
    "order": [
-    "<repo>/tests/corpus/8010-process-exitcode-is-a-validated-int32-slot.js"
+    "<repo>/tests/corpus/8301-process-exitcode-is-a-validated-int32-slot.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8011-process-exit-uses-the-exit-code.js": {
+  "<repo>/tests/corpus/8302-process-exit-uses-the-exit-code.js": {
    "order": [
-    "<repo>/tests/corpus/8011-process-exit-uses-the-exit-code.js"
+    "<repo>/tests/corpus/8302-process-exit-uses-the-exit-code.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8021-a-class-declared-inside-a-typed-function.ts": {
+  "<repo>/tests/corpus/8304-a-class-declared-inside-a-typed-function.ts": {
    "order": [
-    "<repo>/tests/corpus/8021-a-class-declared-inside-a-typed-function.ts"
+    "<repo>/tests/corpus/8304-a-class-declared-inside-a-typed-function.ts"
    ],
    "diags": []
   },
@@ -13738,21 +13738,21 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8020-a-class-declared-inside-a-function-or-block.cjs": {
+  "<repo>/tests/corpus/8303-a-class-declared-inside-a-function-or-block.cjs": {
    "order": [
-    "<repo>/tests/corpus/8020-a-class-declared-inside-a-function-or-block.cjs"
+    "<repo>/tests/corpus/8303-a-class-declared-inside-a-function-or-block.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8030-reflect-ownkeys-over-records-and-arrays.cjs": {
+  "<repo>/tests/corpus/8307-reflect-ownkeys-over-records-and-arrays.cjs": {
    "order": [
-    "<repo>/tests/corpus/8030-reflect-ownkeys-over-records-and-arrays.cjs"
+    "<repo>/tests/corpus/8307-reflect-ownkeys-over-records-and-arrays.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8031-reflect-ownkeys-typed.ts": {
+  "<repo>/tests/corpus/8308-reflect-ownkeys-typed.ts": {
    "order": [
-    "<repo>/tests/corpus/8031-reflect-ownkeys-typed.ts"
+    "<repo>/tests/corpus/8308-reflect-ownkeys-typed.ts"
    ],
    "diags": []
   },
@@ -13762,21 +13762,21 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8061-a-constructor-assigned-function-shadows-an-inherited-method.cjs": {
+  "<repo>/tests/corpus/8315-a-constructor-assigned-function-shadows-an-inherited-method.cjs": {
    "order": [
-    "<repo>/tests/corpus/8061-a-constructor-assigned-function-shadows-an-inherited-method.cjs"
+    "<repo>/tests/corpus/8315-a-constructor-assigned-function-shadows-an-inherited-method.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8071-own-keys-of-functions-and-classes.cjs": {
+  "<repo>/tests/corpus/8317-own-keys-of-functions-and-classes.cjs": {
    "order": [
-    "<repo>/tests/corpus/8071-own-keys-of-functions-and-classes.cjs"
+    "<repo>/tests/corpus/8317-own-keys-of-functions-and-classes.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8070-own-keys-of-class-instances-through-the-box-registry.cjs": {
+  "<repo>/tests/corpus/8316-own-keys-of-class-instances-through-the-box-registry.cjs": {
    "order": [
-    "<repo>/tests/corpus/8070-own-keys-of-class-instances-through-the-box-registry.cjs"
+    "<repo>/tests/corpus/8316-own-keys-of-class-instances-through-the-box-registry.cjs"
    ],
    "diags": []
   },
@@ -13786,27 +13786,27 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8080-fs-callback-forms-read-readfile-mkdtemp.cjs": {
+  "<repo>/tests/corpus/8318-fs-callback-forms-read-readfile-mkdtemp.cjs": {
    "order": [
-    "<repo>/tests/corpus/8080-fs-callback-forms-read-readfile-mkdtemp.cjs"
+    "<repo>/tests/corpus/8318-fs-callback-forms-read-readfile-mkdtemp.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8042-a-rest-parameter-arrow-const-read-from-a-function.js": {
+  "<repo>/tests/corpus/8311-a-rest-parameter-arrow-const-read-from-a-function.js": {
    "order": [
-    "<repo>/tests/corpus/8042-a-rest-parameter-arrow-const-read-from-a-function.js"
+    "<repo>/tests/corpus/8311-a-rest-parameter-arrow-const-read-from-a-function.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8090-net-connect-over-a-run-time-option-bag.cjs": {
+  "<repo>/tests/corpus/8319-net-connect-over-a-run-time-option-bag.cjs": {
    "order": [
-    "<repo>/tests/corpus/8090-net-connect-over-a-run-time-option-bag.cjs"
+    "<repo>/tests/corpus/8319-net-connect-over-a-run-time-option-bag.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8091-dgram-send-callback-list-and-connected-forms.cjs": {
+  "<repo>/tests/corpus/8320-dgram-send-callback-list-and-connected-forms.cjs": {
    "order": [
-    "<repo>/tests/corpus/8091-dgram-send-callback-list-and-connected-forms.cjs"
+    "<repo>/tests/corpus/8320-dgram-send-callback-list-and-connected-forms.cjs"
    ],
    "diags": []
   },
@@ -13816,15 +13816,15 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8023-a-typed-class-declared-in-a-function-capturing-its-locals.ts": {
+  "<repo>/tests/corpus/8306-a-typed-class-declared-in-a-function-capturing-its-locals.ts": {
    "order": [
-    "<repo>/tests/corpus/8023-a-typed-class-declared-in-a-function-capturing-its-locals.ts"
+    "<repo>/tests/corpus/8306-a-typed-class-declared-in-a-function-capturing-its-locals.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8022-a-class-declared-in-a-function-capturing-its-locals.cjs": {
+  "<repo>/tests/corpus/8305-a-class-declared-in-a-function-capturing-its-locals.cjs": {
    "order": [
-    "<repo>/tests/corpus/8022-a-class-declared-in-a-function-capturing-its-locals.cjs"
+    "<repo>/tests/corpus/8305-a-class-declared-in-a-function-capturing-its-locals.cjs"
    ],
    "diags": []
   },
