@@ -11054,6 +11054,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7845-date-leaf-in-checked-casts.ts": {
+   "order": [
+    "<repo>/tests/corpus/7845-date-leaf-in-checked-casts.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
