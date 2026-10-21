@@ -687,6 +687,16 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
   if (dyn_name_is(method, "valueOf")) {
     return scr_dyn_retain(recv);
   }
+  /* Object.prototype.toLocaleString: Invoke(this, "toString"). The Number and Array arms fence their own
+   * (locale formatting is not modeled there); a string, boolean or object answers here, and a Date handle
+   * answers in its own ops (scr_date_dyn.c). */
+  if (dyn_name_is(method, "toLocaleString")) {
+    ScrStr *s = scr_dyn_string_coerce_js(recv);
+    if (s == NULL) return NULL;
+    ScrDyn *r = scr_dyn_new_str(s);
+    scr_str_release(s);
+    return r;
+  }
   dyn_throw_not_fn(what);
   return NULL;
 }
@@ -788,7 +798,7 @@ static bool dyn_name_in(const char *m, const char *const *names) {
  * claimed `function` would create a fresh disagreement in the other
  * direction. They are priced, not guessed at. */
 static bool dyn_objproto_knows(const char *m) {
-  static const char *const names[] = { "hasOwnProperty", "valueOf", NULL };
+  static const char *const names[] = { "hasOwnProperty", "valueOf", "toLocaleString", NULL };
   return dyn_name_in(m, names);
 }
 
@@ -1924,7 +1934,8 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
    * `this` binding is not at issue here and never was -- these methods
    * read the receiver through `recv`, not through the ambient window. */
   if (recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BOOL) {
-    if (dyn_name_is(method, "toString")) {
+    /* Boolean.prototype has no toLocaleString of its own: Object.prototype's runs toString. */
+    if (dyn_name_is(method, "toString") || (recv->kind == SCR_DYN_BOOL && dyn_name_is(method, "toLocaleString"))) {
       if (recv->kind == SCR_DYN_NUM && argc >= 1 && args[0]->kind != SCR_DYN_UNDEF) {
         double radix = dyn_index_arg(args, argc, 0, 10, what);
         if (scr_exc_pending()) return NULL;

@@ -10593,7 +10593,7 @@ export function moduleUsesDateTz(mod: IrModule): boolean {
  * serves toLocale*String with arguments): links scr_date_intl.c and the generated en-US pattern and zone-name
  * tables (scr_date_intl_en.c, scr_date_tznames.c). A LINK GATE, not a fence. */
 export function moduleUsesDateIntl(mod: IrModule): boolean {
-  return dateGates(mod).intl;
+  return dateGates(mod).intl || dateGates(mod).dyn;
 }
 
 /** date.set ops (lower-builtins DATE_SETTERS) that are pure UTC arithmetic:

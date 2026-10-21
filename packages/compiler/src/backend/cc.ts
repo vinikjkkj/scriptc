@@ -2233,7 +2233,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const dateUnit = opts.date ?? false;
   const dateDynUnit = (opts.dateDyn ?? false) && dateUnit;
   const dateFmtUnit = ((opts.dateFmt ?? false) || dateDynUnit) && dateUnit;
-  const dateIntlUnit = (opts.dateIntl ?? false) && dateUnit;
+  const dateIntlUnit = ((opts.dateIntl ?? false) || dateDynUnit) && dateUnit;
   const dateTzUnit = ((opts.dateTz ?? false) || dateFmtUnit || dateIntlUnit) && dateUnit;
   const opaqueUnit = opts.opaque ?? false;
   const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
