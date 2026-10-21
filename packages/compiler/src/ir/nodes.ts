@@ -10575,10 +10575,29 @@ export function moduleUsesDateDyn(mod: IrModule): boolean {
   return dateGates(mod).dyn;
 }
 
-function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean } {
+/** The program reads LOCAL time (a local getter, a local setter or the
+ * component constructor, getTimezoneOffset, a formatter, or a Date that
+ * crosses into `unknown`): links the zone database (scr_date_tz.c plus the
+ * generated scr_date_tzdb.c) instead of the one-function stub. UTC-only Date
+ * programs (Date.UTC, getUTC*, toISOString, the UTC setters, setTime) pay
+ * nothing for it. A LINK GATE: a wrong `false` is a loud runtime trap in the
+ * stub, never a wrong answer. */
+export function moduleUsesDateTz(mod: IrModule): boolean {
+  return dateGates(mod).tz || dateGates(mod).dyn;
+}
+
+/** date.set ops (lower-builtins DATE_SETTERS) that are pure UTC arithmetic:
+ * the setUTC* family (7..13) and setTime (14). */
+function isUtcSetOp(op: unknown): boolean {
+  const v = (op as { kind?: unknown; value?: unknown } | undefined);
+  return v?.kind === "numLit" && typeof v.value === "number" && v.value >= 7 && v.value <= 14;
+}
+
+function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean; tz: boolean } {
   let fmt = false;
   let date = false;
   let dyn = false;
+  let tz = false;
   const visit = (v: unknown): void => {
     if (v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
@@ -10588,11 +10607,21 @@ function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean } {
     const node = v as { kind?: unknown; fn?: unknown };
     if (node.kind === "date") date = true;
     if (node.kind === "dyn") dyn = true;
-    if (node.kind === "libCall" && (node.fn === "date.toString" || node.fn === "date.format")) fmt = true;
+    if (node.kind === "libCall" && (node.fn === "date.toString" || node.fn === "date.format")) {
+      fmt = true;
+      tz = true;
+    }
+    if (
+      node.kind === "libCall" &&
+      (node.fn === "date.getHours" || node.fn === "date.localTime" || node.fn === "date.tzOffset" || node.fn === "date.newParts")
+    ) {
+      tz = true;
+    }
+    if (node.kind === "libCall" && node.fn === "date.set" && !isUtcSetOp((node as { args?: unknown[] }).args?.[1])) tz = true;
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);
-  return { fmt, dyn: date && dyn };
+  return { fmt, dyn: date && dyn, tz };
 }
 
 /** The program holds an RTCPeerConnection or an RTCDataChannel: compiles

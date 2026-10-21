@@ -12,19 +12,13 @@
  * outside it. libc's tm_isdst is NOT a substitute: it disagrees with the
  * flag for 232 of 418 zones over 1800-2100 (measured), so the table stores,
  * per zone, the instants in [0, 2^31) at which the flag toggles.
- * A zone id the table does not carry (a POSIX TZ string such as "XYZ3", an
- * unknown id) prints ICU's own fallback, "GMT+HH:MM" of the offset. */
+ * A zone without an ICU name (a POSIX TZ string such as "XYZ3", an unknown
+ * id: scr_tz.nrec < 0) prints ICU's own fallback, "GMT+HH:MM" of the offset. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-
 #include "scr_runtime.h"
 #include "scr_date_zones.h"
 
@@ -39,43 +33,6 @@ static int dz_varint(const uint8_t *b, size_t *p, uint64_t *out) {
   return 1;
 }
 static int64_t dz_unzz(uint64_t v) { return (v & 1) ? -(int64_t)((v + 1) / 2) : (int64_t)(v / 2); }
-
-/* The host's IANA zone id, or NULL. */
-static const char *dz_host_id(char *buf, size_t cap) {
-  const char *tz = getenv("TZ");
-  if (tz != NULL) {
-    if (*tz == ':') tz++;
-    if (*tz == '\0') return "UTC";
-    return tz;
-  }
-#ifdef _WIN32
-  (void)buf; (void)cap;
-  DYNAMIC_TIME_ZONE_INFORMATION z;
-  if (GetDynamicTimeZoneInformation(&z) != TIME_ZONE_ID_INVALID && wcscmp(z.TimeZoneKeyName, L"UTC") == 0) return "UTC";
-  return NULL;
-#else
-  ssize_t n = readlink("/etc/localtime", buf, cap - 1);
-  if (n <= 0) return "UTC";
-  buf[n] = '\0';
-  const char *k = strstr(buf, "zoneinfo/");
-  if (k == NULL) return "UTC";
-  k += 9;
-  if (strncmp(k, "posix/", 6) == 0) k += 6;
-  else if (strncmp(k, "right/", 6) == 0) k += 6;
-  return k;
-#endif
-}
-
-static const scr_dz_rec *dz_find(const char *id) {
-  size_t lo = 0, hi = scr_dz_nids;
-  while (lo < hi) {
-    size_t mid = (lo + hi) / 2;
-    int c = strcmp(id, scr_dz_ids + scr_dz_id_off[mid]);
-    if (c == 0) return &scr_dz_recs[scr_dz_id_rec[mid]];
-    if (c < 0) hi = mid; else lo = mid + 1;
-  }
-  return NULL;
-}
 
 /* V8's equivalent year for an instant outside [0, 2^31) seconds. */
 static long long dz_equiv_year(long long y) {
@@ -131,9 +88,8 @@ static int dz_flag(const scr_dz_rec *r, double t_ms) {
 }
 
 static const char *dz_zone_name(double t, double tza, char *fb, size_t fbcap) {
-  char idbuf[512];
-  const char *id = dz_host_id(idbuf, sizeof idbuf);
-  const scr_dz_rec *r = id != NULL ? dz_find(id) : NULL;
+  const scr_tz *z = scr_tz_host();
+  const scr_dz_rec *r = z->nrec >= 0 ? &scr_dz_recs[z->nrec] : NULL;
   if (r != NULL) return scr_dz_names + scr_dz_name_off[dz_flag(r, t) ? r->n1 : r->n0];
   int off = (int)(tza / 60000.0), a = off < 0 ? -off : off;
   snprintf(fb, fbcap, "GMT%c%02d:%02d", off < 0 ? '-' : '+', a / 60, a % 60);

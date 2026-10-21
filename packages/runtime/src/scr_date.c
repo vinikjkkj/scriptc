@@ -52,11 +52,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 #include "scr_runtime.h"
 
@@ -185,31 +180,20 @@ void scr_date_release(ScrDate *d) {
 void *scr_date_retain_v(void *p) { return scr_date_retain((ScrDate *)p); }
 void scr_date_release_v(void *p) { scr_date_release((ScrDate *)p); }
 
-/* ── WHY getHours LIVES HERE AND NOT IN scr_lib.c ───────────────────────
+/* ── WHY THE LOCAL-TIME READS LIVE HERE AND NOT IN scr_lib.c ───────────
  *
  * Every other Date entry point (scr_date_now, scr_date_to_iso,
  * scr_date_utc, scr_date_parse_get_time) sits in scr_lib.c, which is
- * ALWAYS linked. This one does not, and the reason is a measurement: on
- * win32/mingw the `localtime` and `gmtime` calls below drag the CRT's
- * timezone machinery in with them, and adding them to the always-linked
- * TU grew a hello-world that never mentions Date by 1,536 bytes on BOTH
- * backends — enough, on top of the drift the size-class anchors already
- * carried, to trip `static hello-world stays in its size class` and its
- * regex twin. tests/harness/size-class.ts says that is not a number to
- * nudge, and it is right: the honest fix is that a program which never
- * reads a local hour should not pay for one.
- *
- * scr_date.c's own header already anticipated this: "nothing constructs a
- * Date, so there are no `date.*` libCalls to look for". Now there is one,
- * and moduleUsesDate looks for it — the gate fires on the HANDLE TYPE or
- * on a `date.getHours` libCall, and a wrong `false` is a loud
- * unresolved-symbol link error, never a wrong answer.
+ * ALWAYS linked. The local reads do not: they need the zone database
+ * (scr_date_tz.c) and must not make a program that never reads a local
+ * hour pay for one (tests/harness/size-class.ts pins the hello-world
+ * class). The gate is moduleUsesDate on the IR, which must see the CALL
+ * and not only the type.
  *
  * The civil-days helper is duplicated from scr_lib.c's
  * scr_days_from_civil rather than shared, and that is deliberate: making
  * the original non-static changes codegen in the always-linked TU, which
- * is the one thing this move exists to avoid. Eight lines of Howard
- * Hinnant's days_from_civil is a cheaper price than moving a size anchor.
+ * is the one thing this move exists to avoid.
  */
 
 /* Howard Hinnant's days_from_civil (see scr_lib.c's copy). */
@@ -222,99 +206,19 @@ static double scr_date_days_from_civil_local(long long y, int m, int d) {
   return (double)(era * 146097 + (long long)doe - 719468);
 }
 
-/* ── new Date(ms?).getHours(), the first LOCAL-time field read ──────────
+/* ── the LOCAL-time reads ───────────────────────────────────────────────
  *
  * Every other Date entry point above is UTC and therefore a pure function
- * of its milliseconds. This one is not: HourFromTime(LocalTime(t)) needs
- * LocalTZA(t) — the offset the HOST's zone was at THAT INSTANT, which is
- * a table lookup, not arithmetic, because it moves with DST and with
- * historical zone changes.
- *
- * The offset is read the way that cannot disagree with the host: break
- * the SAME instant down twice, once local and once UTC, and subtract the
- * two civil times. mktime() is the usual spelling and it is the wrong one
- * — it re-derives an instant from wall-clock fields, and wall clocks are
- * AMBIGUOUS across a DST fall-back (one local hour names two instants)
- * and NONEXISTENT across a spring-forward. Subtracting two broken-down
- * views of one instant asks no ambiguous question.
- *
- * ARBITRARY INSTANTS. The frontend now lowers every local-time read
- * (getHours .. getMilliseconds, getDay, getTimezoneOffset) over a Date
- * value, so scr_date_tza below is the one place the platforms differ:
- * POSIX asks localtime/gmtime (full zone history, honours TZ, as Node's
- * ICU does), Windows asks SystemTimeToTzSpecificLocalTimeEx because the
- * CRT applies the zone's CURRENT rule to every instant (measured, Windows
- * host in America/Sao_Paulo: 260 of 1200 instants disagreed with Node).
- * The guards still answer NaN for anything outside Date's range or the
- * platform's time_t. Residual, unmeasurable by the Linux lane: Node ships
- * its own tzdata, so a host whose system tzdata is a different release
- * can disagree on forecast rules (measured: Africa/Casablanca after 2020,
- * node tz 2026a vs host 2026c). */
-static double scr_date_civil_ms(long long y, int mo, int d, int h, int mi, int sec) {
-  return scr_date_days_from_civil_local(y, mo, d) * 86400000.0 + (double)h * 3600000.0 + (double)mi * 60000.0 +
-         (double)sec * 1000.0;
-}
-
-/* LocalTZA for the instant `t` (an integral, in-range time value): the
- * milliseconds LocalTime(t) - t.  Returns 0 when the platform declines the
- * instant, in which case *out is untouched.
- *
- * The two arms are separate on purpose and the Windows rule must never
- * leak into the POSIX arm (or the reverse):
- *
- *  - POSIX: break the SAME instant down twice (localtime and gmtime) and
- *    subtract the civil times.  glibc/musl/macOS carry the zone's full
- *    history and honour TZ, as Node's ICU does.
- *  - Windows: the CRT's localtime applies the zone's CURRENT rule to every
- *    instant (measured: 260 of 1200 instants disagreed with Node in
- *    America/Sao_Paulo).  SystemTimeToTzSpecificLocalTimeEx with a NULL
- *    zone consults the registry's dynamic-DST history for the current
- *    zone, which is the correct per-instant answer.  Its domain is
- *    FILETIME (1601..30827); an instant outside it is clamped to the
- *    nearest representable day, so far-past/far-future local fields use
- *    the boundary year's rule.  Windows ignores the TZ environment
- *    variable here (Node/ICU honour it); the CI lane runs the machine zone.
- */
-#ifdef _WIN32
-static int scr_date_tza(double t, double *out) {
-  double secsd = floor(t / 1000.0);
-  double ftsecs = secsd + 11644473600.0; /* seconds since 1601-01-01 */
-  if (ftsecs < 86400.0) ftsecs = 86400.0;
-  if (ftsecs > 900000000000.0) ftsecs = 900000000000.0;
-  ULARGE_INTEGER u;
-  u.QuadPart = (ULONGLONG)ftsecs * 10000000ULL;
-  FILETIME ft;
-  ft.dwLowDateTime = u.LowPart;
-  ft.dwHighDateTime = u.HighPart;
-  SYSTEMTIME ut, lt;
-  if (!FileTimeToSystemTime(&ft, &ut)) return 0;
-  if (!SystemTimeToTzSpecificLocalTimeEx(NULL, &ut, &lt)) return 0;
-  *out = scr_date_civil_ms(lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond) -
-         scr_date_civil_ms(ut.wYear, ut.wMonth, ut.wDay, ut.wHour, ut.wMinute, ut.wSecond);
-  return 1;
-}
-#else
-static int scr_date_tza(double t, double *out) {
-  /* The second the instant falls in, floored -- so a negative ms keeps a
-   * non-negative sub-second remainder. */
-  double secsd = floor(t / 1000.0);
-  if (secsd < -9.2e18 || secsd > 9.2e18) return 0; /* outside any time_t */
-  time_t secs = (time_t)secsd;
-  if ((double)secs != secsd) return 0; /* narrower time_t than the instant */
-  struct tm local_tm, utc_tm;
-  const struct tm *lp = localtime(&secs);
-  if (lp == NULL) return 0;
-  local_tm = *lp;
-  const struct tm *gp = gmtime(&secs);
-  if (gp == NULL) return 0;
-  utc_tm = *gp;
-  *out = scr_date_civil_ms((long long)local_tm.tm_year + 1900, local_tm.tm_mon + 1, local_tm.tm_mday,
-                           local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec) -
-         scr_date_civil_ms((long long)utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday, utc_tm.tm_hour,
-                           utc_tm.tm_min, utc_tm.tm_sec);
-  return 1;
-}
-#endif
+ * of its milliseconds. Local time is not: HourFromTime(LocalTime(t)) needs
+ * LocalTZA(t), the offset the zone had at THAT INSTANT, which moves with
+ * DST and with historical zone changes, so it is a table lookup. */
+/* LocalTZA for the instant `t` (an integral, in-range time value): the milliseconds
+ * LocalTime(t) - t, from the bundled zone database (scr_date_tz.c), which replays Node's own
+ * ICU offsets on every platform: no libc localtime, no Windows registry history, and no
+ * dependence on the host's tzdata release. A program with no local-time use links
+ * scr_date_tz_stub.c instead (the call cannot be reached). */
+int scr_tz_host_tza(double t_ms, double *out_ms);
+static int scr_date_tza(double t, double *out) { return scr_tz_host_tza(t, out); }
 
 /* LocalTime(t) as a time value (t + LocalTZA), NaN when t is NaN/out of
  * range or the platform declines the instant.  The local field getters are
