@@ -11007,6 +11007,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7831-bigint-concat-and-template.ts": {
+   "order": [
+    "<repo>/tests/corpus/7831-bigint-concat-and-template.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
