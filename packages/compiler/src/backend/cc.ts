@@ -953,6 +953,52 @@ export function profFlavor(): string {
   return `-prof${h.toString(16).padStart(8, "0")}`;
 }
 
+/* DEAD-CODE ELIMINATION: every native link the driver performs drops the
+ * runtime code a program cannot reach.
+ *
+ * Until this existed the link line carried no -ffunction-sections and no
+ * --gc-sections, so every always-linked runtime unit was paid by every binary
+ * whole, and a few lines added to one of them moved every binary's size class
+ * (the Windows .text anchors went red on nearly every landing). The earlier
+ * "tried and refuted" note ("the runtime is densely cross-referenced through
+ * static ops tables ... Do not re-try the flags") measured the flags on
+ * x86_64-windows-gnu, where they do nothing for a reason that has NOTHING to do
+ * with the runtime: zig's lld-link is handed /DEBUG for the PDB, and /DEBUG
+ * turns /OPT:REF off (zig 0.16 passes no /OPT at all, and refuses
+ * -Wl,/opt:ref). Measured here on the same hello-world, one flag set:
+ *
+ *   linux, host clang      .text 331,374 -> 9,902   (-97%)
+ *   windows-gnu, zig cc    .text 544,246 -> 72,438  (-87%), with the PDB dropped
+ *                          .text 544,246 -> 544,246 (unchanged), with the PDB kept
+ *
+ * so the runtime is NOT densely cross-referenced; the link was simply never
+ * allowed to collect. The per-target spelling lives in gcSectionsLinkArgs.
+ *
+ * Compile side, every object the final link sees (the program TU, the
+ * runtime units, the vendored caches and the library archive's members):
+ * one section per function and per datum, so the linker has something finer
+ * than a whole translation unit to drop. A .ll program TU takes the same
+ * flags through clang's code generator, so the LLVM backend needs no
+ * separate path. Constructors (.init_array / .ctors / the PE CRT tables)
+ * are linker roots, so the runtime's __attribute__((constructor)) hooks
+ * survive; see SCR_RETAIN for the one symbol that is referenced only to be
+ * resolved. */
+function gcSectionsCompileArgs(): string[] {
+  return ["-ffunction-sections", "-fdata-sections"];
+}
+
+/** The link-side spelling, per TARGET platform (not host):
+ *   linux   -Wl,--gc-sections  (GNU ld and lld; zig cc passes it to lld)
+ *   darwin  -Wl,-dead_strip    (ld64; also spelled on the engine arm, below)
+ * win32 gets nothing here (see the note on the PE linker in the block above:
+ * the zig lane's collector is tied to the PDB). */
+function gcSectionsLinkArgs(driver: CcDriver): string[] {
+  const platform = targetPlatform(driver);
+  if (platform === "linux") return ["-Wl,--gc-sections"];
+  if (platform === "darwin") return ["-Wl,-dead_strip"];
+  return [];
+}
+
 function optAuditArgs(sanitize: boolean): string[] {
   // Appended last and only when asked, so an untraced build's argv is
   // the historical one, element for element.
@@ -1648,6 +1694,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...optAuditArgs(sanitize),
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see compileC's buildArgs
+    ...gcSectionsCompileArgs(),
     "-Wno-deprecated-declarations",
     "-DSCR_LIB",
     // Same rule as compileC, same derivation: defined exactly when
@@ -2234,6 +2281,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // cache-miss cflags below and compileLibArchive — the three option
     // sets must stay in lockstep.
     "-fno-strict-aliasing",
+    ...gcSectionsCompileArgs(),
     "-Wno-deprecated-declarations", // ucontext fibers (scr_async.c)
     "-I", rtDir,
     // SCR_CORO_LANE is DERIVED FROM THE SOURCE LIST, not from a second read
@@ -2459,11 +2507,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
           // left-to-right archive resolution. Other dynamic targets keep
           // the historical engine-adjacent spelling.
           ...(driver.linkArgs.includes("-lm") ? [] : ["-lm"]),
-          // ld64 dead-stripping claws back a chunk of the engine archive;
-          // harmless elsewhere but only spelled this way on macOS. Keyed on
-          // the TARGET platform (= the host on the default path, where this
-          // expression is byte-identical to the historical one).
-          ...(targetPlatform(driver) === "darwin" ? ["-Wl,-dead_strip"] : []),
+          // ld64 dead-stripping (the engine archive's reason for it) is now
+          // part of every link: gcSectionsLinkArgs.
           // The PE stack reserve, pinned to the 8MB POSIX main-stack
           // geometry ISL_MAIN_STACK_BUDGET is sized against (4MB engine
           // budget + 4MB excursion margin) — quickjs-ng's own CMake makes
@@ -2487,6 +2532,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.programUnits ?? []),
     ...(opts.linkInputs ?? []),
     ...(opts.systemLibraries ?? []).map((name) => `-l${name}`),
+    ...gcSectionsLinkArgs(driver),
     // glibc keeps libm separate from libc. This must trail the generated
     // program and every native FFI input because GNU ld resolves archives
     // from left to right.
@@ -2651,6 +2697,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...optAuditArgs(opts.sanitize ?? false),
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see buildArgs
+    ...gcSectionsCompileArgs(),
     "-Wno-deprecated-declarations",
     ...includeArgs,
     ...(dynamic ? ["-DSCR_DYNAMIC"] : []),
