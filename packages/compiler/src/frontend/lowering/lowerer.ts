@@ -12052,7 +12052,7 @@ export class Lowerer {
    * undefined/null, ??, ||, conditions), "num" (arithmetic: undefined is
    * NaN), a property name (Node throws the member-access TypeError there),
    * or "narrow" (everything else: the checked extraction). */
-  classifyLyingRead(node: ts.Expression): "peel" | "narrow" | "num" | { prop: string; set: boolean; callText?: string; dynKey?: ts.Expression } {
+  classifyLyingRead(node: ts.Expression): "peel" | "narrow" | "num" | { prop: string; set: boolean; callText?: string; dynKey?: ts.Expression; msg?: string } {
     let p: ts.Node = node;
     while (
       p.parent &&
@@ -12124,6 +12124,15 @@ export class Lowerer {
       if ((k === ts.SyntaxKind.QuestionQuestionToken || k === ts.SyntaxKind.BarBarToken) && par.left === p) return "peel";
       // String `+` takes the wider value only against an operand that is not
       // itself a (possibly widened) read: `u + v` over two union-typed operands has no lowering.
+      // `undefined + 1n` (and the other bigint operators): Node throws this
+      // TypeError, naming no property.
+      if (
+        (this.typeOf(other).flags & ts.TypeFlags.BigIntLike) !== 0 &&
+        (k === ts.SyntaxKind.PlusToken || k === ts.SyntaxKind.MinusToken || k === ts.SyntaxKind.AsteriskToken ||
+          k === ts.SyntaxKind.SlashToken || k === ts.SyntaxKind.PercentToken || k === ts.SyntaxKind.AsteriskAsteriskToken ||
+          k === ts.SyntaxKind.AmpersandToken || k === ts.SyntaxKind.BarToken || k === ts.SyntaxKind.CaretToken ||
+          k === ts.SyntaxKind.LessThanLessThanToken || k === ts.SyntaxKind.GreaterThanGreaterThanToken)
+      ) return { prop: "", set: false, msg: "Cannot mix BigInt and other types, use explicit conversions" };
       const readLike = (e: ts.Expression): boolean => {
         if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)) return readLike(e.expression);
         return ts.isIdentifier(e) || ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e);
@@ -12279,7 +12288,7 @@ export class Lowerer {
     const loc = union.loc;
     const done = (e: IrExpr): IrExpr => { this.lyingResults.add(e); return e; };
     if (ctx === "peel") return done(union);
-    if (typeof ctx === "object" && ctx.dynKey === undefined) {
+    if (typeof ctx === "object" && ctx.dynKey === undefined && ctx.msg === undefined) {
       const h = this.lyingPropHelper(union.type.unionId, target, ctx.set, ctx.prop, loc, ctx.callText);
       if (h) return done({ kind: "call", callee: h, args: [union], type: target, loc });
     }

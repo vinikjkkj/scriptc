@@ -22,7 +22,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, F64, IrExpr, IrGlobal, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, isUnitType, strandTrap, typeKey, VOID } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { checkedJsNumber } from "./lower-exprs.js";
-import { idxMissKeyHelper, oobTolerantElem } from "./lower-containers.js";
+import { idxMissKeyHelper } from "./lower-containers.js";
 
 export interface AbsentFlag {
   /** Synthetic symbol the flag local is registered under (locals). */
@@ -37,6 +37,16 @@ type Shape =
 
 const plainKind = (t: IrType): boolean =>
   t.kind === "f64" || t.kind === "string" || t.kind === "bool" || t.kind === "object" || t.kind === "record";
+
+/** Slot kinds the shadow flag can serve: a plain value (peelable into a
+ * `T | undefined` union) or a pointer/scalar whose consumers are member uses
+ * only (array, closure, bigint, container ...: no union form every consumer
+ * lowers, so a peel consumer takes the checked-extraction trap at the USE). */
+const flaggableKind = (t: IrType): boolean =>
+  plainKind(t) || t.kind === "array" || t.kind === "func" || t.kind === "bigint" || t.kind === "set" || t.kind === "map" || t.kind === "bytes";
+
+/** Kinds whose `T | undefined` union every consumer already lowers. */
+const peelableKind = (t: IrType): boolean => plainKind(t) || t.kind === "array" || t.kind === "func";
 
 function strip(x: ts.Expression): ts.Expression {
   while (ts.isParenthesizedExpression(x) || ts.isAsExpression(x) || ts.isSatisfiesExpression(x)) x = x.expression;
@@ -81,7 +91,7 @@ function shapeOf(L: Lowerer, decl: ts.VariableDeclaration): Shape | null {
 /** Does any later use of the binding take the value in a way a plain slot
  * answers wrongly when it is absent: a member use / call (Node's TypeError
  * at the use) or arithmetic (NaN)? */
-function hasAbsentSensitiveUse(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+function hasAbsentSensitiveUse(L: Lowerer, decl: ts.VariableDeclaration, type: IrType): boolean {
   if (!ts.isIdentifier(decl.name)) return false;
   const name = decl.name.text;
   const list = decl.parent;
@@ -92,7 +102,9 @@ function hasAbsentSensitiveUse(L: Lowerer, decl: ts.VariableDeclaration): boolea
     if (found) return;
     if (ts.isIdentifier(n) && n.text === name && n.pos >= decl.end && n !== decl.name) {
       const c = L.classifyLyingRead(n);
-      if (c === "num" || typeof c === "object") found = true;
+      // A plain kind has a widened-slot path for tests; every other kind is
+      // served only here, so any use counts (the failure moves to the use).
+      if (c === "num" || typeof c === "object" || !plainKind(type)) found = true;
     }
     ts.forEachChild(n, visit);
   };
@@ -102,11 +114,12 @@ function hasAbsentSensitiveUse(L: Lowerer, decl: ts.VariableDeclaration): boolea
 
 /** Candidate test shared by locals and globals (purely syntactic). */
 export function absentFlagCandidate(L: Lowerer, decl: ts.VariableDeclaration, type: IrType): Shape | null {
-  if (!plainKind(type)) return null;
+  if (!flaggableKind(type)) return null;
   const s = shapeOf(L, decl);
   if (s === null) return null;
-  if (L.bindHasEvidence(decl)) return null;
-  if (!hasAbsentSensitiveUse(L, decl)) return null;
+  // The evidence path (a widened slot) serves the kinds it knows.
+  if (plainKind(type) && L.bindHasEvidence(decl)) return null;
+  if (!hasAbsentSensitiveUse(L, decl, type)) return null;
   return s;
 }
 
@@ -130,7 +143,7 @@ function lowerInit(L: Lowerer, shape: Shape, loc: SrcLoc): Init | null {
     const idx0 = checkedJsNumber(L, shape.e.argumentExpression, L.lowerExpr(shape.e.argumentExpression));
     if (idx0 === null) return null;
     const elem = arr0.type.elem;
-    if (!oobTolerantElem(elem)) return null;
+    if (!flaggableKind(elem)) return null;
     const arr = hoist(arr0, "%absArr") as IrExpr & { type: { kind: "array" } };
     const index = hoist(idx0, "%absIdx");
     const ok: IrExpr = { kind: "arrIntrinsic", method: "hasIndex", receiver: arr, args: [index], type: BOOL, loc };
@@ -142,7 +155,7 @@ function lowerInit(L: Lowerer, shape: Shape, loc: SrcLoc): Init | null {
   if (!def) return null;
   const real = def.arms.filter((a) => !isUnitType(a));
   const units = def.arms.filter(isUnitType);
-  if (real.length !== 1 || units.length === 0 || !plainKind(real[0]!)) return null;
+  if (real.length !== 1 || units.length === 0 || !flaggableKind(real[0]!)) return null;
   const T = real[0]!;
   const u = hoist(inner0, "%absU");
   const uid = inner0.type.unionId;
@@ -256,7 +269,7 @@ export function absentRead(L: Lowerer, bsym: ts.Symbol, v: IrExpr, node: ts.Expr
   const T = v.type;
   const done = (e: IrExpr): IrExpr => { L.lyingResults.add(e); return e; };
   const ctx = L.classifyLyingRead(node);
-  if (ctx === "peel") {
+  if (ctx === "peel" && peelableKind(T)) {
     const U = L.withUndefinedArm(T);
     if (U.kind !== "union") return null;
     const tag = L.armTag(U.unionId, T);
@@ -278,11 +291,13 @@ export function absentRead(L: Lowerer, bsym: ts.Symbol, v: IrExpr, node: ts.Expr
       const miss: IrExpr = { kind: "call", callee: idxMissKeyHelper(L, T, k.type, ctx.set, loc), args: [k], type: T, loc };
       return done({ kind: "ternary", cond: okE, then: v, else_: miss, type: T, loc });
     }
-    const msg = ctx.callText !== undefined
-      ? `${ctx.callText} is not a function`
-      : ctx.set
-        ? `Cannot set properties of undefined (setting '${ctx.prop}')`
-        : `Cannot read properties of undefined (reading '${ctx.prop}')`;
+    const msg = ctx.msg !== undefined
+      ? ctx.msg
+      : ctx.callText !== undefined
+        ? `${ctx.callText} is not a function`
+        : ctx.set
+          ? `Cannot set properties of undefined (setting '${ctx.prop}')`
+          : `Cannot read properties of undefined (reading '${ctx.prop}')`;
     return done(guarded(L, okE, v, msg, loc));
   }
   return done(guarded(L, okE, v, "undefined is not representable in the target union (a value narrowed or asserted past it still held it)", loc));
@@ -414,7 +429,7 @@ export function nullableFieldRead(L: Lowerer, read: IrExpr & { kind: "fieldGet" 
   const ctx = L.classifyLyingRead(node);
   let msg = "undefined is not representable in the target union (a value narrowed or asserted past it still held it)";
   if (typeof ctx === "object" && ctx.dynKey === undefined) {
-    msg = ctx.callText !== undefined
+    msg = ctx.msg !== undefined ? ctx.msg : ctx.callText !== undefined
       ? `${ctx.callText} is not a function`
       : ctx.set
         ? `Cannot set properties of undefined (setting '${ctx.prop}')`
