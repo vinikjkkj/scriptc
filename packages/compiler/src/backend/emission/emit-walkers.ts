@@ -8,7 +8,7 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
-import { CLASS_PROPS_FIELD, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
@@ -296,6 +296,12 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       // the path already says where.
       case "func":
         return "function";
+      // A union ARM no dyn value can be (dynNeverArm): named for the
+      // refusal text of the union it sits in ("expected string | Date at ...").
+      case "date":
+        return "Date";
+      case "opaque":
+        return t.name;
       // Map/Set-valued index signatures (Record<string, Map<K, V>>): only
       // reachable through the keyed-read miss trap's message — no dynCheck
       // ever expects one.
@@ -1301,8 +1307,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // the checked-dynamic tree can hold the undefined value now — overflow entries
         // under `unknown` index signatures — and it matches exactly the
         // undefined arm.
-        const arms = def.arms.map((a) => `${E.dynMatchHelper(a)}(d)`);
-        d.push(`  return ${arms.join(" || ")};`);
+        // An arm no dyn value can be (dynNeverArm) has nothing to match.
+        const arms = def.arms.filter((a) => !dynNeverArm(a)).map((a) => `${E.dynMatchHelper(a)}(d)`);
+        d.push(arms.length === 0 ? `  return false;` : `  return ${arms.join(" || ")};`);
         break;
       }
       case "func": {
@@ -2780,6 +2787,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         for (const withLits of passes) {
           order.forEach((i) => {
             const arm = def.arms[i]!;
+            // No dyn value is a Date or a named stdlib handle: the arm can
+            // never be taken, so it is not walked (dynNeverArm).
+            if (dynNeverArm(arm)) return;
             const lits = withLits ? armDiscrimLits(def, i) : {};
             const litTest = Object.keys(lits).length > 0 ? `${dynLitHelper(E, lits)}(d)` : null;
             if (arm.kind === "undefinedT" || arm.kind === "nullT") {
@@ -3411,6 +3421,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`  case ${i}: return scr_dyn_new_num(scr_union_get_f64(v));`);
           } else if (arm.kind === "bool") {
             d.push(`  case ${i}: return scr_dyn_new_bool(scr_union_get_bool(v));`);
+          } else if (dynNeverIn(arm)) {
+            // No value inhabits this arm (a Blob cannot be constructed
+            // natively), so no box can carry its tag.
+            d.push(`  case ${i}: ${E.badTagAbortC()};`);
           } else if (arm.kind === "func") {
             // A boxable function arm crosses through the checked-dynamic
             // function boundary (the dynFrom func special case, sans name).

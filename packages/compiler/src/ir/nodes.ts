@@ -8320,8 +8320,8 @@ export function canConvertToDyn(
     if (visiting.has(unionKey)) return true;
     visiting.add(unionKey);
     try {
-      return def.arms.every((a) =>
-        a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion) ||
+      return def.arms.some((a) => !dynNeverIn(a)) && def.arms.every((a) =>
+        a.kind === "undefinedT" || dynNeverIn(a) || isJsonSafeType(a, getRecord, getUnion) ||
         (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion, visiting)) ||
         (a.kind !== "func" &&
           canConvertToDyn(a, getRecord, getUnion, visiting)),
@@ -8590,6 +8590,30 @@ export function mergeArmLitSets(
     out[k] = set;
   }
   return out;
+}
+
+/** The IN-direction twin of dynNeverArm: a union arm no VALUE can inhabit, so a
+ * static-to-dyn conversion has nothing to box for it. Only `Blob`: nothing in the
+ * native tier constructs one. (`PromiseConstructor` is NOT here: the global
+ * `Promise` value exists, so a union holding it must convert or refuse.) */
+export function dynNeverIn(t: IrType): boolean {
+  return t.kind === "opaque" && t.name === "Blob";
+}
+
+/** A union ARM no checked-dynamic value can be. The dyn tree has no kind for a
+ * named stdlib handle (Blob, PromiseConstructor) and canConvertToDyn refuses
+ * it, so no static value ever crosses INTO an `unknown` as one and nothing
+ * parses to one (nothing in the native tier can construct a Blob). A
+ * dyn-to-union check therefore never has a value for that arm to match, and the
+ * arm is skipped by the matcher and by the arm chain (both backends) rather than
+ * failing the whole union: mysql2's `ExecuteValues` is `... | Date | null | Blob |
+ * Buffer | ...` and must be checkable from an `unknown`. Only a union ARM
+ * qualifies, and only beside at least one live arm: a bare field of this kind
+ * would be a check that can never succeed, which stays a refusal. If a dyn kind
+ * for it is ever added, this predicate is what to change. (Date was once on
+ * this list; it now has a real handle kind, SCR_DYNH_DATE.) */
+export function dynNeverArm(t: IrType): boolean {
+  return t.kind === "opaque";
 }
 
 export function canDynCheckTo(
@@ -8924,7 +8948,11 @@ export function canDynCheckTo(
       // the func matcher compares the boxed signature: two arms that
       // matched the same function value would have to have the same
       // typeKey, and a union cannot hold the same type twice.
-      return !!def && def.arms.every((a) => a.kind === "undefinedT" || nestedOk(a));
+      return (
+        !!def &&
+        def.arms.some((a) => !dynNeverArm(a)) &&
+        def.arms.every((a) => a.kind === "undefinedT" || dynNeverArm(a) || nestedOk(a))
+      );
     }
     return false;
   };
