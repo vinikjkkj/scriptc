@@ -14632,6 +14632,12 @@
     "<repo>/tests/corpus/8412-strict-property-initialization-off-defers-map-fields/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8413-a-const-bound-to-an-absent-array-closure-bigint-or-set-fails-at-its-use.ts": {
+   "order": [
+    "<repo>/tests/corpus/8413-a-const-bound-to-an-absent-array-closure-bigint-or-set-fails-at-its-use.ts"
+   ],
+   "diags": []
   }
  }
 }
