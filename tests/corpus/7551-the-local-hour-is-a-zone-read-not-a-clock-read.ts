@@ -20,16 +20,12 @@
 // is only as strong as the host running it. On the machine this landed on
 // (America/Sao_Paulo) Node and both backends print 21.
 //
-// WHAT DOES NOT COMPILE, AND WHY THAT IS THE FEATURE. Only the live-clock
-// spelling lowers. `new Date(ms).getHours()` is fenced because the answer
-// depends on the RUN host's zone HISTORY, which the compiler cannot see:
-// glibc carries the full database and Windows' CRT applies the zone's
-// current rule to every instant. Sampling one instant every ~9 days from
-// 2000 to 2030 on a Windows host in America/Sao_Paulo, 260 of 1200
-// disagreed with Node -- every one inside a DST period the zone no longer
-// observes. `new Date()` is the one instant a zone database cannot be
-// wrong about. The fence is pinned in
-// tests/diagnostics/date-get-hours-only-composes-with-the-live-clock.ts.
+// ARBITRARY INSTANTS NOW COMPILE TOO. `new Date(ms).getHours()` and the
+// other local getters read the host zone per instant (scr_date.c's
+// scr_date_tza: POSIX localtime/gmtime, Windows
+// SystemTimeToTzSpecificLocalTimeEx instead of the CRT, which applied the
+// zone's current rule to every instant). Corpus 7840 pins them against Node
+// across zones and DST transitions.
 //
 // PINNED IN TIER_REGRESSIONS (tests/harness/llvm-differential.test.ts):
 // before the lowering existed this program did not compile at all, so a
