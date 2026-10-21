@@ -171,13 +171,24 @@ describe("the SCR_DYN_FUNC box's signature contract", () => {
       // into `(e?: Error | null) => void`. The type key cannot match, so the
       // per-target adapter runs it — which is the right answer precisely
       // because the closure holds a dyn thunk and not a typed entry point.
+      //
+      // The `any` parameters are what make the program REACH the mint, and
+      // that matters since the link collects dead sections: with `cb`
+      // typed in the signature, the stream callback never goes through a
+      // runtime-minted box, nothing live references scr_dyn_new_func, and
+      // the guard's literal is (correctly) absent from a collecting link.
+      // The byte scan below is only evidence for a program whose run
+      // reaches the mint -- measured with -finstrument-functions hooks on
+      // scr_dyn_new_func / scr_dyn_new_func_src: this shape reaches both,
+      // the typed-signature shape reaches neither.
       writeFileSync(
         file,
         'import { Writable } from "node:stream"\n' +
           "const w = new Writable({\n" +
-          "  write(chunk: Buffer, enc: string, cb: (e?: Error | null) => void): void {\n" +
+          "  write(chunk: any, enc: any, cb: any): void {\n" +
           '    console.log("chunk " + String(chunk.length))\n' +
-          "    cb()\n" +
+          "    const done: (e?: Error | null) => void = cb\n" +
+          "    done()\n" +
           "  },\n" +
           "})\n" +
           'w.write(Buffer.from("abc"))\n' +
