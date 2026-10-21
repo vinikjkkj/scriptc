@@ -4535,7 +4535,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // receiverClassDeclOf already refuses a declaration file and any
       // source the program did not tag, so a runtime builtin can never
       // reach this set — the guard is that recognizer's, not a second one.
-      const ownPropsTable = L.definePropStringTable(decl);
+      // A class of an untyped JS PACKAGE (the implicit-any lane): any code in
+      // the program may write a member the class never declared onto an
+      // instance (`connection.connectionId = id` from a command that only
+      // knows its parameter), which JS stores as an own property. The class
+      // carries the same run-time property table defineProperty uses, so
+      // those writes and the reads that follow them have somewhere to live.
+      const ownPropsTable =
+        L.definePropStringTable(decl) ||
+        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && implicitMonoFile(decl.getSourceFile()));
       const hasPropsTable = ownPropsTable || base?.hasPropsTable === true;
       if (ownPropsTable && !fields.has(CLASS_PROPS_FIELD)) {
         fields.set(CLASS_PROPS_FIELD, DYN);

@@ -2530,6 +2530,65 @@ ScrDyn *scr_cls_props_get(const ScrDyn *tbl, const ScrStr *key) {
   return scr_dyn_call(g, NULL, 0, "a property getter");
 }
 
+/* `x.k` over the instance property table as a plain READ: +1, never NULL. */
+ScrDyn *scr_cls_props_read(const ScrDyn *tbl, const ScrStr *key) {
+  ScrDyn *v = scr_cls_props_get(tbl, key);
+  if (v != NULL) return v;
+  if (scr_exc_pending()) return NULL;
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+/* `x.k = v` over the instance property table: a plain [[Set]]. An existing
+ * writable data entry takes the value; a missing key creates the ordinary
+ * enumerable, writable, configurable data property; a non-writable data entry
+ * and a getter-only accessor throw V8's strict-mode TypeErrors. An accessor
+ * WITH a setter has no `this` to run it under here (see scr_cls_props_get) and
+ * refuses loudly. */
+void scr_cls_props_set(ScrDyn *tbl, const ScrStr *key, const ScrDyn *value) {
+  if (tbl == NULL || tbl->kind != SCR_DYN_OBJ || key == NULL) {
+    scr_throw_error_msg(SCR_ERR_ERROR, "the instance property table is missing", 37);
+    return;
+  }
+  ScrDyn *ent = scr_dyn_obj_get(tbl, key->data, key->len);
+  if (ent != NULL && ent->kind == SCR_DYN_ARR && ent->v.arr.len >= 5) {
+    if (clsprop_is_data(ent)) {
+      if (!clsprop_writable(ent)) {
+        ScrJsonBuf b;
+        scr_jb_init(&b);
+        scr_jb_puts(&b, "Cannot assign to read only property '");
+        scr_jb_write(&b, key->data, key->len);
+        scr_jb_puts(&b, "' of object");
+        scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+        return;
+      }
+      ScrDyn *old = ent->v.arr.items[1];
+      ent->v.arr.items[1] = scr_dyn_retain((ScrDyn *)value);
+      scr_dyn_release(old); /* after the retain: value may BE old */
+      return;
+    }
+    ScrDyn *setter = ent->v.arr.items[2];
+    if (setter->kind != SCR_DYN_FUNC) {
+      ScrJsonBuf b;
+      scr_jb_init(&b);
+      scr_jb_puts(&b, "Cannot set property ");
+      scr_jb_write(&b, key->data, key->len);
+      scr_jb_puts(&b, " of #<Object> which has only a getter");
+      scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+      return;
+    }
+    const char *msg = "assigning through an accessor defined on a compiled instance is not supported yet";
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, strlen(msg));
+    return;
+  }
+  ScrDyn *fresh = scr_dyn_new_arr();
+  scr_dyn_arr_push(fresh, scr_dyn_new_bool(true));
+  scr_dyn_arr_push(fresh, scr_dyn_retain((ScrDyn *)value));
+  scr_dyn_arr_push(fresh, scr_dyn_new_bool(true));
+  scr_dyn_arr_push(fresh, scr_dyn_new_bool(true));
+  scr_dyn_arr_push(fresh, scr_dyn_new_bool(true));
+  scr_dyn_obj_set(tbl, key->data, key->len, fresh); /* ownership moves in */
+}
+
 /* One boolean out of a descriptor: present-and-truthy, present-and-falsy,
  * or absent (which is what ES's ValidateAndApplyPropertyDescriptor keeps
  * the CURRENT value for). */

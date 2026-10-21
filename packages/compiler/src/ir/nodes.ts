@@ -3251,6 +3251,16 @@ export type IrLibFn =
    * that statically. Never throws. */
   | "cls.propsCount"
   | "cls.propsGet"
+  /** `x.k = v` over the table (a plain [[Set]]): an existing writable data
+   * entry takes the value, a missing key creates an ordinary enumerable data
+   * property, a non-writable or getter-only entry throws the strict-mode
+   * TypeError. Statement position; args (table, key, value), all borrowed. In
+   * the may-throw seed set. */
+  | "cls.propsSet"
+  /** `x.k` over the table as a plain property READ: the data value, the getter's
+   * answer, or the undefined dyn when the key is absent (unlike `cls.propsGet`,
+   * whose NULL means absent). +1, never NULL. In the may-throw seed set. */
+  | "cls.propsRead"
   /** Bare `typeof v` on a dyn value AS A STRING (arg: the dyn value,
    * borrowed; result: an owned string) — the dyn kind's JS answer:
    * undefined→"undefined", null/object/array/bytes→"object" (JS's oldest
@@ -10062,7 +10072,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
           // the definer would leave that program calling a symbol its
           // link line does not carry.
           node.fn === "cls.propsEnsure" || node.fn === "cls.propsDefine" ||
-          node.fn === "cls.propsHas" || node.fn === "cls.propsGet" ||
+          node.fn === "cls.propsHas" || node.fn === "cls.propsGet" || node.fn === "cls.propsSet" || node.fn === "cls.propsRead" ||
           node.fn === "cls.propsCount"))
     ) {
       found = true;
@@ -12296,6 +12306,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.defineProp",
   "cls.propsDefine",
   "cls.propsGet",
+  "cls.propsSet",
+  "cls.propsRead",
   "process.chdir",
   "fs.realpathSync",
   "fs.readFileSync",
