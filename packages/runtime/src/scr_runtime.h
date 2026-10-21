@@ -76,6 +76,14 @@ typedef unsigned short mode_t;
  * shape is the mingw one on purpose: no d_type (scr_lib.c's DT_REG arm
  * stays out, its lstat fallback answers), d_name is the ANSI find-data
  * name, "." and ".." are returned like any entry. */
+/* PATH_MAX: mingw-w64 defines it, the UCRT's <limits.h> does not (scr_lib.c
+ * sizes its _fullpath buffers with it). MAX_PATH's value, which is what
+ * _fullpath is bounded by. */
+#include <limits.h>
+#ifndef PATH_MAX
+#define PATH_MAX 260
+#endif
+
 typedef int clockid_t;
 #define CLOCK_REALTIME  0
 #define CLOCK_MONOTONIC 1
