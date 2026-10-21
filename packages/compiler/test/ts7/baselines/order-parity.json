@@ -14355,6 +14355,223 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/fixtures/node-types/argv-env.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/argv-env.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/import-fences.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/import-fences.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1010",
+     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
+      "start": 422,
+      "end": 461
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/fixtures/node-types/path-os.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/path-os.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stream-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/streams.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/streams.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts": {
+   "order": [
+    "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7800-map-union-two-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7800-map-union-two-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7801-set-union-two-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7801-set-union-two-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7802-map-union-string-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/7802-map-union-string-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7803-map-union-recursive-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/7803-map-union-recursive-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7804-map-union-object-property.ts": {
+   "order": [
+    "<repo>/tests/corpus/7804-map-union-object-property.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-tls-getcacertificates-over-a-dynamic-argument.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-tls-getcacertificates-over-a-dynamic-argument.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-run-time-specifier-classes.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-run-time-specifier-classes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-dgram-send-over-dynamic-arguments.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-dgram-send-over-dynamic-arguments.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-process-exitcode-assignment.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-process-exitcode-assignment.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-class-declared-in-a-block-extending-a-stream.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-class-declared-in-a-block-extending-a-stream.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-new-proxy.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-new-proxy.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/main.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/inner/t.cjs",
+    "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-arrow-const-read-from-a-function.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-arrow-const-read-from-a-function.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-net-connect-with-a-runtime-option-bag.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-net-connect-with-a-runtime-option-bag.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-with-a-run-time-specifier.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-with-a-run-time-specifier.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-constructor-field-shadowing-a-method.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-constructor-field-shadowing-a-method.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8400-member-use-past-the-end-names-the-runtime-key-and-a-fractional-index-misses.ts": {
+   "order": [
+    "<repo>/tests/corpus/8400-member-use-past-the-end-names-the-runtime-key-and-a-fractional-index-misses.ts"
+   ],
+   "diags": []
   }
  }
 }
