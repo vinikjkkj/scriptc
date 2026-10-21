@@ -5532,6 +5532,8 @@ double scr_cls_props_count(const ScrDyn *tbl);
  * for a class whose only declared field is `a`. */
 bool scr_dyn_obj_key_is_index(const char *key, size_t len);
 ScrDyn *scr_cls_props_get(const ScrDyn *tbl, const ScrStr *key);
+ScrDyn *scr_cls_props_read(const ScrDyn *tbl, const ScrStr *key); /* x.k read: +1, undefined when absent (scr_dyn_invoke.c) */
+void scr_cls_props_set(ScrDyn *tbl, const ScrStr *key, const ScrDyn *value); /* x.k = v over the table (scr_dyn_invoke.c) */
 void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool index_keys);
 
 /* scriptc's INTERNAL-SLOT pair — the `slots` member's whole API. It is

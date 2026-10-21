@@ -20693,6 +20693,98 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return { kind: "closure", fnName: name, captures: [], type: funcOf(params, first.ret), loc };
   }
 
+/** Names every object answers from its prototype (`toString`, `hasOwnProperty`,
+   * ...): never an undeclared-member read or write — the instance has them. */
+  function undeclaredMemberExcluded(name: string): boolean {
+    return OBJECT_PROTOTYPE_NAMES.has(name) || name.startsWith("%");
+  }
+
+/** `x.k = v` where `k` is a member the receiver's class never declares
+   * (`connection.connectionId = id` from a command that only holds its
+   * parameter): JS stores an own property. The write lands in the declaring
+   * SUBCLASS's slot when the instance is one (deepest first — the slot a
+   * subclass-typed read answers from), else in the instance's run-time
+   * property table (the class carries one — see collectClassShape). Statement
+   * position only. Null when the receiver is not such a class instance. */
+  export function lowerUndeclaredMemberWrite(L: Lowerer, expr: ts.BinaryExpression): IrStmt | null {
+    if (!ts.isPropertyAccessExpression(expr.left)) return null;
+    const left = expr.left;
+    if (left.questionDotToken !== undefined || !isJsSourceFile(left.getSourceFile())) return null;
+    const name = left.name.text;
+    if (undeclaredMemberExcluded(name)) return null;
+    const recvT = L.mapTypeOf(L.typeOf(left.expression));
+    if (recvT?.kind !== "object") return null;
+    const info = L.classes.get(recvT.className) ?? null;
+    if (info === null || info.builtinError || L.findMethodOn(info, name) !== null || info.fields.has(name)) return null;
+    if (L.findMethodOn(info, `get:${name}`) !== null || L.findMethodOn(info, `set:${name}`) !== null) return null;
+    const decls: { cls: ClassInfo; depth: number; type: IrType }[] = [];
+    const walk = (c: ClassInfo, depth: number): void => {
+      for (const s of c.subclasses) {
+        const own = s.fieldOrder.find((f) => f.name === name && f.redeclared !== true);
+        if (own !== undefined && !(s.base?.fields.has(name) ?? false)) decls.push({ cls: s, depth, type: own.type });
+        walk(s, depth + 1);
+      }
+    };
+    walk(info, 1);
+    const hasBag = info.hasPropsTable === true;
+    if (decls.length === 0 && !hasBag) return null;
+    const loc = locOf(expr);
+    const recv = L.lowerExpr(left.expression);
+    if (recv.type.kind !== "object") return null;
+    const value = L.lowerExprExpecting(expr.right, DYN);
+    if (value.type.kind !== "dyn") return null;
+    const rTmp = L.declareHiddenLocal("%expRecv", recv.type);
+    const vTmp = L.declareHiddenLocal("%expVal", DYN);
+    const rRef = (): IrExpr => ({ kind: "varRef", localId: rTmp.id, type: recv.type, loc });
+    const vRef = (): IrExpr => ({ kind: "varRef", localId: vTmp.id, type: DYN, loc });
+    const className = (recv.type as IrType & { kind: "object" }).className;
+    const bagField = (): IrExpr => ({ kind: "fieldGet", obj: rRef(), className, field: CLASS_PROPS_FIELD, type: DYN, loc });
+    let tail: IrStmt[] = hasBag
+      ? [
+          {
+            kind: "fieldSet", obj: rRef(), className, field: CLASS_PROPS_FIELD,
+            value: { kind: "libCall", fn: "cls.propsEnsure", args: [bagField()], type: DYN, loc }, loc,
+          },
+          {
+            kind: "exprStmt",
+            expr: { kind: "libCall", fn: "cls.propsSet", args: [bagField(), { kind: "strLit", value: name, type: STRING, loc }, vRef()], type: VOID, loc },
+            loc,
+          },
+        ]
+      : [];
+    decls.sort((a, b) => b.depth - a.depth);
+    for (let i = decls.length - 1; i >= 0; i--) {
+      const d = decls[i]!;
+      const selfT: IrType = { kind: "object", className: d.cls.def.name };
+      const store: IrStmt = {
+        kind: "fieldSet",
+        obj: { kind: "downcast", value: rRef(), type: selfT, loc },
+        className: d.cls.def.name,
+        field: name,
+        value: L.coerceInto(expr.right, vRef(), d.type),
+        loc,
+      };
+      tail = [
+        {
+          kind: "if",
+          cond: { kind: "instanceOf", value: rRef(), className: d.cls.def.name, type: BOOL, loc },
+          then: [store],
+          else_: tail.length > 0 ? tail : null,
+          loc,
+        },
+      ];
+    }
+    return {
+      kind: "block",
+      body: [
+        { kind: "varDecl", localId: rTmp.id, init: recv, loc },
+        { kind: "varDecl", localId: vTmp.id, init: value, loc },
+        ...tail,
+      ],
+      loc,
+    };
+  }
+
 /** `this.onResult` inside a BASE class that never declares `onResult` — the
    * subclasses do (mysql2's Command.execute reads `this.onResult`, `this.sql`,
    * `this.queryTimeout`, all assigned by Query/Execute/Ping's constructors).
@@ -20704,6 +20796,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * when no subclass declares the name or a slot cannot box into dyn. */
   export function lowerSubclassFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression, info: ClassInfo): IrExpr | null {
     const name = expr.name.text;
+    if (undeclaredMemberExcluded(name)) return null;
     const decls: { cls: ClassInfo; depth: number; type: IrType }[] = [];
     const walk = (c: ClassInfo, depth: number): void => {
       for (const s of c.subclasses) {
@@ -20713,7 +20806,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
     };
     walk(info, 1);
-    if (decls.length === 0) return null;
+    const hasBag = info.hasPropsTable === true;
+    if (decls.length === 0 && !hasBag) return null;
     if (!isPlainMethodReceiver(expr.expression)) return null;
     const loc = locOf(expr);
     const recv = L.lowerExpr(expr.expression);
@@ -20730,7 +20824,20 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       return L.dynConvertible(t) ? { kind: "dynFrom", value, type: DYN, loc } : null;
     };
     decls.sort((a, b) => b.depth - a.depth);
-    let chain: IrExpr = dynUndefinedExpr(loc);
+    // The chain ends at the instance's own run-time property table when the
+    // class carries one (a member written from outside), `undefined` otherwise.
+    let chain: IrExpr = hasBag
+      ? {
+          kind: "libCall",
+          fn: "cls.propsRead",
+          args: [
+            { kind: "fieldGet", obj: recv, className: recv.type.className, field: CLASS_PROPS_FIELD, type: DYN, loc },
+            { kind: "strLit", value: name, type: STRING, loc },
+          ],
+          type: DYN,
+          loc,
+        }
+      : dynUndefinedExpr(loc);
     for (let i = decls.length - 1; i >= 0; i--) {
       const d = decls[i]!;
       const selfT: IrType = { kind: "object", className: d.cls.def.name };
