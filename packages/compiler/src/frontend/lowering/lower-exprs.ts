@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { dynImportBindingDeclOf } from "./lower-island.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
@@ -32,7 +32,7 @@ import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
-import { bindingNeverReassigned, classHasOwnValueOf, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
+import { type ParamShape, bindingNeverReassigned, classHasOwnValueOf, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -20429,6 +20429,170 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return { kind: "call", callee: helper, args: [recv], type: recordT, loc };
   }
 
+/** `return this.readField` / `this.next = this.start`: a class METHOD read as
+   * a VALUE in a JavaScript file. JS hands out the prototype's function with
+   * no receiver bound (mysql2's command state machine stores one and invokes
+   * it later as `this.next(packet)`, where the call supplies `this`), so the
+   * value is a DETACHED function: a zero-capture closure over an interned
+   * thunk `%unbound.<Class>.<m>` whose receiver is read from the ambient
+   * `this` window (`dyn.this`, exactly the function-value story of
+   * stringMethodFnValueOf) and checked against the static class — a
+   * receiver that is not an instance throws, as `undefined.field` would.
+   * Dispatch inside the thunk is the call arm's: virtual when a subclass
+   * overrides the method, direct otherwise. The call side is
+   * dynCallWithThis (the dyn-field call arm). Null when the member's
+   * parameters are not all required (a detached call cannot say which
+   * were omitted) or the receiver is not a plain class instance. */
+  function lowerUnboundClassMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (!isJsSourceFile(expr.getSourceFile())) return null;
+    if (expr.questionDotToken !== undefined) return null;
+    const recvT = L.mapTypeOf(L.typeOf(expr.expression));
+    if (recvT?.kind !== "object") return null;
+    const info = L.classes.get(recvT.className) ?? null;
+    if (info === null || info.builtinError) return null;
+    const found = L.findMethodOn(info, expr.name.text);
+    if (found === null) return lowerUnboundSubclassMethodValue(L, expr, info);
+    if (found.sig.abstract === true) return null;
+    if (found.sig.params.some((p) => p.mode !== "required")) return null;
+    // The receiver expression still evaluates (a plain read, no effects
+    // when it is `this` or an identifier; anything else is declined).
+    if (!(expr.expression.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(expr.expression))) return null;
+    const method = expr.name.text;
+    const loc = locOf(expr);
+    const virtual = L.overrideBelow(info, method);
+    const name = `%unbound.${info.def.name}.${method}`;
+    const params = found.sig.params.map((p) => p.type);
+    const irParams: IrParam[] = params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
+    const fnT = funcOf(params, found.sig.ret);
+    if (virtual) L.noteVirtualEdge(info, method);
+    else L.noteEdge(`%${found.declarer.def.name}.${method}`);
+    if (!L.liftedFns.some((f) => f.name === name)) {
+      const selfT: IrType = { kind: "object", className: info.def.name };
+      const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
+      const selfRef: IrExpr = { kind: "varRef", localId: "self.0", type: selfT, loc };
+      const call: IrExpr = virtual
+        ? { kind: "virtualCall", className: info.def.name, method, args: [selfRef, ...args], type: found.sig.ret, loc }
+        : {
+            kind: "call",
+            callee: `%${found.declarer.def.name}.${method}`,
+            args: [L.upcastTo(selfRef, found.declarer.def.name), ...args],
+            type: found.sig.ret,
+            loc,
+          };
+      L.liftedFns.push({
+        name,
+        params: irParams,
+        returnType: found.sig.ret,
+        locals: [
+          { id: "self.0", name: "self", type: selfT, mutable: false },
+          ...irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        ],
+        body: [
+          {
+            kind: "varDecl",
+            localId: "self.0",
+            init: {
+              kind: "dynCheck",
+              value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc },
+              type: selfT,
+              loc,
+            },
+            loc,
+          },
+          found.sig.ret.kind === "void"
+            ? { kind: "exprStmt", expr: call, loc }
+            : { kind: "return", value: call, loc },
+        ],
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
+  }
+
+/** `this.start` inside a BASE class that never declares `start` — the
+   * subclasses do (mysql2's Command.execute reads `this.start`, Query and
+   * Execute define it). JS finds the member by the RUNTIME class, so the
+   * detached value is a thunk that dispatches on the receiver the call
+   * supplies (`dyn.this`): the deepest declaring subclass whose instance the
+   * receiver is, down to the last declarer, which is unconditional (a
+   * receiver that is none of them fails its class check — the TypeError a
+   * missing method would throw). Every declarer must spell the same
+   * parameter and result types, since the thunk has one signature. */
+  function lowerUnboundSubclassMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, info: ClassInfo): IrExpr | null {
+    const method = expr.name.text;
+    const decls: { cls: ClassInfo; depth: number; sig: { params: ParamShape[]; ret: IrType } }[] = [];
+    const walk = (c: ClassInfo, depth: number): void => {
+      for (const s of c.subclasses) {
+        const sig = s.methods.get(method);
+        if (sig !== undefined) decls.push({ cls: s, depth, sig });
+        walk(s, depth + 1);
+      }
+    };
+    walk(info, 1);
+    if (decls.length === 0) return null;
+    const first = decls[0]!.sig;
+    for (const d of decls) {
+      if (d.sig.params.some((p) => p.mode !== "required") || d.sig.params.length !== first.params.length) return null;
+      if (!typeEquals(d.sig.ret, first.ret) || d.sig.params.some((p, i) => !typeEquals(p.type, first.params[i]!.type))) return null;
+    }
+    if (!(expr.expression.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(expr.expression))) return null;
+    decls.sort((a, b) => b.depth - a.depth);
+    const loc = locOf(expr);
+    const name = `%unbound.${info.def.name}.${method}`;
+    const params = first.params.map((p) => p.type);
+    const irParams: IrParam[] = params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
+    for (const d of decls) L.noteEdge(`%${d.cls.def.name}.${method}`);
+    if (!L.liftedFns.some((f) => f.name === name)) {
+      const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
+      const locals: IrLocal[] = irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false }));
+      const callOn = (d: (typeof decls)[number], idx: number): IrStmt[] => {
+        const selfT: IrType = { kind: "object", className: d.cls.def.name };
+        const id = `self.${idx}`;
+        locals.push({ id, name: `self${idx}`, type: selfT, mutable: false });
+        const call: IrExpr = {
+          kind: "call",
+          callee: `%${d.cls.def.name}.${method}`,
+          args: [{ kind: "varRef", localId: id, type: selfT, loc }, ...args],
+          type: first.ret,
+          loc,
+        };
+        return [
+          {
+            kind: "varDecl",
+            localId: id,
+            init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: selfT, loc },
+            loc,
+          },
+          first.ret.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc },
+        ];
+      };
+      const body: IrStmt[] = [];
+      const baseT: IrType = { kind: "object", className: info.def.name };
+      locals.push({ id: "base.0", name: "base", type: baseT, mutable: false });
+      body.push({
+        kind: "varDecl",
+        localId: "base.0",
+        init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: baseT, loc },
+        loc,
+      });
+      decls.forEach((d, i) => {
+        if (i === decls.length - 1) {
+          body.push(...callOn(d, i));
+          return;
+        }
+        body.push({
+          kind: "if",
+          cond: { kind: "instanceOf", value: { kind: "varRef", localId: "base.0", type: baseT, loc }, className: d.cls.def.name, type: BOOL, loc },
+          then: callOn(d, i),
+          else_: null,
+          loc,
+        });
+      });
+      L.liftedFns.push({ name, params: irParams, returnType: first.ret, locals, body, loc });
+    }
+    return { kind: "closure", fnName: name, captures: [], type: funcOf(params, first.ret), loc };
+  }
+
 /** Field read `obj.f` on class-instance and record receivers, through the
    * shared FieldTarget union (fieldGet / recordGet). Bound method references
    * on classes are rejected specifically; func-typed record fields are
@@ -20440,10 +20604,21 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (L.chainBlocked(expr)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(expr.expression));
     if (
+      receiverIr?.kind === "object" && isJsSourceFile(expr.getSourceFile()) &&
+      expr.questionDotToken === undefined &&
+      L.findMethodOn(L.classes.get(receiverIr.className) ?? null, expr.name.text) === null
+    ) {
+      const baseInfo = L.classes.get(receiverIr.className) ?? null;
+      const viaSubclass = baseInfo === null ? null : lowerUnboundSubclassMethodValue(L, expr, baseInfo);
+      if (viaSubclass !== null) return viaSubclass;
+    }
+    if (
       receiverIr?.kind === "object" &&
       (L.findMethodOn(L.classes.get(receiverIr.className) ?? null, expr.name.text) ||
         findGenericMethodOn(L, L.classes.get(receiverIr.className) ?? null, expr.name.text))
     ) {
+      const unbound = lowerUnboundClassMethodValue(L, expr);
+      if (unbound !== null) return unbound;
       L.unsupported("SC1090", expr, `bound method references (call '${expr.name.text}' directly)`);
     }
     // An object-literal GENERIC method as a VALUE (`o.m` — the member is

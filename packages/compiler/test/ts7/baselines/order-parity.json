@@ -11242,6 +11242,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8208-method-values-through-a-field.js": {
+   "order": [
+    "<repo>/tests/corpus/8208-method-values-through-a-field.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
