@@ -104,19 +104,15 @@ console.log(check(/a/g, "abc"), check(/a/y, "ba"), check(/a/y, "ab"));
     expect(mine.stdout).toContain("true 1 true 2 true 3 false 0");
   });
 
-  test("split() with capture groups throws a catchable TypeError (Node would splice them in)", async () => {
+  test("split() with capture groups splices the captured values into the result, like Node", async () => {
     const r = await build(
       "split-captures",
-      `try {
-  const parts = "a,b".split(/(,)/);
-  console.log("unreachable", parts.length);
-} catch {
-  console.log("caught");
-}
+      `const parts = "a,b".split(/(,)/);
+console.log(parts.length, parts[1], "A<B>C".split(/<(\\w)>/).length);
 `,
     );
     const { stdout } = await execFileAsync(r.binaryPath, []);
-    expect(stdout).toBe("caught\n");
+    expect(stdout).toBe("3 , 3\n");
   });
 
   test("a pattern the engine rejects aborts at first use with a SyntaxError message", async () => {

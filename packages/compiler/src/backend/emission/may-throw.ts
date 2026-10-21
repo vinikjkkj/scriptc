@@ -391,7 +391,7 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
         case "regexIntrinsic":
           // replaceAll and matchAll without /g throw Node's TypeError;
           // split throws on a pattern with capture groups — all catchable.
-          if (rec["method"] === "replaceAll" || rec["method"] === "split" || rec["method"] === "matchAll" || rec["method"] === "matchAllInto") {
+          if (rec["method"] === "replaceAll" || rec["method"] === "split" || rec["method"] === "matchAll" || rec["method"] === "matchAllInto" || rec["method"] === "replaceRowsInto") {
             f.throws = true;
           }
           break;

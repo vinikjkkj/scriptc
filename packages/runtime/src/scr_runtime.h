@@ -1938,6 +1938,7 @@ ScrArr *scr_regex_match_all(ScrStr *s, ScrRegex *re);
  * start index (f64) onto `indices` — the .index the for-of-over-matchAll
  * desugar reads. Same throw/result contract as scr_regex_match_all. */
 ScrArr *scr_regex_match_all_into(ScrStr *s, ScrRegex *re, ScrArr *indices);
+ScrArr *scr_regex_replace_rows_into(ScrStr *s, ScrRegex *re, ScrArr *indices);
 
 /* Registers the RegExp handle-dispatch ops (SCR_DYNH_REGEX) so a regex
  * can cross into the checked-dynamic tree BY REFERENCE — the emitted

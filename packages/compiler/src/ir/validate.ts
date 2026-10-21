@@ -71,6 +71,7 @@ export const REGEX_INTRINSIC_SIGS: Record<
   execIndexOf: { receiver: arrayOf(STRING), argTypes: [], result: F64 },
   matchAll: { receiver: STRING, argTypes: [REGEX], result: arrayOf(arrayOf(STRING)) },
   matchAllInto: { receiver: STRING, argTypes: [REGEX, arrayOf(F64)], result: arrayOf(arrayOf(STRING)) },
+  replaceRowsInto: { receiver: STRING, argTypes: [REGEX, arrayOf(F64)], result: arrayOf(arrayOf(STRING)) },
   search: { receiver: STRING, argTypes: [REGEX], result: F64 },
   source: { receiver: REGEX, argTypes: [], result: STRING },
   flags: { receiver: REGEX, argTypes: [], result: STRING },
