@@ -13672,12 +13672,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/js-arrow-const-read-from-a-function.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-arrow-const-read-from-a-function.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/js-net-connect-with-a-runtime-option-bag.cjs": {
    "order": [
     "<repo>/tests/diagnostics/js-net-connect-with-a-runtime-option-bag.cjs"
@@ -13705,6 +13699,12 @@
   "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs": {
    "order": [
     "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8000-an-implicit-any-arrow-const-read-from-a-function.js": {
+   "order": [
+    "<repo>/tests/corpus/8000-an-implicit-any-arrow-const-read-from-a-function.js"
    ],
    "diags": []
   }

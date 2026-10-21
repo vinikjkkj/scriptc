@@ -1853,7 +1853,16 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                   // form exists to keep.
                   requireFnValueDeclType(L, decl))
                 : null;
-            if (isJsSourceFile(sf) && objFnValueT === null && !L.mapTypeOf(L.typeOf(nameNode))) continue;
+            // ...EXCEPT a function LITERAL whose strict type is the pure
+            // single-signature `(x: any) => any` shape (`const fst = (x) =>
+            // x` — unannotated params): the value is a closure, so a hoisted
+            // function declaration that reads the binding needs the slot the
+            // checked-dynamic fallback type (irTypeOf: func over dyn pieces)
+            // gives it. Without a global the read had nothing to bind.
+            if (
+              isJsSourceFile(sf) && objFnValueT === null && !L.mapTypeOf(L.typeOf(nameNode)) &&
+              !jsFnLiteralSlot(L, decl, nameNode)
+            ) continue;
             if (objFnValueT !== null && process.env["SCRIPTC_OBJFNVALUE_WHY"] !== undefined) {
               console.error(`[objfnvalue] global ${locOf(nameNode).file}:${locOf(nameNode).start} ${nameNode.text}`);
             }
@@ -2170,6 +2179,46 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
       }
     }
   }
+
+/** A JS file-scope binding of an arrow / function expression whose strict
+ * type does not map but whose checked-dynamic fallback is a FUNC (an
+ * unannotated-parameter literal): it keeps a typed global slot. */
+function jsFnLiteralSlot(L: Lowerer, decl: ts.VariableDeclaration, nameNode: ts.Identifier): boolean {
+  if (!ts.isIdentifier(decl.name) || nameNode !== decl.name || decl.initializer === undefined) return false;
+  let init: ts.Expression = decl.initializer;
+  while (ts.isParenthesizedExpression(init)) init = init.expression;
+  if (!ts.isArrowFunction(init) && !ts.isFunctionExpression(init)) return false;
+  // A factory (it RETURNS a function literal: `wrap = (fn) => (a, b) => ...`)
+  // keeps the dyn lane: its results are listener/callback values the typed
+  // closure adapters have no signature for (events' `ee.once(name, wrapped)`).
+  {
+    const peel = (e: ts.Expression): ts.Expression => {
+      while (ts.isParenthesizedExpression(e)) e = e.expression;
+      return e;
+    };
+    const isFnLit = (e: ts.Expression): boolean => {
+      const p = peel(e);
+      return ts.isArrowFunction(p) || ts.isFunctionExpression(p);
+    };
+    if (init.body !== undefined) {
+      if (!ts.isBlock(init.body)) {
+        if (isFnLit(init.body)) return false;
+      } else {
+        let factory = false;
+        const walk = (n: ts.Node): void => {
+          ts.forEachChild(n, (c) => {
+            if (factory || ts.isFunctionLike(c)) return;
+            if (ts.isReturnStatement(c) && c.expression !== undefined && isFnLit(c.expression)) factory = true;
+            walk(c);
+          });
+        };
+        walk(init.body);
+        if (factory) return false;
+      }
+    }
+  }
+  return dynFallbackType(L, nameNode, L.typeOf(nameNode))?.kind === "func";
+}
 
 /** True iff this initializer's VALUE is a jsval-element array from a
    * module global already registered as one (the evolving-`any` binding
