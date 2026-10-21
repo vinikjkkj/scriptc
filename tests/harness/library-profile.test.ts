@@ -439,6 +439,7 @@ describe("library profile fences", () => {
     // enumeration is the manifest's own sorted id order, not source order.
     expect(dateIds).toEqual([
       "stdlib.date.UTC",
+      "stdlib.date.format",
       "stdlib.date.getHours",
       "stdlib.date.getTime",
       "stdlib.date.getUTCDate",

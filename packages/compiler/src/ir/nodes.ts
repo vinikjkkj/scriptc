@@ -6073,6 +6073,10 @@ export type IrLibFn =
   /** String(date): Date.prototype.toString over a time value. Throws a
    * catchable Error for a zone whose long display name needs ICU data. */
   | "date.toString"
+  /** The other formatters over a time value: (ms, kind) with kind 1 toDateString,
+   * 2 toTimeString, 3 toUTCString, 4/5/6 toLocale{,Date,Time}String (en-US, no
+   * options). Never throws. Linked with the zone-name table (moduleUsesDateFmt). */
+  | "date.format"
   /** String(bytes): Buffer decodes utf8, a plain Uint8Array joins its
    * elements with commas, a DataView is "[object DataView]"; an unstamped
    * value throws a catchable Error (the Buffer-ness is unknown). */
@@ -10540,6 +10544,41 @@ export function moduleUsesOpaque(mod: IrModule): boolean {
   };
   visit(mod);
   return found;
+}
+
+/** The program formats a Date as text (scr_date_fmt.c plus the generated ICU
+ * zone-name table, ~35 KB): a date.toString/date.format libCall, or a Date
+ * crossing the checked-dynamic boundary (whose handle serves the formatters at
+ * runtime). A LINK GATE, not a fence: a wrong `false` is a loud
+ * unresolved-symbol link error. */
+export function moduleUsesDateFmt(mod: IrModule): boolean {
+  return dateGates(mod).fmt || dateGates(mod).dyn;
+}
+
+/** A Date and an `unknown` in one program: the checked-dynamic Date handle
+ * (scr_date_dyn.c) and, through it, the formatters. */
+export function moduleUsesDateDyn(mod: IrModule): boolean {
+  return dateGates(mod).dyn;
+}
+
+function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean } {
+  let fmt = false;
+  let date = false;
+  let dyn = false;
+  const visit = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "date") date = true;
+    if (node.kind === "dyn") dyn = true;
+    if (node.kind === "libCall" && (node.fn === "date.toString" || node.fn === "date.format")) fmt = true;
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return { fmt, dyn: date && dyn };
 }
 
 /** The program holds an RTCPeerConnection or an RTCDataChannel: compiles

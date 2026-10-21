@@ -1259,7 +1259,14 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     kind: "stdlib",
     name: "Date.prototype.toString (and String(date))",
     fns: ["date.toString"],
-    note: "local-time text with the host zone's offset and long name (UTC and GMT zones only)",
+    note: "local-time text with the host zone's offset and ICU long name (generated table, every IANA zone)",
+  },
+  {
+    id: "stdlib.date.format",
+    kind: "stdlib",
+    name: "Date.prototype.toDateString/toTimeString/toUTCString/toGMTString/toLocaleString/toLocaleDateString/toLocaleTimeString (no arguments)",
+    fns: ["date.format"],
+    note: "text over the time value; the local forms read the HOST's zone database and its ICU long name like toString",
   },
   {
     id: "stdlib.date.tzOffset",

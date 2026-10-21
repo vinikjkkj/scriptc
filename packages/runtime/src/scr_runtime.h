@@ -10390,6 +10390,8 @@ double scr_date_set(ScrDate *dt, double op, double argc, double a0, double a1, d
 /* Date.prototype.toString (+1; NULL with a catchable Error when the zone's
  * long name is not one this runtime can state -- see scr_date.c). */
 ScrStr *scr_date_to_string(double ms);
+/* The other Date formatters (kind table in scr_date_fmt.c); +1, never throws. */
+ScrStr *scr_date_format(double ms, double kind);
 /* Registers the Date handle ops (SCR_DYNH_DATE); emitted into main() under
  * the same moduleUsesDate gate that links scr_date.c. */
 void scr_date_dyn_install(void);

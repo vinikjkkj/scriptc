@@ -5567,12 +5567,43 @@ let digestInputValueDispatches = 0;
     setTime: [14, 1], setYear: [15, 1],
   };
 
+  /** Formatter name -> kind (scr_date_fmt.c; 0 is the existing date.toString). */
+  const DATE_FORMATS: Readonly<Record<string, number>> = {
+    toString: 0, toDateString: 1, toTimeString: 2, toUTCString: 3, toGMTString: 3,
+    toLocaleString: 4, toLocaleDateString: 5, toLocaleTimeString: 6,
+  };
+
   export function lowerDateMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "date") return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
+    const fmtKind = Object.prototype.hasOwnProperty.call(DATE_FORMATS, name) ? DATE_FORMATS[name]! : undefined;
+    if (fmtKind !== undefined) {
+      if (call.arguments.length !== 0) {
+        L.noLowering(
+          `Date.${name} with ${call.arguments.length} arguments`,
+          call,
+          "locale and options arguments (ICU formatting) have no lowering; the no-argument en-US forms do",
+        );
+      }
+      const floc = locOf(call);
+      const fms: IrExpr = { kind: "libCall", fn: "date.value", args: [L.lowerExpr(access.expression)], type: F64, loc: floc };
+      if (fmtKind === 0) return { kind: "libCall", fn: "date.toString", args: [fms], type: STRING, loc: floc };
+      return {
+        kind: "libCall", fn: "date.format",
+        args: [fms, { kind: "numLit", value: fmtKind, type: F64, loc: floc }], type: STRING, loc: floc,
+      };
+    }
+    if (name === "getYear") {
+      if (call.arguments.length !== 0) L.noLowering(`Date.getYear with ${call.arguments.length} arguments`, call);
+      const yloc = locOf(call);
+      const yms: IrExpr = { kind: "libCall", fn: "date.value", args: [L.lowerExpr(access.expression)], type: F64, loc: yloc };
+      const ylocal: IrExpr = { kind: "libCall", fn: "date.localTime", args: [yms], type: F64, loc: yloc };
+      const yfull: IrExpr = { kind: "libCall", fn: "date.getUTCFullYear", args: [ylocal], type: F64, loc: yloc };
+      return { kind: "bin", op: "-", left: yfull, right: { kind: "numLit", value: 1900, type: F64, loc: yloc }, type: F64, loc: yloc };
+    }
     const setter = Object.prototype.hasOwnProperty.call(DATE_SETTERS, name) ? DATE_SETTERS[name]! : undefined;
     if (setter !== undefined) {
       const sloc = locOf(call);
