@@ -7682,6 +7682,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_str(${arg(0)})`);
           case "insp.regex":
             return finish(`scr_insp_regex(${arg(0)})`);
+          case "insp.date":
+            return finish(`scr_insp_date(${arg(0)})`);
           case "insp.buffer":
             return finish(`scr_insp_buffer(${arg(0)})`);
           case "insp.error":

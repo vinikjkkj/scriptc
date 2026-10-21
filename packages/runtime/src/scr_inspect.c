@@ -1170,6 +1170,19 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       /* A Symbol is a primitive: util.inspect prints its descriptive string,
        * `Symbol(desc)`, bare (no quotes, unlike a string). */
       if (scr_dyn_is_symbol(d)) return scr_dyn_symbol_descriptive(d);
+      if (d->v.handle.tag == SCR_DYNH_DATE) {
+        /* A Date renders as its ISO form (Invalid Date when NaN). Asked
+         * through the handle's toJSON so this unit names no Date entry
+         * point: a string answer is the ISO text, null is an invalid Date. */
+        const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
+        ScrDyn *j = ops->invoke(d->v.handle.ptr, (ScrDyn *)d, "toJSON", NULL, 0, "toJSON");
+        if (j == NULL) return scr_str_new("", 0); /* the pending throw wins */
+        InspBuf out = {0};
+        if (j->kind == SCR_DYN_STR) ib_bytes(&out, j->v.str->data, j->v.str->len);
+        else ib_cstr(&out, "Invalid Date");
+        scr_dyn_release(j);
+        return ib_take(&out);
+      }
       /* Node prints the class's full property dump (ServerResponse {
        * ... }) — internals we do not model. Fence loudly instead of a
        * silent-wrong shape (SEMANTICS.md). */

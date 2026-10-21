@@ -5745,6 +5745,7 @@ export type IrLibFn =
   | "insp.jsonDyn"
   | "insp.str"
   | "insp.regex"
+  | "insp.date"
   | "insp.buffer"
   | "insp.error"
   | "insp.dyn"
@@ -7835,8 +7836,9 @@ export function isJsonSafeType(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
+  dateOk = false,
 ): boolean {
-  return isJsonSafeAt(t, getRecord, getUnion, false, new Set());
+  return isJsonSafeAt(t, getRecord, getUnion, false, new Set(), dateOk);
 }
 
 /** The recursion behind isJsonSafeType. `inRecordField` is the ONE position
@@ -7853,6 +7855,7 @@ function isJsonSafeAt(
   getUnion: (unionId: string) => IrUnionDef | undefined,
   inRecordField: boolean,
   visiting: Set<string>,
+  dateOk: boolean,
 ): boolean {
   switch (t.kind) {
     case "f64":
@@ -7860,7 +7863,7 @@ function isJsonSafeAt(
     case "bool":
       return true;
     case "array":
-      return isJsonSafeAt(t.elem, getRecord, getUnion, false, visiting);
+      return isJsonSafeAt(t.elem, getRecord, getUnion, false, visiting, dateOk);
     case "record": {
       const shape = getRecord(t.shapeId);
       if (!shape) return false;
@@ -7872,7 +7875,7 @@ function isJsonSafeAt(
       // TUPLE positions are array slots, not droppable object keys: an
       // undefined-armed position would stringify as `null` in JS (not
       // drop), so tuples keep the array rule for their fields.
-      if (!shape.fields.every((f) => isJsonSafeAt(f.type, getRecord, getUnion, !shape.tuple, visiting))) {
+      if (!shape.fields.every((f) => isJsonSafeAt(f.type, getRecord, getUnion, !shape.tuple, visiting, dateOk))) {
         return false;
       }
       // Overflow values sit in record-key position too: dyn is JSON-safe
@@ -7880,7 +7883,7 @@ function isJsonSafeAt(
       // like any undefined-valued key), everything else follows the
       // record-field rule.
       if (shape.indexValue && shape.indexValue.kind !== "dyn") {
-        return isJsonSafeAt(shape.indexValue, getRecord, getUnion, true, visiting);
+        return isJsonSafeAt(shape.indexValue, getRecord, getUnion, true, visiting, dateOk);
       }
       return true;
     }
@@ -7890,7 +7893,7 @@ function isJsonSafeAt(
       const key = `${t.unionId}:${inRecordField}`;
       if (visiting.has(key)) return true; // the recursive knot, union-flavored
       visiting.add(key);
-      return def.arms.every((a) => isJsonSafeAt(a, getRecord, getUnion, inRecordField, visiting));
+      return def.arms.every((a) => isJsonSafeAt(a, getRecord, getUnion, inRecordField, visiting, dateOk));
     }
     case "func":
     case "object":
@@ -7989,11 +7992,12 @@ function isJsonSafeAt(
     // honest JSON surface.
     case "requestInit":
     case "request":
-    // A Date is never constructed and toISOString does not lower off a
-    // value, so it has no honest JSON surface either. Node serialises a
-    // Date as its ISO string; answering anything else would be silently
-    // wrong, and a refusal is what says so.
+    // A Date serialises as its ISO string (toJSON), null when invalid --
+    // but only on the STRINGIFY side (dateOk): a JSON text never holds a
+    // Date, so a checked cast out of the dynamic tree to a Date-bearing
+    // type stays fenced (its own leaf rule, not this one).
     case "date":
+      return dateOk;
     // A Blob / PromiseConstructor handle has no honest JSON surface either:
     // Node serialises a Blob as {} and a constructor not at all.
     case "opaque":

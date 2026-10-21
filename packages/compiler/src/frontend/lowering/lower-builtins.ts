@@ -4384,7 +4384,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       // bridge. Gated on jsonSafe so it can only turn a refusal into the
       // dyn path: a bridged f64/bool/string is already serializable and
       // keeps the per-type serializer it has always had.
-      if (!L.jsonSafe(value.type)) {
+      if (!L.jsonStringifiable(value.type)) {
         const under = narrowBridgeDyn(value);
         if (under !== null) value = under;
       }
@@ -4438,7 +4438,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           if (helper !== null) value = { kind: "call", callee: helper, args: [value], type: want, loc };
         }
       }
-      if (!L.jsonSafe(value.type) && value.type.kind !== "dyn") {
+      if (!L.jsonStringifiable(value.type) && value.type.kind !== "dyn") {
         // Bare undefined-armed unions get their own wording: Node's
         // stringify of bare undefined is not a string at all — per-type
         // serialization cannot match that exactly, so the fence is

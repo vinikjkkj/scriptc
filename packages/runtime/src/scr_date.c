@@ -493,3 +493,25 @@ int scr_date_civil(double local_ms, long long *y, int *mo, int *d, int *h, int *
   return 1;
 }
 int scr_date_tza_at(double t, double *out) { return scr_date_tza(t, out); }
+
+/* util.inspect / console.log of a Date: the ISO form (toISOString), or
+ * `Invalid Date` for NaN. Node colors it only on a TTY, like every other
+ * leaf, and this runtime never colors (scr_inspect.c). */
+ScrStr *scr_insp_date(ScrDate *d) {
+  if (d->ms != d->ms) return scr_str_new("Invalid Date", 12);
+  return scr_date_to_iso(d->ms);
+}
+
+/* JSON.stringify of a Date: Date.prototype.toJSON, the quoted ISO string,
+ * or `null` for an invalid Date. An ISO string needs no escaping. */
+void scr_jb_put_date(ScrJsonBuf *b, ScrDate *d) {
+  if (d->ms != d->ms) {
+    scr_jb_puts(b, "null");
+    return;
+  }
+  ScrStr *s = scr_date_to_iso(d->ms);
+  scr_jb_putc(b, '"');
+  scr_jb_write(b, s->data, s->len);
+  scr_jb_putc(b, '"');
+  scr_str_release(s);
+}

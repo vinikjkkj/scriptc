@@ -10374,6 +10374,8 @@ void scr_date_release_v(void *p);
 ScrDate *scr_date_new(double ms); /* +1 */
 ScrDate *scr_date_new_str(ScrStr *s); /* +1; borrowed string */
 double scr_date_value(ScrDate *d); /* borrowed */
+ScrStr *scr_insp_date(ScrDate *d); /* util.inspect: ISO form, or "Invalid Date"; +1 */
+void scr_jb_put_date(ScrJsonBuf *b, ScrDate *d); /* JSON.stringify: "iso" or null */
 double scr_date_utc_full_year(double ms);
 double scr_date_utc_month(double ms);
 double scr_date_utc_date(double ms);

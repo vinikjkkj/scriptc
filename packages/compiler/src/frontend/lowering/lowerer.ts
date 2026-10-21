@@ -5480,6 +5480,18 @@ export class Lowerer {
 
   /** isJsonSafeType with this Lowerer's registries — the shared fence for
    * what JSON.stringify accepts and what a checked cast can validate. */
+  /** isJsonSafeType plus Date leaves: what JSON.stringify serialises
+   * (toJSON = toISOString, null when invalid). NOT what a checked cast may
+   * validate -- JSON text never carries a Date. */
+  jsonStringifiable(t: IrType): boolean {
+    return isJsonSafeType(
+      t,
+      (id) => this.shapes.get(id),
+      (id) => this.unions.get(id),
+      true,
+    );
+  }
+
   jsonSafe(t: IrType): boolean {
     return isJsonSafeType(
       t,

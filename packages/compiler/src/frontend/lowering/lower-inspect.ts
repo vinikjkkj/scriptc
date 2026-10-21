@@ -139,6 +139,7 @@ function inspectSupport(L: Lowerer, t: IrType, visiting: Set<string>, out: { rec
     case "nullT":
     case "bigint":
     case "regex":
+    case "date":
     case "symbol":
     case "dyn":
     case "jsval":
@@ -279,6 +280,10 @@ function inspectExpr(
       return str("null", loc);
     case "regex":
       return { kind: "libCall", fn: "insp.regex", args: [value], type: STRING, loc };
+    // A Date renders as its ISO form (`Invalid Date` when NaN) at every
+    // depth; a Date carries no own enumerable properties.
+    case "date":
+      return { kind: "libCall", fn: "insp.date", args: [value], type: STRING, loc };
     // Node renders a bigint with its `n` suffix at every depth ("1n",
     // "{ a: 1n }") — the suffix is part of the inspect form, not of
     // String(1n), so it is concatenated here and not inside big.str.
@@ -1515,7 +1520,7 @@ export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
         if (value.type.kind === "dyn") {
           return { kind: "libCall", fn: "insp.jsonDyn", args: [value], type: STRING, loc };
         }
-        if (!L.jsonSafe(value.type)) {
+        if (!L.jsonStringifiable(value.type)) {
           L.noLowering(`util.format %j of '${L.fmt(value.type)}' values`, node, "only JSON-safe static types lower");
         }
         L.noteKeyEnumeration(value, loc, "util.format %j");
