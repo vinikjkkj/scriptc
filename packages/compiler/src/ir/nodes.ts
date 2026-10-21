@@ -9988,6 +9988,34 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
   return found;
 }
 
+/** True when the module holds a libCall of the checked-dynamic extensions
+ * unit (scr_dyn_ext.c): the fs callback forms, Buffer.concat / isBuffer over
+ * dyn values, loose equality over dyn values, the errno/syscall/path reads of
+ * an error. Hello-world-class binaries do not carry them. Same walk shape as
+ * moduleUsesZlib. */
+const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
+  "fs.readFileCb", "fs.mkdtempCb", "fs.mkdtempSyncOpts", "fs.readCb", "fs.lchmodCb", "fs.lchmodSyncChk", "fsp.lchmodChk",
+  "buffer.concatDyn", "buffer.concatDynLen", "dyn.isBuffer", "dyn.looseEq", "error.ext",
+]);
+export function moduleUsesDynExt(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && typeof node.fn === "string" && DYN_EXT_LIB_FNS.has(node.fn)) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module contains any insp libCall — the link switch that
  * pulls scr_inspect.c into the binary (cc.ts; the assert gating
  * precedent — inspect-free binaries keep the historical command line and

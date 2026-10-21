@@ -2182,37 +2182,6 @@ double scr_fs_read_sync(double fd, ScrBytes *buf, double offset, double length) 
   return (double)n;
 }
 
-/* fs.read's positioned form: a negative position reads from (and advances)
- * the file position, a non-negative one reads there and LEAVES the position
- * unchanged (Node's pread semantics, spelled save/seek/read/restore so the
- * bounds ladder and the read stay in scr_fs_read_sync). */
-double scr_fs_read_at(double fd, ScrBytes *buf, double offset, double length, double position) {
-  if (position < 0) return scr_fs_read_sync(fd, buf, offset, length);
-#ifdef _WIN32
-#define SCR_RA_SEEK(f, o, w) _lseeki64((f), (long long)(o), (w))
-  long long saved = SCR_RA_SEEK((int)fd, 0, SEEK_CUR);
-#else
-#define SCR_RA_SEEK(f, o, w) lseek((f), (off_t)(o), (w))
-  off_t saved = SCR_RA_SEEK((int)fd, 0, SEEK_CUR);
-#endif
-  if (saved < 0 || SCR_RA_SEEK((int)fd, position, SEEK_SET) < 0) {
-    int e = errno;
-    char namebuf[16];
-    const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
-    const char *text = scr_errno_text(e);
-    char msg[160];
-    int len = snprintf(msg, sizeof msg, "%s: %s, read", name, text);
-    scr_throw_errno_error(e, name, msg, (size_t)len, "read", NULL, NULL);
-    return 0;
-  }
-  double n = scr_fs_read_sync(fd, buf, offset, length);
-  int saved_errno = errno;
-  SCR_RA_SEEK((int)fd, saved, SEEK_SET);
-  errno = saved_errno;
-#undef SCR_RA_SEEK
-  return n;
-}
-
 void scr_fs_close(double fd) {
   if (close((int)fd) != 0) {
     int e = errno;
