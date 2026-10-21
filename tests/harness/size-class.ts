@@ -2253,7 +2253,14 @@ export const TEXT_DRIFT_TOLERANCE = 256;
  * hello-world .text GREW by 384 bytes: 544406 against the recorded 544022").
  * sqlesc adds +64 to the static text, hidden by the tolerance when it was
  * measured alone. */
-export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_438 : null;
+/* RE-RECORDED 2026-10-21: 72,438 -> 72,694 (+256), MEASURED by the Windows
+ * lane of CI run 39685294142 (attempt 1 and 2) and reproduced with the local
+ * zig windows-gnu cross build (.text 0x11ae6 -> 0x11be6). What the bytes bought
+ * (refusedops, measured on the Linux twin with nm -S): process.exitCode and
+ * uncaughtException exit semantics, always linked: scr_exitcode_at_exit (47 B),
+ * scr_exit_code_hint_get (7 B) and their data words; scr_error_reld 111 -> 259 B
+ * (releases the fs-error errno/syscall/path extension chain); scr_init 55 -> 67 B. */
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
