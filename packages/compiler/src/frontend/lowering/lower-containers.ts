@@ -1573,13 +1573,7 @@ function lowerOptionalDefaultArg(
       // Node produces, so the string-typed result needs no union.
       const repeatableS = (e: IrExpr): boolean => e.kind === "varRef" || e.kind === "numLit";
       if (repeatableS(arr) && repeatableS(index)) {
-        const len: IrExpr = { kind: "arrIntrinsic", method: "length", receiver: arr, args: [], type: F64, loc };
-        const inRange: IrExpr = {
-          kind: "logical", op: "&&",
-          left: { kind: "bin", op: ">=", left: index, right: { kind: "numLit", value: 0, type: F64, loc }, type: BOOL, loc },
-          right: { kind: "bin", op: "<", left: index, right: len, type: BOOL, loc },
-          type: BOOL, loc,
-        };
+        const inRange: IrExpr = { kind: "arrIntrinsic", method: "hasIndex", receiver: arr, args: [index], type: BOOL, loc };
         const t: IrExpr = {
           kind: "ternary", cond: withPresent(inRange),
           then: { kind: "arrayGet", arr, index, type: elem, loc },
@@ -1608,25 +1602,9 @@ function lowerOptionalDefaultArg(
     // helper below serves every other operand shape.
     const repeatable = (e: IrExpr): boolean => e.kind === "varRef" || e.kind === "numLit";
     if (repeatable(arr) && repeatable(index)) {
-      const len: IrExpr = { kind: "arrIntrinsic", method: "length", receiver: arr, args: [], type: F64, loc };
-      const inRange: IrExpr = {
-        kind: "logical", op: "&&",
-        left: {
-          kind: "logical", op: "&&",
-          left: { kind: "bin", op: ">=", left: index, right: { kind: "numLit", value: 0, type: F64, loc }, type: BOOL, loc },
-          right: { kind: "bin", op: "<", left: index, right: len, type: BOOL, loc },
-          type: BOOL, loc,
-        },
-        // A fractional index is not an element (JS reads the property "1.5").
-        // `(i | 0) === i` is the integer test without a libm call (an index
-        // past 2^31 is past the end anyway).
-        right: {
-          kind: "bin", op: "===",
-          left: { kind: "bin", op: "|", left: index, right: { kind: "numLit", value: 0, type: F64, loc }, type: F64, loc },
-          right: index, type: BOOL, loc,
-        },
-        type: BOOL, loc,
-      };
+      // One runtime question: an integer index inside the array that is not a
+      // hole (a fractional index reads the property "1.5", i.e. undefined).
+      const inRange: IrExpr = { kind: "arrIntrinsic", method: "hasIndex", receiver: arr, args: [index], type: BOOL, loc };
       const hit: IrExpr = { kind: "arrayGet", arr, index, type: elem, loc };
       let miss: IrExpr;
       if (isNum()) {
