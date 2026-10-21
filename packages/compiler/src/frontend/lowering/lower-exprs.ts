@@ -20490,6 +20490,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return { kind: "call", callee: helper, args: [recv], type: recordT, loc };
   }
 
+/** A receiver whose read has no effect and whose value a detached method
+   * does not need: `this`, an identifier, or `C.prototype` (a class's own
+   * prototype object, which the thunk never reads). */
+  function isPlainMethodReceiver(e: ts.Expression): boolean {
+    if (e.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(e)) return true;
+    return ts.isPropertyAccessExpression(e) && e.questionDotToken === undefined &&
+      e.name.text === "prototype" && ts.isIdentifier(e.expression);
+  }
+
 /** `return this.readField` / `this.next = this.start`: a class METHOD read as
    * a VALUE in a JavaScript file. JS hands out the prototype's function with
    * no receiver bound (mysql2's command state machine stores one and invokes
@@ -20517,17 +20526,19 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (found.sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable"))) return null;
     // The receiver expression still evaluates (a plain read, no effects
     // when it is `this` or an identifier; anything else is declined).
-    if (!(expr.expression.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(expr.expression))) return null;
-    return unboundMethodThunk(L, info, expr.name.text, found, locOf(expr));
+    if (!isPlainMethodReceiver(expr.expression)) return null;
+    // `C.prototype.m` is C's own function, never an override below it.
+    const viaPrototype = ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype";
+    return unboundMethodThunk(L, info, expr.name.text, found, locOf(expr), viaPrototype);
   }
 
 /** The detached-function closure of class method `method` of `info` (see
    * lowerUnboundClassMethodValue); also what an object-literal method adopted
    * as a late method becomes inside its literal. */
   export function unboundMethodThunk(L: Lowerer, info: ClassInfo, method: string,
-    found: { declarer: ClassInfo; sig: { params: ParamShape[]; ret: IrType } }, loc: SrcLoc): IrExpr {
-    const virtual = L.overrideBelow(info, method);
-    const name = `%unbound.${info.def.name}.${method}`;
+    found: { declarer: ClassInfo; sig: { params: ParamShape[]; ret: IrType } }, loc: SrcLoc, direct = false): IrExpr {
+    const virtual = !direct && L.overrideBelow(info, method);
+    const name = `%unbound.${info.def.name}.${method}${direct ? "%direct" : ""}`;
     const params = found.sig.params.map((p) => p.type);
     const irParams: IrParam[] = params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
     const fnT = funcOf(params, found.sig.ret);
@@ -20602,7 +20613,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       if (d.sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable")) || d.sig.params.length !== first.params.length) return null;
       if (!typeEquals(d.sig.ret, first.ret) || d.sig.params.some((p, i) => !typeEquals(p.type, first.params[i]!.type))) return null;
     }
-    if (!(expr.expression.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(expr.expression))) return null;
+    if (!isPlainMethodReceiver(expr.expression)) return null;
     decls.sort((a, b) => b.depth - a.depth);
     const loc = locOf(expr);
     const name = `%unbound.${info.def.name}.${method}`;
