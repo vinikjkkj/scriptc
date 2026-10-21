@@ -328,7 +328,8 @@ const platform = process.platform;
  * mistake this comment is correcting, just on a different platform. */
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 552_104 : platform === "win32" ? 689_152 : 374_824;
+/* 2026-10-21 (pooldyn): linux 552_104 -> 553_000. CI measured the static hello-world at 552,640 bytes (run 39566905099, island.test.ts shard 1/20): the always-linked dyn core gained the Symbol helpers and the key-order replay (about 536 bytes). Ceiling = that measurement plus ~360 bytes. */
+  platform === "linux" ? 553_000 : platform === "win32" ? 689_152 : 374_824;
 
 /** A program that uses regex: libregexp + libunicode, never the engine.
  * linux: MEASURED 708,968 in CI (run 39492679940, ubuntu-24.04, regex.test.ts),
