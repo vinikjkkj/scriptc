@@ -14682,6 +14682,33 @@ export function numberConvAtDynWidth(L: Lowerer, e: IrExpr): IrExpr | null {
   return L.recordKeyReadAtSlotWidth(e, DYN);
 }
 
+/** The tags of the union `e`'s arms that the CHECKER's narrowed type at
+ * `node` still allows, or null when the narrowed type is not a union that
+ * maps onto arms of `e`'s own union (no narrowing, a lone arm -- which
+ * maybeNarrow already bridges --, or a type with no arm to match). Arms
+ * match by IR type equality, in the union's own order. */
+function narrowedArmTags(L: Lowerer, e: IrExpr, node: ts.Node): number[] | null {
+  if (e.type.kind !== "union" || !ts.isExpression(node)) return null;
+  const def = L.unions.get(e.type.unionId);
+  if (!def) return null;
+  const t = L.typeOf(node);
+  const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
+  const tags = new Set<number>();
+  for (const part of parts) {
+    // Standalone undefined/null map to void/the unit-only union, never to
+    // the unit ARMS a union carries, so they are named directly.
+    const m =
+      (part.flags & ts.TypeFlags.Undefined) !== 0 ? UNDEFINED_T
+      : (part.flags & ts.TypeFlags.Null) !== 0 ? NULL_T
+      : L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(part));
+    if (m === null) return null;
+    const tag = L.armTag(e.type.unionId, m);
+    if (tag < 0) return null;
+    tags.add(tag);
+  }
+  return [...tags].sort((a, b) => a - b);
+}
+
 /** Is this union ARM a record the per-union `sc_us_*` ToString helper can
  * answer for — and arm its hidden toString slot if so. Exported because
  * BOTH spellings of the operation ask it: the conversion (`${u}`,
@@ -14810,6 +14837,44 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
       );
       if (stringable) {
         return { kind: "toString", operand: e, type: STRING, loc: e.loc };
+      }
+      // The checker NARROWED this read to some of the union's arms (a
+      // `typeof v === "number" || typeof v === "bigint"` guard over a
+      // union that also carries Buffer/Date/array arms), but a narrowing
+      // to several arms keeps the WHOLE union's representation. The
+      // per-union helper above would have to answer every arm, including
+      // the ones the guard proved impossible. Dispatch on the tag instead:
+      // each REACHABLE arm converts through its own single-arm rule, and
+      // an arm the narrowing excludes never gets a case at all.
+      const reach = narrowedArmTags(L, e, node) ?? def?.arms.map((_, i) => i) ?? null;
+      if (def && reach !== null && reach.length > 0) {
+        const unionId = e.type.unionId;
+        const stmts: IrStmt[] = [];
+        let src: IrExpr = e;
+        if (reach.length > 1 && !pureReemittable(e)) {
+          const tmp = L.declareHiddenLocal("%strArm", e.type);
+          stmts.push({ kind: "varDecl", localId: tmp.id, init: e, loc: e.loc });
+          src = { kind: "varRef", localId: tmp.id, type: e.type, loc: e.loc };
+        }
+        const armStr = (tag: number): IrExpr => {
+          const arm = def.arms[tag]!;
+          if (arm.kind === "undefinedT") return { kind: "strLit", value: "undefined", type: STRING, loc: e.loc };
+          if (arm.kind === "nullT") return { kind: "strLit", value: "null", type: STRING, loc: e.loc };
+          const payload: IrExpr = { kind: "unionNarrow", unionId, tag, value: src, type: arm, loc: e.loc };
+          return ensureString(L, payload, node);
+        };
+        let result = armStr(reach[reach.length - 1]!);
+        for (const tag of reach.slice(0, -1).reverse()) {
+          result = {
+            kind: "ternary",
+            cond: { kind: "unionIsTag", unionId, tag, negated: false, value: src, type: BOOL, loc: e.loc },
+            then: armStr(tag),
+            else_: result,
+            type: STRING,
+            loc: e.loc,
+          };
+        }
+        return stmts.length === 0 ? result : { kind: "seqExpr", stmts, result, type: STRING, loc: e.loc };
       }
       L.unsupported(
         "SC1090",
