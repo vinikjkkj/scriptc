@@ -1076,7 +1076,22 @@ static bool scr_map_key_array_index(const ScrStr *k, uint32_t *out) {
  * Returns a fresh ScrStr* array (+1); the map is borrowed. Insertion sort
  * over the integer-like subset — overflow maps are small, and ties are
  * impossible (keys are unique). */
-ScrArr *scr_map_keys_js_order(const ScrMap *m) {
+/* A key the mapper spelled for a SYMBOL (`[Symbol.asyncDispose]` is
+ * `__@asyncDispose@13`) is not a string key: Object.keys, JSON and for-in never
+ * list one. The overflow store holds it under that internal name so the member
+ * survives a width cast, and every enumeration below skips it; only the
+ * record-to-dyn walk (scr_map_keys_js_order_all) still sees it, to carry the
+ * member across as a hidden property. */
+static bool scr_map_key_is_symbol(const ScrStr *k) {
+  return k->len > 3 && k->data[0] == '_' && k->data[1] == '_' && k->data[2] == '@';
+}
+
+static ScrArr *scr_map_keys_js_order_impl(const ScrMap *m, bool with_symbols);
+
+ScrArr *scr_map_keys_js_order(const ScrMap *m) { return scr_map_keys_js_order_impl(m, false); }
+ScrArr *scr_map_keys_js_order_all(const ScrMap *m) { return scr_map_keys_js_order_impl(m, true); }
+
+static ScrArr *scr_map_keys_js_order_impl(const ScrMap *m, bool with_symbols) {
 #ifdef SCR_ARRCEN_ON
   scr_arrcen_note(SCR_ARRCEN_MAPKEYS, (long long)m->nlive);
 #endif
@@ -1088,6 +1103,7 @@ ScrArr *scr_map_keys_js_order(const ScrMap *m) {
     if (!m->live[i]) continue;
     ScrStr *k = (ScrStr *)scr_map_slot_to_ptr(m->entries[i].key);
     uint32_t v;
+    if (!with_symbols && scr_map_key_is_symbol(k)) continue;
     if (!scr_map_key_array_index(k, &v)) continue;
     if (nidx % 16 == 0) {
       idx = realloc(idx, (nidx + 16) * sizeof *idx);
@@ -1109,6 +1125,7 @@ ScrArr *scr_map_keys_js_order(const ScrMap *m) {
     if (!m->live[i]) continue;
     ScrStr *k = (ScrStr *)scr_map_slot_to_ptr(m->entries[i].key);
     uint32_t v;
+    if (!with_symbols && scr_map_key_is_symbol(k)) continue;
     if (scr_map_key_array_index(k, &v)) continue;
     scr_arr_push_ref(out, scr_str_retain(k));
   }
@@ -1154,6 +1171,7 @@ ScrArr *scr_map_slots_js_order(const ScrMap *m) {
     if (!m->live[i]) continue;
     ScrStr *k = (ScrStr *)scr_map_slot_to_ptr(m->entries[i].key);
     uint32_t v;
+    if (scr_map_key_is_symbol(k)) continue;
     if (scr_map_key_array_index(k, &v)) continue;
     scr_arr_push_f64(out, (double)i);
   }

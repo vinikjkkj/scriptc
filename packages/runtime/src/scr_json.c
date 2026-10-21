@@ -5630,6 +5630,32 @@ void scr_dyn_obj_define_hidden_data(ScrDyn *recv, const char *key, size_t key_le
   scr_dyn_release(w);
 }
 
+/* A SYMBOL-KEYED member of a record crossing into the tree (the mapper spells
+ * `[Symbol.asyncDispose]` as `__@asyncDispose@13`). The tree has string keys
+ * only and a symbol key is never an own enumerable string key — Object.keys,
+ * JSON, for-in and Object.assign skip it — so the member rides the hidden
+ * non-enumerable table, where [[Get]] (the record builder) still finds it and
+ * enumeration cannot. Takes ownership of `v`; an absent optional member
+ * (`absent_ok` and an undefined value) is simply not defined. */
+void scr_dyn_obj_set_symkey(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v, bool absent_ok) {
+  if (absent_ok && v->kind == SCR_DYN_UNDEF) {
+    scr_dyn_release(v);
+    return;
+  }
+  scr_dyn_obj_define_hidden_data(d, key, key_len, v, true, true);
+  scr_dyn_release(v);
+}
+
+/* The record-to-dyn overflow walk's store: a key the mapper spelled for a
+ * symbol rides scr_dyn_obj_set_symkey, every other key is an ordinary member. */
+void scr_dyn_obj_set_member(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v) {
+  if (key_len > 3 && key[0] == '_' && key[1] == '_' && key[2] == '@') {
+    scr_dyn_obj_set_symkey(d, key, key_len, v, false);
+    return;
+  }
+  scr_dyn_obj_set(d, key, key_len, v);
+}
+
 /* The attributes of an OWN hidden property, for the redefinition rule
  * (ES keeps every field a descriptor OMITS). False when there is none.
  * Any out-pointer may be NULL. */
