@@ -94,9 +94,11 @@ describe("the recorded-size guard is armed", () => {
     expect(STATIC_CLASS_RECORDED).not.toBeNull();
     expect(REGEX_CLASS_RECORDED).not.toBeNull();
     // What the pair actually protects: linking libregexp + libunicode is a
-    // LIBRARY-sized step (~135 KB), never an engine-sized one (~620 KB).
+    // LIBRARY-sized step (~95 KB since the link collects dead sections; it
+    // was ~140 KB while the link carried everything), never an engine-sized
+    // one (~620 KB).
     const distance = (REGEX_CLASS_RECORDED as number) - (STATIC_CLASS_RECORDED as number);
-    expect(distance).toBeGreaterThan(100_000);
+    expect(distance).toBeGreaterThan(60_000);
     expect(distance).toBeLessThan(200_000);
   });
 });

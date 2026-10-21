@@ -328,7 +328,7 @@ const platform = process.platform;
  * mistake this comment is correcting, just on a different platform. */
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 552_104 : platform === "win32" ? 689_152 : 374_824;
+  platform === "linux" ? 61_440 : platform === "win32" ? 124_928 : 374_824;
 
 /** A program that uses regex: libregexp + libunicode, never the engine.
  * linux: MEASURED 708,968 in CI (run 39492679940, ubuntu-24.04, regex.test.ts),
@@ -341,7 +341,7 @@ export const STATIC_CLASS_MAX =
  * is +165,208 (543,752 static, 708,960 regex, local clang 19 at 91c553a3).
  * The distance to the engine class (~+620 KB over static) is untouched. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 717_160 : platform === "win32" ? 830_464 : 526_848;
+  platform === "linux" ? 229_376 : platform === "win32" ? 219_648 : 526_848;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -1768,7 +1768,7 @@ export const SIZE_DRIFT_PAGE = 4_096;
  *     45be81090   713,216   +28,672, all of it in one commit (the fprintf)
  *     a9ee25126   685,056   after the recovery -- .text +512, nothing else
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 685_056 : null;
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 116_736 : null;
 
 /* 2026-09-26 - +4,608 on the REGEX class only, and the bytes are accounted
  * for: non-owning intern entries (SCR_STRING_INTERN_WEAK, off by default).
@@ -1844,7 +1844,7 @@ export const STATIC_CLASS_RECORDED = platform === "win32" ? 685_056 : null;
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 826_368 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 211_456 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
@@ -2248,7 +2248,7 @@ export const TEXT_DRIFT_TOLERANCE = 256;
  * hello-world .text GREW by 384 bytes: 544406 against the recorded 544022").
  * sqlesc adds +64 to the static text, hidden by the tolerance when it was
  * measured alone. */
-export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 544_406 : null;
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_438 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
@@ -2328,7 +2328,50 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 544_406 : null;
  * branch (regex program .text GREW by 688 bytes: 631430 against 630742; global
  * regex lastIndex state and string-pattern replace). Composed value is
  * INFERRED (630742 - 320 + 688); the land-batch9 CI run measures it. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 631_110 : null;
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 131_622 : null;
+
+/* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
+ * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
+ * REGEX_CLASS_MAX), were re-recorded together; the history above them describes
+ * a toolchain that linked every always-linked runtime unit whole.
+ *
+ * What changed: every compile now carries -ffunction-sections -fdata-sections
+ * and the link is given the target's collector (backend/cc.ts, gcSections*).
+ * On x86_64-windows-gnu the collector is only reachable without the PDB, so the
+ * zig lane links with -Wl,--strip-all (SCRIPTC_KEEP_PDB=1 opts back out, at the
+ * price of the collector): zig hands lld-link /DEBUG, /DEBUG turns /OPT:REF off,
+ * and zig rejects -Wl,/opt:ref. That is why the 2026-08-17 note ("the flags
+ * recover 48 bytes ... do not re-try") measured nothing: it was measuring the
+ * PDB, not the runtime.
+ *
+ * Measured in RECORDED_LANE (zig 0.16.0, SCRIPTC_TARGET=x86_64-windows-gnu),
+ * the exact programs of island.test.ts and regex.test.ts, --backend c, fresh
+ * vendor caches (the "-gc" flavors):
+ *
+ *                              before (7b6e86af)    after
+ *   static hello  .text            544,246           72,438
+ *   static hello  file             687,104          116,736
+ *   regex program .text            630,646          131,622 (re-measured on main 54be70ea; 131,350 at 7b6e86af)
+ *   regex program file             828,416          211,456
+ *
+ * The local lane is the CI lane: at 01a74941 (CI run 39629571866 measured the
+ * static .text as 544,406) the same local build gives 544,406, byte for byte.
+ * The regex figures were not checked against a CI number (INFERRED equal).
+ *
+ * The classes keep their order, and the distances shrink because the old
+ * ones included dead code: static -> regex was +86.4 KB of .text / +141.3 KB of
+ * file and is now +58.9 KB / +94.7 KB (libregexp + libunicode, collected per
+ * function). A hello-world no longer pays for any unit it cannot reach, so a
+ * landing that adds code to an always-linked unit moves these figures only by
+ * the functions the program can call. The engine class is still >500 KB
+ * (island.test.ts's ENGINE_CLASS_MIN holds: a --dynamic island build measures
+ * 1,295,872 bytes on the Windows lane and 1,232,208 on linux/clang).
+ *
+ * Linux has no RECORDED figures (null: the CI lane's compiler differs from
+ * every box this was measured on), only the two ceilings above. They were
+ * 552,104 / 717,160 against binaries of 543,784 / 709,488 and are now 61,440 /
+ * 229,376 against 47,080 / 177,056 (host clang 19), i.e. +30% of headroom for
+ * a different clang and glibc rather than 1.5 pages. */
 
 /** The section-anchor complaint, or null when within tolerance. Same shape as
  * recordedSizeComplaint -- a string, so the caller owns the assertion and this
