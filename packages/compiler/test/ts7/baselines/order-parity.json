@@ -11030,6 +11030,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7841-hasownproperty-call-union-index.ts": {
+   "order": [
+    "<repo>/tests/corpus/7841-hasownproperty-call-union-index.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
