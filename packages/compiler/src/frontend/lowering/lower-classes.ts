@@ -4128,6 +4128,33 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       const absentTrackedFields = new Set<string>(base?.absentTrackedFields ?? []);
       if (unguardedFields.length > 0) {
         const topAssigned = new Set<string>();
+        // ORDER: the top-level assignment guards the field only when nothing
+        // that runs BEFORE it can read the field. Zeroed memory is what an
+        // earlier read sees (Node says undefined), so a field whose first
+        // top-level assignment is preceded by a statement that mentions
+        // `this` (a method call, a read), by a `super(...)` call whose base
+        // constructor calls through `this`, or by an initializer of this
+        // class that mentions `this`, is deferred (widened) instead.
+        const mentionsThis = (n: ts.Node): boolean =>
+          n.kind === ts.SyntaxKind.ThisKeyword || ts.forEachChild(n, (c) => (mentionsThis(c) ? true : undefined)) === true;
+        const initializerReadsThis = decl.members.some(
+          (m) => ts.isPropertyDeclaration(m) && !m.modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) &&
+            m.initializer !== undefined && mentionsThis(m.initializer),
+        );
+        const baseCtorCallsThis = (): boolean => {
+          const bdecl = base?.decl;
+          if (!bdecl) return false;
+          const bctor = bdecl.members.find((m): m is ts.ConstructorDeclaration => ts.isConstructorDeclaration(m) && m.body !== undefined);
+          let hit = false;
+          const visit = (n: ts.Node): void => {
+            if (hit) return;
+            if (ts.isCallExpression(n) && mentionsThis(n.expression)) { hit = true; return; }
+            ts.forEachChild(n, visit);
+          };
+          if (bctor?.body) visit(bctor.body);
+          return hit || bdecl.members.some((m) => ts.isPropertyDeclaration(m) && m.initializer !== undefined && mentionsThis(m.initializer));
+        };
+        let earlyRead = initializerReadsThis;
         for (const stmt of ctor?.body?.statements ?? []) {
           if (
             ts.isExpressionStatement(stmt) &&
@@ -4136,7 +4163,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             ts.isPropertyAccessExpression(stmt.expression.left) &&
             stmt.expression.left.expression.kind === ts.SyntaxKind.ThisKeyword
           ) {
-            topAssigned.add(stmt.expression.left.name.text);
+            if (!earlyRead && !topAssigned.has(stmt.expression.left.name.text)) topAssigned.add(stmt.expression.left.name.text);
+            if (mentionsThis(stmt.expression.right)) earlyRead = true;
+          } else if (
+            ts.isExpressionStatement(stmt) && ts.isCallExpression(stmt.expression) &&
+            stmt.expression.expression.kind === ts.SyntaxKind.SuperKeyword
+          ) {
+            if (baseCtorCallsThis() || stmt.expression.arguments.some(mentionsThis)) earlyRead = true;
+          } else if (mentionsThis(stmt)) {
+            earlyRead = true;
           }
         }
         for (const f of unguardedFields) {
