@@ -5,6 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { uniformTupleArrayExpectation } from "./lower-stmts.js";
+import { registerAbsentGlobal } from "./lower-absent.js";
 import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
@@ -2578,6 +2579,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             };
             L.globalsBySymbol.set(symbol, g);
             L.globalsList.push(g);
+            if (bangT === null) registerAbsentGlobal(L, decl, g, symbol);
             // The file-scope face of lowerVarDecl's class PIN: an
             // immutable global the cast-alias rule just pinned to
             // `classval:C` holds C's class object and nothing else —

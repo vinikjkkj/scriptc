@@ -1170,6 +1170,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         switch (method) {
           case "length":
             return E.newTemp(e.type, `scr_arr_len(${r.name})`);
+          case "hasIndex":
+            return E.newTemp(e.type, `scr_arr_has_index(${r.name}, ${E.emitExpr(e.args[0]!).name})`);
           case "push": {
             // Variadic like JS: every argument evaluates first (left to
             // right — an argument reading the array sees the pre-push

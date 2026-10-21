@@ -2908,6 +2908,8 @@ function validateFunction(
               ? { argTypes: [elem, F64, F64], result: e.receiver.type }
             : e.method === "setLength"
               ? { argTypes: [F64], result: VOID }
+            : e.method === "hasIndex"
+              ? { argTypes: [F64], result: BOOL }
             : e.method === "pushSpread"
               ? { argTypes: [e.receiver.type], result: F64 }
               : e.method === "pop"

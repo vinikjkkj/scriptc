@@ -36,6 +36,7 @@ import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } fr
 import { isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
+import { lowerAbsentGlobal, lowerAbsentLocal } from "./lower-absent.js";
 
 /** `const X = /* @__PURE__ *\/ makeX()` at a module's top level: every
  * declarator initialized by a call (or `new`) carrying the bundler PURE
@@ -1321,6 +1322,15 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       if (numericIterator) return numericIterator;
       const drained = lowerMatchAllDrainDecl(L, decl, isConst);
       if (drained) return drained;
+      // `const v = xs[i]` / `const v = m.get(k)!` whose value may be Node's
+      // undefined: a plain slot plus a shadow "exists" flag (lower-absent.ts).
+      if (isConst && ts.isIdentifier(decl.name) && !ts.isSourceFile(stmt.parent)) {
+        const dsym = L.checker.getSymbolAtLocation(decl.name);
+        if (dsym && !L.globalsBySymbol.has(dsym) && !L.tdzPredeclared.has(dsym)) {
+          const absent = lowerAbsentLocal(L, decl);
+          if (absent !== null) return absent;
+        }
+      }
       const lowered = L.lowerVarDecl(decl, isLet);
       return lowered ? [lowered] : [];
     }
@@ -4630,6 +4640,13 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // has already converted away) and coerces itself if the rung
       // declines; the gate above is syntactic, so no other declaration
       // changes path.
+      {
+        const af = L.absentFlags.get(declSymbol!);
+        if (af?.global) {
+          const st = lowerAbsentGlobal(L, decl, g, af.global);
+          if (st !== null) return st;
+        }
+      }
       if (keyedReadGlobalArmedType(L, decl) !== null) {
         const raw = L.lowerExpr(decl.initializer);
         const armed = keyedReadLocalAtUndefinedArm(L, raw, g.type);

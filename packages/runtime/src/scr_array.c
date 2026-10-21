@@ -606,6 +606,20 @@ double scr_arr_get_f64_nan(ScrArr *a, double i) {
   return NAN;
 }
 
+/* `a[i]` is an element: an integer index inside [0, len), and for a
+ * reference-element array a slot that is not a hole. The exact question
+ * behind Node's `a[i] !== undefined` over a dense or holey array. */
+bool scr_arr_has_index(ScrArr *a, double i) {
+  if (i >= 0.0 && i < SCR_ARR_FAST_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)a->len) {
+      if (a->elem == SCR_ELEM_F64 || a->elem == SCR_ELEM_BOOL) return true;
+      return scr_slot_to_ptr(a->data[n]) != NULL;
+    }
+  }
+  return false;
+}
+
 bool scr_arr_get_bool(ScrArr *a, double i) {
   return a->data[scr_arr_check_index(a, i, false)] != 0;
 }

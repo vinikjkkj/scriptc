@@ -1762,6 +1762,7 @@ double scr_math_ceil(double x);
 double scr_arr_get_f64(ScrArr *a, double i); /* trap OOB */
 double scr_arr_get_f64_nan(ScrArr *a, double i); /* NaN on a miss */
 bool scr_arr_get_bool(ScrArr *a, double i);  /* trap OOB */
+bool scr_arr_has_index(ScrArr *a, double i); /* i is an element index (not a hole) */
 void *scr_arr_get_ref(ScrArr *a, double i);  /* trap OOB/ABSENT; returns +1 */
 /* get_ref's copy twin: an ABSENT slot copies through as absent instead of
  * trapping. Only the emitters' spread / pushSpread loops use it. +1. */

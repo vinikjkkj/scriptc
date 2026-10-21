@@ -22,6 +22,7 @@ import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, built
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
+import { absentRead } from "./lower-absent.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
@@ -1226,6 +1227,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             const lr = L.lyingRead({ kind: "varRef", localId: local.id, type: local.type, loc }, expr);
             if (lr) return lr;
           }
+          if (bsym && L.absentFlags.has(bsym)) {
+            const ar = absentRead(L, bsym, { kind: "varRef", localId: local.id, type: local.type, loc }, expr, loc);
+            if (ar) return ar;
+          }
         }
         return L.maybeNarrow({ kind: "varRef", localId: local.id, type: local.type, loc }, expr);
       }
@@ -1250,6 +1255,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           if (gsym && L.bangSymbols.has(gsym) && g.type.kind === "union") {
             const lr = L.lyingRead({ kind: "varRef", localId: g.id, type: g.type, loc }, expr);
             if (lr) return lr;
+          }
+          if (gsym && L.absentFlags.has(gsym)) {
+            const ar = absentRead(L, gsym, { kind: "varRef", localId: g.id, type: g.type, loc }, expr, loc);
+            if (ar) return ar;
           }
         }
         return L.maybeNarrow({ kind: "varRef", localId: g.id, type: g.type, loc }, expr);
