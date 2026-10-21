@@ -11085,6 +11085,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7848-symbol-tostringtag-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/7848-symbol-tostringtag-field.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"

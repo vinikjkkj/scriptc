@@ -8179,6 +8179,25 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // stay one name (the standard trust-the-checker bet); a cast that
     // WIDENS to string un-late-binds the property, its type is no literal,
     // and the fence stays.
+    // `[Symbol.toStringTag]: v` -- the well-known key. The checker late-binds
+    // it as the property `__@toStringTag@<id>`; the record shape carries that
+    // exact spelling as a declared field, so the key folds to the name the
+    // enclosing literal's own type gave the property.
+    if (
+      ts.isPropertyAccessExpression(expr) &&
+      L.stdlibGlobalMember(expr, "Symbol") === "toStringTag" &&
+      expr.parent !== undefined &&
+      ts.isComputedPropertyName(expr.parent) &&
+      expr.parent.parent !== undefined &&
+      expr.parent.parent.parent !== undefined &&
+      ts.isObjectLiteralExpression(expr.parent.parent.parent)
+    ) {
+      const lit = expr.parent.parent.parent;
+      for (const p of L.checker.getPropertiesOfType(L.typeOf(lit))) {
+        if (/^__@toStringTag@\d+$/.test(p.name)) return p.name;
+      }
+      return null;
+    }
     if (!pureKeyExpr(L, expr)) return null;
     return literalKeySpellingOf(L.typeOf(expr));
   }
@@ -12830,6 +12849,26 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // (symbol parameters, Symbol.for consts), and keys no class declares
     // — the layouts are compile-time field lists.
     if (L.mapTypeOf(L.typeOf(expr.argumentExpression))?.kind === "symbol") {
+      // `rec[Symbol.toStringTag]` over a record whose shape carries that
+      // well-known key as a declared field (TypeScript spells it
+      // `__@toStringTag@<id>`): an ordinary field read of the slot.
+      {
+        const key = expr.argumentExpression;
+        if (ts.isPropertyAccessExpression(key) && L.stdlibGlobalMember(key, "Symbol") === "toStringTag" &&
+            !expr.questionDotToken) {
+          const obj = L.lowerExpr(expr.expression);
+          if (obj.type.kind === "record") {
+            const shape = L.shapes.get(obj.type.shapeId);
+            const f = shape?.fields.find((x) => /^__@toStringTag@\d+$/.test(x.name));
+            if (shape && f) {
+              return L.maybeNarrow(
+                { kind: "recordGet", obj, shapeId: obj.type.shapeId, field: f.name, type: f.type, loc: locOf(expr) },
+                expr,
+              );
+            }
+          }
+        }
+      }
       const target = symbolFieldTarget(L, expr);
       if (target) return L.maybeNarrow(L.fieldGetExpr(target, locOf(expr), expr), expr);
       L.unsupported(
