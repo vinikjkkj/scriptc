@@ -331,9 +331,17 @@ export const STATIC_CLASS_MAX =
   platform === "linux" ? 552_104 : platform === "win32" ? 689_152 : 374_824;
 
 /** A program that uses regex: libregexp + libunicode, never the engine.
- * linux: DERIVED, not measured -- see the 2026-10-20 entry above. */
+ * linux: MEASURED 708,968 in CI (run 39492679940, ubuntu-24.04, regex.test.ts),
+ * plus the file's rule of anchor + 2 x SIZE_DRIFT_PAGE. This replaces the
+ * DERIVED 704,736 of caa01727, which was not a measurement and was already
+ * too low when written: the same regex program weighs 709,088 at caa01727
+ * itself (local clang 19, 2026-10-20), i.e. the ceiling failed from birth and
+ * nothing grew afterwards. The derivation added a stale static-to-regex delta
+ * (+152,632, from the 387,600-byte era) to the new static size; the real delta
+ * is +165,208 (543,752 static, 708,960 regex, local clang 19 at 91c553a3).
+ * The distance to the engine class (~+620 KB over static) is untouched. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 704_736 : platform === "win32" ? 830_464 : 526_848;
+  platform === "linux" ? 717_160 : platform === "win32" ? 830_464 : 526_848;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
