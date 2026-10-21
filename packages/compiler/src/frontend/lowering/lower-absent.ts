@@ -19,7 +19,7 @@
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, F64, IrExpr, IrGlobal, IrStmt, IrType, SrcLoc, isUnitType, strandTrap, typeKey, VOID } from "../../ir/nodes.js";
+import { BOOL, F64, IrExpr, IrGlobal, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, isUnitType, strandTrap, typeKey, VOID } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { checkedJsNumber } from "./lower-exprs.js";
 import { idxMissKeyHelper, oobTolerantElem } from "./lower-containers.js";
@@ -286,4 +286,73 @@ export function absentRead(L: Lowerer, bsym: ts.Symbol, v: IrExpr, node: ts.Expr
     return done(guarded(L, okE, v, msg, loc));
   }
   return done(guarded(L, okE, v, "undefined is not representable in the target union (a value narrowed or asserted past it still held it)", loc));
+}
+
+/* `s + t` over operands that may be Node's undefined (a peeled absent read,
+ * or a plain operand beside one). The result's TYPE depends on run-time
+ * values: undefined + undefined is the number NaN, undefined + "x" is the
+ * string "undefinedx", "a" + 5 is "a5", undefined + 5 is NaN. The caller
+ * guarantees the consumer turns the result into TEXT (a template span,
+ * String(), console.*, or a string `+` whose other side is a string), where
+ * the number NaN and the text "NaN" are indistinguishable, so the string-
+ * typed result is exact:
+ *   - if either operand is a PRESENT string: concat(ToString(l), ToString(r)),
+ *     an absent operand reading "undefined";
+ *   - otherwise (numbers and absences only): "NaN" when any operand is
+ *     absent, else the sum's text. */
+export function lowerLyingPlus(L: Lowerer, left: IrExpr, right: IrExpr, node: ts.BinaryExpression, loc: SrcLoc): IrExpr | null {
+  const stmts: IrStmt[] = [];
+  interface Op { kind: "string" | "f64"; absent: IrExpr | null; val: IrExpr }
+  const operand = (e: IrExpr, name: string): Op | null => {
+    if (e.type.kind === "union") {
+      const def = L.unions.get(e.type.unionId);
+      if (!def || !def.arms.some((a) => a.kind === "undefinedT")) return null;
+      const real = def.arms.filter((a) => !isUnitType(a));
+      if (real.length !== 1 || (real[0]!.kind !== "string" && real[0]!.kind !== "f64")) return null;
+      const T = real[0]!;
+      const h = L.declareHiddenLocal(name, e.type);
+      stmts.push({ kind: "varDecl", localId: h.id, init: e, loc });
+      const u = ref(h.id, e.type, loc);
+      const uid = e.type.unionId;
+      return {
+        kind: T.kind as "string" | "f64",
+        absent: { kind: "unionIsTag", unionId: uid, tag: L.armTag(uid, UNDEFINED_T), negated: false, value: u, type: BOOL, loc },
+        val: { kind: "unionNarrow", unionId: uid, tag: L.armTag(uid, T), value: u, type: T, loc },
+      };
+    }
+    if (e.type.kind !== "string" && e.type.kind !== "f64") return null;
+    const h = L.declareHiddenLocal(name, e.type);
+    stmts.push({ kind: "varDecl", localId: h.id, init: e, loc });
+    return { kind: e.type.kind, absent: null, val: ref(h.id, e.type, loc) };
+  };
+  if (left.type.kind !== "union" && right.type.kind !== "union") return null;
+  const l = operand(left, "%plusL");
+  const r = operand(right, "%plusR");
+  if (l === null || r === null) return null;
+  const str = (v: string): IrExpr => ({ kind: "strLit", value: v, type: STRING, loc });
+  const text = (o: Op): IrExpr => {
+    const present: IrExpr = o.kind === "string" ? o.val : L.ensureString(o.val, node);
+    return o.absent === null ? present : { kind: "ternary", cond: o.absent, then: str("undefined"), else_: present, type: STRING, loc };
+  };
+  const cat: IrExpr = { kind: "strConcat", left: text(l), right: text(r), type: STRING, loc };
+  const and = (a: IrExpr, b: IrExpr): IrExpr => ({ kind: "logical", op: "&&", left: a, right: b, type: BOOL, loc });
+  const or = (a: IrExpr | null, b: IrExpr | null): IrExpr | null => (a === null ? b : b === null ? a : { kind: "logical", op: "||", left: a, right: b, type: BOOL, loc });
+  const nan = str("NaN");
+  let result: IrExpr;
+  if (l.kind === "string" && r.kind === "string") {
+    // both absent -> NaN; otherwise at least one present string
+    if (l.absent !== null && r.absent !== null) result = { kind: "ternary", cond: and(l.absent, r.absent), then: nan, else_: cat, type: STRING, loc };
+    else result = cat;
+  } else if (l.kind === "string") {
+    // "a" + 5 is "a5", undefined + anything numeric is NaN
+    result = l.absent !== null ? { kind: "ternary", cond: l.absent, then: nan, else_: cat, type: STRING, loc } : cat;
+  } else if (r.kind === "string") {
+    result = r.absent !== null ? { kind: "ternary", cond: r.absent, then: nan, else_: cat, type: STRING, loc } : cat;
+  } else {
+    // two numbers: absent anywhere is NaN, else the sum
+    const anyAbs = or(l.absent, r.absent);
+    const sum: IrExpr = L.ensureString({ kind: "bin", op: "+", left: l.val, right: r.val, type: F64, loc }, node);
+    result = anyAbs === null ? sum : { kind: "ternary", cond: anyAbs, then: nan, else_: sum, type: STRING, loc };
+  }
+  return { kind: "seqExpr", stmts, result, type: STRING, loc };
 }
