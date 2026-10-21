@@ -16141,6 +16141,48 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             }
           }
         }
+        // A checked-dynamic operand against any scalar or another dyn:
+        // the runtime owns the whole IsLooselyEqual algorithm (the spec
+        // compares TYPES before it converts), so the frontend only boxes
+        // the static side and keeps left-to-right evaluation.
+        {
+          const scalar = (t: IrType): boolean =>
+            t.kind === "f64" || t.kind === "string" || t.kind === "bool" || t.kind === "dyn" || isUnitType(t);
+          // A union operand against a scalar or another dyn-convertible
+          // value: both box (the arms cross by value), and the runtime owns
+          // IsLooselyEqual -- `n == 1` over `number | undefined`.
+          const unionish = (t: IrType): boolean => t.kind === "union" && L.dynConvertible(t);
+          if (
+            (left.type.kind === "union" || right.type.kind === "union") &&
+            (unionish(left.type) || scalar(left.type)) && (unionish(right.type) || scalar(right.type))
+          ) {
+            const boxU = (e: IrExpr): IrExpr =>
+              e.type.kind === "dyn" ? e : { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
+            const eqU: IrExpr = { kind: "libCall", fn: "dyn.looseEq", args: [boxU(left), boxU(right)], type: BOOL, loc };
+            return negated ? { kind: "unary", op: "!", operand: eqU, type: BOOL, loc } : eqU;
+          }
+          // The SAME reference type on both sides: `==` between two values
+          // of one type is `===` (identity), so it lowers as the strict form.
+          if (
+            typeEquals(left.type, right.type) &&
+            (left.type.kind === "array" || left.type.kind === "record" || left.type.kind === "object" ||
+              left.type.kind === "map" || left.type.kind === "set" || left.type.kind === "func" ||
+              left.type.kind === "bytes" || left.type.kind === "promise")
+          ) {
+            const strictExpr = Object.create(expr, {
+              operatorToken: {
+                value: { kind: negated ? ts.SyntaxKind.ExclamationEqualsEqualsToken : ts.SyntaxKind.EqualsEqualsEqualsToken },
+              },
+            }) as ts.BinaryExpression;
+            return lowerBinary(L, strictExpr);
+          }
+          if ((left.type.kind === "dyn" || right.type.kind === "dyn") && scalar(left.type) && scalar(right.type)) {
+            const box = (e: IrExpr): IrExpr =>
+              e.type.kind === "dyn" ? e : { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
+            const eq: IrExpr = { kind: "libCall", fn: "dyn.looseEq", args: [box(left), box(right)], type: BOOL, loc };
+            return negated ? { kind: "unary", op: "!", operand: eq, type: BOOL, loc } : eq;
+          }
+        }
       }
       L.unsupported("SC1040", expr);
     }

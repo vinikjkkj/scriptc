@@ -873,12 +873,59 @@ ScrBigInt *scr_big_from_dyn(const ScrDyn *d) {
  * A LITERAL retain, not a copy: bigints are immutable, so the box and the
  * static value sharing digits is unobservable, and === over two boxes
  * compares VALUES anyway (scr_dyn_strict_eq's BIG arm). */
+/* `bigint == number` (IsLooselyEqual 7.2.14 step 12-13): a number that is
+ * not an integer (NaN, +-Infinity, fractional) equals no bigint; an integral
+ * one compares by exact value. */
+static bool scr_big_eq_f64(const ScrBigInt *b, double n) {
+  if (!isfinite(n) || n != trunc(n)) return false;
+  ScrBigInt *m = scr_big_from_f64(n);
+  bool eq = scr_big_eq(b, m);
+  scr_big_release(m);
+  return eq;
+}
+
+static bool scr_big_ws(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f';
+}
+
+/* `bigint == string`: StringToBigInt (7.1.14) over the string - surrounding
+ * whitespace trimmed, empty is 0n, an optionally signed decimal or an
+ * UNSIGNED 0x/0o/0b literal; anything else is "no value", and the
+ * comparison is false. */
+static bool scr_big_eq_str(const ScrBigInt *b, const ScrStr *s) {
+  const char *p = (const char *)s->data;
+  size_t n = s->len;
+  while (n && scr_big_ws(*p)) { p++; n--; }
+  while (n && scr_big_ws(p[n - 1])) n--;
+  if (n == 0) return !scr_big_truthy(b);
+  size_t i = 0;
+  int base = 10;
+  if (n > 2 && p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) { base = 16; i = 2; }
+  else if (n > 2 && p[0] == '0' && (p[1] == 'o' || p[1] == 'O')) { base = 8; i = 2; }
+  else if (n > 2 && p[0] == '0' && (p[1] == 'b' || p[1] == 'B')) { base = 2; i = 2; }
+  else if (p[0] == '+' || p[0] == '-') i = 1;
+  if (i >= n) return false;
+  for (size_t k = i; k < n; k++) {
+    char c = p[k];
+    int d = (c >= '0' && c <= '9') ? c - '0'
+            : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+            : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : 99;
+    if (d >= base) return false;
+  }
+  ScrBigInt *m = scr_big_parse(p, n);
+  bool eq = scr_big_eq(b, m);
+  scr_big_release(m);
+  return eq;
+}
+
 static const ScrDynBigOps scr_big_dyn_ops = {
   scr_big_retain,
   scr_big_release,
   scr_big_truthy,
   scr_big_eq,
   scr_big_to_str,
+  scr_big_eq_f64,
+  scr_big_eq_str,
 };
 
 ScrDyn *scr_dyn_from_big(ScrBigInt *b) {

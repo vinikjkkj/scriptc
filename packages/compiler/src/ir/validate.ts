@@ -185,6 +185,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // `==` / `!=` with a number on one side: the f64 rides as a plain
   // double, so the number operand needs no dyn box.
   "dyn.looseEqNum": { argTypes: [F64, DYN], result: BOOL },
+  "dyn.looseEq": { argTypes: [DYN, DYN], result: BOOL },
   "timers.setTimeout": { argTypes: [{ kind: "func", params: [], ret: VOID }, F64], result: VOID },
   "timers.setInterval": { argTypes: [{ kind: "func", params: [], ret: VOID }, F64], result: F64 },
   "timers.clearInterval": { argTypes: [F64], result: VOID },

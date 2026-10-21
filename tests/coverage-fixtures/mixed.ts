@@ -8,8 +8,8 @@ function score(n: number): number {
 const items = [1, 2, 3];
 const handler = (x: number) => x * 2;
 
-const anyone: unknown = score(1);
-const flags = anyone == score(2); // mixed-kind loose equality keeps the fence (same-kind == lowers)
+const stamp = new Date(0);
+const flags = stamp == stamp; // loose equality over Date values keeps the fence (numbers, strings, unions and references lower)
 const { length: firstItem } = items; // object patterns over arrays keep the fence (patterns and defaults compile)
 let label = "score: ";
 label += score(10);

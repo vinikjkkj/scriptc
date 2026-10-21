@@ -5905,6 +5905,9 @@ bool scr_dyn_ge(const ScrDyn *a, const ScrDyn *b);
  * same-kind operands is still strict equality in the frontend.
  * Borrowed; no allocation for the number side. */
 bool scr_dyn_loose_eq_num(double n, const ScrDyn *d);
+/* IsLooselyEqual over two dyn values; false with the exception pending when a
+ * ToPrimitive user method throws. */
+bool scr_dyn_loose_eq(const ScrDyn *a, const ScrDyn *b);
 /* JS === over two dyn values: scalars by value, units by kind, everything
  * reference-shaped by node identity. Borrowed; never throws. */
 bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b);
@@ -6393,6 +6396,8 @@ typedef struct ScrDynBigOps {
   bool (*truthy)(const ScrBigInt *b);                  /* 0n is FALSE */
   bool (*eq)(const ScrBigInt *a, const ScrBigInt *b);  /* === by VALUE */
   ScrStr *(*to_str)(const ScrBigInt *b, double radix); /* +1, never throws at radix 10 */
+  bool (*eq_f64)(const ScrBigInt *b, double n);        /* 1n == 1, exact, never throws */
+  bool (*eq_str)(const ScrBigInt *b, const ScrStr *s); /* 1n == "1" via StringToBigInt */
 } ScrDynBigOps;
 
 /* The boxing constructor, DEFINED IN THE GATED UNIT (scr_bigint.c): it

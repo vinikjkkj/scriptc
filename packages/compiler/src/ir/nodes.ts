@@ -5177,6 +5177,12 @@ export type IrLibFn =
    * null-prototype object, a bigint's kept refusal), so it is in the
    * may-throw seed set. */
   | "dyn.looseEqNum"
+  /** IsLooselyEqual over two checked-dynamic operands (scr_dyn_loose_eq):
+   * null/undefined only equal each other, same kinds compare strictly,
+   * number/string/boolean/bigint coerce per 7.2.14, and an object runs
+   * ToPrimitive with no hint and compares again. Borrows both; throws only
+   * where a user valueOf/toString does. */
+  | "dyn.looseEq"
   /** Object.keys/values/entries over a CHECKED-DYNAMIC receiver
    * (scr_json.c): the runtime walks the dyn node's own members in JS
    * own-key order (array-index keys ascending first, then insertion
@@ -12071,6 +12077,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.gt",
   "dyn.ge",
   "dyn.looseEqNum",
+  "dyn.looseEq",
   // the dyn Object walks throw on null/undefined receivers
   "dyn.objKeys",
   "dyn.hasOwn",
