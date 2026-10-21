@@ -32,7 +32,7 @@
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
 import { bytesAliasOnExtract, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
-import { armDiscrimLits, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -518,6 +518,12 @@ export class LlDyn {
       }
       case "func":
         return "function";
+      // A union ARM no dyn value can be (dynNeverArm), named for the refusal
+      // text of the union it sits in.
+      case "date":
+        return "Date";
+      case "opaque":
+        return t.name;
       // "expected Map at $.ids, got Set" — the C emitter's arm
       // (emit-walkers.ts's dynDesc), which has carried these two words
       // since before a Map could reach a dynCheck target at all.
@@ -732,6 +738,8 @@ export class LlDyn {
         // Arms in canonical order; any full match answers true.
         const yes = B.newLabel("dm.y");
         for (const arm of def.arms) {
+          // An arm no dyn value can be (dynNeverArm) has nothing to match.
+          if (dynNeverArm(arm)) continue;
           const ok = B.tmp();
           B.line(`${ok} = call zeroext i1 @${this.dynMatchHelper(arm)}(ptr %d)`);
           const ln = B.newLabel("dm.n");
@@ -1963,6 +1971,9 @@ export class LlDyn {
         for (const withLits of passes) {
           order.forEach((i) => {
             const arm = def.arms[i]!;
+            // No dyn value is a Date or a named stdlib handle: the arm can
+            // never be taken, so it is not walked (dynNeverArm).
+            if (dynNeverArm(arm)) return;
             const lits = withLits ? armDiscrimLits(def, i) : {};
             const litFn = Object.keys(lits).length > 0 ? this.dynLitHelper(lits) : null;
             if (arm.kind === "undefinedT" || arm.kind === "nullT") {
@@ -2853,6 +2864,12 @@ export class LlDyn {
             B.line(`${x} = call zeroext i1 @scr_union_get_bool(ptr %v)`);
             B.line(`${r} = call ptr @scr_dyn_new_bool(i1 ${x})`);
             B.terminate(`ret ptr ${r}`);
+          } else if (dynNeverIn(arm)) {
+            // No value inhabits this arm (a Blob cannot be constructed
+            // natively), so no box can carry its tag.
+            host.needBadTag();
+            B.line(`call void @sc_bad_tag()`);
+            B.terminate(`unreachable`);
           } else if (arm.kind === "func") {
             // A boxable function arm crosses through the checked-dynamic
             // function boundary (the dynFrom func special case, sans name).
