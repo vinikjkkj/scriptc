@@ -9470,10 +9470,20 @@ export class Lowerer {
    * Uniform targets only: every field must already hold the array's
    * element type, so no position can need a conversion of its own. The
    * arity is the shape's, and tsc proved the source has it. */
+  /** The PURE gate of arrayTupleWidthHelper: a non-empty tuple whose every
+   * position is the element type itself or one the element converts into
+   * through the mechanical coercions (coercibleValue: a dyn slot, an arm
+   * extraction). Nothing interns. */
+  arrayTuplePlannable(from: IrType & { kind: "array" }, toId: string): boolean {
+    const to = this.shapes.get(toId);
+    if (!to?.tuple || to.fields.length === 0 || to.indexValue) return false;
+    return to.fields.every((f) => typeEquals(f.type, from.elem) || this.coercibleValue(from.elem, f.type));
+  }
+
   arrayTupleWidthHelper(from: IrType & { kind: "array" }, toId: string, loc: SrcLoc): string | null {
     const to = this.shapes.get(toId);
-    if (!to?.tuple || to.fields.length === 0 || to.indexValue) return null;
-    if (!to.fields.every((f) => typeEquals(f.type, from.elem))) return null;
+    if (!this.arrayTuplePlannable(from, toId)) return null;
+    if (!to) return null;
     const key = `arrtuple:${typeKey(from)}:${toId}`;
     const existing = this.widthHelpers.get(key);
     if (existing) return existing;
@@ -9491,16 +9501,22 @@ export class Lowerer {
           kind: "return",
           value: {
             kind: "recordLit",
-            fields: to.fields.map((f, i) => ({
-              name: f.name,
-              value: {
+            fields: to.fields.map((f, i) => {
+              const read: IrExpr = {
                 kind: "arrayGet",
                 arr: a,
                 index: { kind: "numLit", value: i, type: F64, loc },
-                type: f.type,
+                type: from.elem,
                 loc,
-              } satisfies IrExpr,
-            })),
+              };
+              // Each position takes the conversion the element type needs to
+              // enter the field's slot (identity for a uniform tuple; the dyn
+              // conversion or an arm extraction for the erased-generic case,
+              // `Promise<[T, FieldPacket[]]>` read through `[unknown, unknown]`).
+              const value = typeEquals(f.type, from.elem) ? read : this.coerceToExpected(read, f.type);
+              if (!typeEquals(value.type, f.type)) throw new Error("lowerer bug: planned array-to-tuple position stopped coercing");
+              return { name: f.name, value };
+            }),
             type: toT,
             loc,
           },
@@ -9837,7 +9853,12 @@ export class Lowerer {
    * boundary in both directions (dynFrom / dynCheck's JSON-safe domain).
    * Deliberately EXCLUDES the trap-only stranded conversions — an adapter
    * that could only ever throw is a fence, not a bridge. */
-  coercibleValue(src: IrType, dst: IrType): boolean {
+  private readonly coercibleRecordBusy = new Set<string>();
+  /** >0 while a function adapter's RESULT is being coerced: the promise payload
+   * probes then answer with the result-position width arms too (coercibleValue's
+   * `rw`), exactly as the adapter's own plan did when it admitted the pair. */
+  resultWidthDepth = 0;
+  coercibleValue(src: IrType, dst: IrType, rw = false): boolean {
     if (typeEquals(src, dst)) return true;
     // The island boundary joins the mechanical set: values that MARSHAL
     // in (units, the checked-dynamic deep copy, JSON-safe data, liftable
@@ -9891,7 +9912,40 @@ export class Lowerer {
     // `Promise<null | T>` slot, and an async callback whose contextual
     // return widened its own payload).
     if (dst.kind === "promise" && src.kind === "promise") {
-      return this.coercibleValue(src.inner, dst.inner);
+      return this.coercibleValue(src.inner, dst.inner, rw);
+    }
+    // A RECORD into a RECORD slot through the width family (coerceToExpected
+    // runs widthCoerce on the value, so the adapter's own conversion is the
+    // same copy this probe plans): `Promise<PoolConnection>` into a
+    // `Promise<{ commit(): Promise<void>; ... }>`. An in-progress pair (a
+    // member whose result reaches its own record again) answers no, the
+    // conservative direction: the pair keeps the stranded stance it had.
+    // An ARRAY into a TUPLE slot (arrayTupleWidthHelper), each position
+    // converting from the element type.
+    //
+    // The three width arms below (array-to-tuple, tuple-to-array, record-to-
+    // record) are the RESULT position of a function adapter only (`rw`): a
+    // function's answer is read, never written back through the slot, so the
+    // copy stance (SEMANTICS 35) loses nothing the caller can observe. A
+    // PARAMETER position and a bare promise payload keep the exactness fences
+    // the diagnostics corpus pins (record-width, promise-payload-adoption).
+    if (rw && src.kind === "array" && dst.kind === "record") return this.arrayTuplePlannable(src, dst.shapeId);
+    // A TUPLE into an ARRAY slot (tupleArrayWidthHelper): the producer side of
+    // the same erasure, a closure answering `[rows, fields]` into the merged
+    // generic slot whose result is the array of the positions' union.
+    if (rw && src.kind === "record" && dst.kind === "array" && dst.elem.kind !== "jsval") {
+      const from = this.shapes.get(src.shapeId);
+      return from?.tuple === true && from.fields.every((f) => this.widthLiftPlan(f.type, dst.elem) !== null);
+    }
+    if (rw && src.kind === "record" && dst.kind === "record") {
+      const pair = `${src.shapeId}->${dst.shapeId}`;
+      if (this.coercibleRecordBusy.has(pair)) return false;
+      this.coercibleRecordBusy.add(pair);
+      try {
+        return this.widthLiftPlan(src, dst) !== null;
+      } finally {
+        this.coercibleRecordBusy.delete(pair);
+      }
     }
     // A FUNCTION value converts through funcCoerceAdapter exactly when its
     // signature is clean-adaptable. Without this clause a function-typed
@@ -9916,7 +9970,7 @@ export class Lowerer {
         // level (contextual typing puts the slot's whole union inside the
         // promise), and the adapter's double await unwraps exactly that.
         return (
-          this.coercibleValue(src.inner, arm.inner) ||
+          this.coercibleValue(src.inner, arm.inner, rw) ||
           (src.inner.kind === "union" && this.settleOrValueAwaitYields(src.inner, arm.inner))
         );
       }
@@ -9952,7 +10006,7 @@ export class Lowerer {
       if (!this.coercibleValue(dst.params[i]!, src.params[i]!)) return false;
     }
     if (dst.ret.kind === "void") return src.ret.kind !== "jsval";
-    if (this.coercibleValue(src.ret, dst.ret)) return true;
+    if (this.coercibleValue(src.ret, dst.ret, true)) return true;
     // The CLASS-INSTANCE RETURN, which funcCoerceAdapter already bridges
     // (its `classRetProj`) and this probe did not: a factory
     // `(sessionId) => new WaAuthSqliteStore(...)` flowing into a slot that
@@ -10192,7 +10246,7 @@ export class Lowerer {
     fromT: IrType & { kind: "promise" },
     toT: IrType & { kind: "promise" },
   ): boolean {
-    if (this.coercibleValue(fromT.inner, toT.inner)) return true;
+    if (this.coercibleValue(fromT.inner, toT.inner, this.resultWidthDepth > 0)) return true;
     return (
       fromT.inner.kind === "union" &&
       this.settleOrValueAwaitYields(fromT.inner, toT.inner)
@@ -10251,10 +10305,10 @@ export class Lowerer {
     // callback written against `Promise<T> | T` (its own return nests one
     // level deeper). The helper then awaits twice instead of coercing.
     const viaSettle =
-      !this.coercibleValue(fromT.inner, toT.inner) &&
+      !this.coercibleValue(fromT.inner, toT.inner, this.resultWidthDepth > 0) &&
       fromT.inner.kind === "union" &&
       this.settleOrValueAwaitYields(fromT.inner, toT.inner);
-    if (!viaSettle && !this.coercibleValue(fromT.inner, toT.inner)) return null;
+    if (!viaSettle && !this.coercibleValue(fromT.inner, toT.inner, this.resultWidthDepth > 0)) return null;
     const key = `promiseadapt:${viaSettle ? "sv:" : ""}${typeKey(fromT)}:${typeKey(toT)}`;
     const existing = this.retagHelpers.get(key);
     if (existing) return existing;
@@ -10335,6 +10389,15 @@ export class Lowerer {
       this.fnStack.pop();
     }
     return memoName;
+  }
+
+  withResultWidth<T>(f: () => T): T {
+    this.resultWidthDepth++;
+    try {
+      return f();
+    } finally {
+      this.resultWidthDepth--;
+    }
   }
 
   funcCoerceAdapter(fromT: IrType & { kind: "func" }, toT: IrType & { kind: "func" }, loc: SrcLoc): string | null {
@@ -10523,7 +10586,7 @@ export class Lowerer {
         toT.ret.kind === "object" &&
         fromT.ret.className !== toT.ret.className &&
         this.isSubclassOf(fromT.ret.className, toT.ret.className));
-    if (toT.ret.kind !== "void" && !this.coercibleValue(fromT.ret, toT.ret) && classRetProj === null && !resultBridges) {
+    if (toT.ret.kind !== "void" && !this.coercibleValue(fromT.ret, toT.ret, true) && classRetProj === null && !resultBridges) {
       if (fromT.ret.kind !== "void") {
         // A RESULT that cannot convert — the strandParams stance, result
         // side (the production/development function-choice ternary: the
@@ -10691,7 +10754,7 @@ export class Lowerer {
         const result =
           classRetProj !== null
             ? { kind: "call" as const, callee: classRetProj, args: [call], type: toT.ret, loc }
-            : this.coerceToExpected(call, toT.ret);
+            : this.withResultWidth(() => this.coerceToExpected(call, toT.ret));
         if (!typeEquals(result.type, toT.ret)) throw new Error("lowerer bug: probed fn-adapter return stopped coercing");
         body = [{ kind: "return", value: result, loc }];
       }
