@@ -11840,6 +11840,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8408-a-map-or-set-field-assigned-past-the-constructor-is-null-until-assigned.ts": {
+   "order": [
+    "<repo>/tests/corpus/8408-a-map-or-set-field-assigned-past-the-constructor-is-null-until-assigned.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8409-optional-chaining-typeof-and-nullish-over-an-unassigned-map-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/8409-optional-chaining-typeof-and-nullish-over-an-unassigned-map-field.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"
