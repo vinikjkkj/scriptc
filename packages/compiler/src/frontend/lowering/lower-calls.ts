@@ -26,7 +26,7 @@ import { lowerDateLocaleFormat, lowerNumberLocaleFormat } from "./lower-numfmt.j
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
-import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
+import { pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
@@ -6646,7 +6646,36 @@ const DYN_STRING_ONLY_METHODS = new Set([
     // convention is to tolerate a second lowering after a null, and there
     // is no reason to spend one here.
     const argT = L.mapTypeOf(L.typeOf(argNode));
-    if (argT?.kind !== "dyn" && argT?.kind !== "bytes") return null;
+    // Operands that cannot be a view at all (a string, number, record,
+    // array, a union with no bytes arm): constantly false, the operand still
+    // evaluated for its effects. A union WITH bytes arms tests their tags.
+    if (argT !== null && argT.kind !== "dyn" && argT.kind !== "bytes" && argT.kind !== "jsval") {
+      const loc0 = locOf(call);
+      const falseE: IrExpr = { kind: "boolLit", value: false, type: BOOL, loc: loc0 };
+      const arg0 = L.lowerExpr(argNode);
+      if (arg0.type.kind === "union") {
+        const def = L.unions.get(arg0.type.unionId);
+        const tags = def ? def.arms.flatMap((a, i) => (a.kind === "bytes" && a.elem !== "buf" ? [i] : [])) : [];
+        if (def && tags.length > 0 && pureReemittable(arg0)) {
+          let cond: IrExpr | null = null;
+          for (const tag of tags) {
+            const t: IrExpr = { kind: "unionIsTag", unionId: arg0.type.unionId, tag, negated: false, value: arg0, type: BOOL, loc: loc0 };
+            cond = cond === null ? t : { kind: "logical", op: "||", left: cond, right: t, type: BOOL, loc: loc0 };
+          }
+          return cond;
+        }
+        if (def && tags.length > 0) L.noLowering("ArrayBuffer.isView of a union operand that isn't a plain read", call);
+      } else if (arg0.type.kind === "bytes") {
+        // fallthrough handled below via re-probe is not possible here
+        L.noLowering("ArrayBuffer.isView", call);
+      }
+      return pureReemittable(arg0) || arg0.kind === "unitLit"
+        ? falseE
+        : { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: arg0, loc: loc0 }], result: falseE, type: BOOL, loc: loc0 };
+    }
+    // An operand the checker types `any` (an untyped JS parameter) maps to
+    // nothing but LOWERS checked-dynamic: it takes the dyn arm below.
+    if (argT !== null && argT.kind !== "dyn" && argT.kind !== "bytes") return null;
     const arg = L.lowerExpr(argNode);
     const loc = locOf(call);
     if (arg.type.kind === "dyn") {

@@ -497,6 +497,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // leniently (never throws), concat copies its borrowed list; the sync
   // fs Buffer pair and zlib.inflateSync ride the may-throw check.
   "buffer.fromStr": "scr_bytes_from_str",
+  "buffer.fromDyn": "scr_buffer_from_dyn",
   "buffer.concat": "scr_bytes_concat",
   "buffer.concatLen": "scr_bytes_concat_len",
   "buffer.concatDyn": "scr_buffer_concat_dyn",

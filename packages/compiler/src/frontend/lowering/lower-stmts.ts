@@ -19,7 +19,7 @@ import { lowerWrtcWrite } from "./lower-wrtc.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
-import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfUnionContainer, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
+import { bufferSpeciesAliasDecl, ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfUnionContainer, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
@@ -4483,6 +4483,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // (lowerCreateRequireCall); no storage, no code (collectGlobals
     // skipped its global by the same test).
     if (!isLet && createRequireBindingDecl(L, decl.name, decl.initializer)) return null;
+    if (!isLet && bufferSpeciesAliasDecl(L, decl.name, decl.initializer)) return null;
 
     // `const fs = require("node:fs")` through that binding — a builtin
     // namespace import in const clothing: alias plumbing, no storage

@@ -4585,6 +4585,10 @@ export type IrLibFn =
    * bytes<u8>[] arg (the list) and returns a fresh copy. `Buffer.from(u8)`
    * and `Buffer.alloc(n)` need no libFn — they lower to bytesNew. */
   | "buffer.fromStr"
+  /** `Buffer.from(x)` over a checked-dynamic x (scr_json.c): UTF-8 for a string,
+   * a copy for bytes / ArrayBuffer, a ToUint8 pack for an array, Node's
+   * ERR_INVALID_ARG_TYPE otherwise. Borrowed dyn in, +1 u8 bytes out. May throw. */
+  | "buffer.fromDyn"
   | "buffer.concat"
   /** Buffer.byteLength(string, enc) — enc a NORMALIZED literal like
    * fromStr's — and Buffer.isEncoding(name) over a runtime string
@@ -12566,6 +12570,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.
   "buffer.compareChk",
+  "buffer.fromDyn",
   "bytes.equalsChk",
   "bytes.compareChk",
   // Reading the Buffer-ness of a value whose producer nobody classified:
