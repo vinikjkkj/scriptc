@@ -11055,6 +11055,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7843-object-prototype-tostring-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/7843-object-prototype-tostring-call.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"

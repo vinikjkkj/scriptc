@@ -5156,6 +5156,8 @@ export type IrLibFn =
    * ("Cannot convert undefined or null to object"). */
   | "dyn.objKeys"
   | "dyn.hasOwn"
+  /** Object.prototype.toString.call(v) over a dyn operand: "[object Tag]". */
+  | "dyn.objectToString"
   | "dyn.assign"
   /** Variadic Object.assign over CHECKED-DYNAMIC targets (`Object.assign(
    * {}, ...arr.map(f), tail)` — the option-table merge): the lowering
