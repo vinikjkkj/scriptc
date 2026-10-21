@@ -11019,6 +11019,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7833-set-of-union-elements.ts": {
+   "order": [
+    "<repo>/tests/corpus/7833-set-of-union-elements.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"

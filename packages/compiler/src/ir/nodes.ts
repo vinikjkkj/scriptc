@@ -892,6 +892,13 @@ export function isSupportedSetElem(t: IrType): boolean {
     isSupportedMapKey(t) ||
     t.kind === "netServer" ||
     t.kind === "symbol" ||
+    // A UNION element (`Set<string | number | Foo[]>`, mysql2's SqlValue):
+    // the boxed value is hashed and compared by the VALUE it carries --
+    // strings by content, numbers by SameValueZero, bigints by value, every
+    // object arm by identity (SCR_MAP_KEY_UNION). Not a new idea of
+    // equality: it is `===` over the union's arms plus the -0/NaN rule Set
+    // adds, and the arm decides which.
+    t.kind === "union" ||
     // Promises key by reference identity like every other heap value, and
     // the pending-task idiom (`set.add(p); p.finally(() => set.delete(p))`)
     // is what asks for it. That closure captures BOTH, so the pair is a

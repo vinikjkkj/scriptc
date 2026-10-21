@@ -1919,7 +1919,10 @@ void scr_regex_dyn_install(void);
  * server registry) is honest hashed storage. REF keys carry their own
  * retain/release adapters (scr_set_new_ref); only SETS use the kind so
  * far — the Map-key surface stays f64/string. */
-typedef enum { SCR_MAP_KEY_F64, SCR_MAP_KEY_STR, SCR_MAP_KEY_REF } ScrMapKeyKind;
+/* SCR_MAP_KEY_UNION: a Set whose element is a union. Keys are ScrUnion
+ * boxes under the REF key API (retain/release adapters, borrowed probes),
+ * but hashed and compared by the VALUE the box carries (scr_set_new_union). */
+typedef enum { SCR_MAP_KEY_F64, SCR_MAP_KEY_STR, SCR_MAP_KEY_REF, SCR_MAP_KEY_UNION } ScrMapKeyKind;
 typedef enum { SCR_MAP_VAL_F64, SCR_MAP_VAL_BOOL, SCR_MAP_VAL_REF } ScrMapValKind;
 
 /* Exactly two 8-byte slots and NO padding. The liveness bit used to sit
@@ -1951,6 +1954,8 @@ typedef struct ScrMap {
    * val_trace does) and moves its keys from the teardown's release list
    * into the trace -- the two must agree or the keys are freed twice. */
   ScrTraceFn key_trace;
+  /* SCR_MAP_KEY_UNION only: one class byte per union arm (see scr_map.c). */
+  const ScrStr *key_classes;
   size_t nentries; /* dense entries used, tombstones included */
   size_t nlive;    /* live entries (Map.size) */
   size_t ecap;     /* entries capacity */
@@ -2087,6 +2092,12 @@ ScrMap *scr_set_new_ref(void *(*elem_retain)(void *), void (*elem_release)(void 
  * has to be headered too and its trace has to visit the elements. */
 ScrMap *scr_set_new_ref_traced(void *(*elem_retain)(void *), void (*elem_release)(void *),
                                ScrTraceFn elem_trace);
+/* A Set whose element is a UNION (SCR_MAP_KEY_UNION): the boxes are
+ * compared by the value they carry. `classes` is the per-arm class string
+ * the compiler interns (see scr_map.c); elem_trace is NULL unless an
+ * element can point back at the set. */
+ScrMap *scr_set_new_union(void *(*elem_retain)(void *), void (*elem_release)(void *),
+                          ScrTraceFn elem_trace, const ScrStr *classes);
 
 /* The live STRING keys of a map in JS OWN-KEY ORDER (Object.keys/values/
  * entries over an index-signature record's overflow): canonical array

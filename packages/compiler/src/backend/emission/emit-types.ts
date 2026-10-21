@@ -976,7 +976,29 @@ export function mapKeyAccess(key: IrType): "f64" | "str" | "ref" {
   // holds them is traced on the key side so the pending-task cycle is
   // collectable (scr_set_new_ref_traced).
   if (key.kind === "promise") return "ref";
+  // A union element rides the ref-key API; the runtime hashes the box by
+  // the value it carries (scr_set_new_union).
+  if (key.kind === "union") return "ref";
   throw new Error(`emitter bug: map key of ${key.kind} (frontend rejects these)`);
+}
+
+/** One class byte per arm of a union that is a Set ELEMENT, the table the
+ * runtime's SCR_MAP_KEY_UNION compares by: '0' scalar slot (number, boolean,
+ * unit), '1' string (content), '2' bigint (value), '3' any other arm, an
+ * object compared by identity. Interned as a string literal, so the set
+ * borrows an immortal. */
+export function unionKeyClasses(arms: readonly IrType[]): string {
+  return arms
+    .map((a) =>
+      a.kind === "f64" || a.kind === "bool" || a.kind === "nullT" || a.kind === "undefinedT"
+        ? "0"
+        : a.kind === "string"
+          ? "1"
+          : a.kind === "bigint"
+            ? "2"
+            : "3",
+    )
+    .join("");
 }
 
 /** The runtime's key-kind/value-kind tags for scr_map_new. */

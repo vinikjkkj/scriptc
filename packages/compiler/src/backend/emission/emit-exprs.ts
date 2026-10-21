@@ -7,7 +7,7 @@ import { emitCoroYield } from "./emit-gen-coro.js";
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel, srcSite } from "./emitter.js";
 import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
-import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
+import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
@@ -1958,9 +1958,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // at construction — the scr_arr_new_ref technique.
         const elemAcc = mapKeyAccess(e.type.elem);
         const rcAdapters = elemAcc === "ref" ? vAdapters(e.type.elem) : null;
+        const unionDef = e.type.elem.kind === "union" ? E.unionsById.get(e.type.elem.unionId) : undefined;
+        if (e.type.elem.kind === "union" && !unionDef) throw new Error("emitter bug: set element union has no def");
         const s = E.newTemp(
           e.type,
-          rcAdapters
+          rcAdapters && unionDef
+            ? // A UNION element: the runtime compares boxes by the value
+              // they carry, and needs one class byte per arm to know how.
+              `scr_set_new_union(&${rcAdapters.retain}, &${rcAdapters.release}, ` +
+                `${E.traceAdapterC(e.type.elem) !== null ? `&${E.traceAdapterC(e.type.elem)}` : "NULL"}, ` +
+                `(const ScrStr *)&${E.internLiteral(unionKeyClasses(unionDef.arms))})`
+            : rcAdapters
             ? // A cycle-capable ELEMENT can hold the set back, and a Set
               // keeps its elements on the KEY side -- so the set needs the
               // header and the key-visiting trace, not the plain form.
