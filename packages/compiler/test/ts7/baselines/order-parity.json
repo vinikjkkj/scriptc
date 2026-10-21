@@ -11434,6 +11434,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8211-imported-symbol-keys/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8211-imported-symbol-keys/constants.js",
+    "<repo>/tests/corpus/8211-imported-symbol-keys/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
