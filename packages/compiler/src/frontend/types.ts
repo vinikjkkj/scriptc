@@ -6388,19 +6388,38 @@ function isBodylessDeclClassInstance(
 ): boolean {
   if (ctx?.dynamic) return false;
   const sym = t.getSymbol();
-  if (!sym || !(sym.flags & ts.SymbolFlags.Class)) return false;
+  if (!sym) return false;
+  const isClass = (sym.flags & ts.SymbolFlags.Class) !== 0;
+  // An INTERFACE in the .d.ts that extends such a class is a VIEW of it:
+  // mysql2's public `Pool` is `export interface Pool extends BasePool {}` over
+  // the body-less `declare class Pool`, so the type every program names is the
+  // interface, and its members are the class's. Same argument, same members.
+  const isClassView = !isClass && (sym.flags & ts.SymbolFlags.Interface) !== 0;
+  if (!isClass && !isClassView) return false;
   const decls = checker.declarationsOf(sym);
   if (decls.length === 0) return false;
   const bodyless = decls.every((d) => {
     const sf = d.getSourceFile();
     return (
-      d.kind === ts.SyntaxKind.ClassDeclaration &&
+      (isClass ? d.kind === ts.SyntaxKind.ClassDeclaration : ts.isInterfaceDeclaration(d)) &&
       sf.isDeclarationFile &&
       !(ctx?.isStdlibFile?.(sf) ?? true) &&
       !(ctx?.declFileHasCompiledImpl?.(sf) ?? false)
     );
   });
   if (!bodyless) return false;
+  if (isClassView) {
+    const viaClass = decls.some(
+      (d) =>
+        ts.isInterfaceDeclaration(d) &&
+        (d.heritageClauses ?? []).some(
+          (h) =>
+            h.token === ts.SyntaxKind.ExtendsKeyword &&
+            h.types.some((ht) => isBodylessDeclClassInstance(checker.getTypeAtLocation(ht), checker, ctx)),
+        ),
+    );
+    if (!viaClass) return false;
+  }
   if (checker.getCallSignatures(t).length > 0 || checker.getConstructSignatures(t).length > 0) return false;
   // A class whose OWN declaration advertises a constructor is one programs
   // build with `new` (mathkit's `Calc`: `constructor(seed: number)`). The
@@ -6414,6 +6433,7 @@ function isBodylessDeclClassInstance(
   // `constructor(options?)`, which every emitter subclass carries) says
   // nothing about whether this class is built by a program.
   if (
+    isClass &&
     decls.some((d) =>
       (d as ts.ClassDeclaration).members.some((m) => m.kind === ts.SyntaxKind.Constructor),
     )

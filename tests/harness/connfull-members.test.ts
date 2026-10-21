@@ -252,4 +252,41 @@ console.log(c.query("e", { k: 1 }));
 `,
     );
   }, 240_000);
+
+  test("an interface that extends a body-less class carries the class's members", async () => {
+    // mysql2's public `Pool` is `export interface Pool extends BasePool {}` over the body-less
+    // `declare class Pool`. The class mapped; the interface every program names did not
+    // (the pure-data rules refuse its overload sets).
+    await differential(
+      "interface-view",
+      `export type Cb = (err: Error | null, n: number) => any;
+declare class BasePool {
+  config: { limit: number };
+  getConnection(callback: Cb): void;
+  end(callback?: (err: Error | null) => any): void;
+  on(event: string, listener: (...args: any[]) => void): this;
+  on(event: "acquire", listener: (n: number) => any): this;
+  escapeId(value: string): string;
+  escapeId(values: string[]): string;
+}
+export interface Pool extends BasePool {}
+`,
+      `import type { Pool } from "./declib.js";
+type Cb = (err: Error | null, n: number) => unknown;
+const log: string[] = [];
+const p: Pool = {
+  config: { limit: 3 },
+  getConnection(callback: Cb): void { callback(null, 7); },
+  end: ((cb: unknown): void => { log.push("end"); }) as unknown as Pool["end"],
+  on: ((e: string, _l: unknown): Pool => { log.push("on:" + e); return p; }) as unknown as Pool["on"],
+  escapeId: ((v: string | string[]): string => (typeof v === "string" ? "\`" + v + "\`" : v.join("."))) as unknown as Pool["escapeId"],
+};
+p.getConnection((err, n) => console.log("conn", err === null, n));
+p.on("x", (n: number) => console.log("x got", n)).on("acquire", (n: number) => console.log("acq", n));
+console.log(log.length);
+p.end();
+console.log(p.escapeId("a"), p.escapeId(["a", "b"]), p.config.limit, log.join(","));
+`,
+    );
+  }, 240_000);
 });
