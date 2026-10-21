@@ -6753,6 +6753,35 @@ export function instantiatedConstraint(
   return checker.getTypeFromTypeNode(src);
 }
 
+/** True when no parameter type and no return type of `sig` mentions the type
+ * parameter `tp` (a PHANTOM parameter). Walks the checker's own types, so an
+ * alias or conditional the checker already resolved does not count. */
+function sigDeclNamesNoTypeParam(tp: ts.Type, sig: ts.Signature, ctx: TypeMapperCtx): boolean {
+  const { checker } = ctx;
+  const seen = new Set<ts.Type>();
+  const mentions = (t: ts.Type, depth: number): boolean => {
+    if (t === tp) return true;
+    if (seen.has(t) || depth > 6) return depth > 6;
+    seen.add(t);
+    if (t.isUnionType() || t.isIntersectionType()) return ts.constituentTypes(t).some((x) => mentions(x, depth + 1));
+    if ((t.flags & ts.TypeFlags.Object) !== 0) {
+      const args = checker.getTypeArguments(t as ts.TypeReference);
+      if (args !== undefined && args.some((x) => mentions(x, depth + 1))) return true;
+      if (checker.isArrayType(t)) return false;
+      for (const s of checker.getCallSignatures(t)) {
+        if (s.getParameters().some((p) => mentions(checker.getTypeOfSymbol(p), depth + 1))) return true;
+        if (mentions(checker.getReturnTypeOfSignature(s), depth + 1)) return true;
+      }
+      return false;
+    }
+    return (t.flags & (ts.TypeFlags.Conditional | ts.TypeFlags.IndexedAccess | ts.TypeFlags.Index | ts.TypeFlags.Substitution)) !== 0;
+  };
+  return !(
+    sig.getParameters().some((p) => mentions(checker.getTypeOfSymbol(p), 0)) ||
+    mentions(checker.getReturnTypeOfSignature(sig), 0)
+  );
+}
+
 function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperCtx | null {
   const why = (r: string): null => {
     if (process.env["SCRIPTC_ERASE_WHY"] !== undefined) console.error(`[erasewhy] ${r}`);
@@ -6803,11 +6832,33 @@ function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperC
       // program into a fence. A MethodSignature has no body, so
       // monomorphization was never available for it and the slot is the
       // only home there is.
-      if (sigDecl === undefined || sigDecl.kind !== ts.SyntaxKind.MethodSignature) {
-        return why("type param without constraint or default");
+      // A METHOD DECLARATION with no body — an ambient class's member, which is
+      // how @types/node spells every EventEmitter method (`on<K>(...): this;`
+      // in `class EventEmitter`) — is signature-only in exactly this sense:
+      // there is no body to monomorphize per call site.
+      const signatureOnly =
+        sigDecl !== undefined &&
+        (sigDecl.kind === ts.SyntaxKind.MethodSignature ||
+          (sigDecl.kind === ts.SyntaxKind.MethodDeclaration &&
+            (sigDecl as ts.MethodDeclaration).body === undefined &&
+            sigDecl.getSourceFile().isDeclarationFile));
+      if (!signatureOnly) {
+        return why(`type param without constraint or default (declaration kind ${sigDecl === undefined ? "none" : ts.SyntaxKind[sigDecl.kind]})`);
       }
       const arms = tpDecl === undefined ? null : ctx.unconstrainedTpArms?.(tpDecl) ?? null;
-      if (arms === null || arms.length === 0) return why("type param without constraint or default");
+      if (arms === null || arms.length === 0) {
+        // No instantiation anywhere in the program. That is a PHANTOM
+        // parameter when the signature never names it: @types/node's
+        // EventEmitter spells `on<K>(eventName: Key<K, T>, ...)`, and with
+        // the default event map the checker has already resolved
+        // `Key<K, T>` to `string | symbol`, so no K survives into any
+        // parameter or the return. Binding nothing is then the honest
+        // answer: the parameter stays unbound in the resolvers below, so a
+        // signature that DOES mention it still fails to map exactly as it
+        // did before (resolveTypeParam answers null for it).
+        if (sigDeclNamesNoTypeParam(tp, sig, ctx)) continue;
+        return why("type param without constraint or default (and the signature names it)");
+      }
       const union = erasedUnionOfArms(arms, ctx);
       if (union === null) return why("an instantiation does not map");
       if (process.env["SCRIPTC_ERASE_WHY"] !== undefined) {
@@ -6819,7 +6870,9 @@ function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperC
     }
     const constraint = instantiatedConstraint(ctx.checker, tp, tpDecl, src);
     const mapped = mapType(constraint, ctx);
-    if (!mapped || mapped.kind === "void") return why(`constraint does not map: ${ctx.checker.typeToString(constraint).slice(0,60)}`);
+    if (!mapped || mapped.kind === "void") {
+      return why(`constraint does not map: ${ctx.checker.typeToString(constraint).slice(0,60)}`);
+    }
     irByTp.set(tp, mapped);
     tsByTp.set(tp, constraint);
   }
