@@ -1,4 +1,4 @@
-js-extends-poisoned-base.js:12:5 - error SC1090: constructor-assigned fields shadowing methods are not supported yet
+js-extends-poisoned-base.js:12:5 - error SC1090: constructor-assigned fields shadowing methods (only a function assigned over a method inherited from a base class) are not supported yet
 
   11 |   constructor() {
   12 |     this.foo = () => {

@@ -302,36 +302,7 @@ console.log("unreachable");
 `,
       "cjs",
     );
-    expect(d.some((x) => /^SC1090: constructor-assigned fields shadowing methods are not supported yet$/.test(x)), d.join(" | ")).toBe(true);
-  });
-
-  test("a DERIVED class of a clean base is refused when only the derived is poisoned (JS lane)", async () => {
-    // The other side of the extends-edge rule: the derived class's OWN
-    // fence (a constructor-assigned field shadowing an INHERITED method)
-    // stays deferred — the base collected fine, so the eager
-    // poisoned-base report has nothing to flush, and the derived class
-    // statement is the runtime fence exactly like a leaf.
-    const d = await compileRefused(
-      "derived-shadowing-class-defers",
-      `'use strict';
-console.log("before");
-class A {
-  foo() {
-    return 4;
-  }
-}
-class B extends A {
-  constructor() {
-    super();
-    this.foo = () => 3;
-  }
-}
-const i = new B();
-console.log(i.foo());
-`,
-      "cjs",
-    );
-    expect(d.some((x) => /^SC1090: constructor-assigned fields shadowing methods are not supported yet$/.test(x)), d.join(" | ")).toBe(true);
+    expect(d.some((x) => /^SC1090: constructor-assigned fields shadowing methods \(only a function assigned over a method inherited from a base class\) are not supported yet$/.test(x)), d.join(" | ")).toBe(true);
   });
 
   test("destructuring a SURFACED builtin global's member is refused at the pattern (JS lane)", async () => {

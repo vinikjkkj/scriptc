@@ -127,6 +127,10 @@ export interface ClassInfo {
    * arm" got it wrong. Inherited entries are carried down like
    * deferredInitFields'. */
   collectedFields?: Set<string>;
+  /** Names of OWN function-valued properties this class's constructor
+   * assigns over a prototype method of the same name (not inherited: the
+   * class that assigns declares it). The slot is in `fields`, undefined-armed. */
+  shadowFields?: Set<string>;
   /** The subset of `collectedFields` whose undefined arm means ABSENT and
    * nothing else — the slots every ENUMERATION surface has to skip while
    * the arm is live, because in Node the property does not exist until its
@@ -3584,6 +3588,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       for (const name of armedRedeclares) deferredInitFields.add(name);
       for (const name of placeholderFields) deferredInitFields.add(name);
       const collectedFields = new Set<string>(base?.collectedFields ?? []);
+      const shadowFields = new Set<string>();
       const absentTrackedFields = new Set<string>(base?.absentTrackedFields ?? []);
       if (unguardedFields.length > 0) {
         const topAssigned = new Set<string>();
@@ -3720,7 +3725,50 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               // inherited) are writes, not declarations.
               if (fields.has(name)) continue;
               if (methods.has(name) || L.findMethodOn(base, name)) {
-                L.unsupported("SC1090", assign, "constructor-assigned fields shadowing methods");
+                // An OWN function-valued property shadowing a prototype
+                // method: the slot is the undefined-armed function type
+                // (the property does not exist until the constructor's
+                // write runs, and enumeration skips it while absent), and
+                // calls through the class family test the slot before
+                // taking the method (lowerShadowedMethodCall).
+                // The slot takes the ASSIGNED function's own type (its checker
+                // type, the checked-dynamic fallback for untyped pieces), not
+                // the shadowed method's.
+                const shRhs = ts.isExpressionStatement(stmt) && ts.isBinaryExpression(stmt.expression) ? stmt.expression.right : undefined;
+                const shT = shRhs ? L.checker.getTypeAtLocation(shRhs) : undefined;
+                const shMapped = shT ? (L.mapTypeOf(shT) ?? dynFallbackType(L, assign, shT)) : null;
+                const shArmed = shMapped !== null && shMapped.kind === "func" ? L.withUndefinedArmOf(shMapped) : null;
+                const shBase = L.findMethodOn(base, name);
+                if (
+                  shArmed === null || methods.has(`get:${name}`) || methods.has(`set:${name}`) ||
+                  // Only a method INHERITED from a base class: a class that
+                  // declares the method itself and assigns over it has two
+                  // implementations to merge in one slot.
+                  methods.has(name) || shBase === null || shBase.sig.abstract === true ||
+                  shBase.sig.async === true ||
+                  shBase.sig.params.some((p) => p.mode !== "required")
+                ) {
+                  L.unsupported("SC1090", assign, "constructor-assigned fields shadowing methods (only a function assigned over a method inherited from a base class)");
+                }
+                const shFn = shMapped!;
+                if (
+                  shFn.kind !== "func" || shFn.params.length !== shBase.sig.params.length ||
+                  !shFn.params.every((pt, i) => typeEquals(pt, shBase.sig.params[i]!.type))
+                ) {
+                  L.unsupported("SC1090", assign, `constructor-assigned function with other parameters than the inherited method '${name}'`);
+                }
+                // The class now overrides the method: a synthesized
+                // `%C.m` picks the own property when set and the inherited
+                // implementation otherwise (shadowMethodFn), so typed
+                // calls, base-typed receivers and boxed dispatch all follow
+                // the one vtable entry.
+                methods.set(name, { params: shBase.sig.params, ret: shBase.sig.ret });
+                fields.set(name, shArmed);
+                fieldOrder.push({ name, type: shArmed, initializer: undefined });
+                collectedFields.add(name);
+                absentTrackedFields.add(name);
+                shadowFields.add(name);
+                continue;
               }
               const sym = L.checker.getSymbolAtLocation(assign);
               const t = sym ? L.checker.getTypeOfSymbol(sym) : undefined;
@@ -4102,6 +4150,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ...(deferredInitFields.size > 0 ? { deferredInitFields } : {}),
         ...(collectedFields.size > 0 ? { collectedFields } : {}),
         ...(absentTrackedFields.size > 0 ? { absentTrackedFields } : {}),
+        ...(shadowFields.size > 0 ? { shadowFields } : {}),
       };
       // GENERIC members get their declaring-class backlink now that the
       // info exists (instance lowering reads it for `this` typing and the
@@ -6142,6 +6191,9 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     for (const prop of info.throwingSetters) {
       if (always || L.wantBody(`%${className}.set:${prop}`)) out.push(L.throwingSetterFn(info, prop));
     }
+    for (const name of info.shadowFields ?? []) {
+      if (always || L.wantBody(`%${className}.${name}`)) out.push(shadowMethodFn(L, info, name));
+    }
     // VTABLE THUNKS of this class — one per method whose own function is
     // not what the slot may hold: a WIDENED override (callable at the slot
     // but not spelled at it) or an ASYNC method (whose function is the
@@ -6715,6 +6767,72 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
    * throw exactly like Node's TypeError — a real instance (a typed catch's
    * `e instanceof TypeError` matches), catchable, exit 1 uncaught (message
    * text is compiler-worded; stdout and exit code are the contract). */
+  /** `%C.m` for a method a constructor assigns an own function over: the
+   * own property when it is set, the inherited implementation otherwise
+   * (JS looks the instance's own property up before the prototype chain).
+   * Arguments pass through unchanged; the own function's result rides the
+   * method's result type. */
+  export function shadowMethodFn(L: Lowerer, info: ClassInfo, name: string): IrFunction {
+    const className = info.def.name;
+    const thisType: IrType = { kind: "object", className };
+    const sig = info.methods.get(name)!;
+    const loc = locOf(info.decl!);
+    const slotT = info.fields.get(name) as IrType & { kind: "union" };
+    const slotFn = (L.unions.get(slotT.unionId)?.arms ?? []).find((a) => a.kind === "func") as IrType & { kind: "func" };
+    const locals: IrLocal[] = [{ id: "this.0", name: "this", type: thisType, mutable: false }];
+    sig.params.forEach((p, i) => locals.push({ id: `a${i}.0`, name: `a${i}`, type: p.type, mutable: false }));
+    const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: l.type, loc });
+    const argRefs = locals.slice(1).map(ref);
+    const base = info.base!;
+    const inherited = L.findMethodOn(base, name)!;
+    const declarer = inherited.declarer.def.name;
+    const viaMethod: IrExpr = {
+      kind: "call",
+      callee: `%${declarer}.${name}`,
+      args: [L.upcastTo(ref(locals[0]!), declarer), ...argRefs],
+      type: sig.ret,
+      loc,
+    };
+    let viaField: IrExpr = {
+      kind: "callValue",
+      callee: {
+        kind: "unionNarrow",
+        unionId: slotT.unionId,
+        tag: L.armTag(slotT.unionId, slotFn),
+        value: { kind: "fieldGet", obj: ref(locals[0]!), className, field: name, type: slotT, loc },
+        type: slotFn,
+        loc,
+      },
+      args: argRefs,
+      type: slotFn.ret,
+      loc,
+    };
+    if (!typeEquals(slotFn.ret, sig.ret)) {
+      if (slotFn.ret.kind === "void" || sig.ret.kind === "void") {
+        L.unsupported("SC1090", info.decl!, `the function a constructor assigns over '${name}' differs in void-ness from the method`);
+      }
+      viaField = L.coerceToExpected(viaField, sig.ret);
+    }
+    const isUnset: IrExpr = {
+      kind: "unionIsTag",
+      unionId: slotT.unionId,
+      tag: L.armTag(slotT.unionId, UNDEFINED_T),
+      negated: false,
+      value: { kind: "fieldGet", obj: ref(locals[0]!), className, field: name, type: slotT, loc },
+      type: BOOL,
+      loc,
+    };
+    const finish = (e: IrExpr): IrStmt => (sig.ret.kind === "void" ? { kind: "exprStmt", expr: e, loc } : { kind: "return", value: e, loc });
+    return {
+      name: `%${className}.${name}`,
+      params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+      returnType: sig.ret,
+      locals,
+      body: [{ kind: "if", cond: isUnset, then: [finish(viaMethod)], else_: [finish(viaField)], loc }],
+      loc,
+    };
+  }
+
   export function throwingSetterFn(L: Lowerer, info: ClassInfo, prop: string): IrFunction {
     const className = info.def.name;
     const thisType: IrType = { kind: "object", className };

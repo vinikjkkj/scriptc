@@ -13708,12 +13708,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/js-constructor-field-shadowing-a-method.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-constructor-field-shadowing-a-method.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs": {
    "order": [
     "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs"
@@ -13777,6 +13771,18 @@
   "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-class-instance.js": {
    "order": [
     "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-class-instance.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-constructor-function-over-the-classes-own-method.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-constructor-function-over-the-classes-own-method.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8061-a-constructor-assigned-function-shadows-an-inherited-method.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8061-a-constructor-assigned-function-shadows-an-inherited-method.cjs"
    ],
    "diags": []
   }

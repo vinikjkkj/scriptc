@@ -111,7 +111,7 @@ import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collec
   collectJsonRequires, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
-import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn } from "./lower-classes.js";
+import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
@@ -3426,6 +3426,9 @@ export class Lowerer {
         for (const prop of info.throwingSetters) {
           units.set(`%${cName}.set:${prop}`, () => this.throwingSetterFn(info, prop));
         }
+        for (const name of info.shadowFields ?? []) {
+          units.set(`%${cName}.${name}`, () => shadowMethodFn(this, info, name));
+        }
       }
       for (const name of info.staticMethods?.keys() ?? []) {
         units.set(`%${cName}.static:${name}`, () => lowerStaticMethod(this, info, name));
@@ -3476,6 +3479,9 @@ export class Lowerer {
       }
       for (const prop of info.throwingSetters) {
         units.set(`%${cName}.set:${prop}`, () => this.throwingSetterFn(info, prop));
+      }
+      for (const name of info.shadowFields ?? []) {
+        units.set(`%${cName}.${name}`, () => shadowMethodFn(this, info, name));
       }
     };
     // Generic instances queued by the bodies above lower here (an instance
@@ -3622,6 +3628,7 @@ export class Lowerer {
       // registers units from — a third spelling of "the class's methods"
       // is how the two drift.
       for (const { mName } of this.classMethodMembers(c)) this.noteEdge(`%${c.def.name}.${mName}`);
+      for (const sh of c.shadowFields ?? []) this.noteEdge(`%${c.def.name}.${sh}`);
       for (const [mName] of this.protoClassBodies.get(c.def.name) ?? []) {
         this.noteEdge(`%${c.def.name}.${mName}`);
       }
