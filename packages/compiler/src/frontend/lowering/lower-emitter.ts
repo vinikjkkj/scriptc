@@ -1059,7 +1059,13 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
           "the supported form is emit('error', err) with an Error-hierarchy payload (non-Error payloads would need Node's ERR_UNHANDLED_ERROR wrapping — no lowering yet)",
         );
       }
-      const err = L.lowerExpr(args[1]!);
+      let err = L.lowerExpr(args[1]!);
+      // An `unknown`/`any` payload (a callback's `err`): the checked exit
+      // into the Error hierarchy, the same validated narrowing `err as
+      // Error` takes -- the listener slot is typed %Error.
+      if (err.type.kind === "dyn") {
+        err = L.coerceInto(args[1]!, err, { kind: "object", className: "%Error" });
+      }
       const rootsAtError = (t: IrType): boolean => {
         if (t.kind !== "object") return false;
         for (let c: ClassInfo | null = L.classes.get(t.className) ?? null; c; c = c.base) {
