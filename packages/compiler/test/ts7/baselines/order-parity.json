@@ -11348,6 +11348,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8334-this-in-object-literal-methods.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8334-this-in-object-literal-methods.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8335-this-in-typed-object-literal-methods.ts": {
+   "order": [
+    "<repo>/tests/corpus/8335-this-in-typed-object-literal-methods.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8336-this-in-literals-returned-or-passed.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8336-this-in-literals-returned-or-passed.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8337-this-in-interface-typed-literals.ts": {
+   "order": [
+    "<repo>/tests/corpus/8337-this-in-interface-typed-literals.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"

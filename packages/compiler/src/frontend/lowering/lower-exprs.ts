@@ -1837,7 +1837,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // the read answers the strict-mode plain-call undefined, the old
       // constant. TypeScript keeps the fence (noImplicitThis makes it a
       // compile-time story there).
-      if (isJsSourceFile(expr.getSourceFile())) {
+      if (isJsSourceFile(expr.getSourceFile()) || L.dynThisInLiterals > 0) {
         return { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc };
       }
       L.unsupported("SC1080", expr);
@@ -8829,7 +8829,13 @@ function dynObjLitRun(
 }
 
   export function lowerDynObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
-    return dynObjLitRun(L, expr, expr.properties, null, dynAccessorPlan(L, expr));
+    if (!L.dynThisLiterals.has(expr)) return dynObjLitRun(L, expr, expr.properties, null, dynAccessorPlan(L, expr));
+    L.dynThisInLiterals++;
+    try {
+      return dynObjLitRun(L, expr, expr.properties, null, dynAccessorPlan(L, expr));
+    } finally {
+      L.dynThisInLiterals--;
+    }
   }
 
 /** A JS object literal one of whose SPREADS names a checked-dynamic value.

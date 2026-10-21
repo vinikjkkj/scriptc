@@ -42,8 +42,48 @@ export interface FileParts {
  * operation on it has to take the dyn path to reach the traps. Each read of
  * such a binding is therefore typed `any` for the lowering. Registered once
  * per file, before any body lowers. */
+/** An object literal whose method bodies read their OWN `this` (a nested
+ * non-arrow function or class has its own; arrows inherit the method's). */
+function literalNeedsDynThis(lit: ts.ObjectLiteralExpression): boolean {
+  if (literalMethodsReadThis(lit)) return true;
+  for (const p of lit.properties) {
+    if (ts.isPropertyAssignment(p)) {
+      let v: ts.Expression = p.initializer;
+      while (ts.isParenthesizedExpression(v)) v = v.expression;
+      if (ts.isObjectLiteralExpression(v) && literalNeedsDynThis(v)) return true;
+    }
+  }
+  return false;
+}
+
+function literalMethodsReadThis(lit: ts.ObjectLiteralExpression): boolean {
+  const walk = (n: ts.Node): boolean => {
+    if (n.kind === ts.SyntaxKind.ThisKeyword) return true;
+    let found = false;
+    ts.forEachChild(n, (c) => {
+      if (found) return;
+      if (
+        ts.isFunctionDeclaration(c) || ts.isFunctionExpression(c) || (ts.isClassDeclaration(c) || ts.isClassExpression(c)) ||
+        ts.isMethodDeclaration(c) || ts.isGetAccessor(c) || ts.isSetAccessor(c)
+      ) return;
+      if (walk(c)) found = true;
+    });
+    return found;
+  };
+  for (const p of lit.properties) {
+    if (ts.isMethodDeclaration(p) && p.typeParameters === undefined && p.body !== undefined && walk(p.body)) return true;
+    if (
+      ts.isPropertyAssignment(p) && ts.isFunctionExpression(p.initializer) &&
+      walk(p.initializer.body)
+    ) return true;
+    if ((ts.isGetAccessor(p) || ts.isSetAccessor(p)) && p.body !== undefined && walk(p.body)) return false;
+  }
+  return false;
+}
+
 function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
   const syms: ts.Symbol[] = [];
+  const dynReturnSyms: ts.Symbol[] = [];
   ts.walkPreorder(sf, (n) => {
     if (
       ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined &&
@@ -53,19 +93,101 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
       const s = L.checker.getSymbolAtLocation(n.name);
       if (s !== undefined && bindingNeverReassigned(L, s, n)) syms.push(s);
     }
-    return undefined;
-  });
-  if (syms.length === 0) return;
-  const names = new Set(syms.map((s) => s.name));
-  ts.walkPreorder(sf, (n) => {
-    if (ts.isIdentifier(n) && names.has(n.text)) {
-      const s = L.checker.getSymbolAtLocation(n);
-      if (s !== undefined && syms.includes(s) && !L.chainNarrowedType.has(n)) {
-        L.chainNarrowedType.set(n, L.checker.getAnyType());
+    // `const o = { n: 1, inc() { this.n++ } }`: the object must stay ONE
+    // mutable identity the methods write through, which only the dyn
+    // object is (a static record would copy across the receiver).
+    if (ts.isObjectLiteralExpression(n) && literalNeedsDynThis(n)) {
+      L.dynObjectLiterals.add(n);
+      L.dynThisLiterals.add(n);
+      // A function whose result IS the literal returns it as a dyn value.
+      let p: ts.Node = n.parent;
+      while (ts.isParenthesizedExpression(p)) p = p.parent;
+      let fn: ts.Node | undefined;
+      if (ts.isReturnStatement(p)) {
+        let q: ts.Node | undefined = p.parent;
+        while (q !== undefined && !ts.isFunctionLike(q)) q = q.parent;
+        fn = q;
+      } else if (ts.isArrowFunction(p) && !ts.isBlock(p.body)) {
+        fn = p;
+      }
+      if (fn !== undefined && (ts.isFunctionDeclaration(fn) || ts.isArrowFunction(fn) || ts.isFunctionExpression(fn))) {
+        L.dynReturnFnNodes.add(fn);
+        const fs = ts.isFunctionDeclaration(fn) && fn.name ? L.checker.getSymbolAtLocation(fn.name) : undefined;
+        if (fs !== undefined) dynReturnSyms.push(fs);
+      }
+    }
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
+      let init: ts.Expression = n.initializer;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      if (ts.isObjectLiteralExpression(init) && literalNeedsDynThis(init)) {
+        const s = L.checker.getSymbolAtLocation(n.name);
+        if (s !== undefined && bindingNeverReassigned(L, s, n)) syms.push(s);
       }
     }
     return undefined;
   });
+  // `const c = make(...)` over a function that returns a dyn-this literal.
+  if (dynReturnSyms.length > 0) {
+    ts.walkPreorder(sf, (n) => {
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
+        let init: ts.Expression = n.initializer;
+        while (ts.isParenthesizedExpression(init)) init = init.expression;
+        if (ts.isCallExpression(init) && ts.isIdentifier(init.expression)) {
+          const cs = L.checker.getSymbolAtLocation(init.expression);
+          if (cs !== undefined && dynReturnSyms.includes(cs)) {
+            const s = L.checker.getSymbolAtLocation(n.name);
+            if (s !== undefined && bindingNeverReassigned(L, s, n)) syms.push(s);
+          }
+        }
+      }
+      return undefined;
+    });
+  }
+  if (syms.length === 0 && dynReturnSyms.length === 0) return;
+  const names = new Set(syms.map((s) => s.name));
+  const anyT = L.checker.getAnyType();
+  // Post-order, so a member chain rooted at a marked binding (`o.x`,
+  // `o.a.b`) or at a `this` inside a dyn-built literal's method is any-typed
+  // too: the values it reads are checked-dynamic whatever the checker says.
+  const mark = (n: ts.Node, inThisLit: boolean): void => {
+    const here = inThisLit || (ts.isObjectLiteralExpression(n) && L.dynThisLiterals.has(n));
+    ts.forEachChild(n, (c) => {
+      if (
+        here && inThisLit && (ts.isFunctionDeclaration(c) || ts.isFunctionExpression(c) ||
+          ts.isClassDeclaration(c) || ts.isClassExpression(c)) &&
+        !(ts.isFunctionExpression(c) && ts.isPropertyAssignment(c.parent) && L.dynThisLiterals.has(c.parent.parent as ts.ObjectLiteralExpression))
+      ) return;
+      mark(c, here);
+    });
+    if (ts.isIdentifier(n) && names.has(n.text)) {
+      const s = L.checker.getSymbolAtLocation(n);
+      if (s !== undefined && syms.includes(s) && !L.chainNarrowedType.has(n)) {
+        L.chainNarrowedType.set(n, anyT);
+      }
+    }
+    if (n.kind === ts.SyntaxKind.ThisKeyword && inThisLit && !L.chainNarrowedType.has(n)) {
+      L.chainNarrowedType.set(n, anyT);
+    }
+    if (
+      (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) &&
+      L.chainNarrowedType.get(n.expression) === anyT && !L.chainNarrowedType.has(n) &&
+      L.dynThisLiterals.size > 0
+    ) {
+      L.chainNarrowedType.set(n, anyT);
+    }
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && dynReturnSyms.length > 0 && !L.chainNarrowedType.has(n)) {
+      const cs = L.checker.getSymbolAtLocation(n.expression);
+      if (cs !== undefined && dynReturnSyms.includes(cs)) L.chainNarrowedType.set(n, anyT);
+    }
+    if (
+      ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+      L.chainNarrowedType.get(n.expression) === anyT && !L.chainNarrowedType.has(n) &&
+      L.dynThisLiterals.size > 0
+    ) {
+      L.chainNarrowedType.set(n, anyT);
+    }
+  };
+  mark(sf, false);
 }
 
 /** A class DECLARATION that is not at file (or namespace) level: written
@@ -1163,6 +1285,7 @@ function jsDynHoldableInitializer(L: Lowerer, init: ts.Expression | undefined): 
   // `new Proxy(...)`: a checked-dynamic PROXY value whatever its checker type.
   if (ts.isNewExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "Proxy" &&
       L.isStdlibGlobal(e.expression, "Proxy")) return true;
+  if (ts.isObjectLiteralExpression(e) && L.dynThisLiterals.has(e)) return true;
   if (
     (ts.isCallExpression(e) || ts.isPropertyAccessExpression(e) || ts.isIdentifier(e)) &&
     (L.typeOf(e).flags & ts.TypeFlags.Any) !== 0
