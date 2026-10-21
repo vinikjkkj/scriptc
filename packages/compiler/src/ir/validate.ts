@@ -543,6 +543,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "net.serverOnSecureConnection": { argTypes: [NETSERVER_T, null, BOOL], result: VOID },
   "net.connect": { argTypes: [F64, STRING], result: NETSOCKET_T },
   "net.connectAttempt": { argTypes: [F64, STRING, DYN], result: NETSOCKET_T },
+  "net.connectDyn": { argTypes: [DYN], result: NETSOCKET_T },
   "net.connectCb": { argTypes: [F64, STRING, { kind: "func", params: [], ret: VOID }], result: NETSOCKET_T },
   // The lookup's exact func shape is program data (its answer callback's
   // union/record types) — checked specially in the libCall case.

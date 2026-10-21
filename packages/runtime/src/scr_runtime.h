@@ -9202,11 +9202,10 @@ ScrNetSocket *scr_net_connect(double port, ScrStr *host /*borrowed, nullable*/, 
  * ERR_INVALID_ARG_TYPE) and is then inert — the single dial has nothing
  * to time. +1, or NULL with the throw pending. */
 ScrNetSocket *scr_net_connect_attempt(double port, ScrStr *host /*borrowed*/, const ScrDyn *t /*borrowed*/);
-/* net.connect/createConnection over a RUNTIME option bag (computed
- * keys): Node-order validation (objectMode trio, port, host,
- * autoSelectFamily, attempt budget), then the compiler-rendered fence —
- * always leaves an exception pending. Borrowed. */
-void scr_net_connect_opts_chk(const ScrDyn *opts, const ScrStr *fence);
+/* net.connect/createConnection over a RUNTIME argument (a computed-key bag, a
+ * value of unknown type): Node-order validation, then the dial. +1 socket, or
+ * NULL with the exception pending. Borrowed. */
+ScrNetSocket *scr_net_connect_dyn(const ScrDyn *opts);
 /* connect with a caller lookup (net.connect({ ..., lookup })): invokes
  * lookup(hostname, options, answer-closure) synchronously; answer_fn is
  * the emitted per-shape thunk that decodes the answer down to

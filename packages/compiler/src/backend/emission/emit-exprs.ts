@@ -4667,6 +4667,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "net.connect":
             E.usesTimers = true; // a connecting/open socket holds the loop open
             return finish(`scr_net_connect(${arg(0)}, ${arg(1)}, NULL)`);
+          case "net.connectDyn":
+            E.usesTimers = true;
+            return finish(`scr_net_connect_dyn(${arg(0)})`);
           case "net.connectAttempt":
             // The validated autoSelectFamilyAttemptTimeout form: Node's
             // range ladder runs first, the dial follows.

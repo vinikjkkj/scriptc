@@ -1,8 +1,0 @@
-js-net-connect-with-a-runtime-option-bag.cjs:38:37 - error SC2002: record shapes must match exactly or width-coerce: expected 'number', got '{ port: number; [key: string]: boolean | number }'
-
-  37 |   const option = { port: 8080, [invalidKey]: true };
-  38 |   show(() => { net.createConnection(option); });
-     |                                     ^~~~~~
-  39 | }
-
-  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead

@@ -525,6 +525,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "fs.readCb": "scr_fs_read_cb",
   "fs.lchmodCb": "scr_fs_lchmod_cb",
   "net.connectAttempt": "scr_net_connect_attempt",
+  "net.connectDyn": "scr_net_connect_dyn",
   "fs.lchmodSyncChk": "scr_fs_lchmod_sync_chk",
   "fsp.lchmodChk": "scr_fsp_lchmod_chk",
   "fs.readFileSyncBuf": "scr_fs_read_file_bytes",
@@ -1316,7 +1317,7 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "sp.finished", "sp.pipeline",
   "sc.text", "sc.json", "sc.buffer",
   "net.listen", "net.listenCb", "net.listenOpts", "net.listenOptsCb",
-  "net.connect", "net.connectCb", "net.connectLookup", "net.connectAttempt",
+  "net.connect", "net.connectCb", "net.connectLookup", "net.connectAttempt", "net.connectDyn",
   // node:tls / node:https servers and the TLS client socket, and the
   // dgram calls that implicit-bind — emit-exprs.ts marks E.usesTimers on
   // exactly these, and a server whose loop never runs accepts nothing.

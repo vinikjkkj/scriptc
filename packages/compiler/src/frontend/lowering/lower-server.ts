@@ -582,8 +582,24 @@ export function lowerNetModuleCall(L: Lowerer, expr: ts.CallExpression,
     // autoSelectFamily must be the literal `true` alongside it, portless's
     // spelling — without it Node would dial only the first address). The
     // no-lookup form is connect(port, host) with the option spellings.
-    if (args.length >= 1 && ts.isObjectLiteralExpression(args[0]!)) {
+    if (args.length >= 1 && ts.isObjectLiteralExpression(args[0]!) &&
+        !(args.length === 1 && isJsSourceFile(expr.getSourceFile()) && netOptionsNeedRuntimeBag(L, args[0] as ts.ObjectLiteralExpression))) {
       return lowerNetConnectOptions(L, expr, bi.member, loc);
+    }
+    // A bag or value whose shape is known only at run time (a JS source's
+    // computed-key option record): the runtime validates in Node's order
+    // and dials. One argument; a connect listener keeps the typed forms.
+    if (args.length === 1 && isJsSourceFile(expr.getSourceFile()) && !ts.isSpreadElement(args[0]!)) {
+      const t = L.mapTypeOf(L.typeOf(args[0]!));
+      if (t === null || t.kind !== "f64") {
+        const raw = ts.isObjectLiteralExpression(args[0]!) ? L.lowerExprExpecting(args[0]!, DYN) : L.lowerExpr(args[0]!);
+        if (raw.type.kind === "dyn" || raw.kind === "unitLit" || L.dynConvertible(raw.type)) {
+          const d: IrExpr = raw.type.kind === "dyn" ? raw : { kind: "dynFrom", value: raw, type: DYN, loc };
+          {
+            return { kind: "libCall", fn: "net.connectDyn", args: [d], type: NETSOCKET_T, loc };
+          }
+        }
+      }
     }
     if (args.length < 1 || args.length > 3) {
       L.noLowering(
@@ -650,6 +666,43 @@ function lookupFnShapeOk(L: Lowerer, t: IrType): boolean {
   if (addrsT.kind !== "array" || addrsT.elem.kind !== "record") return false;
   const shape = L.shapes.get(addrsT.elem.shapeId);
   return !!shape && shape.fields.some((f) => f.name === "address" && f.type.kind === "string");
+}
+
+/** A JS option literal the typed lowering cannot take but Node accepts or
+ * validates at run time: computed keys or spreads, no `port`, a port that is
+ * not statically a number, a host that is not statically a string, or a
+ * `path`. Those ride the run-time bag path (net.connectDyn). A literal with
+ * a `lookup` stays with the typed lowering (it needs the lookup shape). */
+function netOptionsNeedRuntimeBag(L: Lowerer, lit: ts.ObjectLiteralExpression): boolean {
+  let hasPort = false;
+  for (const prop of lit.properties) {
+    if (ts.isPropertyAssignment(prop) && (ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name))) {
+      const key = (prop.name as ts.Identifier | ts.StringLiteral).text;
+      if (key === "lookup") return false;
+      const kind = L.mapTypeOf(L.typeOf(prop.initializer))?.kind;
+      if (key === "port") {
+        hasPort = true;
+        if (kind !== "f64") return true;
+      } else if (key === "host") {
+        if (kind !== "string") return true;
+      } else if (key === "path") {
+        return true;
+      }
+    } else if (ts.isShorthandPropertyAssignment(prop)) {
+      const key = (prop.name as ts.Identifier).text;
+      if (key === "lookup") return false;
+      const kind = L.mapTypeOf(L.typeOf(prop.name))?.kind;
+      if (key === "port") {
+        hasPort = true;
+        if (kind !== "f64") return true;
+      } else if (key === "host" && kind !== "string") {
+        return true;
+      }
+    } else {
+      return true;
+    }
+  }
+  return !hasPort;
 }
 
 /** net.connect / net.createConnection with an OPTIONS OBJECT: { port,

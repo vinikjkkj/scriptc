@@ -13684,12 +13684,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/js-net-connect-with-a-runtime-option-bag.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/js-net-connect-with-a-runtime-option-bag.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs": {
    "order": [
     "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs"
@@ -13801,6 +13795,12 @@
   "<repo>/tests/corpus/8042-a-rest-parameter-arrow-const-read-from-a-function.js": {
    "order": [
     "<repo>/tests/corpus/8042-a-rest-parameter-arrow-const-read-from-a-function.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8090-net-connect-over-a-run-time-option-bag.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8090-net-connect-over-a-run-time-option-bag.cjs"
    ],
    "diags": []
   }
