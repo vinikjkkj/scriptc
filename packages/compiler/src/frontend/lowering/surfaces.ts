@@ -1269,6 +1269,13 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     note: "text over the time value; the local forms read the bundled zone database and its ICU long name like toString",
   },
   {
+    id: "stdlib.date.formatOpts",
+    kind: "stdlib",
+    name: "Date.prototype.toLocaleString/toLocaleDateString/toLocaleTimeString with a locale and options (en-US)",
+    fns: ["date.formatOpts"],
+    note: "the en-US pattern for every option vector ICU accepts (generated, verified against Node), over the bundled zone database; the timeZone option and the zone names read the bundled zone and metazone-history tables",
+  },
+  {
     id: "stdlib.date.tzOffset",
     kind: "stdlib",
     name: "Date.prototype.getTimezoneOffset",

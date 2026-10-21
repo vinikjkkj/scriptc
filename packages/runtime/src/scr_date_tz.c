@@ -113,14 +113,18 @@ static void tz_load(const scr_tz_rec *r, scr_tz *z) {
   z->tail = tz_days_from_civil((int64_t)r->end + 1, 1, 1) * 86400;
 }
 
+int64_t scr_tz_year_start(long long year) { return tz_days_from_civil(year, 1, 1) * 86400; }
+
+int64_t scr_tz_map_tail(int64_t t, int end) {
+  int64_t days = tz_floor_div(t, 86400), sod = t - days * 86400, y;
+  int m, d;
+  tz_civil_from_days(days, &y, &m, &d);
+  return tz_days_from_civil(scr_tz_equiv_year(y, end), m, d) * 86400 + sod;
+}
+
 int32_t scr_tz_offset(const scr_tz *z, int64_t t) {
   if (z->cnt == 0) return z->off0;
-  if (t >= z->tail) {
-    int64_t days = tz_floor_div(t, 86400), sod = t - days * 86400, y;
-    int m, d;
-    tz_civil_from_days(days, &y, &m, &d);
-    t = tz_days_from_civil(scr_tz_equiv_year(y, z->end), m, d) * 86400 + sod;
-  }
+  if (t >= z->tail) t = scr_tz_map_tail(t, z->end);
   int lo = 0, hi = z->cnt;
   while (lo < hi) {
     int mid = (lo + hi) / 2;
@@ -144,6 +148,7 @@ static const scr_tz *tz_open(size_t i) {
     if (!z) tz_oom();
     tz_load(&scr_tz_recs[scr_tz_id_orec[i]], z);
     z->id = scr_tz_ids + scr_tz_id_off[i];
+    z->idx = (int)i;
     z->nrec = scr_tz_id_nrec[i];
     tz_cache[i] = z;
   }
@@ -178,6 +183,7 @@ static const scr_tz *tz_host_cached;
 
 static const scr_tz *tz_fixed(int32_t off) {
   memset(&tz_custom, 0, sizeof tz_custom);
+  tz_custom.idx = -1;
   tz_custom.nrec = -1;
   tz_custom.off0 = off;
   tz_custom.tail = INT64_MAX;

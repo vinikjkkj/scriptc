@@ -526,6 +526,9 @@ export interface CcOptions {
   /** The program reads local time (moduleUsesDateTz): compiles the zone database
    * scr_date_tz.c + scr_date_tzdb.c; without it scr_date_tz_stub.c stands in. */
   dateTz?: boolean;
+  /** The program formats a Date with a locale/options bag (moduleUsesDateIntl): compiles scr_date_intl.c, the
+   * generated en-US tables scr_date_intl_en.c and the zone-name sequences scr_date_tznames.c. */
+  dateIntl?: boolean;
   /** A Date and an `unknown` meet (moduleUsesDateDyn): compiles scr_date_dyn.c. */
   dateDyn?: boolean;
   /** The program holds a named stdlib handle, `Blob` or `PromiseConstructor`
@@ -2230,7 +2233,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const dateUnit = opts.date ?? false;
   const dateDynUnit = (opts.dateDyn ?? false) && dateUnit;
   const dateFmtUnit = ((opts.dateFmt ?? false) || dateDynUnit) && dateUnit;
-  const dateTzUnit = ((opts.dateTz ?? false) || dateFmtUnit) && dateUnit;
+  const dateIntlUnit = (opts.dateIntl ?? false) && dateUnit;
+  const dateTzUnit = ((opts.dateTz ?? false) || dateFmtUnit || dateIntlUnit) && dateUnit;
   const opaqueUnit = opts.opaque ?? false;
   const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
   const fetchDispatch = (opts.fetchDispatch ?? false) && fetchStatic;
@@ -2459,6 +2463,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(dateUnit ? [rt(join(rtDir, "scr_date.c"))] : []),
     ...(dateDynUnit ? [rt(join(rtDir, "scr_date_dyn.c"))] : []),
     ...(dateFmtUnit ? [rt(join(rtDir, "scr_date_fmt.c")), rt(join(rtDir, "scr_date_zones.c"))] : []),
+    ...(dateIntlUnit
+      ? [rt(join(rtDir, "scr_date_intl.c")), rt(join(rtDir, "scr_date_intl_en.c")), rt(join(rtDir, "scr_date_tznames.c"))]
+      : []),
     ...(dateUnit
       ? dateTzUnit
         ? [rt(join(rtDir, "scr_date_tz.c")), rt(join(rtDir, "scr_date_tzdb.c"))]

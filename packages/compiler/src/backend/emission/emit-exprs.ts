@@ -7944,6 +7944,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "date.format":
             // toDateString/toTimeString/toUTCString/toLocale*String; +1, never throws.
             return finish(`scr_date_format(${arg(0)}, ${arg(1)})`);
+          case "date.formatOpts":
+            // toLocale*String(locale, options), en-US; +1, or a catchable Range/TypeError.
+            return finish(`scr_date_format_opts(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "date.toString":
             // Date.prototype.toString; +1 string, or a catchable Error for a
             // zone whose long name needs ICU data (may-throw seed set).
