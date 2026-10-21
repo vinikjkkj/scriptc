@@ -2234,7 +2234,16 @@ export const TEXT_DRIFT_TOLERANCE = 256;
  * the Math.imul commit (2026-10-15 entry above) and reproduces there.
  * win32 only, for the reason the file figures are win32 only: a platform
  * nobody weighed gets no invented number. */
-export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 544_342 : null;
+/* RE-RECORDED 2026-10-21: 544,342 -> 544,022 (-320), the Windows lane of CI
+ * run 39557985446 on the nobesteffort branch (island.test.ts and regex.test.ts:
+ * ".text SHRANK by 320 bytes: 544022 vs recorded 544342 (tolerance 256)").
+ * The branch deletes scr_fence_fatal from scr_error.c, which is in
+ * RUNTIME_SOURCES and links into every program unconditionally on this target,
+ * so a hello-world no longer carries it. REGEX_CLASS_TEXT_RECORDED is NOT
+ * touched: regex.test.ts checks this anchor first and masks the regex one, so
+ * the regex figure has not been seen. INFERRED to move by the same -320 (same
+ * always-linked object); re-record it from the next Windows run if it fails. */
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 544_022 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
