@@ -494,6 +494,12 @@ interface Buffer<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> extends
   readIntLE(offset: number, byteLength: number): number;
 }
 interface BufferConstructor {
+  /* The species constructor's construction (`const FastBuffer =
+   * Buffer[Symbol.species]`, which js-desugar serves as this global): an
+   * ArrayBuffer / x.buffer view with optional byte offset and length, or a
+   * Buffer/Uint8Array copy. Only that species spelling lowers; the legacy
+   * `new Buffer(n)` forms stay refused. */
+  new (data: ArrayBuffer | Uint8Array, byteOffset?: number, length?: number): Buffer;
   from(data: string, encoding?: BufferEncoding): Buffer;
   /* The ArrayBuffer form is the VIEW construction: x.buffer with an
    * optional byte offset/length shares x's storage (the subarray rule). */

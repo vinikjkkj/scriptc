@@ -78,8 +78,24 @@ function flatten(
 
 /** The desugared text of `fileName`, or null when nothing in it needs it
  * (the fast path for every ordinary file). */
+/** `Buffer[Symbol.species]` is Buffer's species constructor, which the
+ * checker types `any`: every `new FastBuffer(...)` through it then has an
+ * `any` instance and each member call on the result loses its receiver type.
+ * The species constructor of Buffer constructs Buffers, so the spelling is
+ * served as the global `Buffer` itself (typed), tagged with a marker comment
+ * the lowering reads (bufferSpeciesAliasDecl) so the `const X = Buffer` alias
+ * of this spelling — and only it — is the species constructor. */
+const SPECIES_SPELLING = /\bBuffer\s*\[\s*Symbol\s*\.\s*species\s*\]/g;
+export const SPECIES_MARKER = "/*@species*/";
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
+  if (SPECIES_SPELLING.test(text)) {
+    SPECIES_SPELLING.lastIndex = 0;
+    const out = text.replace(SPECIES_SPELLING, `Buffer${SPECIES_MARKER}`);
+    return jsDesugar(fileName, out) ?? out;
+  }
+  SPECIES_SPELLING.lastIndex = 0;
   if (!NESTED_REQUIRE_PREFILTER.test(text)) return null;
   if (!/\{[^{}]*:\s*\{/.test(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""))) return null;
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);

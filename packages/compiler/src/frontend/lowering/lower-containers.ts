@@ -8262,6 +8262,70 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
   setBigInt64: { method: "dvSetBigInt64", le: true },
 };
 
+/** `const FastBuffer = Buffer[Symbol.species]` (ws's buffer-util/receiver/
+   * permessage-deflate): Buffer's species constructor, the constructor that
+   * makes a Buffer VIEW (`new FastBuffer(ab, byteOffset, length)`). It is the
+   * Buffer class under another name, so the declaration binds nothing and
+   * `new FastBuffer(...)` lowers as Buffer construction (lowerFastBufferNew). */
+  export function bufferSpeciesAliasDecl(L: Lowerer, name: ts.BindingName, init: ts.Expression | undefined): boolean {
+    if (init === undefined || !ts.isIdentifier(name)) return false;
+    let e: ts.Expression = init;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    // js-desugar serves the species spelling as the global `Buffer` followed
+    // by a marker comment (the checker types the spelling itself `any`).
+    if (ts.isIdentifier(e) && L.isStdlibGlobal(e, "Buffer")) {
+      return e.getSourceFile().text.slice(e.end, e.end + 16).startsWith("/*@species*/");
+    }
+    if (!ts.isElementAccessExpression(e) || e.questionDotToken !== undefined) return false;
+    if (!L.isStdlibGlobal(e.expression, "Buffer")) return false;
+    const key = e.argumentExpression;
+    return ts.isPropertyAccessExpression(key) && L.stdlibGlobalMember(key, "Symbol") === "species";
+  }
+
+/** Is `callee` a name bound by such a declaration? */
+  export function isBufferSpeciesCtor(L: Lowerer, callee: ts.Expression): boolean {
+    if (!ts.isIdentifier(callee)) return false;
+    const sym = L.resolveValueSymbol(callee);
+    const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    return d !== undefined && ts.isVariableDeclaration(d) && bufferSpeciesAliasDecl(L, d.name, d.initializer);
+  }
+
+/** `new FastBuffer(x)` / `new FastBuffer(x.buffer, byteOffset?, length?)` /
+   * `new FastBuffer(arrayBuffer, byteOffset?, length?)`: a Buffer. The `.buffer`
+   * spelling and an ArrayBuffer operand are VIEWS sharing the storage (the
+   * dataViewNew intrinsic Buffer.from(x.buffer, ...) uses: offset/length
+   * validated with Node's RangeErrors), a Buffer/Uint8Array operand is a copy
+   * (Uint8Array's constructor over a typed array). */
+  export function lowerFastBufferNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc): IrExpr {
+    const args = expr.arguments ?? [];
+    if (args.length < 1 || args.length > 3 || args.some(ts.isSpreadElement)) {
+      L.noLowering(`new Buffer[Symbol.species] with ${args.length} arguments`, expr);
+    }
+    const first = args[0]!;
+    if (ts.isPropertyAccessExpression(first) && first.name.text === "buffer") {
+      const srcIr = L.mapTypeOf(L.typeOf(first.expression));
+      if (srcIr?.kind === "bytes") {
+        const receiver = L.lowerExpr(first.expression);
+        const idx = args.slice(1).map((a) => L.lowerExprExpecting(a, F64));
+        return markFlavor({ kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idx, type: BYTES_U8, loc }, "buffer", loc);
+      }
+    }
+    const srcIr = L.mapTypeOf(L.typeOf(first));
+    if (srcIr?.kind === "bytes" && srcIr.elem === "buf") {
+      const receiver = L.lowerExpr(first);
+      const idx = args.slice(1).map((a) => L.lowerExprExpecting(a, F64));
+      return markFlavor({ kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idx, type: BYTES_U8, loc }, "buffer", loc);
+    }
+    if (args.length === 1 && srcIr?.kind === "bytes" && srcIr.elem === "u8") {
+      return markFlavor({ kind: "bytesNew", source: L.lowerExpr(first), type: BYTES_U8, loc }, "buffer", loc);
+    }
+    return L.noLowering(
+      `new Buffer[Symbol.species] of '${srcIr ? L.fmt(srcIr) : L.checker.typeToString(L.typeOf(first))}' values`,
+      first,
+      "supported: an ArrayBuffer or x.buffer with optional byteOffset/length (a view), or a Buffer/Uint8Array (a copy)",
+    );
+  }
+
 /** The Buffer statics — `Buffer.from(...)`, `Buffer.alloc(n)`,
    * `Buffer.concat(list)`, `Buffer.isBuffer(x)` — on THE stdlib Buffer
    * global (name + provenance; fallback and @types/node alike). Null when
@@ -8319,6 +8383,16 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           }
           if (args.length === 1 && srcIr?.kind === "array" && srcIr.elem.kind === "f64") {
             return markFlavor({ kind: "bytesNew", source: L.lowerExpr(argNode), type: BYTES_U8, loc }, "buffer", loc);
+          }
+        }
+      }
+      // A checked-dynamic operand (an untyped value): the runtime kind ladder.
+      if (args.length === 1 && !ts.isSpreadElement(args[0]!)) {
+        const maybeDyn = L.mapTypeOf(L.typeOf(args[0]!));
+        if (maybeDyn === null || maybeDyn.kind === "dyn") {
+          const v = L.lowerExpr(args[0]!);
+          if (v.type.kind === "dyn") {
+            return markFlavor({ kind: "libCall", fn: "buffer.fromDyn", args: [v], type: BYTES_U8, loc }, "buffer", loc);
           }
         }
       }
@@ -8467,6 +8541,38 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         // the value knows which.
         if (v.type.kind === "bytes" && v.type.elem === "u8") {
           return { kind: "libCall", fn: "bytes.isBuffer", args: [v, why], type: BOOL, loc };
+        }
+        // A checked-dynamic operand (an untyped parameter): the kind test
+        // for a bytes value, then the flavor test over the unboxed payload —
+        // the union rule's two questions, over the dyn tag.
+        if (v.type.kind === "dyn") {
+          if (!pureReemittable(v)) {
+            L.noLowering(
+              "Buffer.isBuffer of a dynamic operand that isn't a plain read",
+              args[0]!,
+              "the value is tested twice (which kind, then which flavor) — bind it to a const first",
+            );
+          }
+          const isBytes: IrExpr = { kind: "dynTest", test: "u8array", value: v, type: BOOL, loc };
+          const payload: IrExpr = { kind: "dynCheck", value: v, type: BYTES_U8, loc };
+          const flavor: IrExpr = { kind: "libCall", fn: "bytes.isBuffer", args: [payload, why], type: BOOL, loc };
+          return { kind: "logical", op: "&&", left: isBytes, right: flavor, type: BOOL, loc };
+        }
+        // No bytes value can be there (a string, number, record, array, a
+        // union with no bytes arm...): constantly false, the operand still
+        // evaluated for its effects.
+        if (v.type.kind !== "jsval" && v.type.kind !== "bytes" && v.type.kind !== "union") {
+          return pureReemittable(v) || v.kind === "unitLit"
+            ? { kind: "boolLit", value: false, type: BOOL, loc }
+            : { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: v, loc }], result: { kind: "boolLit", value: false, type: BOOL, loc }, type: BOOL, loc };
+        }
+        if (v.type.kind === "union") {
+          const d2 = L.unions.get(v.type.unionId);
+          if (d2 && !d2.arms.some((a) => a.kind === "bytes")) {
+            return pureReemittable(v)
+              ? { kind: "boolLit", value: false, type: BOOL, loc }
+              : { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: v, loc }], result: { kind: "boolLit", value: false, type: BOOL, loc }, type: BOOL, loc };
+          }
         }
         L.noLowering(
           `Buffer.isBuffer of '${L.fmt(v.type)}' values`,
