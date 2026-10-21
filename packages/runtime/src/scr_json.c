@@ -7047,6 +7047,17 @@ static ScrDyn *scr_json_value(ScrJsonP *p) {
   }
   char c = p->s[p->pos];
   if (c == '{' || c == '[') {
+    /* The depth cap below bounds the recursion by COUNT; this bounds it by
+     * the stack the parse is actually running on. A fiber reserves 1 MiB
+     * and an instrumented frame is several times a plain one, so 1000
+     * levels can exhaust a stack well before the count does (a sanitized
+     * Windows test binary on the 1 MiB main stack died with a hard
+     * stack-overflow instead of reaching the cap). Same RangeError, same
+     * catchable path; a no-op wherever SCR_STACK_LOW() has no floor. */
+    if (SCR_STACK_LOW()) {
+      scr_stack_exhausted();
+      return NULL;
+    }
     if (++p->depth > SCR_JSON_MAX_DEPTH) {
       /* JS overflows the engine stack here (RangeError); a native recursive
        * descent must cap instead. Same message and kind, catchable. */
