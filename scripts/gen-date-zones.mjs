@@ -101,17 +101,37 @@ const ids = candidateIds();
 
 // ───────────────────────── offsets ─────────────────────────
 const UTC_MS = (y, mo, d, h = 0, mi = 0, s = 0) => { const u = new Date(0); u.setUTCFullYear(y, mo, d); u.setUTCHours(h, mi, s, 0); return u.getTime(); };
-// LocalTZA at a whole-second instant, in exact seconds: the local fields minus the UTC fields.
-// V8 caches DST intervals per process and mis-extends one across closely spaced transitions (measured:
-// Africa/Tunis 1943-03-29T01:00:00Z reads 3600 or 7200 depending on the queries that came before), so
-// every query starts from a fresh cache (assigning TZ clears it): the answer is ICU's, not the history's.
+// LocalTZA at a whole-second instant, in exact seconds: the local fields minus the UTC fields, read from ICU
+// itself through Intl.DateTimeFormat (not through the TZ variable and Date getters). That is the truth for every id:
+// a host that lacks a legacy id's zoneinfo file (Debian's tzdata-legacy: CET, EET, MET, EST, MST, HST, Cuba, Iran,
+// PRC, ROC, ROK, W-SU) makes `TZ=CET node` read UTC while ICU knows the zone, and a runtime that bundles Node's
+// zone data should carry ICU's rules. Intl also has no DST cache, so a query's answer cannot depend on the queries
+// before it (V8's Date cache mis-extends a DST interval across closely spaced transitions: Africa/Tunis
+// 1943-03-29T01:00:00Z reads 3600 or 7200 by history).
 let tzNow = null;
+const fmtCache = new Map();
+function intlFmt(id, era) {
+  const key = id + (era ? "|era" : "");
+  let f = fmtCache.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-US", { timeZone: id, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric", ...(era ? { era: "short" } : {}) });
+    fmtCache.set(key, f);
+  }
+  return f;
+}
+const INTL_RE = /^(\d+)\/(\d+)\/(\d+), (\d+):(\d+):(\d+)$/;
 function offSec(tms) {
-  process.env.TZ = tzNow;
-  const d = new Date(tms);
+  let y, mo, d, h, mi, s;
+  const m = tms >= -62135596800000 ? INTL_RE.exec(intlFmt(tzNow, false).format(tms)) : null;
+  if (m) { mo = +m[1]; d = +m[2]; y = +m[3]; h = +m[4]; mi = +m[5]; s = +m[6]; }
+  else {
+    const p = Object.fromEntries(intlFmt(tzNow, true).formatToParts(tms).map((x) => [x.type, x.value]));
+    y = +p.year; if (p.era === "BC") y = 1 - y;
+    mo = +p.month; d = +p.day; h = +p.hour; mi = +p.minute; s = +p.second;
+  }
   const u = new Date(0);
-  u.setUTCFullYear(d.getFullYear(), d.getMonth(), d.getDate());
-  u.setUTCHours(d.getHours(), d.getMinutes(), d.getSeconds(), 0);
+  u.setUTCFullYear(y, mo - 1, d);
+  u.setUTCHours(h, mi, s, 0);
   return (u.getTime() - Math.floor(tms / 1000) * 1000) / 1000;
 }
 const SCAN_FROM = UTC_MS(1700, 0, 1);
@@ -190,9 +210,30 @@ const offRecs = new Map(); // key -> rec
 const idOffKey = new Map();
 let verifyN = 0, slivers = 0;
 const rnd = (() => { let x = 0x9e3779b9; return () => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; }; })();
+// The offset phase dominates the run (~10 us per Intl query over 600 zones); it shards: run
+//   --offsets-shard I/N --offsets-out DIR   (N processes, each writes DIR/offsets<I>.json and exits)
+// then the final run with --offsets-in DIR N, which reads them instead of scanning.
+const shardArg = args.includes("--offsets-shard") ? args[args.indexOf("--offsets-shard") + 1].split("/").map(Number) : null;
+const offOut = args.includes("--offsets-out") ? args[args.indexOf("--offsets-out") + 1] : null;
+const offIn = args.includes("--offsets-in") ? args[args.indexOf("--offsets-in") + 1] : null;
+const offInN = offIn ? +args[args.indexOf("--offsets-in") + 2] : 0;
+const preRecs = {};
+if (offIn) for (let i = 0; i < offInN; i++) Object.assign(preRecs, JSON.parse(readFileSync(`${offIn}/offsets${i}.json`, "utf8")));
+const shardOut = {};
+let idN = -1;
 for (const id of ids) {
-  const L = offsetTimeline(id);
+  idN++;
+  if (shardArg && idN % shardArg[1] !== shardArg[0]) continue;
   let rec;
+  if (offIn) {
+    rec = preRecs[id];
+    if (!rec) throw new Error("no precomputed offsets for " + id);
+    const key = JSON.stringify([rec.off0, rec.end, rec.T, rec.O]);
+    if (!offRecs.has(key)) offRecs.set(key, rec);
+    idOffKey.set(id, key);
+    continue;
+  }
+  const L = offsetTimeline(id);
   if (L.T.length === 0) rec = { off0: L.off0, T: [], O: [], end: END_MIN, tail: 0 };
   else {
     if (!validEnd(L, END_MAX)) throw new Error(id + ": no end year up to " + END_MAX + " reproduces the offsets");
@@ -228,6 +269,12 @@ for (const id of ids) {
   const key = JSON.stringify([rec.off0, rec.end, rec.T, rec.O]);
   if (!offRecs.has(key)) offRecs.set(key, rec);
   idOffKey.set(id, key);
+  shardOut[id] = rec;
+}
+if (shardArg) {
+  writeFileSync(`${offOut}/offsets${shardArg[0]}.json`, JSON.stringify(shardOut));
+  console.error(`offsets shard ${shardArg[0]}/${shardArg[1]}: ${Object.keys(shardOut).length} zones, ${verifyN} instants`);
+  process.exit(0);
 }
 console.error(`offset model verified against node: ${verifyN} instants over ${ids.length} zones (${slivers} one-second slivers skipped)`);
 
