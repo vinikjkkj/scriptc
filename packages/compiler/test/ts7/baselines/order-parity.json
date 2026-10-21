@@ -11447,6 +11447,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8213-prototype-define-property-families.js": {
+   "order": [
+    "<repo>/tests/corpus/8213-prototype-define-property-families.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
