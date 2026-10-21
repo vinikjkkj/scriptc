@@ -1,0 +1,6 @@
+js-constructor-function-over-the-classes-own-method.js:14:13 - error SC1090: method calls like 'new C().hi' is not supported yet
+
+  13 | }
+  14 | console.log(new C().hi());
+     |             ^~~~~~~~~~~~
+  15 | 
