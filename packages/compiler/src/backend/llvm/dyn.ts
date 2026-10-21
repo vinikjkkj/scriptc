@@ -2734,6 +2734,9 @@ export class LlDyn {
           B.line(`store double ${i2}, ptr ${iSlot}`);
           B.br(lc);
           B.startBlock(le);
+          // A granted destination's markers replay the SOURCE's key order.
+          host.declare(`declare void @scr_dyn_obj_apply_key_order(ptr, ptr)`);
+          B.line(`call void @scr_dyn_obj_apply_key_order(ptr ${d}, ptr ${ks})`);
           B.line(`call void @scr_arr_release(ptr ${ks})`);
         }
         // The [[Prototype]] link, once, after every member has been placed

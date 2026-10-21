@@ -5650,10 +5650,65 @@ void scr_dyn_obj_set_symkey(ScrDyn *d, const char *key, size_t key_len, ScrDyn *
  * symbol rides scr_dyn_obj_set_symkey, every other key is an ordinary member. */
 void scr_dyn_obj_set_member(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v) {
   if (key_len > 3 && key[0] == '_' && key[1] == '_' && key[2] == '@') {
+    if (key_len >= 7 && memcmp(key, "__@ord@", 7) == 0) { /* an order marker: not a member */
+      scr_dyn_release(v);
+      return;
+    }
     scr_dyn_obj_set_symkey(d, key, key_len, v, false);
     return;
   }
   scr_dyn_obj_set(d, key, key_len, v);
+}
+
+/* Replays a SOURCE object's key order on a freshly converted record. `ks` is
+ * the record's overflow key list INCLUDING the `__@ord@<name>` markers the
+ * capture helper left at each declared member's source position
+ * (scr_map_keys_js_order_all). The desired order is that list with every marker
+ * replaced by the declared name it stands for and every symbol-spelled key
+ * dropped; the object's own entries are permuted to follow it (keys the list
+ * does not name keep their relative order after the named ones). A record that
+ * carries no marker is left exactly as built. */
+void scr_dyn_obj_apply_key_order(ScrDyn *d, ScrArr *ks) {
+  if (d->kind != SCR_DYN_OBJ || ks->len == 0) return;
+  bool any = false;
+  for (size_t i = 0; i < ks->len && !any; i++) {
+    ScrStr *k = (ScrStr *)scr_arr_get_ref(ks, (double)i);
+    any = k->len >= 7 && memcmp(k->data, "__@ord@", 7) == 0;
+    scr_str_release(k);
+  }
+  if (!any) return;
+  const uint32_t n = d->v.obj.len;
+  ScrDynEntry *old = d->v.obj.entries;
+  ScrDynEntry *neu = (ScrDynEntry *)malloc((n ? n : 1) * sizeof *neu);
+  bool *placed = (bool *)calloc(n ? n : 1, sizeof *placed);
+  if (neu == NULL || placed == NULL) scr_json_oom();
+  uint32_t w = 0;
+  for (size_t i = 0; i < ks->len; i++) {
+    ScrStr *k = (ScrStr *)scr_arr_get_ref(ks, (double)i);
+    const char *name = k->data;
+    size_t nlen = k->len;
+    bool skip = false;
+    if (nlen >= 7 && memcmp(name, "__@ord@", 7) == 0) {
+      name += 7;
+      nlen -= 7;
+    } else if (nlen > 3 && name[0] == '_' && name[1] == '_' && name[2] == '@') {
+      skip = true;
+    }
+    for (uint32_t j = 0; !skip && j < n; j++) {
+      if (!placed[j] && old[j].key_len == nlen && memcmp(old[j].key, name, nlen) == 0) {
+        neu[w++] = old[j];
+        placed[j] = true;
+        break;
+      }
+    }
+    scr_str_release(k);
+  }
+  for (uint32_t j = 0; j < n; j++) {
+    if (!placed[j]) neu[w++] = old[j];
+  }
+  memcpy(old, neu, (size_t)n * sizeof *neu);
+  free(neu);
+  free(placed);
 }
 
 /* The attributes of an OWN hidden property, for the redefinition rule

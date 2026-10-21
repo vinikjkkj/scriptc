@@ -3373,6 +3373,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           }
           d.push(`      scr_str_release(k);`);
           d.push(`    }`);
+          // A granted destination's markers replay the SOURCE's key order.
+          d.push(`    scr_dyn_obj_apply_key_order(d, ks);`);
           d.push(`    scr_arr_release(ks);`);
           d.push(`  }`);
         }
