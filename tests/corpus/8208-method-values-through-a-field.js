@@ -28,7 +28,7 @@ class Query extends Command {
 
   header(packet) {
     this.trace += 'header(' + packet + ') ';
-    return packet === 'more' ? this.row : this.done;
+    return packet === 'more' ? Query.prototype.row : this.done;
   }
 
   row(packet) {
@@ -72,3 +72,9 @@ try {
 } catch (e) {
   console.log('threw', e instanceof TypeError);
 }
+
+// the prototype spelling of the same method value, stored and called later
+const viaProto = Query.prototype.done;
+const p = new Quiet('q3');
+p.next = viaProto;
+console.log(p.execute('x'), p.trace);
