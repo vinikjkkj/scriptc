@@ -11103,6 +11103,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7849-string-replace-string-pattern.ts": {
+   "order": [
+    "<repo>/tests/corpus/7849-string-replace-string-pattern.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
