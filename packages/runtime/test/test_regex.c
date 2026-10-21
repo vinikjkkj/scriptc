@@ -276,11 +276,10 @@ static void test_split(void) {
   scr_str_release(s);
 
   s = S("a,b");
-  check(!scr_exc_pending(), "no pending exception before the capture fence");
-  ScrArr *r = scr_regex_split(s, &re_split_group);
-  check(r == NULL && scr_exc_pending(),
-        "split with capture groups throws catchably and returns NULL");
-  scr_exc_clear();
+  check(!scr_exc_pending(), "no pending exception before the capture split");
+  expect_split(s, &re_split_group, (const char *[]){"a", ",", "b"}, 3,
+               "split with a capture group keeps the captured separator");
+  check(!scr_exc_pending(), "split with a capture group does not throw");
   scr_str_release(s);
 }
 
