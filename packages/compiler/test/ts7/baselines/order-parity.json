@@ -11238,6 +11238,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8217-symbol-keyed-method/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8217-symbol-keyed-method/keys.js",
+    "<repo>/tests/corpus/8217-symbol-keyed-method/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"

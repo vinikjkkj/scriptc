@@ -1414,6 +1414,16 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     let found = false;
     const visit = (n: ts.Node): void => {
       if (found) return;
+      // A closure written above the declaration runs LATER (a callback the
+      // constructor stores, ws's `this[kDone] = () => { this.pending--; ... }`
+      // before `this.pending = 0`): its reads are not reads at this position.
+      // One invoked in place is, and keeps counting.
+      if (
+        (ts.isArrowFunction(n) || ts.isFunctionExpression(n)) &&
+        !(n.parent !== undefined && (ts.isCallExpression(n.parent) || ts.isParenthesizedExpression(n.parent)))
+      ) {
+        return;
+      }
       if (
         ts.isPropertyAccessExpression(n) &&
         n.expression.kind === ts.SyntaxKind.ThisKeyword &&
@@ -6851,6 +6861,15 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     }
     const registryKey = symbolForRegistryKeyOf(L, e);
     if (registryKey !== null) return `sym.for:${registryKey}`;
+    // A module-level unique symbol (a const k = Symbol('desc') here or
+    // exported through a CommonJS table, ws's Limiter [kRun]() {...}): the
+    // slot is keyed by the symbol's compile-time identity, spelled like the
+    // symbol-keyed field names. `this[kRun]()` reaches it through the call
+    // arm in lowerCall.
+    {
+      const u = ts.isIdentifier(e) ? uniqueSymbolKeyOf(L, e) : null;
+      if (u !== null) return `sym.uniq:${u.fieldName}`;
+    }
     return L.foldedStringKeyOf(name.expression);
   }
 

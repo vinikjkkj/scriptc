@@ -5758,6 +5758,45 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // The dot spelling already goes to scr_dyn_invoke for exactly this
     // reason (see lowerDynReceiverMethodCall's closing comment); this is
     // the same answer for the other spelling of the same expression.
+    // `this[kRun]()` over a class method keyed by a module-level unique
+    // symbol (collected as the slot sym.uniq:<Symbol(desc)>): the call
+    // dispatches exactly like the named method call would.
+    if (
+      ts.isElementAccessExpression(expr.expression) &&
+      !expr.expression.questionDotToken &&
+      !expr.questionDotToken &&
+      !expr.arguments.some((a) => ts.isSpreadElement(a)) &&
+      ts.isIdentifier(expr.expression.argumentExpression)
+    ) {
+      const symKey = L.uniqueSymbolKeyOf(expr.expression.argumentExpression);
+      const recvIr = symKey ? L.mapTypeOf(L.typeOf(expr.expression.expression)) : null;
+      const recvInfo = recvIr?.kind === "object" ? (L.classes.get(recvIr.className) ?? null) : null;
+      const slot = symKey ? `sym.uniq:${symKey.fieldName}` : "";
+      const fnd = recvInfo ? L.findMethodOn(recvInfo, slot) : null;
+      if (symKey && recvInfo && fnd && !(fnd.sig.abstract === true)) {
+        if (L.overrideBelow(recvInfo, slot)) L.noteVirtualEdge(recvInfo, slot);
+        else L.noteEdge(`%${fnd.declarer.def.name}.${slot}`);
+        const recvExpr = L.lowerExpr(expr.expression.expression);
+        const callArgs = L.completeArgs(expr.arguments, fnd.sig.params, loc, expr);
+        if (L.overrideBelow(recvInfo, slot)) {
+          return {
+            kind: "virtualCall",
+            className: recvInfo.def.name,
+            method: slot,
+            args: [L.upcastTo(recvExpr, recvInfo.def.name), ...callArgs],
+            type: fnd.sig.ret,
+            loc,
+          };
+        }
+        return {
+          kind: "call",
+          callee: `%${fnd.declarer.def.name}.${slot}`,
+          args: [L.upcastTo(recvExpr, fnd.declarer.def.name), ...callArgs],
+          type: fnd.sig.ret,
+          loc,
+        };
+      }
+    }
     if (
       ts.isElementAccessExpression(expr.expression) &&
       !expr.expression.questionDotToken &&
