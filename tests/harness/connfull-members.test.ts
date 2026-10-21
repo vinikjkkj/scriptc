@@ -140,4 +140,45 @@ c.ping();
 `,
     );
   }, 240_000);
+
+  test("an overload set is one merged slot: every overload stays callable", async () => {
+    // `end(cb?)` / `end(options, cb?)` and `escapeId(string)` / `escapeId(string[])`
+    // (mysql2's Connection). The member is ONE closure whose parameters are the
+    // union of the overloads' (a dyn where one spells `any`), and a call through
+    // any overload coerces into its slice of it.
+    await differential(
+      "overload",
+      `export type Cb = (err: Error | null) => void;
+export declare class OvConn {
+  threadId: number;
+  end(callback?: Cb): void;
+  end(options: any, callback?: Cb): void;
+  escapeId(value: string): string;
+  escapeId(values: string[]): string;
+}
+`,
+      `import type { OvConn } from "./declib.js";
+type Cb = (err: Error | null) => void;
+const calls: string[] = [];
+function endImpl(a: unknown, b: Cb | undefined): void {
+  calls.push("end");
+  if (typeof a === "function") (a as Cb)(null);
+  if (b !== undefined) b(null);
+}
+function escapeIdImpl(v: string | string[]): string {
+  if (typeof v === "string") return "\`" + v + "\`";
+  return v.map((x) => "\`" + x + "\`").join(".");
+}
+const c: OvConn = {
+  threadId: 4,
+  end: endImpl as unknown as OvConn["end"],
+  escapeId: escapeIdImpl as unknown as OvConn["escapeId"],
+};
+c.end();
+c.end((e) => console.log("end cb", e === null));
+c.end({ force: true }, (e) => console.log("end opts cb", e === null));
+console.log(c.escapeId("t"), c.escapeId(["db", "t"]), calls.length, c.threadId);
+`,
+    );
+  }, 240_000);
 });
