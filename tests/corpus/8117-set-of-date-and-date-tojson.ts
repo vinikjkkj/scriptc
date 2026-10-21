@@ -1,0 +1,23 @@
+// Set<Date> and Map<Date, V> hash by reference identity (two Dates with equal times are two members);
+// Date.prototype.toJSON() is the ISO string, null for an invalid Date.
+const a = new Date(1000);
+const b = new Date(1000);
+const s = new Set<Date>();
+s.add(a);
+s.add(b);
+s.add(a);
+console.log(s.size, s.has(a), s.has(b), s.has(new Date(1000)));
+for (const d of s) console.log(d.getTime());
+s.delete(a);
+console.log(s.size, s.has(a));
+const m = new Map<Date, string>();
+m.set(a, "a");
+m.set(b, "b");
+console.log(m.size, m.get(a), m.get(b), m.get(new Date(1000)));
+const seeded = new Set<Date>([a, a, b]);
+console.log(seeded.size);
+const bad = new Date(NaN);
+console.log(a.toJSON(), bad.toJSON(), new Date(8.64e15).toJSON(), new Date(-62198755200000).toJSON());
+const t: string | null = bad.toJSON();
+console.log(t === null, a.toJSON().length, `${a.toJSON()}|${bad.toJSON()}`);
+console.log(JSON.stringify({ at: a }) === '{"at":"' + a.toJSON() + '"}');

@@ -893,7 +893,9 @@ export function isSupportedMapKey(t: IrType): boolean {
   // makes is the same documented one, and it changes identity in `===`
   // exactly as it would here.
   return (
-    t.kind === "f64" || t.kind === "string" || t.kind === "object" || t.kind === "record"
+    t.kind === "f64" || t.kind === "string" || t.kind === "object" || t.kind === "record" ||
+    // a Date keys by reference identity like any object (SameValueZero on an object)
+    t.kind === "date"
   );
 }
 
@@ -912,6 +914,9 @@ export function isSupportedSetElem(t: IrType): boolean {
     isSupportedMapKey(t) ||
     t.kind === "netServer" ||
     t.kind === "symbol" ||
+    // A Date is an object: SameValueZero on one is reference identity (two Dates with equal times are two
+    // members), and the handle holds no reference back, so a Set<Date> cannot cycle.
+    t.kind === "date" ||
     // A UNION element (`Set<string | number | Foo[]>`, mysql2's SqlValue):
     // the boxed value is hashed and compared by the VALUE it carries --
     // strings by content, numbers by SameValueZero, bigints by value, every
