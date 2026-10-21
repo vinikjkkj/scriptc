@@ -8395,6 +8395,14 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         list = { kind: "arrayLit", elems, type: arrayOf(BYTES_U8), loc };
       } else {
         list = L.lowerExpr(argNode);
+        if (list.type.kind === "dyn") {
+          if (args.length === 2) {
+            const t0 = L.lowerExpr(args[1]!);
+            const total: IrExpr = t0.type.kind === "dyn" ? t0 : { kind: "dynFrom", value: t0, type: DYN, loc };
+            return { kind: "libCall", fn: "buffer.concatDynLen", args: [list, total], type: BYTES_U8, loc };
+          }
+          return { kind: "libCall", fn: "buffer.concatDyn", args: [list], type: BYTES_U8, loc };
+        }
         if (!typeEquals(list.type, arrayOf(BYTES_U8))) {
           L.noLowering(
             `Buffer.concat of '${L.fmt(list.type)}' values`,
@@ -8406,7 +8414,14 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       if (args.length === 2) {
         // The totalLength form truncates or zero-pads (and THROWS Node's
         // 'length' RangeError on bad totals).
-        const total = L.lowerExprExpecting(args[1]!, F64);
+        const t0 = L.lowerExpr(args[1]!);
+        if (t0.type.kind === "dyn") {
+          // An untyped total may be undefined (no total) or invalid: the
+          // runtime ladder owns it, over the list as a dyn array.
+          const dl: IrExpr = { kind: "dynFrom", value: list, type: DYN, loc };
+          return { kind: "libCall", fn: "buffer.concatDynLen", args: [dl, t0], type: BYTES_U8, loc };
+        }
+        const total = L.coerceToExpected(t0, F64);
         return { kind: "libCall", fn: "buffer.concatLen", args: [list, total], type: BYTES_U8, loc };
       }
       return { kind: "libCall", fn: "buffer.concat", args: [list], type: BYTES_U8, loc };
@@ -8482,10 +8497,33 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         if (v.type.kind === "bytes" && v.type.elem === "u8") {
           return { kind: "libCall", fn: "bytes.isBuffer", args: [v, why], type: BOOL, loc };
         }
+        if (v.type.kind === "dyn") {
+          return { kind: "libCall", fn: "dyn.isBuffer", args: [v, why], type: BOOL, loc };
+        }
+        // No bytes value can be here (a scalar, string, record, array or a
+        // union without a bytes arm): the answer is false, and the operand
+        // still evaluates for its effects.
+        {
+          const hasBytesArm =
+            v.type.kind === "union" &&
+            (L.unions.get(v.type.unionId)?.arms.some((a) => a.kind === "bytes" || a.kind === "dyn" || a.kind === "jsval") ?? true);
+          if (v.type.kind !== "jsval" && v.type.kind !== "bytes" && !hasBytesArm) {
+            if (v.kind === "unitLit" || v.kind === "numLit" || v.kind === "strLit" || v.kind === "boolLit") {
+              return { kind: "boolLit", value: false, type: BOOL, loc };
+            }
+            return {
+              kind: "seqExpr",
+              stmts: [{ kind: "exprStmt", expr: v, loc }],
+              result: { kind: "boolLit", value: false, type: BOOL, loc },
+              type: BOOL,
+              loc,
+            };
+          }
+        }
         L.noLowering(
           `Buffer.isBuffer of '${L.fmt(v.type)}' values`,
           args[0]!,
-          "the check lowers over a bytes value, or over a union with a bytes arm — here no bytes value can be there, so the answer is constantly false",
+          "the check lowers over a bytes value, a dyn value, or a union with a bytes arm",
         );
       }
       L.noLowering("Buffer.isBuffer with this argument shape", call);

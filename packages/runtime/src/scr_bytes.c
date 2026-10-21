@@ -138,6 +138,14 @@ bool scr_bytes_is_plain_u8(const ScrBytes *b, const ScrStr *why) {
   return false;
 }
 
+/* Buffer.isBuffer over a checked-dynamic value: only a bytes box can be a
+ * Buffer, and its own flavor stamp decides (a DataView answers false, an
+ * unclassified producer refuses at the read, exactly like the static form). */
+bool scr_dyn_is_buffer(const ScrDyn *d, const ScrStr *why) {
+  if (d == NULL || d->kind != SCR_DYN_BYTES || d->v.bytes == NULL) return false;
+  return scr_bytes_is_buffer(d->v.bytes, why);
+}
+
 bool scr_bytes_is_buffer(const ScrBytes *b, const ScrStr *why) {
   /* A DataView IS classified, and its answer here is a plain false --
    * `dv.constructor === Buffer` is false in Node and now it is false

@@ -11342,6 +11342,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8333-buffer-predicates-and-concat-over-dynamic-values.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8333-buffer-predicates-and-concat-over-dynamic-values.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
