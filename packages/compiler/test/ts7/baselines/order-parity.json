@@ -11816,6 +11816,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8404-an-initializer-less-static-reads-undefined-until-its-first-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/8404-an-initializer-less-static-reads-undefined-until-its-first-write.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8405-a-let-read-by-a-closure-before-its-assignment-is-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/8405-a-let-read-by-a-closure-before-its-assignment-is-undefined.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"
