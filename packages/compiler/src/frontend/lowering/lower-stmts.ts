@@ -29,7 +29,7 @@ import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } fr
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
+import { ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
 import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, unionFieldReadAt, unitArmsOf } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -7426,6 +7426,12 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
                 loc,
               };
             }
+          }
+          // `x.k = v` where the class of `x` never declares `k`: a subclass
+          // slot or the instance's run-time property table.
+          {
+            const expando = lowerUndeclaredMemberWrite(L, expr);
+            if (expando) return expando;
           }
         }
         if (ts.isObjectLiteralExpression(expr.left) || ts.isArrayLiteralExpression(expr.left)) {

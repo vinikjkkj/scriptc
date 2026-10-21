@@ -193,6 +193,10 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // path. That asymmetry is exactly why the survey that found the crash
     // reported it as needing pg's real context and shipped no repro.
     ["ctorfn", "ctorfn-cli.ts"],
+    // expando: members written onto a class instance by code that holds it as an
+    // untyped parameter, the untyped-local `.length`, and a required table read
+    // as a value (mysql2: connection.connectionId, leftPad, constants/types).
+    ["expando", "expando-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);

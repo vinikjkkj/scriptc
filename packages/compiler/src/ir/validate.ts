@@ -171,6 +171,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "cls.propsHas": { argTypes: [DYN, STRING], result: BOOL },
   "cls.propsCount": { argTypes: [DYN], result: F64 },
   "cls.propsGet": { argTypes: [DYN, STRING], result: DYN },
+  "cls.propsSet": { argTypes: [DYN, STRING, DYN], result: VOID },
+  "cls.propsRead": { argTypes: [DYN, STRING], result: DYN },
   "dyn.typeof": { argTypes: [DYN], result: STRING },
   // The JS operator conversions over dyn operands. `+` answers DYN
   // because its result kind is a runtime property of the operands
