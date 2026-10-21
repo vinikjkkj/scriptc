@@ -58,10 +58,11 @@ function putVarint(n: number, out: number[]): void {
 /** Keeps only the top-level entries of a bundle (a table node) whose key the predicate accepts. */
 function filterTable(bytes: Buffer, keys: string[], keep: (k: string) => boolean): Buffer {
   if (bytes[0] !== 1) return bytes;
-  let [plen, p] = varintAt(bytes, 1);
+  const [plen, p1] = varintAt(bytes, 1);
+  let p = p1;
   const end = p + plen;
-  let count: number;
-  [count, p] = varintAt(bytes, p);
+  const [count, p2] = varintAt(bytes, p);
+  p = p2;
   const entries: Buffer[] = [];
   for (let i = 0; i < count; i++) {
     const start = p;
@@ -112,9 +113,9 @@ export function sliceIcu(bin: Buffer, use: IcuUse): IcuSlice {
   const textOf = (b: Block, pkg: Pkg, key: string): string | null => {
     const id = pkg.keys.indexOf(key);
     if (id < 0 || b.bytes[0] !== 1) return null;
-    let [, p] = varintAt(b.bytes, 1);
-    let count: number;
-    [count, p] = varintAt(b.bytes, p);
+    const [, p1] = varintAt(b.bytes, 1);
+    const [count, p2] = varintAt(b.bytes, p1);
+    let p = p2;
     for (let i = 0; i < count; i++) {
       let kid: number;
       [kid, p] = varintAt(b.bytes, p);
