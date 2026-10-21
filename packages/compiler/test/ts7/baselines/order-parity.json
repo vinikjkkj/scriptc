@@ -11528,6 +11528,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8226-once-with-untyped-arrow-listeners.js": {
+   "order": [
+    "<repo>/tests/corpus/8226-once-with-untyped-arrow-listeners.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
