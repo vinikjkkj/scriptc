@@ -79,6 +79,77 @@ import ts from "typescript5";
 import { cjsLexedExportsOf, cjsLexerVisibleNames } from "./cjs-lexer.js";
 import { resolveExports } from "./npm.js";
 
+/** JSDOC RETURN CLAIMS THE BODY CONTRADICTS. A JavaScript function annotated
+ * `@return {Number}` whose body also hands the caller undefined (a bare
+ * `return;`, `return undefined`, `return void 0`) returns `Number | undefined`
+ * in JavaScript: the comment is a claim, the body is the truth (ms's parse()
+ * answers undefined for garbage input against its `@return {Number}`). The
+ * checker takes the claim, and every consumer — the lowering's return slot,
+ * the callers' reads, the typed callers' expectations — then disagrees with
+ * the runtime value. Respelling the CLAIM (`{Number|undefined}`) makes the
+ * checker, the lowering and the callers agree, with no lowering special case.
+ * The insertion is on the comment's own line (line numbers survive; columns
+ * after it on that line shift). Claims that already say undefined, void, any,
+ * `*` or a nullable/optional form are left alone. Null when nothing changed. */
+export function widenJsdocReturnClaims(source: string, filePath: string): string | null {
+  if (!source.includes("@return")) return null;
+  const sf = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const inserts: number[] = [];
+  // Functions (by declared name) whose slot is widened: a body that RETURNS a
+  // call of one of them hands undefined back too (the fixed point below).
+  const widened = new Set<string>();
+  const returnsUndefined = (body: ts.Node): boolean => {
+    let found = false;
+    const walk = (n: ts.Node): void => {
+      if (found) return;
+      if (n !== body && ts.isFunctionLike(n)) return;
+      if (ts.isReturnStatement(n)) {
+        const e = n.expression;
+        if (e === undefined || (ts.isIdentifier(e) && e.text === "undefined") || ts.isVoidExpression(e)) {
+          found = true;
+          return;
+        }
+        if (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && widened.has(e.expression.text)) {
+          found = true;
+          return;
+        }
+      }
+      n.forEachChild(walk);
+    };
+    walk(body);
+    return found;
+  };
+  const done = new Set<ts.Node>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const visit = (n: ts.Node): void => {
+      if (
+        (ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n)) &&
+        n.body !== undefined && ts.isBlock(n.body) && n.asteriskToken === undefined && !done.has(n)
+      ) {
+        const tag = ts.getJSDocReturnTag(n);
+        const te = tag?.typeExpression;
+        if (te !== undefined && returnsUndefined(n.body)) {
+          const inner = source.slice(te.pos, te.end);
+          if (inner.startsWith("{") && inner.endsWith("}") && !/\b(undefined|void|any|unknown|null)\b|[*?!]/.test(inner)) {
+            inserts.push(te.end - 1);
+            done.add(n);
+            changed = true;
+            if (ts.isFunctionDeclaration(n) && n.name !== undefined) widened.add(n.name.text);
+          }
+        }
+      }
+      n.forEachChild(visit);
+    };
+    visit(sf);
+  }
+  if (inserts.length === 0) return null;
+  let out = source;
+  for (const at of [...new Set(inserts)].sort((a, b) => b - a)) out = out.slice(0, at) + "|undefined" + out.slice(at);
+  return out;
+}
+
 /** True when `e` is exactly the `exports` identifier. */
 function isExportsIdent(e: ts.Expression): boolean {
   return ts.isIdentifier(e) && e.text === "exports";
