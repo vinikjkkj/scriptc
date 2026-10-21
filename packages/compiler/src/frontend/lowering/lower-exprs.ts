@@ -2049,6 +2049,86 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           const settled = L.settleOrValueAwait(value, loc);
           if (settled) return settled;
         }
+        // The GENERAL one-promise-arm union — `Promise<T> | U | ...` where
+        // the other arms are neither all units nor exactly T's own arms
+        // (`Promise<string> | string | null`, the shape a plugin hook
+        // returns). The union's own tag picks the branch: the promise arm
+        // parks on a real await, every other arm takes JS's single
+        // microtask hop (await of a non-thenable) and yields itself; each
+        // result converts into the checker's own type for the await. Both
+        // conversions must land EXACTLY on that type or the fence below
+        // stands (this used to fall through to a re-tag that stranded the
+        // promise arm: a runtime TypeError on the first promise returned).
+        {
+          const def2 = L.unions.get(value.type.unionId);
+          const pTag = def2 ? def2.arms.findIndex((a) => a.kind === "promise") : -1;
+          const resultT = pTag >= 0 ? L.mapTypeOf(L.typeOf(expr)) : null;
+          if (
+            def2 &&
+            pTag >= 0 &&
+            resultT !== null &&
+            resultT.kind !== "void" &&
+            def2.arms.filter((a) => a.kind === "promise").length === 1 &&
+            def2.arms.length >= 2
+          ) {
+            const pArm = def2.arms[pTag]! as IrType & { kind: "promise" };
+            const unionId = value.type.unionId;
+            const vLocal = L.declareHiddenLocal("%awaitG", value.type);
+            const vRef: IrExpr = { kind: "varRef", localId: vLocal.id, type: value.type, loc };
+            const conv = (e: IrExpr): IrExpr | null => {
+              const c = L.coerceToExpected(e, resultT);
+              return typeEquals(c.type, resultT) ? c : null;
+            };
+            const fromPromise = conv({
+              kind: "awaitExpr",
+              value: { kind: "unionNarrow", unionId, tag: pTag, value: vRef, type: pArm, loc },
+              type: pArm.inner,
+              loc,
+            });
+            const dataTags = def2.arms.map((_, i) => i).filter((i) => i !== pTag);
+            const dataConv = dataTags.map((t): IrExpr | null => {
+              const arm = def2.arms[t]!;
+              return conv(
+                isUnitType(arm)
+                  ? { kind: "unitLit", unit: arm.kind === "undefinedT" ? "undefined" : "null", type: arm, loc }
+                  : { kind: "unionNarrow", unionId, tag: t, value: vRef, type: arm, loc },
+              );
+            });
+            if (fromPromise !== null && dataConv.every((d) => d !== null)) {
+              let dataBranch = dataConv[dataConv.length - 1]!;
+              for (let k = dataTags.length - 2; k >= 0; k--) {
+                dataBranch = {
+                  kind: "ternary",
+                  cond: { kind: "unionIsTag", unionId, tag: dataTags[k]!, negated: false, value: vRef, type: BOOL, loc },
+                  then: dataConv[k]!,
+                  else_: dataBranch,
+                  type: resultT,
+                  loc,
+                };
+              }
+              return {
+                kind: "seqExpr",
+                stmts: [{ kind: "varDecl", localId: vLocal.id, init: value, loc }],
+                result: {
+                  kind: "ternary",
+                  cond: { kind: "unionIsTag", unionId, tag: pTag, negated: false, value: vRef, type: BOOL, loc },
+                  then: fromPromise,
+                  else_: {
+                    kind: "seqExpr",
+                    stmts: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "async.hop", args: [], type: VOID, loc }, loc }],
+                    result: dataBranch,
+                    type: resultT,
+                    loc,
+                  },
+                  type: resultT,
+                  loc,
+                },
+                type: resultT,
+                loc,
+              };
+            }
+          }
+        }
       }
       if (value.type.kind !== "promise") {
         // A CHECKED-DYNAMIC operand (`await v` where v rode an untyped
