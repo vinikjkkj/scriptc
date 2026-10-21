@@ -9856,6 +9856,29 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     return { kind: "libCall", fn: "string.lastIndexOf", args: [receiver, needle], type: F64, loc };
   }
 
+/** `s.replace(pat, rep)` / `s.replaceAll(pat, rep)` where the pattern AND the
+   * replacement are strings (a regex pattern is lowerRegexMethodCall's, a
+   * function replacement keeps its fence). A libCall over scr_str_replace_str:
+   * the first occurrence (replace) or every non-overlapping one (replaceAll),
+   * the replacement expanded through GetSubstitution without captures. */
+  export function lowerStringReplaceStrCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(call, access)) return null;
+    const name = access.name.text;
+    if (name !== "replace" && name !== "replaceAll") return null;
+    if (call.arguments.length !== 2 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "string") return null;
+    if (L.mapTypeOf(L.typeOf(call.arguments[0]!))?.kind !== "string") return null;
+    if (L.mapTypeOf(L.typeOf(call.arguments[1]!))?.kind !== "string") return null;
+    if (!L.isStdlibMember(access)) return null;
+    const loc = locOf(call);
+    const receiver = L.lowerExprExpecting(access.expression, STRING);
+    const pat = L.lowerExprExpecting(call.arguments[0]!, STRING);
+    const rep = L.lowerExprExpecting(call.arguments[1]!, STRING);
+    const all: IrExpr = { kind: "boolLit", value: name === "replaceAll", type: BOOL, loc };
+    return { kind: "libCall", fn: "string.replaceStr", args: [receiver, pat, rep, all], type: STRING, loc };
+  }
+
 /** `Promise.race([...])` on THE Promise global: the entries lower
    * individually (the array never materializes — promise-element arrays
    * have no representation) into a promise.race intrinsic; the result

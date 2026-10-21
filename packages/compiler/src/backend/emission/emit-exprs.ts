@@ -8015,6 +8015,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             );
           case "string.lastIndexOf":
             return finish(`scr_str_last_index_of(${arg(0)}, ${arg(1)})`);
+          case "string.replaceStr":
+            // s.replace(str, str) / s.replaceAll(str, str); +1 string.
+            return finish(`scr_str_replace_str(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "string.raw":
             // Raw literals + pre-stringified substitutions; +1 string.
             return finish(`scr_str_raw(${arg(0)}, ${arg(1)})`);

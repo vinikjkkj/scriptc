@@ -339,6 +339,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "number.isInteger": "scr_num_is_integer",
   "number.isSafeInteger": "scr_num_is_safe_integer",
   "string.lastIndexOf": "scr_str_last_index_of",
+  "string.replaceStr": "scr_str_replace_str",
   "string.raw": "scr_str_raw",
   "path.join": "scr_path_join",
   "path.resolve": "scr_path_resolve",
