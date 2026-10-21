@@ -11,6 +11,10 @@ tests/corpus/** text=auto eol=lf
 tests/diagnostics/** text=auto eol=lf
 tests/fixtures/** text=auto eol=lf
 tests/harness/__snapshots__/** text=auto eol=lf
+# The runtime oracle case files: materializeHostCases splits them on \n and
+# compares each line byte-for-byte with a fresh Node run, so a CRLF checkout
+# makes every line 'disagree' with a trailing CR no one can see in the diff.
+packages/runtime/test/*-cases.txt text=auto eol=lf
 
 # Committed with CRLF / mixed endings on purpose: keep the committed bytes.
 tests/corpus/2679-then-two-handlers.ts -text
