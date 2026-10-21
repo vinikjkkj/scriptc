@@ -18,9 +18,10 @@
  * Differential against a hand-written JS twin run on the test's own node: an
  * expectation typed into this file would be a second thing that can be wrong.
  * The program builds the Conn value STRUCTURALLY (no value of a non-program
- * class can come from anywhere else in a static build; the generic, overloaded
- * and PromiseConstructor-taking members are DECLINED from the shape, so the literal
- * carries only the members that map), authors the plugins,
+ * class can come from anywhere else in a static build; the literal carries every
+ * member the shape has: `end` (an overload set, one merged slot) and `on`
+ * (`this`-returning) belong to it, while the generic `query<T>` and the
+ * PromiseConstructor-taking `promise` are still declined from it), authors the plugins,
  * reads them back out of the record and calls them, awaiting every return
  * arm. The negative case pins that the promise-union rule did not widen: a
  * promise whose payload is not among the data arms still refuses. */
@@ -54,8 +55,10 @@ const SRC = `import type { Opts, Conn, Plugin } from "./declib.js";
 const conn: Conn = {
   threadId: 7,
   state: "ready",
+  end(_a: unknown, _b: ((err: Error | null) => void) | undefined) {},
   ping() {},
   escape(v: string) { return "'" + v + "'"; },
+  on(_event: string, _listener: (...args: unknown[]) => void): Conn { return conn; },
 } as unknown as Conn;
 type R = Promise<string> | string | Uint8Array | Promise<Uint8Array> | null;
 const opts: Opts = {
