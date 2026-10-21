@@ -248,14 +248,20 @@ describe("the class-instance dyn box's bookkeeping", () => {
     const { c, ll } = await compileBoth();
     const cs = cDescriptors(c);
     const ls = llDescriptors(ll);
-    // Exactly four rows, and the set itself is the first thing checked: a
-    // lane that stopped boxing one (or started boxing a fifth) fails here
-    // before any field is read. `Base` is in the set because a descriptor
-    // is interned per STATIC type at the crossing — `carry(base)` widens a
-    // Base-typed slot — while `Derived` is interned by the narrow that
-    // reads the instance's own vtable position back out. That pair is the
-    // hierarchy mechanism, so seeing both names here is the point.
-    expect([...cs.keys()].sort()).toEqual(["Base", "Derived", "Lone", "Readable"]);
+    // The set itself is the first thing checked: a lane that stopped boxing
+    // one (or started boxing another) fails here before any field is read.
+    // `Base` is in the set because a descriptor is interned per STATIC type
+    // at the crossing — `carry(base)` widens a Base-typed slot — while
+    // `Derived` is interned by the narrow that reads the instance's own
+    // vtable position back out. That pair is the hierarchy mechanism, so
+    // seeing both names here is the point. A boxed class also interns the
+    // descriptors of its SUBCLASSES (a base-typed value may hold any of
+    // them, and the box dispatches on the class the instance really is), so
+    // Readable brings the stream hierarchy under it: Duplex, Transform and
+    // PassThrough.
+    expect([...cs.keys()].sort()).toEqual([
+      "Base", "Derived", "Duplex", "Lone", "PassThrough", "Readable", "Transform",
+    ]);
     expect([...ls.keys()].sort()).toEqual([...cs.keys()].sort());
     for (const [name, row] of cs) expect(`${name}: ${ls.get(name)}`).toBe(`${name}: ${row}`);
   });

@@ -102,6 +102,14 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? "true" : "false"} }; ` +
         `/* dyn box: class ${className} */`,
     );
+    // A base-typed box can hold a DERIVED instance, and the registry resolves
+    // the instance's own class by its preorder position (scr_dyn_objinst_
+    // class_of). A descriptor for a subclass nobody boxed AS ITSELF was
+    // missing from the registry, so dispatch through the box found the BASE's
+    // member table and ran the base's method for an overriding subclass.
+    for (const [sub, m] of E.classMeta) {
+      if (sub !== className && m.pre > meta.pre && m.pre <= meta.post && canBoxClassIntoDyn(sub)) dynClassDesc(E, sub);
+    }
     return name;
   }
 
