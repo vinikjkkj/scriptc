@@ -17018,15 +17018,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // Runtime HANDLES are objects to === too: one handle per socket/
         // request/response, so pointer identity IS JS's object equality
         // (`c.pause() === c` — Node's chaining assertions). */
-        // REGEX is in that set for CONVERSION (it boxes by reference like
-        // the rest) but not for identity: the emitter interns one static
-        // per (pattern, flags) pair, so two distinct `/x/` literals are
-        // ONE pointer here and two objects in JS. Pointer identity would
-        // answer true where Node answers false — measured, not assumed —
-        // so the comparison keeps the SC1043 fence it has always had
-        // rather than trading a build error for a wrong boolean.
+        // REGEX identity is pointer identity too: every evaluation of a
+        // literal that can reach a comparison is a fresh object (lowerRegexLiteral
+        // marks it `fresh` unless it is consumed in place), and
+        // `new RegExp(..)` allocates, so two distinct `/x/` are two pointers
+        // exactly as in JS.
         if (
-          idLeft.type.kind !== "regex" &&
           DYN_HANDLE_KINDS.has(idLeft.type.kind) &&
           typeEquals(idLeft.type, idRight.type)
         ) {
