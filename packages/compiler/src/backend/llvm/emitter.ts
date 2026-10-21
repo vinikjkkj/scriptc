@@ -133,7 +133,7 @@ import {
 } from "./classes.js";
 import { DK, LlDyn } from "./dyn.js";
 import { emitNpmEmbeddingLl } from "./island.js";
-import { rcAdapters } from "../emission/emit-types.js";
+import { rcAdapters, unionKeyClasses } from "../emission/emit-types.js";
 import { resetSrcSiteCache, srcSite } from "../emission/emitter.js";
 import { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
@@ -14147,7 +14147,17 @@ class LlEmitter {
     const B = this.B;
     const kAcc = mapKeyAccess(e.type.elem);
     const s = B.tmp();
-    if (kAcc === "ref") {
+    if (kAcc === "ref" && e.type.elem.kind === "union") {
+      // A UNION element: boxes are compared by the value they carry, and
+      // the runtime needs one class byte per arm to know how.
+      const unionDef = this.unionsById.get(e.type.elem.unionId);
+      if (!unionDef) throw new Error("llvm emitter bug: set element union has no def");
+      const rc = vAdapters(this, e.type.elem);
+      const trace = traceAdapter(this, e.type.elem);
+      const classes = this.internLiteral(unionKeyClasses(unionDef.arms));
+      this.declare(`declare ptr @scr_set_new_union(ptr, ptr, ptr, ptr)`);
+      B.line(`${s} = call ptr @scr_set_new_union(ptr ${rc.retain}, ptr ${rc.release}, ptr ${trace ?? "null"}, ptr ${classes})`);
+    } else if (kAcc === "ref") {
       const rc = vAdapters(this, e.type.elem);
       // A cycle-capable ELEMENT can hold the set right back, so the set
       // needs the collector header and a trace that visits the KEY side
