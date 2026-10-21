@@ -21,7 +21,7 @@ import { lowerWrtcWrite } from "./lower-wrtc.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
-import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
+import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfUnionContainer, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
@@ -894,6 +894,22 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     while (ts.isParenthesizedExpression(init)) init = init.expression;
     return ts.isObjectLiteralExpression(init) && init.properties.length === 0;
   }
+
+/** The arms of a receiver typed as a UNION OF SEVERAL MAPS (or several SETS):
+ * each constituent's IR container type and its tag in the lowered union.
+ * Null for any other receiver. */
+function unionContainerArms(L: Lowerer, recvTs: ts.Type, unionId: string):
+  { armIrs: ((IrType & { kind: "map" }) | (IrType & { kind: "set" }))[]; tags: number[] } | null {
+  if (!recvTs.isUnionType()) return null;
+  const parts = ts.constituentTypes(recvTs);
+  const armIrs = parts.map((t: ts.Type) => L.mapTypeOf(t));
+  const kind = armIrs[0]?.kind;
+  if (parts.length < 2 || (kind !== "map" && kind !== "set")) return null;
+  if (!armIrs.every((a: IrType | null) => a !== null && a.kind === kind)) return null;
+  const tags = armIrs.map((a: IrType | null) => L.armTag(unionId, a!));
+  if (!tags.every((t: number) => t >= 0)) return null;
+  return { armIrs: armIrs as never, tags };
+}
 
 /** `for (var x of ...)` loop variables: the ONE function-scoped binding
    * every for-of desugar must ASSIGN per iteration instead of declaring a
@@ -8960,6 +8976,13 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       ) {
         const proj = src.expression.name.text as ForOfIterProjection;
         const recv = L.mapTypeOf(L.typeOf(src.expression.expression));
+        if (recv?.kind === "union") {
+          const container = L.lowerExpr(src.expression.expression);
+          if (container.type.kind === "union") {
+            const arms = unionContainerArms(L, L.typeOf(src.expression.expression), container.type.unionId);
+            if (arms) return lowerForOfUnionContainer(L, stmt, container, arms.armIrs, arms.tags, proj);
+          }
+        }
         if (recv?.kind === "map" || recv?.kind === "set") {
           const container = L.lowerExpr(src.expression.expression);
           if (container.type.kind === "map") {
@@ -9070,6 +9093,11 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         // yields the whole character (two UTF-16 units for astral chars,
         // where charAt would truncate to U+FFFD).
         return lowerForOfString(L, stmt, iterable, labels);
+      }
+      if (iterable.type.kind === "union") {
+        // A union of several Maps (or Sets): tag-dispatched iteration.
+        const arms = unionContainerArms(L, L.typeOf(iterSrc), iterable.type.unionId);
+        if (arms) return lowerForOfUnionContainer(L, stmt, iterable, arms.armIrs, arms.tags);
       }
       if (iterable.type.kind === "map") {
         // Maps iterate [key, value] entries with the forEach desugar's

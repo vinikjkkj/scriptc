@@ -5370,7 +5370,7 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
  * Falls back to the un-narrowed union when the helper declines (target not
  * a non-unit arm — already excluded by the callers), which fences loudly
  * downstream rather than admitting an unchecked read. */
-  function checkedArmBridge(L: Lowerer, value: IrExpr, arm: IrType, loc: SrcLoc): IrExpr {
+  export function checkedArmBridge(L: Lowerer, value: IrExpr, arm: IrType, loc: SrcLoc): IrExpr {
     if (value.type.kind !== "union") return value;
     const helper = L.narrowedArmHelper(value.type.unionId, arm, loc);
     if (!helper) return value;
@@ -6853,11 +6853,20 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // (`a?.b.c`) would carry the sub-union past a second step. And every
     // surviving arm must be a RECORD — the shape whose per-arm field read
     // lowerUnionFieldRead serves.
-    const subUnionRecv =
+    // The same shape over SEVERAL MAPS (or several SETS) is served by
+    // lowerUnionContainerDispatch, which dispatches the member on the tag:
+    // `p?.size` and the single-step method call `p?.get(k)`.
+    const containerArms =
       rest.length > 1 &&
-      dotNode === expr &&
-      ts.isPropertyAccessExpression(expr) &&
-      rest.every((a) => a.kind === "record");
+      (rest.every((a) => a.kind === "map") || rest.every((a) => a.kind === "set")) &&
+      ((dotNode === expr && ts.isPropertyAccessExpression(expr)) ||
+        (ts.isCallExpression(expr) && expr.expression === dotNode && ts.isPropertyAccessExpression(dotNode)));
+    const subUnionRecv =
+      containerArms ||
+      (rest.length > 1 &&
+        dotNode === expr &&
+        ts.isPropertyAccessExpression(expr) &&
+        rest.every((a) => a.kind === "record"));
     if (rest.length !== 1 && !subUnionRecv) {
       L.unsupported(
         "SC1090",
@@ -7204,6 +7213,12 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
 
   export function lowerIntrinsicProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (L.chainBlocked(expr)) return null;
+    if (expr.name.text === "size") {
+      for (const k of ["map", "set"] as const) {
+        const d = lowerUnionContainerDispatch(L, expr, expr, k, () => lowerIntrinsicProperty(L, expr));
+        if (d) return d;
+      }
+    }
     // `m.entries().next().value` — the take-the-first-entry idiom. The
     // iterator is never STORED here, so no iterator object has to exist:
     // entries()/keys()/values() already lower to a drained array of the
@@ -15454,6 +15469,129 @@ function setValRhs(L: Lowerer, value: IrExpr): IrExpr {
   return isUnitType(value.type) ? L.coerceToExpected(value, unitOnlyUnion(L.unions)) : value;
 }
 
+/** A method call or `size` read whose receiver is a UNION OF SEVERAL MAPS (or
+ * SETS): `Map<string, number> | Map<string, string>`. tsc types the members
+ * by joining the arms' signatures (`get` answers `number | string |
+ * undefined`, `size` is a number), but each arm is a different native
+ * container, so the call dispatches on the runtime tag: the receiver is
+ * bound once, and for each arm the SAME call node is lowered with the
+ * receiver replaced by that arm's tag-checked extraction and its type
+ * replaced by the arm's own (the optional-chain override channels,
+ * chainRecvByNode and chainNarrowedType). Each arm's result is widened to
+ * the type tsc gave the whole call. Null when the receiver is not such a
+ * union.
+ *
+ * A void result (set/add/clear/forEach) cannot ride a ternary, so the chain
+ * is a bool-typed ternary of seqExprs and is refused outside statement
+ * position. */
+export function lowerUnionContainerDispatch(
+  L: Lowerer,
+  node: ts.CallExpression | ts.PropertyAccessExpression,
+  access: ts.PropertyAccessExpression,
+  kind: "map" | "set",
+  lowerOne: () => IrExpr | null,
+): IrExpr | null {
+  const recvNode = access.expression;
+  const recvTs = L.typeOf(recvNode);
+  if (!recvTs.isUnionType()) return null;
+  const parts = ts.constituentTypes(recvTs);
+  if (parts.length < 2) return null;
+  const armIrs = parts.map((t: ts.Type) => L.mapTypeOf(t));
+  if (!armIrs.every((a: IrType | null) => a !== null && a.kind === kind)) return null;
+  if (L.chainBlocked(access, ...(ts.isCallExpression(node) ? [node] : []))) return null;
+  if (!L.isStdlibMember(access)) return null;
+  const loc = locOf(node);
+  const name = access.name.text;
+  const isCall = ts.isCallExpression(node);
+  const voidResult = isCall && (name === "set" || name === "add" || name === "clear" || name === "forEach");
+  if (voidResult && !(ts.isExpressionStatement(node.parent))) {
+    L.noLowering(
+      `.${name}() on a union of ${kind}s in value position`,
+      node,
+      "the per-arm dispatch of a void call is a statement — call it as its own statement",
+    );
+  }
+  const joined: IrType = voidResult ? VOID : L.irTypeOf(node);
+  const recv = L.lowerExpr(recvNode);
+  if (recv.type.kind !== "union") return null;
+  const unionId = recv.type.unionId;
+  const tags = armIrs.map((a: IrType | null) => L.armTag(unionId, a!));
+  if (tags.some((t: number) => t < 0)) return null;
+  const stmts: IrStmt[] = [];
+  let src: IrExpr = recv;
+  if (!pureReemittable(recv)) {
+    const tmp = L.declareHiddenLocal("%armRecv", recv.type);
+    stmts.push({ kind: "varDecl", localId: tmp.id, init: recv, loc });
+    src = { kind: "varRef", localId: tmp.id, type: recv.type, loc };
+  }
+  const results: IrExpr[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const bridge = checkedArmBridge(L, src, armIrs[i]!, loc);
+    const hadRecv = L.chainRecvByNode.get(recvNode);
+    const hadRecvTs = L.chainNarrowedType.get(recvNode);
+    const hadNode = L.chainNarrowedType.get(node);
+    L.chainRecvByNode.set(recvNode, bridge);
+    L.chainNarrowedType.set(recvNode, parts[i]!);
+    try {
+      const member = L.checker.getPropertyOfType(parts[i]!, name);
+      if (member) {
+        const mt = L.checker.getTypeOfSymbolAtLocation(member, node);
+        if (isCall) {
+          const sig = L.checker.getCallSignatures(mt)[0];
+          if (sig) L.chainNarrowedType.set(node, L.checker.getReturnTypeOfSignature(sig));
+        } else {
+          L.chainNarrowedType.set(node, mt);
+        }
+      }
+      const one = lowerOne();
+      if (one === null) return null;
+      results.push(joined.kind === "void" ? one : L.coerceToExpected(one, joined));
+    } finally {
+      if (hadRecv) L.chainRecvByNode.set(recvNode, hadRecv); else L.chainRecvByNode.delete(recvNode);
+      if (hadRecvTs) L.chainNarrowedType.set(recvNode, hadRecvTs); else L.chainNarrowedType.delete(recvNode);
+      if (hadNode) L.chainNarrowedType.set(node, hadNode); else L.chainNarrowedType.delete(node);
+    }
+  }
+  const asBool = (e: IrExpr): IrExpr =>
+    joined.kind === "void"
+      ? { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: e, loc }], result: { kind: "boolLit", value: true, type: BOOL, loc }, type: BOOL, loc }
+      : e;
+  const outT: IrType = joined.kind === "void" ? BOOL : joined;
+  let chain: IrExpr = asBool(results[results.length - 1]!);
+  for (let i = results.length - 2; i >= 0; i--) {
+    chain = {
+      kind: "ternary",
+      cond: { kind: "unionIsTag", unionId, tag: tags[i]!, negated: false, value: src, type: BOOL, loc },
+      then: asBool(results[i]!),
+      else_: chain,
+      type: outT,
+      loc,
+    };
+  }
+  return stmts.length === 0 ? chain : { kind: "seqExpr", stmts, result: chain, type: outT, loc };
+}
+
+
+/** `value` is one of the union arms `tags`: one unionIsTag, or their OR when
+ * several arms share a constructor (`Map<string, number> | Map<string, string>`
+ * answers `instanceof Map` true for both). An operand that cannot be
+ * re-emitted is bound once to a hidden local. */
+export function armTagsTest(L: Lowerer, value: IrExpr, tags: number[], loc: SrcLoc): IrExpr {
+  const unionId = (value.type as { unionId: string }).unionId;
+  const stmts: IrStmt[] = [];
+  let src: IrExpr = value;
+  if (tags.length > 1 && !pureReemittable(value)) {
+    const tmp = L.declareHiddenLocal("%armTags", value.type);
+    stmts.push({ kind: "varDecl", localId: tmp.id, init: value, loc });
+    src = { kind: "varRef", localId: tmp.id, type: value.type, loc };
+  }
+  let test: IrExpr = { kind: "unionIsTag", unionId, tag: tags[0]!, negated: false, value: src, type: BOOL, loc };
+  for (const t of tags.slice(1)) {
+    test = { kind: "logical", op: "||", left: test, right: { kind: "unionIsTag", unionId, tag: t, negated: false, value: src, type: BOOL, loc }, type: BOOL, loc };
+  }
+  return stmts.length === 0 ? test : { kind: "seqExpr", stmts, result: test, type: BOOL, loc };
+}
+
 export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const loc = locOf(expr);
     const op = expr.operatorToken.kind;
@@ -17771,10 +17909,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // Reads in the true branch bridge through maybeNarrow's tag-CHECKED
       // %union.narrow, so nothing here is a trusted reinterpret.
       //
-      // TWO set arms are refused upstream (no test tells them apart), so
-      // the one-hit rule below is the only case that can arise from a
-      // compiled union; the guard stays anyway because a union built by
-      // some other route must never silently pick the first Set.
+      // SEVERAL set arms share the constructor (`Set<number> | Set<string>`):
+      // `instanceof Set` answers true for each of them, so the test is the
+      // OR of their tags (armTagsTest), and members dispatch per arm
+      // (lowerUnionContainerDispatch).
       if (
         ts.isIdentifier(expr.right) &&
         L.isStdlibGlobal(expr.right, "Set") &&
@@ -17784,8 +17922,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (left.type.kind === "union") {
           const def = L.unions.get(left.type.unionId);
           const tags = def ? def.arms.flatMap((a, i) => (a.kind === "set" ? [i] : [])) : [];
-          if (tags.length === 1) {
-            return { kind: "unionIsTag", unionId: left.type.unionId, tag: tags[0]!, negated: false, value: left, type: BOOL, loc };
+          if (tags.length >= 1) {
+            return armTagsTest(L, left, tags, loc);
           }
         }
         // `u instanceof Set` over a DYN (`unknown`) operand -- the
@@ -17825,11 +17963,9 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // Reads in the true branch bridge through maybeNarrow's tag-CHECKED
       // %union.narrow, so nothing here is a trusted reinterpret.
       //
-      // TWO map arms are refused upstream (no test tells them apart, same
-      // as two Set arms), so the one-hit rule below is the only case that
-      // can arise from a compiled union; the guard stays anyway because a
-      // union built by some other route must never silently pick the first
-      // Map.
+      // SEVERAL map arms (`Map<string, number> | Map<string, string>`) are
+      // the same story as several Set arms: the test is the OR of the arm
+      // tags (armTagsTest).
       if (
         ts.isIdentifier(expr.right) &&
         L.isStdlibGlobal(expr.right, "Map") &&
@@ -17839,8 +17975,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (left.type.kind === "union") {
           const def = L.unions.get(left.type.unionId);
           const tags = def ? def.arms.flatMap((a, i) => (a.kind === "map" ? [i] : [])) : [];
-          if (tags.length === 1) {
-            return { kind: "unionIsTag", unionId: left.type.unionId, tag: tags[0]!, negated: false, value: left, type: BOOL, loc };
+          if (tags.length >= 1) {
+            return armTagsTest(L, left, tags, loc);
           }
         }
         // `u instanceof Map` over a DYN (`unknown`) operand -- sql-escaper's

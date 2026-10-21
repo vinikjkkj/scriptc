@@ -6,7 +6,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
-import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
+import { checkedArmBridge, lowerUnionContainerDispatch, captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { DYN_DISPATCH_METHODS, islandPrimitiveExit } from "./lower-calls.js";
@@ -3538,6 +3538,10 @@ function lowerOptionalDefaultArg(
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
     if (!MAP_METHODS.has(name) && !MAP_ITER_METHODS.has(name)) return null;
+    {
+      const d = lowerUnionContainerDispatch(L, call, access, "map", () => lowerMapMethodCall(L, call, access));
+      if (d) return d;
+    }
     let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
     // JavaScript has no type-argument syntax, so `const m = new Map()`
     // types `Map<any, any>` — unmappable — however the program goes on to
@@ -3982,26 +3986,34 @@ function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): voi
     const argNode = call.arguments[0];
     if (!argNode) L.unsupported("SC1090", call, "this call form"); // tsc-guarded
     const fnArg = L.lowerExpr(argNode);
+    // A callback parameter may be WIDER than the arm's own element type when
+    // this map is one arm of a union of maps (`Map<string, number> |
+    // Map<string, string>`: tsc types the callback's value `string | number`).
+    // The helper widens each element into the callback's parameter type.
+    const takes = (p: IrType, own: IrType): boolean =>
+      typeEquals(p, own) || (p.kind === "union" && L.armTag(p.unionId, own) >= 0);
     if (
       fnArg.type.kind !== "func" ||
       fnArg.type.params.length > 2 ||
-      (fnArg.type.params.length >= 1 && !typeEquals(fnArg.type.params[0]!, mapT.value)) ||
-      (fnArg.type.params.length === 2 && !typeEquals(fnArg.type.params[1]!, mapT.key))
+      (fnArg.type.params.length >= 1 && !takes(fnArg.type.params[0]!, mapT.value)) ||
+      (fnArg.type.params.length === 2 && !takes(fnArg.type.params[1]!, mapT.key))
     ) {
       L.badType(argNode, L.typeOf(argNode));
     }
+    const cbValue = fnArg.type.params.length >= 1 ? fnArg.type.params[0]! : mapT.value;
+    const cbKey = fnArg.type.params.length === 2 ? fnArg.type.params[1]! : mapT.key;
     // A void-returning contextual type accepts callbacks returning anything
     // (TS void-assignability), so the callback's ACTUAL return type rides
     // the helper signature — the desugared call discards the result like
     // JS's forEach does.
     const arity = fnArg.type.params.length;
     const fnRet = fnArg.type.ret;
-    const key = `${typeKey(mapT.key)}:${typeKey(mapT.value)}:${arity}:${typeKey(fnRet)}`;
+    const key = `${typeKey(mapT.key)}:${typeKey(mapT.value)}:${arity}:${typeKey(fnRet)}:${typeKey(cbValue)}:${typeKey(cbKey)}`;
     let helper = L.mapHofHelpers.get(key);
     if (!helper) {
       helper = `%map.forEach.${L.mapHofHelpers.size}`;
       L.mapHofHelpers.set(key, helper);
-      L.liftedFns.push(L.buildMapForEachFn(helper, mapT, arity, fnRet, loc));
+      L.liftedFns.push(L.buildMapForEachFn(helper, mapT, arity, fnRet, loc, cbValue, cbKey));
     }
     return { kind: "call", callee: helper, args: [receiver, fnArg], type: VOID, loc };
   }
@@ -4022,9 +4034,11 @@ function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): voi
     mapT: IrType & { kind: "map" },
     arity: number,
     fnRet: IrType,
-    loc: SrcLoc,): IrFunction {
+    loc: SrcLoc,
+    cbValue: IrType = mapT.value,
+    cbKey: IrType = mapT.key,): IrFunction {
     const fnT = funcOf(
-      arity === 0 ? [] : arity === 1 ? [mapT.value] : [mapT.value, mapT.key],
+      arity === 0 ? [] : arity === 1 ? [cbValue] : [cbValue, cbKey],
       fnRet,
     );
     const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
@@ -4049,24 +4063,28 @@ function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): voi
     const callArgs: IrExpr[] = [];
     const visitBody: IrStmt[] = [];
     if (arity >= 1) {
-      locals.push({ id: "v.0", name: "v", type: mapT.value, mutable: false });
+      locals.push({ id: "v.0", name: "v", type: cbValue, mutable: false });
       visitBody.push({
         kind: "varDecl",
         localId: "v.0",
-        init: iter("iterValue", [ref("i.0", F64)], mapT.value),
+        init: typeEquals(cbValue, mapT.value)
+          ? iter("iterValue", [ref("i.0", F64)], mapT.value)
+          : L.coerceToExpected(iter("iterValue", [ref("i.0", F64)], mapT.value), cbValue),
         loc,
       });
-      callArgs.push(ref("v.0", mapT.value));
+      callArgs.push(ref("v.0", cbValue));
     }
     if (arity === 2) {
-      locals.push({ id: "k.0", name: "k", type: mapT.key, mutable: false });
+      locals.push({ id: "k.0", name: "k", type: cbKey, mutable: false });
       visitBody.push({
         kind: "varDecl",
         localId: "k.0",
-        init: iter("iterKey", [ref("i.0", F64)], mapT.key),
+        init: typeEquals(cbKey, mapT.key)
+          ? iter("iterKey", [ref("i.0", F64)], mapT.key)
+          : L.coerceToExpected(iter("iterKey", [ref("i.0", F64)], mapT.key), cbKey),
         loc,
       });
-      callArgs.push(ref("k.0", mapT.key));
+      callArgs.push(ref("k.0", cbKey));
     }
     visitBody.push({
       kind: "exprStmt",
@@ -4211,6 +4229,10 @@ function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): voi
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
     if (!SET_METHODS.has(name) && !SET_COMBINE_METHODS.has(name)) return null;
+    {
+      const d = lowerUnionContainerDispatch(L, call, access, "set", () => lowerSetMethodCall(L, call, access));
+      if (d) return d;
+    }
     let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
     // The identity-Set idiom (JS): the CHECKER type is an unmappable
     // Set<union-of-signatures>, but the VALUE lowered as a real Set of
@@ -4275,18 +4297,21 @@ function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): voi
     if (
       fnArg.type.kind !== "func" ||
       fnArg.type.params.length > 2 ||
-      !fnArg.type.params.every((p) => typeEquals(p, setT.elem))
+      !fnArg.type.params.every((p) => typeEquals(p, setT.elem) || (p.kind === "union" && L.armTag(p.unionId, setT.elem) >= 0))
     ) {
       L.badType(argNode, L.typeOf(argNode));
     }
+    // Wider than the arm's element only when this set is one arm of a union
+    // of sets (`Set<number> | Set<string>`): the helper widens each element.
+    const cbElem = fnArg.type.params.length >= 1 ? fnArg.type.params[0]! : setT.elem;
     const arity = fnArg.type.params.length;
     const fnRet = fnArg.type.ret;
-    const key = `${typeKey(setT.elem)}:${arity}:${typeKey(fnRet)}`;
+    const key = `${typeKey(setT.elem)}:${arity}:${typeKey(fnRet)}:${typeKey(cbElem)}`;
     let helper = L.setHofHelpers.get(key);
     if (!helper) {
       helper = `%set.forEach.${L.setHofHelpers.size}`;
       L.setHofHelpers.set(key, helper);
-      L.liftedFns.push(L.buildSetForEachFn(helper, setT, arity, fnRet, loc));
+      L.liftedFns.push(L.buildSetForEachFn(helper, setT, arity, fnRet, loc, cbElem));
     }
     return { kind: "call", callee: helper, args: [receiver, fnArg], type: VOID, loc };
   }
@@ -4305,9 +4330,10 @@ function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): voi
     setT: IrType & { kind: "set" },
     arity: number,
     fnRet: IrType,
-    loc: SrcLoc,): IrFunction {
+    loc: SrcLoc,
+    cbElem: IrType = setT.elem,): IrFunction {
     const elem = setT.elem;
-    const fnT = funcOf(Array.from({ length: arity }, () => elem), fnRet);
+    const fnT = funcOf(Array.from({ length: arity }, () => cbElem), fnRet);
     const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
     const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
     const iter = (
@@ -4330,14 +4356,16 @@ function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): voi
     const visitBody: IrStmt[] = [];
     const callArgs: IrExpr[] = [];
     if (arity >= 1) {
-      locals.push({ id: "v.0", name: "v", type: elem, mutable: false });
+      locals.push({ id: "v.0", name: "v", type: cbElem, mutable: false });
       visitBody.push({
         kind: "varDecl",
         localId: "v.0",
-        init: iter("iterKey", [ref("i.0", F64)], elem),
+        init: typeEquals(cbElem, elem)
+          ? iter("iterKey", [ref("i.0", F64)], elem)
+          : L.coerceToExpected(iter("iterKey", [ref("i.0", F64)], elem), cbElem),
         loc,
       });
-      for (let i = 0; i < arity; i++) callArgs.push(ref("v.0", elem));
+      for (let i = 0; i < arity; i++) callArgs.push(ref("v.0", cbElem));
     }
     visitBody.push({
       kind: "exprStmt",
@@ -5738,10 +5766,24 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     return lowerForOfMapOrSet(L, stmt, iterable, setT, proj);
   }
 
+  /** `for (const [k, v] of m)` where `m` is a UNION of several Maps (or Sets):
+   * `Map<string, number> | Map<string, string>`. The body lowers ONCE; the
+   * loop's iteration primitives dispatch on the runtime tag, each arm's read
+   * widened to the type the checker gave the binding. The live-iteration
+   * contract is unchanged (iterEnter/iterExit bracket the active arm). */
+  export function lowerForOfUnionContainer(L: Lowerer, stmt: ts.ForOfStatement,
+    iterable: IrExpr,
+    armIrs: ((IrType & { kind: "map" }) | (IrType & { kind: "set" }))[],
+    tags: number[],
+    proj?: ForOfIterProjection,): IrStmt {
+    return lowerForOfMapOrSet(L, stmt, iterable, armIrs[0]!, proj, { armIrs, tags });
+  }
+
   function lowerForOfMapOrSet(L: Lowerer, stmt: ts.ForOfStatement,
     iterable: IrExpr,
     contT: (IrType & { kind: "map" }) | (IrType & { kind: "set" }),
-    proj?: ForOfIterProjection,): IrStmt {
+    proj?: ForOfIterProjection,
+    multi?: { armIrs: ((IrType & { kind: "map" }) | (IrType & { kind: "set" }))[]; tags: number[] },): IrStmt {
     const loc = locOf(stmt);
     const isMap = contT.kind === "map";
     // What each pass YIELDS: a [first, second] pair (the Map default and
@@ -5766,27 +5808,63 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       isLet = (list.flags & ts.NodeFlags.Let) !== 0 || isVar;
       decl = list.declarations[0]!; // the grammar allows exactly one
     }
+    if (multi && exprHead) {
+      L.unsupported("SC1090", exprHead, "for-of heads assigning pre-declared bindings over a union of Maps or Sets (declare the binding in the head)");
+    }
     L.scopes.push(new Map());
     try {
-      const m = L.declareHiddenLocal(isMap ? "%mapof" : "%setof", contT);
+      const m = L.declareHiddenLocal(isMap ? "%mapof" : "%setof", multi ? iterable.type : contT);
       const i = L.declareHiddenLocal("%iterof", F64);
       i.mutable = true; // the loop counter reassigns (hidden locals default const)
       const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
       const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
-      const iter = (method: string, args: IrExpr[], type: IrType): IrExpr =>
+      const iterOne = (c: IrType & { kind: "map" | "set" }, recv: IrExpr, method: string, args: IrExpr[], type: IrType): IrExpr =>
         isMap
-          ? { kind: "mapIntrinsic", method: method as IrMapIntrinsicMethod, receiver: ref(m.id, contT), args, type, loc }
-          : { kind: "setIntrinsic", method: method as IrSetIntrinsicMethod, receiver: ref(m.id, contT), args, type, loc };
-      const keyT = isMap ? (contT as IrType & { kind: "map" }).key : (contT as IrType & { kind: "set" }).elem;
+          ? { kind: "mapIntrinsic", method: method as IrMapIntrinsicMethod, receiver: recv, args, type, loc }
+          : { kind: "setIntrinsic", method: method as IrSetIntrinsicMethod, receiver: recv, args, type, loc };
+      // Over a union of containers every primitive is a tag dispatch: the arm
+      // reads in its own native type and widens to what the caller asked for.
+      const iterMulti = (method: string, args: IrExpr[], type: IrType): IrExpr => {
+        const mu = multi!;
+        const holder = ref(m.id, iterable.type);
+        const armCall = (k: number): IrExpr => {
+          const arm = mu.armIrs[k]!;
+          const armType: IrType =
+            method === "iterKey" ? (arm.kind === "map" ? arm.key : arm.elem)
+            : method === "iterValue" ? (arm as IrType & { kind: "map" }).value
+            : type.kind === "void" ? VOID : type;
+          const one = iterOne(arm, checkedArmBridge(L, holder, arm, loc), method, args, armType);
+          if (type.kind === "void") {
+            return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: one, loc }], result: { kind: "boolLit", value: true, type: BOOL, loc }, type: BOOL, loc };
+          }
+          return typeEquals(armType, type) ? one : L.coerceToExpected(one, type);
+        };
+        const outT: IrType = type.kind === "void" ? BOOL : type;
+        let chain = armCall(mu.armIrs.length - 1);
+        for (let k = mu.armIrs.length - 2; k >= 0; k--) {
+          chain = {
+            kind: "ternary",
+            cond: { kind: "unionIsTag", unionId: (iterable.type as { unionId: string }).unionId, tag: mu.tags[k]!, negated: false, value: holder, type: BOOL, loc },
+            then: armCall(k),
+            else_: chain,
+            type: outT,
+            loc,
+          };
+        }
+        return chain;
+      };
+      const iter = (method: string, args: IrExpr[], type: IrType): IrExpr =>
+        multi ? iterMulti(method, args, type) : iterOne(contT, ref(m.id, contT), method, args, type);
+      let keyT = isMap ? (contT as IrType & { kind: "map" }).key : (contT as IrType & { kind: "set" }).elem;
       const keyRead = (): IrExpr => iter("iterKey", [ref(i.id, F64)], keyT);
       const valRead = (): IrExpr =>
-        iter("iterValue", [ref(i.id, F64)], (contT as IrType & { kind: "map" }).value);
+        iter("iterValue", [ref(i.id, F64)], multi ? secondT : (contT as IrType & { kind: "map" }).value);
       // The pair's second position (a Map's value; a Set entry repeats the
       // element — JS's [v, v]) and the single yield (a Map's `.values()`
       // reads the value; everything else reads the key/element).
-      const secondT = isMap ? (contT as IrType & { kind: "map" }).value : keyT;
+      let secondT = isMap ? (contT as IrType & { kind: "map" }).value : keyT;
       const secondRead = (): IrExpr => (isMap ? valRead() : keyRead());
-      const singleT = isMap && proj === "values" ? (contT as IrType & { kind: "map" }).value : keyT;
+      let singleT = isMap && proj === "values" ? (contT as IrType & { kind: "map" }).value : keyT;
       const singleRead = (): IrExpr => (isMap && proj === "values" ? valRead() : keyRead());
 
       // The per-iteration bindings at the top of the loop body.
@@ -5829,6 +5907,18 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         // `for (const [k, v] of m)` — bind straight from the primitives;
         // the tuple never exists. `[k]` alone reads only the key.
         const els = decl!.name.elements as readonly (ts.BindingElement & { name: ts.Identifier })[];
+        if (multi) {
+          // The bindings carry the checker's JOINED types (`string | number`
+          // for the value of a Map<string, number> | Map<string, string>).
+          const kt = L.mapTypeOf(L.checker.getTypeAtLocation(els[0]!.name));
+          if (!kt) L.badType(els[0]!.name, L.checker.getTypeAtLocation(els[0]!.name));
+          keyT = kt!;
+          if (els[1]) {
+            const vt = L.mapTypeOf(L.checker.getTypeAtLocation(els[1].name));
+            if (!vt) L.badType(els[1].name, L.checker.getTypeAtLocation(els[1].name));
+            secondT = vt!;
+          }
+        }
         const kLocal = L.declareLocal(els[0]!.name, els[0]!.name.text, keyT, isLet);
         binds.push({ kind: "varDecl", localId: kLocal.id, init: keyRead(), loc });
         if (els[1]) {
@@ -5841,7 +5931,15 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         // T otherwise — built/read once into a hidden per-iteration
         // local, the array for-of's exact desugar.
         const elemT = L.mapTypeOf(L.checker.getTypeAtLocation(decl!.name));
-        if (yieldsPair) {
+        if (multi && !yieldsPair) {
+          if (!elemT) L.badType(decl!.name, L.checker.getTypeAtLocation(decl!.name));
+          if (isMap && proj === "values") secondT = elemT!;
+          else keyT = elemT!;
+          singleT = elemT!;
+        }
+        if (multi && yieldsPair) {
+          if (elemT?.kind !== "union") L.badType(decl!.name, L.checker.getTypeAtLocation(decl!.name));
+        } else if (yieldsPair) {
           const shape = elemT?.kind === "record" ? L.shapes.get(elemT.shapeId) : null;
           if (
             elemT?.kind !== "record" || !shape?.tuple || shape.fields.length !== 2 ||
@@ -5853,7 +5951,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         } else if (!elemT || !typeEquals(elemT, singleT)) {
           L.badType(decl!.name, L.checker.getTypeAtLocation(decl!.name)); // defensive: the lib declares T
         }
-        const elemInit: IrExpr = yieldsPair
+        let elemInit: IrExpr = yieldsPair && !multi
           ? {
               kind: "recordLit",
               fields: [
@@ -5864,6 +5962,39 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
               loc,
             }
           : singleRead();
+        if (multi && yieldsPair) {
+          // The element is the checker's union of tuples: each arm builds ITS
+          // OWN tuple from native reads and widens it into that union.
+          const mu = multi;
+          const armElem = (k: number): IrExpr => {
+            const arm = mu.armIrs[k]! as IrType & { kind: "map" };
+            const tupT: IrType = { kind: "record", shapeId: L.shapes.intern([{ name: "0", type: arm.key }, { name: "1", type: arm.value }], true) };
+            const holder = ref(m.id, iterable.type);
+            const br = checkedArmBridge(L, holder, arm, loc);
+            const rec: IrExpr = {
+              kind: "recordLit",
+              fields: [
+                { name: "0", value: iterOne(arm, br, "iterKey", [ref(i.id, F64)], arm.key) },
+                { name: "1", value: iterOne(arm, br, "iterValue", [ref(i.id, F64)], arm.value) },
+              ],
+              type: tupT,
+              loc,
+            };
+            return L.coerceToExpected(rec, elemT!);
+          };
+          let chain = armElem(mu.armIrs.length - 1);
+          for (let k = mu.armIrs.length - 2; k >= 0; k--) {
+            chain = {
+              kind: "ternary",
+              cond: { kind: "unionIsTag", unionId: (iterable.type as { unionId: string }).unionId, tag: mu.tags[k]!, negated: false, value: ref(m.id, iterable.type), type: BOOL, loc },
+              then: armElem(k),
+              else_: chain,
+              type: elemT!,
+              loc,
+            };
+          }
+          elemInit = chain;
+        }
         if (ts.isIdentifier(decl!.name)) {
           const varTarget = forOfVarTarget(L, decl!);
           if (varTarget) {
