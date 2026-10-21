@@ -18012,6 +18012,34 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           return { kind: "boolLit", value: true, type: BOOL, loc };
         }
       }
+      // `x instanceof Date` over a union with a Date arm -- the Map/Set rule
+      // one constructor over. sql-escaper's SqlValue carries a Date arm and
+      // asks `currentValue instanceof Date`; `typeof` answers "object" for a
+      // Date and every object-flavored sibling alike, so the tag compare is
+      // the only thing that separates them. A Date can only be CONSTRUCTED
+      // through the composed forms today, so the arm is never inhabited by a
+      // value this test could misjudge; the test is still exact (tag).
+      if (
+        ts.isIdentifier(expr.right) &&
+        L.isStdlibGlobal(expr.right, "Date") &&
+        !L.caughtLocalOf(expr.left)
+      ) {
+        const left = L.lowerExpr(expr.left);
+        if (left.type.kind === "union") {
+          const def = L.unions.get(left.type.unionId);
+          const tags = def ? def.arms.flatMap((a, i) => (a.kind === "date" ? [i] : [])) : [];
+          if (tags.length >= 1) {
+            return armTagsTest(L, left, tags, loc);
+          }
+        }
+        const pureDateRead =
+          left.kind === "varRef" ||
+          (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
+          narrowBridgeArm(left)?.kind === "varRef";
+        if (left.type.kind === "date" && pureDateRead) {
+          return { kind: "boolLit", value: true, type: BOOL, loc };
+        }
+      }
       // `x instanceof X` where X is a class VALUE (a classval-typed
       // binding): the target is DYNAMIC — a hierarchy target reads its
       // interval from the class object at runtime (instanceOfValue); a
