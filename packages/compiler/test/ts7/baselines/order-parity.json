@@ -11305,6 +11305,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8219-require-table-as-value/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8219-require-table-as-value/types.js",
+    "<repo>/tests/corpus/8219-require-table-as-value/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
