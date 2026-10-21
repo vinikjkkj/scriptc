@@ -15281,8 +15281,8 @@ export class Lowerer {
     return lowerElementWrite(this, expr);
   }
 
-  ensureString(e: IrExpr, node: ts.Node): IrExpr {
-    return ensureString(this, e, node);
+  ensureString(e: IrExpr, node: ts.Node, explicitString = false): IrExpr {
+    return ensureString(this, e, node, explicitString);
   }
 
   lowerTemplate(expr: ts.TemplateExpression): IrExpr {

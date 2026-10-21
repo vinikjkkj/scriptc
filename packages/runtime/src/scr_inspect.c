@@ -1138,6 +1138,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       return scr_str_new("", 0); /* the pending throw wins */
     }
     case SCR_DYN_HANDLE: {
+      /* A Symbol is a primitive: util.inspect prints its descriptive string,
+       * `Symbol(desc)`, bare (no quotes, unlike a string). */
+      if (scr_dyn_is_symbol(d)) return scr_dyn_symbol_descriptive(d);
       /* Node prints the class's full property dump (ServerResponse {
        * ... }) — internals we do not model. Fence loudly instead of a
        * silent-wrong shape (SEMANTICS.md). */
