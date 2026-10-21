@@ -5063,6 +5063,22 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       const rows = uniformTupleUnionElem(widened, ctx);
       if (rows !== null) return arrayOf(rows);
     }
+    // Inside a member of a body-less .d.ts class (ctx.declMember), a union with
+    // an array-of-unknown constituent (`({} | null | undefined)[]`, which maps
+    // to the dyn array) is the library author saying "any value": mysql2's
+    // `QueryValues` is `string | number | bigint | boolean | Date | null |
+    // undefined | Blob | Buffer | Uint8Array | Raw | ({} | null | undefined)[] |
+    // { [key: string]: QueryValues }`. A union cannot carry a dyn arm beside
+    // typed ones, and the dyn collapse below wants every arm convertible, which
+    // `Date`, `Blob` and `Buffer` are not and which the recursive record arm
+    // cannot even be asked before its own placeholder is minted. The union is
+    // the checked-dynamic tier. A value that tier cannot hold is refused at
+    // its coercion site, loudly.
+    if (ctx.declMember === true && !ctx.dynamic) {
+      for (const part of ts.constituentTypes(widened)) {
+        if (checker.isArrayType(part) && mapType(part, ctx)?.kind === "dyn") return DYN;
+      }
+    }
     const knownRecursive = unions.recursiveUnionFor(widened);
     if (knownRecursive !== undefined) {
       // A placeholder whose frame failed is POISONED, not empty: refuse the

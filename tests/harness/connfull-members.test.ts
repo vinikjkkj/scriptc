@@ -218,4 +218,38 @@ console.log(c.threadId, c.chain === undefined, c.on("x", () => {}).threadId);
 `,
     );
   }, 240_000);
+
+  test("a union with an array-of-unknown constituent in a member is the checked-dynamic tier", async () => {
+    // mysql2's QueryValues: `string | number | bigint | boolean | Date | null | undefined |
+    // Blob | Buffer | Uint8Array | ({} | null | undefined)[] | { [key: string]: QueryValues }`.
+    // A union cannot carry a dyn arm beside typed ones, and the dyn collapse wants every arm
+    // convertible; as a member's parameter it reads "any value", the checked-dynamic tier.
+    await differential(
+      "values-union",
+      `export type QV =
+  | string | number | bigint | boolean | Date | null | undefined | Blob | Buffer | Uint8Array
+  | ({} | null | undefined)[]
+  | { [key: string]: QV };
+export declare class Conn {
+  threadId: number;
+  query(sql: string, values: QV): string;
+  query(sql: string): string;
+}
+`,
+      `import type { Conn } from "./declib.js";
+function queryImpl(sql: string, values: unknown): string {
+  return sql + ":" + (values === undefined ? "none" : typeof values === "string" ? "s=" + values : typeof values === "number" ? "n=" + values : Array.isArray(values) ? "a" + values.length : "o");
+}
+const c: Conn = {
+  threadId: 1,
+  query: queryImpl as unknown as Conn["query"],
+};
+console.log(c.query("a"));
+console.log(c.query("b", "text"));
+console.log(c.query("c", 42));
+console.log(c.query("d", [1, "x", null]));
+console.log(c.query("e", { k: 1 }));
+`,
+    );
+  }, 240_000);
 });
