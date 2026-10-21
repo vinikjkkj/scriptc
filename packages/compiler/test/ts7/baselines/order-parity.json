@@ -10971,6 +10971,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7800-map-union-two-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7800-map-union-two-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7801-set-union-two-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7801-set-union-two-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7802-map-union-string-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/7802-map-union-string-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7803-map-union-recursive-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/7803-map-union-recursive-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7804-map-union-object-property.ts": {
+   "order": [
+    "<repo>/tests/corpus/7804-map-union-object-property.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7810-a-definite-assignment-local-reads-undefined-before-its-assignment.ts": {
    "order": [
     "<repo>/tests/corpus/7810-a-definite-assignment-local-reads-undefined-before-its-assignment.ts"
@@ -11010,6 +11040,30 @@
   "<repo>/tests/corpus/7816-placeholder-initializers-and-compound-assignment-on-deferred-fields.ts": {
    "order": [
     "<repo>/tests/corpus/7816-placeholder-initializers-and-compound-assignment-on-deferred-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts": {
+   "order": [
+    "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts"
    ],
    "diags": []
   },
@@ -11154,6 +11208,12 @@
   "<repo>/tests/corpus/8101-date-dyn-setters.ts": {
    "order": [
     "<repo>/tests/corpus/8101-date-dyn-setters.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8102-date-format-zones.ts": {
+   "order": [
+    "<repo>/tests/corpus/8102-date-format-zones.ts"
    ],
    "diags": []
   },
@@ -13609,60 +13669,6 @@
   "<repo>/tests/fixtures/node-types/streams.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts": {
-   "order": [
-    "<repo>/tests/corpus/7820-a-curried-closure-returned-into-a-wider-function-return-slot.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts": {
-   "order": [
-    "<repo>/tests/corpus/7821-awaiting-a-promise-string-or-string-or-null-union.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts": {
-   "order": [
-    "<repo>/tests/corpus/7822-a-bivariant-method-parameter-narrowed-along-a-class-hierarchy.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts": {
-   "order": [
-    "<repo>/tests/corpus/7823-a-function-result-widened-into-a-narrower-result-slot.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7800-map-union-two-arms.ts": {
-   "order": [
-    "<repo>/tests/corpus/7800-map-union-two-arms.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7801-set-union-two-arms.ts": {
-   "order": [
-    "<repo>/tests/corpus/7801-set-union-two-arms.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7802-map-union-string-arm.ts": {
-   "order": [
-    "<repo>/tests/corpus/7802-map-union-string-arm.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7803-map-union-recursive-value.ts": {
-   "order": [
-    "<repo>/tests/corpus/7803-map-union-recursive-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7804-map-union-object-property.ts": {
-   "order": [
-    "<repo>/tests/corpus/7804-map-union-object-property.ts"
    ],
    "diags": []
   }
