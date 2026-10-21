@@ -933,7 +933,38 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // cannot leaves the historical fence in place.
     const dynArg = (node: ts.Expression | undefined): IrExpr | null => {
       if (!node) return dynUndefinedExpr(loc);
-      const raw = L.lowerExpr(node);
+      // A callback literal's unannotated parameters carry what the runtime
+      // delivers (a Buffer or a string, an Error or null), not what the
+      // overload the checker picked says: they bind as checked-dynamic
+      // values, narrowed by the program's own tests.
+      const unknownParams: ts.Node[] = [];
+      if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+        for (const p of node.parameters) {
+          if (!ts.isIdentifier(p.name) || p.type || p.initializer || p.dotDotDotToken) continue;
+          if (L.chainNarrowedType.has(p.name)) continue;
+          L.chainNarrowedType.set(p.name, L.checker.getUnknownType());
+          unknownParams.push(p.name);
+          // ...and every read of it in the body (a read carries its own
+          // checker type, which is the overload's).
+          const psym = L.resolveValueSymbol(p.name);
+          if (psym !== null) {
+            ts.walkPreorder(node.body!, (n) => {
+              if (ts.isIdentifier(n) && n.text === (p.name as ts.Identifier).text && L.resolveValueSymbol(n) === psym &&
+                  !L.chainNarrowedType.has(n)) {
+                L.chainNarrowedType.set(n, L.checker.getUnknownType());
+                unknownParams.push(n);
+              }
+              return undefined;
+            });
+          }
+        }
+      }
+      let raw: IrExpr;
+      try {
+        raw = L.lowerExpr(node);
+      } finally {
+        for (const n of unknownParams) L.chainNarrowedType.delete(n);
+      }
       if (raw.type.kind === "dyn") return raw;
       if (raw.kind === "unitLit" || L.dynConvertible(raw.type)) {
         return { kind: "dynFrom", value: raw, type: DYN, loc };
@@ -991,6 +1022,38 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         if (args.length > 2) return null;
         const a = dynArgs([args[0], args[1]]);
         return a && chk("fs.lchmodSyncChk", a, DYN);
+      }
+      case "mkdtemp": {
+        // mkdtemp(prefix[, options], callback)
+        if (args.length < 1 || args.length > 3) return null;
+        const a = dynArgs([args[0], args[1], args[2]]);
+        return a && chk("fs.mkdtempCb", a, DYN);
+      }
+      case "mkdtempSync": {
+        // The table serves the plain string 1-arg form.
+        if (args.length === 1 && L.mapTypeOf(L.typeOf(args[0]!))?.kind === "string") return null;
+        if (args.length > 2) return null;
+        const a = dynArgs([args[0], args[1]]);
+        return a && chk("fs.mkdtempSyncOpts", a, DYN);
+      }
+      case "readFile": {
+        // readFile(path[, options], callback)
+        if (args.length < 1 || args.length > 3) return null;
+        const a = dynArgs([args[0], args[1], args[2]]);
+        return a && chk("fs.readFileCb", a, DYN);
+      }
+      case "lchmod": {
+        if (args.length > 3) return null;
+        const a = dynArgs([args[0], args[1], args[2]]);
+        return a && chk("fs.lchmodCb", a, DYN);
+      }
+      case "read": {
+        // read(fd, buffer, offsetOrOptions, length, position, callback) in
+        // its 2- to 6-argument spellings; the count rides along.
+        if (args.length < 1 || args.length > 6) return null;
+        const a = dynArgs([args[0], args[1], args[2], args[3], args[4], args[5]]);
+        if (a === null) return null;
+        return chk("fs.readCb", [...a, { kind: "numLit", value: args.length, type: F64, loc }], DYN);
       }
       default:
         return null;

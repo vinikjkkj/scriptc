@@ -940,7 +940,10 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
   fs: {
     // The Buffer form (no encoding), the fd forms (readFileSync(fd[,
     // "utf8"])), and the checked-dynamic encoding form.
-    readFileSync: ["fs.readFileSyncBuf", "fs.readFileSyncBytes", "fs.readFileSyncDyn", "fs.readFdSync", "fs.readFdSyncBytes"],
+    readFileSync: ["fs.readFileSyncBuf", "fs.readFileSyncBytes", "fs.readFileSyncDyn", "fs.readFdSync", "fs.readFdSyncBytes", "fs.readFileCb"],
+    // The callback form and the options form of mkdtemp, and fs.read.
+    mkdtempSync: ["fs.mkdtempSyncOpts", "fs.mkdtempCb"],
+    readSync: ["fs.readCb"],
     // The bytes-data form and the { mode } options form.
     writeFileSync: ["fs.writeFileSyncBytes", "fs.writeFileModeSync"],
     // The { recursive, mode } option lowerings.
@@ -953,7 +956,7 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
     // callers fence per site); the ladder runs the REAL lchmod on APPLE,
     // so the chmod fence witnesses it — fencing one spelling fences the
     // operation.
-    chmodSync: ["fs.lchmodSyncChk"],
+    chmodSync: ["fs.lchmodSyncChk", "fs.lchmodCb"],
     // The two-argument listener form.
     watch: ["fs.watchCb"],
     // The options-object forms: the SAME file source and sink with a
