@@ -1164,6 +1164,20 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     note: "new Date(), new Date(ms), and the Date copy constructor all allocate through this call, which only TimeClips its f64 argument — pure in isolation. new Date()'s argument is a nested stdlib.date.now call (the actual clock read, already fenced); the copy form's argument is a nested stdlib.date.value read",
   },
   {
+    id: "stdlib.date.newParts",
+    kind: "stdlib",
+    name: "Date constructor (year/month/day... local-time form)",
+    fns: ["date.newParts"],
+    note: "new Date(y, mo, d, h, mi, s, ms): reads the HOST's zone database to turn a wall-clock reading into an instant (the spec's gap/overlap rule), so the answer depends on the machine that runs the binary",
+  },
+  {
+    id: "stdlib.date.set",
+    kind: "stdlib",
+    name: "Date.prototype setters (setTime, setFullYear .. setMilliseconds and the UTC forms)",
+    fns: ["date.set"],
+    note: "mutates the Date handle's time value; the local forms read the HOST's zone database like the local getters",
+  },
+  {
     id: "stdlib.date.newStr",
     kind: "stdlib",
     name: "new Date(string)",

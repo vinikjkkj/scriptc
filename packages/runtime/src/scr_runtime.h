@@ -10382,6 +10382,11 @@ double scr_date_utc_day(double ms);
  * Windows SystemTimeToTzSpecificLocalTimeEx. Never throw. */
 double scr_date_local_time(double ms);
 double scr_date_tz_offset(double ms);
+/* new Date(y, mo, d, h, mi, s, ms): LOCAL wall time, 2-digit-year rule, +1. */
+ScrDate *scr_date_new_parts(double y, double mo, double d, double h, double mi, double s, double ms);
+/* Every setter (opcode table in scr_date.c): mutates the handle, returns the
+ * new time value. Borrowed receiver; never throws. */
+double scr_date_set(ScrDate *dt, double op, double argc, double a0, double a1, double a2, double a3);
 /* Date.prototype.toString (+1; NULL with a catchable Error when the zone's
  * long name is not one this runtime can state -- see scr_date.c). */
 ScrStr *scr_date_to_string(double ms);

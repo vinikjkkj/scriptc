@@ -11174,6 +11174,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8100-date-ctor-setters.ts": {
+   "order": [
+    "<repo>/tests/corpus/8100-date-ctor-setters.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8101-date-dyn-setters.ts": {
+   "order": [
+    "<repo>/tests/corpus/8101-date-dyn-setters.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/820-multi-decl.ts": {
    "order": [
     "<repo>/tests/corpus/820-multi-decl.ts"
