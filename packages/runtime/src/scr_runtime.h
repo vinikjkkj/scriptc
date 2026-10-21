@@ -10144,6 +10144,13 @@ double scr_date_utc_hours(double ms);
 double scr_date_utc_minutes(double ms);
 double scr_date_utc_seconds(double ms);
 double scr_date_utc_ms(double ms);
+double scr_date_utc_day(double ms);
+/* LOCAL time (scr_date.c): LocalTime(t) as a time value -- the local
+ * field getters are the UTC getters over it -- and getTimezoneOffset.
+ * NaN for an invalid Date. Host zone database: POSIX localtime/gmtime,
+ * Windows SystemTimeToTzSpecificLocalTimeEx. Never throw. */
+double scr_date_local_time(double ms);
+double scr_date_tz_offset(double ms);
 
 /* The WebRTC ownership pairs. Dead code in every program: nothing
  * constructs either handle yet. */

@@ -5972,6 +5972,14 @@ export type IrLibFn =
   | "date.getUTCMinutes"
   | "date.getUTCSeconds"
   | "date.getUTCMilliseconds"
+  /** getUTCDay/getDay's weekday over a time value, pure arithmetic. */
+  | "date.getUTCDay"
+  /** LocalTime(t) as a time value, and getTimezoneOffset: both read the
+   * HOST's zone database (scr_date.c), so unlike the UTC reads above they
+   * are machine state. The local field getters lower as the UTC getters
+   * applied to date.localTime. */
+  | "date.localTime"
+  | "date.tzOffset"
   /** The fs option forms and friends (scr_lib.c), all throwing catchably
    * like the rest of sync fs. mkdirRecursiveSync is Node's recursive
    * algorithm (try mkdir, EEXIST-dir is fine, ENOENT creates the parent
@@ -10246,7 +10254,10 @@ export function moduleUsesDate(mod: IrModule): boolean {
       found = true;
       return;
     }
-    if (node.kind === "libCall" && node.fn === "date.getHours") {
+    if (
+      node.kind === "libCall" &&
+      (node.fn === "date.getHours" || node.fn === "date.localTime" || node.fn === "date.tzOffset")
+    ) {
       found = true;
       return;
     }
