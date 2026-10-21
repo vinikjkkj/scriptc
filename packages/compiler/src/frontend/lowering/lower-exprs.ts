@@ -20640,6 +20640,68 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return { kind: "closure", fnName: name, captures: [], type: funcOf(params, first.ret), loc };
   }
 
+/** `this.onResult` inside a BASE class that never declares `onResult` — the
+   * subclasses do (mysql2's Command.execute reads `this.onResult`, `this.sql`,
+   * `this.queryTimeout`, all assigned by Query/Execute/Ping's constructors).
+   * JS finds the property on the RUNTIME instance, so the read dispatches on
+   * the receiver's class: each declaring subclass answers its own slot, deepest
+   * first, and a receiver that is none of them answers `undefined` — the
+   * property it never had. The answer is checked-dynamic (the declarers may
+   * spell different types, and the checker calls the read `any`). Declines
+   * when no subclass declares the name or a slot cannot box into dyn. */
+  export function lowerSubclassFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression, info: ClassInfo): IrExpr | null {
+    const name = expr.name.text;
+    const decls: { cls: ClassInfo; depth: number; type: IrType }[] = [];
+    const walk = (c: ClassInfo, depth: number): void => {
+      for (const s of c.subclasses) {
+        const own = s.fieldOrder.find((f) => f.name === name && f.redeclared !== true);
+        if (own !== undefined && !(s.base?.fields.has(name) ?? false)) decls.push({ cls: s, depth, type: own.type });
+        walk(s, depth + 1);
+      }
+    };
+    walk(info, 1);
+    if (decls.length === 0) return null;
+    if (!isPlainMethodReceiver(expr.expression)) return null;
+    const loc = locOf(expr);
+    const recv = L.lowerExpr(expr.expression);
+    if (recv.type.kind !== "object") return null;
+    const boxed = (value: IrExpr): IrExpr | null => {
+      const t = value.type;
+      if (t.kind === "dyn") return value;
+      if (t.kind === "undefinedT") return dynUndefinedExpr(loc);
+      if (t.kind === "func") {
+        return canBoxFuncIntoDyn(t, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+          ? { kind: "dynFrom", value, type: DYN, loc }
+          : null;
+      }
+      return L.dynConvertible(t) ? { kind: "dynFrom", value, type: DYN, loc } : null;
+    };
+    decls.sort((a, b) => b.depth - a.depth);
+    let chain: IrExpr = dynUndefinedExpr(loc);
+    for (let i = decls.length - 1; i >= 0; i--) {
+      const d = decls[i]!;
+      const selfT: IrType = { kind: "object", className: d.cls.def.name };
+      const slot = boxed({
+        kind: "fieldGet",
+        obj: { kind: "downcast", value: recv, type: selfT, loc },
+        className: d.cls.def.name,
+        field: name,
+        type: d.type,
+        loc,
+      });
+      if (slot === null) return null;
+      chain = {
+        kind: "ternary",
+        cond: { kind: "instanceOf", value: recv, className: d.cls.def.name, type: BOOL, loc },
+        then: slot,
+        else_: chain,
+        type: DYN,
+        loc,
+      };
+    }
+    return chain;
+  }
+
 /** Field read `obj.f` on class-instance and record receivers, through the
    * shared FieldTarget union (fieldGet / recordGet). Bound method references
    * on classes are rejected specifically; func-typed record fields are
@@ -20669,6 +20731,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const baseInfo = L.classes.get(receiverIr.className) ?? null;
       const viaSubclass = baseInfo === null ? null : lowerUnboundSubclassMethodValue(L, expr, baseInfo);
       if (viaSubclass !== null) return viaSubclass;
+    }
+    if (
+      receiverIr?.kind === "object" && isJsSourceFile(expr.getSourceFile()) &&
+      expr.questionDotToken === undefined &&
+      L.findMethodOn(L.classes.get(receiverIr.className) ?? null, expr.name.text) === null &&
+      !(L.classes.get(receiverIr.className)?.fields.has(expr.name.text) ?? false)
+    ) {
+      const viaField = lowerSubclassFieldRead(L, expr, L.classes.get(receiverIr.className)!);
+      if (viaField !== null) return viaField;
     }
     if (
       receiverIr?.kind === "object" &&
