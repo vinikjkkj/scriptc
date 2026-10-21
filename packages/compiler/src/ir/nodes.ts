@@ -8120,6 +8120,11 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   // on/once("data" | "end"), and the dyn dispatch reaches the SAME
   // scr_child_stream_on_* entry points the static lowering does.
   ["childStream", { tag: "SCR_DYNH_CHILD_STREAM", cls: "Readable" }],
+  // An ES Symbol: an immutable identity value that boxes by REFERENCE (the
+  // round trip keeps identity). Its dispatch ops live in scr_symbol.c and are
+  // installed by the emitted main() exactly when that unit links
+  // (moduleUsesSymbol). typeof answers "symbol".
+  ["symbol", { tag: "SCR_DYNH_SYMBOL", cls: "Symbol" }],
 ]);
 
 /** The bytes ELEMENT kinds that cross the checked-dynamic boundary, each
@@ -8867,11 +8872,11 @@ export function canDynCheckTo(
       nestedMemo.set(x, true);
       return true;
     }
-    // A DATE leaf (a union arm or record field of Date type: sql-escaper's
-    // SqlValue): the walkers test the handle tag (scr_dyn_handle_is) and
-    // unbox it by reference. Only Date is admitted nested -- the other
-    // runtime handles keep the standing-alone-only rule.
-    if (x.kind === "date") {
+    // A runtime HANDLE leaf (a Symbol, a Date, a socket): the matcher is the
+    // tag test (`d->kind == HANDLE && tag == T`) and the arm/builder is the
+    // tag-checked reference unwrap, the same pair the top-level target uses.
+    // It had no nested answer while dynMatch had no tag test.
+    if (DYN_HANDLE_KINDS.has(x.kind)) {
       nestedMemo.set(x, true);
       return true;
     }

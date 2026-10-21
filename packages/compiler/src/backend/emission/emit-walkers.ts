@@ -1409,10 +1409,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         break;
       }
       default: {
-        // A Date leaf: the handle kind and tag, nothing more (the box holds
-        // the retained ScrDate by reference).
+        // A runtime HANDLE leaf (Symbol, Date, ...): the tag test.
         const h = DYN_HANDLE_KINDS.get(t.kind);
-        if (h && t.kind === "date") {
+        if (h) {
           d.push(`  return scr_dyn_handle_is(d, ${h.tag});`);
           break;
         }
@@ -2986,6 +2985,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // A DATE arm (the one handle admitted as a union arm): the arm form
           // pre-tests the match predicate verbatim, so the unbox cannot fail.
           if (soft) d.push(`  if (!scr_dyn_handle_is(d, ${h.tag})) { *ok = false; return NULL; }`);
+          d.push(`  return (${cType(t).trim()})scr_dyn_handle_unbox(d, ${h.tag}, path, ${want});`);
+          break;
+        }
+        if (h && soft) {
+          // A union ARM / nested leaf: the tag test decides, the unbox cannot
+          // then fail (the same retained reference the hard form answers).
+          d.push(`  if (!scr_dyn_handle_is(d, ${h.tag})) { *ok = false; return NULL; }`);
           d.push(`  return (${cType(t).trim()})scr_dyn_handle_unbox(d, ${h.tag}, path, ${want});`);
           break;
         }
