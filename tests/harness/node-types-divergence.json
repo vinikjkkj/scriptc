@@ -11,9 +11,9 @@
   ],
   "typesVersion": "24.13.3",
   "counts": {
-    "total": 49,
+    "total": 48,
     "TYPE": 34,
-    "FENCE": 15
+    "FENCE": 14
   },
   "fenceClusters": {
     "NOTE": [
@@ -43,7 +43,6 @@
       "1447-stdin-closed-events.ts: SC1090 reading 'length' off a value of type any",
       "1448-stream-columns.ts: SC2020 process.stdout/stderr.columns as a plain number",
       "1567-server-close-override.ts: SC1090 optional/defaulted parameters as a value",
-      "1677-emitter-listeners.ts: SC2020 'Function[].length'",
       "1686-stream-readable-paused.ts: SC1090 method calls like 'rest.toString'",
       "1693-stream-pipe-backpressure.ts: SC1043 comparing non-number, non-string values",
       "1770-assert-dyn-strict.ts: SC2020 assert.strictEqual across number/string",
@@ -136,13 +135,6 @@
       "mode": "TYPE",
       "codes": [
         "SC0001"
-      ]
-    },
-    {
-      "name": "1677-emitter-listeners.ts",
-      "mode": "FENCE",
-      "codes": [
-        "SC2020"
       ]
     },
     {
