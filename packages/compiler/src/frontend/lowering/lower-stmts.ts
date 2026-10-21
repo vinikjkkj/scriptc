@@ -6825,6 +6825,14 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
             const classInfo = L.exactClassOfReceiver(expr.left.expression);
             if (classInfo) {
               const found = L.findStaticOn(classInfo, expr.left.name.text);
+              // `C.p = v` over a static SETTER: a call of the setter.
+              // Inherited accessors are the property the subclass inherits
+              // (no own property is created), so any receiver class whose
+              // chain declares the accessor qualifies.
+              if (found === null) {
+                const setter = L.staticAccessorWrite(classInfo, expr.left, expr.right, locOf(expr), false);
+                if (setter) return { kind: "exprStmt", expr: setter, loc: locOf(expr) };
+              }
               if (found?.field !== undefined) {
                 if (found.declarer !== classInfo) {
                   L.unsupported(
