@@ -140,7 +140,7 @@ const PROBES: Probe[] = [
   { id: "stdlib.math.cbrt", source: "console.log(Math.cbrt(27));\n" },
   { id: "stdlib.number.toPrecision", source: "const p = 19.99;\nconsole.log(p.toPrecision(4));\n" },
   { id: "stdlib.string.at", source: 'console.log("abc".at(1));\n' },
-  { id: "diagnostic.sc2011", source: "const y: any = 1;\nconst z = y * 2;\nconsole.log(0);\n" },
+  { id: "diagnostic.sc2011", source: "const y: any = 1;\nconst { x } = y;\nconsole.log(0);\n" },
   // status unsupported — refused with the entry's code
   { id: "syntax.debugger-statements", source: "debugger;\nconsole.log(0);\n" },
   {
