@@ -13160,6 +13160,25 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             };
           }
           const args = call.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+          // JavaScript: a method call through a field holding a function
+          // passes the receiver as `this` (mysql2's `this.next(packet)` over
+          // a stored, detached class method). bindThisClosure is the real
+          // bound function; it declines for rest signatures and unboxable
+          // receivers, which keep the plain call.
+          if (isJsSourceFile(call.getSourceFile()) && (access.expression.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(access.expression))) {
+            const recvDyn = L.coerceToExpected(L.lowerExpr(access.expression), DYN);
+            if (recvDyn.type.kind === "dyn") {
+              const bound = L.bindThisClosure(callee, recvDyn, [], locOf(call));
+              if (bound !== null) {
+                for (let i = args.length; i < params.length; i++) {
+                  const absent = omittedArgFor(L, params[i]!, locOf(call));
+                  if (!absent) L.unsupported("SC1090", call, "calls omitting a non-optional parameter of the callee's type");
+                  args.push(absent);
+                }
+                return { kind: "callValue", callee: bound, args, type: callee.type.ret, loc: locOf(call) };
+              }
+            }
+          }
           for (let i = args.length; i < params.length; i++) {
             const absent = omittedArgFor(L, params[i]!, locOf(call));
             if (!absent) {
@@ -13174,6 +13193,14 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
           }
           const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+          // A JS method call through a field holding a detached function
+          // (`this.next(packet, connection)`) passes the receiver as `this`.
+          if (isJsSourceFile(call.getSourceFile()) && (access.expression.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(access.expression))) {
+            const recv = L.coerceToExpected(L.lowerExpr(access.expression), DYN);
+            if (recv.type.kind === "dyn") {
+              return dynCallWithThis(L, recv, callee, args, access.getText(), locOf(call));
+            }
+          }
           return { kind: "dynCall", callee, calleeName: access.getText(), args, type: DYN, loc: locOf(call) };
         }
       }
@@ -13233,6 +13260,52 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       loc: locOf(call),
     });
   }
+/** `recv.f(args)` where `f` holds a checked-dynamic function value: the call
+ * runs with `this` = the receiver. The ambient-receiver window is opened for
+ * the call's extent by an interned helper `%dyncallthis.<n>(recv, f, a0..)`
+ * (push, call, pop in a `finally` — the callee can throw and the unwind is an
+ * early return, so a bare push/pop would leak a stack entry onto every later
+ * `this` read; bindThisClosure's reasoning). One helper per arity. */
+function dynCallWithThis(L: Lowerer, recv: IrExpr, callee: IrExpr, args: IrExpr[], calleeName: string, loc: SrcLoc): IrExpr {
+  const n = args.length;
+  const name = `%dyncallthis.${n}`;
+  if (!L.liftedFns.some((f) => f.name === name)) {
+    const params: IrParam[] = [
+      { localId: "r.0", name: "r", type: DYN },
+      { localId: "f.0", name: "f", type: DYN },
+      ...args.map((_, i) => ({ localId: `a.${i}`, name: `a${i}`, type: DYN as IrType })),
+    ];
+    const ref = (id: string): IrExpr => ({ kind: "varRef", localId: id, type: DYN, loc });
+    const call: IrExpr = {
+      kind: "dynCall",
+      callee: ref("f.0"),
+      calleeName,
+      args: args.map((_, i) => ref(`a.${i}`)),
+      type: DYN,
+      loc,
+    };
+    L.liftedFns.push({
+      name,
+      params,
+      returnType: DYN,
+      locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+      body: [
+        { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.thisPush", args: [ref("r.0")], type: VOID, loc }, loc },
+        {
+          kind: "tryCatch",
+          tryBody: [{ kind: "return", value: call, loc }],
+          catchBody: null,
+          catchLocalId: null,
+          finallyBody: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.thisPop", args: [], type: VOID, loc }, loc }],
+          loc,
+        },
+      ],
+      loc,
+    });
+  }
+  return { kind: "call", callee: name, args: [recv, callee, ...args], type: DYN, loc };
+}
+
 /** True for the builder idiom `const b = {}; ...b[k] = v...;
  * Object.freeze(b)` -- the one aliased-looking freeze whose frozen-ness is
  * provably unobservable.

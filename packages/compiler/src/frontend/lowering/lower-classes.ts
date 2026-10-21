@@ -896,6 +896,23 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
   return ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e) ? e : null;
 }
 
+/** A function type whose RESULT is a function again (directly or as a union
+   * arm), possibly under a union of its own: the shape a JS state machine's
+   * `this.next` slot unrolls to. */
+  function holdsStateMachineFn(L: Lowerer, t: IrType): boolean {
+    const fnReturnsFn = (f: IrType): boolean => {
+      if (f.kind !== "func") return false;
+      if (f.ret.kind === "func") return true;
+      if (f.ret.kind === "union") {
+        return (L.unions.get(f.ret.unionId)?.arms ?? []).some((a) => a.kind === "func");
+      }
+      return false;
+    };
+    if (t.kind === "func") return fnReturnsFn(t);
+    if (t.kind === "union") return (L.unions.get(t.unionId)?.arms ?? []).some((a) => fnReturnsFn(a));
+    return false;
+  }
+
 /** The builtin Error hierarchy (Error + TypeError/RangeError/SyntaxError)
    * as eagerly-registered ClassInfos: mapType names them the moment a lib
    * Error type appears, so the infos must exist before any lowering. They
@@ -3787,6 +3804,16 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
                 ? (L.mapTypeOf(t) ?? (dynBoxLosesMethodTable(L, t) ? null : dynFallbackType(L, assign, t)))
                 : null;
               if (!type || type.kind === "void") L.badType(assign, t ?? L.typeOf(assign));
+              // A STATE-MACHINE slot (mysql2's `this.next = this.start`, then
+              // `this.next = this.next(packet)`): the field holds methods that
+              // each answer the NEXT method. The checker unrolls that
+              // recursion to a finite depth and the compiled slot cannot
+              // hold a value one level shallower (the call would throw 'no
+              // exact lowering'), so the honest representation is the
+              // checked-dynamic slot, which holds any function value.
+              if (isJsSourceFile(assign.getSourceFile()) && holdsStateMachineFn(L, type) && L.dynConvertible(type)) {
+                type = DYN;
+              }
               // A JSDoc claim the BODY contradicts (`@type {Command}`
               // assigned `undefined` — the lazy-init idiom): the
               // representation follows the body — the field widens to the
