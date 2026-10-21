@@ -11073,6 +11073,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7844-regex-exec-index-lastindex.ts": {
+   "order": [
+    "<repo>/tests/corpus/7844-regex-exec-index-lastindex.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -11831,12 +11837,6 @@
   "<repo>/tests/diagnostics/dataview.ts": {
    "order": [
     "<repo>/tests/diagnostics/dataview.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/date-get-hours-only-composes-with-the-live-clock.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/date-get-hours-only-composes-with-the-live-clock.ts"
    ],
    "diags": []
   },
