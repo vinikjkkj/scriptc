@@ -1770,6 +1770,11 @@ export class Lowerer {
   readonly dynThisLiterals = new Set<ts.ObjectLiteralExpression>();
   /** Functions that return such a literal: their ABI return is dyn. */
   readonly dynReturnFnNodes = new Set<ts.Node>();
+  /** Already-lowered values standing in for a node: a compound element
+   * write (`o[k] += v`, `o[k]++`) computes the combined value from the
+   * element read, then hands the ordinary element-write lowering that value
+   * in place of its right-hand side. */
+  readonly preLowered = new Map<ts.Node, IrExpr>();
   /** Object literals whose CONTEXTUAL TYPE the lowering supplies, because
    * the checker's own answer at that position is not the slot's.
    *
@@ -4843,6 +4848,17 @@ export class Lowerer {
    * (the engine could run the operation) from genuine `unknown` ones. */
   anyOrigin(node: ts.Node): boolean {
     return (this.typeOf(node).flags & ts.TypeFlags.Any) !== 0;
+  }
+
+  /** True when a checked-dynamic operand's CHECKER type is `any` OR a plain
+   * primitive (number, string, boolean, bigint): the dyn is then a width
+   * artifact (an index-signature read, a dyn-held slot) and the operator's
+   * own ToPrimitive/ToNumber conversion is exactly what JS runs. */
+  dynOperandOrigin(node: ts.Node): boolean {
+    return (
+      (this.typeOf(node).flags &
+        (ts.TypeFlags.Any | ts.TypeFlags.NumberLike | ts.TypeFlags.StringLike | ts.TypeFlags.BooleanLike)) !== 0
+    );
   }
 
   /** SCRIPTC_DYN_WHY (compiler-development probe): for every site that

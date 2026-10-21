@@ -1,0 +1,26 @@
+const m: Record<string, number> = { a: 1 };
+const k = "a";
+m[k] += 2; m["a"]++; m[k] *= 3; m[k] -= 1; m[k] **= 2; m[k] %= 7; m[k] |= 8; m[k] <<= 1;
+console.log(m);
+const absent: Record<string, number> = {};
+absent["x"] += 1; absent["y"]++; absent["z"] |= 4; absent["w"] -= 2;
+console.log(absent, Object.keys(absent).length);
+const s: { [key: string]: string } = { x: "1" };
+for (const key of Object.keys(s)) s[key] += "!";
+s["new"] += "?";
+console.log(s);
+const words = "to be or not to be that is the question to".split(" ");
+const count: { [w: string]: number } = {};
+for (const w of words) count[w] = (count[w] || 0) + 1;
+for (const w of words) count[w] += 0;
+console.log(count);
+const fixed = { a: 1, b: 2 };
+for (const f of ["a", "b"] as const) { fixed[f] += 10; fixed[f]++; }
+console.log(fixed);
+const arr = ["p", "q"];
+arr[1] += "!"; arr[0] += arr[1];
+console.log(arr);
+const dyn = JSON.parse('{"n":1,"t":"a"}');
+const dk = "n";
+dyn[dk] += 5; dyn[dk]++; dyn["t"] += "b"; dyn["u"] += 1;
+console.log(dyn);
