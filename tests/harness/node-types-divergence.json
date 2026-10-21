@@ -11,9 +11,9 @@
   ],
   "typesVersion": "24.13.3",
   "counts": {
-    "total": 48,
+    "total": 47,
     "TYPE": 34,
-    "FENCE": 14
+    "FENCE": 13
   },
   "fenceClusters": {
     "NOTE": [
@@ -46,7 +46,7 @@
       "1686-stream-readable-paused.ts: SC1090 method calls like 'rest.toString'",
       "1693-stream-pipe-backpressure.ts: SC1043 comparing non-number, non-string values",
       "1770-assert-dyn-strict.ts: SC2020 assert.strictEqual across number/string",
-      "2462-qs-stringify.ts: SC2020 querystring.stringify over a wide value union",
+      "(CLOSED by block/pooldyn: 2462-qs-stringify.ts, SC2020 querystring.stringify over a wide value union - compiles under @types/node and prints what Node prints on both backends)",
       "(CLOSED by block/elemresolve: 2620-ee-override-once-order.ts and 2622-ee-override-filter.ts, SC1090 .join() element type - the checker's element was wider than the array's own, and .join's joinable-union test read the checker's)",
       "3193-child-stream-into-unknown-round-trip.ts: SC2003 union re-tag ordering"
     ],
@@ -240,13 +240,6 @@
       "mode": "TYPE",
       "codes": [
         "SC0001"
-      ]
-    },
-    {
-      "name": "2462-qs-stringify.ts",
-      "mode": "FENCE",
-      "codes": [
-        "SC2020"
       ]
     },
     {
