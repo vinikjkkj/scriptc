@@ -7985,6 +7985,12 @@ function isJsonSafeAt(
     // validate (a JSON null matches exactly the nullT arm).
     case "nullT":
       return true;
+    // A Date serialises as its ISO string (toJSON), null when invalid --
+    // but only on the STRINGIFY side (dateOk): a JSON text never holds a
+    // Date, so a checked cast out of the dynamic tree to a Date-bearing
+    // type stays fenced (its own leaf rule, not this one).
+    case "date":
+      return dateOk;
     // JSON.stringify THROWS on a bigint ("Do not know how to serialize"),
     // so no JSON surface may carry one.
     case "bigint":
@@ -8013,12 +8019,6 @@ function isJsonSafeAt(
     // honest JSON surface.
     case "requestInit":
     case "request":
-    // A Date serialises as its ISO string (toJSON), null when invalid --
-    // but only on the STRINGIFY side (dateOk): a JSON text never holds a
-    // Date, so a checked cast out of the dynamic tree to a Date-bearing
-    // type stays fenced (its own leaf rule, not this one).
-    case "date":
-      return dateOk;
     // A Blob / PromiseConstructor handle has no honest JSON surface either:
     // Node serialises a Blob as {} and a constructor not at all.
     case "opaque":
