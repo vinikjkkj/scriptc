@@ -8093,9 +8093,10 @@ class LlEmitter {
         // the owned temp in the frame like any other.
         const acc = elemAccess(e.arr.type.elem);
         const accTy = acc === "f64" ? "double" : acc === "bool" ? "i1" : "ptr";
-        this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @scr_arr_get_${acc}(ptr, double)`);
+        const getFn = e.nanOnMiss ? "scr_arr_get_f64_nan" : `scr_arr_get_${acc}`;
+        this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @${getFn}(ptr, double)`);
         const t = B.tmp();
-        B.line(`${t} = call ${accTy} @scr_arr_get_${acc}(ptr ${arr.name}, double ${idx.name})`);
+        B.line(`${t} = call ${accTy} @${getFn}(ptr ${arr.name}, double ${idx.name})`);
         return this.own({ name: t, type: e.type });
       }
       case "arrIntrinsic":

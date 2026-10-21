@@ -1137,6 +1137,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // Ref-element reads return +1 (the runtime retains); newTemp
         // registers the owned temp in the frame like any other.
         const acc = elemAccess(e.arr.type.elem);
+        if (e.nanOnMiss) return E.newTemp(e.type, `scr_arr_get_f64_nan(${arr.name}, ${idx.name})`);
         return E.newTemp(e.type, `scr_arr_get_${acc}(${arr.name}, ${idx.name})`);
       }
       case "arrIntrinsic": {

@@ -589,6 +589,18 @@ double scr_arr_get_f64(ScrArr *a, double i) {
   return scr_slot_to_f64(a->data[scr_arr_check_index(a, i, false)]);
 }
 
+/* The NaN-on-miss twin of scr_arr_get_f64: the same fast window, and every
+ * index the window does not accept (negative, fractional, NaN, infinite, or
+ * past the end) answers NaN, which is what Node's `undefined` is in the
+ * arithmetic and comparisons this read is emitted for. */
+double scr_arr_get_f64_nan(ScrArr *a, double i) {
+  if (i >= 0.0 && i < SCR_ARR_FAST_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)a->len) return scr_slot_to_f64(a->data[n]);
+  }
+  return NAN;
+}
+
 bool scr_arr_get_bool(ScrArr *a, double i) {
   return a->data[scr_arr_check_index(a, i, false)] != 0;
 }
