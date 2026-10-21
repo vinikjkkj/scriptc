@@ -2871,7 +2871,14 @@ const SYMBOLIC_PAIR_BUDGET = 256;
       }
       let bound: IrType = DYN;
       const arg = call.arguments[i];
-      if (arg && !ts.isSpreadElement(arg)) {
+      // A require() table binding passed whole travels as its checked-dynamic
+      // snapshot (cjsRequireBindingValueOf), so the slot stays DYN.
+      const tableArg =
+        arg !== undefined &&
+        ts.isIdentifier(arg) &&
+        L.builtinNamespaceModuleOf(arg) === null &&
+        L.cjsLocalModuleBindingOf(arg);
+      if (arg && !tableArg && !ts.isSpreadElement(arg)) {
         // The argument's own checker type, literal-widened ('add' binds
         // string) — typeOf consults the ACTIVE instance's bindings, so a
         // bound param forwarded into another implicit call transitively

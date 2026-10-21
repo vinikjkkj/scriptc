@@ -9,7 +9,7 @@ import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
-import { dynImportBindingDeclOf } from "./lower-island.js";
+import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
@@ -1385,6 +1385,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // their access sites only. The CommonJS namespace binding
       // (`const lib = require("./lib.js")`) gets the same fence.
       if (L.builtinNamespaceModuleOf(expr) !== null || L.cjsLocalModuleBindingOf(expr)) {
+        if (ts.isIdentifier(expr) && L.builtinNamespaceModuleOf(expr) === null) {
+          const tableValue = cjsRequireBindingValueOf(L, expr);
+          if (tableValue !== null) return tableValue;
+        }
         L.unsupported(
           "SC1090",
           expr,
