@@ -479,104 +479,64 @@ export interface GenericInstance {
 
 /** A method call on a value from an UNCOMPILABLE declaration-only module —
    * a `.d.ts` (workspace or npm) with no compiled implementation twin, the
-   * protobufjs `proto.X.decode(...)` shape — lowered to a RUNTIME TRAP
-   * instead of a build error. The module ships no compilable body, so the
-   * call cannot run statically; but the value-side rule mirrors the TYPE
-   * rule (types.ts maps declaration-file data shapes) — an external
-   * dependency's uncompiled method compiles to a throw that fires only if
-   * REACHED, so a program that never calls it (the QR path never runs the
-   * pairing flow's proto decode) builds and runs. The arguments still
-   * evaluate for their effects (Node's order), then the trap throws a
-   * catchable Error naming the member.
+   * protobufjs `proto.X.decode(...)` shape. The module ships no compilable
+   * body, so the call cannot run in a static build: it is a COMPILE REFUSAL
+   * that names the member and says why its module has no body. (It used to
+   * lower to a runtime trap that threw when reached; a build that compiles
+   * a call it cannot run is not a build of the program.)
    *
-   * Null (the caller keeps the ordinary fence) unless EVERY declaration of
-   * the called member is in a NON-stdlib declaration file with no compiled
-   * twin: the stdlib's own gaps are real scriptc gaps (compile errors),
-   * and a member with any compiled declaration has a real body to call.
-   * STATIC builds only — under --dynamic the island executes the call. */
-  export function uncompilableExternMethodTrap(
+   * Applies only when EVERY declaration of the called member is in a
+   * NON-stdlib declaration file: the stdlib's own gaps get their own
+   * stdlib refusal, and a member with a compiled declaration has a real
+   * body to call. Static builds only: under --dynamic the island executes
+   * the call. Returns normally when it does not apply. */
+  export function refuseUncompilableExternMethod(
     L: Lowerer,
     call: ts.CallExpression,
     access: ts.PropertyAccessExpression,
-  ): IrExpr | null {
-    if (L.dynamic) return null;
+  ): void {
+    if (L.dynamic) return;
     const methodSym = L.checker.getSymbolAtLocation(access.name);
     const decls = methodSym ? L.checker.declarationsOf(methodSym) : [];
-    if (decls.length === 0) return null;
-    // Reaching this fallthrough already means NO lowering resolved a
-    // compilable body for the method — so a declaration-file twin being in
-    // the module graph (a minified bundle whose per-method lazy factories
-    // never resolve, like spec/proto) does not help. The signal is simply:
-    // every declaration is in a NON-stdlib declaration file. The stdlib's
-    // own unlowered members stay compile errors (real scriptc gaps); an
-    // external declared method with no resolved body is the uncompilable-
-    // dependency case that traps.
+    if (decls.length === 0) return;
     const uncompilable = decls.every((d) => {
       const sf = d.getSourceFile();
       return sf.isDeclarationFile && !L.isStdlibFile(sf);
     });
-    if (!uncompilable) return null;
-    // SCRIPTC_DTSTWIN_WHY probe: this fence and the declaration-module
-    // fence in lower-exprs share a CAUSE but not a predicate — this one
-    // never asks whether the twin was compiled. The probe reports the
-    // answer it does not ask for, so one run says whether "ships only a
-    // declaration file" is the true story at these sites.
+    if (!uncompilable) return;
+    // SCRIPTC_DTSTWIN_WHY probe: reports whether the declaration module's
+    // twin was compiled, so one run says whether "ships only a declaration
+    // file" is the true story at these sites.
     if (process.env["SCRIPTC_DTSTWIN_WHY"] !== undefined) {
       const sf0 = decls[0]!.getSourceFile();
       process.stderr.write(
         `DTSTWIN methodtrap '${access.getText()}' decl=${sf0.fileName} twinCompiled=${L.declTwinCompiled(sf0)}\n`,
       );
     }
-    // The result type is the mapped call type where it maps (the data-shape
-    // rule maps proto return records now), else the checked-dynamic tree
-    // (a Writer/handle result: the trap throws before the value is ever
-    // read, so its representation is nominal — DYN accepts any downstream
-    // use, including a chained `.finish()` that traps in turn).
-    const resultT = L.mapTypeOf(L.typeOf(call)) ?? DYN;
-    const loc = locOf(call);
-    // The trap throws unconditionally, so the arguments are NOT lowered:
-    // an argument that itself cannot compile (an object literal of another
-    // uncompiled shape) must not sink the whole trap, and on the only path
-    // that reaches a trap — one the program should never take — the
-    // divergence from Node's evaluate-args-then-throw order is
-    // unobservable (both end in the same thrown error). Code the QR path
-    // never runs (the pairing flow's proto calls) builds; code that DOES
-    // reach it throws the catchable "no compiled implementation" error.
     const member = access.getText();
     const modSf = decls[0]!.getSourceFile();
-    const modFile = modSf.fileName;
-    // WHY the module has no body for this member — the two answers are
-    // different facts, and the twin question is what tells them apart.
-    // MEASURED, not assumed: over a whole zapo build every one of these
-    // 99 sites reports declTwinCompiled=TRUE. `spec/proto/index.js` is
-    // 1.8 MB of generated code this build pulled into module order and
-    // lowered; what is missing is a body for THIS member, because the
-    // minified bundle's per-method lazy factories never resolve. Saying
-    // that module "ships only a declaration file" sent the reader looking
-    // for a file sitting right beside the declaration. Both sentences are
-    // true of some site — so say the one that is true of THIS site.
+    // Named by the PACKAGE that ships the code when the declaration lives in
+    // node_modules (a DefinitelyTyped `@types/x` twin names `x`), by path
+    // otherwise.
+    const modFile = (() => {
+      const norm = modSf.fileName.replaceAll("\\", "/");
+      const at = norm.lastIndexOf("/node_modules/");
+      if (at < 0) return norm;
+      const parts = norm.slice(at + "/node_modules/".length).split("/");
+      if (parts[0] === "@types" && parts[1] !== undefined) return parts[1];
+      if (parts[0]!.startsWith("@") && parts[1] !== undefined) return `${parts[0]}/${parts[1]}`;
+      return parts[0]!;
+    })();
+    // WHY the module has no body for this member: the two answers are
+    // different facts, and the twin question tells them apart.
     const why = L.declTwinCompiled(modSf)
       ? `its module '${modFile}' compiled, but no body for this member lowers out of it`
       : `its module '${modFile}' ships only a declaration file`;
-    const name = `%extern.trap.${L.lambdaCounter++}`;
-    L.liftedFns.push({
-      name,
-      params: [],
-      returnType: resultT,
-      locals: [],
-      body: [
-        {
-          kind: "runtimeFence",
-          code: "SC1090",
-          message:
-            `'${member}' has no compiled implementation (${why}) — ` +
-            `this call cannot run in a static build`,
-          loc,
-        },
-      ],
-      loc,
-    });
-    return { kind: "call", callee: name, args: [], type: resultT, loc };
+    L.unsupported(
+      "SC1090",
+      call,
+      `calling '${member}' (it has no compiled implementation: ${why}; this call cannot run in a static build)`,
+    );
   }
 
 /** The SOURCE of a spread that the checked-dynamic tier will walk at RUN
@@ -5631,19 +5591,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // A method call on a value from an UNCOMPILABLE declaration-only
       // module (a workspace/npm `.d.ts` with no compiled twin — the
       // protobufjs `proto.X.decode(...)` shape): the module ships no
-      // compilable body, so the call cannot execute statically. Refusing
-      // the whole BUILD for an external dependency's method that may never
-      // run is too strict — the value-side analog of the declaration-file
-      // TYPE rule (types.ts maps such shapes; the VALUES trap). It lowers
-      // to a runtime trap that throws a catchable error naming the member
-      // if it is ever REACHED, exactly where the uncompiled code would
-      // have run. STATIC builds only (under --dynamic the island runs it),
-      // and never the stdlib (its gaps are real scriptc gaps — compile
-      // errors) — see uncompilableExternMethodTrap.
-      {
-        const trap = uncompilableExternMethodTrap(L, expr, expr.expression);
-        if (trap) return trap;
-      }
+      // compilable body, so the call cannot execute statically and the
+      // build refuses it, naming the member — see
+      // refuseUncompilableExternMethod.
+      refuseUncompilableExternMethod(L, expr, expr.expression);
       // The lib fence's METHOD-CALL chokepoint: a stdlib-declared member
       // that every lowering above declined — an unlowered member
       // (m.keys(), p.then(f), Object.keys(o)) or an unlowered call FORM of

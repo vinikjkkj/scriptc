@@ -1665,7 +1665,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // ...and the same binding when the twin is NOT compiled: the
         // declaration module claims a value whose implementation this
         // build never saw. That is precisely what the method-call fence
-        // reports (uncompilableExternMethodTrap), so it reports it in the
+        // reports (refuseUncompilableExternMethod), so it reports it in the
         // same words — one cause, one message, whether the binding is
         // reached by a call or read as a value.
         const declHome = twinSym ? declModuleWithoutTwin(L, twinSym) : null;
