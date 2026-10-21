@@ -10217,6 +10217,18 @@ export class Lowerer {
     return this.promiseAdaptable(fromT, arm) ? arm : null;
   }
 
+  /** True when slot parameter `slotP` is a class and the wrapped function's
+   * parameter `want` is a proper subclass of it with a checked narrow. */
+  classDowncastParam(slotP: IrType, want: IrType, loc: SrcLoc): boolean {
+    return (
+      slotP.kind === "object" &&
+      want.kind === "object" &&
+      slotP.className !== want.className &&
+      this.isSubclassOf(want.className, slotP.className) &&
+      this.narrowedClassHelper(slotP.className, want.className, loc) !== null
+    );
+  }
+
   /** `Promise<U>` into a `Promise<T>` slot, when the PAYLOAD converts:
    * an async helper that awaits the source and coerces what comes out
    * (`async (p) => coerce(await p)`), so the slot receives a promise whose
@@ -10459,6 +10471,11 @@ export class Lowerer {
       // where there was a strand: the adapter body below already builds the
       // conversion, and its `stopped coercing` assertion is the arming.
       if (this.widthLiftPlan(toT.params[i]!, wantAt(i)!) !== null) continue;
+      // A CLASS parameter narrowed along its hierarchy (a bivariant method
+      // `on(x: Dog)` implementing a slot `on(x: Animal)`): the instance is
+      // passed by reference, so the checked class narrow (instanceof
+      // decides, as `x as Dog` does) hands the callee the very object.
+      if (this.classDowncastParam(toT.params[i]!, wantAt(i)!, loc)) continue;
       strandParams = true;
     }
     let voidRet: "jsval" | "strand" | null = null;
@@ -10506,6 +10523,14 @@ export class Lowerer {
     } else {
       const slotArg = (i: number, pt: IrType): IrExpr => {
         const aRef: IrExpr = { kind: "varRef", localId: `a.${i}`, type: toT.params[i]!, loc };
+        if (this.classDowncastParam(toT.params[i]!, pt, loc)) {
+          const h = this.narrowedClassHelper(
+            (toT.params[i] as IrType & { kind: "object" }).className,
+            (pt as IrType & { kind: "object" }).className,
+            loc,
+          )!;
+          return { kind: "call", callee: h, args: [aRef], type: pt, loc };
+        }
         const converted = this.coerceToExpected(aRef, pt);
         if (!typeEquals(converted.type, pt)) throw new Error("lowerer bug: probed fn-adapter param stopped coercing");
         return converted;
