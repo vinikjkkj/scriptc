@@ -65,6 +65,20 @@
 #define rmdir   _rmdir
 #define isatty  _isatty
 #define mkdir   _mkdir
+/* access() mode bits: <unistd.h> defines them on mingw/POSIX, the UCRT has
+ * only the numbers in its docs (_access takes 0/2/4/6). Node's win32
+ * constants are the same: F_OK 0, R_OK 4, W_OK 2. X_OK stays undefined
+ * on purpose: scr_fs_access masks it down to the R/W bits (there is no
+ * execute bit; Node maps X_OK to F_OK there). */
+#ifndef F_OK
+#define F_OK 0
+#endif
+#ifndef R_OK
+#define R_OK 4
+#endif
+#ifndef W_OK
+#define W_OK 2
+#endif
 #else
 #include <unistd.h>  /* mingw-w64 ships one: getcwd, access, isatty, ... */
 #endif

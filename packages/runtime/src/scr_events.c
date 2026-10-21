@@ -28,7 +28,9 @@
  * read(2) on fd 0 is mingw's CRT read — fd 0 is already _O_BINARY
  * (scr_console.c's install). */
 #include <io.h>
+#ifndef _MSC_VER
 #include <unistd.h> /* mingw-w64 ships one: read */
+#endif
 #include <windows.h>
 #else
 #include <poll.h>
