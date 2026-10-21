@@ -24,9 +24,10 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
+import { gunzipSync } from "node:zlib";
 
 /** What a lockfile records for one locked package. */
 export interface LockedPackage {
@@ -316,5 +317,123 @@ async function persist(path: string, bytes: Buffer): Promise<void> {
     await rename(tmp, path);
   } catch {
     /* A cache that cannot be written is not a verification failure. */
+  }
+}
+
+/* ── in-process extraction ─────────────────────────────────────────────────
+ * The verified bytes are unpacked by this reader, never by a `tar` child
+ * process: GNU tar and the bsdtar that ships with Windows disagree about flags
+ * (`--force-local` is rejected by the latter), and a verified tarball must
+ * unpack the same way on every host. Regular files and directories only; any
+ * other entry type, an absolute path or a `..` segment is a REFUSAL naming the
+ * entry (the thrown message becomes the build refusal's reason). */
+
+function cString(buf: Buffer, start: number, len: number): string {
+  const end = buf.indexOf(0, start);
+  return buf.toString("utf8", start, end === -1 || end > start + len ? start + len : end);
+}
+
+function tarNumber(buf: Buffer, start: number, len: number): number {
+  if ((buf[start]! & 0x80) !== 0) {
+    // GNU base-256 (large sizes)
+    let n = buf[start]! & 0x7f;
+    for (let i = 1; i < len; i++) n = n * 256 + buf[start + i]!;
+    return n;
+  }
+  const t = cString(buf, start, len).trim();
+  return t === "" ? 0 : parseInt(t, 8);
+}
+
+function parsePax(data: Buffer): Map<string, string> {
+  const out = new Map<string, string>();
+  let i = 0;
+  while (i < data.length) {
+    const sp = data.indexOf(0x20, i);
+    if (sp === -1) break;
+    const len = parseInt(data.toString("utf8", i, sp), 10);
+    if (!Number.isFinite(len) || len <= 0) break;
+    const rec = data.toString("utf8", sp + 1, i + len - 1); // drop the trailing newline
+    const eq = rec.indexOf("=");
+    if (eq !== -1) out.set(rec.slice(0, eq), rec.slice(eq + 1));
+    i += len;
+  }
+  return out;
+}
+
+/** The safe relative path of an entry once its first component (`package/`)
+ * is stripped, or an Error naming the entry. Null for the root itself. */
+function safeEntryPath(name: string): string | null {
+  if (name.includes("\\") || name.includes("\0") || /^[A-Za-z]:/.test(name) || name.startsWith("/")) {
+    throw new Error(`tarball entry "${name}" has an absolute or non-portable path`);
+  }
+  const parts = name.split("/").filter((p) => p !== "" && p !== ".");
+  if (parts.includes("..")) throw new Error(`tarball entry "${name}" escapes the extraction directory ("..")`);
+  const rest = parts.slice(1);
+  return rest.length === 0 ? null : rest.join("/");
+}
+
+/** Extract a gzip tarball (first path component stripped) into `dest`,
+ * atomically (temp tree, then rename). Throws an Error naming any refused
+ * entry. */
+export async function extractVerifiedTarball(bytes: Buffer, dest: string): Promise<void> {
+  const tar = gunzipSync(bytes);
+  const files: { path: string; data: Buffer }[] = [];
+  const dirs: string[] = [];
+  let longName: string | null = null;
+  let pax: Map<string, string> | null = null;
+  for (let off = 0; off + 512 <= tar.length; ) {
+    const h = tar.subarray(off, off + 512);
+    if (h.every((b) => b === 0)) break;
+    let name = cString(h, 0, 100);
+    const type = String.fromCharCode(h[156] === 0 ? 0x30 : h[156]!);
+    const size = tarNumber(h, 124, 12);
+    const isUstar = h.toString("latin1", 257, 262) === "ustar";
+    if (isUstar) {
+      const prefix = cString(h, 345, 155);
+      if (prefix !== "") name = `${prefix}/${name}`;
+    }
+    const dataStart = off + 512;
+    const data = tar.subarray(dataStart, dataStart + size);
+    if (data.length < size) throw new Error(`tarball entry "${name}" is truncated`);
+    off = dataStart + Math.ceil(size / 512) * 512;
+    if (type === "L") {
+      longName = cString(data, 0, data.length);
+      continue;
+    }
+    if (type === "x") {
+      pax = parsePax(data);
+      continue;
+    }
+    if (type === "g" || type === "K") continue;
+    if (longName !== null) name = longName;
+    if (pax?.has("path") === true) name = pax.get("path")!;
+    longName = null;
+    pax = null;
+    if (type !== "0" && type !== "5") {
+      const kind = type === "2" ? "a symlink" : type === "1" ? "a hard link" : `type '${type}'`;
+      throw new Error(`tarball entry "${name}" is ${kind}; only regular files and directories are extracted`);
+    }
+    const rel = safeEntryPath(name);
+    if (rel === null) continue;
+    if (type === "5") dirs.push(rel);
+    else files.push({ path: rel, data: Buffer.from(data) });
+  }
+  await mkdir(dirname(dest), { recursive: true });
+  const tmp = await mkdtemp(`${dest}.tmp-`);
+  try {
+    for (const d of dirs) await mkdir(join(tmp, d), { recursive: true });
+    for (const f of files) {
+      const target = join(tmp, f.path);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, f.data);
+    }
+    try {
+      await rename(tmp, dest);
+    } catch {
+      /* A parallel compile won the rename; its tree has the same content. */
+      if (!existsSync(dest)) throw new Error("tarball tree publish failed");
+    }
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
   }
 }

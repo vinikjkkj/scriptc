@@ -39,7 +39,7 @@ import ts from "typescript5";
 import { resolveExports } from "./npm.js";
 import { resolveBareModule, resolveRelativeModule } from "./resolve.js";
 import { isRelativeSpecifier, tsgoPath } from "./shared.js";
-import { lockedIntegrityOf, obtainVerifiedTarball, parseSri } from "./provenance-lockfile.js";
+import { extractVerifiedTarball, lockedIntegrityOf, obtainVerifiedTarball, parseSri } from "./provenance-lockfile.js";
 import type { ProvenancePackageSource, ProvenanceSources } from "./provenance-registry.js";
 
 const execFileAsync = promisify(execFile);
@@ -879,7 +879,7 @@ async function verifiedTarballTree(
     const r = await obtainVerifiedTarball(installed.name, installed.version, lock.locked, join(cacheRoot(), "npm-tarballs"));
     if (!r.ok) return { ok: false, reason: r.reason };
     try {
-      await extractTarballTo(r.bytes, dest);
+      await extractVerifiedTarball(r.bytes, dest);
     } catch (e) {
       return { ok: false, reason: `the verified tarball could not be extracted (${e instanceof Error ? e.message : String(e)})` };
     }

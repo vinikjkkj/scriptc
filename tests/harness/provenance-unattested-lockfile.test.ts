@@ -26,10 +26,11 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   analyze,
@@ -38,7 +39,7 @@ import {
   resolveProvenanceSources,
   setProvenanceSources,
 } from "@scriptc/compiler";
-import { lookupNpmLock, lookupPnpmLock, parseSri } from "../../packages/compiler/src/frontend/provenance-lockfile.js";
+import { extractVerifiedTarball, lookupNpmLock, lookupPnpmLock, parseSri } from "../../packages/compiler/src/frontend/provenance-lockfile.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -49,6 +50,63 @@ const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance-unat
 const EXPECTED = "limit=7\ntag=unattested-ok\n";
 
 const sha512 = (b: Uint8Array): string => `sha512-${createHash("sha512").update(b).digest("base64")}`;
+
+
+/* A minimal tar WRITER, so no test shells out to `tar` (GNU and Windows bsdtar
+ * disagree about flags; the extractor under test does not use it either). */
+interface TarEntry {
+  name: string;
+  data?: Buffer | string;
+  type?: string; // '0' file, '5' dir, '2' symlink, '1' hardlink
+  /** how a name longer than 100 bytes is carried */
+  longName?: "gnu" | "pax";
+}
+function tarHeader(name: string, size: number, type: string): Buffer {
+  const h = Buffer.alloc(512);
+  h.write(name.slice(0, 100), 0, "utf8");
+  h.write("0000644\0", 100);
+  h.write("0000000\0", 108);
+  h.write("0000000\0", 116);
+  h.write(size.toString(8).padStart(11, "0") + "\0", 124);
+  h.write("00000000000\0", 136);
+  h.write("        ", 148);
+  h.write(type, 156);
+  h.write("ustar\0" + "00", 257);
+  let sum = 0;
+  for (const b of h) sum += b;
+  h.write(sum.toString(8).padStart(6, "0") + "\0 ", 148);
+  return h;
+}
+function pad(b: Buffer): Buffer {
+  return Buffer.concat([b, Buffer.alloc((512 - (b.length % 512)) % 512)]);
+}
+function makeTgz(entries: readonly TarEntry[]): Buffer {
+  const parts: Buffer[] = [];
+  for (const e of entries) {
+    const data = Buffer.from(e.data ?? "");
+    const type = e.type ?? "0";
+    if (Buffer.byteLength(e.name) > 100 && e.longName === "pax") {
+      const rec = ` path=${e.name}\n`;
+      let len = rec.length + 1;
+      while (String(len).length + rec.length !== len) len = String(len).length + rec.length;
+      const px = Buffer.from(`${len}${rec}`);
+      parts.push(tarHeader("PaxHeader", px.length, "x"), pad(px));
+    } else if (Buffer.byteLength(e.name) > 100) {
+      const ln = Buffer.from(e.name + "\0");
+      parts.push(tarHeader("././@LongLink", ln.length, "L"), pad(ln));
+    }
+    parts.push(tarHeader(e.name, type === "0" ? data.length : 0, type), pad(type === "0" ? data : Buffer.alloc(0)));
+  }
+  parts.push(Buffer.alloc(1024));
+  return gzipSync(Buffer.concat(parts));
+}
+function listTree(dir: string, base = ""): string[] {
+  return readdirSync(dir).flatMap((n) => {
+    const p = join(dir, n);
+    const r = base === "" ? n : `${base}/${n}`;
+    return statSync(p).isDirectory() ? listTree(p, r) : [r];
+  }).sort();
+}
 
 /** Every URL the stub was asked for. */
 let calls: string[] = [];
@@ -142,12 +200,17 @@ async function makeProject(
   const versions: Record<string, string> = {};
   for (const name of pkgs) {
     const src = join(fixtureDir, "node_modules", name);
-    const stage = join(dir, "stage", name);
-    mkdirSync(join(stage, "package"), { recursive: true });
-    cpSync(src, join(stage, "package"), { recursive: true });
-    const tgz = join(dir, "stage", `${name}.tgz`);
-    await execFileAsync("tar", ["-czf", tgz, "-C", stage, "package"]);
-    const bytes = readFileSync(tgz);
+    const entries: TarEntry[] = [];
+    const walk = (d: string, rel: string): void => {
+      for (const n of readdirSync(d)) {
+        const p = join(d, n);
+        const r = `${rel}/${n}`;
+        if (statSync(p).isDirectory()) walk(p, r);
+        else entries.push({ name: r, data: readFileSync(p) });
+      }
+    };
+    walk(src, "package");
+    const bytes = makeTgz(entries);
     integrity[name] = sha512(bytes);
     versions[name] = (JSON.parse(readFileSync(join(src, "package.json"), "utf8")) as { version: string }).version;
     served.set(`https://registry.npmjs.org/${name}/-/${name}-${versions[name]}.tgz`, bytes);
@@ -424,6 +487,90 @@ describe("provenance: an unattested package reached as a mapped package's depend
     const err = await refusalOf(resolveProvenanceSources(bad.entry));
     expect(err.refusals.map((r) => r.package)).toContain("unattleaf");
     expect(err.refusals[0]!.reason).toContain("INTEGRITY MISMATCH");
+  });
+});
+
+describe("provenance: the lane's ceiling for a verified dependency", () => {
+  test("the mapping lands, the VALUE still does not cross (refused at build time)", async () => {
+    /* Pinned deliberately: reading a value off a mapped dependency of a mapped
+     * authored-JS package is REFUSED at build time. That
+     * ceiling belongs to the authored lane, not to this arm, and pinning it
+     * stops "the blocker went away" being read as "the value arrived". */
+    const depManifest = join(fixtureDir, "manifest-unattdep.json");
+    const p = await makeProject("unattesteddep/main.ts", ["unattmid", "unattleaf"], "pnpm");
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifest;
+    stubFetch(404);
+    setProvenanceSources(await resolveProvenanceSources(p.entry));
+    const refusals = analyze(p.entry).coverage.diagnostics.map((d) => `${d.code}: ${d.message}`);
+    expect(refusals.length).toBeGreaterThan(0);
+    /* The host's require() of the leaf is a CommonJS default import of the
+     * mapped dependency; the refusal names the binding ('leaf'). */
+    expect(refusals.join("\n")).toMatch(/SC1013: the default import of a CommonJS module as a value \(esModuleInterop types 'leaf'/);
+  });
+});
+
+describe("in-process tarball extraction (no tar child process)", () => {
+  const tmp = (): string => mkdtempSync(join(tmpdir(), "scr-untar-"));
+
+  test("extracts files and directories, strips the leading component, handles a GNU long name and a pax path", async () => {
+    const long = "package/" + "d".repeat(60) + "/" + "f".repeat(60) + ".js";
+    const long2 = "package/" + "p".repeat(70) + "/" + "q".repeat(70) + ".js";
+    const dest = join(tmp(), "out");
+    await extractVerifiedTarball(
+      makeTgz([
+        { name: "package/", type: "5" },
+        { name: "package/package.json", data: "{}" },
+        { name: "package/lib/", type: "5" },
+        { name: "package/lib/a.js", data: "a" },
+        { name: long, data: "gnu", longName: "gnu" },
+        { name: long2, data: "pax", longName: "pax" },
+      ]),
+      dest,
+    );
+    expect(listTree(dest)).toEqual(
+      ["lib/a.js", "package.json", long.slice("package/".length), long2.slice("package/".length)].sort(),
+    );
+    expect(readFileSync(join(dest, long.slice(8)), "utf8")).toBe("gnu");
+    expect(readFileSync(join(dest, long2.slice(8)), "utf8")).toBe("pax");
+  });
+
+  test("a '..' entry is refused naming the entry, and nothing is written", async () => {
+    const root = tmp();
+    const dest = join(root, "out");
+    await expect(
+      extractVerifiedTarball(makeTgz([{ name: "package/ok.js", data: "x" }, { name: "package/../../evil.js", data: "x" }]), dest),
+    ).rejects.toThrow(/tarball entry "package\/\.\.\/\.\.\/evil\.js" escapes/);
+    expect(existsSync(dest)).toBe(false);
+    expect(existsSync(join(root, "evil.js"))).toBe(false);
+    /* Positive control: the same archive without the bad entry extracts. */
+    await extractVerifiedTarball(makeTgz([{ name: "package/ok.js", data: "x" }]), dest);
+    expect(listTree(dest)).toEqual(["ok.js"]);
+  });
+
+  test("absolute paths, symlinks and hard links are refused", async () => {
+    const d = (): string => join(tmp(), "out");
+    await expect(extractVerifiedTarball(makeTgz([{ name: "/etc/x", data: "x" }]), d())).rejects.toThrow(/absolute/);
+    await expect(extractVerifiedTarball(makeTgz([{ name: "package/l", type: "2" }]), d())).rejects.toThrow(/symlink/);
+    await expect(extractVerifiedTarball(makeTgz([{ name: "package/h", type: "1" }]), d())).rejects.toThrow(/hard link/);
+  });
+
+  test("a malicious entry in a lockfile-verified tarball REFUSES the build, naming the package and the entry", async () => {
+    noManifest();
+    const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm");
+    const evil = makeTgz([
+      { name: "package/package.json", data: '{"name":"unattlocal","version":"1.4.2"}' },
+      { name: "package/../escape.js", data: "x" },
+    ]);
+    /* The lockfile vouches for the evil bytes, so verification passes and the
+     * extractor is the only thing standing in the way. */
+    const url = "https://registry.npmjs.org/unattlocal/-/unattlocal-1.4.2.tgz";
+    const lock = join(p.dir, "pnpm-lock.yaml");
+    writeFileSync(lock, readFileSync(lock, "utf8").replace(p.integrity["unattlocal"]!, sha512(evil)));
+    stubFetch(404);
+    served.set(url, evil);
+    const err = await refusalOf(resolveProvenanceSources(p.entry));
+    expect(err.refusals[0]!.package).toBe("unattlocal");
+    expect(err.refusals[0]!.reason).toContain('tarball entry "package/../escape.js" escapes');
   });
 });
 
