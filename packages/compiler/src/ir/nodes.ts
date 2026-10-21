@@ -7036,7 +7036,11 @@ export type IrExpr =
    * callees own their params, callers pass +1. */
   | { kind: "virtualCall"; className: string; method: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
   /** Field read `obj.f`. Refcounted fields come out retained (+1). */
-  | { kind: "fieldGet"; obj: IrExpr; className: string; field: string; type: IrType; loc: SrcLoc }
+  | { kind: "fieldGet"; obj: IrExpr; className: string; field: string; type: IrType;
+      /** BOOL-typed: the slot holds NULL (a pointer-backed field no
+       * assignment has reached: `cache!: Map<..>` before its init). Reads the
+       * slot without retaining it. */
+      nullTest?: true; loc: SrcLoc }
   /** Record literal `{ a: 1, b: "x" }`. `type` is the record type; `fields`
    * are in SOURCE order (JS evaluates property values in source order) and
    * cover the shape's fields exactly once each (validated — a source literal

@@ -3333,7 +3333,10 @@ function validateFunction(
         else if (!field) err(`class ${e.className} has no field "${e.field}"`, e.loc);
         else {
           expectType(e.obj, { kind: "object", className: e.className }, "fieldGet receiver");
-          if (!typeEquals(e.type, field.type)) {
+          if (e.nullTest) {
+            if (e.type.kind !== "bool") err(`fieldGet nullTest must be bool, got ${e.type.kind}`, e.loc);
+            if (!isRefCounted(field.type)) err(`fieldGet nullTest on non-pointer field ${e.className}.${e.field}`, e.loc);
+          } else if (!typeEquals(e.type, field.type)) {
             err(`fieldGet ${e.className}.${e.field} type mismatch`, e.loc);
           }
         }

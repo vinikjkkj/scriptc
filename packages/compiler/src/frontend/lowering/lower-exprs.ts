@@ -22,7 +22,7 @@ import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, built
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
-import { absentRead, lowerLyingPlus } from "./lower-absent.js";
+import { absentRead, lowerLyingPlus, lowerNullablePointerChain, nullableFieldRead, presenceComparison } from "./lower-absent.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
@@ -1009,6 +1009,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // literals after lowering, so folding away the value is safe only
       // when the operand is trivial; otherwise keep it simple and reject).
       let operand = L.lowerExpr(expr.expression);
+      if (L.presenceResults.has(operand)) {
+        return {
+          kind: "ternary", cond: operand,
+          then: { kind: "strLit", value: "object", type: STRING, loc },
+          else_: { kind: "strLit", value: "undefined", type: STRING, loc },
+          type: STRING, loc,
+        };
+      }
       if (operand.type.kind === "jsval") {
         return { kind: "jsOp", op: "typeof", args: [operand], type: STRING, loc };
       }
@@ -5714,6 +5722,10 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
     if (!leftIsNull && right.kind !== ts.SyntaxKind.NullKeyword) return null;
     const otherNode = leftIsNull ? right : left;
     const other = L.lowerExpr(otherNode);
+    if (L.presenceResults.has(other)) {
+      // A pointer-backed field's presence bool: `f == null` is "absent".
+      return negated ? other : { kind: "unary", op: "!", operand: other, type: BOOL, loc };
+    }
     if (isUnitType(other.type)) {
       // `null == null`, `undefined == null`: units are mutually loose-equal.
       return { kind: "boolLit", value: !negated, type: BOOL, loc };
@@ -6087,6 +6099,15 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
 
   export function lowerNullishCoalesce(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     let left = L.lowerExpr(expr.left);
+    {
+      // A pointer-backed field (`cache!: Map<..>`): the presence bool picks
+      // the field's value or the default (lower-absent.ts nullableFieldRead).
+      const raw = L.presenceReads.get(left);
+      if (raw !== undefined) {
+        const dflt = L.coerceToExpected(L.lowerExpr(expr.right), raw.type);
+        return { kind: "ternary", cond: left, then: raw, else_: dflt, type: raw.type, loc };
+      }
+    }
     if (left.type.kind === "dyn") {
       // `a ?? b` on a CHECKED-DYNAMIC left: the deciding test is the
       // runtime kind (scr_dyn_is_nullish — UNDEF/NULL take the default;
@@ -6795,6 +6816,10 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // getNonNullableType would be the identity, and a TAIL's intermediate
     // steps carry their plain types for the same reason (TypeScript adds
     // the `| undefined` only where the chain CAN short-circuit).
+    {
+      const np = lowerNullablePointerChain(L, expr, dotNode, recvNode, loc);
+      if (np) return np;
+    }
     if (
       recvNeverNullish(L, recvNode) &&
       !recvSlotCanBeNullish(L, recvNode) &&
@@ -16236,6 +16261,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const negated = op === ts.SyntaxKind.ExclamationEqualsToken;
         const left = L.lowerExpr(expr.left);
         const right = L.lowerExpr(expr.right);
+        {
+          const pc = presenceComparison(L, op, left, right, loc);
+          if (pc) return pc;
+        }
         if (left.type.kind === "string" && right.type.kind === "string") {
           return strEqExpr(negated, left, right, loc);
         }
@@ -16973,6 +17002,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const bothNum = left.type.kind === "f64" && right.type.kind === "f64";
     const bothStr = left.type.kind === "string" && right.type.kind === "string";
 
+    if (op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsEqualsToken) {
+      const pc = presenceComparison(L, op, left, right, loc);
+      if (pc) return pc;
+    }
     // `s + t` over a peeled absent read: see lowerLyingPlus.
     if (op === ts.SyntaxKind.PlusToken && (left.type.kind === "union" || right.type.kind === "union")) {
       const lp = lowerLyingPlus(L, left, right, expr, loc);
@@ -22075,6 +22108,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // undefined-armed union; the read CHECKED-extracts the declared type
       // — a genuinely unassigned read throws the catchable TypeError
       // where Node reads an undefined the declared type cannot hold.
+      if (L.classes.get(target.className)?.nullableFields?.has(target.field) === true && ts.isExpression(blame)) {
+        const nr = nullableFieldRead(L, read as IrExpr & { kind: "fieldGet" }, blame, loc);
+        if (nr) return nr;
+      }
       if (
         L.classes.get(target.className)?.deferredInitFields?.has(target.field) === true &&
         target.fieldType.kind === "union"
