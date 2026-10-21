@@ -1037,6 +1037,10 @@ function lowerOptionalDefaultArg(
     };
     const rewrapOnly = (w: IrType, p: IrType): boolean => {
       if (typeEquals(w, p)) return true;
+      // A checked-dynamic parameter (an implicit-any JS callback) takes a
+      // PRIMITIVE element by value: there is no identity or aliasing for the
+      // dyn conversion to break, unlike an aggregate element it would copy.
+      if (p.kind === "dyn" && (w.kind === "f64" || w.kind === "bool" || w.kind === "string")) return true;
       if (p.kind !== "union") return widthCopyOnly(w, p);
       if (L.armTag(p.unionId, w) >= 0) return true;
       if (w.kind === "union") {
@@ -1233,6 +1237,16 @@ function lowerOptionalDefaultArg(
       // the map helper's closure-returning form has no fixture-backed
       // story yet).
       L.badType(call, L.typeOf(call));
+    }
+    if (method === "map" && fnRet.kind === "dyn" && isJsSourceFile(call.getSourceFile()) && L.dynConvertible(receiver.type) && call.arguments.length === 1) {
+      // A JS callback whose return is checked-dynamic (an implicit-any
+      // function): the result array has no static element type, so the call
+      // runs as the checked-dynamic tree's own map — the receiver crosses as
+      // a dyn array, the callback boxed, the result a dyn array (JS-exact:
+      // the runtime walks the elements and applies the callback).
+      const boxed: IrExpr = { kind: "dynFrom", value: fnArg, type: DYN, loc };
+      const recv: IrExpr = receiver.type.kind === "dyn" ? receiver : { kind: "dynFrom", value: receiver, type: DYN, loc };
+      return { kind: "dynInvoke", recv, method: "map", calleeName: access.getText(), args: [boxed], type: DYN, loc };
     }
     if (method === "map" && fnRet.kind === "dyn") {
       // A checked-dynamic callback return would make the result a
