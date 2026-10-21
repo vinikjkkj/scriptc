@@ -14728,6 +14728,20 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
       // String(v) in the engine — JS-exact (and Node-exact in templates).
       return { kind: "jsOp", op: "toStr", args: [e], type: STRING, loc: e.loc };
     }
+    if (e.type.kind === "bigint") {
+      // `${n}` / "" + n / String(n) over a bigint: the DIGITS, no `n`
+      // suffix (the suffix belongs to inspect). String(n) and n.toString()
+      // already lowered through big.str; the interpolation and
+      // concatenation spellings fell through to the "cannot be compiled
+      // yet" refusal, so one conversion answered and its siblings did not.
+      return {
+        kind: "libCall",
+        fn: "big.str",
+        args: [e, { kind: "numLit", value: 10, type: F64, loc: e.loc }],
+        type: STRING,
+        loc: e.loc,
+      };
+    }
     if (e.type.kind === "regex") {
       // `${re}` / String(re) / "" + re: RegExp.prototype.toString, the
       // same lifted helper the explicit `re.toString()` call uses. A regex
