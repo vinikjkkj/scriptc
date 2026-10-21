@@ -4318,6 +4318,104 @@ export function keyedReadGlobalArmedType(L: Lowerer, decl: ts.VariableDeclaratio
   return null;
 }
 
+/** The slot type of an initializer-less, unannotated JavaScript `let x;`
+ * whose every assignment stores ONE statically-mapped type.
+ *
+ * `let x;` is an evolving `any`: tsc types each REFERENCE by control flow
+ * (the join of what was assigned on the paths reaching it), but the
+ * declaration itself has no type, so the lowering gave the binding the
+ * checked-dynamic slot — and a checked-dynamic slot cannot hold a URL, a
+ * class instance or a Buffer, so ws's `let parsedUrl; if (address
+ * instanceof URL) parsedUrl = address; else parsedUrl = new URL(address)`
+ * fenced at every use. When every `x = e` in the declaring scope (nested
+ * functions included) has an `e` whose checker type maps to the same IR
+ * type T, the binding is a slot of `T | undefined`: undefined is the
+ * unassigned state JS gives it, reads bridge to the narrowed type tsc
+ * assigns at each reference (maybeNarrow, a validated extraction), and
+ * writes wrap into the arm. Any OTHER write (compound, ++/--, a
+ * destructuring or for-in/of target), a type that does not map, two
+ * different types, or no assignment at all keeps the checked-dynamic
+ * slot exactly as before. */
+function evolvedLetType(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrType | null {
+  if (!isLet || !isJsSourceFile(decl.getSourceFile())) return null;
+  if (decl.initializer !== undefined || decl.type !== undefined || !ts.isIdentifier(decl.name)) return null;
+  if (!ts.isVariableDeclarationList(decl.parent) || !ts.isVariableStatement(decl.parent.parent)) return null;
+  const scope = decl.parent.parent.parent;
+  const nameNode = decl.name;
+  const sym = L.checker.getSymbolAtLocation(nameNode);
+  if (!sym) return null;
+  const rhss: ts.Expression[] = [];
+  let bad = false;
+  const isAssignTargetContainer = (n: ts.Node): boolean => {
+    // `n` sits inside a destructuring-assignment pattern: climb the pattern
+    // forms to the `=` whose left side the pattern is.
+    let cur: ts.Node = n;
+    for (;;) {
+      const p: ts.Node | undefined = cur.parent;
+      if (p === undefined) return false;
+      if (ts.isArrayLiteralExpression(p) || ts.isSpreadElement(p) || ts.isParenthesizedExpression(p)) { cur = p; continue; }
+      if (ts.isObjectLiteralExpression(p)) { cur = p; continue; }
+      if (ts.isPropertyAssignment(p) && p.initializer === cur) { cur = p; continue; }
+      if (ts.isShorthandPropertyAssignment(p) || ts.isSpreadAssignment(p)) { cur = p; continue; }
+      return ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.left === cur && cur !== n;
+    }
+  };
+  const visit = (n: ts.Node): void => {
+    if (bad) return;
+    if (ts.isIdentifier(n) && n !== nameNode && n.text === nameNode.text && L.checker.getSymbolAtLocation(n) === sym) {
+      const p = n.parent;
+      if (ts.isBinaryExpression(p) && p.left === n) {
+        const k = p.operatorToken.kind;
+        if (k === ts.SyntaxKind.EqualsToken) {
+          rhss.push(p.right);
+        } else if (k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment) {
+          bad = true;
+        }
+      } else if (
+        (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) &&
+        (p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken)
+      ) {
+        bad = true;
+      } else if ((ts.isForInStatement(p) || ts.isForOfStatement(p)) && p.initializer === n) {
+        bad = true;
+      } else if (isAssignTargetContainer(n)) {
+        bad = true;
+      }
+    }
+    n.forEachChild(visit);
+  };
+  visit(scope);
+  if (bad || rhss.length === 0) return null;
+  let slot: IrType | null = null;
+  for (const rhs of rhss) {
+    // A monomorphized instance overlays its own argument types on the
+    // parameters, which also replaces the checker's flow narrowing of them:
+    // inside `if (address instanceof URL) x = address`, the instance
+    // `address: string` makes the stored value a string while the checker
+    // (and the program's meaning) says URL. That statement is on a path the
+    // instance can never take (the condition folds false, and the branch is
+    // not lowered — lowerIf's pruning), so it must not vote for the slot.
+    {
+      const raw = L.checker.getBaseTypeOfLiteralType(L.checker.getTypeAtLocation(rhs));
+      if ((raw.flags & ts.TypeFlags.Any) === 0) {
+        const rawIr = L.mapTypeOf(raw);
+        const overIr = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.typeOf(rhs)));
+        if (rawIr !== null && overIr !== null && !typeEquals(rawIr, overIr)) continue;
+      }
+    }
+    const t = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.typeOf(rhs)));
+    if (
+      t === null || t.kind === "dyn" || t.kind === "void" || t.kind === "jsval" || t.kind === "caught" ||
+      isUnitType(t)
+    ) {
+      return null;
+    }
+    if (slot === null) slot = t;
+    else if (!typeEquals(slot, t)) return null;
+  }
+  return slot === null ? null : L.withUndefinedArm(slot);
+}
+
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
     // --provenance-sources: an elided pure-annotated dead const emits
     // nothing (collectGlobals registered no global by the same test —
@@ -4599,6 +4697,10 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // immediately (the type covers the unassigned state), so they
       // initialize to the interned undefined arm like an omitted optional.
       let type = L.irTypeOf(decl.name);
+      if (type.kind === "dyn") {
+        const evolved = evolvedLetType(L, decl, isLet);
+        if (evolved !== null) type = evolved;
+      }
       // `var v: void;` / `let x: undefined;` — a unit-only binding rides
       // the unit-only union (its undefined arm is the unassigned state,
       // which is also the only state).
