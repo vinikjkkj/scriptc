@@ -676,7 +676,6 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
         // ones (use sites of the fenced bindings emit matching diagnostics,
         // which the report groups with these).
         diagnostics: [...preflight, ...lowered.diagnostics],
-        ...(lowered.runtimeFences.length > 0 ? { runtimeFences: lowered.runtimeFences } : {}),
         ...(lowered.advisories.length > 0 ? { advisories: lowered.advisories } : {}),
         ...(lowered.unreached ? { unreached: lowered.unreached } : {}),
         ...(lowered.npmBuiltins ? { npmBuiltins: lowered.npmBuiltins } : {}),
