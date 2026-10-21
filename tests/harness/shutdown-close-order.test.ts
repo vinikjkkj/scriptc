@@ -151,6 +151,63 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<La
   });
 }
 
+/* THE ORACLE IS SAMPLED, NOT TRUSTED ONCE.
+ *
+ * This file used to take ONE Node run as the truth. On 2026-10-21 (classj's
+ * Windows job 118990191010) that one run was Node itself dying with exit
+ * 3221226505 (0xC0000409) and empty stdout, so net-close-order-tick-between
+ * read "0/15 runs matched Node" while all 15 compiled runs printed the order
+ * the fixture documents -- and the same case matched 15/15 on three other
+ * Windows runs (39524914232, 39533627417, 39535065116). The curry run's
+ * http-proxy-pipe failure was likewise a 60 s "server program timed out" in a
+ * lane the harness does not name, not an ordering. A crashed or hung ORACLE
+ * run is not an answer, so it is not used as one.
+ *
+ * Only Node is re-sampled; the compiled lane is never retried and must still
+ * match a CLEAN Node answer on every one of its REPEATS runs. Three clean
+ * samples must agree (a Node that answers two different things is not an
+ * oracle, and that fails loudly), out of at most MAX_ORACLE_RUNS attempts
+ * (a Node that cannot produce three clean runs fails loudly too). ARMING
+ * ONLY: SCRIPTC_ORACLE_FAULT=n makes the first n oracle attempts report the
+ * observed crash, to show both arms. */
+const CLEAN_ORACLE_RUNS = 3;
+const MAX_ORACLE_RUNS = 8;
+const ORACLE_FAULT = Number(process.env["SCRIPTC_ORACLE_FAULT"] ?? "0");
+
+async function oracleAnswer(entry: string, driver: string | null): Promise<string> {
+  const clean = new Map<string, number>();
+  const unclean: string[] = [];
+  let cleanN = 0;
+  for (let i = 0; i < MAX_ORACLE_RUNS && cleanN < CLEAN_ORACLE_RUNS; i++) {
+    let lane: Lane;
+    try {
+      lane = await runLane("node", [entry], driver);
+    } catch (e) {
+      unclean.push(String((e as Error).message).split("\n")[0]!);
+      continue;
+    }
+    if (i < ORACLE_FAULT) lane = { ...lane, stdout: "", exitCode: 3221226505 };
+    if (lane.exitCode !== 0 || (driver !== null && lane.driverExit !== 0)) {
+      unclean.push(JSON.stringify(lane));
+      continue;
+    }
+    const k = JSON.stringify(lane);
+    clean.set(k, (clean.get(k) ?? 0) + 1);
+    cleanN++;
+  }
+  if (cleanN < CLEAN_ORACLE_RUNS) {
+    expect.unreachable(
+      `${entry}: the Node oracle gave only ${cleanN}/${CLEAN_ORACLE_RUNS} clean runs in ${MAX_ORACLE_RUNS} attempts; unclean:\n  ${unclean.join("\n  ")}`,
+    );
+  }
+  if (clean.size !== 1) {
+    expect.unreachable(
+      `${entry}: the Node oracle is not deterministic:\n  ${[...clean.entries()].map(([k, n]) => `${n}x ${k}`).join("\n  ")}`,
+    );
+  }
+  return [...clean.keys()][0]!;
+}
+
 async function build(entry: string): Promise<string> {
   const hash = createHash("sha256");
   hash.update(entry).update(readFileSync(entry));
@@ -239,8 +296,7 @@ describe(`shutdown close order (${REPEATS} runs per case)`, () => {
       const driver = existsSync(driverPath) ? driverPath : null;
       const binary = await build(entry);
 
-      const oracle = await runLane("node", [entry], driver);
-      const want = JSON.stringify(oracle);
+      const want = await oracleAnswer(entry, driver);
 
       const bound = RATE_BOUNDED.get(name);
       const runs = bound?.repeats ?? REPEATS;
