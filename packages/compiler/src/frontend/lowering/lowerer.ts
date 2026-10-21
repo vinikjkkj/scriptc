@@ -1638,6 +1638,10 @@ export class Lowerer {
    * (lowerOwnModuleImport): every `import()` of the same program module
    * shares one builder. */
   readonly dynNsBuilders = new Map<ts.SourceFile, string>();
+  /** Per CommonJS module: the dyn global holding the members `module.exports`
+   * gains only from inside function bodies (no static symbol, no storage of
+   * their own) -- see cjsExportsBagOf. */
+  readonly cjsExportBags = new Map<ts.SourceFile, string>();
   /** STATIC-tier dynamic-import ALIAS PLUMBING (lower-island's
    * dynImportBindingDeclOf): a binding introduced by `const { a } =
    * await import("./m.ts")` maps to the exporter's own export symbol,

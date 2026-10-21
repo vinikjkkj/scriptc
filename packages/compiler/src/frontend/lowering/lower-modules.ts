@@ -3392,6 +3392,20 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
         bindFrom = bindTo;
       }
       body.push(...expandoBindStmts(L, sf, bindFrom, Number.MAX_SAFE_INTEGER));
+      // The bag of members `module.exports` gains only inside function bodies
+      // (cjsExportsBagOf) exists before any statement can read or write it:
+      // an empty object, created right after the run-once guard.
+      {
+        const bagId = L.cjsExportBags.get(sf);
+        if (bagId !== undefined) {
+          body.splice(header.length, 0, {
+            kind: "assign",
+            localId: bagId,
+            value: { kind: "dynObjLit", fields: [], type: DYN, loc: loc0 },
+            loc: loc0,
+          });
+        }
+      }
       while (at < statics.length) {
         body.push(...L.lowerStaticFieldInits(statics[at]!.info));
         at++;
