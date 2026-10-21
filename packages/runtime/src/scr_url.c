@@ -1054,3 +1054,70 @@ ScrStr *scr_url_search(ScrUrl *u) {
   if (u->query->len <= 1) return scr_str_new("", 0);
   return scr_str_retain(u->query);
 }
+
+/* WHATWG hash getter: "" for no fragment AND for the bare-'#' fragment;
+ * "#..." verbatim otherwise. */
+ScrStr *scr_url_hash(ScrUrl *u) {
+  if (u->fragment->len <= 1) return scr_str_new("", 0);
+  return scr_str_retain(u->fragment);
+}
+
+/* WHATWG port getter: the stored port ("" when absent or the scheme's
+ * default, which the parser strips). */
+ScrStr *scr_url_port(ScrUrl *u) { return scr_str_retain(u->port); }
+
+/* Username / password: the stored userinfo is "user[:pw]" already
+ * percent-encoded, so the getters are the two sides of its first ':'. */
+ScrStr *scr_url_username(ScrUrl *u) {
+  const char *ui = u->userinfo->data;
+  size_t n = u->userinfo->len;
+  size_t end = 0;
+  while (end < n && ui[end] != ':') end++;
+  return scr_str_new(ui, end);
+}
+
+ScrStr *scr_url_password(ScrUrl *u) {
+  const char *ui = u->userinfo->data;
+  size_t n = u->userinfo->len;
+  size_t i = 0;
+  while (i < n && ui[i] != ':') i++;
+  if (i >= n) return scr_str_new("", 0);
+  return scr_str_new(ui + i + 1, n - i - 1);
+}
+
+/* WHATWG protocol setter (the URL standard's scheme-state-override parse of
+ * `value + ":"`): the scheme is the text up to the first ':' (all of it
+ * when there is none); it must be alpha followed by alnum/+/-/. else the
+ * write is ignored. A change between a SPECIAL and a NON-special scheme is
+ * ignored, "file" is refused for a URL carrying credentials or a port, and
+ * a file URL with an empty host keeps its scheme. A port equal to the new
+ * scheme's default is dropped. */
+void scr_url_set_protocol(ScrUrl *u, ScrStr *value) {
+  size_t n = 0;
+  while (n < value->len && value->data[n] != ':') n++;
+  if (n == 0) return;
+  char buf[16];
+  if (n >= sizeof buf) return;
+  for (size_t i = 0; i < n; i++) {
+    char c = value->data[i];
+    bool alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    bool rest = alpha || (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.';
+    if (i == 0 ? !alpha : !rest) return;
+    buf[i] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
+  }
+  bool old_special = is_special_scheme(u->scheme->data, u->scheme->len);
+  bool new_special = is_special_scheme(buf, n);
+  if (old_special != new_special) return;
+  bool new_file = n == 4 && memcmp(buf, "file", 4) == 0;
+  if (new_file && (u->userinfo->len > 0 || u->port->len > 0)) return;
+  bool old_file = u->scheme->len == 4 && memcmp(u->scheme->data, "file", 4) == 0;
+  if (old_file && u->host->len == 0) return;
+  ScrStr *scheme = scr_str_new(buf, n);
+  scr_str_release(u->scheme);
+  u->scheme = scheme;
+  const char *dflt = default_port(buf, n);
+  if (dflt != NULL && u->port->len == strlen(dflt) && memcmp(u->port->data, dflt, u->port->len) == 0) {
+    scr_str_release(u->port);
+    u->port = scr_str_new("", 0);
+  }
+}

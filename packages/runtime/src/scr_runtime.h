@@ -3980,6 +3980,11 @@ void *scr_sp_retain_v(void *p);
 void scr_sp_release_v(void *p);
 ScrSearchParams *scr_url_search_params(ScrUrl *u); /* +1 live cached view */
 ScrStr *scr_url_search(ScrUrl *u);                 /* +1 "?..." or "" */
+ScrStr *scr_url_hash(ScrUrl *u);                   /* +1 "#..." or "" */
+ScrStr *scr_url_port(ScrUrl *u);                   /* +1 digits or "" */
+ScrStr *scr_url_username(ScrUrl *u);               /* +1 */
+ScrStr *scr_url_password(ScrUrl *u);               /* +1 */
+void scr_url_set_protocol(ScrUrl *u, ScrStr *value); /* WHATWG protocol setter */
 void scr_sp_append(ScrSearchParams *sp, ScrStr *name, ScrStr *value);
 void scr_sp_set(ScrSearchParams *sp, ScrStr *name, ScrStr *value);
 void scr_sp_delete(ScrSearchParams *sp, ScrStr *name);
