@@ -11299,6 +11299,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8218-arguments-in-class-methods.js": {
+   "order": [
+    "<repo>/tests/corpus/8218-arguments-in-class-methods.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"

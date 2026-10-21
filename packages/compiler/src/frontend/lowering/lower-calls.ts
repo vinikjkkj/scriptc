@@ -7991,7 +7991,7 @@ const inliningPredicates = new Set<ts.Symbol>();
         // Only the two LAMBDA-LIFTED forms: methods and accessors are lowered
         // by lower-classes/lower-stream, which pair their own declareParams
         // with these shapes and have no `%arguments` slot to re-bind from.
-        !(ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node)) ||
+        !(ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) ||
         !argumentsRebindsParams(L, node) ||
         // A slot that SPELLS parameters would receive a value whose func
         // type spells none: the arguments-bound form only stands where the

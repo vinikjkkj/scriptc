@@ -7,7 +7,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, canBoxFuncIntoDyn, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
-import { MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn } from "./lower-calls.js";
+import { MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { protoClassArmOn, protoClassInfoFor } from "./proto-class-consume.js";
@@ -64,6 +64,12 @@ export interface MethodSig {
   abstract?: true;
   async?: true;
   gen?: { yieldT: IrType; nextT: IrType };
+  /** The body reads `arguments` and DECLARES parameters: params is the one
+   * trailing dynRest shape carrying the whole argument list, and the
+   * prologue re-binds the declared names off it (bindArgumentsParams). A
+   * method that declares none and reads `arguments` has the dynRest shape
+   * alone and no flag. */
+  argsBound?: true;
 }
 
 export interface ClassInfo {
@@ -3705,7 +3711,21 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               continue;
             }
           }
-          const { shapes, funcType: ft } = L.lambdaSignature(member);
+          const sigOfMember = L.lambdaSignature(member);
+          let shapes = sigOfMember.shapes;
+          const ft = sigOfMember.funcType;
+          // A method whose body reads `arguments`: one dynRest shape carries
+          // the whole argument list (the declared parameters, if any, leave
+          // the ABI and re-bind off it in the prologue) — the same form a
+          // function declaration takes.
+          let methodArgsBound = false;
+          if (
+            isJsSourceFile(member.getSourceFile()) && !shapes.some((s) => s.mode === "dynRest") &&
+            bodyReadsArguments(member)
+          ) {
+            methodArgsBound = member.parameters.length > 0;
+            shapes = [...shapes, { type: DYN, mode: "dynRest" }];
+          }
           if (fields.has(mName)) {
             L.unsupported("SC1090", member.name, "methods shadowing inherited fields");
           }
@@ -3784,7 +3804,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             if (ft.ret.kind !== "generator") L.badType(member.name, L.typeOf(member.name));
             methods.set(mName, { params: shapes, ret: ft.ret, gen: { yieldT: ft.ret.yieldT, nextT: ft.ret.nextT } });
           } else {
-            methods.set(mName, asyncMember ? { params: shapes, ret: ft.ret, async: true as const } : { params: shapes, ret: ft.ret });
+            methods.set(mName, {
+              params: shapes,
+              ret: ft.ret,
+              ...(asyncMember ? { async: true as const } : {}),
+              ...(methodArgsBound ? { argsBound: true as const } : {}),
+            });
           }
           // Overrides keep the inherited ABI exactly, so only non-override
           // methods may still refine once the ctor scan runs.
@@ -7272,8 +7297,16 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
       // `this` is declared first, so method parameter DEFAULTS may use it
       // (JS allows this in method defaults; it is param 0 here).
-      const declared = L.declareParams(fnLike.parameters, sig.params);
+      const declaredNodes = sig.argsBound === true ? [] : fnLike.parameters;
+      const declared = L.declareParams(declaredNodes, sig.params);
       params.push(...declared.params);
+      // The synthetic `arguments` slot (a dynRest shape beyond the declared
+      // parameters): one trailing dyn-array param that `arguments` resolves to.
+      if (sig.params.length > declaredNodes.length && sig.params[sig.params.length - 1]!.mode === "dynRest") {
+        const argsLocal = L.declareArgumentsLocal();
+        params.push({ localId: argsLocal.id, name: "%arguments", type: DYN });
+        if (sig.argsBound === true) bindArgumentsParams(L, fnLike.parameters, argsLocal, declared.prologue);
+      }
       const body = [...declared.prologue, ...L.lowerStmts(fnLike.body.statements)];
       // A body that can complete without `return` answers undefined (a JS
       // method `if (x) return cb(); this.n++;`): the same trailing return
