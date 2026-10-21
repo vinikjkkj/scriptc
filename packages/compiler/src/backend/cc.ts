@@ -987,6 +987,16 @@ function gcSectionsCompileArgs(): string[] {
   return ["-ffunction-sections", "-fdata-sections"];
 }
 
+/** The cache-flavor suffix of every vendored object cache (engine, lre, zlib,
+ * sqlite, mbedtls). Those caches key on flavor + driver + target and never on
+ * flags, so objects compiled before gcSectionsCompileArgs existed would come
+ * back as a HIT and the vendored code would stay one undroppable section per
+ * file (sqlite3.o is a single amalgamated object: 100% in or 100% out). A new
+ * suffix leaves the old directories orphaned instead of silently reused. */
+function gcFlavor(): string {
+  return "-gc";
+}
+
 /** The link-side spelling, per TARGET platform (not host):
  *   linux   -Wl,--gc-sections  (GNU ld and lld; zig cc passes it to lld)
  *   darwin  -Wl,-dead_strip    (ld64; also spelled on the engine arm, below)
@@ -1028,7 +1038,7 @@ function optAuditArgs(sanitize: boolean): string[] {
  * same flags CMake's MinSizeRel/Debug+ASan configurations apply, packed
  * with `zig ar`. Host builds keep the exact historical CMake recipe. */
 async function ensureEngineArchive(sanitize: boolean, driver: CcDriver): Promise<string> {
-  const flavor = `${sanitize ? "asan" : "plain"}${driver.target !== null ? `-${driver.target}` : ""}${profFlavor()}`;
+  const flavor = `${sanitize ? "asan" : "plain"}${driver.target !== null ? `-${driver.target}` : ""}${gcFlavor()}${profFlavor()}`;
   const vendor = vendorEngineDir();
   const cacheRoot = join(vendor, "..", ".cache");
   const cacheDir = join(cacheRoot, `${QJS_COMMIT.slice(0, 12)}-${flavor}`);
@@ -1051,6 +1061,7 @@ async function ensureEngineArchive(sanitize: boolean, driver: CcDriver): Promise
         : ["-DCMAKE_BUILD_TYPE=MinSizeRel"]),
       "-DQJS_BUILD_EXAMPLES=OFF",
       "-DQJS_ENABLE_INSTALL=OFF",
+      `-DCMAKE_C_FLAGS=${gcSectionsCompileArgs().join(" ")}`,
     ];
     try {
       await execFileAsync("cmake", configureArgs);
@@ -1115,6 +1126,7 @@ async function buildEngineArchiveCross(sanitize: boolean, driver: CcDriver, cach
     ...(sanitize
       ? ["-O0", "-ggdb", "-fno-omit-frame-pointer", "-fsanitize=address", "-fno-sanitize-recover=all", "-DQJS_ENABLE_ASAN"]
       : ["-Os", "-DNDEBUG"]),
+    ...gcSectionsCompileArgs(),
     "-I", vendor,
   ];
   await mkdir(cacheRoot, { recursive: true });
@@ -1174,6 +1186,7 @@ async function ensureLreObjects(sanitize: boolean, driver: CcDriver): Promise<st
     (sanitize ? "asan" : "plain") +
     (driver.argv.length === 1 && driver.argv[0] === "clang" ? "" : "-zigcc") +
     (driver.target !== null ? `-${driver.target}` : "") +
+    gcFlavor() +
     profFlavor();
   const vendor = vendorEngineDir();
   const cacheRoot = join(vendor, "..", ".cache");
@@ -1199,6 +1212,7 @@ async function ensureLreObjects(sanitize: boolean, driver: CcDriver): Promise<st
           "-std=c11",
           ...driver.targetArgs,
           ...(sanitize ? ["-O1", "-fsanitize=address"] : ["-Os"]),
+          ...gcSectionsCompileArgs(),
           "-I", vendor,
           "-c", join(vendor, f),
           "-o", join(buildDir, f.replace(/\.c$/, ".o")),
@@ -1246,6 +1260,7 @@ async function ensureZlibObjects(sanitize: boolean, driver: CcDriver): Promise<s
     (sanitize ? "asan" : "plain") +
     (driver.argv.length === 1 && driver.argv[0] === "clang" ? "" : "-zigcc") +
     (driver.target !== null ? `-${driver.target}` : "") +
+    gcFlavor() +
     profFlavor();
   const vendor = vendorZlibDir();
   const cacheRoot = join(vendor, "..", ".cache");
@@ -1269,6 +1284,7 @@ async function ensureZlibObjects(sanitize: boolean, driver: CcDriver): Promise<s
           "-std=c11",
           ...driver.targetArgs,
           ...(sanitize ? ["-O1", "-fsanitize=address"] : ["-Os"]),
+          ...gcSectionsCompileArgs(),
           "-I", vendor,
           "-c", join(vendor, f),
           "-o", join(buildDir, f.replace(/\.c$/, ".o")),
@@ -1372,6 +1388,7 @@ async function ensureSqliteObjects(sanitize: boolean, driver: CcDriver): Promise
     (sanitize ? "asan" : "plain") +
     (driver.argv.length === 1 && driver.argv[0] === "clang" ? "" : "-zigcc") +
     (driver.target !== null ? `-${driver.target}` : "") +
+    gcFlavor() +
     profFlavor();
   const vendor = vendorSqliteDir();
   const cacheRoot = join(vendor, "..", ".cache");
@@ -1392,6 +1409,7 @@ async function ensureSqliteObjects(sanitize: boolean, driver: CcDriver): Promise
         "-std=c11",
         ...driver.targetArgs,
         ...(sanitize ? ["-O1", "-fsanitize=address"] : ["-Os"]),
+        ...gcSectionsCompileArgs(),
         ...SQLITE_DEFINES,
         "-I", vendor,
         "-c", join(vendor, "sqlite3.c"),
@@ -1501,7 +1519,7 @@ function vendorTlsDir(): string {
  * with `zig ar` (llvm-ar — the host BSD ar has no business indexing ELF
  * objects). Host builds keep the exact historical clang + ar recipe. */
 async function ensureTlsArchive(sanitize: boolean, driver: CcDriver): Promise<string> {
-  const flavor = `${sanitize ? "asan" : "plain"}${driver.target !== null ? `-${driver.target}` : ""}${profFlavor()}`;
+  const flavor = `${sanitize ? "asan" : "plain"}${driver.target !== null ? `-${driver.target}` : ""}${gcFlavor()}${profFlavor()}`;
   const compileArgv = driver.target !== null ? driver.argv : ["clang"];
   const arArgv = driver.target !== null ? [...driver.argv.slice(0, 1), "ar"] : ["ar"];
   const vendor = vendorTlsDir();
@@ -1521,6 +1539,7 @@ async function ensureTlsArchive(sanitize: boolean, driver: CcDriver): Promise<st
       "-std=c11",
       ...driver.targetArgs,
       ...(sanitize ? ["-O1", "-fsanitize=address"] : ["-Os"]),
+      ...gcSectionsCompileArgs(),
       "-I", join(vendor, "include"),
       "-I", join(vendor, "library"),
       ...profCflags(),
