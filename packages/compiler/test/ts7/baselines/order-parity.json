@@ -5133,12 +5133,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/2616-js-collect-probe-defers.js": {
-   "order": [
-    "<repo>/tests/corpus/2616-js-collect-probe-defers.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/2617-enum-static-field-import/main.ts": {
    "order": [
     "<repo>/tests/corpus/2617-enum-static-field-import/a.ts",
@@ -9460,25 +9454,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/6100-require-as-a-value.cjs": {
-   "order": [
-    "<repo>/tests/corpus/6100-require-as-a-value.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/6101-require-self-scope/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/6101-require-self-scope/inner/t.cjs",
-    "<repo>/tests/corpus/6101-require-self-scope/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/6120-require-run-time-specifier-classes.cjs": {
-   "order": [
-    "<repo>/tests/corpus/6120-require-run-time-specifier-classes.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/6120-zlib-create-unzip-stream.ts": {
    "order": [
     "<repo>/tests/corpus/6120-zlib-create-unzip-stream.ts"
@@ -13597,6 +13572,85 @@
   "<repo>/tests/corpus/7804-map-union-object-property.ts": {
    "order": [
     "<repo>/tests/corpus/7804-map-union-object-property.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-tls-getcacertificates-over-a-dynamic-argument.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-tls-getcacertificates-over-a-dynamic-argument.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-run-time-specifier-classes.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-run-time-specifier-classes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-dgram-send-over-dynamic-arguments.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-dgram-send-over-dynamic-arguments.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-process-exitcode-assignment.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-process-exitcode-assignment.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-class-declared-in-a-block-extending-a-stream.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-class-declared-in-a-block-extending-a-stream.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-new-proxy.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-new-proxy.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/main.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/inner/t.cjs",
+    "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-arrow-const-read-from-a-function.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-arrow-const-read-from-a-function.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-net-connect-with-a-runtime-option-bag.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-net-connect-with-a-runtime-option-bag.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-with-a-run-time-specifier.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-with-a-run-time-specifier.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-constructor-field-shadowing-a-method.js": {
+   "order": [
+    "<repo>/tests/diagnostics/js-constructor-field-shadowing-a-method.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-taken-as-a-value.cjs"
    ],
    "diags": []
   }
