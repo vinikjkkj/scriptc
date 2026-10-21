@@ -4146,6 +4146,8 @@ static void scr_err_hide(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v) 
   scr_dyn_release(v);
 }
 
+static void scr_error_props_drop_impl(void *obj);
+
 ScrDyn *scr_dyn_from_error(const ScrError *e) {
   for (size_t i = 0; i < scr_errdyn_n; i++) {
     if (scr_errdyn_cache[i].err == e) return scr_dyn_retain(scr_errdyn_cache[i].dyn);
@@ -4225,6 +4227,32 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
     scr_err_hide(d, "code", 4, scr_dyn_new_num(scr_domex_code((ScrError *)e)));
     if (scr_domex_has_cause((ScrError *)e)) {
       scr_err_hide(d, "cause", 5, scr_domex_cause((ScrError *)e));
+    }
+  }
+  /* Own expandos the typed side attached (`err.fatal = true`, error.propSet)
+   * move into the encoding, and from here on the encoding IS the error's
+   * bag: a write through either spelling is one write, so a property set on
+   * the dyn value (`e.retry = 3` in a handler that took the error as
+   * `unknown`) is what a later typed read of the same error sees, exactly
+   * the one object Node has. The encoding holds no reference back to the
+   * error, so the bag adds no cycle; the cache below keeps both alive until
+   * exit, as it always did. */
+  {
+    ScrError *me = (ScrError *)e;
+    scr_error_install_props_drop(&scr_error_props_drop_impl);
+    if (me->props != NULL && me->props != d && me->props->kind == SCR_DYN_OBJ) {
+      ScrDyn *old = me->props;
+      for (size_t i = 0; i < old->v.obj.len; i++) {
+        const ScrDynEntry *ent = &old->v.obj.entries[i];
+        if (ent->value == scr_dyn_acc_slot()) continue;
+        scr_dyn_obj_set(d, ent->key, ent->key_len, scr_dyn_retain(ent->value));
+      }
+      scr_dyn_release(old);
+      me->props = NULL;
+    }
+    if (me->props == NULL || me->props->kind != SCR_DYN_OBJ) {
+      scr_dyn_release(me->props);
+      me->props = scr_dyn_retain(d);
     }
   }
   if (scr_errdyn_n == scr_errdyn_cap) {
@@ -10016,3 +10044,52 @@ ScrStr *scr_b64_missing_arg(void) {
   return NULL;
 }
 
+/* ── own expando properties on error objects ──────────────────────────
+ * `err.fatal = true`, `err.errno = 5`: Node errors are ordinary objects, and
+ * programs hang their diagnostics off them. The bag is one dyn object in the
+ * error's `props` slot (scr_runtime.h), created at the first write. It lives
+ * HERE and not in scr_error.c so that unit stays linkable without the
+ * checked-dynamic tree; the teardown reaches it through the hook below,
+ * installed before any bag can exist (the DOMException cause precedent). */
+
+static void scr_error_props_drop_impl(void *obj) {
+  ScrError *e = (ScrError *)obj;
+  scr_dyn_release(e->props);
+  e->props = NULL;
+}
+
+void scr_error_prop_set(ScrError *e, ScrStr *key, ScrDyn *value) {
+  scr_error_install_props_drop(&scr_error_props_drop_impl);
+  /* `.stack` has a dedicated memo slot the stack readers already consult: a
+   * string stored there is what `e.stack` answers afterwards. */
+  if (key->len == 5 && memcmp(key->data, "stack", 5) == 0 && value->kind == SCR_DYN_STR) {
+    ScrStr *s = scr_dyn_string_coerce(value);
+    scr_str_release(e->stack);
+    e->stack = s;
+    return;
+  }
+  /* A compiled subclass's constructor starts the slot at the dyn UNDEFINED
+   * (every DYN field does), so "no bag yet" is NULL or a non-object. */
+  if (e->props == NULL || e->props->kind != SCR_DYN_OBJ) {
+    scr_dyn_release(e->props);
+    e->props = scr_dyn_new_obj();
+  }
+  scr_dyn_obj_set(e->props, key->data, key->len, scr_dyn_retain(value));
+}
+
+ScrDyn *scr_error_prop_get(ScrError *e, ScrStr *key) {
+  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) {
+    ScrDyn *m = scr_dyn_obj_get(e->props, key->data, key->len);
+    if (m != NULL) return scr_dyn_retain(m);
+  }
+  if (key->len == 4 && memcmp(key->data, "code", 4) == 0 && e->code != NULL) {
+    return scr_dyn_new_str(e->code);
+  }
+  if (key->len == 5 && memcmp(key->data, "stack", 5) == 0) {
+    ScrStr *s = scr_error_stack(e);
+    ScrDyn *d = scr_dyn_new_str(s);
+    scr_str_release(s);
+    return d;
+  }
+  return scr_dyn_undefined();
+}

@@ -1165,6 +1165,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The MEMOISING `.stack` reader. Same receiver rule as error.toString
   // (an `%Error`-rooted pointer), same +1 string result.
   "error.stack": { argTypes: [null], result: STRING },
+  // Own expando properties of an error object: borrowed receiver, borrowed
+  // key, borrowed dyn value in; propGet answers a +1 dyn.
+  "error.propSet": { argTypes: [null, STRING, DYN], result: VOID },
+  "error.propGet": { argTypes: [null, STRING], result: DYN },
   // Receiver (any error-hierarchy object) and the program-dependent
   // `string | undefined` result are checked in the libCall case.
   "error.code": { argTypes: [null], result: VOID },
@@ -5323,9 +5327,11 @@ function validateFunction(
             break;
           }
         }
-        if (e.fn === "error.ctor" || e.fn === "error.toString" || e.fn === "error.stack") {
+        if (e.fn === "error.ctor" || e.fn === "error.toString" || e.fn === "error.stack" ||
+            e.fn === "error.propSet" || e.fn === "error.propGet") {
           const recv = e.args[0];
-          const wantErrorRoot = e.fn === "error.toString" || e.fn === "error.stack";
+          const wantErrorRoot = e.fn === "error.toString" || e.fn === "error.stack" ||
+            e.fn === "error.propSet" || e.fn === "error.propGet";
           const ok =
             recv &&
             isBuiltinErrorObject(recv.type) &&

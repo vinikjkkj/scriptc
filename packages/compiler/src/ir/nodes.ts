@@ -5139,6 +5139,16 @@ export type IrLibFn =
    * else wrote. error.toString, beside it, IS free of this: it reads two
    * slots and writes none. */
   | "error.stack"
+  /** `err.name = v` / `err.name` over an error-hierarchy receiver for a
+   * property the class does not declare (scr_json.c): the error's OWN
+   * EXPANDO bag, a dyn object in its `%props` slot. propSet's args are the
+   * borrowed receiver, the borrowed key string and the borrowed dyn value
+   * (stored as a +1 copy; the key "stack" with a string value replaces the
+   * `.stack` memo); propGet answers +1, the dyn undefined for an absent
+   * property, falling back to the errno `code` slot and the stack memo for
+   * those two names. Neither throws. */
+  | "error.propSet"
+  | "error.propGet"
   /** `new DOMException(message?, nameOrOptions?)` (scr_error.c): both args
    * are borrowed dyn values (the lowering passes the dyn undefined for an
    * absent argument, so WebIDL's optionality lives in one place). The

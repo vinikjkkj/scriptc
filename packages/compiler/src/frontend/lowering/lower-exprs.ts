@@ -2678,6 +2678,9 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         L.lowerNamespaceBuiltinProperty(expr) ??
         L.lowerJsonProperty(expr) ??
         L.lowerErrorCodeProperty(expr) ??
+        // An own EXPANDO property read off an error object (`err.fatal`,
+        // `e.errno`): the property no declaration names.
+        lowerErrorExpandoRead(L, expr) ??
         // signal.aborted / signal.reason / controller.signal. Its own
         // entry rather than a lowerIntrinsicProperty arm because that
         // function's receiver filter drops handle kinds before its member
@@ -17062,6 +17065,47 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         break;
     }
     L.unsupported("SC1090", expr, `operator '${ts.tokenToString(op) ?? ts.SyntaxKind[op]}'`);
+  }
+
+/** An error object receiver whose property NO declaration names, typed by
+   * what the checker answers for the access: the receiver must map to an
+   * %Error-rooted class instance (builtin or user subclass) and the checker
+   * must know no such property on the receiver's type (a declared `code`,
+   * `cause`, `message` or a subclass field is not an expando). Null
+   * otherwise, so the ordinary field paths keep their say. */
+  export function errorExpandoReceiver(L: Lowerer, access: ts.PropertyAccessExpression | ts.ElementAccessExpression, name: string, forWrite = false): IrType | null {
+    if (access.questionDotToken !== undefined) return null;
+    const recvT = L.mapTypeOf(L.typeOf(access.expression));
+    if (recvT?.kind !== "object") return null;
+    let info = L.classes.get(recvT.className) ?? null;
+    if (info === null) return null;
+    if (recvT.className === "%DOMException") return null;
+    while (info && info.base) info = info.base;
+    if (!info || info.def.name !== "%Error") return null;
+    // A WRITE of `.stack` is the one declared member the bag takes: the lib
+    // declares it but the runtime keeps it in the memo slot, which only
+    // the bag's setter reaches (the read has its own lowering).
+    const stackWrite = forWrite && name === "stack" && ts.isPropertyAccessExpression(access) && L.isStdlibMember(access);
+    if (!stackWrite && L.checker.getPropertyOfType(L.typeOf(access.expression), name) !== undefined) return null;
+    return recvT;
+  }
+
+/** `err.fatal` over an error object: the bag read (error.propGet), a dyn
+   * value — `undefined` when no write ever stored the name. The JS-only
+   * spelling: a TypeScript program cannot name a property its type lacks. */
+  function lowerErrorExpandoRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (!isJsSourceFile(expr.getSourceFile())) return null;
+    if (errorExpandoReceiver(L, expr, expr.name.text) === null) return null;
+    const loc = locOf(expr);
+    const receiver = L.lowerExpr(expr.expression);
+    if (receiver.type.kind !== "object") return null;
+    return {
+      kind: "libCall",
+      fn: "error.propGet",
+      args: [L.upcastTo(receiver, "%Error"), { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) }],
+      type: DYN,
+      loc,
+    };
   }
 
 /** `typeof e === "lit"` / `typeof e !== "lit"` where e is a catch

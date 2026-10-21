@@ -29,7 +29,7 @@ import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } fr
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { ctorObjectGlobalValue, dynAssertionReceiver, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
+import { ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
 import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, unionFieldReadAt, unitArmsOf } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -6979,6 +6979,28 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
                   `assigning the static '${expr.left.name.text}' through a class value (JS creates an OWN property on the runtime class — assign through the declaring class's name${vInfo && vInfo.subclasses.length > 0 ? ", which subclasses here" : ""})`,
                 );
               }
+            }
+          }
+          // `err.fatal = true` over an error object: the property no
+          // declaration names is an own EXPANDO of the error (the dyn bag in
+          // its `%props` slot — error.propSet). JS files only: a TypeScript
+          // program cannot name a property its type lacks.
+          if (isJsSourceFile(expr.getSourceFile()) && errorExpandoReceiver(L, expr.left, expr.left.name.text, true) !== null) {
+            const loc = locOf(expr);
+            const recv = L.lowerExpr(expr.left.expression);
+            if (recv.type.kind === "object") {
+              const value = L.lowerExprExpecting(expr.right, DYN);
+              return {
+                kind: "exprStmt",
+                expr: {
+                  kind: "libCall",
+                  fn: "error.propSet",
+                  args: [L.upcastTo(recv, "%Error"), { kind: "strLit", value: expr.left.name.text, type: STRING, loc: locOf(expr.left.name) }, value],
+                  type: VOID,
+                  loc,
+                },
+                loc,
+              };
             }
           }
           // `u.protocol = 'ws:'` — the URL's WHATWG protocol setter (the

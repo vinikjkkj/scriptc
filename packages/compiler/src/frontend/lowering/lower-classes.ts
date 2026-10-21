@@ -941,6 +941,11 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
             // from compiled code, so without somewhere to hold the first
             // answer the second read diverges from node.
             { name: "%stack", type: STRING },
+            // `%props` is the FIFTH slot: the own-expando bag (a dyn
+            // object, NULL until the first `err.x = v` write) the error.prop*
+            // libCalls reach. Layout-only like the two above; its DYN type
+            // makes the emitted subclass teardown release it NULL-guarded.
+            { name: "%props", type: DYN },
           ],
           loc,
         },

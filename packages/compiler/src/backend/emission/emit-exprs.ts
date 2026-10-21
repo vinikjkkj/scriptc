@@ -6915,6 +6915,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "error.toString":
             // Borrowed receiver; +1 "name: message" (Node's toString rules).
             return finish(`scr_error_to_string(${arg(0)})`);
+          case "error.propSet":
+            // Borrowed receiver (any error-hierarchy struct: the ScrError
+            // prefix leads every subclass), key and dyn value.
+            return finish(`scr_error_prop_set((ScrError *)${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "error.propGet":
+            // +1 dyn value (the dyn undefined when absent).
+            return finish(`scr_error_prop_get((ScrError *)${arg(0)}, ${arg(1)})`);
           case "error.stack":
             // Borrowed receiver; +1 the MEMOISED header. The receiver may be
             // a user subclass struct -- the %stack slot sits in its ScrError
