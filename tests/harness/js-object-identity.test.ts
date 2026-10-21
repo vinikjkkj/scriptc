@@ -657,7 +657,9 @@ console.log(a.v, root.sub.v, a === root.sub);
     for (const backend of ["c", "llvm"] as const) {
       const { node, exe } = await bothWays("nested-member-let-reassigned", backend, src);
       expect(node.out.trim()).toBe("7 1 false");
-      expect(exe.code, `${backend}: expected the fence, got ${exe.out}`).toBe(1);
+      // A BUILD refusal (bothWays reports a failed build as code -1 with the
+      // diagnostics in `err`): there is no binary that prints a fence.
+      expect(exe.code, `${backend}: expected a build refusal, got ${exe.out}`).toBe(-1);
       expect(exe.out + exe.err).toMatch(/SC1100/);
     }
   });
@@ -676,7 +678,9 @@ console.log(arr[0] === ns);
     for (const backend of ["c", "llvm"] as const) {
       const { node, exe } = await bothWays("array-element-crossing", backend, src);
       expect(node.out.trim()).toBe("true");
-      expect(exe.code, `${backend}: expected the fence, got ${exe.out}`).toBe(1);
+      // A BUILD refusal (bothWays reports a failed build as code -1 with the
+      // diagnostics in `err`): there is no binary that prints a fence.
+      expect(exe.code, `${backend}: expected a build refusal, got ${exe.out}`).toBe(-1);
       expect(exe.out + exe.err).toMatch(/SC1100/);
     }
   });

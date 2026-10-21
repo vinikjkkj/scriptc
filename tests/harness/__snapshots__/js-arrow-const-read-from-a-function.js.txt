@@ -1,0 +1,6 @@
+js-arrow-const-read-from-a-function.js:9:10 - error SC1090: the reference to 'fst' (a binding form with no lowering) is not supported yet
+
+   8 | function probe() {
+   9 |   return fst(2);
+     |          ^~~
+  10 | }

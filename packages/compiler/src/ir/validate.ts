@@ -6022,7 +6022,7 @@ function validateFunction(
         }
         break;
       case "runtimeFence":
-        // The deferred JS compile fence: carries only its message/code.
+        // A coded runtime throw: carries only its message/code.
         if (s.message.length === 0) err(`runtimeFence with an empty message`, s.loc);
         break;
       case "rethrow": {

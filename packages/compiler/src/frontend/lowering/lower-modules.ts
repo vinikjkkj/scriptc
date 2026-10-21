@@ -952,19 +952,6 @@ export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
    * global (stable storage: cross-module live bindings, and functions can
    * reference them without capture). Block-scoped vars inside nested
    * statements keep their different symbols and stay locals. */
-  /** JS collection failures defer to runtime fences: the registration's
- * diagnostics move off the build (into L.runtimeFences) — the declaring
- * statement re-fails during init lowering and compiles to the
- * runtimeFence trap there, and every use site cascades to its own trap.
- * TypeScript files keep eager collection reports. */
-function deferJsCollectionDiags(L: Lowerer, sf: ts.SourceFile, diagsBefore: number): void {
-  if (!isJsSourceFile(sf)) return;
-  const captured = L.diags.splice(diagsBefore);
-  const ice = captured.filter((d) => d.code === "SC9001");
-  if (ice.length > 0) L.diags.push(...ice);
-  L.runtimeFences.push(...captured.filter((d) => d.code !== "SC9001"));
-}
-
 /** A scalar-literal expression a single-value `module.exports =` can carry
  * without any declaration to alias to: string/number/boolean literals,
  * substitution-free templates, and negated numbers. */
@@ -1252,7 +1239,6 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           ? (cjsExportAssignmentOf(stmt) ?? commaWholeExportRecordOf(stmt))
           : null;
         const registerExport = (nameNode: ts.Node, name: string, typeNode: ts.Node): void => {
-          const diagsBefore = L.diags.length;
           try {
             // tsgo answers no symbol at the attachment site's NAME (no
             // expando synthesis); the module symbol's exports table still
@@ -1309,9 +1295,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             L.globalsList.push(g);
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
-            // diagnostic recorded; the statement lowering poisons too —
-            // both defer to the statement's runtime fence in JS files.
-            deferJsCollectionDiags(L, sf, diagsBefore);
+            // diagnostic recorded; the statement lowering poisons too.
           }
         };
         if (cjs?.kind === "member" && cjs.text !== null) {
@@ -1346,7 +1330,6 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           // fallback like every JS binding.
           const fnValued = ts.isFunctionExpression(rhs) || ts.isArrowFunction(rhs);
           if (cjsScalarLiteral(rhs) || fnValued) {
-            const diagsBefore = L.diags.length;
             try {
               const strict = L.typeOf(rhs);
               const t = L.mapTypeOf(strict) ?? (fnValued ? dynFallbackType(L, rhs, strict) : null);
@@ -1357,7 +1340,6 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               }
             } catch (e) {
               if (!(e instanceof PoisonError)) throw e;
-              deferJsCollectionDiags(L, sf, diagsBefore);
             }
           } else if (ts.isIdentifier(rhs) && wholeExportRootNeedsStorage(L, rhs, cjs.expr)) {
             // `module.exports = <root>` over a module-scope VARIABLE the
@@ -1430,7 +1412,6 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           !vd.getSourceFile().isDeclarationFile &&
           (ts.getCombinedNodeFlags(vd) & ts.NodeFlags.Const) === 0;
         if (!mutableVar) continue;
-        const diagsBefore = L.diags.length;
         try {
           let type = L.irTypeOf(stmt.name);
           if (type.kind === "void" && isUnitOnlyTsType(L.typeOf(stmt.name))) {
@@ -1447,7 +1428,6 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           L.globalsList.push(g);
         } catch (e) {
           if (!(e instanceof PoisonError)) throw e;
-          deferJsCollectionDiags(L, sf, diagsBefore);
         }
         continue;
       }
@@ -1527,7 +1507,6 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // registration, and the statement lowering re-fences at its own
         // site (pushDiag dedupes), exactly the per-probe recovery the
         // alias/generic-fn registrations below already use.
-        const classifyDiagsBefore = L.diags.length;
         const classified = (() => {
           try {
             // A TRAP declaration at file scope — the initializer's chain roots
@@ -1567,12 +1546,9 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             }
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
-            // A probe fenced mid-classification: JS files defer the
-            // recorded diagnostics to runtime fences like every other
-            // collection failure; TS keeps the eager report (the
-            // statement lowering re-fences at its own site — pushDiag
-            // dedupes).
-            deferJsCollectionDiags(L, sf, classifyDiagsBefore);
+            // A probe fenced mid-classification: the recorded diagnostic
+            // stays on the build (the statement lowering re-fences at its
+            // own site — pushDiag dedupes).
           }
           return false;
         })();
@@ -1717,7 +1693,6 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // desugar in the init function assigns the pre-registered globals,
         // exactly like plain declarations).
         for (const nameNode of boundIdentifiersOf(decl.name)) {
-          const diagsBefore = L.diags.length;
           try {
             // A JS file-scope evolving ARRAY (`const mustCallChecks = [];`
             // — test/common's exit-accounting ledger): the strict type
@@ -1926,9 +1901,8 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // between the two exists — the slot would demand a static array
             // the engine value never receives — and the VALUE is the truth,
             // the file-scope face of lowerVarDecl's rule. Without it the
-            // `(...args) => f(...args)` forwarding idiom fenced at its own
-            // declaration; JS sources defer fences, so a program that built
-            // clean threw SC1090 at run time instead.
+            // `(...args) => f(...args)` forwarding idiom was refused at its
+            // own declaration.
             const islandRestT =
               ts.isIdentifier(decl.name) && nameNode === decl.name && decl.initializer !== undefined
                 ? islandRestSlotType(L, decl.initializer, L.mapTypeOf(L.typeOf(nameNode)))
@@ -2190,9 +2164,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
             // diagnostic already recorded; lowering the statement poisons
-            // too — and in a JS file BOTH defer to the statement's
-            // runtime fence (deferJsCollectionDiags).
-            deferJsCollectionDiags(L, sf, diagsBefore);
+            // too.
           }
         }
       }
@@ -2535,7 +2507,6 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
     for (const list of lists) {
       for (const decl of list.declarations) {
         for (const nameNode of boundIdentifiersOf(decl.name)) {
-          const diagsBefore = L.diags.length;
           try {
             if (isJsSourceFile(sf) && !L.mapTypeOf(L.typeOf(nameNode))) continue;
             let type = L.irTypeOf(nameNode);
@@ -2569,7 +2540,6 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
             noteVarGlobalEntryInit(L, sf, g);
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
-            deferJsCollectionDiags(L, sf, diagsBefore);
           }
         }
       }

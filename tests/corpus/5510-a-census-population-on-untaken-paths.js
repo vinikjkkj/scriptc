@@ -1,4 +1,3 @@
-// @deferred-fences: 1
 // A program that carries, on purpose, one instance of each population
 // scripts/tu-census.mjs counts — and runs exactly like Node anyway, because
 // every one of them sits on a path this program never takes.
@@ -13,11 +12,10 @@
 //
 // What is planted, and where the census puts it:
 //
-//   REFUSAL   the `new Proxy(...)` wrap. `globalThis['__scriptc_absent__']`
-//             answers undefined in a static build, so the arm folds away at
-//             run time and the fence is never executed — which is why this
-//             file still passes the differential oracle. It is the ONE
-//             deferred fence the header declares.
+//   (REFUSAL  none any more: a construct with no static lowering is a
+//             compile error, so no program this compiler builds carries a
+//             tagged refusal. The `new Proxy(...)` wrap this file used to
+//             plant there is pinned by tests/diagnostics/js-new-proxy.js.)
 //   BOILER-   `classify`'s fall-through. tsc proves every path returns and the
 //   PLATE     lowering cannot, so an SC9002 guard is emitted after the switch.
 //             Not a refusal: the guard is unreachable by construction.
@@ -53,7 +51,7 @@ function classify(v) {
 
 function readKey(bag) {
   if (globalThis['__scriptc_absent__'] !== undefined) {
-    return new Proxy(bag, {}).k; // untaken: dynamic-global probes answer undefined
+    return bag.k + '!'; // untaken: dynamic-global probes answer undefined
   }
   return bag.k;
 }

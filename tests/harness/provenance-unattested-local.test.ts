@@ -403,21 +403,19 @@ describe("provenance: an unattested package reached as a mapped package's depend
     );
   });
 
-  test("the lane's ceiling: the mapping lands, the VALUE still does not cross", async () => {
+  test("the lane's ceiling: the mapping lands, the VALUE still does not cross (refused at build time)", async () => {
     /* Pinned deliberately. A mapped dependency of a mapped authored-JS
      * package compiles as far as the module edge and no further: reading a
-     * value off it leaves a runtime fence, so a build of this entry links and
-     * then throws at module init. That ceiling belongs to the authored lane,
-     * not to this arm -- the attested sibling fixture hits it too -- and
-     * pinning it here is what stops "the blocker went away" from being read
-     * as "the value arrived". */
+     * value off it is REFUSED at build time, naming the module. That ceiling
+     * belongs to the authored lane, not to this arm -- the attested sibling
+     * fixture hits it too -- and pinning it here is what stops "the blocker
+     * went away" from being read as "the value arrived". */
     armDep("unattleaf");
     stubFetch(404);
     setProvenanceSources(await resolveProvenanceSources(depEntry));
     const { coverage } = analyze(depEntry);
-    expect(coverage.diagnostics).toStrictEqual([]);
-    const fences = (coverage.runtimeFences ?? []).map((d) => `${d.code}: ${d.message}`);
-    expect(fences.length).toBeGreaterThan(0);
-    expect(fences.join("\n")).toContain("'unattleaf'");
+    const refusals = coverage.diagnostics.map((d) => `${d.code}: ${d.message}`);
+    expect(refusals.length).toBeGreaterThan(0);
+    expect(refusals.join("\n")).toContain("'unattleaf'");
   });
 });

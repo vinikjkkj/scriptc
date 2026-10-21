@@ -787,11 +787,10 @@ function rcAuditRequested(): boolean {
 }
 
 /** SCRIPTC_TRAP_TRACE=1 at BUILD time: which lowering traps a run
- * actually EXECUTES. A `runtimeFence` (the deferred compile fence
- * --best-effort emits for a statement whose construct has no static
- * lowering) never blocks the build, so a trap census counts constructs
- * the compiler DECLINED and says nothing about how many the program
- * REACHES. The define turns on scr_error.c's SCTRAP marker, which prints
+ * actually EXECUTES. A `runtimeFence` (a coded throw the lowering emits,
+ * e.g. the SC9002 unreachable-by-proof guard) does not block the build, so
+ * a trap census counts throws the program CARRIES and says nothing about
+ * how many it REACHES. The define turns on scr_error.c's SCTRAP marker, which prints
  * the fence's code and message to stderr at the throw, BEFORE the
  * unwind, so a fence the program catches and swallows is still observed.
  *

@@ -1,4 +1,6 @@
-// @deferred-fences: 2
+// REFUSED AT COMPILE TIME (no --best-effort, no runtime fence): this was
+// tests/corpus/2616-js-collect-probe-defers.js, a program that used to build and
+// throw its fence when the statement ran. See the snapshot for the diagnostics.
 // The collect-time classification probes (trap/nullish/dead) resolve
 // initializer symbols; that resolution must NOT flush a reached
 // declaration's DEFERRED collection diagnostics onto the build. At

@@ -111,12 +111,12 @@ async function arm(npmStatic?: readonly string[]): Promise<ReturnType<typeof ana
   return analyze(entry, npmStatic === undefined ? {} : { npmStatic });
 }
 
-/** Every runtime fence as `CODE file:line "construct"`, with the character
+/** Every refusal as `CODE file:line "construct"`, with the character
  * offset RESOLVED against the source the compiler read. A bare code list would
  * let a fence that moved to another construct keep this green, and the failure
  * message has to name the real thing. */
 function fenceSites(r: ReturnType<typeof analyze>): string[] {
-  const sites = (r.coverage.runtimeFences ?? []).map((d: ScrDiagnostic) => {
+  const sites = r.coverage.diagnostics.map((d: ScrDiagnostic) => {
     const text = r.sourceTexts.get(d.loc.file) ?? r.sourceTexts.get(slash(d.loc.file)) ?? "";
     /* An empty text would silently degrade every site to a passing-looking
      * `?:0 ""`. Say so instead of rendering a blank. */
@@ -228,10 +228,10 @@ describe("provenance + npm-static: the mono gate answers by package identity", (
     });
   });
 
-  /* The binary. A fence is DEFERRED, not refused: with the gate off this
-   * program builds clean and then throws on its first line, which is the shape
-   * that makes a coverage hole expensive -- a build that looks fine and a
-   * binary that does not run. Node's output is the oracle. */
+  /* The binary. With the gate off the same program is REFUSED at build time
+   * (arms B and C above: the diagnostics are the refusals), so a coverage hole
+   * is a build failure and never a binary that links and then throws. With the
+   * gate on it builds, and Node's output is the oracle. */
   test("the static binary runs, and matches Node", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
     process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "monoarg";

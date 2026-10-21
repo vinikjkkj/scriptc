@@ -90,6 +90,25 @@ async function compileAndRun(
   }
 }
 
+
+/** Compiles an inline program that must be REFUSED AT BUILD TIME and
+ * returns the diagnostics as `CODE: message` lines. There is no deferred
+ * fence: a construct with no static lowering fails the build, and no binary
+ * exists to run. */
+async function compileRefused(
+  name: string,
+  source: string,
+  ext = "ts",
+): Promise<string[]> {
+  const key = createHash("sha256").update(source).update("refused").digest("hex").slice(0, 16);
+  const outDir = holdScratch(cacheDir, `errors-refused-${key}`);
+  const file = join(outDir, `${name}.${ext}`);
+  writeFileSync(file, source);
+  const result = await compile(file, { outPath: join(outDir, exeName(name)), outDir, sanitize, backend: "c" });
+  if (result.ok) throw new Error(`${name} compiled, but it must be refused at build time`);
+  return result.diagnostics.map((d) => `${d.code}: ${d.message}`);
+}
+
 /** Linux ASan prints a once-per-process warning to stderr the first time a
  * fiber swapcontext()s (the interceptor has no off switch; Apple's ASan
  * never intercepts ucontext, so the macOS lanes never see it). Sanitizer
@@ -198,13 +217,13 @@ describe("checked catch-binding casts", () => {
     );
   });
 
-  test("an EFFECTFUL surplus argument is a named deferred fence (JS lane)", async () => {
+  test("an EFFECTFUL surplus argument is refused at build time (JS lane)", async () => {
     // Effect-free surplus args drop at compile time, JS-exact (corpus
     // 1760 — the test-string-decoder writeSequences shape). An effectful
     // one has no evaluation slot in the completed call, so instead of
     // silently not running it the build defers a named SC1090 to the
     // call site. JS-only: tsc's arity errors gate the TS lane.
-    const r = await compileAndRun(
+    const d = await compileRefused(
       "surplus-args-effectful",
       `'use strict';
 function two(a, b) {
@@ -218,20 +237,16 @@ console.log(two(1, 2, loud()));
 `,
       "cjs",
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toMatch(
-      /^Uncaught Error: surplus arguments with side effects .* are not supported yet \[SC1090 at .*surplus-args-effectful\.cjs:9\]\n$/,
-    );
+    expect(d.some((x) => /^SC1090: surplus arguments with side effects .* are not supported yet$/.test(x)), d.join(" | ")).toBe(true);
   });
 
-  test("extending a property-assigned class ABOVE its assignment is a named deferred fence (JS lane)", async () => {
+  test("extending a property-assigned class ABOVE its assignment is refused at build time (JS lane)", async () => {
     // The property-assigned class-expression family (corpus 2032/2033
     // pins what lowers): `exports.O = class extends exports.I {}` with
     // the base assigned BELOW would extend undefined in Node (TypeError
     // at the derived statement) — the source-order guard defers a named
     // fence instead of pinning a base that doesn't exist yet.
-    const r = await compileAndRun(
+    const d = await compileRefused(
       "extends-above-assignment",
       `'use strict';
 exports.O = class extends exports.I {};
@@ -240,20 +255,16 @@ console.log('unreached');
 `,
       "cjs",
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toMatch(
-      /^Uncaught Error: extending 'exports\.I' above the statement that assigns it .* \[SC1090 at .*extends-above-assignment\.cjs:2\]\n$/,
-    );
+    expect(d.some((x) => /^SC1090: extending 'exports\.I' above the statement that assigns it /.test(x)), d.join(" | ")).toBe(true);
   });
 
-  test("a REASSIGNED property-assigned class stays fenced, never a silently wrong base (JS lane)", async () => {
+  test("a REASSIGNED property-assigned class is refused, never a silently wrong base (JS lane)", async () => {
     // Two `exports.I = class …` assignments make the binding dynamic (the
     // runtime base is whichever ran last). The second assignment's
     // class-value flow fence fires first (nominal classval slots), and the
     // extends resolver refuses to pin either class — the program fences
     // instead of extending the first assignment's class.
-    const r = await compileAndRun(
+    const d = await compileRefused(
       "extends-reassigned-property",
       `'use strict';
 exports.I = class { a() { return 1; } };
@@ -263,19 +274,17 @@ console.log(new exports.O().a());
 `,
       "cjs",
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toMatch(/^Uncaught Error: .* \[SC1090 at .*extends-reassigned-property\.cjs:\d+\]\n$/);
+    expect(d.some((x) => /^SC1090: /.test(x)), d.join(" | ")).toBe(true);
   });
 
-  test("a LEAF class whose collection fenced defers to its statement (JS lane)", async () => {
+  test("a LEAF class whose collection is refused fails the build (JS lane)", async () => {
     // The JS deferral's leaf edge: a class nothing extends keeps the
     // runtime-fence story even when its shape has no lowering
     // (constructor-assigned field shadowing its own method) — the build
     // succeeds, statements before the class statement run, and the class
     // statement throws the recorded fence. Only the EXTENDS edge reports
     // at compile time (diagnostics js-extends-poisoned-base pins that).
-    const r = await compileAndRun(
+    const d = await compileRefused(
       "leaf-shadowing-class-defers",
       `'use strict';
 console.log("before");
@@ -293,20 +302,16 @@ console.log("unreachable");
 `,
       "cjs",
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toBe("before\n");
-    expect(r.stderr).toMatch(
-      /^Uncaught Error: constructor-assigned fields shadowing methods are not supported yet \[SC1090 at .*leaf-shadowing-class-defers\.cjs:5\]\n$/,
-    );
+    expect(d.some((x) => /^SC1090: constructor-assigned fields shadowing methods are not supported yet$/.test(x)), d.join(" | ")).toBe(true);
   });
 
-  test("a DERIVED class of a clean base keeps the deferral when only the derived is poisoned (JS lane)", async () => {
+  test("a DERIVED class of a clean base is refused when only the derived is poisoned (JS lane)", async () => {
     // The other side of the extends-edge rule: the derived class's OWN
     // fence (a constructor-assigned field shadowing an INHERITED method)
     // stays deferred — the base collected fine, so the eager
     // poisoned-base report has nothing to flush, and the derived class
     // statement is the runtime fence exactly like a leaf.
-    const r = await compileAndRun(
+    const d = await compileRefused(
       "derived-shadowing-class-defers",
       `'use strict';
 console.log("before");
@@ -326,19 +331,15 @@ console.log(i.foo());
 `,
       "cjs",
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toBe("before\n");
-    expect(r.stderr).toMatch(
-      /^Uncaught Error: constructor-assigned fields shadowing methods are not supported yet \[SC1090 at .*derived-shadowing-class-defers\.cjs:11\]\n$/,
-    );
+    expect(d.some((x) => /^SC1090: constructor-assigned fields shadowing methods are not supported yet$/.test(x)), d.join(" | ")).toBe(true);
   });
 
-  test("destructuring a SURFACED builtin global's member is a named fence at the pattern (JS lane)", async () => {
+  test("destructuring a SURFACED builtin global's member is refused at the pattern (JS lane)", async () => {
     // `const { max } = Math` would detach a member whose lowering is
     // keyed to its receiver (Math.max) — the pattern fences by member
     // and global name instead of binding a token whose calls fail late.
     // Corpus 2558 pins the OPAQUE globals, where members DO bind tokens.
-    const r = await compileAndRun(
+    const d = await compileRefused(
       "destructure-surfaced-global",
       `'use strict';
 const { max } = Math;
@@ -346,19 +347,15 @@ console.log(max(1, 2));
 `,
       "cjs",
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toMatch(
-      /^Uncaught Error: destructuring the member 'max' of the builtin global 'Math' \(a detached member loses its receiver-keyed lowering — call it through the global\) is not supported yet \[SC1031 at .*destructure-surfaced-global\.cjs:2\]\n$/,
-    );
+    expect(d.some((x) => /^SC1031: destructuring the member 'max' of the builtin global 'Math' /.test(x)), d.join(" | ")).toBe(true);
   });
 
-  test("an OPAQUE global's destructured member binds a token; uses fence lazily per site (JS lane)", async () => {
+  test("an OPAQUE global's destructured member binds a token; each use of it is refused (JS lane)", async () => {
     // The node-suite webcrypto prologue: `const { subtle } =
     // globalThis.crypto` binds the member identity token, so the program
     // RUNS past the destructure (the eager pattern fence used to kill it
     // at that line) and each use meets its own named fence.
-    const r = await compileAndRun(
+    const d = await compileRefused(
       "destructure-opaque-global",
       `'use strict';
 const { subtle } = globalThis.crypto;
@@ -367,14 +364,10 @@ subtle.digest('SHA-256');
 `,
       "cjs",
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toBe("bound true\n");
-    expect(r.stderr).toMatch(
-      /^Uncaught Error: method calls like 'subtle\.digest' is not supported yet \[SC1090 at .*destructure-opaque-global\.cjs:4\]\n$/,
-    );
+    expect(d.some((x) => /^SC1090: method calls like 'subtle\.digest' is not supported yet$/.test(x)), d.join(" | ")).toBe(true);
   });
 
-  test("a 7000-level expression is a named deferred fence, not a stack overflow (JS lane)", async () => {
+  test("a 7000-level expression is a named build refusal, not a stack overflow (JS lane)", async () => {
     // The binderBinaryExpressionStress depth: an AST deep enough that the
     // PREFLIGHT walks (the checker facade's prefetch sweep, the require
     // scans) used to overflow the JS stack as a RangeError ICE before the
@@ -384,7 +377,7 @@ subtle.digest('SHA-256');
     // compile-time twin is the deep-nesting-preflight diagnostics fixture.
     // Parens carry the depth (a real 6500-term chain spends minutes in
     // per-node type queries; the walk that used to crash is shape-blind).
-    const r = await compileAndRun(
+    const d = await compileRefused(
       "deep-nesting-chain",
       `'use strict';
 let x = ${"(".repeat(7000)}1${")".repeat(7000)};
@@ -392,32 +385,24 @@ console.log('after');
 `,
       "cjs",
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toMatch(
-      /^Uncaught Error: expressions nested deeper than 200 levels are not supported yet \[SC1090 at .*deep-nesting-chain\.cjs:2\]\n$/,
-    );
+    expect(d.some((x) => /^SC1090: expressions nested deeper than 200 levels are not supported yet$/.test(x)), d.join(" | ")).toBe(true);
   });
 
-  test("process.on with a prototype-member event name fences by NAME", async () => {
+  test("process.on with a prototype-member event name is refused by NAME", async () => {
     // '__proto__' used to fall into the compiler's own signal table —
     // `{ SIGINT: 2 }["__proto__"]` answered Object.prototype, which rode
     // a numLit into the C as `[object Object]` (invalid C, cc.js death).
     // The own() lookup makes it what every other unsupported process
     // event is: a named deferred fence. Corpus 1761 pins the EMITTER
     // side, where these names work and match Node byte-exactly.
-    const r = await compileAndRun(
+    const d = await compileRefused(
       "process-on-proto",
       `'use strict';
 process.on('__proto__', () => {});
 `,
       "cjs",
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toMatch(
-      /^Uncaught Error: 'process\.on\("__proto__", \.\.\.\)' is part of the standard library types but has no scriptc lowering yet \[SC2020 at .*process-on-proto\.cjs:2\]\n$/,
-    );
+    expect(d.some((x) => /^SC2020: 'process\.on\(\"__proto__\", \.\.\.\)' is part of the standard library types but has no scriptc lowering yet$/.test(x)), d.join(" | ")).toBe(true);
   });
 });
 

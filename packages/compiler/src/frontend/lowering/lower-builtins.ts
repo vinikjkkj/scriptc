@@ -433,11 +433,12 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
  * inside a function, a require whose specifier is not a written literal,
  * a require whose value is consumed as a value — and until this pass the
  * whole family reached the callee-as-a-value fence, which under a JS
- * file's deferred-fence stance means the program's own `try/catch`
+ * file's deferred-fence stance meant the program's own `try/catch`
  * swallowed a compiler refusal and carried on with `null`. Node's answer
- * there is not `null`: it is a module, or a THROW.
+ * there is not `null`: it is a module, or a THROW. A construct this file
+ * cannot answer exactly is a BUILD refusal.
  *
- * The two arms this can serve exactly, and one it deliberately cannot:
+ * The arms this can serve exactly, and the one it refuses:
  *
  *  1. A specifier the BUILD can prove Node does not resolve compiles to
  *     Node's own catchable MODULE_NOT_FOUND — message and code — which
@@ -455,9 +456,8 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
  *     the same scr_throw_error_msg_code text the poisoned-statement
  *     fence does, so the translation-unit census still counts it.
  *
- * The direction of every approximation is loud: a fence is never a value
- * where Node throws, and MODULE_NOT_FOUND is only ever emitted where the
- * build PROVED nothing resolves. */
+ * MODULE_NOT_FOUND is only ever emitted where the build PROVED nothing
+ * resolves. */
 
 /** True when `callee` is the ambient CommonJS `require` — the module-scope
    * binding Node defines in a CommonJS module, not a local of that name and
@@ -705,8 +705,6 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
     }
     return { kind: "closure", fnName, captures: [], type: funcOf([DYN], DYN), loc };
   }
-
-
 
 /** The four properties Node defines on the CommonJS `require` function,
    * taken as VALUES: `resolve`, `main`, `extensions`, `cache`. Measured
@@ -1071,7 +1069,10 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * throw Node's exact ERR_INVALID_ARG_TYPE / ERR_INVALID_ARG_VALUE /
    * ERR_OUT_OF_RANGE — the honest tail (the real operation where one
    * exists, the compiler-rendered SC2020 fence otherwise) runs only
-   * after every validation passes, exactly Node's order. Null when this
+   * after every validation passes, exactly Node's order. A tail that has no
+   * real operation is not claimed here: those shapes (fs.mkdtemp, readFile,
+   * opendirSync, watchFile, lchmod, read, the stream option forms) stay
+   * with the table, which refuses them at build time. Null when this
    * is not a claimed member/shape (the table or fence path stands). */
   export function lowerFsLadderCall(L: Lowerer, expr: ts.CallExpression,
     bi: { module: string; member: string },

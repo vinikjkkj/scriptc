@@ -55,10 +55,9 @@
 // M3's key is `trim`, not `toUpperCase`: toUpperCase is fenced for a
 // link-line reason recorded in 4152, and a row that fences for a reason
 // unrelated to this case would not show the resolution close it is about.
-import { m1ReadDot, m1CallDot, m1CallElem, m1CallDotFromMethod, m1CtorControl, m1NoThisControl, m2ReadOwnElem, m2CallOwnElem, m2ReadInhElem, m2CallInhElem, m2ReadInhDot, m2CallInhDot, m3ReadElem, m3ReadDot, m3CallElem, m3CallDot, m3LenElem, m3IdxElem, m4ReadElem, m4ReadDot, m4CallElem, m4CallDot, m4CallElemArg, m5ReadElem, m5CallElem } from "recvmech"
+import { m1ReadDot, m1CallDot, m1CallDotFromMethod, m1CtorControl, m1NoThisControl, m2ReadOwnElem, m2CallOwnElem, m2ReadInhElem, m2CallInhElem, m2ReadInhDot, m2CallInhDot, m3ReadElem, m3ReadDot, m3CallElem, m3CallDot, m3LenElem, m3IdxElem, m4ReadElem, m4ReadDot, m4CallElem, m4CallDot, m4CallElemArg, m5ReadElem, m5CallElem } from "recvmech"
 console.log("m1ReadDot           = " + m1ReadDot())
 console.log("m1CallDot           = " + m1CallDot())
-console.log("m1CallElem          = " + m1CallElem())
 console.log("m1CallDotFromMethod = " + m1CallDotFromMethod())
 console.log("m1CtorControl       = " + m1CtorControl())
 console.log("m1NoThisControl     = " + m1NoThisControl())
