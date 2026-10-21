@@ -285,6 +285,24 @@ export function expectCasesPassed(
 const PROBE_CWDS = ["/", "/zz/yy", "\\", "\\zz\\yy", "Q:\\", "Q:\\zz\\yy"] as const;
 
 /**
+ * The probe set above names ONE drive, Q:, which no vocabulary string
+ * mentions, so a case that spells a drive in its arguments looked cwd-free
+ * under all six probes. On a Windows host the generator's chdir("/") lands
+ * on the CURRENT drive's root, and the CI runner's checkout is on D:, so
+ * `relative("a", "d:/games")` is "d:\games" under every probe (different
+ * roots) yet `..\..\..\games` on the host (same root): fourteen
+ * `relative` cases and one `resolve("..\..\up", "d:x")` the probe called
+ * cwd-free, then reported as a stale committed file. The drive that decides
+ * those cases is the host's own, so probe it, measured from the process
+ * (execFile children inherit our cwd, hence the generator's drive).
+ */
+function hostDriveProbeCwds(): string[] {
+  if (process.platform !== "win32") return [];
+  const m = /^([A-Za-z]:)/.exec(process.cwd());
+  return m === null ? [] : [`${m[1]}\\`, `${m[1]}\\zz\\yy`];
+}
+
+/**
  * A committed/host disagreement on a case the cwd probe says is cwd-free.
  * These are Node behaviours that name or leak `process.platform` itself, so
  * no cwd can reproduce them; each one is a decision about who is right:
@@ -338,7 +356,7 @@ export async function materializeHostCases(
   const committed = readFileSync(committedFile, "utf8").split(/\r?\n/).filter((l) => l !== "");
   const [host, ...probes] = await Promise.all([
     generateCases(gen),
-    ...PROBE_CWDS.map((c) => generateCases(gen, c)),
+    ...[...PROBE_CWDS, ...hostDriveProbeCwds()].map((c) => generateCases(gen, c)),
   ]);
 
   const runs = [host!, ...probes];
