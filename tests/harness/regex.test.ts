@@ -1,9 +1,9 @@
 /* Regex behavior that is scriptc-only by nature — deliberately NOT in the
  * differential corpus (tests/corpus/1200.. holds everything Node-comparable):
  *
- * - The statefulness fence at runtime: test() on a g/y regex that flowed
- *   through a variable (the frontend only sees literal receivers) must
- *   abort with the fence message, never silently model lastIndex.
+ * - Statefulness: test()/exec() on a g/y regex that flowed through a
+ *   variable read and write lastIndex exactly as Node does (asserted
+ *   against a run of the same source under Node).
  * - split() on a pattern with capture groups: Node splices the captured
  *   values into the result — scriptc throws a catchable TypeError naming
  *   the limitation instead, so the caught branch is asserted here.
@@ -18,6 +18,8 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { mkdtempSync } from "node:fs";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
@@ -80,29 +82,26 @@ async function build(
 }
 
 describe("regex (scriptc-only behavior)", () => {
-  test("test() on a g-flagged regex reaching runtime aborts with the fence message", async () => {
+  test("test() on a g-flagged regex reaching runtime is stateful through lastIndex, like Node", async () => {
     // The g flag is invisible to the frontend here: the regex flows through
-    // a function parameter, so the RUNTIME fence must catch it.
-    const r = await build(
-      "g-test-runtime",
-      `function check(re: RegExp, s: string): boolean {
+    // a function parameter, so the RUNTIME must carry the state.
+    const src = `function check(re: RegExp, s: string): boolean {
   return re.test(s);
 }
+const r = /a/g;
 console.log("before");
-console.log(check(/a/g, "abc"));
-`,
-    );
-    const err = await execFileAsync(r.binaryPath, []).then(
-      () => {
-        throw new Error("expected the g-flagged test() to abort");
-      },
-      (e: Error & { signal?: string; stdout?: string; stderr?: string }) => e,
-    );
-    expectAbort(err);
-    expect(err.stdout).toContain("before");
-    expect(err.stderr).toContain(
-      "test() on a regex with the 'g' or 'y' flag is not supported",
-    );
+console.log(check(r, "aaa"), r.lastIndex, check(r, "aaa"), r.lastIndex, check(r, "aaa"), r.lastIndex, check(r, "aaa"), r.lastIndex);
+console.log(check(/a/g, "abc"), check(/a/y, "ba"), check(/a/y, "ab"));
+`;
+    const r = await build("g-test-runtime", src);
+    const mine = await execFileAsync(r.binaryPath, []);
+    // Node refuses to strip types under node_modules (the scratch cache
+    // lives there), so the source is copied to TMPDIR (~/sc/tmp here).
+    const nodeDir = mkdtempSync(join(tmpdir(), "regex-g-node-"));
+    writeFileSync(join(nodeDir, "main.ts"), src);
+    const node = await execFileAsync(process.execPath, [join(nodeDir, "main.ts")]);
+    expect(mine.stdout).toBe(node.stdout);
+    expect(mine.stdout).toContain("true 1 true 2 true 3 false 0");
   });
 
   test("split() with capture groups throws a catchable TypeError (Node would splice them in)", async () => {
