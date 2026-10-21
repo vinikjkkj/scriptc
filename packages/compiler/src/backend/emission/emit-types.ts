@@ -102,6 +102,10 @@ export function cType(t: IrType): string {
       // Nothing constructs one -- see the IrType comment; the pointer is
       // always NULL in practice.
       return "ScrDate *";
+    case "opaque":
+      // A named stdlib handle (Blob, PromiseConstructor): the pointer is NULL
+      // for a Blob, the immortal singleton for the PromiseConstructor.
+      return "ScrOpaque *";
     case "rtcPeerConnection":
       // Declared so the record field and the union arm have a C type.
       // Nothing constructs one yet -- see the IrType comment.
@@ -246,6 +250,8 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_request_retain(${expr})`;
     case "date":
       return `scr_date_retain(${expr})`;
+    case "opaque":
+      return `scr_opaque_retain(${expr})`;
     case "rtcPeerConnection":
       return `scr_rtc_peer_connection_retain(${expr})`;
     case "rtcDataChannel":
@@ -363,6 +369,8 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_request_release(${expr})`;
     case "date":
       return `scr_date_release(${expr})`;
+    case "opaque":
+      return `scr_opaque_release(${expr})`;
     case "rtcPeerConnection":
       return `scr_rtc_peer_connection_release(${expr})`;
     case "rtcDataChannel":
@@ -464,6 +472,7 @@ export function boxKindC(t: IrType): string {
     case "requestInit":
     case "request":
     case "date":
+    case "opaque":
     case "rtcPeerConnection":
     case "rtcDataChannel":
     case "bytes":
@@ -613,6 +622,8 @@ export function rcAdapters(t: IrType): RcAdapters | null {
       return rt("scr_request_retain_v", "scr_request_release_v");
     case "date":
       return rt("scr_date_retain_v", "scr_date_release_v");
+    case "opaque":
+      return rt("scr_opaque_retain_v", "scr_opaque_release_v");
     case "rtcPeerConnection":
       return rt("scr_rtc_peer_connection_retain_v", "scr_rtc_peer_connection_release_v");
     case "rtcDataChannel":
@@ -804,6 +815,8 @@ export function elemKindC(elem: IrType): string {
     // struct is a refcount and nothing else), so elemTraceC answers null
     // and the element CLASS is plain REF.
     case "date":
+    // A Blob[] or PromiseConstructor[] holds no edge either: REF, no trace.
+    case "opaque":
     // Connection.incomingChannels in zapo is RTCDataChannel[]; the peer
     // connection is included for symmetry. Neither holds an edge, so
     // elemTraceC answers null and the element CLASS is plain REF.

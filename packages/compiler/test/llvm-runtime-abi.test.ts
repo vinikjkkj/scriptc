@@ -591,6 +591,10 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     // elements stay uniform, and the row is what forces the next
     // person to look at both backends before that changes.
     date: { kind: "date" },
+    // A named stdlib handle (Blob, PromiseConstructor): same refcount-only
+    // struct as the handles above, one immortal singleton for the
+    // PromiseConstructor, and the row is what forces a look at both backends.
+    opaque: { kind: "opaque", name: "Blob" },
     rtcPeerConnection: { kind: "rtcPeerConnection" },
     rtcDataChannel: { kind: "rtcDataChannel" },
     fsWatcher: { kind: "fsWatcher" },

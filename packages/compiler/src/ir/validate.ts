@@ -1462,6 +1462,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "number.isInteger": { argTypes: [F64], result: BOOL },
   "number.isSafeInteger": { argTypes: [F64], result: BOOL },
   "date.now": { argTypes: [], result: F64 },
+  "opaque.promiseCtor": { argTypes: [], result: { kind: "opaque", name: "PromiseConstructor" } },
   "date.toISOString": { argTypes: [F64], result: STRING },
   "date.parseGetTime": { argTypes: [STRING], result: F64 },
   "date.utc": { argTypes: [F64, F64, F64, F64, F64, F64, F64], result: F64 },

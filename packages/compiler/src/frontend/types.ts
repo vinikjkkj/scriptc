@@ -1115,6 +1115,8 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "Request";
     case "date":
       return "Date";
+    case "opaque":
+      return t.name;
     case "rtcPeerConnection":
       return "RTCPeerConnection";
     case "rtcDataChannel":
@@ -4644,6 +4646,22 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // is unusable.
   if (!ctx.dynamic && isStdlibInterface("Function")) {
     return { kind: "func", params: [DYN], ret: DYN, restIn: true };
+  }
+  // `Blob` and `PromiseConstructor`: named standard-library handles (IrType
+  // "opaque"). Type first: nothing builds a Blob, and the global `Promise`
+  // value is the one PromiseConstructor there is. Every member still refuses
+  // through the standard-library fence, so the handle is inert.
+  if (
+    !ctx.dynamic &&
+    psym !== undefined &&
+    (psym.name === "Blob" || psym.name === "PromiseConstructor") &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d) || ts.isVariableDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return { kind: "opaque", name: psym.name };
   }
   if (isStdlibInterface("PromiseRejectedResult")) {
     return {

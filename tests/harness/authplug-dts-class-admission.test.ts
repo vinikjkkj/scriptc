@@ -19,9 +19,10 @@
  * expectation typed into this file would be a second thing that can be wrong.
  * The program builds the Conn value STRUCTURALLY (no value of a non-program
  * class can come from anywhere else in a static build; the literal carries every
- * member the shape has: `end` (an overload set, one merged slot) and `on`
- * (`this`-returning) belong to it, while the generic `query<T>` and the
- * PromiseConstructor-taking `promise` are still declined from it), authors the plugins,
+ * member the shape has: `end` (an overload set, one merged slot), `on`
+ * (`this`-returning) and `promise` (PromiseConstructor, a named stdlib handle)
+ * belong to it; only the UNCONSTRAINED generic `query<T>(sql): T`, whose T no
+ * program instantiates, is still declined from it), authors the plugins,
  * reads them back out of the record and calls them, awaiting every return
  * arm. The negative case pins that the promise-union rule did not widen: a
  * promise whose payload is not among the data arms still refuses. */
@@ -59,6 +60,7 @@ const conn: Conn = {
   ping() {},
   escape(v: string) { return "'" + v + "'"; },
   on(_event: string, _listener: (...args: unknown[]) => void): Conn { return conn; },
+  promise(_impl: PromiseConstructor | undefined): Conn { return conn; },
 } as unknown as Conn;
 type R = Promise<string> | string | Uint8Array | Promise<Uint8Array> | null;
 const opts: Opts = {

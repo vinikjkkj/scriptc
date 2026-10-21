@@ -315,4 +315,60 @@ console.log(r.name, events.join(","));
 `,
     );
   }, 240_000);
+
+  test("a PromiseConstructor-typed parameter takes the global Promise value", async () => {
+    // `Connection.promise(promiseImpl?: PromiseConstructor)`. The type is a named stdlib
+    // handle (IrType "opaque"); the bare `Promise` value is its one immortal singleton.
+    await differential(
+      "promise-ctor",
+      `export declare class Conn {
+  threadId: number;
+  promise(promiseImpl?: PromiseConstructor): Conn;
+}
+`,
+      `import type { Conn } from "./declib.js";
+let seen = 0;
+const c: Conn = {
+  threadId: 5,
+  promise(promiseImpl: PromiseConstructor | undefined): Conn {
+    seen += promiseImpl === undefined ? 1 : 10;
+    return c;
+  },
+};
+c.promise();
+c.promise(Promise);
+c.promise(Promise).promise();
+console.log(seen, c.threadId);
+`,
+    );
+  }, 240_000);
+
+  test("a recursive union with Blob, Date and Buffer arms maps", async () => {
+    // mysql2's ExecuteValues: `Typed | string | number | bigint | boolean | Date | null | Blob |
+    // Buffer | Uint8Array | ExecuteValues[] | { [key: string]: ExecuteValues }`. `Blob` had no
+    // representation at all.
+    await differential(
+      "blob-union",
+      `export interface Typed { readonly type: number; readonly value: unknown }
+export type EV =
+  | Typed | string | number | bigint | boolean | Date | null | Blob | Buffer | Uint8Array
+  | EV[]
+  | { [key: string]: EV };
+export declare class Conn {
+  threadId: number;
+  execute(sql: string, values: EV[]): string;
+  run(sql: string, v: EV): string;
+}
+`,
+      `import type { Conn, EV } from "./declib.js";
+const c: Conn = {
+  threadId: 2,
+  execute(sql: string, values: EV[]): string { return sql + ":" + values.length; },
+  run(sql: string, v: EV): string { return sql + ":" + (Array.isArray(v) ? "a" + v.length : v === null ? "null" : "x"); },
+};
+console.log(c.execute("a", [1, "x", true, null]));
+console.log(c.run("b", 3), c.run("c", "s"), c.run("d", [1, 2]), c.run("e", { k: 1 }));
+`,
+    );
+  }, 240_000);
 });

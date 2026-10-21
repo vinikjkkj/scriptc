@@ -3036,6 +3036,8 @@ export class CEmitter {
       // A Date is an object too -- and this case is what keeps
       // `if (new Date(0))` true rather than false.
       case "date":
+      // A named stdlib handle (Blob, PromiseConstructor) is an object too.
+      case "opaque":
       // A peer connection and a data channel are objects too.
       case "rtcPeerConnection":
       case "rtcDataChannel":

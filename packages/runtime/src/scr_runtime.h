@@ -9991,6 +9991,10 @@ typedef struct ScrRequest ScrRequest;
  * case -- has a representation at all. Every member still refuses by
  * name, and `new Date(...)` as a VALUE still refuses. See scr_date.c. */
 typedef struct ScrDate ScrDate;
+/* A named standard-library handle: Blob, PromiseConstructor. A type first, so a
+ * union or record that mentions one has a representation at all; nothing builds
+ * a Blob, and the PromiseConstructor is one immortal singleton. See scr_opaque.c. */
+typedef struct ScrOpaque ScrOpaque;
 /* The WebRTC data-channel handles. Types with no values today: mapped so
  * that a record with an `RTCPeerConnection | null` field, and the Map
  * holding that record, have a representation at all. Every member still
@@ -10116,6 +10120,14 @@ ScrRequest *scr_request_retain(ScrRequest *r);
 void scr_request_release(ScrRequest *r);
 void *scr_request_retain_v(void *p);
 void scr_request_release_v(void *p);
+
+/* The named-handle ownership pair (scr_opaque.c, behind moduleUsesOpaque) and the
+ * immortal PromiseConstructor singleton the global `Promise` value lowers to. */
+ScrOpaque *scr_opaque_retain(ScrOpaque *p);
+void scr_opaque_release(ScrOpaque *p);
+void *scr_opaque_retain_v(void *p);
+void scr_opaque_release_v(void *p);
+ScrOpaque *scr_opaque_promise_ctor(void);
 
 /* The Date ownership pair. LIVE as of the Date-value slice:
  * scr_date_new below allocates, so these balance a real refcount. The

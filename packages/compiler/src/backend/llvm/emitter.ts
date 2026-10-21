@@ -404,6 +404,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "process.stderrWrite": "scr_process_stderr_write",
   "process.isTTY": "scr_process_is_tty",
   "date.now": "scr_date_now",
+  "opaque.promiseCtor": "scr_opaque_promise_ctor",
   "date.parseGetTime": "scr_date_parse_get_time",
   "date.utc": "scr_date_utc",
   "date.getHours": "scr_date_get_hours",
@@ -4922,6 +4923,7 @@ class LlEmitter {
       // A Date is a JS object too, and this is what keeps
       // `if (new Date(0))` true rather than false.
       case "date":
+      case "opaque":
       case "rtcPeerConnection":
       case "rtcDataChannel":
       case "fsWatcher": {
