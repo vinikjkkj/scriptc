@@ -137,6 +137,9 @@ ScrCoroParkKind scr_coro_park(ScrCoroBase *base, ScrPromise *p) {
    * returns to tell a park from a fall-out-of-the-body, and the two need
    * opposite handling. */
   base->flags |= SCR_CORO_SUSPENDED;
+#ifdef SCR_RC_AUDIT
+  scr_note_coro_park();
+#endif
 
   /* The suspension owns a reference: between here and the resume, the only
    * things naming this frame are the ready queue or a promise waiter list,
@@ -206,6 +209,9 @@ ScrCoroParkKind scr_coro_park(ScrCoroBase *base, ScrPromise *p) {
  * second arm, because there is no operand that could already be settled. */
 void scr_coro_hop(ScrCoroBase *base) {
   base->flags |= SCR_CORO_SUSPENDED;
+#ifdef SCR_RC_AUDIT
+  scr_note_coro_park();
+#endif
   scr_coro_retain(base);
   scr_queue_microtask_raw(&scr_coro_resume_entry, base, NULL);
 }
@@ -270,6 +276,9 @@ void scr_coro_resume_entry(void *base_as_void) {
   ScrCoroTaskState st;
   scr_coro_state_in(base, &st);
 
+#ifdef SCR_RC_AUDIT
+  if ((base->flags & SCR_CORO_SUSPENDED) != 0u) scr_note_coro_unpark();
+#endif
   base->flags &= ~(uint32_t)SCR_CORO_SUSPENDED;
   base->flags |= SCR_CORO_RUNNING;
   base->resume(base);

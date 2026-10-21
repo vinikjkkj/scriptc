@@ -7179,6 +7179,10 @@ void scr_note_abandoned_fibers(long n); /* scr_console.c owns the flag */
 /* Live coroutine frames. scr_console.c owns the counter; scr_coro.c pushes. */
 void scr_note_coro_alloc(void);
 void scr_note_coro_free(void);
+/* Frames parked on an await/hop and not yet resumed: at loop exhaustion these
+ * are the ones abandoned by design (see scr_rc_audit_at_exit). */
+void scr_note_coro_park(void);
+void scr_note_coro_unpark(void);
 #endif
 
 /* new Promise(executor): kind 0 f64, 1 bool, 2 str, 3 void; ref-kind

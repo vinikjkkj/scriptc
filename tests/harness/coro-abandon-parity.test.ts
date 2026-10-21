@@ -161,6 +161,7 @@ const PARKED_FOREVER = [
 const COUNT_RE = /scriptc RC audit: ([0-9]+) coroutine\(s\) abandoned/;
 const FAILED_RE = /scriptc RC AUDIT FAILED: (.*) live at exit/;
 const FIBER_SKIP_RE = /scriptc RC audit skipped: ([0-9]+) fiber\(s\) never resumed/;
+const CORO_SKIP_RE = /scriptc RC audit skipped: ([0-9]+) coroutine\(s\) parked forever/;
 
 interface Run { stdout: string; stderr: string; code: number }
 
@@ -231,44 +232,40 @@ describe("clause 3.5: the codegen discharges it on every exit path a frame can t
 
 describe("the one residue: a frame parked when the loop exits", () => {
   /* The contract calls this "exactly what happens to an abandoned fiber
-   * today". MEASURED, IT IS NOT EXACTLY THAT, and the difference is a
-   * process exit code -- the loudest observable a program has.
+   * today". It used to be false, and this test pinned the divergence: the
+   * coroutine lane printed its count line and fell through to the leak
+   * check, which found the parked frame's deliberately retained payload and
+   * answered _Exit(99), while the fiber lane printed its skip notice and
+   * returned, exiting 0. Node exits 0 there, so the 99 was the audit
+   * reporting a deliberate abandonment as a leak.
    *
-   * scr_console.c:61-64 prints the coroutine line and FALLS THROUGH to the
-   * leak check, which finds the abandoned frame's deliberately retained
-   * payload and calls _Exit(99). scr_console.c:67-71 prints the fiber
-   * notice and RETURNS, so the leak check never runs and the process exits 0.
-   *
-   * Both halves are deliberate where they were written -- the coroutine line
-   * exists precisely so the failure is EXPLAINED rather than silent -- so
-   * this test pins the divergence instead of erasing it. What it refuses to
-   * let stand is the contract sentence claiming the two lanes behave alike,
-   * because that sentence is the stated reason for leaving 3.5's residue
-   * open, and it is false in the reassuring direction. */
-  test("the two lanes diverge, and the divergence is the EXIT CODE", async () => {
+   * scr_rc_audit_at_exit now exempts a coroutine parked at loop exhaustion
+   * the way it exempts a fiber, on a notice of its own. The sentence is
+   * true again, which is the condition the previous version of this test
+   * named for deleting it; what it checks instead is that the two lanes
+   * AGREE, and that the exemption is announced rather than silent. */
+  test("the two lanes agree: named, SKIPPED, exit 0", async () => {
     const k1 = await buildAndRun("c35-parked-k1", PARKED_FOREVER, true);
     const k0 = await buildAndRun("c35-parked-k0", PARKED_FOREVER, false);
 
     expect(k1.stdout, "both lanes must still run the program").toBe(k0.stdout);
 
-    /* Stackless: named, counted, and FAILED. */
+    /* Stackless: named, counted, and SKIPPED on a notice of its own. */
     expect(Number(COUNT_RE.exec(k1.stderr)?.[1] ?? "-1"),
       "one frame was abandoned and the line must say so; stderr: " + k1.stderr).toBe(1);
+    expect(Number(CORO_SKIP_RE.exec(k1.stderr)?.[1] ?? "-1"),
+      "the exemption must be announced, never silent; stderr: " + k1.stderr).toBe(1);
     expect(FAILED_RE.test(k1.stderr),
-      "the abandoned frame's payload must still reach the leak check; stderr: " + k1.stderr).toBe(true);
-    expect(k1.code, "the leak check answers with _Exit(99)").toBe(99);
+      "a parked frame's payload is held by design and must not be reported as a leak; stderr: " + k1.stderr).toBe(false);
 
     /* Fiber: named, and SKIPPED. */
     expect(Number(FIBER_SKIP_RE.exec(k0.stderr)?.[1] ?? "-1"),
       "the fiber lane must print its own skip notice; stderr: " + k0.stderr).toBe(1);
     expect(FAILED_RE.test(k0.stderr),
       "the fiber lane returns before the leak check and must not report one").toBe(false);
-    expect(k0.code, "the fiber lane exits cleanly on the same source").toBe(0);
 
     /* The sentence under test, stated as an assertion rather than as prose. */
-    expect(k1.code === k0.code,
-      "docs/stackless-frame-contract.md:141-143 claims an abandoned frame behaves " +
-        "'exactly' as an abandoned fiber. If this ever becomes true, that sentence " +
-        "is correct again and this test is the thing to delete.").toBe(false);
+    expect(k0.code, "the fiber lane exits cleanly on the same source").toBe(0);
+    expect(k1.code, "an abandoned frame behaves 'exactly' as an abandoned fiber: exit 0").toBe(0);
   }, 600_000);
 });

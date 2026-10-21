@@ -32,6 +32,13 @@ void scr_note_abandoned_fibers(long n) { scr_abandoned_fibers = n; }
 static long scr_coros_live = 0;
 void scr_note_coro_alloc(void) { scr_coros_live++; }
 void scr_note_coro_free(void) { scr_coros_live--; }
+/* Of those, the frames parked on an await (or a hop) and not yet resumed. A
+ * frame is parked from scr_coro_park/scr_coro_hop until scr_coro_resume_entry,
+ * so at loop exhaustion every one still counted here is waiting on something
+ * that will never settle: the coroutine twin of an abandoned fiber. */
+static long scr_coros_parked = 0;
+void scr_note_coro_park(void) { scr_coros_parked++; }
+void scr_note_coro_unpark(void) { scr_coros_parked--; }
 #endif
 
 #ifndef SCR_LIB
@@ -60,6 +67,18 @@ static void scr_rc_audit_at_exit(void) {
   if (scr_coros_live > 0) {
     fprintf(stderr, "scriptc RC audit: %ld coroutine(s) abandoned\n",
             scr_coros_live);
+  }
+  /* Coroutines parked forever at loop exhaustion are the stackless twin of
+   * the fibers below: awaits nobody settles (Node exits 0 there too) leave
+   * the frame, and every value it owns across the park, held by design.
+   * Exempted ONLY when every live frame is a parked one: a frame that is
+   * alive but NOT parked (a finished frame nobody released, an abandoned
+   * generator frame) is still a candidate leak and keeps the audit running.
+   * The skip is announced on the fiber lane's own line, never silent. */
+  if (scr_coros_live > 0 && scr_coros_parked >= scr_coros_live) {
+    fprintf(stderr, "scriptc RC audit skipped: %ld coroutine(s) parked forever\n",
+            scr_coros_parked);
+    return;
   }
   /* Fibers suspended forever at loop exhaustion (awaits nobody resolves —
    * Node exits 0 there too) still hold their stacks and owned values by
