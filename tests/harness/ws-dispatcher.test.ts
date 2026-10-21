@@ -374,7 +374,6 @@ beforeAll(async () => {
         outPath: join(dir, "program"),
         outDir: dir,
         backend,
-        bestEffort: true,
       });
       if (!res.ok) {
         throw new Error(`${name}/${backend} did not build: ${res.diagnostics[0]?.code ?? "?"}`);

@@ -467,13 +467,10 @@ beforeAll(async () => {
         outPath: join(dir, "program"),
         outDir: dir,
         backend,
-        // the plants are unlowerable in exactly one spot each; without this
-        // the refusal is a compile ERROR and there is no TU to census
-        bestEffort: true,
       });
       if (!res.ok) {
         throw new Error(
-          `${p.name} did not build on the ${backend} lane even best-effort: ` +
+          `${p.name} did not build on the ${backend} lane ` +
             `${res.diagnostics[0]?.code ?? "?"} ${res.diagnostics[0]?.message?.slice(0, 200) ?? "?"}`,
         );
       }
