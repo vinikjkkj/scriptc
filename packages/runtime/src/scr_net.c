@@ -3441,6 +3441,33 @@ static int scr_net_pollfd(void) {
   return scr_net_poller != NULL ? scrp_poller_fd(scr_net_poller) : -1;
 }
 
+/* Does the nextTick queue run between two poller events of ONE drain?
+ *
+ * On POSIX it does, and it is observable. One epoll_wait/kevent batch is one
+ * libuv poll phase, and uv__io_poll runs each ready handle's callback
+ * through its own MakeCallback scope, so the tick queue (where a drained
+ * server's _emitCloseIfDrained schedules its 'close') empties after EVERY
+ * callback and before the next handle's. A server drained by socket A's
+ * EOF therefore emits 'close' before socket B's 'data'/'end' in the same
+ * batch, and before any 'close' callback, since those wait for the
+ * iteration's closing phase. Measured against Node v24.15.0 on Linux with
+ * strace: net-close-order-drain's server socket reads "hello" and, because
+ * both directions are already shut down (EPOLLHUP), libuv synthesizes its
+ * EOF in that same callback; the epoll batch also holds the client's
+ * readable event, and Node prints 'srv closed' before 'client end'.
+ *
+ * Windows is left as it was: there a half-closed peer's EOF arrives an
+ * iteration later (IOCP), the epoch gate in scr_net_settle_due_head is what
+ * encodes that ordering, and it was measured only on a Windows Node, so
+ * this change is not applied there unmeasured. */
+static bool scr_net_ticks_between_events(void) {
+#if defined(_WIN32)
+  return false;
+#else
+  return true;
+#endif
+}
+
 static void scr_net_dispatch(void) {
   if (!scr_net_servers && !scr_net_socks &&
       !scr_net_proto_pending()) {
@@ -3453,6 +3480,10 @@ static void scr_net_dispatch(void) {
     ScrPollerEvent evs[64];
     int n = scrp_drain(scr_net_poller, evs, 64);
     for (int i = 0; i < n; i++) {
+      if (i > 0 && scr_net_ticks_between_events()) {
+        scr_net_settle_due_servers(); /* the tick queue between libuv callbacks */
+        if (scr_exc_pending()) return;
+      }
       scr_net_epoch++; /* one delivered event = one callback turn */
       void *udata = evs[i].udata;
       if (!udata) continue;
@@ -3500,6 +3531,10 @@ static void scr_net_dispatch(void) {
         }
       }
       scr_net_cur_sock = NULL;
+      if (scr_exc_pending()) return;
+    }
+    if (n > 0 && scr_net_ticks_between_events()) {
+      scr_net_settle_due_servers();
       if (scr_exc_pending()) return;
     }
     if (!scr_net_flags_pending()) return;
