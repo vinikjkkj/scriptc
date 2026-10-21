@@ -11767,12 +11767,16 @@ export class Lowerer {
     if (ts.isNonNullExpression(e)) { bang = true; e = strip(e.expression); }
     const isElem = ts.isElementAccessExpression(e) && this.mapTypeOf(this.typeOf(e.expression))?.kind === "array";
     const isCall = bang && ts.isCallExpression(e);
-    if (!isElem && !isCall) return null;
-    if (!this.bindHasEvidence(decl)) return null;
+    // `d.toJSON()`: null for an invalid Date while the checker says `string`; the binding always keeps `string | null`.
+    const isToJson = !bang && type.kind === "string" && ts.isCallExpression(e) && e.arguments.length === 0 &&
+      ts.isPropertyAccessExpression(e.expression) && e.expression.name.text === "toJSON" &&
+      this.mapTypeOf(this.typeOf(e.expression.expression))?.kind === "date";
+    if (!isElem && !isCall && !isToJson) return null;
+    if (!isToJson && !this.bindHasEvidence(decl)) return null;
     const sym = this.checker.getSymbolAtLocation(decl.name);
     if (!sym) return null;
     this.bangSymbols.add(sym);
-    return this.withUndefinedArm(type);
+    return isToJson ? this.withNullArm(type) : this.withUndefinedArm(type);
   }
 
   /** `null!` / `undefined!` (parenthesised or `as`-wrapped forms included):

@@ -5739,35 +5739,24 @@ let digestInputValueDispatches = 0;
     return name;
   }
 
-  /** `d.toJSON()`: the ISO string, or null for an invalid Date (tsc types it `string`; the value is the union
-   * `string | null`, the shape Node returns). A lifted helper so the receiver evaluates once. */
+  /** `d.toJSON()`: the ISO string, or null for an invalid Date, exactly as Node answers (tsc types it `string`;
+   * the value is the union `string | null`). The union is read like any slot that may hold Node's null: printing,
+   * serialising, templates, comparisons, `??`, `?.`, conditions and a declaration keep the union (a declaration
+   * always does: its reads classify like a `!` binding's), a property use throws Node's TypeError naming the
+   * property, and a consumer that needs a plain string extracts it with the checked narrowing. A lifted helper so
+   * the receiver evaluates once. */
   function lowerDateToJson(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr {
-    // Where a null can ride (a printed or serialised argument, a comparison with null, a `??`, a declaration that
-    // names a null arm, a template span) the value is the union Node returns. In a position that needs a string
-    // (a receiver, a typed argument or field) the call answers the ISO string and an invalid Date throws the
-    // catchable RangeError scr_date_to_iso raises: tsc types the call `string`, so there is no null slot there.
     let par: ts.Node = call.parent;
-    while (ts.isParenthesizedExpression(par) || ts.isNonNullExpression(par)) par = par.parent;
-    const nullRides =
-      (ts.isCallExpression(par) && par.arguments.includes(call) &&
-        ts.isPropertyAccessExpression(par.expression) &&
-        ((ts.isIdentifier(par.expression.expression) && par.expression.expression.text === "console") ||
-          (ts.isIdentifier(par.expression.expression) && par.expression.expression.text === "JSON"))) ||
-      (ts.isBinaryExpression(par) &&
-        [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken,
-          ts.SyntaxKind.ExclamationEqualsToken, ts.SyntaxKind.QuestionQuestionToken].includes(par.operatorToken.kind)) ||
-      ts.isTemplateSpan(par) ||
-      (ts.isVariableDeclaration(par) && par.type !== undefined &&
-        (() => {
-          const t = L.mapTypeOf(L.typeOf(par.name));
-          if (t?.kind !== "union") return false;
-          return (L.unions.get(t.unionId)?.arms ?? []).some((a) => a.kind === "nullT");
-        })());
-    if (!nullRides) {
-      const dd = L.lowerExpr(access.expression);
-      const msv: IrExpr = { kind: "libCall", fn: "date.value", args: [dd], type: F64, loc };
-      return { kind: "libCall", fn: "date.toISOString", args: [msv], type: STRING, loc };
+    let top: ts.Node = call;
+    while (ts.isParenthesizedExpression(par) || ts.isNonNullExpression(par) || ts.isAsExpression(par) || ts.isSatisfiesExpression(par)) {
+      top = par;
+      par = par.parent;
     }
+    const keepsUnion =
+      (ts.isVariableDeclaration(par) && par.initializer === top && ts.isIdentifier(par.name)) ||
+      (ts.isCallExpression(par) && par.arguments.includes(top as ts.Expression) &&
+        ts.isPropertyAccessExpression(par.expression) && ts.isIdentifier(par.expression.expression) &&
+        (par.expression.expression.text === "console" || par.expression.expression.text === "JSON"));
     const unionId = L.unions.intern([STRING, NULL_T]);
     const retT: IrType = { kind: "union", unionId };
     const key = "dateToJSON";
@@ -5798,7 +5787,12 @@ let digestInputValueDispatches = 0;
         loc,
       });
     }
-    return { kind: "call", callee: name, args: [L.lowerExpr(access.expression)], type: retT, loc };
+    const u: IrExpr = { kind: "call", callee: name, args: [L.lowerExpr(access.expression)], type: retT, loc };
+    if (keepsUnion) {
+      L.lyingResults.add(u);
+      return u;
+    }
+    return L.lyingRead(u, call) ?? u;
   }
 
   /** `d.toLocaleString(locales, options)` and the Date / Time twins. */
