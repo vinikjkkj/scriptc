@@ -19,6 +19,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #ifdef SCR_RC_AUDIT
 long scr_str_live_count(void); /* provided by scr_string.c */
 #endif
@@ -281,6 +286,11 @@ static void test_split(void) {
 
 int main(int argc, char **argv) {
   if (argc > 1 && strcmp(argv[1], "--global-test-stateful") == 0) {
+#ifdef _WIN32
+    /* The harness compares these bytes with Node's, which ends lines with a
+     * bare LF; the CRT's text mode would write CRLF. */
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     ScrStr *s = S("aaa");
     scr_regex_set_last_index(&re_a_g, 0);
     for (int i = 0; i < 4; i++) {
