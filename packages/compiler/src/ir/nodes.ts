@@ -3519,6 +3519,16 @@ export type IrLibFn =
    * grouping every three integer digits, "∞"/"NaN" texts, and "-0" for
    * negative inputs rounding to zero. Result +1; never throws. */
   | "intl.numFormatEnUs"
+  /** `x.toLocaleString(locales, options)` / `new Intl.NumberFormat(locales, options).format(x)` for a number
+   * (intl.numFormat) or a bigint's decimal text (intl.numFormatBig), over the ICU locale data (scr_nf.c). args:
+   * the value, the locales text ("" = the default locale; several joined with ","), and a string[] of alternating
+   * option name and TAGGED value ('s' string, 'n' number, 'b' boolean, 'u' undefined). Result +1; a bad locale or
+   * option is a catchable RangeError / TypeError (may-throw seed set). */
+  | "intl.numFormat"
+  | "intl.numFormatBig"
+  /** The same with the options as a checked-dynamic (any / unknown typed) value: args value, locales text, options. */
+  | "intl.numFormatDyn"
+  | "intl.numFormatBigDyn"
   /** `Intl.DateTimeFormat().resolvedOptions().locale` — the ENVIRONMENT's
    * default locale as a BCP-47 tag, read from the machine at runtime
    * (scr_intl_default_locale: GetUserDefaultLocaleName on win32, ICU's
@@ -10647,6 +10657,74 @@ function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean; tz: boolean; in
   return { fmt, dyn: date && dyn, tz, intl };
 }
 
+/** What a program asks of the ICU locale data (scr_ures.c): `langs` the languages its literal locales name (null:
+ * a locale is computed, so every locale is carried), `curr` / `unit` whether currency or unit names can be read.
+ * `nf` says the number formatter itself links. A LINK GATE, not a fence: a wrong `false` is a loud
+ * unresolved-symbol link error or a missing-data answer for a locale the program names. */
+export interface IcuUse {
+  nf: boolean;
+  langs: string[] | null;
+  curr: boolean;
+  unit: boolean;
+  zone: boolean;
+}
+export function moduleIcuUse(mod: IrModule): IcuUse {
+  const use: IcuUse = { nf: false, langs: [], curr: false, unit: false, zone: false };
+  const langs = new Set<string>();
+  const addLocale = (e: unknown): void => {
+    const node = e as { kind?: string; value?: unknown } | undefined;
+    if (node?.kind === "strLit" && typeof node.value === "string") {
+      for (const tag of node.value.split(",")) {
+        const lang = tag.trim().split(/[-_]/)[0]!.toLowerCase();
+        if (lang !== "") langs.add(lang);
+      }
+      if (node.value === "") langs.add("");
+    } else use.langs = null;
+  };
+  const visit = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown; method?: unknown; methodKey?: unknown; args?: unknown[] };
+    if (node.kind === "libCall" && (node.fn === "intl.numFormatDyn" || node.fn === "intl.numFormatBigDyn")) {
+      use.nf = true;
+      addLocale(node.args?.[1]);
+      use.curr = use.unit = true;
+    }
+    if (node.kind === "libCall" && (node.fn === "intl.numFormat" || node.fn === "intl.numFormatBig")) {
+      use.nf = true;
+      addLocale(node.args?.[1]);
+      const kv = node.args?.[2] as { kind?: string; elems?: { kind?: string; value?: unknown }[] } | undefined;
+      if (kv?.kind === "arrayLit" && Array.isArray(kv.elems)) {
+        for (let i = 0; i + 1 < kv.elems.length; i += 2) {
+          const key = kv.elems[i];
+          const val = kv.elems[i + 1];
+          if (key?.kind !== "strLit") { use.curr = use.unit = true; continue; }
+          if (key.value === "style" || key.value === "currency" || key.value === "unit") {
+            if (val?.kind === "strLit" && typeof val.value === "string") {
+              if (val.value === "scurrency") use.curr = true;
+              else if (val.value === "sunit") use.unit = true;
+              else if (key.value === "currency") use.curr = true;
+              else if (key.value === "unit") use.unit = true;
+            } else use.curr = use.unit = true;
+          }
+        }
+      } else use.curr = use.unit = true;
+    }
+    if (node.kind === "dynInvoke" && (node.method === "toLocaleString" || node.methodKey !== undefined)) {
+      use.nf = true;
+      use.langs = null;
+      use.curr = use.unit = true;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  if (use.langs !== null) use.langs = [...langs].sort();
+  return use;
+}
+
 /** The program holds an RTCPeerConnection or an RTCDataChannel: compiles
  * scr_wrtc.c in. A LINK GATE, not a fence -- a wrong `false` is a loud
  * unresolved-symbol link error, never a wrong answer.
@@ -12489,6 +12567,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "date.toISOString",
   "date.toString",
   "date.formatOpts",
+  "intl.numFormat",
+  "intl.numFormatBig",
+  "intl.numFormatDyn",
+  "intl.numFormatBigDyn",
   "bytes.jsString",
   // The length-mismatch RangeError, which is a contract of the call.
   "crypto.timingSafeEqual",

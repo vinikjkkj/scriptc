@@ -44,7 +44,6 @@ const arrAt = [1, 2].at(0);
 const norm = "abc".normalize();
 const limited = "a,b,c".split(",", 2); // the string-separator split lowers; the limit form stays fenced
 const fixed = (1.5).toFixed(); // digit-free toFixed lowers now (the static ties-up integer)
-const localized = (1234.5).toLocaleString();
 
 // Unlowered call FORMS of lowered members. (push is fully variadic now —
 // no fenced form remains to pin.)

@@ -3920,6 +3920,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_num_same_value(${arg(0)}, ${arg(1)})`);
           // Intl.NumberFormat("en-US").format / toLocaleString("en-US")
           // with default options (scr_lib.c). +1 string; no throw.
+          case "intl.numFormat":
+            // +1, or a catchable Range/TypeError (may-throw seed set)
+            return finish(`scr_nf_format_num(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "intl.numFormatBig":
+            return finish(`scr_nf_format_big(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "intl.numFormatDyn":
+            return finish(`scr_nf_format_num_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "intl.numFormatBigDyn":
+            return finish(`scr_nf_format_big_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "intl.numFormatEnUs":
             return finish(`scr_intl_num_format_en_us(${arg(0)})`);
           // Intl.DateTimeFormat().resolvedOptions().locale (scr_lib.c):

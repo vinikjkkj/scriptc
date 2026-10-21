@@ -48,7 +48,7 @@ stdlib-fence.ts:20:7 - error SC2020: 'NumberFormat' is part of the standard libr
      |       ^~~
   21 | 
 
-  hint: Intl formatter values have no representation — the COMPOSED en-US forms lower: new Intl.NumberFormat("en-US").format(x) and x.toLocaleString("en-US") with default options; the rest is ICU locale data the binary does not carry
+  hint: Intl formatter values have no representation yet — the COMPOSED forms lower: new Intl.NumberFormat(locales, options).format(x) and x.toLocaleString(locales, options); call format at the construction site instead of hoisting the formatter
 
 stdlib-fence.ts:20:13 - error SC1090: constructing values other than classes declared in the program is not supported yet
 
@@ -138,83 +138,74 @@ stdlib-fence.ts:44:14 - error SC2020: 'string.normalize' is part of the standard
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-stdlib-fence.ts:47:19 - error SC2020: 'Number.prototype.toLocaleString without a locale' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:51:15 - error SC2020: '.indexOf with 2 arguments' is part of the standard library types but has no scriptc lowering yet
 
-  46 | const fixed = (1.5).toFixed(); // digit-free toFixed lowers now (the static ties-up integer)
-  47 | const localized = (1234.5).toLocaleString();
-     |                   ^~~~~~~~~~~~~~~~~~~~~~~~~
-  48 | 
-
-  hint: the default locale is the host environment's, which a compiled binary cannot carry — pass it explicitly: x.toLocaleString("en-US")
-
-stdlib-fence.ts:52:15 - error SC2020: '.indexOf with 2 arguments' is part of the standard library types but has no scriptc lowering yet
-
-  51 | const nums = [1, 2, 3];
-  52 | const found = nums.indexOf(2, 1);
+  50 | const nums = [1, 2, 3];
+  51 | const found = nums.indexOf(2, 1);
      |               ^~~~~~~~~~~~~~~~~~
-  53 | const joined = nums.join();
+  52 | const joined = nums.join();
 
   hint: the fromIndex parameter has no lowering — slice first, or loop
 
-stdlib-fence.ts:53:16 - error SC2020: '.join with 0 arguments' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:52:16 - error SC2020: '.join with 0 arguments' is part of the standard library types but has no scriptc lowering yet
 
-  52 | const found = nums.indexOf(2, 1);
-  53 | const joined = nums.join();
+  51 | const found = nums.indexOf(2, 1);
+  52 | const joined = nums.join();
      |                ^~~~~~~~~~~
-  54 | nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
+  53 | nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
 
   hint: pass the separator explicitly: join(",")
 
-stdlib-fence.ts:54:1 - error SC2020: '.forEach with 2 arguments' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:53:1 - error SC2020: '.forEach with 2 arguments' is part of the standard library types but has no scriptc lowering yet
 
-  53 | const joined = nums.join();
-  54 | nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
+  52 | const joined = nums.join();
+  53 | nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  55 | const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
+  54 | const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
 
   hint: the thisArg parameter has no lowering — use an arrow function
 
-stdlib-fence.ts:56:13 - error SC2020: 'JSON.parse with a reviver' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:55:13 - error SC2020: 'JSON.parse with a reviver' is part of the standard library types but has no scriptc lowering yet
 
-  55 | const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
-  56 | const rev = JSON.parse("1", (_k, v) => v);
+  54 | const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
+  55 | const rev = JSON.parse("1", (_k, v) => v);
      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  57 | // (stringify with a null replacer + LITERAL space now lowers — the pretty
+  56 | // (stringify with a null replacer + LITERAL space now lowers — the pretty
 
   hint: parse to `unknown` and validate with a checked cast ('as T') instead
 
-stdlib-fence.ts:61:18 - error SC2020: 'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:60:18 - error SC2020: 'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet
 
-  60 | const toStringify = { a: 1 };
-  61 | const replaced = JSON.stringify(toStringify, (_k, v) => v);
+  59 | const toStringify = { a: 1 };
+  60 | const replaced = JSON.stringify(toStringify, (_k, v) => v);
      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  62 | const width = 2;
+  61 | const width = 2;
 
   hint: the serializer is type-directed — shape the value before stringifying
 
-stdlib-fence.ts:63:16 - error SC2020: 'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:62:16 - error SC2020: 'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet
 
-  62 | const width = 2;
-  63 | const spaced = JSON.stringify(toStringify, null, width);
+  61 | const width = 2;
+  62 | const spaced = JSON.stringify(toStringify, null, width);
      |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  64 | 
+  63 | 
 
   hint: the serializer is type-directed — shape the value before stringifying
 
-stdlib-fence.ts:76:15 - error SC2020: 'Object.is over a dynamic operand' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:75:15 - error SC2020: 'Object.is over a dynamic operand' is part of the standard library types but has no scriptc lowering yet
 
-  75 | // unions needing narrowing.
-  76 | const dynIs = Object.is(JSON.parse("1") as unknown, 1);
+  74 | // unions needing narrowing.
+  75 | const dynIs = Object.is(JSON.parse("1") as unknown, 1);
      |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  77 | function pick(a: string | number, b: number | boolean): boolean {
+  76 | function pick(a: string | number, b: number | boolean): boolean {
 
   hint: validate/narrow the value first (strict equality's rule) — SameValue only differs from === on numbers (NaN, ±0)
 
-stdlib-fence.ts:78:10 - error SC2020: 'Object.is over these union operands' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:77:10 - error SC2020: 'Object.is over these union operands' is part of the standard library types but has no scriptc lowering yet
 
-  77 | function pick(a: string | number, b: number | boolean): boolean {
-  78 |   return Object.is(a, b); // partially-overlapping unions: narrow first
+  76 | function pick(a: string | number, b: number | boolean): boolean {
+  77 |   return Object.is(a, b); // partially-overlapping unions: narrow first
      |          ^~~~~~~~~~~~~~~
-  79 | }
+  78 | }
 
   hint: union-typed comparisons need one comparable shape (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms)
