@@ -9531,8 +9531,30 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     ];
     // Source declared fields in declaration order, skipping unset
     // optionals (stance 37) and the direct-initialized (consumed) names.
+    // ORDER MARKERS. A granted destination carries the source's members split
+    // in two homes: its declared fields in the struct, the rest in the overflow
+    // store, so the record's own key order is "declared first, then overflow"
+    // where the SOURCE object listed them in creation order. Each consumed
+    // (declared-in-the-target) member leaves a marker `__@ord@<name>` at its
+    // source position in the overflow store; the record-to-dyn walk replays
+    // the interleaving (scr_dyn_obj_apply_key_order) and every typed
+    // enumeration skips the markers like any symbol-spelled key.
+    const markOrder = tIv.kind === "dyn" && L.shapes.grantedOverflow(toId);
     for (const ff of orderedFields) {
-      if (consumed.has(ff.name)) continue;
+      if (consumed.has(ff.name)) {
+        if (markOrder) {
+          body.push({
+            kind: "recordKeySet",
+            obj: outRef,
+            shapeId: toId,
+            key: { kind: "strLit", value: `__@ord@${ff.name}`, type: STRING, loc },
+            value: dynUndefinedExpr(loc),
+            overflowOnly: true,
+            loc,
+          });
+        }
+        continue;
+      }
       const raw: IrExpr = { kind: "recordGet", obj: sRef, shapeId: fromId, field: ff.name, type: ff.type, loc };
       const utag = ff.type.kind === "union" ? L.armTag(ff.type.unionId, UNDEFINED_T) : -1;
       const write: IrStmt = {
