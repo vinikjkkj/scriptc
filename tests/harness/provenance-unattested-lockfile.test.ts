@@ -90,7 +90,6 @@ function attestationBody(repo: string, commit: string): unknown {
 const REAL_FETCH = globalThis.fetch;
 const PRIOR = {
   manifest: process.env["SCRIPTC_PROVENANCE_MANIFEST"],
-  authored: process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"],
   cache: process.env["SCRIPTC_PROVENANCE_CACHE"],
   npmCache: process.env["npm_config_cache"],
 };
@@ -102,7 +101,6 @@ afterEach(() => {
   setProvenanceSources(null);
   globalThis.fetch = REAL_FETCH;
   restore("SCRIPTC_PROVENANCE_MANIFEST", PRIOR.manifest);
-  restore("SCRIPTC_PROVENANCE_AUTHORED_JS", PRIOR.authored);
   restore("SCRIPTC_PROVENANCE_CACHE", PRIOR.cache);
   restore("npm_config_cache", PRIOR.npmCache);
 });
@@ -124,7 +122,9 @@ async function makeProject(
   caseFile: string,
   pkgs: readonly string[],
   lock: LockKind,
-  opts: { installed?: Record<string, Record<string, string>> } = {},
+  opts: {
+    installed?: Record<string, Record<string, string>>;
+  } = {},
 ): Promise<Project> {
   mkdirSync(tmpdir(), { recursive: true });
   const dir = mkdtempSync(join(tmpdir(), "scr-unatt-"));
@@ -190,16 +190,14 @@ async function buildAndRun(entry: string, name: string): Promise<string> {
   return stdout;
 }
 
-/** The authored-JavaScript gate is independent of this arm; name the fixture
- * package to it. */
-const authored = (names: string): void => {
+/** These tests resolve through a fixture project, never a manifest. */
+const noManifest = (): void => {
   delete process.env["SCRIPTC_PROVENANCE_MANIFEST"];
-  process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = names;
 };
 
 describe("provenance: a package that publishes no attestation, verified by the lockfile", () => {
   test("MATCH: the tarball verifies, maps from the VERIFIED bytes, and says npm-tarball://", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm");
     stubFetch(404);
     const sources = await resolveProvenanceSources(p.entry);
@@ -226,7 +224,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("the binary runs the VERIFIED bytes, not a tampered node_modules copy", async () => {
-    authored("unattlocal");
+    noManifest();
     /* The installed copy was edited after install. The lockfile digest is of
      * the ORIGINAL tarball. The binary must print the tarball's values. */
     const tampered = {
@@ -243,7 +241,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("package-lock.json is a lockfile too", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "npm");
     stubFetch(404);
     const sources = await resolveProvenanceSources(p.entry);
@@ -252,7 +250,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("a warm cache needs no network: the tarball is read from the scriptc cache and re-verified", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm");
     stubFetch(404);
     await resolveProvenanceSources(p.entry);
@@ -265,7 +263,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("MISMATCH: bytes that do not hash to the locked digest are refused at build time", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm-wrong-digest");
     stubFetch(404);
     const err = await refusalOf(resolveProvenanceSources(p.entry));
@@ -279,7 +277,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("MISMATCH in the CACHE is refused too, not papered over by a refetch", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm");
     const sri = parseSri(p.integrity["unattlocal"]!)!;
     mkdirSync(join(p.cache, "npm-tarballs"), { recursive: true });
@@ -290,8 +288,22 @@ describe("provenance: a package that publishes no attestation, verified by the l
     expect(calls.filter((u) => u.endsWith(".tgz"))).toHaveLength(0);
   });
 
+  test("verified but UNMAPPABLE: the refusal is put back and no compile is claimed", async () => {
+    noManifest();
+    const p = await makeProject("unattested/distonly.ts", ["distjs"], "pnpm");
+    stubFetch(404);
+    const sources = await resolveProvenanceSources(p.entry);
+    expect(sources.packages).toHaveLength(0);
+    const notes = sources.notes.join("\n");
+    expect(notes).toContain("nothing in it maps to a source entry");
+    expect(notes).toContain("NO unattested source was compiled");
+    expect(notes).not.toContain("UNATTESTED --");
+    /* The tarball WAS fetched and verified: this is not a refusal of the build. */
+    expect(calls.some((u) => u.endsWith("distjs-1.1.0.tgz"))).toBe(true);
+  });
+
   test("NO ENTRY for the package in the lockfile: refused, naming the package", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm-other-package");
     stubFetch(404);
     const err = await refusalOf(resolveProvenanceSources(p.entry));
@@ -301,7 +313,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("NO INTEGRITY digest (a tarball-URL dependency): refused", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm-no-integrity");
     stubFetch(404);
     const err = await refusalOf(resolveProvenanceSources(p.entry));
@@ -310,7 +322,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("NO LOCKFILE at or above the entry: refused", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "none");
     stubFetch(404);
     const err = await refusalOf(resolveProvenanceSources(p.entry));
@@ -321,7 +333,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("OFFLINE with no cache: refused, not silently islanded", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm");
     stubFetch(404, { throwOnTarball: true });
     const err = await refusalOf(resolveProvenanceSources(p.entry));
@@ -330,7 +342,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("ATTESTED (HTTP 200) is never routed to the tarball arm", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm");
     stubFetch(200, { body: attestationBody("git+https://github.com/example/unattlocal", "5".repeat(40)) });
     const sources = await resolveProvenanceSources(p.entry);
@@ -342,7 +354,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("UNAVAILABLE is not ABSENT: a throwing attestation probe islands, it does not refuse or verify", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm");
     stubFetch(0, { throwOnAttestation: true });
     const sources = await resolveProvenanceSources(p.entry);
@@ -352,7 +364,7 @@ describe("provenance: a package that publishes no attestation, verified by the l
   });
 
   test("a 500 from the attestation endpoint is not a 404", async () => {
-    authored("unattlocal");
+    noManifest();
     const p = await makeProject("unattested/main.ts", ["unattlocal"], "pnpm");
     stubFetch(500);
     const sources = await resolveProvenanceSources(p.entry);
@@ -366,7 +378,6 @@ describe("provenance: an unattested package reached as a mapped package's depend
 
   test("a verified dependency two edges from the entry is mapped; a mismatched one refuses the build", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifest;
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "unattmid,unattleaf";
     const p = await makeProject("unattesteddep/main.ts", ["unattmid", "unattleaf"], "pnpm");
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifest;
     /* Nothing in the entry or the manifest names the leaf: it arrives only
