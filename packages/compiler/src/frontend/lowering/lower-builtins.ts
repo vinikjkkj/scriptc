@@ -5573,6 +5573,224 @@ let digestInputValueDispatches = 0;
     toLocaleString: 4, toLocaleDateString: 5, toLocaleTimeString: 6,
   };
 
+  /** The options Intl.DateTimeFormat reads, in V8's reading order (scr_date_intl.c validates in this order). */
+  const DATE_LOCALE_OPTION_KEYS: readonly string[] = [
+    "localeMatcher", "calendar", "numberingSystem", "hour12", "hourCycle", "timeZone", "weekday", "era", "year",
+    "month", "day", "dayPeriod", "hour", "minute", "second", "fractionalSecondDigits", "timeZoneName",
+    "formatMatcher", "dateStyle", "timeStyle",
+  ];
+  /** The one locale bundled (scripts/gen-date-intl.mjs mines Node's en-US patterns). */
+  const DATE_LOCALES_OK: ReadonlySet<string> = new Set(["en-US", "en"]);
+  const DATE_LOCALE_HINT =
+    "only the en-US locale (and \"en\") has formatter data bundled; any other locale needs CLDR data that is not " +
+    "(open defect). Pass \"en-US\", or format the fields with getters";
+
+  function stripWrappers(n: ts.Expression): ts.Expression {
+    while (ts.isParenthesizedExpression(n) || ts.isAssertionExpression(n) || ts.isNonNullExpression(n) || ts.isSatisfiesExpression(n)) {
+      n = (n as ts.ParenthesizedExpression).expression;
+    }
+    return n;
+  }
+
+  /** The `locales` argument of toLocale*String, which must be a literal the compiler can check (a locale it
+   * cannot name is a locale it cannot promise to cover). Returns the text ("" = the default locale). */
+  function dateLocaleText(L: Lowerer, name: string, node: ts.Expression): string {
+    const n = stripWrappers(node);
+    if (ts.isIdentifier(n) && n.text === "undefined") return "";
+    if (ts.isStringLiteralLike(n)) {
+      if (DATE_LOCALES_OK.has(n.text)) return n.text;
+      L.noLowering(`Date.${name} at locale "${n.text}"`, node, DATE_LOCALE_HINT);
+    }
+    if (ts.isArrayLiteralExpression(n)) {
+      if (n.elements.length === 0) return "";
+      if (n.elements.length === 1) return dateLocaleText(L, name, n.elements[0]!);
+      L.noLowering(`Date.${name} with several locales`, node, DATE_LOCALE_HINT);
+    }
+    return L.noLowering(
+      `Date.${name} with a locale that is not a string literal`,
+      node,
+      "the locale must be a literal so the compiler can check it is covered. " + DATE_LOCALE_HINT,
+    );
+  }
+
+  /** One option value as a string (the runtime parses and validates it): a literal folds; a string, number or
+   * boolean value converts; `T | undefined` becomes "\x01" (undefined) when absent. */
+  function dateOptionString(L: Lowerer, key: string, node: ts.Expression | null, given: IrExpr | null, loc: SrcLoc, diag: ts.Node): IrExpr {
+    const strLit = (value: string): IrExpr => ({ kind: "strLit", value, type: STRING, loc });
+    let v: IrExpr;
+    if (node !== null) {
+      const n = stripWrappers(node);
+      if (ts.isIdentifier(n) && n.text === "undefined") return strLit("\x01");
+      if (ts.isStringLiteralLike(n)) return restrictLiteral(L, key, n.text, node, strLit);
+      if (ts.isNumericLiteral(n)) return strLit(String(Number(n.text)));
+      if (n.kind === ts.SyntaxKind.TrueKeyword) return strLit("true");
+      if (n.kind === ts.SyntaxKind.FalseKeyword) return strLit("false");
+      v = L.lowerExpr(node);
+    } else {
+      v = given!;
+    }
+    return convertOptionValue(L, key, v, diag, loc);
+  }
+  function restrictLiteral(L: Lowerer, key: string, text: string, node: ts.Expression, strLit: (s: string) => IrExpr): IrExpr {
+    if (key === "calendar" && text !== "gregory") {
+      L.noLowering(`Date toLocale*String with calendar "${text}"`, node, 'only the "gregory" calendar is bundled (open defect)');
+    }
+    if (key === "numberingSystem" && text !== "latn") {
+      L.noLowering(`Date toLocale*String with numberingSystem "${text}"`, node, 'only the "latn" numbering system is bundled (open defect)');
+    }
+    return strLit(text);
+  }
+  /** The scalar string of an option value: a string as is, a number or boolean through toString. */
+  function optionScalar(e: IrExpr, loc: SrcLoc): IrExpr | null {
+    if (e.type.kind === "string") return e;
+    if (e.type.kind === "f64" || e.type.kind === "bool") return { kind: "toString", operand: e, type: STRING, loc };
+    return null;
+  }
+  /** `v === undefined ? "\x01" : scalar(v)` over a union value whose arms are one scalar and undefined, as an IR
+   * expression over a PURE re-emittable `v` (a parameter or a read of one): no temporaries, nothing to release. */
+  function optionUnionExpr(L: Lowerer, v: IrExpr, loc: SrcLoc): IrExpr | null {
+    if (v.type.kind !== "union") return null;
+    const unionId = v.type.unionId;
+    const def = L.unions.get(unionId);
+    if (!def) return null;
+    const undefTag = def.arms.findIndex((a) => a.kind === "undefinedT");
+    const rest = def.arms.map((_, i) => i).filter((i) => i !== undefTag);
+    if (undefTag < 0 || rest.length !== 1) return null;
+    const arm = def.arms[rest[0]!]!;
+    const picked: IrExpr = { kind: "unionNarrow", unionId, tag: rest[0]!, value: v, type: arm, loc };
+    const scalar = optionScalar(picked, loc);
+    if (scalar === null) return null;
+    return {
+      kind: "ternary",
+      cond: { kind: "unionIsTag", unionId, tag: undefTag, negated: false, value: v, type: BOOL, loc },
+      then: { kind: "strLit", value: "\x01", type: STRING, loc },
+      else_: scalar,
+      type: STRING,
+      loc,
+    };
+  }
+  /** A lifted `(v: T | undefined) => string`: the value evaluates ONCE as the call's argument. */
+  function optionUnionHelper(L: Lowerer, t: IrType, loc: SrcLoc): string | null {
+    const key = `dtopt:${typeKey(t)}`;
+    const existing = L.arrHofHelpers.get(key);
+    if (existing) return existing;
+    const probe = optionUnionExpr(L, { kind: "varRef", localId: "v.0", type: t, loc }, loc);
+    if (probe === null) return null;
+    const name = `%dtopt.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, name);
+    L.liftedFns.push({
+      name,
+      params: [{ localId: "v.0", name: "v", type: t }],
+      returnType: STRING,
+      locals: [{ id: "v.0", name: "v", type: t, mutable: false }],
+      body: [{ kind: "return", value: probe, loc }],
+      loc,
+    });
+    return name;
+  }
+  function convertOptionValue(L: Lowerer, key: string, v: IrExpr, node: ts.Node, loc: SrcLoc): IrExpr {
+    const fail = (): never =>
+      L.noLowering(
+        `Date toLocale*String option '${key}' of type '${L.fmt(v.type)}'`,
+        node,
+        "an option value is a string, a number or a boolean (or that or undefined)",
+      );
+    const direct = optionScalar(v, loc);
+    if (direct !== null) return direct;
+    const helper = optionUnionHelper(L, v.type, loc);
+    if (helper === null) return fail();
+    return { kind: "call", callee: helper, args: [v], type: STRING, loc };
+  }
+  /** A lifted `(opts: R) => string[]` for an options RECORD: the key/value pairs of every Intl.DateTimeFormat option
+   * the shape declares, read once, in V8's reading order. */
+  function optionsRecordHelper(L: Lowerer, recT: IrType & { kind: "record" }, loc: SrcLoc, diag: ts.Node): string {
+    const key = `dtopts:${typeKey(recT)}`;
+    const existing = L.arrHofHelpers.get(key);
+    if (existing) return existing;
+    const shape = L.shapes.get(recT.shapeId);
+    if (!shape) L.noLowering("Date toLocale*String options of an unknown shape", diag);
+    const rec: IrExpr = { kind: "varRef", localId: "o.0", type: recT, loc };
+    const elems: IrExpr[] = [];
+    for (const k of DATE_LOCALE_OPTION_KEYS) {
+      const f = shape!.fields.find((x) => x.name === k);
+      if (!f) continue;
+      const got: IrExpr = { kind: "recordGet", obj: rec, shapeId: recT.shapeId, field: k, type: f.type, loc };
+      const direct = optionScalar(got, loc);
+      const val = direct ?? optionUnionExpr(L, got, loc);
+      if (val === null) {
+        L.noLowering(
+          `Date toLocale*String option '${k}' of type '${L.fmt(f.type)}'`,
+          diag,
+          "an option value is a string, a number or a boolean (or that or undefined)",
+        );
+      }
+      elems.push({ kind: "strLit", value: k, type: STRING, loc }, val!);
+    }
+    const name = `%dtopts.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, name);
+    L.liftedFns.push({
+      name,
+      params: [{ localId: "o.0", name: "o", type: recT }],
+      returnType: arrayOf(STRING),
+      locals: [{ id: "o.0", name: "o", type: recT, mutable: false }],
+      body: [{ kind: "return", value: { kind: "arrayLit", elems, type: arrayOf(STRING), loc }, loc }],
+      loc,
+    });
+    return name;
+  }
+
+  /** `d.toLocaleString(locales, options)` and the Date / Time twins. */
+  function lowerDateLocaleCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression, name: string, kind: number): IrExpr {
+    const loc = locOf(call);
+    const args = call.arguments;
+    if (args.length > 2 || args.some(ts.isSpreadElement)) {
+      L.noLowering(`Date.${name} with ${args.length} arguments`, call);
+    }
+    const ms: IrExpr = { kind: "libCall", fn: "date.value", args: [L.lowerExpr(access.expression)], type: F64, loc };
+    const locale = args[0] !== undefined ? dateLocaleText(L, name, args[0]) : "";
+    const elems: IrExpr[] = [];
+    let recordKv: IrExpr | null = null;
+    const key = (k: string): IrExpr => ({ kind: "strLit", value: k, type: STRING, loc });
+    if (args[1] !== undefined) {
+      const optNode = stripWrappers(args[1]);
+      if (ts.isIdentifier(optNode) && optNode.text === "undefined") {
+        // no options
+      } else if (
+        ts.isObjectLiteralExpression(optNode) &&
+        optNode.properties.every(
+          (p) =>
+            (ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name))) ||
+            ts.isShorthandPropertyAssignment(p),
+        )
+      ) {
+        for (const p of optNode.properties) {
+          const pa = p as ts.PropertyAssignment | ts.ShorthandPropertyAssignment;
+          const k = (pa.name as ts.Identifier | ts.StringLiteral).text;
+          if (!DATE_LOCALE_OPTION_KEYS.includes(k)) {
+            L.noLowering(`Date.${name} with the option '${k}'`, p, "not an option Intl.DateTimeFormat reads");
+          }
+          const valueNode: ts.Expression = ts.isShorthandPropertyAssignment(pa) ? (pa.name as ts.Identifier) : pa.initializer;
+          elems.push(key(k), dateOptionString(L, k, valueNode, null, locOf(p), p));
+        }
+      } else {
+        const rec = L.lowerExpr(args[1]);
+        if (rec.type.kind !== "record") {
+          L.noLowering(`Date.${name} with options of type '${L.fmt(rec.type)}'`, args[1], "pass an object literal or a record value");
+        }
+        const helper = optionsRecordHelper(L, rec.type as IrType & { kind: "record" }, loc, args[1]);
+        recordKv = { kind: "call", callee: helper, args: [rec], type: arrayOf(STRING), loc };
+      }
+    }
+    const kv: IrExpr = recordKv ?? { kind: "arrayLit", elems, type: arrayOf(STRING), loc };
+    return {
+      kind: "libCall",
+      fn: "date.formatOpts",
+      args: [ms, { kind: "numLit", value: kind, type: F64, loc }, { kind: "strLit", value: locale, type: STRING, loc }, kv],
+      type: STRING,
+      loc,
+    };
+  }
+
   export function lowerDateMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
@@ -5581,6 +5799,7 @@ let digestInputValueDispatches = 0;
     const name = access.name.text;
     const fmtKind = Object.prototype.hasOwnProperty.call(DATE_FORMATS, name) ? DATE_FORMATS[name]! : undefined;
     if (fmtKind !== undefined) {
+      if (fmtKind >= 4 && call.arguments.length !== 0) return lowerDateLocaleCall(L, call, access, name, fmtKind);
       if (call.arguments.length !== 0) {
         L.noLowering(
           `Date.${name} with ${call.arguments.length} arguments`,

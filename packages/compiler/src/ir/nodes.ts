@@ -6088,6 +6088,9 @@ export type IrLibFn =
    * 2 toTimeString, 3 toUTCString, 4/5/6 toLocale{,Date,Time}String (en-US, no
    * options). Never throws. Linked with the zone-name table (moduleUsesDateFmt). */
   | "date.format"
+  /** toLocale{,Date,Time}String(locale, options): (ms, kind, locale text, option key/value string[]) -> string,
+   * en-US only (scr_date_intl.c). A catchable RangeError/TypeError for what Node throws on. */
+  | "date.formatOpts"
   /** String(bytes): Buffer decodes utf8, a plain Uint8Array joins its
    * elements with commas, a DataView is "[object DataView]"; an unstamped
    * value throws a catchable Error (the Buffer-ness is unknown). */
@@ -10586,6 +10589,13 @@ export function moduleUsesDateTz(mod: IrModule): boolean {
   return dateGates(mod).tz || dateGates(mod).dyn;
 }
 
+/** The program formats a Date with a locale/options bag (date.formatOpts) or a Date meets `unknown` (whose handle
+ * serves toLocale*String with arguments): links scr_date_intl.c and the generated en-US pattern and zone-name
+ * tables (scr_date_intl_en.c, scr_date_tznames.c). A LINK GATE, not a fence. */
+export function moduleUsesDateIntl(mod: IrModule): boolean {
+  return dateGates(mod).intl;
+}
+
 /** date.set ops (lower-builtins DATE_SETTERS) that are pure UTC arithmetic:
  * the setUTC* family (7..13) and setTime (14). */
 function isUtcSetOp(op: unknown): boolean {
@@ -10593,11 +10603,12 @@ function isUtcSetOp(op: unknown): boolean {
   return v?.kind === "numLit" && typeof v.value === "number" && v.value >= 7 && v.value <= 14;
 }
 
-function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean; tz: boolean } {
+function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean; tz: boolean; intl: boolean } {
   let fmt = false;
   let date = false;
   let dyn = false;
   let tz = false;
+  let intl = false;
   const visit = (v: unknown): void => {
     if (v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
@@ -10617,11 +10628,15 @@ function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean; tz: boolean } {
     ) {
       tz = true;
     }
+    if (node.kind === "libCall" && node.fn === "date.formatOpts") {
+      intl = true;
+      tz = true;
+    }
     if (node.kind === "libCall" && node.fn === "date.set" && !isUtcSetOp((node as { args?: unknown[] }).args?.[1])) tz = true;
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);
-  return { fmt, dyn: date && dyn, tz };
+  return { fmt, dyn: date && dyn, tz, intl };
 }
 
 /** The program holds an RTCPeerConnection or an RTCDataChannel: compiles
@@ -12465,6 +12480,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "zlib.inflateRawSync",
   "date.toISOString",
   "date.toString",
+  "date.formatOpts",
   "bytes.jsString",
   // The length-mismatch RangeError, which is a contract of the call.
   "crypto.timingSafeEqual",

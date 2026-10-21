@@ -440,6 +440,7 @@ describe("library profile fences", () => {
     expect(dateIds).toEqual([
       "stdlib.date.UTC",
       "stdlib.date.format",
+      "stdlib.date.formatOpts",
       "stdlib.date.getHours",
       "stdlib.date.getTime",
       "stdlib.date.getUTCDate",

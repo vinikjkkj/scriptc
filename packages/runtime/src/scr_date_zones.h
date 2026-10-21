@@ -35,6 +35,7 @@ extern const scr_tz_rec scr_tz_recs[];
 /* scr_date_tz.c -- a decoded zone */
 typedef struct scr_tz {
   const char *id;      /* canonical id, or NULL for a custom (POSIX-offset / unknown) zone */
+  int idx;             /* index in scr_tz_ids, or -1 for a custom zone */
   int nrec;            /* scr_dz_recs index, or -1 when there is no ICU name (prints GMT+HH:MM) */
   int32_t off0;
   int cnt;
@@ -47,4 +48,20 @@ const scr_tz *scr_tz_host(void);                                   /* never NULL
 const scr_tz *scr_tz_find(const char *id, size_t len, int nocase); /* NULL when unknown */
 int32_t scr_tz_offset(const scr_tz *z, int64_t t_sec);             /* seconds east of UTC */
 int scr_tz_equiv_year(long long y, int end);
+int64_t scr_tz_year_start(long long year);               /* seconds of YEAR-01-01T00:00:00Z */
+int64_t scr_tz_map_tail(int64_t t_sec, int end);         /* the equivalent instant inside the window [end-27, end] */
+
+/* scr_date_tznames.c -- zone-name sequences (Intl names per instant) */
+typedef struct {
+  uint16_t cnt;  /* name changes */
+  uint16_t end;  /* year of the window the instants after the last change map into */
+  uint32_t off;  /* offset into scr_tzn_blob */
+} scr_tzn_rec;
+extern const char scr_tzn_names[];
+extern const uint16_t scr_tzn_name_off[];
+extern const uint8_t scr_tzn_blob[];
+extern const scr_tzn_rec scr_tzn_recs[];
+extern const size_t scr_tzn_nrecs;
+extern const uint16_t scr_tzn_id_rec[];
+extern const int64_t scr_tzn_meta_end;
 #endif
