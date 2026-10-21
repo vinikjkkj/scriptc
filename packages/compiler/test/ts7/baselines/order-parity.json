@@ -10971,6 +10971,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7800-map-union-two-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7800-map-union-two-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7801-set-union-two-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7801-set-union-two-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7802-map-union-string-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/7802-map-union-string-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7803-map-union-recursive-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/7803-map-union-recursive-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7804-map-union-object-property.ts": {
+   "order": [
+    "<repo>/tests/corpus/7804-map-union-object-property.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
