@@ -8308,6 +8308,15 @@ export function canConvertToDyn(
   }
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
+    // The recursive knot, union-flavored: a union whose arms reach the same
+    // union again (`type V = string | V[] | Map<string, V>`) is being
+    // decided already further up the walk. Answer true HERE and let the
+    // rest of the arms decide -- any arm that cannot convert still makes
+    // the outermost `every` false. Without the guard the walk never
+    // terminated: a Maximum-call-stack crash of the compiler itself.
+    const knot = `union:${t.unionId}`;
+    if (visiting.has(knot)) return true;
+    visiting.add(knot);
     // JSON-safe arms box as before; BOXABLE FUNCTION arms join them (the
     // invalid-input probes iterate `[1, null, () => {}, true]` — the
     // union's func arm crosses through the checked-dynamic function
