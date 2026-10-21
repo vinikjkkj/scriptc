@@ -26,7 +26,7 @@ import { lowerDateLocaleFormat, lowerNumberLocaleFormat } from "./lower-numfmt.j
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
-import { pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
+import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
@@ -13399,6 +13399,22 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     // and bridges to the arm, the same trusted unionNarrow a narrowed
     // LOCAL of the same type already lowers through. An un-narrowed union
     // stays union-typed and falls through to the fences below.
+    // A member the BASE never declares but its subclasses do as FIELDS
+    // (mysql2's `this.onResult(err)` in Command.execute): the receiver's
+    // class picks the slot (lowerSubclassFieldRead), the call goes through
+    // the checked-dynamic callee with the receiver as `this`.
+    if (
+      info && !found && !info.fields.has(access.name.text) && isJsSourceFile(call.getSourceFile()) &&
+      call.questionDotToken === undefined && access.questionDotToken === undefined &&
+      !call.arguments.some((a) => ts.isSpreadElement(a))
+    ) {
+      const viaField = lowerSubclassFieldRead(L, access, info);
+      if (viaField !== null) {
+        const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+        const recv = L.coerceToExpected(L.lowerExpr(access.expression), DYN);
+        if (recv.type.kind === "dyn") return dynCallWithThis(L, recv, viaField, args, access.getText(), locOf(call));
+      }
+    }
     if (info && !found) {
       const fieldType = info.fields.get(access.name.text);
       if (fieldType && (fieldType.kind === "func" || fieldType.kind === "dyn" || fieldType.kind === "union")) {
