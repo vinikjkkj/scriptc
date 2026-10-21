@@ -356,3 +356,155 @@ export function lowerLyingPlus(L: Lowerer, left: IrExpr, right: IrExpr, node: ts
   }
   return { kind: "seqExpr", stmts, result, type: STRING, loc };
 }
+
+/* POINTER-BACKED FIELDS THAT CANNOT BE UNION ARMS (`cache!: Map<..>`).
+ *
+ * A Map/Set has no representation as a union arm, so the `T | undefined`
+ * widening every other `x!: T` field takes is impossible. The slot stays the
+ * plain pointer: zeroed memory is NULL, and NULL IS "undefined" (an
+ * assignment makes it a real pointer). Reads classify their consumer:
+ *   - a member use or call (`this.cache.get(k)`): Node's TypeError naming
+ *     the property, thrown at the use;
+ *   - a comparison with undefined/null, or a truthiness test: answered from
+ *     the NULL test directly (a boolean, no map is ever formed);
+ *   - anything else: the checked extraction's trap (exact whenever the
+ *     field is assigned).
+ */
+export function nullableFieldRead(L: Lowerer, read: IrExpr & { kind: "fieldGet" }, node: ts.Expression, loc: SrcLoc): IrExpr | null {
+  const nullE: IrExpr = { ...read, type: BOOL, nullTest: true };
+  const present: IrExpr = { kind: "unary", op: "!", operand: nullE, type: BOOL, loc };
+  const strip = (): ts.Node => {
+    let p: ts.Node = node;
+    while (
+      p.parent &&
+      (ts.isParenthesizedExpression(p.parent) || ts.isNonNullExpression(p.parent) ||
+        ts.isSatisfiesExpression(p.parent) || ts.isAsExpression(p.parent))
+    ) p = p.parent;
+    return p;
+  };
+  const p = strip();
+  const par = p.parent;
+  const isUnit = (e: ts.Expression): boolean => (L.typeOf(e).flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null)) !== 0;
+  if (par && (ts.isTypeOfExpression(par) || (ts.isBinaryExpression(par) && par.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken && par.left === p))) {
+    // `typeof f` and `f ?? d` ask only "is it there": the presence bool,
+    // with the raw read kept for the `??` value arm.
+    L.presenceResults.add(present);
+    L.presenceReads.set(present, read);
+    return present;
+  }
+  if (par && ts.isBinaryExpression(par)) {
+    const k = par.operatorToken.kind;
+    const other = par.left === p ? par.right : par.left;
+    if (
+      (k === ts.SyntaxKind.EqualsEqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
+        k === ts.SyntaxKind.EqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsToken) && isUnit(other)
+    ) {
+      L.presenceResults.add(present);
+      return present;
+    }
+  }
+  if (par) {
+    const cond =
+      ((ts.isIfStatement(par) || ts.isWhileStatement(par) || ts.isDoStatement(par)) && par.expression === p) ||
+      (ts.isConditionalExpression(par) && par.condition === p) ||
+      (ts.isForStatement(par) && par.condition === p) ||
+      (ts.isPrefixUnaryExpression(par) && par.operator === ts.SyntaxKind.ExclamationToken);
+    if (cond) return present;
+  }
+  const ctx = L.classifyLyingRead(node);
+  let msg = "undefined is not representable in the target union (a value narrowed or asserted past it still held it)";
+  if (typeof ctx === "object" && ctx.dynKey === undefined) {
+    msg = ctx.callText !== undefined
+      ? `${ctx.callText} is not a function`
+      : ctx.set
+        ? `Cannot set properties of undefined (setting '${ctx.prop}')`
+        : `Cannot read properties of undefined (reading '${ctx.prop}')`;
+  }
+  L.lyingResults.add(read);
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "exprStmt", expr: { kind: "call", callee: guardHelper(L, msg, loc), args: [present], type: VOID, loc }, loc }],
+    result: read, type: read.type, loc,
+  };
+}
+
+/** `field === undefined` over a presence boolean (see nullableFieldRead):
+ * the whole comparison, or null when the shape is not one. */
+export function presenceComparison(L: Lowerer, op: ts.SyntaxKind, left: IrExpr, right: IrExpr, loc: SrcLoc): IrExpr | null {
+  const lp = L.presenceResults.has(left);
+  const rp = L.presenceResults.has(right);
+  if (!lp && !rp) return null;
+  const pres = lp ? left : right;
+  const other = lp ? right : left;
+  if (other.kind !== "unitLit") return null;
+  const strict = op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+  const negated = op === ts.SyntaxKind.ExclamationEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken;
+  // `=== null` is never true of undefined or a map; `== null` / `=== undefined`
+  // are the absent test.
+  let absentTest: boolean | null;
+  if (other.unit === "null" && strict) absentTest = null;
+  else absentTest = true;
+  let eq: IrExpr;
+  if (absentTest === null) eq = { kind: "boolLit", value: false, type: BOOL, loc };
+  else eq = { kind: "unary", op: "!", operand: pres, type: BOOL, loc };
+  return negated ? { kind: "unary", op: "!", operand: eq, type: BOOL, loc } : eq;
+}
+
+/** `this.cache?.get(k)` / `this.cache?.size` over a pointer-backed field:
+ * `present ? <the plain member use> : undefined`. The receiver is an
+ * identifier or `this` (re-reading it is unobservable). A void-bodied call
+ * (`this.cache?.clear()`) has no value form and keeps a named fence. */
+export function lowerNullablePointerChain(
+  L: Lowerer,
+  expr: ts.CallExpression | ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  dotNode: ts.Node,
+  recvNode: ts.Expression,
+  loc: SrcLoc,
+): IrExpr | null {
+  let r: ts.Expression = recvNode;
+  while (ts.isParenthesizedExpression(r)) r = r.expression;
+  if (!ts.isPropertyAccessExpression(r) || r.questionDotToken !== undefined) return null;
+  const single =
+    (dotNode === expr && ts.isPropertyAccessExpression(expr)) ||
+    (ts.isCallExpression(expr) && expr.expression === dotNode && ts.isPropertyAccessExpression(dotNode));
+  if (!single) return null;
+  if (!(ts.isIdentifier(r.expression) || r.expression.kind === ts.SyntaxKind.ThisKeyword)) return null;
+  const ft = L.fieldTarget(r);
+  if (!ft || ft.container !== "class" || L.classes.get(ft.className)?.nullableFields?.has(ft.field) !== true) return null;
+  const read: IrExpr = { kind: "fieldGet", obj: ft.obj, className: ft.className, field: ft.field, type: ft.fieldType, loc };
+  const present: IrExpr = { kind: "unary", op: "!", operand: { ...read, type: BOOL, nullTest: true } as IrExpr, type: BOOL, loc };
+  L.chainHandled.add(dotNode);
+  let body: IrExpr;
+  try {
+    body = L.lowerExpr(expr);
+  } finally {
+    L.chainHandled.delete(dotNode);
+  }
+  if (body.type.kind === "void") {
+    L.unsupported(
+      "SC1090", expr,
+      "'?.' calls returning void over a Map/Set field assigned past the constructor (write 'if (this.f !== undefined) this.f.m()' instead)",
+    );
+  }
+  const declared = L.irTypeOf(expr);
+  const hasUndef = declared.kind === "union" && L.armTag(declared.unionId, UNDEFINED_T) >= 0;
+  let type: IrType = declared;
+  if (!hasUndef) {
+    if (body.type.kind === "union") {
+      const w = L.withUndefinedArmOf(body.type);
+      if (w === null) return null;
+      type = w;
+    } else type = L.withUndefinedArm(body.type);
+  }
+  const wrapped = L.coerceToExpected(body, type);
+  const undef = L.unassignedSlotInit(type, loc);
+  if (undef === null) return null;
+  const out: IrExpr = { kind: "ternary", cond: present, then: wrapped, else_: undef, type, loc };
+  if (!hasUndef) {
+    // The checker typed the chain without its `| undefined` arm (the field
+    // is declared non-nullable), so its consumer reads it like a lying slot.
+    const lr = L.lyingRead(out, expr as ts.Expression);
+    if (lr) return lr;
+  }
+  return out;
+}

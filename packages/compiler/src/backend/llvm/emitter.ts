@@ -9455,6 +9455,11 @@ class LlEmitter {
         const obj = this.emitExpr(e.obj);
         const { ptr, type } = this.classFieldPtr(obj.name, e.className, e.field);
         const v = this.loadField(ptr, type);
+        if (e.nullTest) {
+          const t = B.tmp();
+          B.line(`${t} = icmp eq ptr ${v}, null`);
+          return { name: t, type: e.type };
+        }
         if (isRefCounted(e.type)) return this.own({ name: this.retainValue(v, e.type), type: e.type });
         return { name: v, type: e.type };
       }
