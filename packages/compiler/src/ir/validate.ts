@@ -355,6 +355,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "sp.with": { argTypes: [SEARCH_PARAMS_T, STRING, STRING], result: SEARCH_PARAMS_T },
   "url.searchParams": { argTypes: [URL_T], result: SEARCH_PARAMS_T },
   "url.search": { argTypes: [URL_T], result: STRING },
+  "url.hash": { argTypes: [URL_T], result: STRING },
+  "url.port": { argTypes: [URL_T], result: STRING },
+  "url.username": { argTypes: [URL_T], result: STRING },
+  "url.password": { argTypes: [URL_T], result: STRING },
+  "url.setProtocol": { argTypes: [URL_T, STRING], result: VOID },
   // Result is the interned `string | null` union — the libCall case
   // checks the arms (the spawnRes.signal pattern).
   "sp.get": { argTypes: [SEARCH_PARAMS_T, STRING], result: VOID },

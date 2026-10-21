@@ -1291,23 +1291,29 @@ declare module "node:os" {
  * URL string, or from an input and a `base` it is resolved against with
  * the WHATWG relative algorithm (invalid input throws a catchable
  * TypeError, like Node), the
- * protocol/pathname/href/host/hostname/search getters, searchParams (the
+ * protocol/pathname/href/host/hostname/search/hash/port/username/password
+ * getters, searchParams (the
  * LIVE query view — mutations through it re-serialize into the URL, so
  * href reflects immediately; every read answers the same object, Node's
  * caching), and toString() (the href serialization).
- * URL values have no SETTERS — the component fields are read-only (the
- * one supported mutation path is searchParams) — and participate in
- * unions (URL | undefined). The parser covers the common CLI schemes
+ * The one supported SETTER is `protocol` (the WHATWG scheme-state-override
+ * rules — what ws does to turn http(s) into ws(s)); the other component
+ * fields are read-only (the other supported mutation path is searchParams)
+ * — and URL values participate in unions (URL | undefined). The parser covers the common CLI schemes
  * exactly (http/https/ws/wss/ftp/file authority URLs, opaque paths like
  * data: and mailto:) — divergences from the full WHATWG algorithm are
  * documented in SEMANTICS.md. */
 interface URL {
-  readonly protocol: string;
+  protocol: string;
   readonly pathname: string;
   readonly href: string;
   readonly host: string;
   readonly hostname: string;
   readonly search: string;
+  readonly hash: string;
+  readonly port: string;
+  readonly username: string;
+  readonly password: string;
   readonly searchParams: URLSearchParams;
   toString(): string;
 }
