@@ -7909,6 +7909,26 @@ const inliningPredicates = new Set<ts.Symbol>();
         !typeEquals(innerRet.inner, ctxRet.inner)
       ) {
         ret = ctxRet;
+      } else if (
+        // The FUNCTION twin, for a curried lambda: `(m) => (d) => x` against
+        // a slot `(m) => (d) => T | null`. The returned inner arrow is
+        // contextually typed by the slot's returned signature and adopts its
+        // union return (above), so the BODY value already has the slot's
+        // function type; the outer's inferred return (`(d) => string`, or
+        // `(d) => null` whose unit-only union has no home in `T | null`)
+        // would be a different type than the value it returns. Adopting the
+        // slot's function type makes the ABI agree with the body at every
+        // depth (each level adopts from its own contextual signature), and
+        // the closure value then matches the slot exactly. Kept to a
+        // divergent func pair that the clean adapter could bridge anyway, so
+        // nothing is adopted that the previous disposition could not carry.
+        !isAsyncLike &&
+        ctxRet?.kind === "func" &&
+        innerRet.kind === "func" &&
+        !typeEquals(innerRet, ctxRet) &&
+        L.cleanFuncAdaptable(innerRet, ctxRet)
+      ) {
+        ret = ctxRet;
       }
       // A VOID slot discards the callback's result (TS's void-returning
       // assignability rule; JS ignores the value), so an UNANNOTATED
