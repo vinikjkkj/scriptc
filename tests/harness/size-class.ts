@@ -329,7 +329,7 @@ const platform = process.platform;
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
 /* 2026-10-21 (pooldyn): linux 552_104 -> 553_000. CI measured the static hello-world at 552,640 bytes (run 39566905099, island.test.ts shard 1/20): the always-linked dyn core gained the Symbol helpers and the key-order replay (about 536 bytes). Ceiling = that measurement plus ~360 bytes. */
-  platform === "linux" ? 553_000 : platform === "win32" ? 689_152 : 374_824;
+  platform === "linux" ? 553_000 : platform === "win32" ? 691_200 : 374_824;
 
 /** A program that uses regex: libregexp + libunicode, never the engine.
  * linux: MEASURED 708,968 in CI (run 39492679940, ubuntu-24.04, regex.test.ts),
@@ -1769,7 +1769,13 @@ export const SIZE_DRIFT_PAGE = 4_096;
  *     45be81090   713,216   +28,672, all of it in one commit (the fprintf)
  *     a9ee25126   685,056   after the recovery -- .text +512, nothing else
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 685_056 : null;
+/* RE-RECORDED 2026-10-21 (pooldyn): 685,056 -> 690,176 (+5,120, ten alignment units), the growth the
+ * Windows lane of the pooldyn CI run measured ("the static hello-world GREW by 5120 bytes: 690176 against
+ * the recorded 685056"). Cause: always-linked dyn-core code (the Symbol handle helpers, the symbol-keyed
+ * member store, the key-order replay). It was NOT gated: the runtime links with no --gc-sections, and a
+ * gate needs a new link switch through cc.ts, index.ts and the library-mode lists; recorded here so the
+ * cost is named rather than absorbed. The composed value on land-batch9 is measured by the next run. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 690_176 : null;
 
 /* 2026-09-26 - +4,608 on the REGEX class only, and the bytes are accounted
  * for: non-owning intern entries (SCR_STRING_INTERN_WEAK, off by default).
