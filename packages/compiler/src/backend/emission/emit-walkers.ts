@@ -557,6 +557,14 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
           d.push(`  case ${i}: return scr_str_retain((ScrStr *)&${sym});`);
           break;
         }
+        case "map":
+        case "set": {
+          // Object.prototype.toString's constant, exactly Node's
+          // String(new Map()) / String(new Set()).
+          const sym = E.internLiteral(arm.kind === "map" ? "[object Map]" : "[object Set]");
+          d.push(`  case ${i}: return scr_str_retain((ScrStr *)&${sym});`);
+          break;
+        }
         default:
           throw new Error(`emitter bug: ToString of union with a ${arm.kind} arm (frontend fences these)`);
       }

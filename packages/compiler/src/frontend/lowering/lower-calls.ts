@@ -6839,6 +6839,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       (a) =>
         a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
         (a.kind === "bytes" && a.elem === "u8") ||
+        a.kind === "map" || a.kind === "set" ||
         recordArmStringable(L, a),
     );
     if (!stringable) return null;

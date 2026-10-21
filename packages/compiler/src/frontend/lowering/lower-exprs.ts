@@ -14599,6 +14599,13 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
         (a) =>
           a.kind === "undefinedT" || a.kind === "nullT" ||
           a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
+          // A Map/Set arm prints Object.prototype.toString's constant
+          // ("[object Map]" / "[object Set]"): nothing in the runtime can
+          // override it, so the arm is decidable from the tag alone. A
+          // narrowed `number | boolean` read of `V | Map<string, V>` keeps
+          // the whole union's representation, so this arm is reachable in
+          // the helper even though the branch can never hit it.
+          a.kind === "map" || a.kind === "set" ||
           recordArmStringable(L, a),
       );
       if (stringable) {

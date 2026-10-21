@@ -838,6 +838,15 @@ export class LlWalkers {
           B.terminate(`ret ptr ${r}`);
           break;
         }
+        case "map":
+        case "set": {
+          const lit = host.internLiteral(arm.kind === "map" ? "[object Map]" : "[object Set]");
+          host.declare(`declare ptr @scr_str_retain_v(ptr)`);
+          const r = B.tmp();
+          B.line(`${r} = call ptr @scr_str_retain_v(ptr ${lit})`);
+          B.terminate(`ret ptr ${r}`);
+          break;
+        }
         default:
           throw new LlvmUnsupportedError(`unionToStr:${arm.kind}`);
       }
