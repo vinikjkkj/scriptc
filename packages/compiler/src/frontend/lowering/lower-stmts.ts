@@ -29,7 +29,7 @@ import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } fr
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
+import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
 import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, unionFieldReadAt, unitArmsOf } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -7402,6 +7402,28 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
                   value: L.lowerExprExpecting(expr.right, memberGlobal.type),
                   loc: locOf(expr),
                 };
+              }
+              // A member attached ONLY from inside function bodies (no symbol, no
+              // top-level statement): the file's own bag of such members.
+              if (cjsMemberOnlyInFunctions(L, memberSym)) {
+                const loc = locOf(expr);
+                const bag = cjsExportsBagOf(L, cjsSf);
+                const value = L.lowerExprExpecting(expr.right, DYN);
+                if (value.type.kind === "dyn") {
+                  const bagRef = (): IrExpr => ({ kind: "varRef", localId: bag, type: DYN, loc });
+                  return {
+                    kind: "block",
+                    body: [
+                      { kind: "assign", localId: bag, value: { kind: "libCall", fn: "cls.propsEnsure", args: [bagRef()], type: DYN, loc }, loc },
+                      {
+                        kind: "exprStmt",
+                        expr: { kind: "libCall", fn: "dyn.keySet", args: [bagRef(), { kind: "strLit", value: expr.left.name.text, type: STRING, loc }, value], type: VOID, loc },
+                        loc,
+                      },
+                    ],
+                    loc,
+                  };
+                }
               }
             }
           }
