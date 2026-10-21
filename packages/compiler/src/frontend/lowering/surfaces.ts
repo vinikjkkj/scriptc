@@ -1242,6 +1242,13 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     note: "LocalTime(t): reads the HOST's zone database (POSIX localtime/gmtime, Windows SystemTimeToTzSpecificLocalTimeEx), so the answer depends on the machine that runs the binary",
   },
   {
+    id: "stdlib.date.toString",
+    kind: "stdlib",
+    name: "Date.prototype.toString (and String(date))",
+    fns: ["date.toString"],
+    note: "local-time text with the host zone's offset and long name (UTC and GMT zones only)",
+  },
+  {
     id: "stdlib.date.tzOffset",
     kind: "stdlib",
     name: "Date.prototype.getTimezoneOffset",

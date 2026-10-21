@@ -1485,6 +1485,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "date.getUTCDay": { argTypes: [F64], result: F64 },
   "date.localTime": { argTypes: [F64], result: F64 },
   "date.tzOffset": { argTypes: [F64], result: F64 },
+  "date.toString": { argTypes: [F64], result: STRING },
+  "bytes.jsString": { argTypes: [BYTES_U8], result: STRING },
   "text.decode": { argTypes: [BYTES_U8], result: STRING },
   "fs.mkdirRecursiveSync": { argTypes: [STRING], result: VOID },
   "fs.rmOptsSync": { argTypes: [STRING, BOOL, BOOL], result: VOID },
