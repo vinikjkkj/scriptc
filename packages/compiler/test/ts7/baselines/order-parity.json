@@ -11600,6 +11600,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8500-error-subclass-param-property-redeclares-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/8500-error-subclass-param-property-redeclares-name.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
