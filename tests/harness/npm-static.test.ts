@@ -206,6 +206,8 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // valuesunion: a package-declared union with an array-of-unknown arm as an
     // options member (mysql2's QueryValues) reads as the checked-dynamic tier.
     ["valuesunion", "valuesunion-cli.ts"],
+    // bindmethod: a class method taken as a bound value (this.method.bind(this)) when its parameters are untyped
+    ["bindmethod", "bindmethod-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
