@@ -15775,7 +15775,7 @@ export class Lowerer {
     return isConsoleLog(this, call);
   }
 
-  consoleCallMember(call: ts.CallExpression): "log" | "info" | "debug" | "error" | "warn" | null {
+  consoleCallMember(call: ts.CallExpression): "log" | "info" | "debug" | "error" | "warn" | "trace" | null {
     return consoleCallMember(this, call);
   }
 
