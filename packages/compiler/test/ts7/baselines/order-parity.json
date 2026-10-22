@@ -11606,6 +11606,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8501-any-object-literal-written-through.ts": {
+   "order": [
+    "<repo>/tests/corpus/8501-any-object-literal-written-through.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
