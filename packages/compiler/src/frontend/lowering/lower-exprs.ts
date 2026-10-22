@@ -15615,6 +15615,32 @@ export function checkedJsNumber(L: Lowerer, node: ts.Node, value: IrExpr): IrExp
   if (value.type.kind === "dyn" && isJsSourceFile(node.getSourceFile())) {
     return { kind: "dynCheck", value, type: F64, loc: value.loc };
   }
+  // A STRING key into an array or typed array in JavaScript (`for (i in list)
+  // list[i]`, the cursor of a for-in is the string "0", "1", ...): an own
+  // element exactly when the string is a CANONICAL array index, otherwise the
+  // access names an ordinary property the array does not have. NaN is the index
+  // that reads as absent, so a canonical index maps to itself and every other
+  // string to NaN.
+  if (value.type.kind === "string" && isJsSourceFile(node.getSourceFile())) {
+    const loc = value.loc;
+    const k = L.declareHiddenLocal("%idxkey", STRING);
+    const kRef = (): IrExpr => ({ kind: "varRef", localId: k.id, type: STRING, loc });
+    const parsed = (): IrExpr => ({ kind: "libCall", fn: "num.parseInt", args: [kRef(), { kind: "numLit", value: 10, type: F64, loc }], type: F64, loc });
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: k.id, init: value, loc }],
+      result: {
+        kind: "ternary",
+        cond: { kind: "strEq", negated: false, left: { kind: "toString", operand: parsed(), type: STRING, loc }, right: kRef(), type: BOOL, loc },
+        then: parsed(),
+        else_: { kind: "numLit", value: NaN, type: F64, loc },
+        type: F64,
+        loc,
+      },
+      type: F64,
+      loc,
+    };
+  }
   return null;
 }
 
