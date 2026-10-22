@@ -88,8 +88,26 @@ function flatten(
 const SPECIES_SPELLING = /\bBuffer\s*\[\s*Symbol\s*\.\s*species\s*\]/g;
 export const SPECIES_MARKER = "/*@species*/";
 
+/** `require("process")` IS the global `process` object (Node's `process` module
+ * exports it). A binding of that name to the module is dropped (the global is
+ * already in scope and typed), any other use is the global itself. */
+const PROCESS_MODULE_DECL = /^([ \t]*)(?:const|let|var)\s+process\s*=\s*require\(\s*(['"])(?:node:)?process\2\s*\)\s*;?/gm;
+const PROCESS_MODULE_USE = /\brequire\(\s*(['"])(?:node:)?process\1\s*\)/g;
+
+/** `process.getBuiltinModule("node:x")` with a literal specifier IS
+ * `require("node:x")` (Node 22+ answers the same module object). */
+const GET_BUILTIN_MODULE = /\bprocess\.getBuiltinModule\(\s*(['"])((?:node:)?[a-z_/]+)\1\s*\)/g;
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
+  if (/\bprocess\.getBuiltinModule\(/.test(text)) {
+    const out = text.replace(GET_BUILTIN_MODULE, "require($1$2$1)");
+    if (out !== text) return jsDesugar(fileName, out) ?? out;
+  }
+  if (/require\(\s*['"](?:node:)?process['"]\s*\)/.test(text)) {
+    const out = text.replace(PROCESS_MODULE_DECL, "$1;").replace(PROCESS_MODULE_USE, "process");
+    return jsDesugar(fileName, out) ?? out;
+  }
   if (SPECIES_SPELLING.test(text)) {
     SPECIES_SPELLING.lastIndex = 0;
     const out = text.replace(SPECIES_SPELLING, `Buffer${SPECIES_MARKER}`);

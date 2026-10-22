@@ -958,6 +958,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           if (answer !== null) return { kind: "strLit", value: answer, type: STRING, loc };
         }
       }
+      // `typeof process.hrtime` / `process.nextTick`: a member of Node's `process`
+      // whose declared type is callable IS a function in Node (the environment
+      // probes `typeof process.hrtime === "function"`), and `typeof` needs no value.
+      if (ts.isPropertyAccessExpression(expr.expression) && L.stdlibGlobalMember(expr.expression, "process") !== null) {
+        if (L.checker.getCallSignatures(L.typeOf(expr.expression)).length > 0) {
+          return { kind: "strLit", value: "function", type: STRING, loc };
+        }
+      }
       if (ts.isIdentifier(expr.expression)) {
         const sym = L.checker.getSymbolAtLocation(expr.expression);
         // `typeof window` / `typeof define` — a name NOTHING in the program
@@ -19163,6 +19171,17 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           }
           return { kind: "bin", op: "<", left: len, right: { kind: "numLit", value: 0, type: F64, loc }, type: BOOL, loc };
         }
+      }
+    }
+    // `"getBuiltinModule" in process`: the environment probe. `process` is a
+    // stdlib global whose members the declared type lists, and the probe asks
+    // about exactly those -- the answer is whether Node's own `process` has the
+    // member, which the typings state.
+    {
+      const probeKey = foldedStringKeyOf(L, expr.left);
+      if (probeKey !== null && stdlibGlobalNameOf(L, expr.right) === "process") {
+        const has = L.checker.getPropertyOfType(L.typeOf(expr.right), probeKey) !== undefined;
+        return { kind: "boolLit", value: has, type: BOOL, loc };
       }
     }
     const key = foldedStringKeyOf(L, expr.left);
