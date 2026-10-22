@@ -111,9 +111,9 @@ import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collec
   collectJsonRequires, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
-import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget } from "./lower-classes.js";
+import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
-import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
+import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports, implicitDefaultInstance } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
 import { lowerStreamModuleCall, streamInstanceOfExpr } from "./lower-stream.js";
 import { unifyWidthShapes, type UnifyOutcome } from "./shape-unify.js";
@@ -9290,8 +9290,8 @@ export class Lowerer {
    * the method with the slot's own arguments. Interned per (receiver,
    * declarer, method, slot signature) and captures the width helper's `o.0`
    * instance param (boxed there so the capture can retain it). */
-  boundMethodClosure(recvClass: string, proj: BoundMethodProj, loc: SrcLoc, captureLocalId = "o.0"): IrExpr {
-    const key = `boundmeth:${recvClass}:${proj.declarer}:${proj.name}:${typeKey(proj.func)}`;
+  boundMethodClosure(recvClass: string, proj: BoundMethodProj, loc: SrcLoc, captureLocalId = "o.0", calleeOverride?: string): IrExpr {
+    const key = `boundmeth:${recvClass}:${proj.declarer}:${proj.name}:${typeKey(proj.func)}${calleeOverride !== undefined ? `:${calleeOverride}` : ""}`;
     const existing = this.widthHelpers.get(key);
     const name = existing ?? `%boundmeth.${this.widthHelpers.size}`;
     if (!existing) {
@@ -9301,7 +9301,7 @@ export class Lowerer {
       const params = proj.func.params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
       const argRefs: IrExpr[] = proj.func.params.map((t, i) => ({ kind: "varRef", localId: `p.${i}`, type: t, loc }));
       if (proj.virtual) this.noteVirtualEdge(this.classes.get(recvClass)!, proj.name);
-      else this.noteEdge(`%${proj.declarer}.${proj.name}`);
+      else this.noteEdge(calleeOverride ?? `%${proj.declarer}.${proj.name}`);
       const call: IrExpr = proj.virtual
         ? {
             kind: "virtualCall",
@@ -9313,7 +9313,7 @@ export class Lowerer {
           }
         : {
             kind: "call",
-            callee: `%${proj.declarer}.${proj.name}`,
+            callee: calleeOverride ?? `%${proj.declarer}.${proj.name}`,
             args: [this.upcastTo(self, proj.declarer), ...argRefs],
             type: proj.func.ret,
             loc,
@@ -9481,8 +9481,35 @@ export class Lowerer {
     if (recvIr?.kind !== "object") return null;
     const info = this.classes.get(recvIr.className);
     if (!info) return null;
+    // An implicit-any method (`_handleNetworkError(err)` in an untyped JS
+    // package) has no vtable slot: its value is the all-dyn default instance,
+    // bound to the receiver. Dispatch is static, so a receiver whose class a
+    // subclass overrides it under keeps the refusal.
+    const generic = findGenericMethodOn(this, info, access.name.text);
+    if (generic !== null) {
+      if (generic.info.implicitParams === undefined || genericOverrideBelow(this, info, access.name.text)) return null;
+      const inst = implicitDefaultInstance(this, access, generic.info);
+      if (inst.params.some((p) => p.mode === "dynRest" || p.mode === "rest")) return null;
+      const gT = funcOf(inst.params.map((p) => p.type), inst.returnType) as IrType & { kind: "func" };
+      const grecv = this.lowerExpr(access.expression);
+      if (grecv.type.kind !== "object") return null;
+      const gctx = this.ctx;
+      const gcount = gctx.localCounters.get("%bmrecv") ?? 0;
+      gctx.localCounters.set("%bmrecv", gcount + 1);
+      const grecvId = `%bmrecv.${gcount}`;
+      gctx.locals.push({ id: grecvId, name: "%bmrecv", type: grecv.type, mutable: false, boxed: true });
+      this.noteEdge(inst.name);
+      const gclosure = this.boundMethodClosure(
+        info.def.name,
+        { name: access.name.text, declarer: generic.declarer.def.name, func: gT, virtual: false },
+        loc,
+        grecvId,
+        inst.name,
+      );
+      return { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: grecvId, init: grecv, loc }], result: gclosure, type: gT, loc };
+    }
     const meth = findMethodOn(this, info, access.name.text);
-    if (!meth || findGenericMethodOn(this, info, access.name.text)) return null;
+    if (!meth) return null;
     const fnT = funcOf(meth.sig.params.map((p) => p.type), meth.sig.ret);
     const proj = this.boundMethodPlan(info, access.name.text, fnT, meth.declarer.def.name, meth.sig);
     if (!proj) return null;
