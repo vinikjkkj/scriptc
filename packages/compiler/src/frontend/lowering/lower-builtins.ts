@@ -8585,6 +8585,42 @@ let digestInputValueDispatches = 0;
         : member === "availableMemory" ? "process.availableMemory" : "process.constrainedMemory";
       return { kind: "libCall", fn, args: [], type: F64, loc };
     }
+    // process.hrtime(): the [seconds, nanoseconds] pair of a monotonic clock
+    // with an arbitrary origin (Node's own is the system boot-relative one), built
+    // from the live clock's milliseconds since process start. The diff form
+    // hrtime(prev) and hrtime.bigint() keep their refusals.
+    if (member === "hrtime" && call.arguments.length === 0) {
+      const t = L.mapTypeOf(L.typeOf(call));
+      if (t?.kind === "record") {
+        const shape = L.shapes.get(t.shapeId);
+        if (shape?.tuple === true && shape.fields.length === 2 && shape.fields.every((f) => f.type.kind === "f64")) {
+          const ms = L.declareHiddenLocal("%hrms", F64);
+          const msRef = (): IrExpr => ({ kind: "varRef", localId: ms.id, type: F64, loc });
+          const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+          const sec: IrExpr = {
+            kind: "libCall", fn: "math.floor",
+            args: [{ kind: "bin", op: "/", left: msRef(), right: num(1000), type: F64, loc }],
+            type: F64, loc,
+          };
+          const nanos: IrExpr = {
+            kind: "libCall", fn: "math.floor",
+            args: [{
+              kind: "bin", op: "*",
+              left: { kind: "bin", op: "-", left: msRef(), right: { kind: "bin", op: "*", left: sec, right: num(1000), type: F64, loc }, type: F64, loc },
+              right: num(1e6), type: F64, loc,
+            }],
+            type: F64, loc,
+          };
+          return {
+            kind: "seqExpr",
+            stmts: [{ kind: "varDecl", localId: ms.id, init: { kind: "libCall", fn: "perf.now", args: [], type: F64, loc }, loc }],
+            result: { kind: "recordLit", fields: [{ name: shape.fields[0]!.name, value: sec }, { name: shape.fields[1]!.name, value: nanos }], type: t, loc },
+            type: t,
+            loc,
+          };
+        }
+      }
+    }
     // process.cpuUsage(prev?) / process.threadCpuUsage(prev?) — the
     // {user, system} microsecond records (getrusage / the thread clock).
     // The prev form validates Node-style (prevValue.user then .system,
