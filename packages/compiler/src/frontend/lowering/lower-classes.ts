@@ -1222,6 +1222,27 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     return out;
   }
 
+/** `D.prototype.n` where D is a program class that neither defines nor
+   * inherits `n`: the read answers undefined. */
+  function isMissingPrototypeMember(L: Lowerer, rhs: ts.Expression): boolean {
+    let e: ts.Expression = rhs;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (
+      !ts.isPropertyAccessExpression(e) || !ts.isPropertyAccessExpression(e.expression) ||
+      e.expression.name.text !== "prototype" || !ts.isIdentifier(e.expression.expression)
+    ) {
+      return false;
+    }
+    const sym = L.resolveValueSymbol(e.expression.expression);
+    const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    if (d === undefined || !ts.isClassDeclaration(d)) return false;
+    const dinfo = sym ? L.classBySymbol.get(sym) : undefined;
+    const name = e.name.text;
+    if (dinfo === undefined || dinfo.builtinError || dinfo.subclasses.length > 0) return false;
+    if (L.findMethodOn(dinfo, name) !== null || L.findMethodOn(dinfo, `get:${name}`) !== null) return false;
+    return !dinfo.fields.has(name) && !dinfo.staticFields.some((s) => s.name === name);
+  }
+
 /** `C.prototype.m = <function-like>` at the top level of the file declaring
    * class C: a LATE METHOD. The function becomes `C`'s method `m` exactly as
    * if declared in the body (same module function `%C.m`, the
@@ -1254,6 +1275,14 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       const m = lhs.name.text;
       if (info.methods.has(m) || info.fields.has(m)) continue;
       const fn = lateMethodSourceOf(L, e.right);
+      // `C.prototype.m = D.prototype.n` where D never defines n: the value is
+      // undefined, the property exists with that value and nothing can call
+      // it -- the statement has no observable effect worth a slot (mysql2's
+      // Execute.prototype._findOrCreateReadStream = Query.prototype.<missing>).
+      if (fn === null && isMissingPrototypeMember(L, e.right)) {
+        L.lateMethodAssigns.add(e);
+        continue;
+      }
       if (fn === null) continue;
       let sig: ReturnType<Lowerer["lambdaSignature"]>;
       try {
