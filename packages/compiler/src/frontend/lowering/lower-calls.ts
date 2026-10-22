@@ -4248,6 +4248,17 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // shapes inspect cannot render keep honest per-argument fences.
       const surface = `console.${consoleMember}`;
       const stdoutMember = consoleMember === "log" || consoleMember === "info" || consoleMember === "debug";
+      // console.trace writes "Trace: <message>" to stderr (Node follows it with the
+      // call-site frames, which a compiled binary has no module graph to name:
+      // the header line is the whole observable text here). Only the plain
+      // argument forms lower; the %-format and spread forms keep the refusal.
+      if (
+        consoleMember === "trace" &&
+        (expr.arguments.some((a) => ts.isSpreadElement(a)) ||
+          (expr.arguments.length > 1 && expr.arguments[0] !== undefined && ts.isStringLiteral(expr.arguments[0]) && /%[sdifjoOc%]/.test(expr.arguments[0].text)))
+      ) {
+        L.unsupported("SC1090", expr, "console.trace with a %-format string or spread arguments (call it with plain arguments)");
+      }
       // A LITERAL format string with %-specifiers and further arguments
       // (`console.log('Mismatched %s function calls. Expected %s, actual
       // %d.', name, seg, n)` — test/common's exit report): Node's console
@@ -4404,7 +4415,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       return {
         kind: "intrinsic",
         name: stdoutMember ? "console.log" : "console.error",
-        args,
+        args: consoleMember === "trace"
+          ? [{ kind: "strLit", value: args.length === 0 ? "Trace" : "Trace:", type: STRING, loc } as IrExpr, ...args]
+          : args,
         type: VOID,
         loc,
       };

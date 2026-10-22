@@ -8,3 +8,4 @@ console.log(memberexports.encode("hi", "UTF-8"));
 console.log(memberexports.getCodec("Latin_1").name, memberexports.toEncoding("x", "ASCII"));
 console.log(memberexports.state());
 console.log(memberexports.decode("a", "x"), memberexports.decode("b", "y"), memberexports.use("q"), memberexports.use("r"), memberexports.state());
+console.log(memberexports.noisy());
