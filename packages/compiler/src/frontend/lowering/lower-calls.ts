@@ -13147,8 +13147,14 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         // only the membership test did not.)
         const recvProbe = probeLower(L, call.arguments[0]!)?.type;
         const recvShape = recvProbe?.kind === "record" ? L.shapes.get(recvProbe.shapeId) : undefined;
+        // A record whose declared fields are ALL always-present (no undefined
+        // arm anywhere) carries no such divergence either: a key it declares is
+        // an own key, whatever the value, so the compare chain is exact.
+        const allPresent =
+          recvShape !== undefined && !recvShape.indexValue && !recvShape.tuple &&
+          recvShape.fields.every((f) => f.type.kind !== "undefinedT" && !(f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0));
         if (
-          recvProbe?.kind === "dyn" ||
+          recvProbe?.kind === "dyn" || allPresent ||
           (recvShape !== undefined && recvShape.fields.length === 0 && !!recvShape.indexValue)
         ) {
           const own = lowerHasOwnOver(L, call, call.arguments[0]!, call.arguments[1]!);

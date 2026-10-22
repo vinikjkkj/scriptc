@@ -10429,6 +10429,14 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       if (u) return u;
     }
     if (recvT?.kind === "dyn") return lowerForInDyn(L, stmt, labels);
+    // A receiver whose checker type maps to nothing (an `any`/`unknown`
+    // parameter, an object with an untyped member): the value is checked-dynamic at run time, and the walk is
+    // the dyn walk's -- a lowered value of another kind falls through to the
+    // refusals below.
+    if (recvT === null && isJsSourceFile(stmt.getSourceFile())) {
+      const probe = probeLower(L, stmt.expression);
+      if (probe?.type.kind === "dyn") return lowerForInDyn(L, stmt, labels);
+    }
     if (recvT?.kind === "object") {
       L.unsupported(
         "SC1052",

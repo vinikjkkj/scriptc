@@ -11360,6 +11360,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8228-for-in-over-untyped-parameter.js": {
+   "order": [
+    "<repo>/tests/corpus/8228-for-in-over-untyped-parameter.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
