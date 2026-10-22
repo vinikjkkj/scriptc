@@ -47,7 +47,7 @@ const execFileAsync = promisify(execFile);
 const NODE_BUILTINS = new Set(builtinModules);
 
 /** Hard cap on packages one compile will source-map (prototype guard). */
-const MAX_PACKAGES = 16;
+const MAX_PACKAGES = 64;
 
 function isFile(path: string): boolean {
   try {
