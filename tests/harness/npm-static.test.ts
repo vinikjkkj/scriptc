@@ -206,6 +206,8 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // valuesunion: a package-declared union with an array-of-unknown arm as an
     // options member (mysql2's QueryValues) reads as the checked-dynamic tier.
     ["valuesunion", "valuesunion-cli.ts"],
+    // processmod: require('process') is the global process: typeof/in probes on its members and hrtime
+    ["processmod", "processmod-cli.ts"],
     // forinoptions: for-in over an options bag that is reassigned, hasOwnProperty.call over a typed record, and a for-in cursor indexing an array
     ["forinoptions", "forinoptions-cli.ts"],
     // latemissing: late prototype methods copied between classes, including a donor member the donor never defines (mysql2's Execute.prototype assignments)
