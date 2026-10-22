@@ -2976,6 +2976,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
        * declared fields after the member loop (Node's layout, probed: the
        * transform hoists their definitions above every declared field). */
       const paramProps: NonNullable<ClassInfo["paramProps"]> = [];
+      /** Parameter properties that re-assign an inherited slot at its own type. */
+      const redeclaredParamProps = new Set<string>();
 
       const staticFields: ClassInfo["staticFields"] = [];
       const staticMethods = new Map<string, { params: ParamShape[]; ret: IrType; member: ts.MethodDeclaration }>();
@@ -3745,7 +3747,18 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             // `override x` (and any same-named inherited member) would
             // redeclare a base slot — the declared-field rule verbatim.
             if (fields.has(name)) {
-              L.unsupported("SC1090", p.name, "redeclaring inherited fields");
+              // A parameter property that REDECLARES an inherited slot at
+              // the slot's own type (`constructor(m, public readonly name:
+              // MessageName)` over Error's string `name`) is the same
+              // assignment `this.name = name` into the inherited slot, no
+              // new slot. Node's transform also [[Define]]s the field to
+              // undefined right after super(); that reset is invisible
+              // when no instance field initializer runs before the
+              // assignment can read it (paramPropResetIsDead).
+              if (!typeEquals(type, fields.get(name)!) || !paramPropResetIsDead(L, decl)) {
+                L.unsupported("SC1090", p.name, "redeclaring inherited fields");
+              }
+              redeclaredParamProps.add(name);
             }
             if (L.findMethodOn(base, name)) {
               L.unsupported("SC1090", p.name, "fields shadowing inherited methods");
@@ -4214,7 +4227,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         const ppRouted = routesErrorCode ? paramProps.some((pp) => pp.name === "code") : false;
         for (const pp of paramProps) fields.set(pp.name, pp.type);
         fieldOrder.unshift(...paramProps.map((pp) =>
-          ppRouted && pp.name === "code"
+          (ppRouted && pp.name === "code") || redeclaredParamProps.has(pp.name)
             ? { name: pp.name, type: pp.type, initializer: undefined, redeclared: true as const }
             : { name: pp.name, type: pp.type, initializer: undefined }));
       }
@@ -11617,6 +11630,21 @@ function bareResetIsDead(L: Lowerer, member: ts.PropertyDeclaration, decl: ts.Cl
     if (s.expression.left.name.text === name) return true;
   }
   return false;
+}
+
+/** Is the reset Node's transform performs for a PARAMETER PROPERTY that
+ * redeclares an inherited field impossible to observe? The definitions are
+ * hoisted above every declared field and the assignments open the
+ * constructor body, so the only code that runs between the reset and the
+ * assignment is this class's own instance field initializers. Dead when
+ * all of them are inert. */
+function paramPropResetIsDead(L: Lowerer, decl: ts.ClassLikeDeclaration): boolean {
+  for (const m of decl.members) {
+    if (ts.isPropertyDeclaration(m) && !isStaticMember(m) && m.initializer && !inertExpr(L, m.initializer)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** A `static` member — the reset analysis only reasons about instance
