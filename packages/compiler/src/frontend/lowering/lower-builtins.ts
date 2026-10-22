@@ -11336,12 +11336,12 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
   export function consoleCallMember(
     L: Lowerer,
     call: ts.CallExpression,
-  ): "log" | "info" | "debug" | "error" | "warn" | null {
+  ): "log" | "info" | "debug" | "error" | "warn" | "trace" | null {
     if (!ts.isPropertyAccessExpression(call.expression)) return null;
     const access = call.expression;
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
-    if (name !== "log" && name !== "info" && name !== "debug" && name !== "error" && name !== "warn") return null;
+    if (name !== "log" && name !== "info" && name !== "debug" && name !== "error" && name !== "warn" && name !== "trace") return null;
     return L.isStdlibGlobal(access.expression, "console") ? name : null;
   }
 
