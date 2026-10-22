@@ -537,6 +537,45 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     return (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.BlockScoped) === 0;
   }
 
+/** Does the scope write a member through this binding — `x.p = v`,
+   * `x[k] = v`, `x.p += v`, `x.p++`, `delete x.p` — where the binding is a
+   * checker-`any` declaration initialized with an object literal? */
+  function anyObjectLiteralIsWrittenThrough(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+    if (!ts.isIdentifier(decl.name) || decl.initializer === undefined) return false;
+    if ((L.typeOf(decl.name).flags & ts.TypeFlags.Any) === 0) return false;
+    let init: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    if (!ts.isObjectLiteralExpression(init)) return false;
+    const sym = L.checker.getSymbolAtLocation(decl.name);
+    if (!sym) return false;
+    let scope: ts.Node = decl.parent;
+    while (scope.parent && !ts.isBlock(scope) && !ts.isSourceFile(scope) && !ts.isModuleBlock(scope)) scope = scope.parent;
+    let found = false;
+    const isAssignOp = (k: ts.SyntaxKind): boolean =>
+      k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
+    const visit = (n: ts.Node): void => {
+      if (found) return;
+      if (ts.isIdentifier(n) && n !== decl.name && L.checker.getSymbolAtLocation(n) === sym) {
+        const p = n.parent;
+        if ((ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p)) && p.expression === n) {
+          const gp = p.parent;
+          if (
+            (ts.isBinaryExpression(gp) && gp.left === p && isAssignOp(gp.operatorToken.kind)) ||
+            ((ts.isPrefixUnaryExpression(gp) || ts.isPostfixUnaryExpression(gp)) &&
+              (gp.operator === ts.SyntaxKind.PlusPlusToken || gp.operator === ts.SyntaxKind.MinusMinusToken)) ||
+            ts.isDeleteExpression(gp)
+          ) {
+            found = true;
+            return;
+          }
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(scope);
+    return found;
+  }
+
 /** The VariableDeclaration hosting a binding name (walking out of any
    * enclosing binding patterns), or null when the name belongs to some
    * other declaration form — a parameter pattern, a catch binding. */
@@ -5045,8 +5084,16 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // to the union's real array arm). Const only — an evolving-`any`
     // `let` may be reassigned a different shape later; genuine `any`
     // only — every other unmappable keeps its own diagnostic.
+    // ... EXCEPT a checker-`any` const holding an OBJECT LITERAL that the
+    // scope later writes members through (`const message: any = { name };
+    // message.mechanisms = []`): adopting the literal's record would fix
+    // the member set at the literal's, and the write of an undeclared
+    // member (or any write through the `any` receiver, which the record
+    // path does not route) has no home. The binding is the checked-dynamic
+    // object the annotation says it is.
     if (
       type === null && !isLet &&
+      !anyObjectLiteralIsWrittenThrough(L, decl) &&
       ((L.typeOf(decl.name).flags & ts.TypeFlags.Any) !== 0 ||
         // ... and a TUPLE initializer takes it too: `const t = value`
         // inside an Array.isArray guard over a readonly tuple arm, where
