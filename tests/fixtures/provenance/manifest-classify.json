@@ -20,6 +20,11 @@
       "commit": "5555555555555555555555555555555555555555",
       "repo": "https://github.com/example/jsonly"
     },
+    "extless": {
+      "dir": "./attested-src/extless",
+      "commit": "7777777777777777777777777777777777777777",
+      "repo": "https://github.com/example/extless"
+    },
     "distjs": {
       "dir": "./attested-src/distjs",
       "commit": "6666666666666666666666666666666666666666",

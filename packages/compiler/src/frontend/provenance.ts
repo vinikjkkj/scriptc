@@ -685,6 +685,15 @@ function mapEntryToSource(
    * nothing about it. */
   const bareJs: string[] = [];
   if (/\.(js|mjs|cjs)$/.test(rel) && !/\.d\.(ts|mts|cts)$/.test(rel)) bareJs.push(rel);
+  /* An EXTENSIONLESS published target ("main": "lib/index", "./mutable")
+   * names the file by Node's own resolution: the path itself, then the
+   * extension probes, then the directory index. The identity rule above is
+   * the same fact for these (the tree holds the file at the path the package
+   * publishes it at), only spelled the way Node accepts it. */
+  else if (!/\.[A-Za-z0-9]+$/.test(rel)) {
+    for (const ext of [".js", ".cjs", ".mjs"]) bareJs.push(`${rel}${ext}`);
+    for (const ext of [".js", ".cjs", ".mjs"]) bareJs.push(join(rel, `index${ext}`));
+  }
   for (const stem of stems) {
     const base = stem.replace(/\.d\.(ts|mts|cts)$/, ".$1").replace(/\.(js|mjs|cjs)$/, "");
     if (/\.(ts|tsx|mts|cts)$/.test(base)) candidates.push(base);

@@ -6,5 +6,6 @@ import { PROMISE } from "mysqlshape/promise";
 import { greet } from "greeter";
 import { J } from "jsonly";
 import { D } from "distjs";
+import { X } from "extless";
 
-console.log(String(TABLE.a) + String(ROOT) + String(PROMISE) + greet("x") + String(J) + String(D));
+console.log(String(TABLE.a) + String(ROOT) + String(PROMISE) + greet("x") + String(J) + String(D) + String(X));
