@@ -5154,7 +5154,20 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // cannot even be asked before its own placeholder is minted. The union is
     // the checked-dynamic tier. A value that tier cannot hold is refused at
     // its coercion site, loudly.
-    if (ctx.declMember === true && !ctx.dynamic) {
+    // The same author-says-any-value reading holds for a union a PACKAGE's
+    // declaration file spells (the interface member `values?: QueryValues` of
+    // mysql2's QueryOptions is not a class member, and is the same type): one
+    // of its named constituents (`Raw`, `TypedParameterValue`...) is declared
+    // in a declaration file that is not the standard library's.
+    const aliasInDts = (): boolean =>
+      ts.constituentTypes(widened).some((c) => {
+        const s = c.getSymbol();
+        return (
+          s !== undefined &&
+          checker.declarationsOf(s).some((d) => d.getSourceFile().isDeclarationFile && !ctx.isStdlibFile(d.getSourceFile()))
+        );
+      });
+    if ((ctx.declMember === true || aliasInDts()) && !ctx.dynamic) {
       for (const part of ts.constituentTypes(widened)) {
         if (checker.isArrayType(part) && mapType(part, ctx)?.kind === "dyn") return DYN;
       }
