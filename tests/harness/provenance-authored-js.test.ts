@@ -161,6 +161,10 @@ describe("provenance: a package that publishes the source it authored", () => {
      * only in the IDENTITY spelling: the tree holds the file at the very path
      * the package publishes it at. */
     expect(posix(byName.get("jsonly")?.entries["jsonly"])).toMatch(/attested-src\/jsonly\/index\.js$/);
+    /* A package whose "main" is spelled WITHOUT an extension ("lib/index", the
+     * way Node accepts it) maps to the file Node would load. Base: "no source
+     * mapping" and the island. */
+    expect(posix(byName.get("extless")?.entries["extless"])).toMatch(/attested-src\/extless\/lib\/index\.js$/);
     /* NEGATIVE CONTROL 2: the package publishes dist/index.js, which is absent
      * from the tree, while an unrelated root index.js IS there. Mapping that
      * shim would compile code the package never ships, so it must not map. */
