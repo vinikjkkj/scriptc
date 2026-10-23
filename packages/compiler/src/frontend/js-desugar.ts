@@ -523,6 +523,83 @@ function staticExpandoEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* ENVIRONMENT-PROBE BRANCHES. A module that picks its implementation by
+ * asking whether it runs in a browser or an Electron renderer,
+ *
+ *     if (typeof process === 'undefined' || process.type === 'renderer' ||
+ *         process.browser === true || process.__nwjs) {
+ *       module.exports = require('./browser.js');
+ *     } else {
+ *       module.exports = require('./node.js');
+ *     }
+ *
+ * asks four questions whose answers are fixed for a compiled binary: the
+ * `process` global exists, and `process.type`, `process.browser` and
+ * `process.__nwjs` are undefined in Node (Electron and NW.js define them;
+ * a compiled binary is neither). So the test is false and the else branch is
+ * the module. A TOP-LEVEL `if` whose condition is a disjunction of exactly
+ * these probes is replaced by its else branch (nothing when there is none),
+ * which also removes the browser-only module from the program: it would never
+ * be loaded. Any other operand in the condition leaves the statement alone. */
+const ENV_PROBE_PREFILTER = /process\.(?:type|browser|__nwjs)/;
+
+function isNodeFalseProbe(e: ts.Expression): boolean {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  const procMember = (n: ts.Expression, member: string): boolean =>
+    ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "process" && n.name.text === member;
+  if (procMember(e, "__nwjs")) return true;
+  if (!ts.isBinaryExpression(e)) return false;
+  const op = e.operatorToken.kind;
+  if (op === ts.SyntaxKind.EqualsEqualsEqualsToken) {
+    if (ts.isTypeOfExpression(e.left) && ts.isIdentifier(e.left.expression) && e.left.expression.text === "process") {
+      return ts.isStringLiteral(e.right) && e.right.text === "undefined";
+    }
+    if (procMember(e.left, "type")) return ts.isStringLiteral(e.right) && e.right.text === "renderer";
+    if (procMember(e.left, "browser")) return e.right.kind === ts.SyntaxKind.TrueKeyword;
+  }
+  return false;
+}
+
+function envProbeBranchEdits(fileName: string, text: string): string | null {
+  if (!ENV_PROBE_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  for (const stmt of sf.statements) {
+    if (!ts.isIfStatement(stmt)) continue;
+    const operands: ts.Expression[] = [];
+    const collect = (e: ts.Expression): void => {
+      while (ts.isParenthesizedExpression(e)) e = e.expression;
+      if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        collect(e.left);
+        collect(e.right);
+      } else {
+        operands.push(e);
+      }
+    };
+    collect(stmt.expression);
+    if (!operands.every(isNodeFalseProbe)) continue;
+    const keep = stmt.elseStatement;
+    const original = stmt.getText(sf);
+    const nl = (original.match(/\n/g) ?? []).length;
+    let body = "";
+    if (keep !== undefined) {
+      const inner = ts.isBlock(keep) ? keep.statements.map((st) => st.getText(sf)).join(" ") : keep.getText(sf);
+      body = inner;
+    }
+    const kept = keep === undefined ? 0 : (body.match(/\n/g) ?? []).length;
+    edits.push({ start: stmt.getStart(sf), end: stmt.getEnd(), text: body + "\n".repeat(Math.max(0, nl - kept)) });
+  }
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -532,6 +609,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const tsCjs = tsCjsEdits(fileName, text);
     if (tsCjs !== null) return jsDesugar(fileName, tsCjs) ?? tsCjs;
+  }
+  {
+    const probes = envProbeBranchEdits(fileName, text);
+    if (probes !== null) return jsDesugar(fileName, probes) ?? probes;
   }
   {
     const expando = staticExpandoEdits(fileName, text);

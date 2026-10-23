@@ -11622,6 +11622,14 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8603-environment-probe-picks-the-node-module/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8603-environment-probe-picks-the-node-module/node.js",
+    "<repo>/tests/corpus/8603-environment-probe-picks-the-node-module/index.js",
+    "<repo>/tests/corpus/8603-environment-probe-picks-the-node-module/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8604-module-exports-is-another-required-module/main.js": {
    "order": [
     "<repo>/tests/corpus/8604-module-exports-is-another-required-module/impl.js",
