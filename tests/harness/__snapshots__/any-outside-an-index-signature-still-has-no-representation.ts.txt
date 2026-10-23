@@ -1,12 +1,3 @@
-any-outside-an-index-signature-still-has-no-representation.ts:17:7 - error SC2011: values of type 'any[]' have no static representation but run in the embedded dynamic engine, which this build does not include
-
-  16 | // an `any` ARRAY: the element slot is a named slot
-  17 | const arr: any[] = [1, "x"];
-     |       ^~~
-  18 | 
-
-  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
-
 any-outside-an-index-signature-still-has-no-representation.ts:20:7 - error SC2011: values of type '{ item: any; width: string; }' have no static representation but run in the embedded dynamic engine, which this build does not include
 
   19 | // an `any` MEMBER of a record: same
