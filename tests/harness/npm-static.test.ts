@@ -52,7 +52,11 @@ async function runBinary(cmd: string, args: string[]): Promise<RunResult> {
 /** Compile one pilot statically (no --dynamic — the whole point) with the
  * named packages opted in; cache-keyed over the program and the vendored
  * packages. */
-async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise<string> {
+async function buildStatic(
+  entry: string,
+  npmStatic: string[] | "auto",
+  backend: "c" | "llvm" = "c",
+): Promise<string> {
   const hash = createHash("sha256");
   const inputs = [
     entry,
@@ -74,6 +78,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
   const key = hash
     .update(npmStatic === "auto" ? "auto" : npmStatic.join(","))
     .update(sanitize ? "san" : "plain")
+    .update(backend)
     .digest("hex")
     .slice(0, 16);
   // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
@@ -87,9 +92,9 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     sanitize,
     npmStatic,
     // Pinned: the suite pins --npm-static's FRONTEND frontier (coverage
-    // numbers, fence sites); the backend lane is held fixed so those pins
-    // move only when the frontend moves.
-    backend: "c",
+    // numbers, fence sites); the backend lane is held fixed (C unless a test
+    // asks for the other) so those pins move only when the frontend moves.
+    backend,
   });
   if (!result.ok) {
     throw new Error(
@@ -954,8 +959,8 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // the ARR arm answers it now, so the keyed spelling runs and says what
     // its dot twin and Node say (the sum of [1,2,3]).
     expect(rows.get("dReduce")).toBe("6");
-    // HONEST REFUSAL -- still failing, no longer lying about why
-    expect(rows.get("dFlat")).toBe("THREW 'Array.prototype.flat' on a dynamic value is not supported yet");
+    // flat on an untyped array: the runtime answers it now (it was a loud refusal)
+    expect(rows.get("dFlat")).toBe("1,2,3");
     // THE RESIDUAL GAP -- HALF CLOSED, and the two halves went different
     // ways, which is the whole reason this row is worth reading.
     //
@@ -987,16 +992,31 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
-  test("4114 (refused rows): the dot spellings of reduce and flat on a dyn array are build refusals", () => {
+  test("4114 (formerly refused rows): the dot spellings of reduce and flat on a dyn array build and answer Node's values on both backends", async () => {
+    // These two rows were pinned as BUILD REFUSALS (SC1090, "method calls
+    // like 'a.reduce' is not supported yet"). A refusal is an open defect,
+    // not a fix, so the runtime now answers both on an untyped array and
+    // this row records the answer instead: built on BOTH backends and
+    // diffed against Node, never against a literal alone.
     const entry = join(fixturesRoot, "npm/cases/4114-keyed-method-call-reach-on-purpose/main-refused.ts");
     const { coverage } = analyze(entry, { npmStatic: ["keyedreach-refused"] });
     expect(coverage.npmStatic).toEqual([{ package: "keyedreach-refused", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics.map((d) => d.message).sort()).toEqual([
-      "method calls like 'a.flat' is not supported yet",
-      "method calls like 'a.reduce' is not supported yet",
-    ]);
-  }, 120_000);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const nodeRes = await runBinary("node", [entry]);
+    const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    // A zero-denominator guard: the comparison must see both rows, with the
+    // values Node itself prints.
+    expect(node).toContain("tReduce   = 6");
+    expect(node).toContain("tFlat     = 1,2,3");
+    for (const backend of ["c", "llvm"] as const) {
+      const binary = await buildStatic(entry, ["keyedreach-refused"], backend);
+      const nativeRes = await runBinary(binary, []);
+      const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      expect(native, `--backend ${backend}`).toBe(node);
+      expect(nativeRes.exitCode).toBe(0);
+    }
+  }, 240_000);
 
   /* -- 4153: how many receiver mechanisms are there? (discriminator) -----
    *
