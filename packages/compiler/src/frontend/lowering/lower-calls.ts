@@ -6707,6 +6707,11 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   "fill", "copyWithin",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "reverse", "sort",
   "forEach", "map", "filter", "some", "every", "find", "findIndex",
+  // reduce/reduceRight and the change-by-copy names the ARR arm now answers
+  // (flat, toReversed, toSorted, toSpliced, with); a Uint8Array/Buffer receiver
+  // answers reduce/reduceRight/toReversed/toSorted/with, every other kind meets
+  // the same own-member-or-is-not-a-function ladder as the names above.
+  "reduce", "reduceRight", "flat", "toReversed", "toSorted", "toSpliced", "with",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
   // boxed through the checked-dynamic boundary): these names dispatch on
   // the runtime kind so a boxed IncomingMessage/ServerResponse/Socket

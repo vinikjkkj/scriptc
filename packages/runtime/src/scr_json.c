@@ -8093,6 +8093,7 @@ static ScrStr *scr_dyn_bytes_enc_canon(const ScrStr *raw) {
  * is a method of this kind at ALL — false leaves the caller its own
  * is-not-a-function answer, which is JS's for a name no prototype
  * declares. */
+static void scr_u8_throw_not_fn(const ScrDyn *f);
 ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *args,
                              size_t argc, const char *what, bool *known) {
   ScrBytes *bytes = recv->v.bytes;
@@ -8239,6 +8240,133 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
     if (scr_exc_pending()) { if (s) scr_str_release(s); return NULL; }
     ScrDyn *d = scr_dyn_new_str(s);
     scr_str_release(s);
+    return d;
+  }
+  /* reduce / reduceRight / toReversed / toSorted / with over a Uint8Array or
+   * Buffer receiver (the element kind a dyn bytes value can hold here). The
+   * copies are PLAIN Uint8Arrays, which is what TypedArrayCreateSameType makes
+   * of a Buffer as well (measured). */
+  if (bytes->elem == SCR_BYTES_U8 && bytes->flavor != SCR_BF_DATAVIEW &&
+      (strcmp(method, "reduce") == 0 || strcmp(method, "reduceRight") == 0)) {
+    ScrDyn *cb = argc > 0 ? args[0] : scr_dyn_undefined();
+    if (cb->kind != SCR_DYN_FUNC) {
+      scr_u8_throw_not_fn(cb);
+      return NULL;
+    }
+    bool right = method[6] == 'R';
+    size_t k = 0;
+    ScrDyn *acc;
+    if (argc >= 2) {
+      acc = scr_dyn_retain(args[1]);
+    } else {
+      if (blen == 0) {
+        scr_throw_error_msg(SCR_ERR_TYPE, "Reduce of empty array with no initial value",
+                            strlen("Reduce of empty array with no initial value"));
+        return NULL;
+      }
+      acc = scr_dyn_new_num((double)bytes->data[right ? blen - 1 : 0]);
+      k = 1;
+    }
+    for (; k < blen; k++) {
+      size_t at = right ? blen - 1 - k : k;
+      ScrDyn *item = scr_dyn_new_num((double)bytes->data[at]);
+      ScrDyn *idx = scr_dyn_new_num((double)at);
+      ScrDyn *cbargs[4] = { acc, item, idx, recv };
+      ScrDyn *r = scr_dyn_call(cb, cbargs, 4, "callback");
+      scr_dyn_release(idx);
+      scr_dyn_release(item);
+      scr_dyn_release(acc);
+      if (!r) return NULL;
+      acc = r;
+    }
+    return acc;
+  }
+  if (bytes->elem == SCR_BYTES_U8 && bytes->flavor != SCR_BF_DATAVIEW && strcmp(method, "toReversed") == 0) {
+    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)blen);
+    for (size_t i = 0; i < blen; i++) out->data[i] = bytes->data[blen - 1 - i];
+    ScrDyn *d = scr_dyn_new_bytes_copy(out);
+    scr_bytes_release(out);
+    return d;
+  }
+  if (bytes->elem == SCR_BYTES_U8 && bytes->flavor != SCR_BF_DATAVIEW && strcmp(method, "toSorted") == 0) {
+    ScrDyn *cmp = argc > 0 ? args[0] : scr_dyn_undefined();
+    if (cmp->kind != SCR_DYN_UNDEF && cmp->kind != SCR_DYN_FUNC) {
+      ScrJsonBuf b;
+      scr_jb_init(&b);
+      scr_jb_puts(&b, "The comparison function must be either a function or undefined: ");
+      if (cmp->kind == SCR_DYN_NUM || cmp->kind == SCR_DYN_BOOL || cmp->kind == SCR_DYN_STR ||
+          cmp->kind == SCR_DYN_NULL) {
+        ScrStr *shown = scr_dyn_string_coerce_js(cmp); /* +1; never throws for these */
+        if (shown != NULL) {
+          scr_jb_write(&b, shown->data, shown->len);
+          scr_str_release(shown);
+        }
+      } else {
+        scr_jb_puts(&b, "#<Object>");
+      }
+      scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+      return NULL;
+    }
+    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)blen);
+    if (cmp->kind == SCR_DYN_UNDEF) {
+      size_t counts[256] = { 0 };
+      for (size_t i = 0; i < blen; i++) counts[bytes->data[i]]++;
+      size_t w = 0;
+      for (int v = 0; v < 256; v++) {
+        for (size_t c = 0; c < counts[v]; c++) out->data[w++] = (uint8_t)v;
+      }
+    } else {
+      /* A stable insertion sort driven by the comparator (a typed array's
+       * sort is stable); the comparator's NaN/non-number answers are 0. */
+      for (size_t i = 0; i < blen; i++) out->data[i] = bytes->data[i];
+      for (size_t i = 1; i < blen; i++) {
+        uint8_t key = out->data[i];
+        size_t j = i;
+        while (j > 0) {
+          ScrDyn *x = scr_dyn_new_num((double)out->data[j - 1]);
+          ScrDyn *y = scr_dyn_new_num((double)key);
+          ScrDyn *cbargs[2] = { x, y };
+          ScrDyn *r = scr_dyn_call(cmp, cbargs, 2, "comparefn");
+          scr_dyn_release(x);
+          scr_dyn_release(y);
+          if (!r) {
+            scr_bytes_release(out);
+            return NULL;
+          }
+          double v = scr_dyn_to_number(r);
+          scr_dyn_release(r);
+          if (!(v > 0)) break;
+          out->data[j] = out->data[j - 1];
+          j--;
+        }
+        out->data[j] = key;
+      }
+    }
+    ScrDyn *d = scr_dyn_new_bytes_copy(out);
+    scr_bytes_release(out);
+    return d;
+  }
+  if (bytes->elem == SCR_BYTES_U8 && bytes->flavor != SCR_BF_DATAVIEW && strcmp(method, "with") == 0) {
+    double rel = scr_dyn_index_arg(args, argc, 0, 0, what);
+    if (scr_exc_pending()) return NULL;
+    double num = argc > 1 ? scr_dyn_to_number(args[1]) : NAN;
+    if (scr_exc_pending()) return NULL;
+    double actual = rel >= 0 ? rel : (double)blen + rel;
+    if (!(actual >= 0 && actual < (double)blen)) {
+      scr_throw_error_msg(SCR_ERR_RANGE, "Invalid typed array index", strlen("Invalid typed array index"));
+      return NULL;
+    }
+    uint8_t byte = 0;
+    if (num == num && !isinf(num)) {
+      double t = fmod(trunc(num), 256.0);
+      if (t < 0) t += 256.0;
+      byte = (uint8_t)t;
+    }
+    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)blen);
+    for (size_t i = 0; i < blen; i++) out->data[i] = bytes->data[i];
+    out->data[(size_t)actual] = byte;
+    ScrDyn *d = scr_dyn_new_bytes_copy(out);
+    scr_bytes_release(out);
     return d;
   }
   if (scr_dyn_bytes_proto_name(method)) {

@@ -11774,6 +11774,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8534-dyn-array-reduce-flat-and-change-by-copy.js": {
+   "order": [
+    "<repo>/tests/corpus/8534-dyn-array-reduce-flat-and-change-by-copy.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js": {
    "order": [
     "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js"

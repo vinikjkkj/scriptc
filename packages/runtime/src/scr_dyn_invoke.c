@@ -721,11 +721,30 @@ static bool dyn_arr_proto_unimpl(const char *m) {
    * must not sit in a list called *_unimpl. Keeping them here made two of
    * the static-copy guard's nine arms unreachable, because this predicate
    * throws "not supported" before that guard can fire. */
-  static const char *names[] = { "reduce", "reduceRight", "flat",
-    "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
-    "with", "toLocaleString", NULL };
+  static const char *names[] = { "keys", "values", "entries", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
+}
+
+/* Array.prototype.flat's recursion: flatten `src`'s elements into `out`, one
+ * level per unit of `depth` (Infinity flattens fully). A cycle under an
+ * infinite depth is JS's stack overflow: a RangeError at 4096 nested levels
+ * instead of a crash. False with the exception pending. */
+static bool dyn_flatten_into(ScrDyn *out, ScrDyn *src, double depth, unsigned level) {
+  if (level > 4096) {
+    scr_throw_error_msg(SCR_ERR_RANGE, "Maximum call stack size exceeded",
+                        strlen("Maximum call stack size exceeded"));
+    return false;
+  }
+  for (size_t i = 0; i < src->v.arr.len; i++) {
+    ScrDyn *el = src->v.arr.items[i];
+    if (depth > 0 && el->kind == SCR_DYN_ARR) {
+      if (!dyn_flatten_into(out, el, depth - 1, level + 1)) return false;
+    } else {
+      scr_dyn_arr_push(out, scr_dyn_retain(el));
+    }
+  }
+  return true;
 }
 
 /* `recv[k](...)`: the ELEMENT spelling of the dispatch below.
@@ -813,9 +832,10 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
        * predicate exists to prevent, reintroduced by a tidy-up. */
       static const char *const impl[] = { "at", "concat", "copyWithin", "every",
         "fill", "filter",
-        "find", "findIndex", "flatMap", "forEach", "includes", "indexOf",
-        "join", "lastIndexOf", "map", "pop", "push", "reverse", "shift",
-        "slice", "some", "sort", "splice", "toString", "unshift", NULL };
+        "find", "findIndex", "flat", "flatMap", "forEach", "includes", "indexOf",
+        "join", "lastIndexOf", "map", "pop", "push", "reduce", "reduceRight",
+        "reverse", "shift", "slice", "some", "sort", "splice", "toReversed",
+        "toSorted", "toSpliced", "toString", "unshift", "with", NULL };
       return dyn_name_in(m, impl) || dyn_arr_proto_unimpl(m) || dyn_objproto_knows(m);
     }
     case SCR_DYN_BYTES:
@@ -1872,6 +1892,133 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
               tail * sizeof(ScrDyn *));
       for (size_t i = 0; i < ins; i++) recv->v.arr.items[start + i] = scr_dyn_retain(args[i + 2]);
       recv->v.arr.len = newLen;
+      return out;
+    }
+    /* reduce / reduceRight (ES 23.1.3.24 / .25): the accumulator threads
+     * through cb(acc, item, index, array). The length is read ONCE, and a slot
+     * a callback shrank away is skipped (HasProperty is false there); with no
+     * initial value the first PRESENT element seeds the accumulator, and an
+     * empty array throws Node's TypeError. An explicit `undefined` initial
+     * value counts as given (argc decides, not the value). */
+    if (dyn_name_is(method, "reduce") || dyn_name_is(method, "reduceRight")) {
+      if (!dyn_cb_check(args, argc)) return NULL;
+      ScrDyn *cb = args[0];
+      bool right = dyn_name_is(method, "reduceRight");
+      size_t n = len;
+      size_t k = 0;
+      ScrDyn *acc = NULL;
+      if (argc >= 2) {
+        acc = scr_dyn_retain(args[1]);
+      } else {
+        while (k < n && acc == NULL) {
+          size_t at = right ? n - 1 - k : k;
+          k++;
+          if (at < recv->v.arr.len) acc = scr_dyn_retain(recv->v.arr.items[at]);
+        }
+        if (acc == NULL) {
+          scr_throw_error_msg(SCR_ERR_TYPE, "Reduce of empty array with no initial value",
+                              strlen("Reduce of empty array with no initial value"));
+          return NULL;
+        }
+      }
+      for (; k < n; k++) {
+        size_t at = right ? n - 1 - k : k;
+        if (at >= recv->v.arr.len) continue;
+        ScrDyn *item = scr_dyn_retain(recv->v.arr.items[at]);
+        ScrDyn *idx = scr_dyn_new_num((double)at);
+        ScrDyn *cbargs[4] = { acc, item, idx, recv };
+        ScrDyn *r = scr_dyn_call(cb, cbargs, 4, "callback");
+        scr_dyn_release(idx);
+        scr_dyn_release(item);
+        scr_dyn_release(acc);
+        if (!r) return NULL;
+        acc = r;
+      }
+      return acc;
+    }
+    /* flat(depth = 1): ToIntegerOrInfinity(depth) levels of nested arrays. */
+    if (dyn_name_is(method, "flat")) {
+      double depth = dyn_index_arg(args, argc, 0, 1, what);
+      if (scr_exc_pending()) return NULL;
+      ScrDyn *out = scr_dyn_new_arr();
+      if (!dyn_flatten_into(out, recv, depth, 0)) {
+        scr_dyn_release(out);
+        return NULL;
+      }
+      return out;
+    }
+    /* The four change-by-copy methods: a NEW array, the receiver untouched. */
+    if (dyn_name_is(method, "toReversed")) {
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = len; i > 0; i--) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i - 1]));
+      return out;
+    }
+    if (dyn_name_is(method, "toSorted")) {
+      ScrDyn *cmp = argc > 0 ? args[0] : scr_dyn_undefined();
+      if (cmp->kind != SCR_DYN_UNDEF && cmp->kind != SCR_DYN_FUNC) {
+        ScrJsonBuf b;
+        scr_jb_init(&b);
+        scr_jb_puts(&b, "The comparison function must be either a function or undefined: ");
+        scr_dyn_diag_buf(&b, cmp);
+        scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+        return NULL;
+      }
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < len; i++) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      if (len > 1 && !dyn_arr_sort(out, cmp->kind == SCR_DYN_FUNC ? cmp : NULL)) {
+        scr_dyn_release(out);
+        return NULL;
+      }
+      return out;
+    }
+    if (dyn_name_is(method, "toSpliced")) {
+      /* splice's argument rules over a copy: toSpliced() skips nothing,
+       * toSpliced(start) skips the whole tail, toSpliced(start, n) skips n. */
+      double startD = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      size_t start = dyn_rel_index(startD, len);
+      size_t skip;
+      if (argc == 0) {
+        skip = 0;
+      } else if (argc == 1) {
+        skip = len - start;
+      } else {
+        double dc = dyn_index_arg(args, argc, 1, 0, what);
+        if (scr_exc_pending()) return NULL;
+        double cap = (double)(len - start);
+        skip = dc <= 0 ? 0 : (dc >= cap ? len - start : (size_t)dc);
+      }
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < start; i++) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      for (size_t i = 2; i < argc; i++) scr_dyn_arr_push(out, scr_dyn_retain(args[i]));
+      for (size_t i = start + skip; i < len; i++) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      return out;
+    }
+    if (dyn_name_is(method, "with")) {
+      double relRaw = 0;
+      if (argc > 0 && args[0]->kind == SCR_DYN_NUM) relRaw = args[0]->v.num;
+      double rel = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      if (argc > 0 && args[0]->kind != SCR_DYN_NUM) relRaw = rel;
+      double actual = rel >= 0 ? rel : (double)len + rel;
+      if (!(actual >= 0 && actual < (double)len)) {
+        ScrJsonBuf b;
+        scr_jb_init(&b);
+        scr_jb_puts(&b, "Invalid index : ");
+        ScrDyn *shown = scr_dyn_new_num(relRaw);
+        scr_dyn_display_buf(&b, shown);
+        scr_dyn_release(shown);
+        scr_throw_error(SCR_ERR_RANGE, scr_jb_finish(&b));
+        return NULL;
+      }
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < len; i++) {
+        if (i == (size_t)actual) {
+          scr_dyn_arr_push(out, scr_dyn_retain(argc > 1 ? args[1] : scr_dyn_undefined()));
+        } else {
+          scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+        }
+      }
       return out;
     }
     if (dyn_name_is(method, "toString")) {

@@ -950,9 +950,10 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(rows.get("dSlice")).toBe(rows.get("tSlice"));
     expect(rows.get("dHasOwn")).toBe(rows.get("tHasOwn"));
     expect(rows.get("dFnApply")).toBe(rows.get("tFnApply"));
-    // HONEST REFUSALS -- still failing, no longer lying about why
-    expect(rows.get("dReduce")).toBe("THREW 'Array.prototype.reduce' on a dynamic value is not supported yet");
-    expect(rows.get("dFlat")).toBe("THREW 'Array.prototype.flat' on a dynamic value is not supported yet");
+    // reduce and flat are answered on a dyn array now (they were the honest
+    // refusals of this row): Node's own results, 6 and 1,2,3
+    expect(rows.get("dReduce")).toBe("6");
+    expect(rows.get("dFlat")).toBe("1,2,3");
     // THE RESIDUAL GAP -- HALF CLOSED, and the two halves went different
     // ways, which is the whole reason this row is worth reading.
     //
@@ -984,16 +985,19 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
-  test("4114 (refused rows): the dot spellings of reduce and flat on a dyn array are build refusals", () => {
+  test("4114 (dot rows): the dot spellings of reduce and flat on a dyn array build and answer like Node", async () => {
     const entry = join(fixturesRoot, "npm/cases/4114-keyed-method-call-reach-on-purpose/main-refused.ts");
     const { coverage } = analyze(entry, { npmStatic: ["keyedreach-refused"] });
     expect(coverage.npmStatic).toEqual([{ package: "keyedreach-refused", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics.map((d) => d.message).sort()).toEqual([
-      "method calls like 'a.flat' is not supported yet",
-      "method calls like 'a.reduce' is not supported yet",
-    ]);
-  }, 120_000);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["keyedreach-refused"]);
+    const nativeRes = await runBinary(binary, []);
+    const text = nativeRes.stdout.toString("utf8");
+    expect(text).toContain("tReduce   = 6");
+    expect(text).toContain("tFlat     = 1,2,3");
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
 
   /* -- 4153: how many receiver mechanisms are there? (discriminator) -----
    *
