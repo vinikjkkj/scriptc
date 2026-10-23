@@ -249,11 +249,78 @@ function inlineRequireEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* STATIC EXPANDOS ASSIGNED RIGHT AFTER THE CLASS. `tsc` below ES2022 spells
+ * `static X = e` as a statement after the class,
+ *
+ *     class Command { ... }
+ *     Command.FLAGS = { ... };
+ *     Command._transformer = { ... };
+ *
+ * which defines the same own static properties, in the same order, with
+ * nothing able to run between the class definition and them (the statements
+ * are consecutive). The static field form is what the lowering models, so the
+ * contiguous run of `C.name = expr;` statements directly after the class
+ * declaration moves into its body. Only a plain identifier name that the class
+ * does not already declare, and only the contiguous run: the first statement
+ * that is anything else ends it, so no other code is reordered around a moved
+ * initializer. */
+function staticExpandoEdits(fileName: string, text: string): string | null {
+  if (!/^[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\s*=[^=]/m.test(text) || !/\bclass\s+[A-Za-z_$]/.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const stmts = sf.statements;
+  for (let i = 0; i < stmts.length; i++) {
+    const cls = stmts[i]!;
+    if (!ts.isClassDeclaration(cls) || cls.name === undefined) continue;
+    const cname = cls.name.text;
+    const declared = new Set<string>();
+    for (const m of cls.members) {
+      if (m.name !== undefined && (ts.isIdentifier(m.name) || ts.isStringLiteral(m.name))) declared.add(m.name.text);
+    }
+    const moved: string[] = [];
+    let last: ts.Statement | null = null;
+    for (let j = i + 1; j < stmts.length; j++) {
+      const st = stmts[j]!;
+      if (!ts.isExpressionStatement(st)) break;
+      const e = st.expression;
+      if (
+        !ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken || !ts.isPropertyAccessExpression(e.left) ||
+        !ts.isIdentifier(e.left.expression) || e.left.expression.text !== cname || !ts.isIdentifier(e.left.name)
+      ) {
+        break;
+      }
+      const name = e.left.name.text;
+      if (declared.has(name) || name === "prototype" || name === "name" || name === "length") break;
+      declared.add(name);
+      moved.push(`static ${name} = ${e.right.getText(sf)};`);
+      last = st;
+    }
+    if (last === null) continue;
+    const closing = cls.getEnd() - 1;
+    if (text[closing] !== "}") continue;
+    edits.push({ start: closing, end: closing, text: ` ${moved.join(" ")} ` });
+    edits.push({ start: cls.getEnd(), end: last.getEnd(), text: "" });
+  }
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
     const unwrapped = umdUnwrap(fileName, text);
     if (unwrapped !== null) return jsDesugar(fileName, unwrapped) ?? unwrapped;
+  }
+  {
+    const expando = staticExpandoEdits(fileName, text);
+    if (expando !== null) return jsDesugar(fileName, expando) ?? expando;
   }
   {
     const inlined = inlineRequireEdits(fileName, text);
