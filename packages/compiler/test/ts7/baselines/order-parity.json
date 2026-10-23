@@ -11672,6 +11672,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8512-js-library-functions-as-values-and-dynamic-parsefloat.js": {
+   "order": [
+    "<repo>/tests/corpus/8512-js-library-functions-as-values-and-dynamic-parsefloat.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
