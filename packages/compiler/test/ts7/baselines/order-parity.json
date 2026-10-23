@@ -11660,6 +11660,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8510-js-ctor-identity-after-prototype-create.js": {
+   "order": [
+    "<repo>/tests/corpus/8510-js-ctor-identity-after-prototype-create.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
