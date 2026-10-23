@@ -52,6 +52,7 @@ import {
 import { provenanceDeclSiblings, provenanceRequireRoots, provenanceSpecTwinsInProgram } from "./provenance-registry.js";
 import { clearResolveCaches, isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
+import { deadTopLevelStatements, type RequireThrowCtx } from "./require-throws.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
 import { isProvenanceSourceFile, isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { provenanceAliasRewrite, readSourceForRewrite } from "./provenance-rewrite.js";
@@ -3165,8 +3166,21 @@ function preflight7(load: LoadResult): {
         }
         if (firstRunnable < 0 && !purePrefixStmt7(s)) firstRunnable = i;
       });
+      // Statements after one that throws MODULE_NOT_FOUND every time it runs
+      // never execute (require-throws.ts), and the modules their requires
+      // would load are never loaded: the lowering does not lower them, so the
+      // graph does not follow them.
+      const throwCtx: RequireThrowCtx = {
+        program,
+        depOf: (from, spec) =>
+          isRelativeSpecifier(spec)
+            ? resolveImport7(program, from, spec)
+            : (npmStaticDepSf7(program, from, spec) ?? resolveProjectImportSf7(program, from, spec)),
+      };
+      const deadStmts = new Set<ts.Node>(deadTopLevelStatements(throwCtx, sf));
       for (let k = 0; k < stmts.length; k++) {
         const stmt = stmts[k]!;
+        if (deadStmts.has(stmt)) continue;
         for (const req of requiresOf7(stmt)) {
           const loc = { file: sf.fileName, start: req.node.getStart(sf), end: req.node.getEnd() };
           if (isNodeEsmFile7(sf)) {
@@ -3287,6 +3301,11 @@ function preflight7(load: LoadResult): {
       }
       if (!ts.isExternalModule(sf)) {
         for (const call of nestedBareRequiresOf7(sf)) {
+          if (deadStmts.size > 0) {
+            let top: ts.Node = call;
+            while (top.parent !== undefined && !ts.isSourceFile(top.parent)) top = top.parent;
+            if (deadStmts.has(top)) continue;
+          }
           const spec = requireSpecOf7(call)!;
           const loc = { file: sf.fileName, start: call.getStart(sf), end: call.getEnd() };
           if (!isRelativeSpecifier(spec)) {

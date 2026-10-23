@@ -18,7 +18,8 @@ import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordS
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall, requireFnValueDeclType } from "./lower-builtins.js";
 import { bindingNeverReassigned, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf, hasOwnPropertyAliasDecl } from "./lower-calls.js";
-import { dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
+import { deadBranchSkippable, statementAlwaysThrowsOnRequire } from "../require-throws.js";
+import { irAlwaysExits, dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { dynImportBindingDepOf } from "./lower-island.js";
 import { bufferSpeciesAliasDecl } from "./lower-containers.js";
@@ -3549,7 +3550,8 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
       const body = [...header, ...prelude, ...expandoBindStmts(L, sf, 0, 1)];
       let bindFrom = 1;
       let at = 0;
-      for (const stmt of stmts) {
+      for (let si = 0; si < stmts.length; si++) {
+        const stmt = stmts[si]!;
         // `<=`: a mixin instantiation's position IS its statement's start
         // — its statics run mid-statement in JS (the call), before
         // anything the statement's lowering emits. Hoisted class
@@ -3567,6 +3569,17 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
         const bindTo = stmt.getEnd() + 1;
         body.push(...expandoBindStmts(L, sf, bindFrom, bindTo));
         bindFrom = bindTo;
+        // The module's own init ends where Node's does: a statement that
+        // always throws or returns (pg's native client opens with
+        // `try { Native = require('pg-native') } catch (e) { throw e }`, and
+        // pg-native is not installed, so requiring that module is
+        // MODULE_NOT_FOUND at that statement) leaves the rest unreachable, and
+        // the rest is not lowered. Same rule and same hoisting guard as
+        // lowerStmts applies inside a block.
+        if (
+          si < stmts.length - 1 && (statementAlwaysThrowsOnRequire(L.requireThrowCtx, stmt) || irAlwaysExits(stmtIr)) &&
+          stmts.slice(si + 1).every(deadBranchSkippable)
+        ) break;
       }
       body.push(...expandoBindStmts(L, sf, bindFrom, Number.MAX_SAFE_INTEGER));
       // The bag of members `module.exports` gains only inside function bodies
