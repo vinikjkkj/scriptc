@@ -770,6 +770,20 @@ function nestedBareRequiresOf7(sf: ts.SourceFile): ts.CallExpression[] {
       requireSpecOf7(n.expression) !== null
     ) {
       out.push(n.expression);
+      return;
+    }
+    // A require below the top level that BINDS or is read inline
+    // (`const authSwitch = require('./auth_switch')` inside a method,
+    // `require('./x').f`): the same lazy load, so the same program edge -- the
+    // module joins the order (cycles still pass through the admission engine)
+    // and its %init runs at the require site.
+    if (ts.isCallExpression(n) && requireSpecOf7(n) !== null && !(ts.isExpressionStatement(n.parent))) {
+      for (let p: ts.Node | undefined = n.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
+        if (ts.isFunctionLike(p) || ts.isBlock(p) || ts.isClassDeclaration(p) || ts.isClassExpression(p)) {
+          out.push(n);
+          return;
+        }
+      }
     }
   });
   return out;

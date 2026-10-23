@@ -153,11 +153,105 @@ function umdUnwrap(fileName: string, text: string): string | null {
   return null;
 }
 
+/** INLINE require()s: `require('./x').f`, `const g = require('./x')(opts)`,
+ * `y = require('./x')` -- a require that is not itself the whole initializer of
+ * a declaration. Node evaluates it at that point; the lowering models a
+ * require as a BINDING whose module %init runs at the declaration. So a
+ * require evaluated UNCONDITIONALLY by its statement is bound immediately
+ * before that statement (`const __sc_rN = require('./x');`) and the call
+ * becomes the binding -- the same load, at the same statement, in the same
+ * order. A require under a conditional operator, a loop/branch body, or a
+ * nested function is left alone (and only RELATIVE specifiers: a builtin or package
+ * require keeps the member-read forms the lowering already models), as is a statement that cannot take a
+ * preceding declaration (an unbraced `if` body). */
+const INLINE_REQUIRE_PREFILTER = /\brequire\s*\(\s*['"][^'"]+['"]\s*\)/;
+
+function inlineRequireEdits(fileName: string, text: string): string | null {
+  if (!INLINE_REQUIRE_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const isRequireCall = (n: ts.Node): n is ts.CallExpression =>
+    ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "require" &&
+    n.arguments.length === 1 && ts.isStringLiteral(n.arguments[0]!) && n.arguments[0]!.text.startsWith(".");
+  const statementOf = (n: ts.Node): ts.Statement | null => {
+    for (let p: ts.Node | undefined = n; p !== undefined; p = p.parent) {
+      if (ts.isStatement(p) && (ts.isSourceFile(p.parent) || ts.isBlock(p.parent) || ts.isCaseClause(p.parent) || ts.isDefaultClause(p.parent))) return p;
+    }
+    return null;
+  };
+  let counter = 0;
+  const hoisted = new Map<ts.Statement, string[]>();
+  const visit = (n: ts.Node): void => {
+    if (isRequireCall(n)) {
+      const stmt = statementOf(n);
+      if (stmt !== null) {
+        // Skip the whole-initializer declaration form: the lowering already
+        // takes `const x = require(lit)` / `const {..} = require(lit)`, and the bare
+        // `require(lit);` statement (a load for effects binds nothing).
+        const parent = n.parent;
+        const wholeInit = (ts.isVariableDeclaration(parent) && parent.initializer === n) || ts.isExpressionStatement(parent);
+        // Walk the chain from the call up to the statement: any conditional
+        // operator, loop/branch statement or function boundary on it disqualifies.
+        let ok = !wholeInit;
+        for (let p: ts.Node = n.parent; ok && p !== stmt; p = p.parent) {
+          if (
+            ts.isConditionalExpression(p) || ts.isFunctionLike(p) || ts.isClassLike(p) ||
+            ts.isIterationStatement(p, false) || ts.isIfStatement(p) || ts.isSwitchStatement(p) ||
+            ts.isTryStatement(p) || (ts.isBinaryExpression(p) &&
+              (p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+               p.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+               p.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) && p.right !== undefined && n.getStart(sf) >= p.right.getStart(sf)) ||
+            ts.isOptionalChain(p)
+          ) {
+            ok = false;
+          }
+        }
+        // A statement that assigns an export (`module.exports = require('./x')`,
+        // `exports.y = require('./y')`) is the re-export form the export
+        // machinery models itself.
+        if (
+          ok && ts.isExpressionStatement(stmt) && ts.isBinaryExpression(stmt.expression) &&
+          stmt.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          /^(?:module\.)?exports\b/.test(stmt.expression.left.getText(sf))
+        ) {
+          ok = false;
+        }
+        if (ok && (ts.isExpressionStatement(stmt) || ts.isVariableStatement(stmt) || ts.isReturnStatement(stmt) || ts.isThrowStatement(stmt))) {
+          const name = `__sc_r${counter++}`;
+          const lits = hoisted.get(stmt) ?? [];
+          lits.push(`const ${name} = ${n.getText(sf)};`);
+          hoisted.set(stmt, lits);
+          edits.push({ start: n.getStart(sf), end: n.getEnd(), text: name });
+          return;
+        }
+      }
+    }
+    n.forEachChild(visit);
+  };
+  visit(sf);
+  if (edits.length === 0) return null;
+  for (const [stmt, decls] of hoisted) {
+    edits.push({ start: stmt.getStart(sf), end: stmt.getStart(sf), text: decls.join(" ") + " " });
+  }
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+  let out = "";
+  let at = 0;
+  for (const e of edits) {
+    out += text.slice(at, e.start) + e.text;
+    at = e.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
     const unwrapped = umdUnwrap(fileName, text);
     if (unwrapped !== null) return jsDesugar(fileName, unwrapped) ?? unwrapped;
+  }
+  {
+    const inlined = inlineRequireEdits(fileName, text);
+    if (inlined !== null) return jsDesugar(fileName, inlined) ?? inlined;
   }
   if (/\bprocess\.getBuiltinModule\(/.test(text)) {
     const out = text.replace(GET_BUILTIN_MODULE, "require($1$2$1)");
