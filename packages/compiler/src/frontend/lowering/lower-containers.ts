@@ -1619,17 +1619,7 @@ function lowerOptionalDefaultArg(
           kind: "seqExpr",
           stmts: [
             { kind: "varDecl", localId: h.id, init: { kind: "arrayGet", arr, index, type: elem, tryRef: true, loc }, loc },
-            { kind: "if", cond: ((): IrExpr => {
-              const present: IrExpr = { kind: "unary", op: "!", operand: { kind: "varRef", localId: h.id, type: BOOL, nullTest: true, loc }, type: BOOL, loc };
-              // A string element can be the ABSENT string (a split capture that
-              // did not participate): a non-NULL sentinel that reads as a miss.
-              if (elem.kind !== "string") return present;
-              return {
-                kind: "logical", op: "&&", left: present,
-                right: { kind: "unary", op: "!", type: BOOL, loc, operand: { kind: "libCall", fn: "str.isAbsent", args: [{ kind: "varRef", localId: h.id, type: elem, loc }], type: BOOL, loc } },
-                type: BOOL, loc,
-              };
-            })(), then: [], else_: [strandTrap(mmsg0, loc)], loc },
+            { kind: "if", cond: { kind: "unary", op: "!", operand: { kind: "varRef", localId: h.id, type: BOOL, nullTest: true, loc }, type: BOOL, loc }, then: [], else_: [strandTrap(mmsg0, loc)], loc },
           ],
           result: { kind: "varRef", localId: h.id, type: elem, loc }, type: elem, loc,
         };
