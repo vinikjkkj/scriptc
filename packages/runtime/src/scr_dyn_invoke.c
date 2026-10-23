@@ -1152,6 +1152,12 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
         return dyn_name_in(m, impl) || dyn_objproto_knows(m);
       }
     case SCR_DYN_HANDLE:
+      if (recv->v.handle.tag == SCR_DYNH_REGEX) {
+        /* RegExp.prototype: the three methods the ops answer (exec, test,
+         * toString) and compile, which they fence loudly by name. */
+        static const char *const rem[] = { "exec", "test", "toString", "compile", NULL };
+        return dyn_name_in(m, rem) || dyn_objproto_knows(m);
+      }
       if (recv->v.handle.tag == SCR_DYNH_TEXTCODEC) {
         /* TextEncoder: encode / encodeInto. TextDecoder: decode. Both
          * inherit Object.prototype's names; the read agrees with the ops

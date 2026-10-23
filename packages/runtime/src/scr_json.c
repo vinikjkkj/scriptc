@@ -122,7 +122,7 @@ static void scr_json_key_free(char *key, size_t key_len) {
  * pool, not the key pool: a pool is only self-consistent if every block
  * in it was sized by one rule.
  */
-const ScrDynObjExt scr_dyn_obj_ext_none = {NULL, NULL, NULL, NULL};
+const ScrDynObjExt scr_dyn_obj_ext_none = {NULL, NULL, NULL, NULL, NULL};
 
 #if SCR_JSON_KEY_POOL
 static ScrPool scr_dyn_ext_blocks;
@@ -146,6 +146,7 @@ ScrDynObjExt *scr_dyn_ext_w(ScrDyn *d) {
   e->cname = NULL;
   e->hidden = NULL;
   e->slots = NULL;
+  e->extras = NULL;
   d->v.obj.ext = e;
   return e;
 }
@@ -163,11 +164,43 @@ void scr_dyn_ext_drop(ScrDyn *d, bool release) {
     scr_dyn_release(e->proto);
     scr_dyn_release(e->hidden);
     scr_dyn_release(e->slots);
+    scr_dyn_release(e->extras);
   }
 #if SCR_JSON_KEY_POOL
   if (scr_pool_give(&scr_dyn_ext_blocks, e, sizeof *e)) return;
 #endif
   free(e);
+}
+
+/* ── named properties on a dyn ARRAY ───────────────────────────────────
+ * `exec`'s result is an array carrying `index`, `input` and `groups`, and
+ * `a.k = v` on any array creates an own property: both land in the
+ * array's ext->extras object (an OBJ dyn, created on first use). Indices
+ * and `length` never go there — they live in the item vector. The ext is
+ * the same block the OBJ arm keeps, at the same offset. */
+ScrDyn *scr_dyn_arr_extras(const ScrDyn *a) {
+  return a->kind == SCR_DYN_ARR ? scr_dyn_ext(a)->extras : NULL;
+}
+
+/* +1 on a hit; NULL when the array has no such named property. */
+ScrDyn *scr_dyn_arr_key_get(const ScrDyn *d, const ScrStr *k) {
+  ScrDyn *x = scr_dyn_arr_extras(d);
+  if (x == NULL) return NULL;
+  ScrDyn *v = scr_dyn_obj_get(x, k->data, k->len);
+  return v != NULL ? scr_dyn_retain(v) : NULL;
+}
+
+/* `"k" in arr` for a literal name that is neither `length` nor an index. */
+bool scr_dyn_arr_has_extra(const ScrDyn *a, const char *key, size_t key_len) {
+  const ScrDyn *x = scr_dyn_arr_extras(a);
+  return x != NULL && scr_dyn_obj_get(x, key, key_len) != NULL;
+}
+
+/* Creates or overwrites an own enumerable named property (value MOVED). */
+void scr_dyn_arr_extra_set(ScrDyn *a, const char *key, size_t key_len, ScrDyn *value) {
+  ScrDynObjExt *e = scr_dyn_ext_w(a);
+  if (e->extras == NULL) e->extras = scr_dyn_new_obj();
+  scr_dyn_obj_set(e->extras, key, key_len, value);
 }
 
 /* ── output buffer ─────────────────────────────────────────────────────
@@ -600,6 +633,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     d->module_ns = false;
     if (kind == SCR_DYN_ARR) {
       d->v.arr.len = 0; /* cap/items preserved from the node's last life */
+      d->v.arr.ext = NULL; /* release already dropped it; belt and braces */
     } else if (kind == SCR_DYN_OBJ) {
       d->v.obj.len = 0; /* cap/entries preserved */
       d->v.obj.ext = NULL; /* release already dropped it; belt and braces */
@@ -644,6 +678,8 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
   switch (d->kind) {
   case SCR_DYN_ARR:
     for (size_t i = 0; i < d->v.arr.len; i++) visit(d->v.arr.items[i], ctx);
+    /* the named-property table of an exec result / expando'd array */
+    visit(scr_dyn_ext(d)->extras, ctx);
     break;
   case SCR_DYN_OBJ:
     for (size_t i = 0; i < d->v.obj.len; i++) visit(d->v.obj.entries[i].value, ctx);
@@ -698,6 +734,10 @@ static void scr_dyn_gcfree(void *o) {
    * otherwise nothing for it to do. */
   if (d->static_copy && (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ))
     scr_dyn_origin_forget(d);
+  /* An array's named-property table: the collector has accounted for the
+   * extras object (the trace visits it), so the block frees without
+   * releasing it — the OBJ arm's own rule, below. */
+  if (d->kind == SCR_DYN_ARR) scr_dyn_ext_drop(d, false);
   switch (d->kind) {
   case SCR_DYN_STR:
     scr_str_release(d->v.str);
@@ -829,6 +869,8 @@ void scr_dyn_release(ScrDyn *d) {
      * the table is not even allocated then. */
     if (d->static_copy) scr_dyn_origin_forget(d);
     for (size_t i = 0; i < d->v.arr.len; i++) scr_dyn_release(d->v.arr.items[i]);
+    /* the named-property table, if any (an exec result's index/input/groups) */
+    scr_dyn_ext_drop(d, true);
     break;
   case SCR_DYN_OBJ:
     if (d->static_copy) scr_dyn_origin_forget(d);
@@ -6726,6 +6768,12 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
       scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
       return false;
     }
+    /* A named property (an exec result's `groups`, an expando) is removed
+     * like any own property; a name the array never had deletes nothing. */
+    {
+      ScrDyn *x = scr_dyn_arr_extras(recv);
+      if (x != NULL) scr_dyn_obj_unset(x, key->data, key->len);
+    }
     return true;
   }
   if (recv->kind == SCR_DYN_OBJINST) {
@@ -6862,7 +6910,9 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
     size_t idx = 0;
-    return dyn_canonical_index(key, &idx) && idx < v->v.arr.len;
+    if (dyn_canonical_index(key, &idx)) return idx < v->v.arr.len;
+    ScrDyn *x = scr_dyn_arr_extras(v);
+    return x != NULL && scr_dyn_obj_get(x, key->data, key->len) != NULL;
   }
   /* A function value carries own properties (assignment and
    * defineProperties both land in one table), so `k in f` answers from
@@ -7097,6 +7147,11 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       }
       return;
     }
+    /* Any other key is an ordinary own property (`m.index = 5`, `a.tag =
+     * "x"`), which arrays take like every object — it used to throw "Cannot
+     * create property" because a dyn array had no table to keep one in. */
+    scr_dyn_arr_extra_set(recv, key->data, key->len, scr_dyn_retain(value));
+    return;
   }
   if (recv->kind == SCR_DYN_HANDLE) {
     scr_dyn_handle_key_set(recv, key, value);
@@ -10664,6 +10719,19 @@ static ScrDyn *scr_sc_clone(const ScrDyn *v, const ScrScParent *up) {
         }
         scr_dyn_arr_push(out, c); /* ownership moves */
       }
+      /* StructuredSerialize of an array also carries its own enumerable
+       * NAMED properties (an exec result's index/input/groups): they clone
+       * with the same walk, after the elements. */
+      const ScrDyn *xs = scr_dyn_arr_extras(v);
+      for (size_t i = 0; xs != NULL && i < xs->v.obj.len; i++) {
+        const ScrDynEntry *e = &xs->v.obj.entries[i];
+        ScrDyn *c = scr_sc_clone(e->value, &self);
+        if (c == NULL) {
+          scr_dyn_release(out);
+          return NULL;
+        }
+        scr_dyn_arr_extra_set(out, e->key, e->key_len, c); /* ownership moves */
+      }
       return out;
     }
     ScrDyn *out = scr_dyn_new_obj();
@@ -10972,6 +11040,17 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
         scr_dyn_arr_push(out, pair);
       }
     }
+    /* …then an array's own NAMED properties, in creation order (an exec
+     * result lists index, input, groups after its elements). */
+    if (v->kind == SCR_DYN_ARR) {
+      const ScrDyn *x = scr_dyn_arr_extras(v);
+      if (x != NULL) {
+        for (size_t i = 0; i < x->v.obj.len; i++) {
+          const ScrDynEntry *e = &x->v.obj.entries[i];
+          scr_dyn_objwalk_push(out, mode, e->key, e->key_len, e->value);
+        }
+      }
+    }
     return out;
   }
   if (v->kind == SCR_DYN_STR) {
@@ -11264,7 +11343,9 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
     size_t idx = 0;
-    return dyn_canonical_index(key, &idx) && idx < v->v.arr.len;
+    if (dyn_canonical_index(key, &idx)) return idx < v->v.arr.len;
+    ScrDyn *x = scr_dyn_arr_extras(v);
+    return x != NULL && scr_dyn_obj_get(x, key->data, key->len) != NULL;
   }
   /* A STRING exotic object's own properties are its INDICES plus a
    * non-writable own `length` — measured, not assumed:

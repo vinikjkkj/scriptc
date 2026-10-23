@@ -9626,6 +9626,17 @@ export function moduleUsesFetchDispatch(mod: IrModule): boolean {
  * (cc.ts); regex-free programs keep the historical command line. A generic
  * JSON walk: `kind` discriminants live only on IR objects, so user string
  * VALUES can never false-positive. */
+/** RegExp.prototype.exec on a dynamic receiver is reachable only through the
+ * dyn dispatch unit (scr_dyn_invoke.c), so its body -- the array and object
+ * machinery an exec result is built from -- installs only into a program that
+ * links BOTH the regex unit and the dispatch unit (scr_regex_dyn_exec_install).
+ * A static regex program never pays for it: unconditionally, it measured
+ * +12.6 KB of .text in every regex program. A LINK/INSTALL GATE, not a fence:
+ * a wrong `false` is a loud internal-error throw at the first exec. */
+export function moduleUsesRegexExecDyn(mod: IrModule): boolean {
+  return moduleUsesRegex(mod) && moduleUsesDynInvoke(mod);
+}
+
 export function moduleUsesRegex(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {
