@@ -108,7 +108,7 @@ const NOT_ROUTED: ReadonlyMap<string, string> = new Map([
   // a regression, not a fix: it would take the dotted form away from the
   // better lowering. Same structure as toString and flatMap above.
   ...(["charAt", "charCodeAt", "endsWith", "padEnd", "padStart", "repeat",
-    "startsWith", "substring", "trim", "trimEnd", "trimStart"] as const).map(
+    "startsWith", "substr", "substring", "trim", "trimEnd", "trimStart"] as const).map(
     (n) => [n, "claimed by DYN_STRING_ONLY_METHODS before the dispatch set; the element spelling reaches the runtime arm"] as const,
   ),
 ]);
