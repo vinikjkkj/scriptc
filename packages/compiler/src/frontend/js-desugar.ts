@@ -1432,6 +1432,129 @@ function methodShadowEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* AN OPEN RECORD: AN OBJECT LITERAL THAT IS THE TARGET OF DYNAMIC-KEY WRITES.
+ * A literal is a record: its keys are the fields it was written with. A program
+ * that builds a map out of one
+ *
+ *     var obj = {};
+ *     obj[fieldNames[idx]] = field;                      // pgpass, helper.js
+ *
+ *     keys.reduce(function (parsed, property) {          // postgres-interval
+ *       parsed[property] = value; return parsed;
+ *     }, {})
+ *
+ * adds keys the literal never named, so the record has nowhere to put them. The
+ * object is the checked-dynamic object, which the language already models (a
+ * `/** @type {any} *\/` literal builds one), and the decision is made PER
+ * BINDING by scanning that binding's writes: a literal bound by `name = {…}`
+ * becomes dynamic when anything in the binding's scope writes (assigns,
+ * compound-assigns, increments or deletes) `name[<expression>]` with a key that
+ * is not a string or number literal; a literal passed as the initial value of
+ * `.reduce(callback, {…})` becomes dynamic when the inline callback writes
+ * `accumulator[<expression>]` the same way. Every other literal keeps its record
+ * shape. The text handed to the checker spells the cast, so every downstream
+ * type (the reduce result, the function that returns the accumulator) is
+ * `any` from the checker's own answer, not patched afterwards. */
+const OPEN_RECORD_PREFILTER = /\]\s*(?:=(?!=)|[-+*\/%|&^]=|\+\+|--|\|\|=|&&=|\?\?=|<<=|>>>?=)/;
+const ASSIGN_OPS = new Set<number>([
+  ts.SyntaxKind.EqualsToken, ts.SyntaxKind.PlusEqualsToken, ts.SyntaxKind.MinusEqualsToken,
+  ts.SyntaxKind.AsteriskEqualsToken, ts.SyntaxKind.SlashEqualsToken, ts.SyntaxKind.PercentEqualsToken,
+  ts.SyntaxKind.AmpersandEqualsToken, ts.SyntaxKind.BarEqualsToken, ts.SyntaxKind.CaretEqualsToken,
+  ts.SyntaxKind.LessThanLessThanEqualsToken, ts.SyntaxKind.GreaterThanGreaterThanEqualsToken,
+  ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken, ts.SyntaxKind.BarBarEqualsToken,
+  ts.SyntaxKind.AmpersandAmpersandEqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken,
+  ts.SyntaxKind.AsteriskAsteriskEqualsToken,
+]);
+
+function dynamicKeyAccessOf(e: ts.Expression, name: string): boolean {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isElementAccessExpression(e) || !ts.isIdentifier(e.expression) || e.expression.text !== name) return false;
+  const k = e.argumentExpression;
+  return !(ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k) || ts.isNumericLiteral(k));
+}
+
+function writesDynamicKey(region: ts.Node, name: string): boolean {
+  let found = false;
+  const walk = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isBinaryExpression(n) && ASSIGN_OPS.has(n.operatorToken.kind) && dynamicKeyAccessOf(n.left, name)) {
+      found = true;
+      return;
+    }
+    if (
+      (ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) &&
+      (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken) &&
+      dynamicKeyAccessOf(n.operand, name)
+    ) {
+      found = true;
+      return;
+    }
+    if (ts.isDeleteExpression(n) && dynamicKeyAccessOf(n.expression, name)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(region);
+  return found;
+}
+
+function openRecordEdits(fileName: string, text: string): string | null {
+  if (!text.includes("{}") && !/=\s*\{/.test(text)) return null;
+  if (!OPEN_RECORD_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const marked = new Set<ts.Node>();
+  const cast = (lit: ts.ObjectLiteralExpression): void => {
+    if (marked.has(lit)) return;
+    // Already typed by the author: `/** @type {...} */ ({...})`.
+    const lead = text.slice(Math.max(0, lit.getFullStart() - 80), lit.getStart(sf));
+    if (/@type\b/.test(lead)) return;
+    marked.add(lit);
+    edits.push({ start: lit.getStart(sf), end: lit.getStart(sf), text: "/** @type {any} */ (" });
+    edits.push({ start: lit.getEnd(), end: lit.getEnd(), text: ")" });
+  };
+  const scopeOf = (n: ts.Node): ts.Node => {
+    for (let p: ts.Node | undefined = n.parent; p !== undefined; p = p.parent) {
+      if (ts.isFunctionLike(p) || ts.isSourceFile(p)) return p;
+    }
+    return sf;
+  };
+  const visit = (n: ts.Node): void => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
+      let init: ts.Expression = n.initializer;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      if (ts.isObjectLiteralExpression(init) && n.initializer === init && writesDynamicKey(scopeOf(n), n.name.text)) cast(init);
+    }
+    if (
+      ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+      (n.expression.name.text === "reduce" || n.expression.name.text === "reduceRight") && n.arguments.length === 2
+    ) {
+      const cb = n.arguments[0]!;
+      const seed = n.arguments[1]!;
+      if (
+        (ts.isFunctionExpression(cb) || ts.isArrowFunction(cb)) && ts.isObjectLiteralExpression(seed) &&
+        cb.parameters.length > 0 && ts.isIdentifier(cb.parameters[0]!.name) && cb.body !== undefined &&
+        writesDynamicKey(cb.body, (cb.parameters[0]!.name as ts.Identifier).text)
+      ) {
+        cast(seed);
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    if (ed.start < at) continue;
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -1441,6 +1564,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const shadow = methodShadowEdits(fileName, text);
     if (shadow !== null) return jsDesugar(fileName, shadow) ?? shadow;
+  }
+  {
+    const open = openRecordEdits(fileName, text);
+    if (open !== null) return jsDesugar(fileName, open) ?? open;
   }
   {
     const chained = chainedPropertyAssignEdits(fileName, text);
