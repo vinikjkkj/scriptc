@@ -1061,7 +1061,7 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
  * that global. The declared-binding forms stay with collectJsonRequires. */
 export function collectNestedJsonRequires(L: Lowerer, parts: FileParts[]): void {
   for (const fp of parts) {
-    const visit = (n: ts.Node): void => {
+    const inspect = (n: ts.Node): void => {
       if (
         ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "require" &&
         n.arguments.length === 1 && ts.isStringLiteral(n.arguments[0]!) && n.arguments[0]!.text.endsWith(".json") &&
@@ -1093,9 +1093,19 @@ export function collectNestedJsonRequires(L: Lowerer, parts: FileParts[]): void 
           }
         }
       }
-      n.forEachChild(visit);
     };
-    visit(fp.sf);
+    // Iterative pre-order: a pathologically nested file must reach the
+    // preflight's own diagnostic, not overflow this walk's stack.
+    const stack: ts.Node[] = [fp.sf];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      inspect(n);
+      const kids: ts.Node[] = [];
+      n.forEachChild((c) => {
+        kids.push(c);
+      });
+      for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]!);
+    }
   }
 }
 
