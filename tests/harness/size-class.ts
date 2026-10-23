@@ -1849,7 +1849,9 @@ export const STATIC_CLASS_RECORDED = platform === "win32" ? 116_736 : null;
  * reproduced main's recorded 211,456 byte-exact on origin/main bb2a04bf, on the test's own regex program. The static
  * hello-world did NOT move (116,736 on main and on this branch): under gcsections the Symbol/Date dyn handles are not linked
  * into it. Cause of the regex program's unit: the always-linked dyn string/JSON paths now test for a Symbol handle. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 211_968 : null;
+/* RE-RECORDED 2026-10-23 (refusedops): 211,968 -> 212,992 (+1,024, two alignment units for the +496 bytes of .text
+ * recorded above). Same cross build and program; the static hello-world stayed at 116,736. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 212_992 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
@@ -2340,7 +2342,15 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
  * branch (regex program .text GREW by 688 bytes: 631430 against 630742; global
  * regex lastIndex state and string-pattern replace). Composed value is
  * INFERRED (630742 - 320 + 688); the land-batch9 CI run measures it. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 131_622 : null;
+/* RE-RECORDED 2026-10-23 (refusedops): 131,622 -> 132,118 (+496). Measured with the zig windows-gnu cross build
+ * (SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu) on the composed tree over the test's own regex program; the same
+ * build reproduced the recorded static 72,694 byte-exact. What the bytes bought, all in always-linked units the regex
+ * program carries: the dyn dispatch arms for the Proxy kind (typeof, truthy, call, construct, key get/set/has/delete,
+ * the JSON form and the own-key walk reach the gated Proxy table through one pointer), the array `length` write in the
+ * dyn key setter, the errno/syscall/path/dest chain in the error-to-dyn conversion, and the Buffer rendering of the
+ * inspect-lite form. The Proxy operations themselves, the fs callback forms and the Buffer/loose-equality/errno reads
+ * sit in gated units and are not in this figure. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 132_118 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
