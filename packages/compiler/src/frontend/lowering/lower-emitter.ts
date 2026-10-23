@@ -38,7 +38,7 @@
  * super.emit as the prototype chain). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { dynFallbackType, newFnCtx } from "./lowerer.js";
+import { dynFallbackType, dynUndefinedExpr, newFnCtx } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { lowerDynObjectLiteral } from "./lower-exprs.js";
@@ -181,8 +181,20 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
     // is answered by the emit-payload shape instead.
     return null;
   };
+  /** An emit's position against the recorded one: exact unification, and on
+   * an event with an unannotated listener (dyn parameters take anything) a
+   * disagreement widens the position to dyn instead of conflicting. */
+  const unifyEmitPos = (sig: EventSig, recorded: IrType, incoming: IrType): IrType | null =>
+    unifyPos(recorded, incoming, "recorded") ?? (sig.dynListener ? DYN : null);
   const mergeEmit = (name: string, rawArgs: (IrType | null)[]): void => {
-    let args = rawArgs;
+    // An `undefined` argument (`emit('fields', void 0)`) maps to void. On an
+    // event with an unannotated (checked-dynamic) listener that position
+    // is a dyn one: every other site of the event feeds it values of other
+    // types, and the listener's parameter is dyn, so the undefined rides as
+    // the dyn undefined. A position nothing dyn-flavored listens to keeps
+    // its exact type (a typed `undefined` listener still unifies by equality).
+    const dynListened = table.get(name)?.dynListener === true;
+    let args = dynListened ? rawArgs.map((a) => (a !== null && a.kind === "void" ? DYN : a)) : rawArgs;
     if (args.some((a) => a === null)) {
       // An UNMAPPED argument. `this.emit('x', { node, frame })` re-emitting
       // an UNTYPED emitter's callback parameters is a record whose FIELDS
@@ -204,7 +216,10 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       // dynListener and constrains nothing, which is how the tuple came to
       // be empty while the bucket is full.
       const recorded = table.get(name);
-      if (recorded !== undefined && (recorded.tuple.length > 0 || recorded.fromEmit)) return;
+      // An event with a checked-dynamic listener (unannotated parameters)
+      // already takes anything in every position, so a dyn argument can
+      // only widen it harmlessly.
+      if (recorded !== undefined && (recorded.tuple.length > 0 || recorded.fromEmit) && !recorded.dynListener) return;
       args = args.map((a) => a ?? DYN);
     }
     const tuple = [...(args as IrType[])];
@@ -219,7 +234,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       for (let i = 0; i < sig.tuple.length; i++) {
         // The recorded type is a LISTENER's here (nothing has emitted yet),
         // so it is the side allowed to be the union.
-        const u = unifyPos(sig.tuple[i]!, tuple[i]!, "recorded");
+        const u = unifyEmitPos(sig, sig.tuple[i]!, tuple[i]!);
         if (u === null) {
           sig.conflict = `position ${i} is '${fmt(sig.tuple[i]!)}' at one site and '${fmt(tuple[i]!)}' at another`;
           return;
@@ -231,13 +246,38 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       return;
     }
     if (sig.tuple.length !== tuple.length) {
-      sig.conflict = `emit sites supply ${sig.tuple.length} and ${tuple.length} arguments`;
+      // Emit sites of different arity (`emit('result', rs)` and `emit('result',
+      // row, index)`): Node hands each listener what that call passed and a
+      // missing trailing argument reads undefined. With an unannotated
+      // listener (dyn parameters, which take anything including undefined)
+      // the event's tuple is the LONGEST one with the positions only some
+      // sites supply widened to dyn; the shorter sites pad with the dyn
+      // undefined. Typed listeners keep the strict rule.
+      if (!sig.dynListener) {
+        sig.conflict = `emit sites supply ${sig.tuple.length} and ${tuple.length} arguments`;
+        return;
+      }
+      const shared = Math.min(sig.tuple.length, tuple.length);
+      const merged: IrType[] = [];
+      for (let i = 0; i < Math.max(sig.tuple.length, tuple.length); i++) {
+        if (i >= shared) {
+          merged.push(DYN);
+          continue;
+        }
+        const u = unifyEmitPos(sig, sig.tuple[i]!, tuple[i]!);
+        if (u === null) {
+          sig.conflict = `position ${i} is '${fmt(sig.tuple[i]!)}' at one site and '${fmt(tuple[i]!)}' at another`;
+          return;
+        }
+        merged.push(u);
+      }
+      sig.tuple = merged;
       return;
     }
     for (let i = 0; i < tuple.length; i++) {
       // A position already widened to a listener's union absorbs a later
       // emit of any of its arms; two emits alone keep the strict rule.
-      const u = unifyPos(sig.tuple[i]!, tuple[i]!, "recorded");
+      const u = unifyEmitPos(sig, sig.tuple[i]!, tuple[i]!);
       if (u === null) {
         sig.conflict = `position ${i} is '${fmt(sig.tuple[i]!)}' at one site and '${fmt(tuple[i]!)}' at another`;
         return;
@@ -1115,7 +1155,9 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, name, call);
     const sig = table.get(name);
-    if (args.length - 1 !== tuple.length) {
+    const padFromDyn = args.length - 1 < tuple.length && sig !== undefined && sig.dynListener &&
+      tuple.slice(args.length - 1).every((t) => t.kind === "dyn");
+    if (args.length - 1 !== tuple.length && !padFromDyn) {
       // An event nothing listens to: the call has no observable effect,
       // so the arity it disagrees on cannot matter.
       const noop = listenerlessEmitNoop(L, info, name, call, access, superRecv, loc);
@@ -1205,6 +1247,8 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       }
       return L.lowerExprExpecting(a, tuple[i]);
     });
+    // The trailing positions this site does not supply read undefined.
+    while (payload.length < tuple.length) payload.push(dynUndefinedExpr(loc));
     return emitDispatchExpr(L, info, name, tuple, receiver, payload, superRecv?.cls, loc);
   }
 
