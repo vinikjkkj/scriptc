@@ -17,78 +17,12 @@ enum {
   SCR_DSET_UTC_MONTH, SCR_DSET_UTC_YEAR, SCR_DSET_TIME, SCR_DSET_YEAR2
 };
 
-/* toLocale{,Date,Time}String(locales, options) on a dynamic receiver: the dynamic values become the locales text and
- * the tagged option bag the static lowering builds ('s' string, 'n' number, 'b' boolean, 'z' null; undefined is
- * absent), and scr_date_format_opts (scr_date_intl.c) does the rest. A number, string or boolean options argument
- * has no own keys (ToObject). */
-static void date_kv_push(ScrArr *kv, const char *key, char tag, const char *text, size_t n) {
-  scr_arr_push_ref(kv, scr_str_new(key, strlen(key)));
-  char *b = (char *)malloc(n + 2);
-  b[0] = tag;
-  memcpy(b + 1, text, n);
-  scr_arr_push_ref(kv, scr_str_new(b, n + 1));
-  free(b);
-}
-static ScrStr *scr_date_dyn_locales_text(const ScrDyn *l) {
-  if (l == NULL || l->kind == SCR_DYN_UNDEF) return scr_str_new("", 0);
-  if (l->kind == SCR_DYN_STR) return scr_str_retain(l->v.str);
-  if (l->kind == SCR_DYN_ARR) {
-    size_t cap = 64, len = 0;
-    char *b = (char *)malloc(cap);
-    for (size_t i = 0; i < l->v.arr.len; i++) {
-      const ScrDyn *e = l->v.arr.items[i];
-      if (e->kind != SCR_DYN_STR) { free(b); scr_throw_error_msg(SCR_ERR_TYPE, "Language ID should be string or object.", 38); return NULL; }
-      while (len + e->v.str->len + 2 > cap) { cap *= 2; b = (char *)realloc(b, cap); }
-      if (i) b[len++] = ',';
-      memcpy(b + len, e->v.str->data, e->v.str->len);
-      len += e->v.str->len;
-    }
-    ScrStr *r = scr_str_new(b, len);
-    free(b);
-    return r;
-  }
-  scr_throw_error_msg(SCR_ERR_TYPE, "Incorrect locale information provided", 37);
-  return NULL;
-}
+/* toLocale{,Date,Time}String(locales, options) on a dynamic receiver: the locales and options are read from the
+ * dynamic values by scr_date_locales_text / scr_date_format_opts_dyn (scr_date_intl.c). */
 static ScrDyn *scr_date_dynh_locale_format(double ms, int kind, ScrDyn *const *args, size_t argc) {
-  static const char *const keys[] = {"localeMatcher", "calendar", "numberingSystem", "hour12", "hourCycle",
-                                     "timeZone", "weekday", "era", "year", "month", "day", "dayPeriod", "hour",
-                                     "minute", "second", "fractionalSecondDigits", "timeZoneName",
-                                     "formatMatcher", "dateStyle", "timeStyle", NULL};
-  ScrStr *locale = scr_date_dyn_locales_text(argc > 0 ? args[0] : NULL);
+  ScrStr *locale = scr_date_locales_text(argc > 0 ? args[0] : NULL);
   if (locale == NULL) return NULL;
-  ScrArr *kv = scr_arr_new(SCR_ELEM_STR, 16);
-  const ScrDyn *opts = argc > 1 ? args[1] : NULL;
-  if (opts != NULL && opts->kind == SCR_DYN_NULL) {
-    scr_arr_release(kv);
-    scr_str_release(locale);
-    static const char *const names[] = {"Date.prototype.toLocaleString", "Date.prototype.toLocaleDateString", "Date.prototype.toLocaleTimeString"};
-    char msg[160];
-    int n = snprintf(msg, sizeof msg, "%s called on null or undefined", names[kind - 4]);
-    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
-    return NULL;
-  }
-  if (opts != NULL && opts->kind == SCR_DYN_OBJ) {
-    for (size_t i = 0; keys[i]; i++) {
-      const ScrDyn *v = scr_dyn_obj_get(opts, keys[i], strlen(keys[i]));
-      if (v == NULL || v->kind == SCR_DYN_UNDEF) continue;
-      char num[40];
-      switch (v->kind) {
-        case SCR_DYN_STR: date_kv_push(kv, keys[i], 's', v->v.str->data, v->v.str->len); break;
-        case SCR_DYN_NUM: { size_t n = scr_f64_to_str(v->v.num, num); date_kv_push(kv, keys[i], 'n', num, n); break; }
-        case SCR_DYN_BOOL: date_kv_push(kv, keys[i], 'b', v->v.b ? "true" : "false", v->v.b ? 4 : 5); break;
-        case SCR_DYN_NULL: date_kv_push(kv, keys[i], 'z', "", 0); break;
-        default: {
-          ScrStr *t = scr_dyn_string_coerce_js(v);
-          if (t == NULL) { scr_arr_release(kv); scr_str_release(locale); return NULL; }
-          date_kv_push(kv, keys[i], 's', t->data, t->len);
-          scr_str_release(t);
-        }
-      }
-    }
-  }
-  ScrStr *r = scr_date_format_opts(ms, (double)kind, locale, kv);
-  scr_arr_release(kv);
+  ScrStr *r = scr_date_format_opts_dyn(ms, (double)kind, locale, argc > 1 ? args[1] : NULL);
   scr_str_release(locale);
   if (r == NULL) return NULL;
   ScrDyn *out = scr_dyn_new_str(r);
