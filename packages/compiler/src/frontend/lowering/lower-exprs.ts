@@ -22696,7 +22696,12 @@ function arrayLengthCompoundParts(
   // The scalar-element growth wall, in the compound spelling.
   const elem = arrT.elem;
   const growable = elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem);
-  const provenShrink = op === "-" && (rhsNode === null || positiveNumericLiteral(rhsNode));
+  // `a.length >>>= k` (k a positive literal) halves: floor(n / 2^k) never
+  // exceeds n for a length, so it cannot grow either (the ring buffer's
+  // `this._list.length >>>= 1`).
+  const provenShrink =
+    (op === "-" && (rhsNode === null || positiveNumericLiteral(rhsNode))) ||
+    (op === ">>>" && rhsNode !== null && positiveNumericLiteral(rhsNode));
   if (!growable && !provenShrink) {
     L.noLowering(
       `compound '.length' assignment on '${L.fmt(elem)}'-element arrays`,
