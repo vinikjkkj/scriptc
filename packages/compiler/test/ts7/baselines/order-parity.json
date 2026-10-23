@@ -11798,6 +11798,44 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8540-require-of-a-module-that-always-throws-is-module-not-found/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8540-require-of-a-module-that-always-throws-is-module-not-found/client.js",
+    "<repo>/tests/corpus/8540-require-of-a-module-that-always-throws-is-module-not-found/native.js",
+    "<repo>/tests/corpus/8540-require-of-a-module-that-always-throws-is-module-not-found/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8541-builtin-module-functions-as-values-in-a-javascript-source.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8541-builtin-module-functions-as-values-in-a-javascript-source.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8542-builtin-function-held-in-an-untyped-variable.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8542-builtin-function-held-in-an-untyped-variable.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8543-decode-uri-keeps-reserved-escapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/8543-decode-uri-keeps-reserved-escapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8544-object-literal-written-through-dynamic-keys-is-an-open-object.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8544-object-literal-written-through-dynamic-keys-is-an-open-object.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8545-own-property-shadowing-a-method-is-listed-and-printed.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8545-own-property-shadowing-a-method-is-listed-and-printed.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js": {
    "order": [
     "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js"
