@@ -1,3 +1,4 @@
+// @transform-types
 // A shared-field WRITE over a union of classes (pg-protocol's
 // NoticeMessage | DatabaseError) and over a union of records.
 class Notice {

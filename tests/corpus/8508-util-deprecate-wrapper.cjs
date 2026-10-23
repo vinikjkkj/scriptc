@@ -1,10 +1,11 @@
-// @exit: 0
+// @exit: 3
 // util.deprecate(fn, msg, code?) as pg uses it (client.js, utils.js):
 // the wrapper keeps fn's signature, forwards arguments and the result, and
 // warns ONCE on its first call (Node: process.emitWarning(msg,
 // 'DeprecationWarning', code)); a code already warned under by another
-// wrapper stays silent. The default report carries the pid, so the @exit
-// directive keeps stderr out of the comparison; the warning event fires
+// wrapper stays silent. The default report carries the pid, and the harness compares
+// stderr only for exit-0 programs, so the program ends with exit code 3 and
+// the @exit directive keeps stderr out of the comparison; the warning event fires
 // a tick later in Node, so the transcript reads the listener's log after
 // a timer.
 'use strict';
@@ -34,4 +35,5 @@ console.log(greet2('c'), calls);
 setTimeout(() => {
   for (const s of seen) console.log(s);
   console.log('warnings', seen.length);
+  process.exitCode = 3;
 }, 20);

@@ -1,3 +1,4 @@
+// @transform-types
 // Explicit `any[]` and `any` parameters in function types in program source
 // (pg-protocol: DataRowMessage.fields, serializer valueMapper).
 class Row {

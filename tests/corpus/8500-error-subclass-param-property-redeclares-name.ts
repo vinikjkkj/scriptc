@@ -1,3 +1,4 @@
+// @transform-types
 // A parameter property that redeclares an inherited Error slot at its own
 // type: `constructor(message, public readonly name: MessageName)`.
 type MessageName = "error" | "notice" | "fatal";
