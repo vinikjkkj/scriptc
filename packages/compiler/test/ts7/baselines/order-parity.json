@@ -11750,6 +11750,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8529-switch-on-a-union-valued-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/8529-switch-on-a-union-valued-call.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js": {
    "order": [
     "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js"
