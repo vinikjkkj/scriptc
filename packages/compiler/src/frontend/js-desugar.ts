@@ -425,6 +425,38 @@ function methodShadowEdits(fileName: string, text: string): string | null {
     }
     const shadowed = new Map<string, string>();
     const stmts: Array<{ st: ts.ExpressionStatement; m: string }> = [];
+    // WHERE THE OWN PROPERTY SITS among the instance's own keys. Node lists own
+    // keys in the order they were created, so `this.parseRow = ...` written
+    // between `this.rowAsArray = ...` and `this._prebuilt... = ...` lists
+    // `parseRow` between those two. The flag's name records the field assigned
+    // just before the write (the last constructor assignment, for a write made
+    // in a method), and the member tables and inspect read it back.
+    const ctorOf = cls.members.find((c): c is ts.ConstructorDeclaration => ts.isConstructorDeclaration(c) && c.body !== undefined);
+    const thisAssignTarget = (n: ts.Statement): string | null => {
+      if (!ts.isExpressionStatement(n) || !ts.isBinaryExpression(n.expression)) return null;
+      const { left, operatorToken } = n.expression;
+      if (operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
+      if (!ts.isPropertyAccessExpression(left) || left.expression.kind !== ts.SyntaxKind.ThisKeyword || !ts.isIdentifier(left.name)) return null;
+      return left.name.text;
+    };
+    const afterOf = (st: ts.Statement): string => {
+      const body = ctorOf?.body;
+      if (body === undefined) return "";
+      let from = body.statements.length;
+      for (let i = 0; i < body.statements.length; i++) {
+        const top = body.statements[i]!;
+        if (st.getStart() >= top.getStart() && st.getEnd() <= top.getEnd()) {
+          from = i;
+          break;
+        }
+      }
+      for (let i = from - 1; i >= 0; i--) {
+        const t = thisAssignTarget(body.statements[i]!);
+        if (t !== null) return t;
+      }
+      return "";
+    };
+    const flagNames = new Map<string, string>();
     const walk = (n: ts.Node): void => {
       if (ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isClassLike(n)) return;
       if (ts.isExpressionStatement(n) && ts.isBinaryExpression(n.expression) && n.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
@@ -440,8 +472,12 @@ function methodShadowEdits(fileName: string, text: string): string | null {
           const mp = mm && plainParams(mm);
           const kp = km && plainParams(km);
           if (mm && km && m !== k && mp && kp && kp.length <= mp.length && (shadowed.get(m) ?? k) === k) {
-            shadowed.set(m, k);
-            stmts.push({ st: n, m });
+            const after = afterOf(n);
+            if (!/\$/.test(m + k + after)) {
+              shadowed.set(m, k);
+              stmts.push({ st: n, m });
+              if (!flagNames.has(m)) flagNames.set(m, `#__sc_own$${m}$${k}$${after}`);
+            }
           }
         }
       }
@@ -454,14 +490,14 @@ function methodShadowEdits(fileName: string, text: string): string | null {
     for (const k of shadowed.values()) if (shadowed.has(k)) return;
     const heritageEnd = cls.heritageClauses?.length ? cls.heritageClauses[cls.heritageClauses.length - 1]!.getEnd() : -1;
     const bodyOpen = text.indexOf("{", Math.max(heritageEnd, cls.name !== undefined ? cls.name.getEnd() : cls.getStart(sf)));
-    const fields = [...shadowed.keys()].map((m) => `#__sc_own_${m} = false;`).join(" ");
+    const fields = [...shadowed.keys()].map((m) => `${flagNames.get(m)!} = false;`).join(" ");
     edits.push({ start: bodyOpen + 1, end: bodyOpen + 1, text: ` ${fields} ` });
-    for (const { st, m } of stmts) edits.push({ start: st.getStart(sf), end: st.getEnd(), text: `this.#__sc_own_${m} = true;` });
+    for (const { st, m } of stmts) edits.push({ start: st.getStart(sf), end: st.getEnd(), text: `this.${flagNames.get(m)!} = true;` });
     for (const [m, k] of shadowed) {
       const mm = methods.get(m)!;
       const args = plainParams(mm)!.slice(0, plainParams(methods.get(k)!)!.length).join(", ");
       const at = mm.body!.getStart(sf) + 1;
-      edits.push({ start: at, end: at, text: ` if (this.#__sc_own_${m}) { return this.${k}(${args}); } ` });
+      edits.push({ start: at, end: at, text: ` if (this.${flagNames.get(m)!}) { return this.${k}(${args}); } ` });
     }
   };
   const visit = (n: ts.Node): void => {

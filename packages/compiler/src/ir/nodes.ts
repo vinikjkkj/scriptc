@@ -1553,6 +1553,26 @@ export interface IrLibIdentity {
  * silently disabling the other. */
 export const CLASS_PROPS_FIELD = "%props";
 
+/** A class whose instances may carry an OWN property that shadows one of its
+ * methods with another method of the same class (`this.parseRow =
+ * this._parseRowAsArray`) keeps the choice in a private boolean named
+ * `#__sc_own$<method>$<target>$<after>` (js-desugar.ts writes it): the
+ * property exists on the instance exactly while the flag is set, its value is
+ * the function `<target>`, and it sits in the own-key order right after the
+ * field `<after>` (empty: first). The member tables and util.inspect read the
+ * name back with this parser, so the three layers cannot disagree about the
+ * spelling. Null for every other field name. */
+export interface OwnShadow {
+  readonly method: string;
+  readonly target: string;
+  readonly after: string;
+}
+export function parseOwnShadowField(name: string): OwnShadow | null {
+  if (!name.startsWith("#__sc_own$")) return null;
+  const parts = name.slice("#__sc_own$".length).split("$");
+  if (parts.length !== 3 || parts[0] === "" || parts[1] === "") return null;
+  return { method: parts[0]!, target: parts[1]!, after: parts[2]! };
+}
 export interface IrClassDef {
   name: string;
   /** The JS-observable `.name` of the class (the runtime class object's
