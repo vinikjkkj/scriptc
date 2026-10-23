@@ -2560,7 +2560,14 @@ static int scr_uri_hex_byte(const char *p, size_t rem) {
  * querystring unit's unescape needs exactly the try/catch shape Node's
  * qsUnescape wraps around decodeURIComponent (scr_qs.c), and the throwing
  * entry point below stays byte-identical by rethrowing over NULL. */
-ScrStr *scr_str_decode_uri_component_try(ScrStr *s) {
+static ScrStr *scr_uri_decode_core(ScrStr *s, int keep_reserved);
+
+ScrStr *scr_str_decode_uri_component_try(ScrStr *s) { return scr_uri_decode_core(s, 0); }
+
+/* decodeURI: the same decoder, except that an escape of a character in the
+ * reserved set `;/?:@&=+$,#` is left AS WRITTEN (the three bytes, case
+ * included) instead of decoded. */
+static ScrStr *scr_uri_decode_core(ScrStr *s, int keep_reserved) {
   /* Decoding only ever shrinks (%XX → 1 byte), so len is a safe cap. */
   ScrStr *out = scr_str_alloc_raw(0, s->len);
   size_t w = 0;
@@ -2575,6 +2582,11 @@ ScrStr *scr_str_decode_uri_component_try(ScrStr *s) {
     if (b0 < 0) goto malformed;
     i += 3;
     if (b0 < 0x80) {
+      if (keep_reserved && b0 != 0 && strchr(";/?:@&=+$,#", b0) != NULL) {
+        memcpy(out->data + w, p + i - 3, 3);
+        w += 3;
+        continue;
+      }
       /* The empty component reserved set: every ASCII escape decodes. */
       out->data[w++] = (char)b0;
       continue;
@@ -2611,6 +2623,15 @@ malformed:
 
 ScrStr *scr_str_decode_uri_component(ScrStr *s) {
   ScrStr *out = scr_str_decode_uri_component_try(s);
+  if (!out) {
+    scr_uri_malformed();
+    return NULL;
+  }
+  return out;
+}
+
+ScrStr *scr_str_decode_uri(ScrStr *s) {
+  ScrStr *out = scr_uri_decode_core(s, 1);
   if (!out) {
     scr_uri_malformed();
     return NULL;

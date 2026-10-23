@@ -1157,6 +1157,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dc.chanHasSubscribers": "scr_dc_chan_has_subscribers",
   "dc.chanName": "scr_dc_chan_name",
   "str.decodeUriComponent": "scr_str_decode_uri_component",
+  "str.decodeUri": "scr_str_decode_uri",
   // TracingChannel (scr_dc.c): registry handles are plain doubles; the
   // subscribe/trace forms ride the may-throw pending check, and
   // tcTracePromise marks the loop live (USES_TIMERS_LIB_FNS — the

@@ -205,6 +205,11 @@ const BUILTIN_FN_VALUES: Readonly<Record<string, BuiltinFnValue | undefined>> = 
     ret: STRING,
     body: (a, loc) => libCall("str.decodeUriComponent", [a[0]!], STRING, loc),
   },
+  decodeURI: {
+    params: [["encodedURI", STRING]],
+    ret: STRING,
+    body: (a, loc) => libCall("str.decodeUri", [a[0]!], STRING, loc),
+  },
 };
 
 /** OWN-property read of one of the tables above. The tables are plain
