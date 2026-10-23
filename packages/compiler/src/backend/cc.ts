@@ -532,8 +532,9 @@ export interface CcOptions {
   /** The program reads local time (moduleUsesDateTz): compiles the zone database
    * scr_date_tz.c + scr_date_tzdb.c; without it scr_date_tz_stub.c stands in. */
   dateTz?: boolean;
-  /** The program formats a Date with a locale/options bag (moduleUsesDateIntl): compiles scr_date_intl.c, the
-   * generated en-US tables scr_date_intl_en.c and the zone-name sequences scr_date_tznames.c. */
+  /** The program formats a Date with a locale/options bag (moduleUsesDateIntl): compiles scr_date_intl.c and the
+   * date formatter over the ICU locale data (scr_dtf.c, scr_dtpg.c, scr_dtfmt.c, scr_cal.c, scr_dtz.c, scr_zone.c,
+   * scr_rbnf.c, scr_dtloc.c), with the data unit icuDate asks for. */
   dateIntl?: boolean;
   /** What the program asks of the ICU locale data (moduleIcuUse, spelt as flags so they ride the build-cache
    * metadata): icuNf links the number formatter (scr_nf.c, scr_locale.c, scr_ures.c) with a generated data unit
@@ -543,6 +544,8 @@ export interface CcOptions {
   icuCurr?: boolean;
   icuUnit?: boolean;
   icuZone?: boolean;
+  /** the date formatter (scr_dtf.c over the ICU data: calendars, patterns, zone names) */
+  icuDate?: boolean;
   icuAll?: boolean;
   /** A Date and an `unknown` meet (moduleUsesDateDyn): compiles scr_date_dyn.c. */
   dateDyn?: boolean;
@@ -2194,10 +2197,10 @@ async function reclaimDeadObjectKeys(
  * unchanged programs skip clang via the binary cache, and misses link the
  * program's own TU against cached per-flavor runtime objects. */
 function icuUseFromOptions(opts: CcOptions): IcuUse | null {
-  if (!opts.icuNf && !opts.icuZone) return null;
+  if (!opts.icuNf && !opts.icuDate) return null;
   const langs: string[] = [];
   for (const k of Object.keys(opts)) if (k.startsWith("icuLang.") && (opts as unknown as Record<string, unknown>)[k] === true) langs.push(k.slice(8));
-  return { nf: opts.icuNf === true, curr: opts.icuCurr === true, unit: opts.icuUnit === true, zone: opts.icuZone === true, langs: opts.icuAll === true ? null : langs.sort() };
+  return { nf: opts.icuNf === true, curr: opts.icuCurr === true, unit: opts.icuUnit === true, zone: opts.icuZone === true, date: opts.icuDate === true, langs: opts.icuAll === true ? null : langs.sort() };
 }
 
 export async function compileC(opts: CcOptions): Promise<void> {
@@ -2493,7 +2496,17 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(dateDynUnit ? [rt(join(rtDir, "scr_date_dyn.c"))] : []),
     ...(dateFmtUnit ? [rt(join(rtDir, "scr_date_fmt.c")), rt(join(rtDir, "scr_date_zones.c"))] : []),
     ...(dateIntlUnit
-      ? [rt(join(rtDir, "scr_date_intl.c")), rt(join(rtDir, "scr_date_intl_en.c")), rt(join(rtDir, "scr_date_tznames.c"))]
+      ? [
+          rt(join(rtDir, "scr_date_intl.c")),
+          rt(join(rtDir, "scr_dtf.c")),
+          rt(join(rtDir, "scr_dtfmt.c")),
+          rt(join(rtDir, "scr_dtpg.c")),
+          rt(join(rtDir, "scr_dtloc.c")),
+          rt(join(rtDir, "scr_cal.c")),
+          rt(join(rtDir, "scr_dtz.c")),
+          rt(join(rtDir, "scr_zone.c")),
+          rt(join(rtDir, "scr_rbnf.c")),
+        ]
       : []),
     ...(icuFile !== undefined
       ? [

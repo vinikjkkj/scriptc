@@ -1516,7 +1516,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             BigInt: "arbitrary-precision integers have no static representation — f64 is the one number type (Number.MAX_SAFE_INTEGER bounds exact integers)",
             Proxy: "property-access metaprogramming has no static lowering (every property read must resolve at compile time)",
             Reflect: "reflective property access has no static lowering — read and call members directly",
-            Intl: "locale- and ICU-backed behavior lives outside the static runtime (the localeCompare stance: code-unit order, no collation/locale data) — what lowers: the composed new Intl.NumberFormat(\"en-US\").format(x) and x.toLocaleString(\"en-US\") with default options",
+            Intl: "locale- and ICU-backed behavior lives outside the static runtime (the localeCompare stance: code-unit order, no collation/locale data) — what lowers: the composed new Intl.NumberFormat(locales, options).format(x), new Intl.DateTimeFormat(locales, options).format(x), x.toLocaleString(locales, options) and Date toLocale*String(locales, options)",
             SharedArrayBuffer: "no shared-memory threads exist in a compiled program — Uint8Array is the byte storage",
             ArrayBuffer: "no free-standing ArrayBuffer value exists — typed arrays own their storage (new Uint8Array(n) allocates; new Uint8Array(new ArrayBuffer(n)) erases the buffer into the view)",
             WeakRef: "deref()-after-collect exposes GC timing — genuinely dynamic; hold a strong reference instead",

@@ -7958,6 +7958,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "date.formatOpts":
             // toLocale*String(locale, options), en-US; +1, or a catchable Range/TypeError.
             return finish(`scr_date_format_opts(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "date.formatOptsDyn":
+            // the same with the options read from a checked-dynamic value; +1, or a catchable Range/TypeError.
+            return finish(`scr_date_format_opts_dyn(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "date.toString":
             // Date.prototype.toString; +1 string, or a catchable Error for a
             // zone whose long name needs ICU data (may-throw seed set).

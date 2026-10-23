@@ -25,17 +25,33 @@ const lit = (value: string, loc: SrcLoc): IrExpr => ({ kind: "strLit", value, ty
 const cat = (a: IrExpr, b: IrExpr, loc: SrcLoc): IrExpr => ({ kind: "strConcat", left: a, right: b, type: STRING, loc });
 const isUndefinedIdent = (n: ts.Expression): boolean => ts.isIdentifier(n) && n.text === "undefined";
 
-/** The locales argument as one string: "" for the default locale, tags joined by "," for several. */
+/** The locales argument as one string: "" for the default locale (absent, undefined or an empty list), tags joined by
+ * "," for several. An EMPTY tag is not the default locale (V8 throws RangeError for it), so it travels as "-", which
+ * is not a structurally valid tag. */
+const emptyTag = (s: string): string => (s === "" ? "-" : s);
+function nonEmptyText(v: IrExpr, loc: SrcLoc): IrExpr {
+  return {
+    kind: "ternary",
+    cond: { kind: "strEq", negated: false, left: v, right: lit("", loc), type: BOOL, loc },
+    then: lit("-", loc),
+    else_: v,
+    type: STRING,
+    loc,
+  };
+}
 export function numberLocalesText(L: Lowerer, node: ts.Expression | undefined, loc: SrcLoc): IrExpr {
   if (node === undefined) return lit("", loc);
   const n = strip(node);
   if (isUndefinedIdent(n)) return lit("", loc);
-  if (ts.isStringLiteralLike(n)) return lit(n.text, loc);
+  if (ts.isStringLiteralLike(n)) return lit(emptyTag(n.text), loc);
   if (ts.isArrayLiteralExpression(n) && n.elements.every((e) => ts.isStringLiteralLike(strip(e)))) {
-    return lit(n.elements.map((e) => (strip(e) as ts.StringLiteralLike).text).join(","), loc);
+    return lit(n.elements.map((e) => emptyTag((strip(e) as ts.StringLiteralLike).text)).join(","), loc);
   }
   const t = L.mapTypeOf(L.typeOf(node));
-  if (t?.kind === "string") return L.lowerExprExpecting(node, STRING);
+  if (t?.kind === "string") {
+    const helper = emptyTextHelper(L, loc);
+    return { kind: "call", callee: helper, args: [L.lowerExprExpecting(node, STRING)], type: STRING, loc };
+  }
   if (t?.kind === "array" && t.elem.kind === "string") {
     return { kind: "arrIntrinsic", method: "join", receiver: L.lowerExpr(node), args: [lit(",", loc)], type: STRING, loc };
   }
@@ -56,6 +72,24 @@ export function numberLocalesText(L: Lowerer, node: ts.Expression | undefined, l
     "a locales argument is a string, an array of strings or undefined",
   );
 }
+/** A lifted `(v: string) => string` mapping "" to "-" (the value evaluates once, as the call's argument). */
+function emptyTextHelper(L: Lowerer, loc: SrcLoc): string {
+  const key = "nfloc:empty";
+  const existing = L.arrHofHelpers.get(key);
+  if (existing) return existing;
+  const name = `%nfloc.${L.arrHofHelpers.size}`;
+  L.arrHofHelpers.set(key, name);
+  const v: IrExpr = { kind: "varRef", localId: "v.0", type: STRING, loc };
+  L.liftedFns.push({
+    name,
+    params: [{ localId: "v.0", name: "v", type: STRING }],
+    returnType: STRING,
+    locals: [{ id: "v.0", name: "v", type: STRING, mutable: false }],
+    body: [{ kind: "return", value: nonEmptyText(v, loc), loc }],
+    loc,
+  });
+  return name;
+}
 function unionTextHelper(L: Lowerer, t: IrType & { kind: "union" }, arm: IrType, loc: SrcLoc): string | null {
   const key = `nfloc:${t.unionId}`;
   const existing = L.arrHofHelpers.get(key);
@@ -67,7 +101,7 @@ function unionTextHelper(L: Lowerer, t: IrType & { kind: "union" }, arm: IrType,
   const v: IrExpr = { kind: "varRef", localId: "v.0", type: t, loc };
   const picked: IrExpr = { kind: "unionNarrow", unionId: t.unionId, tag, value: v, type: arm, loc };
   let text: IrExpr;
-  if (arm.kind === "string") text = picked;
+  if (arm.kind === "string") text = nonEmptyText(picked, loc);
   else if (arm.kind === "array" && arm.elem.kind === "string") text = { kind: "arrIntrinsic", method: "join", receiver: picked, args: [lit(",", loc)], type: STRING, loc };
   else return null;
   const body: IrExpr = {
@@ -89,6 +123,26 @@ function unionTextHelper(L: Lowerer, t: IrType & { kind: "union" }, arm: IrType,
     loc,
   });
   return name;
+}
+
+/** V8's per-kind default-formatter cache (scr_locale.h): toLocale*String(locales, undefined) with a string or undefined
+ * locales is "cacheable"; the call carries the marker entry in its option bag. */
+const CACHE_KEY = "\x01k";
+function localesCacheable(L: Lowerer, node: ts.Expression | undefined): boolean {
+  if (node === undefined) return true;
+  const n = strip(node);
+  if (isUndefinedIdent(n) || ts.isStringLiteralLike(n)) return true;
+  if (ts.isArrayLiteralExpression(n)) return false;
+  const t = L.mapTypeOf(L.typeOf(node));
+  if (t?.kind === "string") return true;
+  if (t?.kind === "union") {
+    const def = L.unions.get(t.unionId);
+    return def !== undefined && def.arms.every((a) => a.kind === "string" || a.kind === "undefinedT");
+  }
+  return false;
+}
+function cacheMarkerKv(loc: SrcLoc): IrExpr {
+  return { kind: "arrayLit", elems: [lit(CACHE_KEY, loc), lit("", loc)], type: arrayOf(STRING), loc };
 }
 
 /** The tagged text of a value of type `t` held in the pure re-emittable expression `v` ('s' string, 'n' number,
@@ -142,7 +196,7 @@ function taggedHelper(L: Lowerer, t: IrType, loc: SrcLoc): string | null {
   return name;
 }
 
-function optionValue(L: Lowerer, key: string, node: ts.Expression, loc: SrcLoc): IrExpr {
+function optionValue(L: Lowerer, key: string, node: ts.Expression, loc: SrcLoc, what: string): IrExpr {
   const n = strip(node);
   if (isUndefinedIdent(n)) return lit("u", loc);
   if (ts.isStringLiteralLike(n)) return lit("s" + n.text, loc);
@@ -156,7 +210,7 @@ function optionValue(L: Lowerer, key: string, node: ts.Expression, loc: SrcLoc):
   const helper = taggedHelper(L, v.type, loc);
   if (helper === null) {
     return L.noLowering(
-      `Intl.NumberFormat option '${key}' of type '${L.fmt(v.type)}'`,
+      `${what} option '${key}' of type '${L.fmt(v.type)}'`,
       node,
       "an option value is a string, a number or a boolean (or that or undefined)",
     );
@@ -165,7 +219,14 @@ function optionValue(L: Lowerer, key: string, node: ts.Expression, loc: SrcLoc):
 }
 
 /** The options argument as a string[] of alternating option name and tagged value. */
-export function numberOptionsKv(L: Lowerer, node: ts.Expression | undefined, loc: SrcLoc, pre?: IrExpr): IrExpr {
+export function numberOptionsKv(
+  L: Lowerer,
+  node: ts.Expression | undefined,
+  loc: SrcLoc,
+  pre?: IrExpr,
+  keys: readonly string[] = NUMBER_FORMAT_OPTION_KEYS,
+  what = "Intl.NumberFormat",
+): IrExpr {
   const empty: IrExpr = { kind: "arrayLit", elems: [], type: arrayOf(STRING), loc };
   if (node === undefined) return empty;
   const n = strip(node);
@@ -178,36 +239,36 @@ export function numberOptionsKv(L: Lowerer, node: ts.Expression | undefined, loc
     for (const p of n.properties) {
       const pa = p as ts.PropertyAssignment | ts.ShorthandPropertyAssignment;
       const k = (pa.name as ts.Identifier | ts.StringLiteral).text;
-      if (!NUMBER_FORMAT_OPTION_KEYS.includes(k)) continue; // not an option Intl.NumberFormat reads
+      if (!keys.includes(k)) continue; // not an option the constructor reads
       const valueNode: ts.Expression = ts.isShorthandPropertyAssignment(pa) ? (pa.name as ts.Identifier) : pa.initializer;
-      elems.push(lit(k, locOf(p)), optionValue(L, k, valueNode, locOf(p)));
+      elems.push(lit(k, locOf(p)), optionValue(L, k, valueNode, locOf(p), what));
     }
     return { kind: "arrayLit", elems, type: arrayOf(STRING), loc };
   }
   const rec = pre ?? L.lowerExpr(node);
   if (rec.type.kind !== "record") {
-    return L.noLowering(`Intl.NumberFormat options of type '${L.fmt(rec.type)}'`, node, "pass an object literal or a record value");
+    return L.noLowering(`${what} options of type '${L.fmt(rec.type)}'`, node, "pass an object literal or a record value");
   }
-  const helper = recordHelper(L, rec.type, loc, node);
+  const helper = recordHelper(L, rec.type, loc, node, keys, what);
   return { kind: "call", callee: helper, args: [rec], type: arrayOf(STRING), loc };
 }
 
-function recordHelper(L: Lowerer, recT: IrType & { kind: "record" }, loc: SrcLoc, diag: ts.Node): string {
-  const key = `nfopts:${JSON.stringify(recT)}`;
+function recordHelper(L: Lowerer, recT: IrType & { kind: "record" }, loc: SrcLoc, diag: ts.Node, keys: readonly string[], what: string): string {
+  const key = `nfopts:${keys === NUMBER_FORMAT_OPTION_KEYS ? "" : what}:${JSON.stringify(recT)}`;
   const existing = L.arrHofHelpers.get(key);
   if (existing) return existing;
   const shape = L.shapes.get(recT.shapeId);
-  if (!shape) L.noLowering("Intl.NumberFormat options of an unknown shape", diag);
+  if (!shape) L.noLowering(`${what} options of an unknown shape`, diag);
   const rec: IrExpr = { kind: "varRef", localId: "o.0", type: recT, loc };
   const elems: IrExpr[] = [];
-  for (const k of NUMBER_FORMAT_OPTION_KEYS) {
+  for (const k of keys) {
     const f = shape!.fields.find((x) => x.name === k);
     if (!f) continue;
     const got: IrExpr = { kind: "recordGet", obj: rec, shapeId: recT.shapeId, field: k, type: f.type, loc };
     const direct = f.type.kind === "string" || f.type.kind === "f64" || f.type.kind === "bool" ? taggedOf(L, got, loc) : null;
     const val = direct ?? (f.type.kind === "union" ? taggedOf(L, got, loc) : null);
     if (val === null) {
-      L.noLowering(`Intl.NumberFormat option '${k}' of type '${L.fmt(f.type)}'`, diag, "an option value is a string, a number or a boolean (or that or undefined)");
+      L.noLowering(`${what} option '${k}' of type '${L.fmt(f.type)}'`, diag, "an option value is a string, a number or a boolean (or that or undefined)");
     }
     elems.push(lit(k, loc), val!);
   }
@@ -231,6 +292,7 @@ export function lowerNumberLocaleFormat(
   localesNode: ts.Expression | undefined,
   optionsNode: ts.Expression | undefined,
   loc: SrcLoc,
+  cacheable = false,
 ): IrExpr {
   const locales = numberLocalesText(L, localesNode, loc);
   let pre: IrExpr | undefined;
@@ -242,11 +304,45 @@ export function lowerNumberLocaleFormat(
       return { kind: "libCall", fn: "intl.numFormatBigDyn", args: [digits, locales, pre], type: STRING, loc };
     }
   }
-  const kv = numberOptionsKv(L, optionsNode, loc, pre);
+  const unmarked = optionsNode === undefined || isUndefinedIdent(strip(optionsNode));
+  const kv = cacheable && unmarked && localesCacheable(L, localesNode) ? cacheMarkerKv(loc) : numberOptionsKv(L, optionsNode, loc, pre);
   if (value.type.kind === "f64") return { kind: "libCall", fn: "intl.numFormat", args: [value, locales, kv], type: STRING, loc };
   if (value.type.kind === "bigint") {
     const digits: IrExpr = { kind: "libCall", fn: "big.str", args: [value, { kind: "numLit", value: 10, type: F64, loc }], type: STRING, loc };
     return { kind: "libCall", fn: "intl.numFormatBig", args: [digits, locales, kv], type: STRING, loc };
   }
   throw new Error("lowerNumberLocaleFormat: not a number");
+}
+
+/** Every option Intl.DateTimeFormat reads, in V8's reading order (scr_dtf.c validates in this order). */
+export const DATE_FORMAT_OPTION_KEYS: readonly string[] = [
+  "localeMatcher", "calendar", "numberingSystem", "hour12", "hourCycle", "timeZone", "weekday", "era", "year",
+  "month", "day", "dayPeriod", "hour", "minute", "second", "fractionalSecondDigits", "timeZoneName",
+  "formatMatcher", "dateStyle", "timeStyle",
+];
+
+/** `new Intl.DateTimeFormat(locales, options).format(x)` and the toLocale*String twins (kind 4 / 5 / 6 / 7): the
+ * time value `ms` formatted by scr_date_format_opts (scr_dtf.c over the ICU locale data). */
+export function lowerDateLocaleFormat(
+  L: Lowerer,
+  ms: IrExpr,
+  kind: number,
+  localesNode: ts.Expression | undefined,
+  optionsNode: ts.Expression | undefined,
+  loc: SrcLoc,
+  what: string,
+): IrExpr {
+  const locales = numberLocalesText(L, localesNode, loc);
+  let pre: IrExpr | undefined;
+  if (optionsNode !== undefined && !isUndefinedIdent(strip(optionsNode)) && !ts.isObjectLiteralExpression(strip(optionsNode))) {
+    pre = L.lowerExpr(optionsNode);
+    if (pre.type.kind === "dyn") {
+      return { kind: "libCall", fn: "date.formatOptsDyn", args: [ms, { kind: "numLit", value: kind, type: F64, loc }, locales, pre], type: STRING, loc };
+    }
+  }
+  const unmarked = optionsNode === undefined || isUndefinedIdent(strip(optionsNode));
+  const kv = kind >= 4 && kind <= 6 && unmarked && localesCacheable(L, localesNode)
+    ? cacheMarkerKv(loc)
+    : numberOptionsKv(L, optionsNode, loc, pre, DATE_FORMAT_OPTION_KEYS, what);
+  return { kind: "libCall", fn: "date.formatOpts", args: [ms, { kind: "numLit", value: kind, type: F64, loc }, locales, kv], type: STRING, loc };
 }

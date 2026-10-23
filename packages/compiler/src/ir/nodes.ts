@@ -6104,11 +6104,14 @@ export type IrLibFn =
   | "date.toString"
   /** The other formatters over a time value: (ms, kind) with kind 1 toDateString,
    * 2 toTimeString, 3 toUTCString, 4/5/6 toLocale{,Date,Time}String (en-US, no
-   * options). Never throws. Linked with the zone-name table (moduleUsesDateFmt). */
+   * arguments). Never throws. Linked with the zone-name table (moduleUsesDateFmt). */
   | "date.format"
-  /** toLocale{,Date,Time}String(locale, options): (ms, kind, locale text, option key/value string[]) -> string,
-   * en-US only (scr_date_intl.c). A catchable RangeError/TypeError for what Node throws on. */
+  /** toLocale{,Date,Time}String(locales, options) (kind 4 / 5 / 6) and Intl.DateTimeFormat#format (kind 7):
+   * (ms, kind, locales text, option name / tagged value string[]) -> string, every ICU locale (scr_date_intl.c over
+   * scr_dtf.c). A catchable RangeError/TypeError for what Node throws on. */
   | "date.formatOpts"
+  /** The same with the options as a checked-dynamic (any / unknown typed) value: args ms, kind, locales text, options. */
+  | "date.formatOptsDyn"
   /** String(bytes): Buffer decodes utf8, a plain Uint8Array joins its
    * elements with commas, a DataView is "[object DataView]"; an unstamped
    * value throws a catchable Error (the Buffer-ness is unknown). */
@@ -10546,7 +10549,7 @@ export function moduleUsesDate(mod: IrModule): boolean {
     }
     if (
       node.kind === "libCall" &&
-      (node.fn === "date.getHours" || node.fn === "date.localTime" || node.fn === "date.tzOffset")
+      (node.fn === "date.getHours" || node.fn === "date.localTime" || node.fn === "date.tzOffset" || node.fn === "date.formatOpts" || node.fn === "date.formatOptsDyn")
     ) {
       found = true;
       return;
@@ -10608,8 +10611,8 @@ export function moduleUsesDateTz(mod: IrModule): boolean {
 }
 
 /** The program formats a Date with a locale/options bag (date.formatOpts) or a Date meets `unknown` (whose handle
- * serves toLocale*String with arguments): links scr_date_intl.c and the generated en-US pattern and zone-name
- * tables (scr_date_intl_en.c, scr_date_tznames.c). A LINK GATE, not a fence. */
+ * serves toLocale*String with arguments): links scr_date_intl.c and the date formatter over the ICU locale data
+ * (scr_dtf.c and the units it stands on). A LINK GATE, not a fence. */
 export function moduleUsesDateIntl(mod: IrModule): boolean {
   return dateGates(mod).intl || dateGates(mod).dyn;
 }
@@ -10646,7 +10649,7 @@ function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean; tz: boolean; in
     ) {
       tz = true;
     }
-    if (node.kind === "libCall" && node.fn === "date.formatOpts") {
+    if (node.kind === "libCall" && (node.fn === "date.formatOpts" || node.fn === "date.formatOptsDyn")) {
       intl = true;
       tz = true;
     }
@@ -10666,10 +10669,13 @@ export interface IcuUse {
   langs: string[] | null;
   curr: boolean;
   unit: boolean;
+  /** the zone-name package (Date formatting reads localized zone names, metazones and region names) */
   zone: boolean;
+  /** the date formatter links: calendar, field-name and pattern data, supplemental bundles, zone rules */
+  date: boolean;
 }
 export function moduleIcuUse(mod: IrModule): IcuUse {
-  const use: IcuUse = { nf: false, langs: [], curr: false, unit: false, zone: false };
+  const use: IcuUse = { nf: false, langs: [], curr: false, unit: false, zone: false, date: false };
   const langs = new Set<string>();
   const addLocale = (e: unknown): void => {
     const node = e as { kind?: string; value?: unknown } | undefined;
@@ -10713,6 +10719,10 @@ export function moduleIcuUse(mod: IrModule): IcuUse {
         }
       } else use.curr = use.unit = true;
     }
+    if (node.kind === "libCall" && (node.fn === "date.formatOpts" || node.fn === "date.formatOptsDyn")) {
+      use.date = use.zone = true;
+      addLocale(node.args?.[2]);
+    }
     if (node.kind === "dynInvoke" && (node.method === "toLocaleString" || node.methodKey !== undefined)) {
       use.nf = true;
       use.langs = null;
@@ -10721,6 +10731,11 @@ export function moduleIcuUse(mod: IrModule): IcuUse {
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);
+  if (moduleUsesDateDyn(mod)) {
+    // a Date behind `unknown` can be asked for any locale
+    use.date = use.zone = true;
+    use.langs = null;
+  }
   if (use.langs !== null) use.langs = [...langs].sort();
   return use;
 }
@@ -12567,6 +12582,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "date.toISOString",
   "date.toString",
   "date.formatOpts",
+  "date.formatOptsDyn",
   "intl.numFormat",
   "intl.numFormatBig",
   "intl.numFormatDyn",
