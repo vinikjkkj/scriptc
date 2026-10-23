@@ -27,3 +27,13 @@ console.log(new B());
 const o = { cb: (v) => v };
 console.log(o);
 console.log(new B().cb(41));
+
+// Record members, array elements and a declared function as the value itself.
+const rec = { f: function named() { return 1; }, g: () => 2, n: 1 };
+console.log(rec);
+console.log([() => 1, function z() {}]);
+function top(a) {
+  return a;
+}
+console.log(top);
+console.log({ top });
