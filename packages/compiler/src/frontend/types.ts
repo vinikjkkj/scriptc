@@ -4901,6 +4901,16 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           isJsSourceFile(decl.getSourceFile()) && !functionBodyReadsThis(decl.parent)) {
         pt = DYN;
       }
+      // A bare `any` PARAMETER written in a PACKAGE's declaration file
+      // (mysql2's `execute(parameters: any | any[] | {...})`): the library
+      // author's lazy any, the checked-dynamic tier -- the same reading
+      // callable literals and body-less class members already give it. A
+      // program-authored `any` parameter keeps every refusal.
+      if (pt === null && decl !== undefined && ts.isParameter(decl) && decl.type !== undefined &&
+          (checker.getTypeOfSymbol(p).flags & ts.TypeFlags.Any) !== 0 &&
+          decl.getSourceFile().isDeclarationFile && !ctx.isStdlibFile(decl.getSourceFile())) {
+        pt = DYN;
+      }
       // An options bag defaulted to `{}` in authored JavaScript: the same
       // checked-dynamic slot the lowering of the function gives it (paramShape).
       if (decl !== undefined && ts.isParameter(decl) && decl.type === undefined &&
