@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesSymbol, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn } from "../../ir/nodes.js";
+import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesSymbol, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
@@ -1859,6 +1859,10 @@ export class CEmitter {
       // on the same moduleUsesDate switch) so a Date can cross into the
       // checked-dynamic tree by reference.
       ...(moduleUsesDateDyn(this.mod) ? [`  scr_date_dyn_install();`] : []),
+      // The bigint unit's one entry the dyn core reaches by pointer
+      // (DataView.getBigInt64/getBigUint64 on a dynamic receiver): installed
+      // exactly when scr_bigint.c links (moduleUsesBigInt, cc.ts's gate).
+      ...(moduleUsesBigInt(this.mod) ? [`  scr_big_dyn_install();`] : []),
       // Symbol values cross the checked-dynamic tree as handles (SCR_DYNH_SYMBOL): the ops are installed
       // exactly when scr_symbol.c links (moduleUsesSymbol, cc.ts's gate).
       ...(moduleUsesSymbol(this.mod) ? [`  scr_sym_dyn_install();`] : []),

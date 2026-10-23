@@ -926,8 +926,23 @@ static const ScrDynBigOps scr_big_dyn_ops = {
   scr_big_to_str,
   scr_big_eq_f64,
   scr_big_eq_str,
+  scr_big_low_u64,
 };
 
 ScrDyn *scr_dyn_from_big(ScrBigInt *b) {
   return scr_dyn_alloc_big(b, &scr_big_dyn_ops);
 }
+
+/* 64 raw bits as the bigint they spell: DataView.prototype.getBigInt64 /
+ * getBigUint64 on a dynamic receiver. Installed through
+ * scr_dyn_big_from_bits_fn by the emitted main(). The box takes its own
+ * reference (scr_dyn_alloc_big retains), so ours is released. */
+static ScrDyn *scr_big_dyn_from_bits(uint64_t bits, bool is_signed) {
+  ScrBigInt *b = (is_signed && (int64_t)bits < 0) ? scr_big_from_u64_signed(~bits + 1u, -1)
+                                                   : scr_big_from_u64_signed(bits, 1);
+  ScrDyn *d = scr_dyn_from_big(b);
+  scr_big_release(b);
+  return d;
+}
+
+void scr_big_dyn_install(void) { scr_dyn_big_from_bits_fn = scr_big_dyn_from_bits; }

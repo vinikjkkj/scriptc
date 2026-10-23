@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, isDynPackFunc } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, isDynPackFunc, moduleUsesBigInt } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -2026,6 +2026,7 @@ class LlEmitter {
     // on the same moduleUsesRegex switch cc.ts links scr_regex.c by.
     const usesRegex = moduleUsesRegex(this.mod);
     const usesDate = moduleUsesDateDyn(this.mod);
+    const usesBigDyn = moduleUsesBigInt(this.mod);
     const usesSymbolDyn = moduleUsesSymbol(this.mod);
     // Child-stdio programs stamp the child-stream handle-dispatch ops so
     // `child.stdout` can cross into the checked-dynamic tree by reference.
@@ -2108,6 +2109,7 @@ class LlEmitter {
     if (embedsHttpClient) this.declare(`declare void @scr_net_island_install()`);
     if (usesRegex) this.declare(`declare void @scr_regex_dyn_install()`);
     if (usesDate) this.declare(`declare void @scr_date_dyn_install()`);
+    if (usesBigDyn) this.declare(`declare void @scr_big_dyn_install()`);
     if (usesSymbolDyn) this.declare(`declare void @scr_sym_dyn_install()`);
     if (usesChildStream) this.declare(`declare void @scr_child_stream_dyn_install()`);
     if (usesFetch) this.declare(`declare void @scr_fetch_install()`);
@@ -2583,6 +2585,8 @@ class LlEmitter {
       ...(usesHttp ? [`  call void @scr_http_dyn_install()`] : []),
       ...(usesRegex ? [`  call void @scr_regex_dyn_install()`] : []),
       ...(usesDate ? [`  call void @scr_date_dyn_install()`] : []),
+      // The C twin's row: the bigint unit's dyn-core entry pointer.
+      ...(usesBigDyn ? [`  call void @scr_big_dyn_install()`] : []),
       ...(usesSymbolDyn ? [`  call void @scr_sym_dyn_install()`] : []),
       ...(usesChildStream ? [`  call void @scr_child_stream_dyn_install()`] : []),
       ...(usesStream ? [`  call void @scr_stream_install()`] : []),

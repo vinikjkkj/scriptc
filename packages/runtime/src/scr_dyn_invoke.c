@@ -133,6 +133,13 @@ static void dyn_str_buf(ScrJsonBuf *b, const ScrDyn *d, bool protocol) {
     return;
   }
   case SCR_DYN_BYTES:
+    /* A DataView is Object.prototype.toString with the "DataView" tag (it
+     * has no toString of its own, so String(dv) must not join its bytes
+     * the way a Uint8Array does). Constant in both modes, like ARRBUF's. */
+    if (d->v.bytes->flavor == SCR_BF_DATAVIEW) {
+      scr_jb_puts(b, "[object DataView]");
+      return;
+    }
     if (d->buffer) {
       /* Buffer-flavored values (stream chunks) coerce utf8 (Node's
        * Buffer.toString); plain Uint8Array joins its elements. */
@@ -850,6 +857,238 @@ ScrDyn *scr_dyn_invoke_key(ScrDyn *recv, const ScrStr *key, ScrDyn *const *args,
  * Corpus 4242 walks this list row by row and asserts that agreement, so
  * a name added to an arm without being added here (or the reverse) is a
  * red test rather than a new silent divergence. */
+/* ── DataView on a dynamic receiver ────────────────────────────────────
+ *
+ * A DataView rides SCR_DYN_BYTES with its own flavor (SCR_BF_DATAVIEW),
+ * and until this arm the BYTES dispatch below answered it with the
+ * typed-array names only: `x.getUint8(0)` through an untyped parameter
+ * was Node's "x.getUint8 is not a function" for a method the object
+ * plainly has — a clean build, a runtime TypeError where Node answers, no
+ * diagnostic. (The reverse leak was real too: a DataView answered
+ * `at` / `slice` / `subarray`, which it does not have.)
+ *
+ * The twenty-six accessors are ONE table, and each runs the SAME runtime
+ * entry points the static lowering reaches (scr_dataview_get / _set), so
+ * a dynamic and a static spelling of one call cannot answer differently.
+ * What differs is only the COERCION, which the static side did at compile
+ * time and this side must do at run time, in the spec's order:
+ *
+ *   get<T>(byteOffset, littleEndian)
+ *     ToIndex(byteOffset), ToBoolean(littleEndian), bounds -> RangeError
+ *   set<T>(byteOffset, value, littleEndian)
+ *     ToIndex(byteOffset), ToNumber (or ToBigInt) of value, ToBoolean,
+ *     bounds -> RangeError
+ *
+ * ToIndex runs BEFORE the value's coercion, so an invalid offset is
+ * reported even when the value would have thrown first. The bounds RangeError
+ * (Node's one constant message) comes from the entry points themselves.
+ *
+ * The BigInt pair is the one place the always-linked core and this unit
+ * cannot name the answer's constructor: a bigint box is made by the gated
+ * unit (scr_bigint.c), reached through scr_dyn_big_from_bits_fn, which
+ * the emitted main() installs exactly when that unit links. The compiler
+ * links it for any program that can reach these two names
+ * (moduleUsesBigInt: a dynInvoke of getBigInt64/getBigUint64, or a
+ * COMPUTED method key, which could spell one). A value that is stored
+ * rides scr_dyn_big_ops()->low_u64 instead, and needs no hook: a bigint
+ * box can only exist once the unit is linked. */
+typedef struct {
+  const char *name;
+  ScrDataViewGet kind;
+  bool is_set;
+} DynDvMethod;
+
+static const DynDvMethod DYN_DV_METHODS[] = {
+  { "getInt8", SCR_DV_I8, false },       { "setInt8", SCR_DV_I8, true },
+  { "getUint8", SCR_DV_U8, false },      { "setUint8", SCR_DV_U8, true },
+  { "getInt16", SCR_DV_I16, false },     { "setInt16", SCR_DV_I16, true },
+  { "getUint16", SCR_DV_U16, false },    { "setUint16", SCR_DV_U16, true },
+  { "getInt32", SCR_DV_I32, false },     { "setInt32", SCR_DV_I32, true },
+  { "getUint32", SCR_DV_U32, false },    { "setUint32", SCR_DV_U32, true },
+  { "getFloat16", SCR_DV_F16, false },   { "setFloat16", SCR_DV_F16, true },
+  { "getFloat32", SCR_DV_F32, false },   { "setFloat32", SCR_DV_F32, true },
+  { "getFloat64", SCR_DV_F64, false },   { "setFloat64", SCR_DV_F64, true },
+  { "getBigInt64", SCR_DV_BIGI64, false }, { "setBigInt64", SCR_DV_BIGI64, true },
+  { "getBigUint64", SCR_DV_BIGU64, false }, { "setBigUint64", SCR_DV_BIGU64, true },
+  { NULL, SCR_DV_U8, false },
+};
+
+static const DynDvMethod *dyn_dv_lookup(const char *m) {
+  for (size_t i = 0; DYN_DV_METHODS[i].name; i++) {
+    if (dyn_name_is(m, DYN_DV_METHODS[i].name)) return &DYN_DV_METHODS[i];
+  }
+  return NULL;
+}
+
+/* ToIndex(ToNumber(arg)): the offset every accessor starts with. NaN is 0
+ * (so `getUint8()` reads byte 0), the fraction truncates, and a negative or
+ * past-2^53-1 value is the accessors' one RangeError. false with the
+ * exception pending. */
+static bool dyn_dv_to_index(const ScrDyn *a, double *out) {
+  double n = scr_dyn_to_number(a);
+  if (scr_exc_pending()) return false;
+  n = (n != n) ? 0 : trunc(n);
+  if (!(n >= 0) || n > 9007199254740991.0) {
+    static const char msg[] = "Offset is outside the bounds of the DataView";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return false;
+  }
+  *out = n;
+  return true;
+}
+
+/* Is `c` (a whole UTF-8 sequence starting at p) a StrWhiteSpaceChar?
+ * Returns its byte length, 0 when it is not whitespace. */
+static size_t dyn_dv_ws_len(const unsigned char *p, size_t left) {
+  if (left >= 1 && (p[0] == ' ' || (p[0] >= 9 && p[0] <= 13))) return 1;
+  if (left >= 2 && p[0] == 0xC2 && p[1] == 0xA0) return 2;                       /* NBSP */
+  if (left >= 3 && p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF) return 3;       /* BOM */
+  if (left >= 3 && p[0] == 0xE1 && p[1] == 0x9A && p[2] == 0x80) return 3;       /* U+1680 */
+  if (left >= 3 && p[0] == 0xE2 && p[1] == 0x80 &&
+      ((p[2] >= 0x80 && p[2] <= 0x8A) || p[2] == 0xA8 || p[2] == 0xA9 || p[2] == 0xAF)) return 3;
+  if (left >= 3 && p[0] == 0xE2 && p[1] == 0x81 && p[2] == 0x9F) return 3;       /* U+205F */
+  if (left >= 3 && p[0] == 0xE3 && p[1] == 0x80 && p[2] == 0x80) return 3;       /* U+3000 */
+  return 0;
+}
+
+/* ToBigInt(v) reduced to the 64 bits setBigInt64/setBigUint64 store (the
+ * value modulo 2^64 — the two differ only in how the bits read back). The
+ * spec's ToBigInt is NOT BigInt(): a Number is a TypeError, and only a
+ * bigint, a boolean and a string (StringToBigInt) convert. A string is
+ * parsed here straight into the modulus, which needs no bigint arithmetic
+ * at all. false with the exception pending. */
+static bool dyn_dv_to_bigint_bits(const ScrDyn *v, uint64_t *bits, int depth) {
+  switch (v->kind) {
+  case SCR_DYN_BIG:
+    *bits = scr_dyn_big_ops()->low_u64(v->v.big);
+    return true;
+  case SCR_DYN_BOOL:
+    *bits = v->v.b ? 1u : 0u;
+    return true;
+  case SCR_DYN_STR: {
+    const unsigned char *p = (const unsigned char *)v->v.str->data;
+    size_t n = v->v.str->len;
+    size_t w;
+    while (n > 0 && (w = dyn_dv_ws_len(p, n)) != 0) { p += w; n -= w; }
+    { /* trim the right edge: n becomes the end of the last non-white byte */
+      size_t keep = 0, k = 0;
+      while (k < n) {
+        size_t cw = dyn_dv_ws_len(p + k, n - k);
+        if (cw == 0) { k++; keep = k; } else { k += cw; }
+      }
+      n = keep;
+    }
+    uint64_t acc = 0;
+    bool neg = false, ok = true;
+    unsigned base = 10;
+    size_t i = 0;
+    if (n >= 2 && p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) { base = 16; i = 2; }
+    else if (n >= 2 && p[0] == '0' && (p[1] == 'o' || p[1] == 'O')) { base = 8; i = 2; }
+    else if (n >= 2 && p[0] == '0' && (p[1] == 'b' || p[1] == 'B')) { base = 2; i = 2; }
+    else if (n >= 1 && (p[0] == '+' || p[0] == '-')) { neg = p[0] == '-'; i = 1; }
+    if (n == 0) { *bits = 0; return true; } /* the empty string is 0n */
+    if (i >= n) ok = false;               /* a bare sign or prefix */
+    for (; ok && i < n; i++) {
+      unsigned dgt;
+      if (p[i] >= '0' && p[i] <= '9') dgt = (unsigned)(p[i] - '0');
+      else if (p[i] >= 'a' && p[i] <= 'f') dgt = (unsigned)(p[i] - 'a') + 10;
+      else if (p[i] >= 'A' && p[i] <= 'F') dgt = (unsigned)(p[i] - 'A') + 10;
+      else { ok = false; break; }
+      if (dgt >= base) { ok = false; break; }
+      acc = acc * base + dgt; /* wraps modulo 2^64 — the modulus */
+    }
+    if (!ok) {
+      ScrJsonBuf b;
+      scr_jb_init(&b);
+      scr_jb_puts(&b, "Cannot convert ");
+      scr_jb_write(&b, v->v.str->data, v->v.str->len);
+      scr_jb_puts(&b, " to a BigInt");
+      scr_throw_error(SCR_ERR_SYNTAX, scr_jb_finish(&b));
+      return false;
+    }
+    *bits = neg ? (uint64_t)(~acc + 1u) : acc;
+    return true;
+  }
+  case SCR_DYN_NUM:
+  case SCR_DYN_UNDEF:
+  case SCR_DYN_NULL: {
+    ScrStr *s = scr_dyn_string_coerce(v);
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Cannot convert ");
+    scr_jb_write(&b, s->data, s->len);
+    scr_jb_puts(&b, " to a BigInt");
+    scr_str_release(s);
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return false;
+  }
+  default: {
+    /* An object: ToPrimitive (number hint) first, then the primitive's own
+     * conversion. One level only — ToPrimitive never answers an object. */
+    if (depth > 0) break;
+    ScrDyn *p = scr_dyn_to_primitive(v, SCR_TOPRIM_NUMBER);
+    if (p == NULL) return false;
+    const bool prim = p->kind == SCR_DYN_UNDEF || p->kind == SCR_DYN_NULL ||
+                      p->kind == SCR_DYN_BOOL || p->kind == SCR_DYN_NUM ||
+                      p->kind == SCR_DYN_STR || p->kind == SCR_DYN_BIG;
+    bool r = prim ? dyn_dv_to_bigint_bits(p, bits, depth + 1) : false;
+    if (!r && !scr_exc_pending()) {
+      scr_dyn_check_fail(NULL, "a BigInt", p);
+    }
+    scr_dyn_release(p);
+    return r;
+  }
+  }
+  scr_dyn_check_fail(NULL, "a BigInt", v);
+  return false;
+}
+
+static ScrDyn *dyn_dataview_invoke(ScrDyn *recv, const DynDvMethod *m, ScrDyn *const *args,
+                                   size_t argc) {
+  ScrBytes *b = recv->v.bytes;
+  ScrDyn *undef = scr_dyn_undefined();
+  double off;
+  if (!dyn_dv_to_index(argc > 0 ? args[0] : undef, &off)) return NULL;
+  const bool big = m->kind == SCR_DV_BIGI64 || m->kind == SCR_DV_BIGU64;
+  if (!m->is_set) {
+    const bool le = scr_dyn_truthy(argc > 1 ? args[1] : undef);
+    if (big) {
+      uint64_t bits;
+      if (!scr_dataview_get_bits64(b, off, le, &bits)) return NULL;
+      if (scr_dyn_big_from_bits_fn == NULL) {
+        /* Unreachable when the compiler's link gate held: it links the
+         * bigint unit (and the emitted main installs this) for every
+         * program that can name these two methods. Kept as a real answer
+         * rather than an assert so a gate that ever misses fails loudly
+         * here instead of reading as a wrong number. */
+        static const char msg[] =
+            "internal error: DataView.getBigInt64/getBigUint64 on a dynamic receiver reached a binary "
+            "without the bigint unit";
+        scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+        return NULL;
+      }
+      return scr_dyn_big_from_bits_fn(bits, m->kind == SCR_DV_BIGI64);
+    }
+    double r = scr_dataview_get(b, off, m->kind, le);
+    if (scr_exc_pending()) return NULL;
+    return scr_dyn_new_num(r);
+  }
+  const ScrDyn *val = argc > 1 ? args[1] : undef;
+  if (big) {
+    uint64_t bits;
+    if (!dyn_dv_to_bigint_bits(val, &bits, 0)) return NULL;
+    const bool le = scr_dyn_truthy(argc > 2 ? args[2] : undef);
+    if (!scr_dataview_set_bits64(b, off, bits, le)) return NULL;
+    return scr_dyn_retain(undef);
+  }
+  double v = scr_dyn_to_number(val);
+  if (scr_exc_pending()) return NULL;
+  const bool le = scr_dyn_truthy(argc > 2 ? args[2] : undef);
+  scr_dataview_set(b, off, v, m->kind, le);
+  if (scr_exc_pending()) return NULL;
+  return scr_dyn_retain(undef);
+}
+
 static bool dyn_name_in(const char *m, const char *const *names) {
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
@@ -893,6 +1132,11 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
       return dyn_name_in(m, impl) || dyn_arr_proto_unimpl(m) || dyn_objproto_knows(m);
     }
     case SCR_DYN_BYTES:
+      /* A DataView's surface is its accessor table plus toString, and the
+       * read must agree with the call arm above name for name. */
+      if (recv->v.bytes->flavor == SCR_BF_DATAVIEW) {
+        return dyn_dv_lookup(m) != NULL || dyn_name_is(m, "toString") || dyn_objproto_knows(m);
+      }
       /* ONE name, and only because this branch flipped it. The BYTES call
        * arm (scr_dyn_bytes_method) answers `toString` now where it used to
        * fence loudly, so leaving BYTES in the default:false arm below would
@@ -2181,6 +2425,24 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     }
     if (dyn_name_is(method, "finally")) {
       return scr_dyn_promise_then(recv->v.promise, NULL, NULL, argc >= 1 ? args[0] : NULL);
+    }
+    return dyn_object_proto_method(recv, method, args, argc, what);
+  }
+
+  if (recv->kind == SCR_DYN_BYTES && recv->v.bytes->flavor == SCR_BF_DATAVIEW) {
+    /* A DataView answers its accessors and NOTHING of the typed-array
+     * surface (no at/slice/subarray/fill/...): the name is a DataView
+     * method or it falls through to Object.prototype's, whose answer for
+     * a name nobody declares is JS's is-not-a-function. */
+    const DynDvMethod *dm = dyn_dv_lookup(method);
+    if (dm != NULL) return dyn_dataview_invoke(recv, dm, args, argc);
+    if (dyn_name_is(method, "toString")) {
+      /* Object.prototype.toString: a DataView declares none of its own,
+       * and its @@toStringTag is "DataView". */
+      ScrStr *ts = scr_str_new("[object DataView]", 17);
+      ScrDyn *td = scr_dyn_new_str(ts);
+      scr_str_release(ts);
+      return td;
     }
     return dyn_object_proto_method(recv, method, args, argc, what);
   }

@@ -3361,57 +3361,15 @@ export class LlDyn {
       }
       B.startBlock(labels.get(DK.BYTES)!);
       {
-        // Buffer-flavored values coerce utf8; plain Uint8Array joins
-        // its elements.
-        const bufp = B.tmp();
-        const bufRaw = B.tmp();
-        const isBuf = B.tmp();
-        B.line(`${bufp} = getelementptr inbounds i8, ptr %d, i64 12 ; ->buffer`);
-        B.line(`${bufRaw} = load i8, ptr ${bufp}`);
-        B.line(`${isBuf} = icmp ne i8 ${bufRaw}, 0`);
-        const lBuf = B.newLabel("ds.bu");
-        const lJoin = B.newLabel("ds.bj");
-        B.condBr(isBuf, lBuf, lJoin);
-        B.startBlock(lBuf);
-        host.declare(`declare ptr @scr_bytes_to_str(ptr, ptr)`);
-        const bytes = this.payloadOf(B, "%d", "ptr");
-        const enc = host.internLiteral("utf8");
-        const txt = B.tmp();
-        B.line(`${txt} = call ptr @scr_bytes_to_str(ptr ${bytes}, ptr ${enc})`);
-        this.putScrStr(B, "%b", txt);
-        B.line(`call void @scr_str_release(ptr ${txt})`);
-        B.br(done);
-        B.startBlock(lJoin);
-        const bts = this.payloadOf(B, "%d", "ptr");
-        const blenp = B.tmp();
-        const blen = B.tmp();
-        const bdatap = B.tmp();
-        const bdata = B.tmp();
-        B.line(`${blenp} = getelementptr inbounds i8, ptr ${bts}, i64 8 ; ->len`);
-        B.line(`${blen} = load i64, ptr ${blenp}`);
-        B.line(`${bdatap} = getelementptr inbounds i8, ptr ${bts}, i64 24 ; ->data`);
-        B.line(`${bdata} = load ptr, ptr ${bdatap}`);
-        this.i64Loop(B, "ds.by", blen, (i) => {
-          const nz = B.tmp();
-          B.line(`${nz} = icmp ugt i64 ${i}, 0`);
-          const lcm = B.newLabel("ds.bc");
-          const lv = B.newLabel("ds.bv");
-          B.condBr(nz, lcm, lv);
-          B.startBlock(lcm);
-          B.line(`call void @scr_jb_putc(ptr %b, i8 44)`);
-          B.br(lv);
-          B.startBlock(lv);
-          const cp = B.tmp();
-          const c = B.tmp();
-          const cd = B.tmp();
-          B.line(`${cp} = getelementptr inbounds i8, ptr ${bdata}, i64 ${i}`);
-          B.line(`${c} = load i8, ptr ${cp}`);
-          B.line(`${cd} = uitofp i8 ${c} to double`);
-          const s = B.tmp();
-          B.line(`${s} = call ptr @scr_f64_to_scrstr(double ${cd})`);
-          this.putScrStr(B, "%b", s);
-          B.line(`call void @scr_str_release(ptr ${s})`);
-        });
+        // Buffer-flavored values coerce utf8, a plain Uint8Array joins its
+        // elements, and a DataView is "[object DataView]": all three live
+        // in scr_dyn_to_string, so this arm DELEGATES like the OBJ arm
+        // (the C walker's twin). The open-coded join answered
+        // String(dataView) with its bytes.
+        const s = B.tmp();
+        B.line(`${s} = call ptr @scr_dyn_to_string(ptr %d, ptr null)`);
+        this.putScrStr(B, "%b", s);
+        B.line(`call void @scr_str_release(ptr ${s})`);
         B.br(done);
       }
       B.startBlock(labels.get(DK.FUNC)!);
@@ -4168,10 +4126,13 @@ export class LlDyn {
     // Parse once up front (pure), branch per kind below — C parses per
     // branch, but the computation is effect-free and identical.
     const lenHit = isLength();
-    const ctorHit = isKey("constructor", "kc");
     const { digits, idx } = parseIndex();
-    // BYTES: .constructor, .length and canonical-index byte reads answer
-    // like Node.
+    // BYTES: ONE runtime body for both lanes (scr_dyn_bytes_key_get,
+    // scr_json.c): length, byteLength, byteOffset, BYTES_PER_ELEMENT,
+    // `constructor` and the canonical-index reads, with a DataView
+    // answering byteLength/byteOffset only. NULL with an exception
+    // pending is a throw (the `constructor` refusal); NULL with nothing
+    // pending is a miss, which takes the intrinsic-method tail.
     {
       const isB = B.tmp();
       B.line(`${isB} = icmp eq i32 ${kd}, ${DK.BYTES}`);
@@ -4179,58 +4140,26 @@ export class LlDyn {
       const lNext = B.newLabel("kg.n");
       B.condBr(isB, lB, lNext);
       B.startBlock(lB);
-      host.declare(`declare ptr @scr_dyn_new_num(double)`);
-      // `b.constructor`: the %Uint8Array% singleton, through the same
-      // runtime function the C lane calls (a Buffer or a non-u8 element
-      // kind refuses by name inside it).
-      {
-        host.declare(`declare ptr @scr_dyn_bytes_constructor(ptr)`);
-        const lC = B.newLabel("kg.bc");
-        const lNc = B.newLabel("kg.bn");
-        B.condBr(ctorHit, lC, lNc);
-        B.startBlock(lC);
-        const rc = B.tmp();
-        B.line(`${rc} = call ptr @scr_dyn_bytes_constructor(ptr %d)`);
-        B.terminate(`ret ptr ${rc}`);
-        B.startBlock(lNc);
-      }
-      const bts = this.payloadOf(B, "%d", "ptr");
-      const blenp = B.tmp();
-      const blen = B.tmp();
-      B.line(`${blenp} = getelementptr inbounds i8, ptr ${bts}, i64 8 ; ->len`);
-      B.line(`${blen} = load i64, ptr ${blenp}`);
-      const lLen = B.newLabel("kg.bl");
-      const lIdx = B.newLabel("kg.bi");
-      B.condBr(lenHit, lLen, lIdx);
-      B.startBlock(lLen);
-      const lenD = B.tmp();
-      const r0 = B.tmp();
-      B.line(`${lenD} = uitofp i64 ${blen} to double`);
-      B.line(`${r0} = call ptr @scr_dyn_new_num(double ${lenD})`);
-      B.terminate(`ret ptr ${r0}`);
-      B.startBlock(lIdx);
-      const inRange = B.tmp();
-      const hit = B.tmp();
-      B.line(`${inRange} = icmp ult i64 ${idx}, ${blen}`);
-      B.line(`${hit} = and i1 ${digits}, ${inRange}`);
+      host.declare(`declare ptr @scr_dyn_bytes_key_get(ptr, ptr)`);
+      host.declare(`declare zeroext i1 @scr_exc_pending()`);
+      const bk = B.tmp();
+      B.line(`${bk} = call ptr @scr_dyn_bytes_key_get(ptr %d, ptr %k)`);
+      const hasBk = B.tmp();
+      B.line(`${hasBk} = icmp ne ptr ${bk}, null`);
       const lHit = B.newLabel("kg.bh");
       const lMiss = B.newLabel("kg.bm");
-      B.condBr(hit, lHit, lMiss);
+      B.condBr(hasBk, lHit, lMiss);
       B.startBlock(lHit);
-      const bdatap = B.tmp();
-      const bdata = B.tmp();
-      B.line(`${bdatap} = getelementptr inbounds i8, ptr ${bts}, i64 24 ; ->data`);
-      B.line(`${bdata} = load ptr, ptr ${bdatap}`);
-      const bp = B.tmp();
-      const bv = B.tmp();
-      const bd = B.tmp();
-      const r1 = B.tmp();
-      B.line(`${bp} = getelementptr inbounds i8, ptr ${bdata}, i64 ${idx}`);
-      B.line(`${bv} = load i8, ptr ${bp}`);
-      B.line(`${bd} = uitofp i8 ${bv} to double`);
-      B.line(`${r1} = call ptr @scr_dyn_new_num(double ${bd})`);
-      B.terminate(`ret ptr ${r1}`);
+      B.terminate(`ret ptr ${bk}`);
       B.startBlock(lMiss);
+      const pend = B.tmp();
+      B.line(`${pend} = call zeroext i1 @scr_exc_pending()`);
+      const lThrow = B.newLabel("kg.bt");
+      const lTail = B.newLabel("kg.bu");
+      B.condBr(pend, lThrow, lTail);
+      B.startBlock(lThrow);
+      B.terminate(`ret ptr null`);
+      B.startBlock(lTail);
       intrinsicOrUndef();
       B.startBlock(lNext);
     }

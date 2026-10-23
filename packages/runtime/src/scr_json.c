@@ -3342,6 +3342,10 @@ ScrDyn *scr_dyn_map_key_get(ScrDyn *d, const ScrStr *k) {
  * answers and the static answers are the same code and cannot drift. */
 static const ScrDynBigOps *scr_dynbig_ops = NULL;
 
+/* See scr_runtime.h: the one gated-unit entry the dyn core and the
+ * dispatch unit reach by pointer. */
+ScrDyn *(*scr_dyn_big_from_bits_fn)(uint64_t bits, bool is_signed) = NULL;
+
 ScrDyn *scr_dyn_alloc_big(ScrBigInt *b, const ScrDynBigOps *ops) {
   scr_dynbig_ops = ops;
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_BIG);
@@ -5049,6 +5053,10 @@ ScrStr *scr_rec_tostr(ScrClosure *slot) {
 ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
   switch (d->kind) {
   case SCR_DYN_BYTES:
+    /* A DataView has no toString of its own: Object.prototype's, with the
+     * "DataView" tag. It rides this kind, so without the test it joined
+     * its bytes like a Uint8Array and String(dv) answered "1,2,3,...". */
+    if (d->v.bytes->flavor == SCR_BF_DATAVIEW) return scr_str_new("[object DataView]", 17);
     if (d->buffer) return scr_bytes_to_str(d->v.bytes, enc);
     /* Uint8Array.prototype.toString is Array's: elements joined */
     {
@@ -9326,6 +9334,53 @@ ScrDyn *scr_dyn_bytes_constructor(const ScrDyn *d) {
     return NULL;
   }
   return scr_dyn_uint8array_ctor();
+}
+
+/* Property READS off a BYTES box — the ONE body behind both backends'
+ * keyed-read helpers (emit-walkers.ts's sc_dyn_key_get and llvm/dyn.ts's
+ * keyGet), which used to spell `length`, `constructor` and the canonical
+ * index inline and answered NOTHING else: `u8.byteLength`,
+ * `u8.byteOffset`, `u8.BYTES_PER_ELEMENT` and every DataView property
+ * read as `undefined` while Node answers a number — a clean build with a
+ * wrong value, and `dv.length` / `dv[0]` answered 12 / 0 for a DataView,
+ * which has neither.
+ *
+ * Returns +1 on a hit; NULL with the exception pending when the read
+ * threw (`constructor` is a loud refusal); NULL with NOTHING pending when
+ * the name is not a data property of this kind, which leaves the caller's
+ * tail (the intrinsic-method read, then undefined) to answer. The caller
+ * tests `r != NULL || scr_exc_pending()`.
+ *
+ * Two kinds share SCR_DYN_BYTES and their property sets differ, so the
+ * flavor decides: a typed array (and a Buffer) answers length / byteLength
+ * / byteOffset / BYTES_PER_ELEMENT / constructor and its indices; a
+ * DataView answers byteLength and byteOffset ONLY — `length`, indices and
+ * BYTES_PER_ELEMENT are undefined on it in Node, and answering them was
+ * the divergence. `byteLength` and `byteOffset` are accessors on the
+ * prototype in Node and data-like reads here: nothing observable differs
+ * for a read. */
+ScrDyn *scr_dyn_bytes_key_get(const ScrDyn *d, const ScrStr *k) {
+  const ScrBytes *b = d->v.bytes;
+  const bool dv = b->flavor == SCR_BF_DATAVIEW;
+  const char *kd = k->data;
+  const size_t kl = k->len;
+  if (kl == 10 && memcmp(kd, "byteLength", 10) == 0) return scr_dyn_new_num(scr_bytes_byte_len(b));
+  if (kl == 10 && memcmp(kd, "byteOffset", 10) == 0) return scr_dyn_new_num(scr_bytes_byte_offset(b));
+  if (kl == 11 && memcmp(kd, "constructor", 11) == 0) return scr_dyn_bytes_constructor(d);
+  if (dv) return NULL; /* nothing else is a data property of a DataView */
+  if (kl == 6 && memcmp(kd, "length", 6) == 0) return scr_dyn_new_num((double)b->len);
+  if (kl == 17 && memcmp(kd, "BYTES_PER_ELEMENT", 17) == 0) {
+    return scr_dyn_new_num((double)scr_bytes_elem_size(b->elem));
+  }
+  if (kl > 0 && !(kl > 1 && kd[0] == '0')) {
+    size_t idx = 0;
+    for (size_t i = 0; i < kl; i++) {
+      if (kd[i] < '0' || kd[i] > '9' || idx > (SIZE_MAX - 9) / 10) return NULL;
+      idx = idx * 10 + (size_t)(kd[i] - '0');
+    }
+    if (idx < b->len) return scr_dyn_new_num(scr_bytes_get(b, (double)idx));
+  }
+  return NULL;
 }
 
 /* `new Uint8Array(…)` through the singleton. scr_dyn_construct routes

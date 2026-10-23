@@ -9968,6 +9968,18 @@ export function moduleUsesZlib(mod: IrModule): boolean {
  * probed, not calls: a bigint reaches the runtime through operators and
  * literals, not through one named surface. */
 export function moduleUsesBigInt(mod: IrModule): boolean {
+  // The dyn dispatch unit (scr_dyn_invoke.c) answers DataView's
+  // getBigInt64/getBigUint64 on a dynamic receiver with a bigint no static
+  // node ever spelled, and the box is built by THIS unit (scr_big_dyn_install
+  // fills the pointer the dispatch unit calls it through, because naming the
+  // constructor directly is an undefined symbol in every bigint-free link).
+  // The name can reach that arm by a spelling no IR node shows -- `x[k](0)`,
+  // or a bound method read off the value and called later -- so the gate is
+  // the dispatch unit's own link switch rather than a sniff for the two
+  // names: whoever links scr_dyn_invoke.c links this unit and installs the
+  // pointer. Measured cost is the unit's size, in the programs that already
+  // carry the dynamic dispatch.
+  if (moduleUsesDynInvoke(mod)) return true;
   let found = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
