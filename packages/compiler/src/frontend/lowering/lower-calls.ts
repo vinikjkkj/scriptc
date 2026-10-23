@@ -8659,7 +8659,14 @@ const inliningPredicates = new Set<ts.Symbol>();
           // `(name) => void doThing(name)`, the fire-and-forget arrow).
           let stripped: ts.Expression = bodyExpr;
           while (ts.isParenthesizedExpression(stripped)) stripped = stripped.expression;
-          if (ts.isVoidExpression(stripped)) {
+          if (
+            ts.isVoidExpression(stripped) ||
+            // `(err) => (err ? reject(err) : resolve(v))`: a conditional whose
+            // arms are both void is a branch spelled as an expression, and in
+            // this void-returning body its value is discarded, so it takes the
+            // statement lowering (the IR has no void ternary).
+            (ts.isConditionalExpression(stripped) && L.mapTypeOf(L.typeOf(stripped))?.kind === "void")
+          ) {
             body = [L.lowerExprStatement(stripped)];
           } else {
             const value = L.lowerExpr(bodyExpr);

@@ -11372,6 +11372,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8230-void-ternary-arrow-body.ts": {
+   "order": [
+    "<repo>/tests/corpus/8230-void-ternary-arrow-body.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
