@@ -36,7 +36,7 @@ static uint32_t rdvar(const unsigned char **p) {
   }
 }
 
-static const char *const pkg_names[SCR_URES_NPKG] = {"loc", "curr", "unit", "zone"};
+static const char *const pkg_names[SCR_URES_NPKG] = {"loc", "curr", "unit", "zone", "misc", "region"};
 
 static void init(void) {
   if (G.ready) return;
@@ -120,6 +120,22 @@ const char *scr_res_str(ScrRes r, size_t *n) {
   return (const char *)q;
 }
 static const unsigned char *payload(ScrRes r) { const unsigned char *q = r.p + 1; rdvar(&q); return q; }
+static int32_t unzig(uint32_t z) { return (z & 1) ? -(int32_t)((z + 1) / 2) : (int32_t)(z / 2); }
+int scr_res_intvec(ScrRes r, int32_t *out, int cap) {
+  if (!r.p || r.p[0] != SCR_RES_INTVEC) return -1;
+  const unsigned char *q = r.p + 1;
+  rdvar(&q);
+  int n = (int)rdvar(&q);
+  for (int i = 0; i < n; i++) { uint32_t z = rdvar(&q); if (i < cap) out[i] = unzig(z); }
+  return n;
+}
+int32_t scr_res_int(ScrRes r, int *ok) {
+  if (!r.p || r.p[0] != SCR_RES_INT) { if (ok) *ok = 0; return 0; }
+  const unsigned char *q = r.p + 1;
+  rdvar(&q);
+  if (ok) *ok = 1;
+  return unzig(rdvar(&q));
+}
 int scr_res_array_len(ScrRes r) {
   if (!r.p || r.p[0] != SCR_RES_ARRAY) return 0;
   const unsigned char *q = payload(r);
@@ -224,6 +240,7 @@ static int alias_target(int pkg, int loc) {
 }
 
 static bool get_depth(int pkg, int loc, const char *path, ScrRes *out, int depth);
+static bool has_block_fwd(int pkg, int idx) { return idx >= 0 && G.blk[pkg][idx].data != NULL; }
 
 /* Walks `path` below the bundle root `node`. An alias met on the way (the alias text is "/LOCALE/<path>") is expanded
  * into a fresh lookup of <path>/<rest of the walk> against the REQUESTED locale, with its own fallback: `alias`
@@ -278,6 +295,13 @@ static bool get_depth(int pkg, int loc, const char *path, ScrRes *out, int depth
 }
 bool scr_ures_get(const ScrUloc *u, int pkg, const char *path, ScrRes *out) { return get_depth(pkg, u->start[pkg], path, out, 0); }
 
+bool scr_ures_misc(const char *bundle, const char *path, ScrRes *out) {
+  init();
+  int idx = scr_ures_locale_find(bundle, strlen(bundle));
+  if (idx < 0 || !has_block_fwd(SCR_URES_MISC, idx)) return false;
+  return get_depth(SCR_URES_MISC, idx, path, out, 0);
+}
+
 bool scr_res_get_str(const ScrUloc *u, int pkg, const char *path, char *out, size_t cap) {
   ScrRes r;
   if (!scr_ures_get(u, pkg, path, &r) || r.p[0] != SCR_RES_STR) return false;
@@ -329,6 +353,31 @@ static bool all_items_depth(int pkg, int loc, const char *path, ScrResSink sink,
   }
   return any;
 }
+/* the table at `path` of every bundle in the chain that has one, child first, children left unresolved */
+static bool each_table_depth(int pkg, int loc, const char *path, ScrResTableCb cb, void *ctx, int depth) {
+  init();
+  if (depth > 16) return false;
+  bool any = false;
+  size_t pn = strlen(path);
+  for (int cur = loc; cur >= 0;) {
+    int l = alias_target(pkg, cur);
+    cur = chain_next(pkg, l);
+    Blk *b = &G.blk[pkg][l];
+    if (!b->data) continue;
+    ScrRes root = {b->data, pkg}, t;
+    char alias[512];
+    if (!walk(pkg, root, path, pn, &t, alias, sizeof alias)) {
+      if (alias[0] && each_table_depth(pkg, loc, alias, cb, ctx, depth + 1)) any = true;
+      continue;
+    }
+    if (t.p[0] != SCR_RES_TABLE) continue;
+    any = true;
+    cb(ctx, t);
+  }
+  return any;
+}
+bool scr_ures_each_table(const ScrUloc *u, int pkg, const char *path, ScrResTableCb cb, void *ctx) { return each_table_depth(pkg, u->start[pkg], path, cb, ctx, 0); }
+
 bool scr_ures_all_items(const ScrUloc *u, int pkg, const char *path, ScrResSink sink, void *ctx) { return all_items_depth(pkg, u->start[pkg], path, sink, ctx, 0); }
 
 /* ── ures_open: findFirstExisting with CLDR's fallback for names that have no bundle ──────────────────────── */
@@ -413,6 +462,28 @@ void scr_ures_open(const char *icuName, ScrUloc *u) {
   init();
   for (int p = 0; p < SCR_URES_NPKG; p++) u->start[p] = find_first_existing(p, icuName);
 }
+
+/* ── single-bundle access (ures_open / getByKey as the functional-equivalent search uses them) ──────────────── */
+int scr_ures_bundle_exact(const char *name) {
+  init();
+  int idx = scr_ures_locale_find(name, strlen(name));
+  return has_block(SCR_URES_LOC, idx) ? idx : -1;
+}
+int scr_ures_bundle_open(const char *name) { /* ures_open: the exact bundle, else the first existing one */
+  init();
+  if (!name[0]) return G.root;
+  return find_first_existing(SCR_URES_LOC, name);
+}
+const char *scr_ures_bundle_name(int idx) { size_t n; static char buf[96]; const char *s = scr_ures_locale_name(idx, &n); snprintf(buf, sizeof buf, "%.*s", (int)(n < 95 ? n : 95), s); return buf; }
+bool scr_ures_bundle_own(int idx, const char *path, ScrRes *out) {
+  init();
+  Blk *b = &G.blk[SCR_URES_LOC][idx];
+  if (!b->data) return false;
+  ScrRes root = {b->data, SCR_URES_LOC};
+  char alias[64];
+  return walk(SCR_URES_LOC, root, path, strlen(path), out, alias, sizeof alias);
+}
+bool scr_ures_bundle_get(int idx, const char *path, ScrRes *out) { init(); return get_depth(SCR_URES_LOC, idx, path, out, 0); }
 
 ScrCoreVal scr_core_get(const char *key) {
   init();
