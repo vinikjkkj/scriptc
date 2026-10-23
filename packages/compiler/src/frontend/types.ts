@@ -1580,6 +1580,13 @@ export interface TypeMapperCtx {
   /** The program class a declaration-file type's values are instances of
    * (lower-twin-witness.ts), or null. */
   dtsWitnessClass?: (t: ts.Type) => ts.ClassDeclaration | null;
+  /** The COMPILED twin's class behind a class declared in a declaration file
+   * (`export declare class Box` beside the `class Box` the `.js` twin
+   * defines), or null. The declaration keeps the type surface; the twin's
+   * class IS the class the binary holds, so both halves are ONE class: the
+   * instance type, the static side, construction, methods and `instanceof`
+   * all answer for the twin's declaration. */
+  declTwinClassDecl?: (d: ts.ClassDeclaration) => ts.ClassDeclaration | null;
 }
 
 
@@ -2918,7 +2925,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       }
     }
   }
-  const classDecl = widenedSym ? checker.valueDeclarationOf(widenedSym) : undefined;
+  const classDecl0 = widenedSym ? checker.valueDeclarationOf(widenedSym) : undefined;
+  // One class across the declaration/twin boundary: a class declared in a
+  // `.d.ts` whose `.js` twin was compiled maps as the TWIN's class.
+  const classDecl =
+    classDecl0 && ts.isClassDeclaration(classDecl0) && classDecl0.getSourceFile().isDeclarationFile
+      ? (ctx.declTwinClassDecl?.(classDecl0) ?? classDecl0)
+      : classDecl0;
   if (
     classDecl &&
     (ts.isClassDeclaration(classDecl) || ts.isClassExpression(classDecl)) &&
