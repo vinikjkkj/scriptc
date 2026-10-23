@@ -5,13 +5,6 @@ accessors.ts:7:12 - error SC1090: references to 'this' in object literal get/set
     |            ^~~~
   8 |   },
 
-accessors.ts:22:13 - error SC1090: the static member 'version' of class 'Config' (static accessors and initializer-less static fields have no lowering, and Function members like .call/.bind/.prototype have no value form) is not supported yet
-
-  21 | }
-  22 | console.log(Config.version);
-     |             ^~~~~~~~~~~~~~
-  23 | 
-
 accessors.ts:26:3 - error SC1090: auto-accessor fields ('accessor x') are not supported yet
 
   25 | class Auto {

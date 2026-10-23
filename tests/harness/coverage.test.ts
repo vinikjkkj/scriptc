@@ -241,18 +241,16 @@ test("a STRING written to an error's `code` lands in ScrError's slot; anything e
   // which is why `err.name = v` and `err.message = v`, the other two
   // ScrError slots, have always lowered while this one did not.
   //
-  // A PAIR on purpose. The admitted half is three writes (a literal, a
-  // subclass receiver, a string-TYPED non-literal RHS) plus the `name`
-  // control that lowered before this arm existed. The refused half is two
-  // writes the slot cannot represent: a NUMBER (Node keeps the value a
-  // number; the slot is a ScrStr*) and a property with no slot at all.
-  // Asserting the refused half is what makes a later widening of the
-  // general property-write case FAIL this test instead of passing it.
+  // The admitted half is three writes (a literal, a subclass receiver, a
+  // string-TYPED non-literal RHS) plus the `name` control. The two writes
+  // the slot cannot represent (a NUMBER, and a property with no slot at
+  // all) used to stay fenced; own expando properties on error objects now
+  // carry them, so the whole fixture is static. The binary agrees with
+  // Node on both backends (run checked by hand, C and LLVM).
   const out = report(fixture("error-code-slot-write.js"));
-  expect(out).toMatch(/×2\s+assignment to non-variables/);
-  // Before the arm this same fixture reported five.
-  expect(out).not.toMatch(/×5\s/);
-  expect(out).toContain("(83%)");
+  expect(out).not.toMatch(/assignment to non-variables/);
+  expect(out).toContain("(100%)");
+  expect(out).toContain("fully static");
 });
 
 test("a nested `module.exports.<n> =` assigns the global its own nested READ answers from", () => {
@@ -266,16 +264,12 @@ test("a nested `module.exports.<n> =` assigns the global its own nested READ ans
   // "assignment to non-variables" while a nested read of that same member
   // lowered. One storage, two answers.
   //
-  // A PAIR on purpose. The refused half is the members with NO top-level
-  // attachment: no global, no storage, nothing to assign -- family B's
-  // genuine wall, and widening to it needs a first-class mutable export
-  // object. Asserting the refusal makes that widening FAIL this test
-  // instead of quietly passing it.
+  // The members with NO top-level attachment used to be the refused half
+  // (no global, nothing to assign); members written only inside function
+  // bodies now join the export table, so the fixture is fully static.
   const out = report(fixture("cjs-export-member-nested-write/main.cjs"));
-  expect(out).toMatch(/×2\s+assignment to non-variables/);
-  // Before the arm this same fixture reported five: the three admitted
-  // nested writes carried a fence each.
-  expect(out).not.toMatch(/×5\s/);
+  expect(out).not.toMatch(/assignment to non-variables/);
+  expect(out).toContain("fully static");
 });
 
 test("type errors block analysis", () => {

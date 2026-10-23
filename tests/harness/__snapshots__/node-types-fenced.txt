@@ -70,15 +70,6 @@ fenced.ts:35:13 - error SC2020: 'PlatformPath.sep' is typed by @types/node but h
 
   hint: the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-fenced.ts:41:13 - error SC2020: 'URL.hash' is typed by @types/node but has no scriptc lowering yet
-
-  40 | const u = new URL("https://example.com/x?a=1");
-  41 | console.log(u.hash);
-     |             ^~~~~~
-  42 | u.searchParams.get("a");
-
-  hint: protocol, pathname, href, host, hostname, search, searchParams, and toString() are the supported URL members
-
 fenced.ts:48:13 - error SC2020: 'deflateSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
 
   47 | import { deflateSync, gzipSync } from "zlib";
