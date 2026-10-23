@@ -11186,6 +11186,174 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8102-date-format-zones.ts": {
+   "order": [
+    "<repo>/tests/corpus/8102-date-format-zones.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8103-record-of-date.ts": {
+   "order": [
+    "<repo>/tests/corpus/8103-record-of-date.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8104-regex-literal-fresh-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/8104-regex-literal-fresh-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8105-regex-match-index-every-binding.ts": {
+   "order": [
+    "<repo>/tests/corpus/8105-regex-match-index-every-binding.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8110-regex-global-match.ts": {
+   "order": [
+    "<repo>/tests/corpus/8110-regex-global-match.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8111-regex-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/8111-regex-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8112-date-inspect-json.ts": {
+   "order": [
+    "<repo>/tests/corpus/8112-date-inspect-json.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8113-date-tz-history.ts": {
+   "order": [
+    "<repo>/tests/corpus/8113-date-tz-history.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8114-date-tolocale-options.ts": {
+   "order": [
+    "<repo>/tests/corpus/8114-date-tolocale-options.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8115-date-tolocale-dynamic-receivers.ts": {
+   "order": [
+    "<repo>/tests/corpus/8115-date-tolocale-dynamic-receivers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8116-dyn-tolocalestring-number-array.ts": {
+   "order": [
+    "<repo>/tests/corpus/8116-dyn-tolocalestring-number-array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8117-set-of-date-and-date-tojson.ts": {
+   "order": [
+    "<repo>/tests/corpus/8117-set-of-date-and-date-tojson.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8118-split-undefined-captures.ts": {
+   "order": [
+    "<repo>/tests/corpus/8118-split-undefined-captures.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8119-date-tojson-invalid-null.ts": {
+   "order": [
+    "<repo>/tests/corpus/8119-date-tojson-invalid-null.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8120-number-tolocalestring-icu-locales.ts": {
+   "order": [
+    "<repo>/tests/corpus/8120-number-tolocalestring-icu-locales.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8121-dyn-number-tolocalestring-options.ts": {
+   "order": [
+    "<repo>/tests/corpus/8121-dyn-number-tolocalestring-options.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8122-date-locale-styles.ts": {
+   "order": [
+    "<repo>/tests/corpus/8122-date-locale-styles.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8123-date-locale-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/8123-date-locale-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8124-date-locale-hour-cycles.ts": {
+   "order": [
+    "<repo>/tests/corpus/8124-date-locale-hour-cycles.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8125-date-locale-calendars.ts": {
+   "order": [
+    "<repo>/tests/corpus/8125-date-locale-calendars.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8126-date-locale-numbering.ts": {
+   "order": [
+    "<repo>/tests/corpus/8126-date-locale-numbering.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8127-date-locale-zone-names.ts": {
+   "order": [
+    "<repo>/tests/corpus/8127-date-locale-zone-names.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8128-date-locale-extensions.ts": {
+   "order": [
+    "<repo>/tests/corpus/8128-date-locale-extensions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8129-date-locale-computed.ts": {
+   "order": [
+    "<repo>/tests/corpus/8129-date-locale-computed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8130-date-locale-intl-datetimeformat.ts": {
+   "order": [
+    "<repo>/tests/corpus/8130-date-locale-intl-datetimeformat.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8131-date-locale-extreme-dates.ts": {
+   "order": [
+    "<repo>/tests/corpus/8131-date-locale-extreme-dates.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8132-date-locale-host-zone.ts": {
+   "order": [
+    "<repo>/tests/corpus/8132-date-locale-host-zone.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8133-date-locale-dyn-options.ts": {
+   "order": [
+    "<repo>/tests/corpus/8133-date-locale-dyn-options.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/820-multi-decl.ts": {
    "order": [
     "<repo>/tests/corpus/820-multi-decl.ts"
