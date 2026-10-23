@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, isDynPackFunc } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, isDynPackFunc, presenceMaskStores } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -6769,12 +6769,16 @@ class LlEmitter {
           if (bit && shape) {
             const mp = B.tmp();
             B.line(
-              `${mp} = getelementptr inbounds %${mangleRecordStruct(shape.id)}, ptr ${obj.name}, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 ${bit.byte} ; a write is an own key`,
+              `${mp} = getelementptr inbounds %${mangleRecordStruct(shape.id)}, ptr ${obj.name}, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 ${bit.byte} ; ${s.unset === true ? "delete removes the own key" : "a write is an own key"}`,
             );
             const mv = B.tmp();
             B.line(`${mv} = load i8, ptr ${mp}`);
             const mo = B.tmp();
-            B.line(`${mo} = or i8 ${mv}, ${bit.bit}`);
+            B.line(
+              s.unset === true
+                ? `${mo} = and i8 ${mv}, ${(~bit.bit) & 0xff}`
+                : `${mo} = or i8 ${mv}, ${bit.bit}`,
+            );
             B.line(`store i8 ${mo}, ptr ${mp}`);
           }
         }
@@ -8294,9 +8298,47 @@ class LlEmitter {
             // A property the literal WRITES is one of the value's own keys
             // - emit-exprs's row, after its own store so an unwind never
             // leaves a bit set over a slot the literal had not reached.
-            if (e.ownmask) this.emitOwnKeyBitSet(this.recordsById.get(shapeId)!, rec, f.name);
+            if (e.ownmask && (!e.presence || f.own === true)) this.emitOwnKeyBitSet(this.recordsById.get(shapeId)!, rec, f.name);
           } finally {
             this.releaseFrame(this.frames.pop()!);
+          }
+        }
+        // PRESENCE (recordLit.presence) - the C tier's row: constants, after
+        // the last field.
+        if (e.presence && !e.ownmask) {
+          const sh = this.recordsById.get(shapeId)!;
+          const stores = presenceMaskStores(sh, e.fields);
+          if (stores) {
+            for (const st of stores) {
+              const vp = B.tmp();
+              B.line(
+                `${vp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr ${rec}, i64 0, i32 ${ownMaskSlotIndex(sh)}, i64 ${st.byte}${st.byte === 0 ? " ; literal: the bits are the own keys" : ""}`,
+              );
+              B.line(`store i8 ${st.value}, ptr ${vp}`);
+            }
+            // The bits a width copy decides at run time (`ownIf`).
+            for (const f of e.fields) {
+              if (f.ownIf === undefined || f.drop || f.overflow) continue;
+              const bit = ownMaskKeyBit(sh, f.name);
+              if (!bit) continue;
+              this.frames.push([]);
+              try {
+                const c = this.emitExpr(f.ownIf);
+                const mp = B.tmp();
+                B.line(
+                  `${mp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr ${rec}, i64 0, i32 ${ownMaskSlotIndex(sh)}, i64 ${bit.byte} ; own key ${f.name}: own in the source`,
+                );
+                const mv = B.tmp();
+                B.line(`${mv} = load i8, ptr ${mp}`);
+                const sel = B.tmp();
+                B.line(`${sel} = select i1 ${c.name}, i8 ${bit.bit}, i8 0`);
+                const mo = B.tmp();
+                B.line(`${mo} = or i8 ${mv}, ${sel}`);
+                B.line(`store i8 ${mo}, ptr ${mp}`);
+              } finally {
+                this.releaseFrame(this.frames.pop()!);
+              }
+            }
           }
         }
         // The hidden per-instance toString slot, written LAST (it is not a

@@ -3267,8 +3267,33 @@ export class Lowerer {
         ),
       );
     }
+    // THE OPTIONAL-MEMBER ARM. A shape with an undefined-armed member arms
+    // too, for a different reason than a crossing does: `{a?: T}` and
+    // `{a: T | undefined}` intern to ONE shape, so the slot's undefined arm
+    // was the only presence signal and "written undefined" and "never
+    // written" were one value. Node distinguishes them on every own-key
+    // surface (`{ c: 3 }` against `{ a: undefined, c: 3 }`), and a union of
+    // object literals with disjoint fields is exactly where the merged
+    // shape makes the difference visible. The literals that build such a
+    // shape establish the mask (recordLit.presence), a write sets the bit,
+    // `delete` clears it, and every surface that already asked the own-key
+    // question (recordKeyPresent) now gets the instance's answer; an
+    // instance no literal wrote (byte 0 clear) keeps the undefined-arm rule.
+    // No source-prototype slot: nothing crossed, so there is no chain.
+    const optionalOnly = new Set<string>();
     for (const r of records) {
-      if (!armed.has(r.id)) continue;
+      if (armed.has(r.id) || !maskable(r)) continue;
+      const internal = internalSlotFields(r);
+      if (
+        r.fields.some(
+          (f) => !internal.includes(f.name) && isUndefinedArmedUnion(f.type, (u) => this.unions.get(u)),
+        )
+      ) {
+        optionalOnly.add(r.id);
+      }
+    }
+    for (const r of records) {
+      if (!armed.has(r.id) && !optionalOnly.has(r.id)) continue;
       r.ownmask = true;
       // The hidden SOURCE [[Prototype]] slot arms with the mask and for the
       // same reason: it is the mask that lets the record→dyn walker demote
@@ -3276,8 +3301,9 @@ export class Lowerer {
       // demotion with nowhere to demote INTO had to synthesise a fresh
       // prototype per crossing. One arming, one question, one place a
       // crossing's facts live.
-      r.srcproto = true;
+      if (!optionalOnly.has(r.id)) r.srcproto = true;
     }
+    for (const id of optionalOnly) armed.add(id);
     // Re-spell every registered presence guard over an ARMED shape: the
     // undefined-arm tag test becomes the own-key question, which is the
     // same test on an instance no crossing wrote and the SOURCE object's
@@ -3291,6 +3317,13 @@ export class Lowerer {
       // ownMaskKeyBit's rule, asked here in the frontend's spelling.
       const gShape = byId.get(g.shapeId);
       if (gShape && internalSlotFields(gShape).includes(g.field)) continue;
+      // A shape armed ONLY for its optional members has nothing to inherit,
+      // so a REQUIRED member is own on every instance and keeps the plain
+      // (guard-free) spelling it has.
+      if (optionalOnly.has(g.shapeId)) {
+        const gf = gShape?.fields.find((x) => x.name === g.field);
+        if (!gf || !isUndefinedArmedUnion(gf.type, (u) => this.unions.get(u))) continue;
+      }
       applyOwnKey(g.patch, {
         kind: "recordKeyPresent",
         obj: g.obj,

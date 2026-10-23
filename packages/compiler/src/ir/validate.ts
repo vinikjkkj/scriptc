@@ -3586,6 +3586,11 @@ function validateFunction(
           const ft = want.get(f.name);
           if (!ft) err(`shape ${shape.id} has no field "${f.name}"`, e.loc);
           else expectType(f.value, ft, `recordLit field "${f.name}"`);
+          if (f.ownIf !== undefined) {
+            checkExpr(f.ownIf);
+            if (f.ownIf.type.kind !== "bool") err(`recordLit ownIf of "${f.name}" must be bool, got ${f.ownIf.type.kind}`, e.loc);
+            if (f.own === true) err(`recordLit field "${f.name}" is both own and ownIf`, e.loc);
+          }
         }
         if (e.ownmask === true) {
           // The COMPLETED literal (recordWidthHelper's required-absent

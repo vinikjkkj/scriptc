@@ -3340,8 +3340,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
                 d.push(`          scr_dyn_obj_set_lit(sc_proto, ${keyLit}, ${keyLen}, sc_fv);`);
                 d.push(`        }`);
               } else {
-                d.push(`        if (sc_proto == NULL) sc_proto = scr_dyn_new_obj(); /* inherited members */`);
-                d.push(`        scr_dyn_obj_set_lit(sc_proto, ${keyLit}, ${keyLen}, sc_fv);`);
+                // A shape armed for OPTIONAL members only (no crossing built
+                // it, so no source chain exists) has no inherited members to
+                // demote: a value in the slot under a clear bit is a member
+                // whose bit nobody set, and demoting it would lose the key.
+                // It is own.
+                d.push(`        scr_dyn_obj_set_lit(d, ${keyLit}, ${keyLen}, sc_fv); /* no chain: a slot value is own */`);
               }
               d.push(`      } else {`);
               d.push(`        scr_dyn_release(sc_fv); /* absent on the source object entirely */`);

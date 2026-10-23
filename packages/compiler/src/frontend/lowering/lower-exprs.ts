@@ -11041,7 +11041,11 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // spread). Only those carry evaluation a spread's field-by-field copy
     // could drop or step over — spread-contributed entries are reads and
     // pure re-tag helper calls by construction.
-    const fields: { name: string; value: IrExpr; overflow?: true; drop?: true; expl?: true }[] = [];
+    const fields: { name: string; value: IrExpr; overflow?: true; drop?: true; expl?: true; own?: true; ownIf?: IrExpr }[] = [];
+    // Spread properties whose copied members carry their presence (see the
+    // literal's `presence` below), and whether every one of them did.
+    const presenceSpreads = new Set<ts.Node>();
+    let presenceOk = true;
     // Hoisted spread sources, in source order. A COMPUTED source (a call,
     // an await, an indexed read) is re-emitted once per field it
     // contributes, so it must be evaluated exactly ONCE first and the
@@ -12027,6 +12031,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       shape = L.shapes.get(narrowedId)!;
     }
     let completedRequired = false;
+    const completionNames = new Set<string>();
     if (fields.filter((f) => !f.overflow).length !== shape.fields.length) {
       const provided = new Set(fields.filter((f) => !f.overflow).map((f) => f.name));
       for (const f of shape.fields) {
@@ -12038,6 +12043,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         const absent = L.wrappedUndefined(f.type, loc) ?? (f.type.kind === "dyn" ? dynUndefinedExpr(loc) : null);
         if (absent) {
           fields.push({ name: f.name, value: absent });
+          completionNames.add(f.name);
           continue;
         }
         // A REQUIRED field with nothing to complete it. tsc rejects the
@@ -12075,10 +12081,30 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       }
     }
     if (completedRequired) L.requiredAbsentTargets.add(shape.id);
+    // PRESENCE. Every property of a literal with no spread is written by
+    // the source, so the literal can say which keys it owns: an entry the
+    // source wrote is `own`, an entry the completions above (or a later
+    // shape merge) added is not. Only meaningful once the shape arms the
+    // own-key mask (armOwnMasks), and ignored by the backends until then.
+    // A spread contributes keys at run time, so such a literal keeps the
+    // undefined-arm rule for the members it copies.
+    const presence =
+      presenceOk &&
+      expr.properties.every((p) => !ts.isSpreadAssignment(p) || presenceSpreads.has(p)) &&
+      // a spread's own entries must all have decided: an entry with neither
+      // `own`, `ownIf` nor `expl` would be a COMPLETION or a desugar
+      // product whose presence nobody stated, and a clear bit over a real
+      // value loses the key.
+      fields.every(
+        (f) => f.expl === true || f.own === true || f.ownIf !== undefined || f.overflow === true || f.drop === true || completionNames.has(f.name),
+      );
     const lit: IrExpr = {
       kind: "recordLit",
-      fields,
+      fields: presence
+        ? fields.map((f) => (f.expl === true && !f.overflow && !f.drop ? { ...f, own: true as const } : f))
+        : fields,
       ...(completedRequired ? { ownmask: true as const } : {}),
+      ...(presence ? { presence: true as const } : {}),
       type,
       loc,
     };
