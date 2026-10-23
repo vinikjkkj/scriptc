@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesBigInt, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, isDynPackFunc } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesBigInt, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, isDynPackFunc } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -2027,6 +2027,7 @@ class LlEmitter {
     // Regex-surface programs stamp the RegExp handle-dispatch ops, gated
     // on the same moduleUsesRegex switch cc.ts links scr_regex.c by.
     const usesRegex = moduleUsesRegex(this.mod);
+    const usesRegexExec = moduleUsesRegexExecDyn(this.mod);
     const usesDate = moduleUsesDateDyn(this.mod);
     const usesBigDyn = moduleUsesBigInt(this.mod);
     const usesSymbolDyn = moduleUsesSymbol(this.mod);
@@ -2110,6 +2111,7 @@ class LlEmitter {
     if (embedsZlib) this.declare(`declare void @scr_zlib_island_install()`);
     if (embedsHttpClient) this.declare(`declare void @scr_net_island_install()`);
     if (usesRegex) this.declare(`declare void @scr_regex_dyn_install()`);
+    if (usesRegexExec) this.declare(`declare void @scr_regex_dyn_exec_install()`);
     if (usesDate) this.declare(`declare void @scr_date_dyn_install()`);
     if (usesBigDyn) this.declare(`declare void @scr_big_dyn_install()`);
     if (usesSymbolDyn) this.declare(`declare void @scr_sym_dyn_install()`);
@@ -2586,6 +2588,9 @@ class LlEmitter {
       ...(usesNet ? [`  call void @scr_net_install()`, `  call void @scr_net_dyn_install()`] : []),
       ...(usesHttp ? [`  call void @scr_http_dyn_install()`] : []),
       ...(usesRegex ? [`  call void @scr_regex_dyn_install()`] : []),
+      // The C twin's row: exec on a dynamic regex, for a program that links
+      // both the regex unit and the dispatch unit.
+      ...(usesRegexExec ? [`  call void @scr_regex_dyn_exec_install()`] : []),
       ...(usesDate ? [`  call void @scr_date_dyn_install()`] : []),
       // The C twin's row: the bigint unit's dyn-core entry pointer.
       ...(usesBigDyn ? [`  call void @scr_big_dyn_install()`] : []),
@@ -10786,6 +10791,13 @@ class LlEmitter {
           B.line(`${len} = zext i32 ${lenw} to i64`);
           B.line(`${inR} = icmp ugt i64 ${len}, ${e.key}`);
           B.line(`store i1 ${inR}, ptr ${slot}`);
+        } else {
+          // any other name: the array's own NAMED properties (an exec
+          // result's index/input/groups, an expando) — the C twin's arm
+          this.declare(`declare zeroext i1 @scr_dyn_arr_has_extra(ptr, ptr, i64)`);
+          const hx = B.tmp();
+          B.line(`${hx} = call zeroext i1 @scr_dyn_arr_has_extra(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${keyBytes})`);
+          B.line(`store i1 ${hx}, ptr ${slot}`);
         }
         B.br(lj);
         // A FUNCTION receiver carries own properties (the closure's

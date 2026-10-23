@@ -2996,7 +2996,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             ? "true"
             : /^(0|[1-9][0-9]*)$/.test(e.key) && Number(e.key) <= Number.MAX_SAFE_INTEGER
               ? `${d.name}->v.arr.len > ${e.key}`
-              : "false";
+              // any other name: the array's own NAMED properties (an exec
+              // result's index/input/groups, an expando)
+              : `scr_dyn_arr_has_extra(${d.name}, ${keyLit}, ${keyBytes.length})`;
         // A FUNCTION receiver carries own properties (the closure's
         // property table — assignment and defineProperties both land
         // there), so `in` answers from the same place the keyed READ

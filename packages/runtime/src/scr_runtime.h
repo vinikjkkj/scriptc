@@ -1975,6 +1975,10 @@ ScrArr *scr_regex_replace_rows_into(ScrStr *s, ScrRegex *re, ScrArr *indices);
  * pattern+flags pair here (no lastIndex state is modeled), so boxing it
  * is a retain and nothing else. */
 void scr_regex_dyn_install(void);
+/* Installs RegExp.prototype.exec for dynamic receivers (scr_regex.c): emitted
+ * into main() only for a program that links the regex unit AND the dyn
+ * dispatch unit, the one caller. */
+void scr_regex_dyn_exec_install(void);
 
 /* The Symbol handle-dispatch ops (SCR_DYNH_SYMBOL), registered by the emitted
  * main() exactly when scr_symbol.c is linked (moduleUsesSymbol, the switch
@@ -4771,6 +4775,11 @@ typedef struct ScrDynObjExt {
   const char *cname; /* static literal, never owned */
   ScrDyn *hidden;    /* owned; the own NON-ENUMERABLE / accessor table */
   ScrDyn *slots;     /* owned; scriptc's internal-slot table */
+  /* ARRAY receivers only: the own ENUMERABLE named properties of a dyn
+   * array (an OBJ dyn, owned). `exec`'s result is the motivating owner —
+   * `index`, `input`, `groups` (and `indices`) ride a real array — but any
+   * `a.k = v` lands here; indices and `length` stay in the item vector. */
+  ScrDyn *extras;
 } ScrDynObjExt;
 
 /* The all-NULL instance every read of an absent ext answers from. */
@@ -4830,7 +4839,15 @@ struct ScrDyn {
       * zapo's live maxima at 800 elements and 1,024 of capacity; the
       * ceiling is enforced rather than assumed, at the two growth sites
       * in scr_json.c, which refuse loudly past SCR_DYN_LEN_MAX. */
-    struct { uint32_t len; uint32_t cap; ScrDyn **items; } arr;   /* owned */
+    struct {
+      uint32_t len; uint32_t cap; ScrDyn **items;
+      /* The array's named-property table, behind one pointer, at the SAME
+       * offset the OBJ arm keeps its own ext (so scr_dyn_ext() reads either
+       * kind). NULL for every array that has no named property, which is
+       * every array but an exec/match result and the rare expando. The arm
+       * stays 24 bytes inside the union's 32. */
+      ScrDynObjExt *ext;
+    } arr;   /* owned */
     /* SCR_DYN_OBJ: the own DATA members (owned), plus the three fields
      * that make the object a member of a PROTOTYPE CHAIN and a carrier of
      * ACCESSOR properties.
@@ -5698,6 +5715,13 @@ ScrDyn *scr_dyn_new_bool(bool b);
 ScrDyn *scr_dyn_new_num(double n);
 ScrDyn *scr_dyn_new_str(ScrStr *s);
 ScrDyn *scr_dyn_new_arr(void);
+/* An array's own NAMED properties (ext->extras; see ScrDynObjExt): the
+ * extras object or NULL; a keyed read (+1 or NULL); a keyed write (value
+ * MOVED). exec/match results ride these. */
+ScrDyn *scr_dyn_arr_extras(const ScrDyn *a);
+ScrDyn *scr_dyn_arr_key_get(const ScrDyn *d, const ScrStr *k);
+void scr_dyn_arr_extra_set(ScrDyn *a, const char *key, size_t key_len, ScrDyn *value);
+bool scr_dyn_arr_has_extra(const ScrDyn *a, const char *key, size_t key_len);
 /* `new Array(n)` — the spec's ArrayCreate: n slots that read undefined (the
  * holes-are-undefined stance scr_dyn_key_set's index growth already took).
  * An n that is not a valid array length (NaN, fractional, negative, >= 2^32)

@@ -4315,6 +4315,20 @@ export class LlDyn {
         B.line(`call void @scr_str_release(ptr ${ch})`);
         B.terminate(`ret ptr ${r2}`);
         B.startBlock(lMiss);
+        // An ARRAY's own NAMED properties (an exec result's index/input/
+        // groups, or any `a.k = v`): the C walker's arm, after the element
+        // reads and before the intrinsic-method tail. A string answers NULL.
+        host.declare(`declare ptr @scr_dyn_arr_key_get(ptr, ptr)`);
+        const xr = B.tmp();
+        B.line(`${xr} = call ptr @scr_dyn_arr_key_get(ptr %d, ptr %k)`);
+        const hasXr = B.tmp();
+        B.line(`${hasXr} = icmp ne ptr ${xr}, null`);
+        const lXr = B.newLabel("kg.ax");
+        const lNoXr = B.newLabel("kg.an");
+        B.condBr(hasXr, lXr, lNoXr);
+        B.startBlock(lXr);
+        B.terminate(`ret ptr ${xr}`);
+        B.startBlock(lNoXr);
         intrinsicOrUndef();
       }
       B.startBlock(lNext);

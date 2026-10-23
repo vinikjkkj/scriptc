@@ -1846,6 +1846,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`      }`);
     d.push(`    }`);
     d.push(`  }`);
+    /* An ARRAY's own NAMED properties: an exec/match result's `index`,
+     * `input` and `groups`, or any `a.k = v` (the extras table in
+     * scr_json.c). After the element/length reads above, and before the
+     * intrinsic-method tail, which only answers a name the array does NOT
+     * own. */
+    d.push(`  if (d->kind == SCR_DYN_ARR) {`);
+    d.push(`    ScrDyn *xr = scr_dyn_arr_key_get(d, k);`);
+    d.push(`    if (xr != NULL) return xr;`);
+    d.push(`  }`);
     /* The kinds whose PROTOTYPE this runtime models as dispatch arms
      * rather than as a stored chain — a string's trim, an array's push, a
      * number's toString, a promise's then. Each read `undefined` where

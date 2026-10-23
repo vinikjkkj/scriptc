@@ -638,6 +638,20 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
       for (size_t i = 0; i < a->v.arr.len; i++) {
         if (!scr_assert_dyn_deep_eq(a->v.arr.items[i], b->v.arr.items[i])) return false;
       }
+      /* An array's own named properties are part of what deepStrictEqual
+       * compares (an exec result's index/input/groups): same set of keys,
+       * each pair deep-equal. */
+      {
+        const ScrDyn *xa = scr_dyn_arr_extras(a), *xb = scr_dyn_arr_extras(b);
+        const size_t na = xa != NULL ? xa->v.obj.len : 0;
+        const size_t nb = xb != NULL ? xb->v.obj.len : 0;
+        if (na != nb) return false;
+        for (size_t i = 0; i < na; i++) {
+          const ScrDynEntry *ent = &xa->v.obj.entries[i];
+          ScrDyn *bv = scr_dyn_obj_get(xb, ent->key, ent->key_len);
+          if (bv == NULL || !scr_assert_dyn_deep_eq(ent->value, bv)) return false;
+        }
+      }
       return true;
     }
     case SCR_DYN_OBJ: {

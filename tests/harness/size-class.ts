@@ -2358,7 +2358,16 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
  * two NULL-guarded drops in scr_error.c, the class-table property read/write pair (scr_cls_props_read/set) in
  * scr_dyn_invoke.c, and the Buffer.from(dyn) / checked-Uint8Array / crypto-input helpers in scr_json.c. The URL setters and
  * stream done-packers are in gated units and are not in this figure. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 132_406 : null;
+/* RE-RECORDED 2026-10-23 (dynbuiltins): 132,406 -> 132,806 (+400; the file figure above did not move: 214,528 against
+ * 212,992 is inside its page). Same cross build (SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu, --backend c) over the
+ * test's own two programs, measured against main b547b323a built the same way: regex .text 132,486 -> 132,806 (+320,
+ * main itself already 80 over the old record), file 213,504 -> 214,528; the regex-free program 72,790 -> 72,822 (+32) and
+ * 117,760 -> 118,272, inside both of its anchors. What the bytes bought, all in always-linked units the regex program
+ * carries: the dyn string constructor's two-load test for the TextEncoder/TextDecoder strings, the named-property table's
+ * release/trace/recycle arms on dyn arrays, and the ScrDynObjExt slot they hang off. Everything else in this series is
+ * gated by link: the codec section links only into a program that evaluates `new TextEncoder()`, exec on a dynamic regex
+ * installs only into a program that links the dyn dispatch unit (an unconditional install measured +12,624 .text here). */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 132_806 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and

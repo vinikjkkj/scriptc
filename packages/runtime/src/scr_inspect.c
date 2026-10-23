@@ -890,7 +890,14 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
     case SCR_DYN_STR:
       return scr_insp_str(d->v.str);
     case SCR_DYN_ARR: {
-      if (d->v.arr.len == 0) return scr_str_new("[]", 2);
+      /* An array's own NAMED properties print after its elements, as `key:
+       * value` entries (an exec result: `[ 'aa', index: 1, input: 'caab',
+       * groups: undefined ]`). They are part of the same entry list, which
+       * is also what decides the grid grouping and the "... more items"
+       * tail's exclusion, exactly as Node's formatList appends them. */
+      const ScrDyn *xs = scr_dyn_arr_extras(d);
+      const size_t nx = xs != NULL ? xs->v.obj.len : 0;
+      if (d->v.arr.len == 0 && nx == 0) return scr_str_new("[]", 2);
       if (recurse > depth) return scr_str_new("[Array]", 7);
       scr_insp_begin(recurse + 1);
       size_t shown = d->v.arr.len < 100 ? d->v.arr.len : 100;
@@ -906,10 +913,25 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_insp_entry(m, d->v.arr.items[100]->kind == SCR_DYN_NUM);
         scr_str_release(m);
       }
+      for (size_t i = 0; i < nx; i++) {
+        const ScrDynEntry *ent = &xs->v.obj.entries[i];
+        ScrStr *val = scr_insp_dyn(ent->value, recurse + 1, depth);
+        InspBuf eb = {0};
+        insp_key_into(&eb, ent->key, ent->key_len);
+        ib_cstr(&eb, ": ");
+        ib_bytes(&eb, val->data, val->len);
+        scr_str_release(val);
+        ScrStr *entry = ib_take(&eb);
+        scr_insp_entry(entry, false);
+        scr_str_release(entry);
+      }
       ScrStr *base = scr_str_new("", 0);
       ScrStr *b0 = scr_str_new("[", 1);
       ScrStr *b1 = scr_str_new("]", 1);
-      ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, true, more);
+      /* Node drops the LAST entry from the grid whenever the entry list
+       * outgrew maxArrayLength (100), which with named properties appended
+       * is no longer the "more items" line. */
+      ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, true, shown + (more ? 1 : 0) + nx > 100);
       scr_str_release(base);
       scr_str_release(b0);
       scr_str_release(b1);

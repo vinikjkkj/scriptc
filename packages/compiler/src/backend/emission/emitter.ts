@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesSymbol, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn } from "../../ir/nodes.js";
+import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
@@ -1855,6 +1855,9 @@ export class CEmitter {
       // on — so the call and the symbol appear together or not at all
       // (a program that boxes a regex necessarily contains one).
       ...(moduleUsesRegex(this.mod) ? [`  scr_regex_dyn_install();`] : []),
+      // exec on a dynamic regex: only a program that links the dispatch unit
+      // can call it (see moduleUsesRegexExecDyn), so only it installs the body.
+      ...(moduleUsesRegexExecDyn(this.mod) ? [`  scr_regex_dyn_exec_install();`] : []),
       // Date-holding programs stamp the Date handle ops (scr_date.c is linked
       // on the same moduleUsesDate switch) so a Date can cross into the
       // checked-dynamic tree by reference.

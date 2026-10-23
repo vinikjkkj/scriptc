@@ -126,6 +126,7 @@ static int scr_lre_flags(const ScrStr *flags) {
       case 'u': mask |= LRE_FLAG_UNICODE; break;
       case 'v': mask |= LRE_FLAG_UNICODE_SETS; break;
       case 'y': mask |= LRE_FLAG_STICKY; break;
+      case 'd': mask |= LRE_FLAG_INDICES; break; /* recorded only: exec builds `indices` itself */
       default:
         scr_trap_fmt("scriptc: internal error: unexpected regex flag '%c'\n",
                      flags->data[i]);
@@ -1160,7 +1161,8 @@ void scr_assert_shape_re(int key, ScrRegex *re) {
  * instead of refusing it. Taking 'd' means taking the whole `indices`
  * surface. */
 ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
-  static const char kFlagAlphabet[] = "gimsuvy";
+  /* 'd' is LAST so the u/v bit positions below keep their indices. */
+  static const char kFlagAlphabet[] = "gimsuvyd";
   static const char kFlagAlphabetOrder[] = "dgimsuvy"; /* the GETTER order */
   unsigned seen = 0;
   bool bad_flags = false;
@@ -1417,6 +1419,127 @@ static ScrDyn *scr_regex_dynh_to_string(const ScrRegex *re) {
   return d;
 }
 
+/* ── RegExp.prototype.exec on a dynamic receiver ───────────────────────
+ *
+ * The static `exec` answers the honest `string[]` slice (nonparticipating
+ * captures read "", and `.index` / `.input` / `.groups` are fenced per
+ * member); a dynamic receiver has no static type to fence against, so its
+ * answer is the REAL result: an array whose elements are the match and its
+ * captures (a capture that did not participate is `undefined`) and whose
+ * own enumerable properties are `index`, `input`, `groups` and — under /d —
+ * `indices`, in that order (RegExpBuiltinExec steps 33-38, ES2025). The
+ * array carries them in its named-property table (scr_dyn_arr_extra_set),
+ * which is what a dyn array could not do before.
+ *
+ * The match itself is scr_regex_run — the SAME routine test and the static
+ * exec use, so lastIndex (read as ToLength for /g and /y, advanced on a
+ * hit, reset on a miss) cannot differ between the spellings. */
+
+/* A UTF-16 slice [start, end) of the subject as a dyn string. */
+static ScrDyn *scr_regex_dyn_slice(const uint16_t *u, int start, int end) {
+  ScrStr *s = scr_str_from_utf16(u, start, end);
+  ScrDyn *d = scr_dyn_new_str(s);
+  scr_str_release(s);
+  return d;
+}
+
+static ScrDyn *scr_regex_dyn_pair(int start, int end) {
+  ScrDyn *p = scr_dyn_new_arr();
+  scr_dyn_arr_push(p, scr_dyn_new_num((double)start));
+  scr_dyn_arr_push(p, scr_dyn_new_num((double)end));
+  return p;
+}
+
+/* The `groups` object: null-prototype, one property per NAMED capture in
+ * group order, undefined for a group that did not participate. A name that
+ * appears in several alternatives (ES2025 duplicate named groups) holds the
+ * participating one. `as_indices` fills it with [start, end] pairs instead
+ * of substrings. Answers undefined when the pattern has no named group. */
+static ScrDyn *scr_regex_dyn_groups(const uint8_t *bc, const uint16_t *u, uint8_t **capture,
+                                    int capture_count, bool as_indices) {
+  if (!(lre_get_flags(bc) & LRE_FLAG_NAMED_GROUPS)) return scr_dyn_retain(scr_dyn_undefined());
+  const uint8_t *ubase = (const uint8_t *)u;
+  ScrDyn *g = scr_dyn_new_obj();
+  g->null_proto = true;
+  const char *p = lre_get_groupnames(bc);
+  for (int k = 1; k < capture_count; k++) {
+    const size_t glen = strlen(p);
+    if (glen > 0) {
+      const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
+      const bool part = cs != NULL && ce != NULL;
+      ScrDyn *existing = scr_dyn_obj_get(g, p, glen); /* borrowed */
+      if (existing == NULL || (existing->kind == SCR_DYN_UNDEF && part)) {
+        const int s0 = part ? (int)((cs - ubase) >> 1) : 0;
+        const int e0 = part ? (int)((ce - ubase) >> 1) : 0;
+        ScrDyn *v = !part ? scr_dyn_retain(scr_dyn_undefined())
+                          : as_indices ? scr_regex_dyn_pair(s0, e0) : scr_regex_dyn_slice(u, s0, e0);
+        scr_dyn_obj_set(g, p, glen, v); /* ownership moves; overwrites in place */
+      }
+    }
+    p += glen + LRE_GROUP_NAME_TRAILER_LEN;
+  }
+  return g;
+}
+
+static ScrDyn *scr_regex_dynh_exec(ScrRegex *re, ScrDyn *const *args, size_t argc) {
+  /* ToString(argument): a missing argument is the string "undefined". */
+  ScrStr *s = scr_dyn_string_coerce_js(argc > 0 ? args[0] : scr_dyn_undefined());
+  if (s == NULL) return NULL; /* ToString threw: pending */
+  uint8_t *bc = scr_regex_bc(re);
+  int len;
+  uint16_t *u = scr_to_utf16(s, &len);
+  uint8_t **capture = scr_capture_alloc(bc);
+  const int rc = scr_regex_run(re, bc, u, len, capture);
+  ScrDyn *out;
+  if (rc != 1) {
+    out = scr_dyn_new_null();
+  } else {
+    const uint8_t *ubase = (const uint8_t *)u;
+    const int count = lre_get_capture_count(bc);
+    out = scr_dyn_new_arr();
+    for (int k = 0; k < count; k++) {
+      const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
+      if (cs == NULL || ce == NULL) {
+        scr_dyn_arr_push(out, scr_dyn_retain(scr_dyn_undefined()));
+      } else {
+        scr_dyn_arr_push(out, scr_regex_dyn_slice(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
+      }
+    }
+    scr_dyn_arr_extra_set(out, "index", 5, scr_dyn_new_num((double)((capture[0] - ubase) >> 1)));
+    ScrDyn *input = scr_dyn_new_str(s);
+    scr_dyn_arr_extra_set(out, "input", 5, input);
+    scr_dyn_arr_extra_set(out, "groups", 6, scr_regex_dyn_groups(bc, u, capture, count, false));
+    if (scr_regex_dynh_has_flag(re, 'd')) {
+      ScrDyn *ind = scr_dyn_new_arr();
+      for (int k = 0; k < count; k++) {
+        const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
+        if (cs == NULL || ce == NULL) {
+          scr_dyn_arr_push(ind, scr_dyn_retain(scr_dyn_undefined()));
+        } else {
+          scr_dyn_arr_push(ind, scr_regex_dyn_pair((int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
+        }
+      }
+      scr_dyn_arr_extra_set(ind, "groups", 6, scr_regex_dyn_groups(bc, u, capture, count, true));
+      scr_dyn_arr_extra_set(out, "indices", 7, ind);
+    }
+  }
+  free(capture);
+  free(u);
+  scr_str_release(s);
+  return out;
+}
+
+/* exec is reachable ONLY through the dyn dispatch unit (scr_dyn_invoke.c's
+ * handle arm), so its body — the array and object machinery the result is
+ * built from — is pulled in by an install the emitted main() performs only
+ * for a program that links both the regex unit and the dispatch unit. Naming
+ * scr_regex_dynh_exec straight from the ops' invoke would pin all of it into
+ * every regex program (measured +12.6 KB .text in a plain static one). */
+/* Deliberately NOT static: a file-local pointer with one constant store lets the
+ * optimizer turn it into a flag and a direct call, which links exec back in. */
+ScrDyn *(*scr_regex_exec_dyn_fn)(ScrRegex *re, ScrDyn *const *args, size_t argc) = NULL;
+void scr_regex_dyn_exec_install(void) { scr_regex_exec_dyn_fn = &scr_regex_dynh_exec; }
+
 static ScrDyn *scr_regex_dynh_invoke(void *h, ScrDyn *self, const char *method,
                                      ScrDyn *const *args, size_t argc, const char *what) {
   ScrRegex *re = (ScrRegex *)h;
@@ -1431,21 +1554,27 @@ static ScrDyn *scr_regex_dynh_invoke(void *h, ScrDyn *self, const char *method,
     return scr_dyn_new_bool(r);
   }
   if (strcmp(method, "toString") == 0) return scr_regex_dynh_to_string(re);
-  {
-    /* Real members of the class whose dynamic answer would have to be
-     * approximate — loud, not silent. */
-    static const char *const known[] = { "exec", "compile", NULL };
-    for (size_t i = 0; known[i]; i++) {
-      if (strcmp(method, known[i]) == 0) {
-        scr_regex_dynh_unsupported(
-            method, strcmp(known[i], "exec") == 0
-                        ? "its result is an array carrying index/input/groups, which the "
-                          "checked-dynamic tree's arrays do not carry (use test, or match "
-                          "statically)"
-                        : NULL);
-        return NULL;
-      }
+  if (strcmp(method, "exec") == 0) {
+    if (scr_regex_exec_dyn_fn == NULL) {
+      /* Unreachable when the link gate held: only the dispatch unit calls
+       * this, and a program that links it installs exec. A real answer
+       * rather than an assert, so a gate that ever misses fails loudly. */
+      static const char msg[] =
+          "internal error: RegExp.prototype.exec on a dynamic receiver reached a binary without the dispatch unit";
+      scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+      return NULL;
     }
+    return scr_regex_exec_dyn_fn(re, args, argc);
+  }
+  if (strcmp(method, "compile") == 0) {
+    /* RegExp.prototype.compile re-initializes the regex IN PLACE. A regex
+     * literal without g/y is one interned immortal static shared by every
+     * evaluation of that literal (and of any equal one), so mutating the
+     * receiver would change every other holder — a wrong answer where this
+     * refuses. The one member of the class left loud, and for a
+     * representation reason, not a missing algorithm. */
+    scr_regex_dynh_unsupported(method, "a regex literal is one shared immutable value here, so re-initializing it in place would change every other evaluation of the same literal");
+    return NULL;
   }
   {
     char msg[160];
@@ -1479,6 +1608,7 @@ static ScrDyn *scr_regex_dynh_get(void *h, const char *key, size_t key_len) {
   if (strcmp(key, "unicode") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'u'));
   if (strcmp(key, "sticky") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'y'));
   if (strcmp(key, "hasIndices") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'd'));
+  if (strcmp(key, "unicodeSets") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'v'));
   if (strcmp(key, "lastIndex") == 0) return scr_dyn_new_num(scr_regex_get_last_index(re));
   return NULL; /* not a modeled property — the caller answers undefined */
 }
