@@ -11912,6 +11912,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8505-js-arrow-const-read-from-a-function.js": {
+   "order": [
+    "<repo>/tests/corpus/8505-js-arrow-const-read-from-a-function.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
