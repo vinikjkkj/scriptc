@@ -1627,6 +1627,21 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     return false;
   }
 
+  /** True when some function arm of `t` has a parameter with no annotation
+   * in authored JS (the shape types.ts maps to a checked-dynamic slot). */
+  function callbackHasUntypedJsParam(L: Lowerer, t: ts.Type): boolean {
+    const arms: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
+    for (const a of arms) {
+      for (const sig of L.checker.getCallSignatures(a)) {
+        for (const prm of sig.getParameters()) {
+          const d = L.checker.valueDeclarationOf(prm);
+          if (d !== undefined && ts.isParameter(d) && d.type === undefined && isJsSourceFile(d.getSourceFile())) return true;
+        }
+      }
+    }
+    return false;
+  }
+
   function isDeferredCallbackField(L: Lowerer, site: ts.Node, t: ts.Type): boolean {
     const arms: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
     let sawFn = false;
@@ -1721,6 +1736,13 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     // through unchanged to the fences below, so the method-table refusal
     // beneath this one keeps every site it had.
     if (mapped === null && isDeferredCallbackField(L, site, t)) return DYN;
+    // The same field when its callback has an UNTYPED JS parameter: that
+    // function type maps (an untyped parameter is a checked-dynamic slot),
+    // so `mapped` is a func or an undefined-armed func union rather than
+    // null. The union has no call form (`on.cb(1)` over `fn | undefined`),
+    // while the box answers undefined before the write and dynCall's
+    // catchable TypeError when the write never ran, exactly as above.
+    if (mapped !== null && isDeferredCallbackField(L, site, t) && callbackHasUntypedJsParam(L, t)) return DYN;
     if (!mapped || mapped.kind === "void") return null;
     if (mapped.kind === "dyn") return mapped;
     const byKey = new Map<string, IrType>();
