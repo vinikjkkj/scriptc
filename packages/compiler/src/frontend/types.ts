@@ -2326,7 +2326,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   }
   // A declaration-file type whose values are instances of a class the
   // build COMPILES (the code half of the same module): it IS that class.
-  {
+  // INSTANCE side only: the witness is keyed by the class symbol, which the
+  // static side (`typeof C`, a type with construct signatures) shares, and
+  // answering an object there types the class VALUE as an instance (`new
+  // rs.C()` then refuses). The static side maps as the twin's classval in the
+  // class arm below (declTwinClassDecl), which is the value half of the same
+  // pairing: the witness owns the instance TYPE, declTwinClassDecl owns what
+  // the witness cannot say (the class value) and the symbol re-point.
+  if (checker.getConstructSignatures(widened).length === 0) {
     const witness = ctx.dtsWitnessClass?.(widened);
     if (witness !== undefined && witness !== null) return { kind: "object", className: classNamer(witness) };
   }
