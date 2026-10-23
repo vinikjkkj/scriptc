@@ -161,18 +161,9 @@ stdlib-fence.ts:53:16 - error SC2020: '.join with 0 arguments' is part of the st
   52 | const found = nums.indexOf(2, 1);
   53 | const joined = nums.join();
      |                ^~~~~~~~~~~
-  54 | nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
+  54 | nums.forEach((x) => console.log(x), { unused: true }); // thisArg lowers now (corpus 8509)
 
   hint: pass the separator explicitly: join(",")
-
-stdlib-fence.ts:54:1 - error SC2020: '.forEach with 2 arguments' is part of the standard library types but has no scriptc lowering yet
-
-  53 | const joined = nums.join();
-  54 | nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
-     | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  55 | const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
-
-  hint: the thisArg parameter has no lowering — use an arrow function
 
 stdlib-fence.ts:56:13 - error SC2020: 'JSON.parse with a reviver' is part of the standard library types but has no scriptc lowering yet
 
