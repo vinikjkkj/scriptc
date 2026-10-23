@@ -295,6 +295,46 @@ static size_t dyn_rel_index(double rel, size_t len) {
   return rel > (double)len ? len : (size_t)rel;
 }
 
+/* FlattenIntoArray (ES 23.1.3.13.1) for a dyn array: elements that are
+ * arrays flatten while depth > 0, everything else is pushed whole. A wrapped
+ * engine array flattens through the routed keyed reads. Returns false with a
+ * pending exception when a bridged read unwinds. */
+static bool dyn_flatten_into(ScrDyn *out, ScrDyn *src, double depth) {
+  size_t n = src->v.arr.len;
+  for (size_t i = 0; i < n && i < src->v.arr.len; i++) {
+    ScrDyn *item = scr_dyn_retain(src->v.arr.items[i]);
+    if (depth > 0 && item->kind == SCR_DYN_ARR) {
+      bool ok = dyn_flatten_into(out, item, depth - 1);
+      scr_dyn_release(item);
+      if (!ok) return false;
+    } else if (depth > 0 && scr_dyn_isl_is_array(item)) {
+      ScrStr *lk = scr_str_new("length", 6);
+      ScrDyn *lenv = scr_dyn_isl_key_get(item, lk);
+      scr_str_release(lk);
+      if (!lenv) { scr_dyn_release(item); return false; }
+      size_t rn = lenv->kind == SCR_DYN_NUM ? (size_t)lenv->v.num : 0;
+      scr_dyn_release(lenv);
+      ScrDyn *tmp = scr_dyn_new_arr();
+      for (size_t j = 0; j < rn; j++) {
+        char idx[24];
+        int ilen = snprintf(idx, sizeof idx, "%zu", j);
+        ScrStr *jk = scr_str_new(idx, (size_t)ilen);
+        ScrDyn *el = scr_dyn_isl_key_get(item, jk);
+        scr_str_release(jk);
+        if (!el) { scr_dyn_release(tmp); scr_dyn_release(item); return false; }
+        scr_dyn_arr_push(tmp, el);
+      }
+      bool ok = dyn_flatten_into(out, tmp, depth - 1);
+      scr_dyn_release(tmp);
+      scr_dyn_release(item);
+      if (!ok) return false;
+    } else {
+      scr_dyn_arr_push(out, item); /* ownership moves in */
+    }
+  }
+  return true;
+}
+
 /* The array callback runner (forEach/map/filter/some/every/find/
  * findIndex): calls cb(item, i, recv) per element through the boxed
  * thunk. Returns the owned result or NULL with the exception pending. */
@@ -753,8 +793,8 @@ static bool dyn_arr_proto_unimpl(const char *m) {
    * must not sit in a list called *_unimpl. Keeping them here made two of
    * the static-copy guard's nine arms unreachable, because this predicate
    * throws "not supported" before that guard can fire. */
-  static const char *names[] = { "flat",
-    "keys", "values", "entries", "toSpliced", NULL };
+  static const char *names[] = {
+    "keys", "values", "entries", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
@@ -1078,8 +1118,8 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
         "fill", "filter",
         "find", "findIndex", "findLast", "findLastIndex", "flatMap", "forEach", "includes", "indexOf",
         "join", "lastIndexOf", "map", "pop", "push", "reduce", "reduceRight", "reverse", "shift",
-        "slice", "some", "sort", "splice", "toReversed", "toSorted", "toString", "unshift",
-        "with", NULL };
+        "slice", "some", "sort", "splice", "toReversed", "toSorted", "toSpliced", "toString", "unshift",
+        "flat", "with", NULL };
       return dyn_name_in(m, impl) || dyn_arr_proto_unimpl(m) || dyn_objproto_knows(m);
     }
     case SCR_DYN_BYTES:
@@ -2340,6 +2380,37 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     if (dyn_name_is(method, "toReversed")) {
       ScrDyn *out = scr_dyn_new_arr();
       for (size_t i = recv->v.arr.len; i-- > 0;) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      return out;
+    }
+    if (dyn_name_is(method, "flat")) {
+      /* depth defaults to 1 only when absent/undefined; NaN and negatives
+       * mean 0; Infinity flattens fully (dyn_index_arg is
+       * ToIntegerOrInfinity). */
+      double depth = dyn_index_arg(args, argc, 0, 1, what);
+      if (scr_exc_pending()) return NULL;
+      ScrDyn *out = scr_dyn_new_arr();
+      if (!dyn_flatten_into(out, recv, depth)) { scr_dyn_release(out); return NULL; }
+      return out;
+    }
+    if (dyn_name_is(method, "toSpliced")) {
+      double startD = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      size_t start = dyn_rel_index(startD, len);
+      size_t del;
+      if (argc == 0) {
+        del = 0;
+      } else if (argc == 1) {
+        del = len - start;
+      } else {
+        double dc = dyn_index_arg(args, argc, 1, 0, what);
+        if (scr_exc_pending()) return NULL;
+        double cap = (double)(len - start);
+        del = dc <= 0 ? 0 : (dc >= cap ? len - start : (size_t)dc);
+      }
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < start; i++) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      for (size_t i = 2; i < argc; i++) scr_dyn_arr_push(out, scr_dyn_retain(args[i]));
+      for (size_t i = start + del; i < len; i++) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
       return out;
     }
     if (dyn_name_is(method, "toSorted")) {
