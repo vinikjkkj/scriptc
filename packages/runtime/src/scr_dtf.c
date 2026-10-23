@@ -360,7 +360,8 @@ char *scr_dtf_format(const char *locales, const DtfKV *kv, int nkv, int kind, do
   int mk = kind < 4 ? 4 : kind;
   /* 1. locales */
   ScrLocRes lr;
-  if (scr_locale_resolve(SCR_LOC_DTF, locales, &lr) != 0) { fail(err, 1, "Incorrect locale information provided"); return NULL; }
+  { int lrc = scr_locale_resolve(SCR_LOC_DTF, locales, &lr);
+    if (lrc != 0) { char em[260]; scr_locale_error_message(lrc, &lr, em, sizeof em); fail(err, 1, "%s", em); return NULL; } }
   /* 3. localeMatcher */
   opt_enum(&bag, err, mk, "localeMatcher", V_MATCHER, 2);
   if (err->errKind) return NULL;

@@ -897,7 +897,8 @@ static void cur_info_apply(NfLoc *L, const char *code) {
 }
 
 static int load_locale(NfCtx *c, NfLoc *L, const char *locales, const NfOpts *o) {
-  if (scr_locale_resolve(SCR_LOC_NF, locales, &L->lr) != 0) { nf_fail(c, 1, "Incorrect locale information provided"); return -1; }
+  { int lrc = scr_locale_resolve(SCR_LOC_NF, locales, &L->lr);
+    if (lrc != 0) { char em[260]; scr_locale_error_message(lrc, &L->lr, em, sizeof em); nf_fail(c, 1, "%s", em); return -1; } }
   size_t n = strlen(L->lr.tag);
   for (size_t i = 0; i <= n; i++) L->name[i] = L->lr.tag[i] == '-' ? '_' : L->lr.tag[i];
   L->uloc = L->lr.uloc;
@@ -1676,7 +1677,8 @@ int scr_nf_format_core(char **out, const char *locales, int is_bigint, double x,
   int rc = 0;
   { /* CanonicalizeLocaleList comes before the options are read */
     ScrLocRes probe;
-    if (scr_locale_resolve(SCR_LOC_NF, locales, &probe) != 0) { nf_fail(&c, 1, "Incorrect locale information provided"); goto fail; }
+    int lrc = scr_locale_resolve(SCR_LOC_NF, locales, &probe);
+    if (lrc != 0) { char em[260]; scr_locale_error_message(lrc, &probe, em, sizeof em); nf_fail(&c, 1, "%s", em); goto fail; }
   }
   if (parse_options(&c, &o, locales, NULL) != 0 || c.errKind) goto fail;
   if (load_locale(&c, L, locales, &o) != 0) goto fail;
@@ -1715,8 +1717,12 @@ static ScrStr *nf_entry(int is_big, double x, ScrStr *digits, ScrStr *locales, S
     ScrStr **d = (ScrStr **)kv->data;
     for (size_t i = 0; i + 1 < kv->len && n < MAXKV; i += 2) { pairs[2 * n] = d[i]->data; pairs[2 * n + 1] = d[i + 1]->data; n++; }
   }
+  int cacheable = 0;
+  for (int i = 0; i < n; i++) if (strcmp(pairs[2 * i], SCR_ICU_CACHE_KEY) == 0) cacheable = 1;
+  const char *eff = cacheable ? scr_icu_cache_lookup(SCR_ICUC_NUMBER, loc) : loc;
   char *res = NULL;
-  int rc = scr_nf_format_core(&res, loc, is_big, x, is_big ? digits->data : NULL, pairs, n);
+  int rc = scr_nf_format_core(&res, eff, is_big, x, is_big ? digits->data : NULL, pairs, n);
+  if (rc == 0 && cacheable) scr_icu_cache_store(SCR_ICUC_NUMBER, loc);
   if (rc != 0) {
     scr_throw_error_msg(rc == 2 ? SCR_ERR_TYPE : SCR_ERR_RANGE, res, strlen(res));
     free(res);
@@ -1738,24 +1744,53 @@ static const char *const NF_KEYS[] = {
   "maximumSignificantDigits", "roundingIncrement", "roundingMode", "roundingPriority", "trailingZeroDisplay",
   "compactDisplay", "useGrouping", "signDisplay", NULL};
 
-/* the locales argument as text: "" for undefined, tags joined with "," for an array of strings; +1 or NULL */
+/* The locales argument as text: "" for undefined, an empty list or a primitive (ToObject gives it no elements), tags
+ * joined with "," otherwise ("-", which is not a structurally valid tag, for an empty one: V8 rejects it, it is not
+ * the default locale). CanonicalizeLocaleList's element rules: a string, or an object converted with ToString;
+ * anything else is a TypeError. +1 or NULL with the exception pending. */
 static ScrStr *dyn_locales_text(const ScrDyn *l) {
   if (l == NULL || l->kind == SCR_DYN_UNDEF) return scr_str_new("", 0);
-  if (l->kind == SCR_DYN_STR) return scr_str_retain(l->v.str);
-  if (l->kind == SCR_DYN_ARR) {
-    Buf b = {0};
-    for (size_t i = 0; i < l->v.arr.len; i++) {
-      const ScrDyn *e = l->v.arr.items[i];
-      if (e->kind != SCR_DYN_STR) { b_free(&b); scr_throw_error_msg(SCR_ERR_TYPE, "Language ID should be string or object.", 38); return NULL; }
-      if (i) b_putc(&b, ',');
-      b_put(&b, e->v.str->data, e->v.str->len);
+  if (l->kind == SCR_DYN_NULL) { scr_throw_error_msg(SCR_ERR_TYPE, "Cannot convert undefined or null to object", 42); return NULL; }
+  if (l->kind == SCR_DYN_STR) return l->v.str->len == 0 ? scr_str_new("-", 1) : scr_str_retain(l->v.str);
+  size_t n = 0;
+  const ScrDyn *const *items = NULL;
+  ScrDyn **owned = NULL;
+  if (l->kind == SCR_DYN_ARR) { n = l->v.arr.len; items = (const ScrDyn *const *)l->v.arr.items; }
+  else if (l->kind == SCR_DYN_OBJ) { /* an array-like: its length and index properties */
+    const ScrDyn *len = scr_dyn_obj_get(l, "length", 6);
+    if (len != NULL && len->kind == SCR_DYN_NUM && len->v.num >= 1) {
+      n = len->v.num > 1000000 ? 1000000 : (size_t)len->v.num;
+      owned = (ScrDyn **)calloc(n, sizeof(ScrDyn *));
+      for (size_t i = 0; i < n; i++) { char k[24]; int kl = snprintf(k, sizeof k, "%zu", i); owned[i] = (ScrDyn *)scr_dyn_obj_get(l, k, (size_t)kl); }
+      items = (const ScrDyn *const *)owned;
     }
-    ScrStr *r = scr_str_new(b.p ? b.p : "", b.n);
-    b_free(&b);
-    return r;
   }
-  scr_throw_error_msg(SCR_ERR_TYPE, "Incorrect locale information provided", 37);
-  return NULL;
+  if (n == 0) { free(owned); return scr_str_new("", 0); }
+  size_t cap = 64, len = 0;
+  char *b = (char *)malloc(cap);
+  for (size_t i = 0; i < n; i++) {
+    const ScrDyn *e = items[i];
+    ScrStr *t = NULL;
+    if (e != NULL && e->kind == SCR_DYN_STR) t = scr_str_retain(e->v.str);
+    else if (e == NULL || e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL || e->kind == SCR_DYN_NUM || e->kind == SCR_DYN_BOOL || e->kind == SCR_DYN_BIG) {
+      free(b); free(owned);
+      scr_throw_error_msg(SCR_ERR_TYPE, "Language ID should be string or object.", 38);
+      return NULL;
+    } else {
+      t = scr_dyn_string_coerce_js(e);
+      if (t == NULL) { free(b); free(owned); return NULL; }
+    }
+    while (len + t->len + 3 > cap) { cap *= 2; b = (char *)realloc(b, cap); }
+    if (i) b[len++] = ',';
+    if (t->len == 0) { b[len++] = '-'; b[len++] = '-'; } /* "--": not the cache key "-" of an empty string */
+    memcpy(b + len, t->data, t->len);
+    len += t->len;
+    scr_str_release(t);
+  }
+  free(owned);
+  ScrStr *r = scr_str_new(b, len);
+  free(b);
+  return r;
 }
 static void kv_push(ScrArr *kv, const char *key, char tag, const char *text, size_t n) {
   scr_arr_push_ref(kv, scr_str_new(key, strlen(key)));
@@ -1768,7 +1803,7 @@ static void kv_push(ScrArr *kv, const char *key, char tag, const char *text, siz
 /* the options object as alternating name / tagged value; +1, NULL with the exception pending */
 static ScrArr *dyn_options_kv(const ScrDyn *o, const char *who) {
   ScrArr *kv = scr_arr_new(SCR_ELEM_STR, 0);
-  if (o == NULL || o->kind == SCR_DYN_UNDEF) return kv;
+  if (o == NULL || o->kind == SCR_DYN_UNDEF) { kv_push(kv, SCR_ICU_CACHE_KEY, 'u', "", 0); return kv; }
   if (o->kind == SCR_DYN_NULL) {
     scr_arr_release(kv);
     char msg[96];
@@ -1796,7 +1831,17 @@ static ScrArr *dyn_options_kv(const ScrDyn *o, const char *who) {
   }
   return kv;
 }
+/* null options: the locales are canonicalized first, so a bad locale wins over the TypeError */
+static int nf_locale_probe_fails(double x, ScrStr *locales) {
+  ScrArr *none = scr_arr_new(SCR_ELEM_STR, 0);
+  ScrStr *p = scr_nf_format_num(x, locales, none);
+  scr_arr_release(none);
+  if (p == NULL) return 1;
+  scr_str_release(p);
+  return 0;
+}
 ScrStr *scr_nf_format_num_dyn(double x, ScrStr *locales, const ScrDyn *opts) {
+  if (opts != NULL && opts->kind == SCR_DYN_NULL && nf_locale_probe_fails(x, locales)) return NULL;
   ScrArr *kv = dyn_options_kv(opts, "Number");
   if (kv == NULL) return NULL;
   ScrStr *r = scr_nf_format_num(x, locales, kv);
@@ -1804,6 +1849,13 @@ ScrStr *scr_nf_format_num_dyn(double x, ScrStr *locales, const ScrDyn *opts) {
   return r;
 }
 ScrStr *scr_nf_format_big_dyn(ScrStr *digits, ScrStr *locales, const ScrDyn *opts) {
+  if (opts != NULL && opts->kind == SCR_DYN_NULL) {
+    ScrArr *none = scr_arr_new(SCR_ELEM_STR, 0);
+    ScrStr *p = scr_nf_format_big(digits, locales, none);
+    scr_arr_release(none);
+    if (p == NULL) return NULL;
+    scr_str_release(p);
+  }
   ScrArr *kv = dyn_options_kv(opts, "BigInt");
   if (kv == NULL) return NULL;
   ScrStr *r = scr_nf_format_big(digits, locales, kv);
