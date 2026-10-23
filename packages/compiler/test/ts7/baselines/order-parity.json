@@ -11612,6 +11612,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8502-union-shared-field-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/8502-union-shared-field-write.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
