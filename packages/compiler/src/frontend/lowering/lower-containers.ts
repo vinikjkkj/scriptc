@@ -7842,6 +7842,24 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       }
       if (nArgs > 3) L.noLowering(`.toString with ${nArgs} arguments on Buffers`, call);
       const encNode = call.arguments[0];
+      // A RUNTIME encoding (a field typed BufferEncoding, pg's `this.encoding`):
+      // the receiver is a Buffer, so the dispatch is the runtime's — the same
+      // dyn Buffer arm the dynamic-receiver spelling reaches, which folds the
+      // aliases, throws Node's ERR_UNKNOWN_ENCODING for an unknown name, and
+      // takes the optional [start, end) window.
+      if (encNode !== undefined && !ts.isSpreadElement(encNode) && !L.typeOf(encNode).isStringLiteralType()) {
+        const recvDyn: IrExpr = { kind: "dynFrom", value: L.lowerExpr(access.expression), type: DYN, loc };
+        const viaRuntime: IrExpr = {
+          kind: "dynInvoke",
+          recv: recvDyn,
+          method: "toString",
+          calleeName: access.getText(),
+          args: call.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
+          type: DYN,
+          loc,
+        };
+        return { kind: "dynCheck", value: viaRuntime, type: STRING, loc };
+      }
       const encName = encNode ? bufEncoding(L, "Buffer.toString", encNode) : "utf8";
       const receiver = L.lowerExpr(access.expression);
       const enc: IrExpr = { kind: "strLit", value: encName, type: STRING, loc };

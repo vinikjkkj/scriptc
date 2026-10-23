@@ -8062,9 +8062,17 @@ static ScrStr *scr_dyn_bytes_enc_canon(const ScrStr *raw) {
   };
   for (size_t i = 0; i < sizeof map / sizeof map[0]; i++) {
     size_t n = strlen(map[i].from);
-    if (raw->len == n && memcmp(raw->data, map[i].from, n) == 0) {
-      return scr_str_new(map[i].to, strlen(map[i].to));
+    if (raw->len != n) continue;
+    /* Node lowercases the name before the lookup: 'UTF-8', 'Hex' and
+     * 'BASE64' are the same encodings as their lowercase spellings. */
+    size_t k = 0;
+    while (k < n) {
+      unsigned char c = (unsigned char)raw->data[k];
+      if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + 32);
+      if (c != (unsigned char)map[i].from[k]) break;
+      k++;
     }
+    if (k == n) return scr_str_new(map[i].to, strlen(map[i].to));
   }
   char msg[128];
   int len = snprintf(msg, sizeof msg, "Unknown encoding: %.*s",

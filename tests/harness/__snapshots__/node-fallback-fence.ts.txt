@@ -25,15 +25,6 @@ node-fallback-fence.ts:23:16 - error SC2012: 'AbortSignal.timeout' runs in the e
 
   hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
 
-node-fallback-fence.ts:31:49 - error SC2020: 'Buffer.toString with this encoding' is part of the standard library types but has no scriptc lowering yet
-
-  30 | const tmp = mkdtempSync("/tmp/scr-");
-  31 | const raw = readFileSync("/etc/hosts").toString(tty ? "hex" : "latin1"); // the read and every literal encoding lower; a non-literal fences
-     |                                                 ^~~~~~~~~~~~~~~~~~~~~~
-  32 | 
-
-  hint: a literal "utf8", "hex", "base64", "base64url", "latin1", "binary", "ascii", "utf16le", or "ucs2" spelling is the lowered encoding surface
-
 node-fallback-fence.ts:34:28 - error SC2020: 'deflateSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
 
   33 | import { deflateSync, gzipSync } from "node:zlib";

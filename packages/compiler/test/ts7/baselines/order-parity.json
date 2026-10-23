@@ -11684,6 +11684,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8514-buffer-tostring-with-a-runtime-encoding.ts": {
+   "order": [
+    "<repo>/tests/corpus/8514-buffer-tostring-with-a-runtime-encoding.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8515-dynamic-receiver-tostring-with-a-runtime-encoding.js": {
+   "order": [
+    "<repo>/tests/corpus/8515-dynamic-receiver-tostring-with-a-runtime-encoding.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"

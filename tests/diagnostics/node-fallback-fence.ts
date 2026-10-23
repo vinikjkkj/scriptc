@@ -28,7 +28,7 @@ const errTty = process.stderr.isTTY;
 import { accessSync, constants, mkdtempSync, readFileSync } from "node:fs";
 accessSync("/bin/sh", constants.X_OK);
 const tmp = mkdtempSync("/tmp/scr-");
-const raw = readFileSync("/etc/hosts").toString(tty ? "hex" : "latin1"); // the read and every literal encoding lower; a non-literal fences
+const raw = readFileSync("/etc/hosts").toString(tty ? "hex" : "latin1"); // the read lowers, and so does a runtime-chosen encoding (the runtime folds it)
 
 import { deflateSync, gzipSync } from "node:zlib";
 const packed = deflateSync("data"); // string data: the wrap-it-first hint

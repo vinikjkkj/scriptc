@@ -6427,6 +6427,20 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     if (access.name.text === "toString" && call.arguments.length >= 2 &&
         call.arguments.length <= 3 && !call.questionDotToken && !access.questionDotToken &&
         !call.arguments.some((a) => ts.isSpreadElement(a))) {
+      // A RUNTIME encoding (`value.toString(this.encoding, start, end)`): the
+      // runtime's Buffer arm folds the aliases and throws Node's
+      // ERR_UNKNOWN_ENCODING, so the whole call is a dynamic invoke.
+      if (!L.typeOf(call.arguments[0]!).isStringLiteralType()) {
+        return {
+          kind: "dynInvoke",
+          recv,
+          method: "toString",
+          calleeName: access.getText(),
+          args: call.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
+          type: DYN,
+          loc: locOf(call),
+        };
+      }
       const encName = bufEncoding(L, "toString", call.arguments[0]!);
       return {
         kind: "libCall",
