@@ -264,11 +264,11 @@ async function refusalOf(p: Promise<unknown>): Promise<ProvenanceRefusalError> {
   throw new Error("expected a ProvenanceRefusalError, but resolution succeeded");
 }
 
-async function buildAndRun(entry: string, name: string): Promise<string> {
+async function buildAndRun(entry: string, name: string, backend: "c" | "llvm" = "c"): Promise<string> {
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, process.platform === "win32" ? `${name}.exe` : name);
-  /* Pinned to the C lane for the reason the sibling provenance suites pin it. */
-  const result = await compile(entry, { outPath, outDir, dynamic: false, backend: "c" });
+  /* The C lane unless a caller asks for both, for the reason the sibling provenance suites pin it. */
+  const result = await compile(entry, { outPath, outDir, dynamic: false, backend });
   if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
   const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
   return stdout;
@@ -490,22 +490,26 @@ describe("provenance: an unattested package reached as a mapped package's depend
   });
 });
 
-describe("provenance: the lane's ceiling for a verified dependency", () => {
-  test("the mapping lands, the VALUE still does not cross (refused at build time)", async () => {
-    /* Pinned deliberately: reading a value off a mapped dependency of a mapped
-     * authored-JS package is REFUSED at build time. That
-     * ceiling belongs to the authored lane, not to this arm, and pinning it
-     * stops "the blocker went away" being read as "the value arrived". */
+describe("provenance: a verified dependency's value through a mapped authored-JS package", () => {
+  /* This pinned a REFUSAL: a mapped authored-JS package's own `require("leaf")`
+   * was a CommonJS binding of a declaration-with-twin module and refused SC1013.
+   * A require binding of a .d.ts module with a compiled twin now reads through
+   * the twin (and runs its init), so the value ARRIVES. What is pinned now is
+   * the value: the leaf's numbers live only in the leaf, so the binary printing
+   * them on both backends, equal to Node's answer, is the evidence that the
+   * verified bytes compiled and ran. A silent `0` here (module init never
+   * called) is the failure this guards. */
+  test("the mapping lands and the VALUE crosses: both backends print what Node prints", async () => {
     const depManifest = join(fixtureDir, "manifest-unattdep.json");
     const p = await makeProject("unattesteddep/main.ts", ["unattmid", "unattleaf"], "pnpm");
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifest;
     stubFetch(404);
     setProvenanceSources(await resolveProvenanceSources(p.entry));
     const refusals = analyze(p.entry).coverage.diagnostics.map((d) => `${d.code}: ${d.message}`);
-    expect(refusals.length).toBeGreaterThan(0);
-    /* The host's require() of the leaf is a CommonJS default import of the
-     * mapped dependency; the refusal names the binding ('leaf'). */
-    expect(refusals.join("\n")).toMatch(/SC1013: the default import of a CommonJS module as a value \(esModuleInterop types 'leaf'/);
+    expect(refusals).toEqual([]);
+    const NODE = "limit=19\ntag=leaf-through-dep-edge\n";
+    expect(await buildAndRun(p.entry, "unattdep-value-c", "c")).toBe(NODE);
+    expect(await buildAndRun(p.entry, "unattdep-value-llvm", "llvm")).toBe(NODE);
   });
 });
 
