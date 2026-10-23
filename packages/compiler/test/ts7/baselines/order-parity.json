@@ -11678,6 +11678,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8513-json-parse-as-a-value.js": {
+   "order": [
+    "<repo>/tests/corpus/8513-json-parse-as-a-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
