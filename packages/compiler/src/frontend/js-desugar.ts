@@ -1556,6 +1556,30 @@ function openRecordEdits(fileName: string, text: string): string | null {
     }
     return sf;
   };
+  // A function whose own JSDoc types it (`@returns`, `@param`, `@template`,
+  // `@type`) is the author's claim about what flows through it: a record bound
+  // in it can be returned or passed into a slot of the declared type, and a
+  // dynamic object crossing into a typed record slot is COPIED (corpus 2470:
+  // `mocked` written through a dynamic key, returned as `{ mocked: T }`, the
+  // write was invisible to the caller). Such a function keeps its record shapes.
+  const jsdocTypesFn = (fn: ts.Node): boolean => {
+    let anchor: ts.Node = fn;
+    if (ts.isVariableDeclaration(fn.parent) && ts.isVariableDeclarationList(fn.parent.parent) && fn.parent.parent.parent !== undefined) {
+      anchor = fn.parent.parent.parent;
+    }
+    const st = anchor.getStart(sf);
+    let i = st;
+    while (i > 0 && /\s/.test(text[i - 1]!)) i--;
+    if (text.slice(i - 2, i) !== "*/") return false;
+    const open = text.lastIndexOf("/**", i - 2);
+    return open >= 0 && /@(?:returns?|param|template|type)\b/.test(text.slice(open, i));
+  };
+  const inTypedFn = (n: ts.Node): boolean => {
+    for (let p: ts.Node | undefined = n.parent; p !== undefined; p = p.parent) {
+      if (ts.isFunctionLike(p) && jsdocTypesFn(p)) return true;
+    }
+    return false;
+  };
   const visit = (n: ts.Node): void => {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
       let init: ts.Expression = n.initializer;
@@ -1565,7 +1589,7 @@ function openRecordEdits(fileName: string, text: string): string | null {
       // would replace that storage with a dynamic slot the global path
       // does not take writes through.
       const scope = scopeOf(n);
-      if (!ts.isSourceFile(scope) && ts.isObjectLiteralExpression(init) && n.initializer === init && writesDynamicKey(scope, n.name.text)) cast(init);
+      if (!ts.isSourceFile(scope) && ts.isObjectLiteralExpression(init) && n.initializer === init && writesDynamicKey(scope, n.name.text) && !inTypedFn(n)) cast(init);
     }
     if (
       ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
@@ -1576,7 +1600,7 @@ function openRecordEdits(fileName: string, text: string): string | null {
       if (
         (ts.isFunctionExpression(cb) || ts.isArrowFunction(cb)) && ts.isObjectLiteralExpression(seed) &&
         cb.parameters.length > 0 && ts.isIdentifier(cb.parameters[0]!.name) && cb.body !== undefined &&
-        writesDynamicKey(cb.body, (cb.parameters[0]!.name as ts.Identifier).text)
+        writesDynamicKey(cb.body, (cb.parameters[0]!.name as ts.Identifier).text) && !inTypedFn(n)
       ) {
         cast(seed);
       }
