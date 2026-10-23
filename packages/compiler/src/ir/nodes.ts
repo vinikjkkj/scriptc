@@ -3212,6 +3212,12 @@ export type IrLibFn =
    * own-member presence, ARR answers 'length'/a valid index — exactly
    * the compile-time dynHasKey fold, per value. Never throws. */
   | "dyn.hasKey"
+  /** `recv.m(a, ...xs)` through a dyn receiver with a spread argument
+   * (scr_dyn_invoke.c): args are [recv, pack (a dyn array the lowering built
+   * with dynArrLit spreads, so the arguments are already flattened), method
+   * name, spelling]; dispatches exactly like dynInvoke over the pack's
+   * elements. All borrowed; +1 dyn result; may throw. */
+  | "dyn.invokePack"
   /** new Proxy(target, handler, strict): a SCR_DYN_PROXY dyn value. May throw
    * (a non-object target or handler). */
   | "dyn.proxyNew"
@@ -10276,7 +10282,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
         // scr_dyn_has_key_full, which lives in the gated unit for the
         // same reason the read's helper does: scr_json.c is always
         // linked and must not name the dispatch.
-        (node.fn === "dyn.hasKey" ||
+        (node.fn === "dyn.hasKey" || node.fn === "dyn.invokePack" ||
           node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" || node.fn === "dyn.reflectDefine" ||
           node.fn === "dyn.proxyNew" || node.fn === "dyn.proxyRevocable" ||
           node.fn === "dyn.reflectSet" || node.fn === "dyn.reflectDelete" ||
@@ -12656,6 +12662,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.reflectDelete",
   "dyn.reflectDefine",
   "dyn.hasKey",
+  "dyn.invokePack",
   // delete: ToObject on a nullish receiver, and the array-element hole
   // this representation refuses rather than fakes.
   "dyn.keyDelete",

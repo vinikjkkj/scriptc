@@ -1703,6 +1703,10 @@ ScrDyn *scr_dyn_map_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args
   return NULL;
 }
 
+ScrDyn *scr_dyn_invoke_pack(ScrDyn *recv, ScrDyn *pack, const ScrStr *method, const ScrStr *what) {
+  return scr_dyn_invoke(recv, method->data, (ScrDyn *const *)pack->v.arr.items, pack->v.arr.len, what->data);
+}
+
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what) {
   if (recv->kind == SCR_DYN_PROXY) {
     ScrStr *k = scr_str_new(method, strlen(method));

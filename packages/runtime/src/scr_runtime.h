@@ -6170,6 +6170,7 @@ bool scr_dyn_has_key_full(const ScrDyn *v, const ScrStr *key);
  * NARROWING, stated: the dispatch below takes a NUL-terminated name, so a
  * key holding an embedded NUL truncates there. The dot spelling cannot
  * express such a name at all, and no shipped package in this corpus does. */
+ScrDyn *scr_dyn_invoke_pack(ScrDyn *recv, ScrDyn *pack, const ScrStr *method, const ScrStr *what); /* dynInvoke over a built argument array (spread calls) */
 ScrDyn *scr_dyn_invoke_key(ScrDyn *recv, const ScrStr *key, ScrDyn *const *args, size_t argc, const char *what);
 /* Keyed read on a FUNC node: the own-property table first (defineProperties
  * writes land there), then "name" (the box's best-effort static name; ""

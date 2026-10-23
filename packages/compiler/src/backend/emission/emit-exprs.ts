@@ -3569,6 +3569,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_cls_props_get(${arg(0)}, ${arg(1)})`);
           case "dyn.proxyNew":
             return finish(`scr_dyn_proxy_new(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.invokePack":
+            return finish(`scr_dyn_invoke_pack(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "dyn.hasKey":
             // `k in v` with a runtime key: the dyn presence answer (both
             // borrowed, no allocation, never throws). The _full spelling

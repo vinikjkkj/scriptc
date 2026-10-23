@@ -6127,6 +6127,27 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
    * Answers null when neither lane fits (typed .ts spreads keep
    * completeArgs' rest packing and its fences). JS sources only — the
    * same guard as the over-arity dynCall precedent. */
+  /** `recv.m(a, ...xs)` through a dyn receiver: the arguments build ONE dyn
+   * array (dynArrLit flattens each spread, in source order, throwing V8's
+   * not-iterable TypeError for a bad one) and the call dispatches over its
+   * elements exactly as the fixed-arity dynInvoke does. */
+  function dynInvokeWithSpread(L: Lowerer, call: ts.CallExpression, recv: IrExpr, access: ts.PropertyAccessExpression): IrExpr {
+    const loc = locOf(call);
+    const elems: IrExpr[] = [];
+    const spreads: { at: number; what: string | null }[] = [];
+    call.arguments.forEach((a, i) => {
+      if (ts.isSpreadElement(a)) {
+        spreads.push({ at: i, what: a === call.arguments[call.arguments.length - 1] ? a.expression.getText() : null });
+        elems.push(L.lowerExprExpecting(a.expression, DYN));
+      } else {
+        elems.push(L.lowerExprExpecting(a, DYN));
+      }
+    });
+    const pack: IrExpr = { kind: "dynArrLit", elems, spreads, type: DYN, loc };
+    const strLit = (value: string): IrExpr => ({ kind: "strLit", value, type: STRING, loc });
+    return { kind: "libCall", fn: "dyn.invokePack", args: [recv, pack, strLit(access.name.text), strLit(access.getText())], type: DYN, loc };
+  }
+
   export function lowerSpreadArgsCall(L: Lowerer, expr: ts.CallExpression, callee: IrExpr, loc: SrcLoc): IrExpr | null {
     if (!isJsSourceFile(expr.getSourceFile())) return null;
     if (!expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
@@ -6449,7 +6470,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // receivers call the own member.
     if (DYN_DISPATCH_METHODS.has(access.name.text) && !call.questionDotToken && !access.questionDotToken) {
       if (call.arguments.some((a) => ts.isSpreadElement(a))) {
-        L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
+        return dynInvokeWithSpread(L, call, recv, access);
       }
       const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
       return {
@@ -6511,7 +6532,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     if (call.questionDotToken || access.questionDotToken) { mcallWhy("optchain", access, access.name.text); return null; }
     const loc = locOf(call);
     if (call.arguments.some((a) => ts.isSpreadElement(a))) {
-      L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
+      return dynInvokeWithSpread(L, call, recv, access);
     }
     const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
     fenceObservableContainerStore(L, call, access, recvTs, args);
