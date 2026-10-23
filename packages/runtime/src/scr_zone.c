@@ -54,7 +54,9 @@ static void zi_init(void) {
   for (int i = 0; i < G.n; i++) {
     size_t l;
     const char *s = scr_res_str(scr_res_array_at(G.names, i), &l);
-    G.name[i] = s ? strndup(s, l) : strdup("");
+    G.name[i] = (char *)malloc(s ? l + 1 : 1);
+    if (s) memcpy(G.name[i], s, l);
+    G.name[i][s ? l : 0] = 0;
     G.zoneRes[i] = scr_res_array_at(G.zones, i);
   }
 }
