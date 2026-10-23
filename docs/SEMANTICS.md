@@ -148,14 +148,20 @@ documents the divergence when they are not.
     packages/compiler/src/frontend/types.ts:7614
     packages/compiler/src/backend/emission/emit-walkers.ts:3135
 
-### 37 - A field holding the undefined arm is SKIPPED by key walks
+### 37 - Key walks ask the instance's own-key bits, falling back to the undefined arm
 
 `for-in` and `Object.keys/values/entries` over a record iterate declaration
-order with undefined-arm fields skipped at runtime. The key list snapshots at
-loop entry, which IS Node's for-in contract for keys added during the walk.
+order and skip a member that is not an own key. A record with an optional
+member carries a per-instance own-key mask: an object literal, a write,
+`delete`, a width copy and a spread keep it, so `{ a: undefined }` has the key
+`a` and `{}` does not. A record built any other way (a class projection, a
+run-time keyed builder) has no mask and keeps the older rule: the key exists
+exactly when the slot is not the undefined arm. The key list snapshots at loop
+entry, which IS Node's for-in contract for keys added during the walk.
 
     packages/compiler/src/frontend/lowering/lower-stmts.ts:9937
     packages/compiler/src/frontend/lowering/lower-stmts.ts:10021
+    packages/compiler/src/frontend/lowering/lowerer.ts (armOwnMasks, the optional-member arm)
 
 ### 38 - A lying assertion throws instead of smuggling the wrong arm
 
@@ -241,13 +247,14 @@ recovered by parsing the message, exact over this runtime's closed message set
     packages/runtime/src/scr_child.c:3611
     packages/runtime/src/scr_http.c:391
 
-### 55 - A field explicitly assigned `undefined` reads as ABSENT
+### 55 - `in` over an optional member of a record no literal built reads the slot
 
-`"a" in {a: undefined}` is `true` in JS and `false` here: an optional field is a
-runtime tag test on the slot, and the undefined arm means absent. The same
-answer now covers class fields, so a class field and a record field say the
-same thing about the same value. On a dyn receiver `in` stores presence and
-answers true -- the checked-dynamic tree does not share this stance.
+`"a" in {a: undefined}` is `true` in JS, and is `true` here: an object literal,
+a write, `delete`, a width copy and a spread keep the member's own-key bit, and
+`in` asks it. A record built any other way (a class projection, a run-time
+keyed builder) carries no bit, so `in` falls back to the slot's tag test and an
+explicit undefined reads as absent there. On a dyn receiver `in` stores presence
+and answers true -- the checked-dynamic tree does not share this stance.
 
     packages/compiler/src/frontend/lowering/lower-exprs.ts:18342
     packages/compiler/src/frontend/lowering/lower-exprs.ts:18764
