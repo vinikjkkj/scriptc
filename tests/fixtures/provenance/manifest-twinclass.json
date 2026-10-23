@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "twinpkg": {
+      "dir": "./attested-src/twinpkg",
+      "commit": "5555555555555555555555555555555555555555",
+      "repo": "https://github.com/example/twinpkg"
+    }
+  }
+}
