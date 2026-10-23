@@ -416,7 +416,17 @@ function lowerOptionalDefaultArg(
         | "unshift" | "reverse" | "copyWithin"
         | "forEach" | "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every" | "flatMap" | "reduce" | "reduceRight"
     ];
-    if (call.arguments.length < arity[0]! || call.arguments.length > arity[1]!) {
+    // The callback-taking methods accept Array.prototype's second argument,
+    // the callback's `this`. It is registered against the callback node and
+    // bound onto the lowered callback (hofCallbackArg), so the per-method
+    // lowerings below see the one-argument form.
+    if (
+      call.arguments.length === 2 && !ts.isSpreadElement(call.arguments[0]!) && !ts.isSpreadElement(call.arguments[1]!) &&
+      (name === "map" || name === "filter" || name === "forEach" || name === "find" || name === "findIndex" ||
+        name === "findLast" || name === "findLastIndex" || name === "some" || name === "every" || name === "flatMap")
+    ) {
+      L.hofThisArgs.set(call.arguments[0]!, call.arguments[1]!);
+    } else if (call.arguments.length < arity[0]! || call.arguments.length > arity[1]!) {
       const hint =
         name === "splice"
           ? "the removal forms lower — splice(start, deleteCount?); to insert, build a new array with slice and push"
@@ -1031,6 +1041,7 @@ function lowerOptionalDefaultArg(
     // array's own element). The copy IS a divergence from Node's aliasing,
     // and it is the one SEMANTICS.md 35 already documents for the arrow
     // spelling of the same call.
+    const hofThis = L.hofThisArgs.get(argNode);
     const widthCopyOnly = (w: IrType, p: IrType): boolean => {
       const plan = L.widthLiftPlan(w, p);
       return plan !== null && (plan.how === "liftWrap" || plan.how === "width");
@@ -1057,6 +1068,34 @@ function lowerOptionalDefaultArg(
         L.badType(argNode, L.typeOf(argNode));
       }
       fnArg = adapted;
+    }
+    // The thisArg: an arrow callback ignores it (it is still evaluated, once,
+    // before the loop); any other callback runs with it as `this`, which is
+    // exactly `cb.bind(thisArg)`.
+    if (hofThis !== undefined) {
+      L.hofThisArgs.delete(argNode);
+      const thisIr = L.lowerExpr(hofThis);
+      let unwrapped: ts.Expression = argNode;
+      while (ts.isParenthesizedExpression(unwrapped)) unwrapped = unwrapped.expression;
+      if (ts.isArrowFunction(unwrapped)) {
+        fnArg = {
+          kind: "seqExpr",
+          stmts: [{ kind: "exprStmt", expr: thisIr, loc: locOf(hofThis) }],
+          result: fnArg,
+          type: fnArg.type,
+          loc: locOf(argNode),
+        };
+      } else {
+        const bound = L.bindThisClosure(fnArg, thisIr, [], locOf(argNode));
+        if (bound === null) {
+          L.noLowering(
+            "an array callback's thisArg of this type",
+            hofThis,
+            "the thisArg must convert to a dynamic value (a class instance, record or primitive)",
+          );
+        }
+        fnArg = bound;
+      }
     }
     return {
       fnArg: fnArg as IrExpr & { type: IrType & { kind: "func" } },
@@ -1370,7 +1409,7 @@ function lowerOptionalDefaultArg(
       return { kind: "arrIntrinsic", method: "slice", receiver: snapshot, args, type: arrayOf(snapshotElem), loc };
     }
     // map
-    if (call.arguments.length !== 1) {
+    if (call.arguments.length !== 1 && !L.hofThisArgs.has(call.arguments[0]!)) {
       L.noLowering(`.map with ${call.arguments.length} arguments`, call, "the thisArg parameter has no lowering — use an arrow function");
     }
     const argNode = call.arguments[0]!;

@@ -1450,6 +1450,10 @@ export class Lowerer {
   /** Width-coercion helpers (%rec.width.N / %arr.width.N), interned per
    * (from, to) shape pair — see widthCoerce. */
   readonly widthHelpers = new Map<string, string>();
+  /** `arr.map(cb, thisArg)` and the other callback-taking array methods:
+   * the thisArg expression, keyed by the CALLBACK argument node. The arity
+   * check registers it; hofCallbackArg binds it onto the lowered callback. */
+  readonly hofThisArgs = new Map<ts.Node, ts.Expression>();
   /** Shape ids some object literal COMPLETED a required field of - the
    * `{} as Record<K, V>` spelling, where V has no undefined arm and the
    * literal therefore names fewer fields than the shape declares.
