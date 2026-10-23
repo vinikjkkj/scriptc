@@ -10394,9 +10394,13 @@ ScrDate *scr_date_new(double ms); /* +1 */
 ScrDate *scr_date_new_str(ScrStr *s); /* +1; borrowed string */
 double scr_date_value(ScrDate *d); /* borrowed */
 ScrStr *scr_insp_date(ScrDate *d); /* util.inspect: ISO form, or "Invalid Date"; +1 */
-/* toLocale{,Date,Time}String(locale, options), en-US: kind 4/5/6, locale text ("" or NULL = default), option
- * key/value string[] ("\x01" = undefined). +1, or NULL with a pending RangeError/TypeError. */
+/* toLocale{,Date,Time}String(locales, options) (kind 4/5/6) and Intl.DateTimeFormat#format (kind 7) for every ICU
+ * locale: locales text ("" or NULL = the default locale, tags joined by ","), option name / TAGGED value string[]
+ * ('s' string, 'n' number, 'b' boolean, 'z' null, 'u' undefined). +1, or NULL with a pending RangeError/TypeError. */
 ScrStr *scr_date_format_opts(double ms, double kind, ScrStr *locale, ScrArr *kv);
+/* The same with the options (and the locales) read from checked-dynamic values; +1, or NULL with the exception pending. */
+ScrStr *scr_date_locales_text(const ScrDyn *locales);
+ScrStr *scr_date_format_opts_dyn(double ms, double kind, ScrStr *locale, const ScrDyn *opts);
 void scr_jb_put_date(ScrJsonBuf *b, ScrDate *d); /* JSON.stringify: "iso" or null */
 double scr_date_utc_full_year(double ms);
 double scr_date_utc_month(double ms);
