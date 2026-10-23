@@ -3188,6 +3188,15 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
         const sym = L.resolveValueSymbol(el.name);
         const decls = sym === null ? [] : L.checker.declarationsOf(sym);
         if (decls.length > 0 && decls.every((d) => d.getSourceFile() === twin)) return "static";
+        // A declared FUNCTION (overloaded, or one the twin exports under a
+        // different local name) keeps its declaration-file symbol, and the
+        // call crosses to the twin's body through declTwinFunctionSymbol, or
+        // to the twin's export storage through declTwinGlobalOf (a CommonJS
+        // `exports.f = f` registers a closure global): the same evidence that
+        // the twin holds the value, so the twin's init must run for it.
+        if (sym !== null && (L.declTwinFunctionSymbol(sym) !== null || declTwinGlobalOf(L, sym) !== undefined)) {
+          return "static";
+        }
       }
     }
     return "clause";
