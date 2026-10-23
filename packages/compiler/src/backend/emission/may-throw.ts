@@ -183,6 +183,11 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // ladder on either form — seed both.
           f.throws = true;
           break;
+        case "dynMapNew":
+          // A seed entry that is not an entry object is V8's catchable
+          // TypeError (and iterating a non-iterable seed is another).
+          f.throws = true;
+          break;
         case "dynArrNew":
           // `new Array(n)` throws V8's `RangeError: Invalid array length`
           // for anything that is not a non-negative integer below 2^32 —

@@ -2723,6 +2723,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         });
         return arr;
       }
+      case "dynMapNew": {
+        // `new Map()` / `new Set()` in untyped JS: a dyn-flavored map box
+        // (scr_dyn_new_dynmap). The seed, when present, is drained once at
+        // construction; a bad entry throws, so the temp is fallible.
+        const flavor = { map: 0, set: 1, weakmap: 2, weakset: 3 }[e.flavor];
+        const seed = e.seed !== undefined ? E.emitExpr(e.seed).name : "NULL";
+        return E.fallibleTemp(e.type, `scr_dyn_new_dynmap(${flavor}, ${seed})`);
+      }
       case "dynArrNew": {
         // `new Array(n)` in the checked-dynamic tier. An f64 operand is
         // the LENGTH (ArrayCreate); a dyn operand is the undecided
