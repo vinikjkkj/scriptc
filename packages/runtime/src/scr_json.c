@@ -9374,10 +9374,49 @@ static void tbm_diag(ScrJsonBuf *b, const ScrDyn *d) {
   case SCR_DYN_ARRBUF: scr_jb_puts(b, "[object ArrayBuffer]"); return;
   case SCR_DYN_PROMISE: scr_jb_puts(b, "[object Promise]"); return;
   case SCR_DYN_MAP: scr_jb_puts(b, d->v.map.tkey[0] == 's' ? "[object Set]" : "[object Map]"); return;
+  case SCR_DYN_OBJINST: {
+    /* A class instance: `#<Class>` unless the class (or a base) declares a
+     * callable toString, which turns it into the [object Object] constant. */
+    const ScrDynClass *cls = scr_dyn_objinst_class_of(d);
+    for (size_t i = 0; cls->members != NULL && i < cls->nmembers; i++) {
+      if (cls->members[i].len == 8 && memcmp(cls->members[i].name, "toString", 8) == 0 &&
+          cls->members[i].call != NULL) {
+        scr_jb_puts(b, "[object Object]");
+        return;
+      }
+    }
+    scr_jb_puts(b, "#<");
+    scr_jb_puts(b, cls->name != NULL && cls->name[0] ? cls->name : "Object");
+    scr_jb_puts(b, ">");
+    return;
+  }
   case SCR_DYN_HANDLE:
+    if (scr_dyn_is_symbol(d)) {
+      ScrStr *s = scr_dyn_symbol_descriptive(d);
+      scr_jb_write(b, s->data, s->len);
+      scr_str_release(s);
+      return;
+    }
     scr_jb_puts(b, d->v.handle.tag == SCR_DYNH_REGEX ? "[object RegExp]"
                    : d->v.handle.tag == SCR_DYNH_DATE ? "[object Date]" : "#<Object>");
     return;
+  case SCR_DYN_OBJ: {
+    /* V8's NoSideEffectsToString on a plain object: `#<Ctor>`, UNLESS the
+     * object (or its chain) carries a callable toString, which it does not
+     * run but which turns the rendering into the [object Object] constant;
+     * a prototype-less dictionary has no constructor name to print either. */
+    ScrDyn *m = scr_dyn_obj_own_data(d, "toString", 8);
+    if (m == NULL) m = scr_dyn_proto_get(d, "toString", 8);
+    if ((m != NULL && m->kind == SCR_DYN_FUNC) || d->null_proto) {
+      scr_jb_puts(b, "[object Object]");
+      return;
+    }
+    const char *cn = scr_dyn_ext(d)->cname;
+    scr_jb_puts(b, "#<");
+    scr_jb_puts(b, cn != NULL && cn[0] ? cn : "Object");
+    scr_jb_puts(b, ">");
+    return;
+  }
   default: scr_jb_puts(b, "#<Object>"); return;
   }
 }
