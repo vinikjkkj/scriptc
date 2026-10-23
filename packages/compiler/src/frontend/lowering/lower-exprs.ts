@@ -19689,11 +19689,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             if (a.slot !== null) {
               if (a.arm.kind !== "record" || a.slot.kind !== "union") throw new Error("lowerer bug: 'in' per-value arm is not a record with a union slot");
               const narrowed: IrExpr = { kind: "unionNarrow", unionId, tag: a.tag, value: recv, type: a.arm, loc };
-              const read: IrExpr = { kind: "recordGet", obj: narrowed, shapeId: a.arm.shapeId, field: key, type: a.slot, loc };
               terms.push({
                 kind: "ternary",
                 cond: isTag(a.tag),
-                then: { kind: "unionIsTag", unionId: a.slot.unionId, tag: L.armTag(a.slot.unionId, UNDEFINED_T), negated: true, value: read, type: BOOL, loc },
+                then: { kind: "recordKeyPresent", obj: narrowed, shapeId: a.arm.shapeId, field: key, orSlot: true, type: BOOL, loc },
                 else_: falseLit(),
                 type: BOOL,
                 loc,
@@ -19744,9 +19743,11 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const field = shape.fields.find((f) => f.name === key);
     if (field) {
       if (field.type.kind === "union" && L.armTag(field.type.unionId, UNDEFINED_T) >= 0) {
-        // Optional slot: the key is present iff the arm is not undefined.
-        const read: IrExpr = { kind: "recordGet", obj: recv, shapeId: recv.type.shapeId, field: key, type: field.type, loc };
-        return { kind: "unionIsTag", unionId: field.type.unionId, tag: L.armTag(field.type.unionId, UNDEFINED_T), negated: true, value: read, type: BOOL, loc };
+        // Optional slot: the key is present iff the arm is not undefined -
+        // and, on a shape that armed the own-key mask (armOwnMasks), iff
+        // the instance says so: `"a" in {a: undefined}` is true. The node
+        // is the undefined-arm test on every unarmed shape.
+        return { kind: "recordKeyPresent", obj: recv, shapeId: recv.type.shapeId, field: key, orSlot: true, type: BOOL, loc };
       }
       // A declared non-optional field exists on every value of the shape —
       // statically true, but folding may only drop a side-effect-free

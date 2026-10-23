@@ -61,6 +61,7 @@ export function ownPresentCondC(
   recv: string,
   utag: number,
   dropUndefined: boolean,
+  orSlot = false,
 ): string | null {
   const armTest = utag >= 0 ? `${recv}->${mangleField(fieldName)}->tag != ${utag}` : null;
   // INTERNAL SLOTS take no bit — ownMaskKeyBit carries the whole argument,
@@ -69,7 +70,12 @@ export function ownPresentCondC(
   const bit = ownMaskKeyBit(shape, fieldName);
   if (!bit) return armTest;
   const m = `${recv}->${OWNMASK_MEMBER}`;
-  const ownTest = `(${m}[0] ? ((${m}[${bit.byte}] & ${bit.bit}) != 0) : (${armTest ?? "true"}))`;
+  // `orSlot` is `in`'s question: own OR inherited, and a crossing's
+  // inherited member is a clear bit over a value in the slot.
+  const maskOwn = orSlot && armTest !== null
+    ? `(((${m}[${bit.byte}] & ${bit.bit}) != 0) || (${armTest}))`
+    : `((${m}[${bit.byte}] & ${bit.bit}) != 0)`;
+  const ownTest = `(${m}[0] ? ${maskOwn} : (${armTest ?? "true"}))`;
   if (!dropUndefined) return ownTest;
   // JSON.stringify drops an undefined-VALUED property even when it is the
   // object's own — `JSON.stringify({a: undefined})` is `{}` — so the two

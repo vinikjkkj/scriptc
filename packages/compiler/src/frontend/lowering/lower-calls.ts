@@ -14257,6 +14257,56 @@ function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
         loc,
       },
       r.helper);
+    // AN OWN KEY HOLDING undefined. `Object.values({a: undefined})` is
+    // `[undefined]` and entries is `[["a", undefined]]`: the key is own, so
+    // the element is there. The statement above can only push a defined
+    // value (it narrows past the undefined arm), so when the result element
+    // can HOLD undefined, a second statement pushes it for the instance
+    // whose mask calls the key own while the slot holds the undefined arm.
+    // It exists only on an armed shape: the placeholder is an empty block
+    // that stays one when nothing arms (an unarmed shape's undefined is an
+    // absent key, as it always was).
+    if (guardUndefTag !== null && valueT && valueT.kind === "union" && f.type.kind === "union") {
+      const vUndef = L.armTag(valueT.unionId, UNDEFINED_T);
+      if (vUndef >= 0) {
+        const undefVal: IrExpr = {
+          kind: "unionWrap",
+          unionId: valueT.unionId,
+          tag: vUndef,
+          value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+          type: valueT,
+          loc,
+        };
+        const pushedU: IrExpr =
+          objMember === "values"
+            ? undefVal
+            : {
+                kind: "recordLit",
+                fields: [
+                  { name: "0", value: { kind: "strLit", value: f.name, type: STRING, loc } },
+                  { name: "1", value: undefVal },
+                ],
+                type: tupleT!,
+                loc,
+              };
+        const pushU: IrStmt = {
+          kind: "exprStmt",
+          expr: { kind: "arrIntrinsic", method: "push", receiver: outRef, args: [pushedU], type: F64, loc },
+          loc,
+        };
+        const atU = body.length;
+        body.push({ kind: "block", body: [], loc });
+        L.noteOwnKeyGuard(r.shapeId, f.name, ref, loc,
+          {
+            kind: "guardStmt",
+            slot: { holder: body, at: atU },
+            inner: pushU,
+            outer: { unionId: f.type.unionId, tag: guardUndefTag, value: raw, negated: false },
+            loc,
+          },
+          r.helper);
+      }
+    }
   }
   body.push({ kind: "return", value: outRef, loc });
 }

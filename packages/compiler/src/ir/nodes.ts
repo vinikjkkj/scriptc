@@ -7138,7 +7138,11 @@ export type IrExpr =
    * the whole walk (armOwnMasks), so that the answer does not depend on
    * declaration order — which is exactly why this is a node and not two
    * spellings chosen at lowering time. */
-  | { kind: "recordKeyPresent"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
+  /** `orSlot: true` is `in`'s spelling of the question: own OR carried in
+   * the slot. A record a crossing materialised can hold a member its source
+   * only INHERITED (clear bit, value in the slot), which `in` answers true
+   * for and Object.keys does not. */
+  | { kind: "recordKeyPresent"; obj: IrExpr; shapeId: string; field: string; orSlot?: true; type: IrType; loc: SrcLoc }
   /** `in`'s question about a REQUIRED field of a shape some literal
    * COMPLETED: was this slot ever written on THIS instance?
    *

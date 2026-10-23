@@ -2364,7 +2364,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (!shape) throw new Error(`emitter bug: recordKeyPresent of unknown shape ${e.shapeId}`);
         const f = shape.fields.find((x) => x.name === e.field);
         if (!f) throw new Error(`emitter bug: recordKeyPresent of unknown field ${e.shapeId}.${e.field}`);
-        const cond = ownPresentCondC(shape, e.field, obj.name, E.undefinedArmTag(f.type), false);
+        const cond = ownPresentCondC(shape, e.field, obj.name, E.undefinedArmTag(f.type), false, e.orSlot === true);
         return E.newTemp(e.type, cond ?? "true");
       }
       case "recordNullProto": {
