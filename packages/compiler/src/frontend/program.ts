@@ -3235,6 +3235,13 @@ function preflight7(load: LoadResult): {
               if (nDep !== null) deps.push({ dep: nDep });
               continue;
             }
+            // A PROJECT import (a provenance-mapped package) read below the top
+            // level: the same program-module edge the statement-level form takes.
+            const projDep = resolveProjectImportSf7(program, sf, spec);
+            if (projDep !== null) {
+              deps.push({ dep: projDep });
+              continue;
+            }
             if (canonicalBuiltinModule(spec) === null && !processModuleAliasRequire7(spec, null)) {
               // Binding-less by construction — same require-site throw
               // channel as the statement-level form above.
@@ -3246,9 +3253,9 @@ function preflight7(load: LoadResult): {
           }
           const dep = resolveImport7(program, sf, spec);
           if (dep && dep.fileName.endsWith(".json")) {
-            // Nested requires are not top-level statements, so the bake never
-            // sees them: a JSON require inside a function keeps the fence.
-            diags.push(unsupportedDiag("SC1012", loc, "require() of JSON modules"));
+            // A JSON require below the top level (iconv-lite's lazy tables)
+            // bakes as a value read (collectNestedJsonRequires): a literal
+            // specifier, so the document is known at build time.
             continue;
           }
           if (dep) deps.push({ dep });

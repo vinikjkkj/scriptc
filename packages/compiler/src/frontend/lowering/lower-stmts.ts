@@ -1266,21 +1266,14 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
         if (canonicalBuiltinModule(requireSpecOf(decl.initializer)!) !== null) {
           return [];
         }
-        // A nested RELATIVE require (`const authSwitch = require('./auth_switch')`
-        // inside a method -- mysql2's lazy loads): the bindings are the same
+        // A nested relative or PACKAGE require (`const authSwitch = require('./auth_switch')`
+        // inside a method -- mysql2's lazy loads; `require('lru.min')`): the bindings are the same
         // alias plumbing a top-level require gives, and the module's guarded
         // %init runs at this position, which is exactly when Node first
         // evaluates it (a later require is a cache hit, and a module a top-level
         // import already ran is a no-op).
-        if (isRelativeSpecifier(requireSpecOf(decl.initializer)!)) {
-          const lazy = L.requireInitStmt(requireSpecOf(decl.initializer)!, decl);
-          return lazy ? [lazy] : [];
-        }
-        L.unsupported(
-          "SC1090",
-          decl,
-          "require() with bindings outside the module's top level (move it to the top of the file)",
-        );
+        const lazy = L.requireInitStmt(requireSpecOf(decl.initializer)!, decl);
+        return lazy ? [lazy] : [];
       }
       // STATIC tier: `const ns = await import("./m.ts")` / `const { a } =
       // await import("./m.ts")` over one of the program's OWN modules.
