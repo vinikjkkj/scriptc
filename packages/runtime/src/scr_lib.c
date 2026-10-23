@@ -146,6 +146,7 @@ static ScrStr *scr_platform_str = NULL; /* interned process.platform */
 static ScrStr *scr_exec_path_str = NULL; /* interned process.execPath */
 static ScrStr *scr_arch_str = NULL;      /* interned process.arch */
 static ScrStr *scr_versions_node_str = NULL; /* interned process.versions.node */
+static ScrStr *scr_version_str = NULL; /* interned process.version */
 static ScrStr *scr_versions_openssl_str = NULL; /* interned process.versions.openssl */
 static ScrStr *scr_default_locale_str = NULL;   /* interned Intl default locale */
 
@@ -160,6 +161,8 @@ static void scr_lib_cleanup(void) {
   scr_arch_str = NULL;
   scr_str_release(scr_versions_node_str);
   scr_versions_node_str = NULL;
+  scr_str_release(scr_version_str);
+  scr_version_str = NULL;
   scr_str_release(scr_versions_openssl_str);
   scr_versions_openssl_str = NULL;
   scr_str_release(scr_default_locale_str);
@@ -248,6 +251,16 @@ ScrStr *scr_process_versions_node(void) {
         scr_str_new(SCR_NODE_COMPAT_VERSION, sizeof(SCR_NODE_COMPAT_VERSION) - 1);
   }
   return scr_str_retain(scr_versions_node_str);
+}
+
+/* process.version: "v" + process.versions.node (the same compatibility
+ * target). Interned; +1 per read. */
+ScrStr *scr_process_version(void) {
+  if (!scr_version_str) {
+    scr_version_str =
+        scr_str_new("v" SCR_NODE_COMPAT_VERSION, sizeof("v" SCR_NODE_COMPAT_VERSION) - 1);
+  }
+  return scr_str_retain(scr_version_str);
 }
 
 /* process.versions.openssl — the compat target's crypto-provider version

@@ -381,6 +381,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "process.execPath": "scr_process_exec_path",
   "process.arch": "scr_process_arch",
   "process.versionsNode": "scr_process_versions_node",
+  "process.version": "scr_process_version",
   "process.versionsOpenssl": "scr_process_versions_openssl",
   "process.umask": "scr_process_umask",
   "process.uptime": "scr_process_uptime",

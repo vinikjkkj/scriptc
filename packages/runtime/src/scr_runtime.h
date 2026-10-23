@@ -3142,6 +3142,7 @@ ScrStr *scr_process_arch(void);
  * semantics the runtime implements (SEMANTICS.md divergence 60). +1
  * interned. */
 ScrStr *scr_process_versions_node(void);
+ScrStr *scr_process_version(void);
 ScrStr *scr_process_versions_openssl(void);
 /* process.kill with Node's exact semantics: int32 pid validation (the
  * ERR_INVALID_ARG_TYPE TypeError text), Node's signal-name table for the

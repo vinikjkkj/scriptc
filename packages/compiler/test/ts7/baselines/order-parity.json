@@ -11610,6 +11610,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8601-process-version-string.js": {
+   "order": [
+    "<repo>/tests/corpus/8601-process-version-string.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"

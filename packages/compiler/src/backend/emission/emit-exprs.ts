@@ -6707,6 +6707,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_process_exec_path()`);
           case "process.arch":
             return finish(`scr_process_arch()`);
+          case "process.version":
+            return finish(`scr_process_version()`);
           case "process.versionsNode":
             return finish(`scr_process_versions_node()`);
           case "process.versionsOpenssl":

@@ -7232,6 +7232,11 @@ let digestInputValueDispatches = 0;
     if (member === "platform") {
       return { kind: "libCall", fn: "process.platform", args: [], type: STRING, loc };
     }
+    // process.version: "v" + process.versions.node, the same compatibility
+    // target (SEMANTICS.md divergence 60).
+    if (member === "version") {
+      return { kind: "libCall", fn: "process.version", args: [], type: STRING, loc };
+    }
     // process.arch: the compiled binary's OWN architecture ("arm64",
     // "x64") — the same answer Node gives for its own build on the same
     // machine.

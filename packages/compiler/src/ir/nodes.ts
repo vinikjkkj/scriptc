@@ -4875,6 +4875,8 @@ export type IrLibFn =
    * semantics the runtime implements (SEMANTICS.md divergence 60, the
    * execPath stance). Interned; +1 per read. Never throws. */
   | "process.versionsNode"
+  /** process.version: "v" + the compatibility target of process.versions.node. */
+  | "process.version"
   | "process.versionsOpenssl"
   /** umask(2): arg < 0 reads without setting (umask has no read-only form
    * — set 0, restore); otherwise sets and answers the PREVIOUS mask.
