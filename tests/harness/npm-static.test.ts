@@ -105,12 +105,15 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // remaining fence sits on the garbage-input path (pinned below), which
   // ms-cli.ts deliberately never drives.
   test.for([
+    // FIRST on purpose: the smallest package, so the cold runtime build (the
+    // first build in the file compiles every runtime unit) is paid here and
+    // not by `ms`, which sat near the 120 s timeout when it came first.
+    ["slash", "slash-cli.ts"],
     // ms's garbage-input paths: parse() answers undefined against its JSDoc
     // `@return {Number}` (a bare `return;`); the shadow respells the claim
     // `{Number|undefined}`, so the slot, the callers and Node agree.
     ["ms", "ms-garbage-cli.ts"],
     ["escape-string-regexp", "escape-cli.ts"],
-    ["slash", "slash-cli.ts"],
     // dualist pins the "node" exports condition: Node runs ./node.js
     // (yaml's browser-vs-node shape) and the opted-in resolution must
     // land on the SAME artifact, never the browser build.
