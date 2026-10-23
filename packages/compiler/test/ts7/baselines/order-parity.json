@@ -11616,6 +11616,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js": {
+   "order": [
+    "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
