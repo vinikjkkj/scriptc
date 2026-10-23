@@ -298,3 +298,15 @@ describe("provenance: a relative module's declaration twin is walked", () => {
     expect(sources.packages.map((p) => p.name).sort()).toEqual(["authoredrel", "depts"]);
   });
 });
+
+describe("provenance: declaration files are not cycle members", () => {
+  test("a .d.ts import cycle raises no SC1016", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = join(fixtureDir, "manifest-declcycle.json");
+    const declEntry = join(fixtureDir, "cases/declcycle/main.ts");
+    const sources = await resolveProvenanceSources(declEntry);
+    setProvenanceSources(sources);
+    const { coverage } = analyze(declEntry);
+    const codes = coverage.diagnostics.map((d) => `${d.code}: ${d.message}`).filter((m) => /^SC1016/.test(m));
+    expect(codes).toEqual([]);
+  });
+});
