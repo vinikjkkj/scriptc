@@ -11702,6 +11702,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8521-own-property-shadows-a-method-with-a-sibling-method.js": {
+   "order": [
+    "<repo>/tests/corpus/8521-own-property-shadows-a-method-with-a-sibling-method.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js": {
    "order": [
     "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js"
