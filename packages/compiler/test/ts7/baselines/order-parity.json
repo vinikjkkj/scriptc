@@ -11792,6 +11792,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8537-tofixed-on-a-dynamic-number.js": {
+   "order": [
+    "<repo>/tests/corpus/8537-tofixed-on-a-dynamic-number.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js": {
    "order": [
     "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js"

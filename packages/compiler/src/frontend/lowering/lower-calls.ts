@@ -6712,6 +6712,9 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // answers reduce/reduceRight/toReversed/toSorted/with, every other kind meets
   // the same own-member-or-is-not-a-function ladder as the names above.
   "reduce", "reduceRight", "flat", "toReversed", "toSorted", "toSpliced", "with",
+  // Number.prototype.toFixed: the same runtime formatter the typed spelling
+  // calls; every non-number kind meets the not-a-function ladder.
+  "toFixed",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
   // boxed through the checked-dynamic boundary): these names dispatch on
   // the runtime kind so a boxed IncomingMessage/ServerResponse/Socket
