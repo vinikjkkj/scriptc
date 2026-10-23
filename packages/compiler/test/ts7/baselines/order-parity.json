@@ -12026,6 +12026,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8531-statements-after-an-exit-are-not-lowered.js": {
+   "order": [
+    "<repo>/tests/corpus/8531-statements-after-an-exit-are-not-lowered.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8532-navigator-guard-makes-the-rest-of-the-function-dead.js": {
+   "order": [
+    "<repo>/tests/corpus/8532-navigator-guard-makes-the-rest-of-the-function-dead.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",

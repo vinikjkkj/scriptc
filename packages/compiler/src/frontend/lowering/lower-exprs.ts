@@ -5921,6 +5921,8 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
     "process.version",
     "process.versionsNode",
     "process.versionsOpenssl",
+    "navigator.userAgent",
+    "navigator.platform",
   ]);
 
 /** The answer of `typeof recv.name` when `name` is a method of the class
