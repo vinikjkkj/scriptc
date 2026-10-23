@@ -4,6 +4,11 @@
       "dir": "./attested-src/twinpkg",
       "commit": "5555555555555555555555555555555555555555",
       "repo": "https://github.com/example/twinpkg"
+    },
+    "twindef": {
+      "dir": "./attested-src/twindef",
+      "commit": "6666666666666666666666666666666666666666",
+      "repo": "https://github.com/example/twindef"
     }
   }
 }

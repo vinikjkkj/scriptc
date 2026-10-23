@@ -87,3 +87,32 @@ describe("provenance: a require binding of a .d.ts module with a compiled twin",
     });
   }
 });
+
+/* Classes through the require binding. The receiver of a static call/read and
+ * the base of an `extends` clause were bare identifiers only; a qualified one
+ * (`rs.Box.make(9)`, `class X extends rs.Base`) answered "constructing values
+ * other than classes", "no compiled implementation" and "no base class declares
+ * it". `exports.default = Client` in the twin against `export default class` in
+ * the declaration is the default-export form ("twin defines it as a function"
+ * in the field measurement). */
+const EXPECTED_REQUIRE_CLASSES =
+  "get=4\n" +
+  "make=9 kind=box\n" +
+  "other7\n" +
+  "truefalsetrue\n" +
+  "v=4\n" +
+  "v2=11\n" +
+  "pong:a\n" +
+  "pong:q2\n" +
+  "sub-pong:sub5true\n" +
+  "my-pong:ktruetrue\n" +
+  "6sub-pong:sub\n";
+
+describe("provenance: classes through a require binding of a .d.ts module with a compiled twin", () => {
+  for (const backend of BACKENDS) {
+    test(`construction, qualified statics, default export, extends with super, instanceof (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinclassjs/main.js");
+      expect(await buildAndRun(entry, "twinclassjs", backend)).toBe(EXPECTED_REQUIRE_CLASSES);
+    });
+  }
+});
