@@ -4553,6 +4553,7 @@ typedef enum {
   SCR_DYNH_CHILD_STREAM, /* ScrChildStream — child stdio (Readable), on/once("data"|"end") */
   SCR_DYNH_DATE,        /* ScrDate — Date (immutable time value, by reference) */
   SCR_DYNH_SYMBOL,       /* ScrSym — an ES Symbol (immutable identity value, by reference) */
+  SCR_DYNH_TEXTCODEC,    /* the immortal TextEncoder/TextDecoder values (scr_json.c; ops install lazily) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
@@ -6369,6 +6370,19 @@ const ScrDynHandleOps *scr_dyn_handle_ops_of(const ScrDyn *d);
  * The tag MUST be installed — emitted programs install a unit's ops
  * whenever they can box its handles. */
 ScrDyn *scr_dyn_new_handle(void *h, ScrDynHandleTag tag);
+/* `new TextEncoder()` / `new TextDecoder()` evaluate to one of two IMMORTAL
+ * strings (scr_json.c) instead of a fresh "utf-8", and scr_dyn_new_str
+ * boxes exactly those two as a SCR_DYNH_TEXTCODEC handle — so a codec that
+ * escapes into the checked-dynamic tree is an object with its members, not
+ * the string it is represented by. scr_textcodec_name answers the class
+ * ("TextEncoder" / "TextDecoder") for a box. */
+ScrStr *scr_text_encoder_value(void);
+ScrStr *scr_text_decoder_value(void);
+extern ScrDyn *(*scr_textcodec_box_fn)(ScrStr *s);
+bool scr_dyn_is_textcodec(const ScrDyn *d);
+bool scr_dyn_str_like(const ScrDyn *d);
+ScrStr *scr_dyn_str_value(const ScrDyn *d);
+const char *scr_textcodec_name(const ScrDyn *d);
 /* dynCheck extraction (`u as IncomingMessage`, a boxed listener's typed
  * parameter): tag match answers the RETAINED pointer (+1 — reference
  * identity, no copy); anything else throws the path-annotated catchable

@@ -6325,15 +6325,26 @@ let digestInputValueDispatches = 0;
       if (receiver.type.kind !== "record") L.badType(expr.expression, L.typeOf(expr.expression));
       return { kind: "recordGet", obj: receiver, shapeId: receiver.type.shapeId, field: "encoding", type: STRING, loc: locOf(expr) };
     }
-    // codec.encoding on a TextEncoder/TextDecoder: the instance IS that
-    // constant string (types.ts), so the read is the receiver itself.
+    // codec.encoding on a TextEncoder/TextDecoder: the constant "utf-8".
+    // NOT the receiver itself, which is one of the runtime's two immortal
+    // codec strings (scr_dyn_new_str boxes those as a handle): a read that
+    // handed the receiver back would make `use(codec.encoding)` cross the
+    // boundary as a TextEncoder. The receiver still evaluates, once, for
+    // its effects.
     if (
       expr.name.text === "encoding" &&
       (isStdlibInstanceOf(L, expr.expression, "TextEncoder") ||
         isStdlibInstanceOf(L, expr.expression, "TextDecoder")) &&
       L.isStdlibMember(expr)
     ) {
-      return L.lowerExprExpecting(expr.expression, STRING);
+      const loc = locOf(expr);
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: L.lowerExprExpecting(expr.expression, STRING), loc }],
+        result: { kind: "strLit", value: "utf-8", type: STRING, loc },
+        type: STRING,
+        loc,
+      };
     }
     const kind = L.mapTypeOf(L.typeOf(expr.expression))?.kind;
     if (kind !== "stats" && kind !== "spawnRes" && kind !== "child") return null;
