@@ -1146,7 +1146,22 @@ export function jsonModuleOfRequire(L: Lowerer, call: ts.CallExpression): ts.Sou
   const t = L.typeOf(call);
   const sym = t.getSymbol() ?? t.getAliasSymbol();
   const sf = sym ? L.checker.declarationsOf(sym)[0]?.getSourceFile() : undefined;
-  return sf && sf.fileName.endsWith(".json") ? sf : null;
+  if (sf && sf.fileName.endsWith(".json")) return sf;
+  // A JSON document whose root is an array or a scalar types as `number[]` /
+  // `string` — a type with no symbol of its own to trace back to the file.
+  // The specifier literal still resolves to the module, so ask for that.
+  if (!arg.text.startsWith(".") || !arg.text.endsWith(".json")) return null;
+  const from = call.getSourceFile().fileName.replace(/\\/g, "/");
+  const dir = from.slice(0, from.lastIndexOf("/") + 1);
+  const parts = (dir + arg.text).split("/");
+  const norm: string[] = [];
+  for (const p of parts) {
+    if (p === "." || (p === "" && norm.length > 0)) continue;
+    if (p === "..") norm.pop();
+    else norm.push(p);
+  }
+  const modSf = L.program.getSourceFile(norm.join("/"));
+  return modSf && modSf.fileName.endsWith(".json") ? modSf : null;
 }
 
 /** The CJS twin of collectJsonImports: `const { a, b } = require("./x.json")`
