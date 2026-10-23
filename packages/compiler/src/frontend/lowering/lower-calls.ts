@@ -5243,7 +5243,8 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (
         (expr.expression.text === "encodeURIComponent" ||
           expr.expression.text === "encodeURI" ||
-          expr.expression.text === "decodeURIComponent") &&
+          expr.expression.text === "decodeURIComponent" ||
+          expr.expression.text === "decodeURI") &&
         L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined)
       ) {
         const name = expr.expression.text;
@@ -5255,7 +5256,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         }
         const loc = locOf(expr);
         const argNode = expr.arguments[0]!;
-        if (name === "decodeURIComponent") {
+        if (name === "decodeURIComponent" || name === "decodeURI") {
           const d = L.lowerExpr(argNode);
           if (d.type.kind !== "string") {
             L.noLowering(
@@ -5264,7 +5265,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
               "only string arguments lower (Node would ToString the value — convert it explicitly)",
             );
           }
-          return { kind: "libCall", fn: "str.decodeUriComponent", args: [d], type: STRING, loc };
+          return { kind: "libCall", fn: name === "decodeURI" ? "str.decodeUri" : "str.decodeUriComponent", args: [d], type: STRING, loc };
         }
         const s = L.ensureString(L.lowerExpr(argNode), argNode);
         return {

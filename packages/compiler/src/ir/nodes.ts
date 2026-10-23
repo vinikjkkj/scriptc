@@ -3464,6 +3464,10 @@ export type IrLibFn =
    * spec's URIError ("URI malformed"), catchable. Borrow; results +1. */
   | "str.encodeUriComponent"
   | "str.decodeUriComponent"
+  /** decodeURI: str.decodeUriComponent except that an escape of one of the
+   * reserved characters `;/?:@&=+$,#` stays as written. Throws the same
+   * URIError; borrows; result +1. */
+  | "str.decodeUri"
   /** RegExp.escape (ES2025): per-code-point EncodeForRegExpEscape —
    * leading ASCII alphanumeric hex-escapes, syntax characters and '/'
    * take a backslash, other punctuators/whitespace/line terminators
@@ -12221,6 +12225,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // decodeURIComponent throws the spec's URIError on bad hex/invalid
   // UTF-8 octets (encodeURIComponent never throws — see the IrLibFn doc).
   "str.decodeUriComponent",
+  "str.decodeUri",
   // The base64 globals: atob/btoa throw the catchable DOMException
   // InvalidCharacterError on malformed input; the zero-argument form
   // always throws Node's TypeError [ERR_MISSING_ARGS].
