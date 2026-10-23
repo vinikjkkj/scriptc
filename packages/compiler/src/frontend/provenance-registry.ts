@@ -51,6 +51,10 @@ export interface ProvenancePackageSource {
   installedDir?: string;
   /** specifier → absolute mapped source file ("cookie" → …/src/index.ts). */
   entries: Record<string, string>;
+  /** specifier → mapped file when a require() of it resolves to a different
+   * file than an import of it (the "require" vs "import" export condition).
+   * Absent entries mean both edges take `entries`. */
+  requireEntries?: Record<string, string>;
   /** The source tree's OWN tsconfig "paths", baseUrl-resolved to absolute
    * targets ("@client/*" → ["…/src/client/*"]). A package built with path
    * aliases imports its internals through them, and those specifiers are
@@ -112,6 +116,8 @@ export interface AliasScope {
 
 interface RegistryState {
   bySpecifier: Map<string, string>;
+  /** require() edges whose target differs from bySpecifier's. */
+  byRequire: Map<string, string>;
   /** Longest-prefix-first, so the tsc "most specific pattern wins" rule is
    * a linear scan. */
   aliases: AliasPattern[];
@@ -148,6 +154,7 @@ export function setProvenanceSources(sources: ProvenanceSources | null): void {
         ? null
         : {
             bySpecifier: new Map(),
+            byRequire: new Map(),
             aliases: [],
             aliasPaths: {},
             externalPaths: {},
@@ -158,6 +165,7 @@ export function setProvenanceSources(sources: ProvenanceSources | null): void {
     return;
   }
   const bySpecifier = new Map<string, string>();
+  const byRequire = new Map<string, string>();
   const packageDirs: string[] = [];
   const aliases: AliasPattern[] = [];
   const aliasPaths: Record<string, string[]> = {};
@@ -171,6 +179,7 @@ export function setProvenanceSources(sources: ProvenanceSources | null): void {
     for (const [spec, file] of Object.entries(pkg.entries)) {
       bySpecifier.set(spec, file);
     }
+    for (const [spec, file] of Object.entries(pkg.requireEntries ?? {})) byRequire.set(spec, file);
     for (const [key, targets] of Object.entries(pkg.aliases ?? {})) {
       if (targets.length === 0) continue;
       const star = key.indexOf("*");
@@ -203,6 +212,7 @@ export function setProvenanceSources(sources: ProvenanceSources | null): void {
   aliases.sort((a, b) => b.prefix.length - a.prefix.length);
   state = {
     bySpecifier,
+    byRequire,
     aliases,
     aliasPaths,
     externalPaths,
@@ -441,8 +451,19 @@ export function provenanceSources(): ProvenanceSources | null {
 }
 
 /** The mapped source entry for a bare specifier, or null. */
-export function provenanceEntryFor(specifier: string): string | null {
+export function provenanceEntryFor(specifier: string, viaRequire = false): string | null {
+  if (viaRequire) {
+    const r = state?.byRequire.get(specifier);
+    if (r !== undefined) return r;
+  }
   return state?.bySpecifier.get(specifier) ?? null;
+}
+
+/** The files only a require() edge reaches (their import-edge twin is a
+ * different file); program roots, so the checker holds the body the
+ * CommonJS edge resolves to even when no import statement names it. */
+export function provenanceRequireRoots(): string[] {
+  return state === null ? [] : [...new Set(state.byRequire.values())];
 }
 
 /** True when `specifier` was recorded as an ORDINARY npm package a mapped

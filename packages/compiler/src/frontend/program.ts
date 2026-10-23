@@ -49,7 +49,7 @@ import {
   tscPassthroughDiag,
   unsupportedDiag,
 } from "../diagnostics/diagnostic.js";
-import { provenanceDeclSiblings, provenanceSpecTwinsInProgram } from "./provenance-registry.js";
+import { provenanceDeclSiblings, provenanceRequireRoots, provenanceSpecTwinsInProgram } from "./provenance-registry.js";
 import { clearResolveCaches, isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
@@ -298,7 +298,7 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
     }
     if (npm !== null && isJsSourceFileName(npm.typesFile)) npmStaticRoots.push(npm.typesFile);
   }
-  const baseRoots = [...coreRoots, overridesDtsPath(), ...provenanceDeclSiblings(), ...npmStaticRoots];
+  const baseRoots = [...coreRoots, overridesDtsPath(), ...provenanceDeclSiblings(), ...provenanceRequireRoots(), ...npmStaticRoots];
   let program = ts.createProgram(baseRoots, options, host);
   /* The two-phase ORACLE for the prescan`s spec-twin selection (see
    * provenanceSpecTwinsInProgram). Off by default -- the scan already put the
