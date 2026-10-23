@@ -32,7 +32,7 @@ import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
-import { bindingNeverReassigned, classHasOwnValueOf, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
+import { bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -7788,17 +7788,16 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     expected?: (IrType & { kind: "array" }) | (IrType & { kind: "record" }),): IrExpr {
     const loc = locOf(expr);
     if (L.dynArrayLiterals.has(expr)) {
-      const elems = expr.elements.map((el): IrExpr => {
-        if (ts.isSpreadElement(el)) {
-          L.unsupported("SC1090", el, "spread elements in a dynamic (unknown[]) array literal");
-        }
+      const spreads: { at: number; what: string | null }[] = [];
+      const elems = expr.elements.map((el, i): IrExpr => {
+        if (ts.isSpreadElement(el)) return lowerDynLiteralSpread(L, el, i, spreads);
         const v = L.coerceToExpected(L.lowerExpr(el), DYN);
         if (v.type.kind !== "dyn") {
           L.unsupported("SC1101", el, `holding '${L.fmt(v.type)}' values in a dynamic (unknown[]) array literal`);
         }
         return v;
       });
-      return { kind: "dynArrLit", elems, type: DYN, loc };
+      return { kind: "dynArrLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: DYN, loc };
     }
     const ctxType = L.checker.getContextualType(expr);
     const tsType = ctxType ?? L.typeOf(expr);
@@ -7972,10 +7971,9 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       // to DYN wholesale now (mapType's dyn-element array rule), so the
       // literal IS the dyn array.
       if (isJsSourceFile(expr.getSourceFile()) || mapped?.kind === "dyn") {
-        const elems = expr.elements.map((el): IrExpr => {
-          if (ts.isSpreadElement(el)) {
-            L.unsupported("SC1090", el, "spread elements in a dynamic (unknown[]) array literal");
-          }
+        const spreads: { at: number; what: string | null }[] = [];
+        const elems = expr.elements.map((el, i): IrExpr => {
+          if (ts.isSpreadElement(el)) return lowerDynLiteralSpread(L, el, i, spreads);
           const v = L.coerceToExpected(L.lowerExpr(el), DYN);
           if (v.type.kind !== "dyn") {
             L.unsupported(
@@ -7986,7 +7984,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
           }
           return v;
         });
-        return { kind: "dynArrLit", elems, type: DYN, loc };
+        return { kind: "dynArrLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: DYN, loc };
       }
       L.badType(expr, tsType);
     }
@@ -22257,3 +22255,25 @@ function everyArmIsTuple(L: Lowerer, t: ts.Type): boolean {
           // they were not captured[0] of their statement (the SC2004 cascade
           // markers for 'pickActiveSyncKey' and 'fetchLatestWaMobileVersion'
           // -- neither reaches the emitted C at all).
+
+
+/** A SPREAD element of a dynamic (unknown[]) array literal: `[...xs, y]` where
+ * the literal itself is a dyn array. The source flattens at RUN time through
+ * the iterable kinds the dyn walk steps (arrays element-by-element, strings
+ * by code point, bytes by byte, a dyn-flavored Map/Set by its iteration),
+ * exactly as a spread into a dyn rest pack does (dynArrLit's `spreads`), and
+ * a non-iterable source is V8's catchable TypeError. A source the dyn walk
+ * cannot step refuses BY NAME (dynSpreadSource) instead of reaching a box
+ * that answers a TypeError for a spread Node completes. The ITERATED text
+ * variant (`what: null`) is the right one here: a literal's spread always
+ * drives the real iterator protocol. */
+function lowerDynLiteralSpread(
+  L: Lowerer,
+  el: ts.SpreadElement,
+  at: number,
+  spreads: { at: number; what: string | null }[],
+): IrExpr {
+  const src = dynSpreadSource(L, el, L.lowerExpr(el.expression), "a dynamic (unknown[]) array literal");
+  spreads.push({ at, what: null });
+  return L.coerceInto(el.expression, src, DYN);
+}

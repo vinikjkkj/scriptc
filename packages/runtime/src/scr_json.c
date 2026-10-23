@@ -1497,6 +1497,14 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
     }
     return;
   }
+  if (scr_dyn_is_iterable_dynmap(src)) {
+    ScrDyn *snap = scr_dyn_map_snapshot(src, 0);
+    for (size_t i = 0; i < snap->v.arr.len; i++) {
+      scr_dyn_arr_push(arr, scr_dyn_retain(snap->v.arr.items[i]));
+    }
+    scr_dyn_release(snap);
+    return;
+  }
   if (src->kind == SCR_DYN_BYTES && !dyn_bytes_is_dataview(src)) {
     for (size_t i = 0; i < src->v.bytes->len; i++) {
       scr_dyn_arr_push(arr, scr_dyn_new_num((double)src->v.bytes->data[i]));
@@ -1555,7 +1563,8 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
  * undefined no kind prefix, null V8's "object null"). Borrows both; +1 or
  * NULL with the TypeError pending. */
 ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg) {
-  if ((src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_BYTES || src->kind == SCR_DYN_STR) &&
+  if ((src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_BYTES || src->kind == SCR_DYN_STR ||
+       scr_dyn_is_iterable_dynmap(src)) &&
       !dyn_bytes_is_dataview(src)) {
     ScrDyn *out = scr_dyn_new_arr();
     scr_dyn_arr_push_spread(out, src, ""); /* iterable kinds never consult `what` */
@@ -9888,7 +9897,7 @@ void scr_dyn_pack_push_spread(ScrDyn *pack, const ScrDyn *src, const ScrStr *wha
  * spread's syntactic position. MAY THROW (pending). Borrows src. */
 void scr_dyn_pack_push_spread_iter(ScrDyn *pack, const ScrDyn *src) {
   if ((src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_BYTES ||
-       src->kind == SCR_DYN_STR) && !dyn_bytes_is_dataview(src)) {
+       src->kind == SCR_DYN_STR || scr_dyn_is_iterable_dynmap(src)) && !dyn_bytes_is_dataview(src)) {
     scr_dyn_arr_push_spread(pack, src, ""); /* iterable kinds never throw */
     return;
   }
