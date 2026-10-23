@@ -5779,7 +5779,17 @@ function switchDiscAtBridgedLocal(L: Lowerer, stmt: ts.SwitchStatement, disc: Ir
       const chain = lowerUnionSwitch(L, stmt, { kind: "varRef", localId: tmp.id, type: DYN, loc: disc.loc });
       return { kind: "block", body: [bind, chain], loc: locOf(stmt) };
     }
-    if (dk === "union") return lowerUnionSwitch(L, stmt, disc);
+    if (dk === "union") {
+      // The same pin for a union: a discriminant that is not a plain read
+      // (`switch (process.env.PGSSLMODE)`, `switch (f())`) evaluates ONCE into a
+      // hidden local — JS evaluates the switch expression once — and the chain's
+      // tests re-read the local.
+      if (pureReemittable(disc)) return lowerUnionSwitch(L, stmt, disc);
+      const tmp = L.declareHiddenLocal("%switchDisc", disc.type);
+      const bind: IrStmt = { kind: "varDecl", localId: tmp.id, init: disc, loc: disc.loc };
+      const chain = lowerUnionSwitch(L, stmt, { kind: "varRef", localId: tmp.id, type: disc.type, loc: disc.loc });
+      return { kind: "block", body: [bind, chain], loc: locOf(stmt) };
+    }
     if (dk !== "f64" && dk !== "string" && dk !== "bool") {
       L.unsupported("SC1090", stmt.expression, "switch on non-primitive values");
     }

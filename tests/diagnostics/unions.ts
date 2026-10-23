@@ -32,7 +32,7 @@ console.log(both, picked === u);
 console.log(u);
 
 // switch on a union compiles for plain-read discriminants (corpus 1119);
-// a COMPUTED discriminant rides every desugared test and stays fenced.
+// a COMPUTED discriminant is evaluated once into a hidden local (8529).
 switch (mk()) {
   case 1:
     break;

@@ -12014,6 +12014,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8529-switch-on-a-union-valued-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/8529-switch-on-a-union-valued-call.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
