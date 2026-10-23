@@ -39,8 +39,13 @@ afterEach(() => {
   else process.env["SCRIPTC_PROVENANCE_MANIFEST"] = PRIOR;
 });
 
-async function buildAndRun(entry: string, name: string, backend: "c" | "llvm"): Promise<string> {
-  process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
+async function buildAndRun(
+  entry: string,
+  name: string,
+  backend: "c" | "llvm",
+  manifestPath: string = manifest,
+): Promise<string> {
+  process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifestPath;
   setProvenanceSources(await resolveProvenanceSources(entry));
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, process.platform === "win32" ? `${name}-${backend}.exe` : `${name}-${backend}`);
@@ -113,6 +118,25 @@ describe("provenance: classes through a require binding of a .d.ts module with a
     test(`construction, qualified statics, default export, extends with super, instanceof (${backend})`, async () => {
       const entry = join(fixtureDir, "cases/twinclassjs/main.js");
       expect(await buildAndRun(entry, "twinclassjs", backend)).toBe(EXPECTED_REQUIRE_CLASSES);
+    });
+  }
+});
+
+/* The DEFAULT import of a declaration-with-twin CommonJS module:
+ * `import mysql from "pkg/promise"; mysql.createPool(...)`. esModuleInterop
+ * types the binding as the module namespace and Node binds the TWIN's
+ * module.exports there. The call refused "no compiled implementation" (the
+ * mysql2 shape), and once the binding resolved, the twin's init was not run for
+ * a default binding: the build compiled and the binary aborted/segfaulted, a
+ * silent-wrong-answer class. */
+const EXPECTED_DEFAULT = "SELECT:2/1\n" + "SELECT 2:2/1\n" + "2\n" + "boom from a\n";
+
+describe("provenance: the default import of a .d.ts module with a compiled twin", () => {
+  for (const backend of BACKENDS) {
+    test(`mysql.createPool through the default binding runs the twin (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/mixinpooldefault/main.ts");
+      const mp = join(fixtureDir, "manifest-mixinpool.json");
+      expect(await buildAndRun(entry, "mixinpooldefault", backend, mp)).toBe(EXPECTED_DEFAULT);
     });
   }
 });
