@@ -11892,6 +11892,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8601-process-version-string.js": {
+   "order": [
+    "<repo>/tests/corpus/8601-process-version-string.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"

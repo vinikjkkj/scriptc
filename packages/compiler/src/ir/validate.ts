@@ -1144,6 +1144,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.execPath": { argTypes: [], result: STRING },
   "process.arch": { argTypes: [], result: STRING },
   "process.versionsNode": { argTypes: [], result: STRING },
+  "process.version": { argTypes: [], result: STRING },
   "process.versionsOpenssl": { argTypes: [], result: STRING },
   "process.kill": { argTypes: [F64, STRING], result: BOOL },
   "process.killNum": { argTypes: [F64, F64], result: BOOL },

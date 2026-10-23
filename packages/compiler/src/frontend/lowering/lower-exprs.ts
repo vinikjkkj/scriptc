@@ -5898,6 +5898,7 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
 /** Builtins whose value is a constant of the runtime build — see
    * droppableStatic. */
   const CONST_LIB_CALLS: ReadonlySet<string> = new Set([
+    "process.version",
     "process.versionsNode",
     "process.versionsOpenssl",
   ]);
