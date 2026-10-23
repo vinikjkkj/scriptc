@@ -11792,6 +11792,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
+   "order": [
+    "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8701-union-of-object-literals-prints-only-the-keys-it-has.ts": {
+   "order": [
+    "<repo>/tests/corpus/8701-union-of-object-literals-prints-only-the-keys-it-has.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8702-width-copy-keeps-the-own-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/8702-width-copy-keeps-the-own-keys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8703-optional-members-cross-into-unknown-with-their-own-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/8703-optional-members-cross-into-unknown-with-their-own-keys.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8710-untyped-map-methods-are-real.js": {
    "order": [
     "<repo>/tests/corpus/8710-untyped-map-methods-are-real.js"
