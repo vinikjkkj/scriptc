@@ -7988,6 +7988,8 @@ function spellsAnyReturn(decl: ts.Node | undefined): boolean {
   return tn !== undefined && tn.kind === ts.SyntaxKind.AnyKeyword;
 }
 
+// Only the ARRAY spellings (`any[]`, `Array<any>`): a program-authored bare `any` member keeps its refusal
+// (anymember-dts-admission pins it).
 function declSpellsAny(decls: readonly ts.Node[]): boolean {
   if (decls.length === 0) return false;
   return decls.every((d) => {
@@ -7995,7 +7997,6 @@ function declSpellsAny(decls: readonly ts.Node[]): boolean {
     let tn: ts.TypeNode | undefined = d.type;
     while (tn !== undefined && ts.isParenthesizedTypeNode(tn)) tn = tn.type;
     if (tn === undefined) return false;
-    if (tn.kind === ts.SyntaxKind.AnyKeyword) return true;
     if (ts.isArrayTypeNode(tn)) return tn.elementType.kind === ts.SyntaxKind.AnyKeyword;
     return (
       ts.isTypeReferenceNode(tn) && ts.isIdentifier(tn.typeName) && tn.typeName.text === "Array" &&
