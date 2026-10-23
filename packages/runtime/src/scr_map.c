@@ -296,102 +296,17 @@ static bool scr_map_union_eq(const ScrMap *m, const ScrUnion *a, const ScrUnion 
 }
 
 /* DYN keys (a Map/Set in untyped JavaScript, whose keys are arbitrary
- * values): the stored key is a ScrDyn box (retained), and SameValueZero over
- * the VALUE it carries is decided by the box's kind, exactly as
- * scr_dyn_strict_eq decides === (which this follows arm for arm) plus the two
- * rules Map adds to ===: NaN equals NaN, and -0 is +0.
- *   undefined / null / boolean  by value;
- *   number                      the normalized double (scr_map_f64_bits);
- *   string                      by content;
- *   bigint                      by value (sign + limbs);
- *   function / handle / promise / class instance / bytes / arraybuffer / map
- *                               by the PAYLOAD pointer (the box is a boundary
- *                               artifact: two boxes of one payload are one
- *                               JS value, and strict_eq says so too);
- *   every other kind            by BOX identity (the checked-dynamic tree's
- *                               own object identity).
- * Two boxes of different kinds are never equal; the kind decides first. */
-static uint64_t scr_map_hash_dyn(const ScrDyn *d) {
-  uint64_t parts[2];
-  parts[0] = (uint64_t)d->kind;
-  switch (d->kind) {
-    case SCR_DYN_UNDEF:
-    case SCR_DYN_NULL:
-      parts[1] = 0;
-      break;
-    case SCR_DYN_BOOL:
-      parts[1] = d->v.b ? 1 : 0;
-      break;
-    case SCR_DYN_NUM:
-      parts[1] = scr_map_f64_bits(d->v.num);
-      break;
-    case SCR_DYN_STR:
-      parts[1] = scr_map_hash_str(d->v.str);
-      break;
-    case SCR_DYN_BIG: {
-      const ScrBigInt *b = d->v.big;
-      uint64_t h = scr_map_fnv1a((const unsigned char *)b->limbs, b->n * sizeof(uint32_t));
-      parts[1] = h ^ (uint64_t)(b->sign < 0 ? 1 : 0);
-      break;
-    }
-    case SCR_DYN_FUNC:
-      parts[1] = (uint64_t)(uintptr_t)d->v.fn.clo;
-      break;
-    case SCR_DYN_HANDLE:
-      parts[0] ^= ((uint64_t)d->v.handle.tag + 1) << 8;
-      parts[1] = (uint64_t)(uintptr_t)d->v.handle.ptr;
-      break;
-    case SCR_DYN_PROMISE:
-      parts[1] = (uint64_t)(uintptr_t)d->v.promise;
-      break;
-    case SCR_DYN_OBJINST:
-      parts[1] = (uint64_t)(uintptr_t)d->v.inst.o;
-      break;
-    case SCR_DYN_BYTES:
-    case SCR_DYN_ARRBUF:
-      parts[1] = (uint64_t)(uintptr_t)d->v.bytes;
-      break;
-    case SCR_DYN_MAP:
-      parts[1] = (uint64_t)(uintptr_t)d->v.map.m;
-      break;
-    case SCR_DYN_JSVAL:
-      parts[1] = 0; /* engine identity is not addressable here: one bucket, strict_eq decides */
-      break;
-    case SCR_DYN_ARR:
-    case SCR_DYN_OBJ: {
-      /* A COPY the static-to-dynamic boundary made of an array or record the
-       * program still names is the SAME JS value as every other copy of that
-       * origin, so identity is the ORIGIN (the side table the weak keys read,
-       * scr_dyn_origin_peek). A native dyn array/object, or a copy of an
-       * unnamed rvalue, has no origin: its identity is its own box. */
-      void *o = scr_dyn_origin_peek(d, NULL);
-      parts[1] = (uint64_t)(uintptr_t)(o != NULL ? o : (const void *)d);
-      break;
-    }
-    default:
-      parts[1] = (uint64_t)(uintptr_t)d;
-      break;
-  }
-  return scr_map_fnv1a((const unsigned char *)parts, sizeof parts);
-}
-
-static bool scr_map_dyn_eq(const ScrDyn *a, const ScrDyn *b) {
-  if (a == b) return true;
-  if (a->kind != b->kind) return false;
-  if (a->kind == SCR_DYN_NUM) return scr_map_f64_bits(a->v.num) == scr_map_f64_bits(b->v.num);
-  if (a->kind == SCR_DYN_ARR || a->kind == SCR_DYN_OBJ) {
-    void *oa = scr_dyn_origin_peek(a, NULL);
-    void *ob = scr_dyn_origin_peek(b, NULL);
-    return oa != NULL && oa == ob; /* a != b was settled above; two boxes are one value only through one origin */
-  }
-  return scr_dyn_strict_eq(a, b);
-}
+ * values) hash and compare through the TWO HOOKS the map carries
+ * (key_hash / key_eq), which the dyn layer installs with its constructors
+ * (scr_json.c: scr_map_new_dynkey / scr_set_new_dynkey). The typed core
+ * therefore names no dyn symbol, and a program or unit test that links
+ * scr_map.c without the dyn layer links cleanly. */
 
 /* The hash of one STORED or PROBE key slot, by the map's key kind. */
 static uint64_t scr_map_hash_slot(const ScrMap *m, uint64_t key) {
   if (m->key_kind == SCR_MAP_KEY_STR) return scr_map_hash_str((const ScrStr *)scr_map_slot_to_ptr(key));
   if (m->key_kind == SCR_MAP_KEY_UNION) return scr_map_hash_union(m, (const ScrUnion *)scr_map_slot_to_ptr(key));
-  if (m->key_kind == SCR_MAP_KEY_DYN) return scr_map_hash_dyn((const ScrDyn *)scr_map_slot_to_ptr(key));
+  if (m->key_kind == SCR_MAP_KEY_DYN) return m->key_hash(scr_map_slot_to_ptr(key));
   return scr_map_fnv1a((const unsigned char *)&key, 8);
 }
 
@@ -404,8 +319,7 @@ static bool scr_map_key_eq(const ScrMap *m, uint64_t stored, uint64_t probe) {
     return scr_map_union_eq(m, (const ScrUnion *)scr_map_slot_to_ptr(stored),
                             (const ScrUnion *)scr_map_slot_to_ptr(probe));
   if (m->key_kind == SCR_MAP_KEY_DYN)
-    return scr_map_dyn_eq((const ScrDyn *)scr_map_slot_to_ptr(stored),
-                          (const ScrDyn *)scr_map_slot_to_ptr(probe));
+    return m->key_eq(scr_map_slot_to_ptr(stored), scr_map_slot_to_ptr(probe));
   if (m->key_kind != SCR_MAP_KEY_STR) return stored == probe;
   return scr_str_eq((ScrStr *)scr_map_slot_to_ptr(stored),
                      (ScrStr *)scr_map_slot_to_ptr(probe));
@@ -1016,25 +930,6 @@ ScrMap *scr_set_new_union(void *(*elem_retain)(void *), void (*elem_release)(voi
   m->key_release = elem_release;
   m->key_trace = elem_trace;
   m->key_classes = classes;
-  return m;
-}
-
-/* DYN-KEYED containers (untyped JavaScript's `new Map()` / `new Set()`): keys
- * are retained ScrDyn boxes hashed and compared by the value they carry (see
- * scr_map_hash_dyn). A Map's values are ScrDyn boxes too (retain/release
- * adapters, no trace: cycles through the checked-dynamic tree are never
- * collected, the tree's standing stance); a Set has no value side. */
-ScrMap *scr_map_new_dynkey(void) {
-  ScrMap *m = scr_map_new(SCR_MAP_KEY_DYN, SCR_MAP_VAL_REF, scr_dyn_retain_v, scr_dyn_release_v, NULL);
-  m->key_retain = scr_dyn_retain_v;
-  m->key_release = scr_dyn_release_v;
-  return m;
-}
-
-ScrMap *scr_set_new_dynkey(void) {
-  ScrMap *m = scr_map_new(SCR_MAP_KEY_DYN, SCR_MAP_VAL_F64, NULL, NULL, NULL);
-  m->key_retain = scr_dyn_retain_v;
-  m->key_release = scr_dyn_release_v;
   return m;
 }
 

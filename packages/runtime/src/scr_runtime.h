@@ -2065,6 +2065,11 @@ typedef struct ScrMap {
   ScrTraceFn key_trace;
   /* SCR_MAP_KEY_UNION only: one class byte per union arm (see scr_map.c). */
   const ScrStr *key_classes;
+  /* SCR_MAP_KEY_DYN only: the hash and equality of a stored/probe key, the
+   * dyn layer's own (scr_json.c installs them). The typed map core calls
+   * through these and names no dyn symbol. */
+  uint64_t (*key_hash)(void *key);
+  bool (*key_eq)(void *a, void *b);
   size_t nentries; /* dense entries used, tombstones included */
   size_t nlive;    /* live entries (Map.size) */
   size_t ecap;     /* entries capacity */

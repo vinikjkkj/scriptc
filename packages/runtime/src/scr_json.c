@@ -2998,6 +2998,138 @@ bool scr_dyn_map_fence(const ScrDyn *d, const char *what) {
  * exactly as for a typed one. The methods are scr_dyn_map_invoke
  * (scr_dyn_invoke.c); `size` is scr_dyn_map_key_get; iteration drains
  * through scr_dyn_map_snapshot. */
+/* ── the DYN key kind's hash and equality (SCR_MAP_KEY_DYN) ─────────────
+ * Installed into the map's key_hash / key_eq hooks by the two constructors
+ * below, so scr_map.c (the typed core) never references the dyn layer.
+ *
+ * The stored key is a ScrDyn box (retained), and SameValueZero over the
+ * VALUE it carries is decided by the box's kind, exactly as
+ * scr_dyn_strict_eq decides === (which this follows arm for arm) plus the
+ * two rules Map adds to ===: NaN equals NaN, and -0 is +0.
+ *   undefined / null / boolean  by value;
+ *   number                      the normalized double;
+ *   string                      by content;
+ *   bigint                      by value (sign + limbs);
+ *   function / handle / promise / class instance / bytes / arraybuffer / map
+ *                               by the PAYLOAD pointer (the box is a boundary
+ *                               artifact: two boxes of one payload are one
+ *                               JS value, and strict_eq says so too);
+ *   array / object              by the ORIGIN of a boundary copy (the side
+ *                               table the weak keys read) or else by box;
+ *   every other kind            by BOX identity.
+ * Two boxes of different kinds are never equal; the kind decides first. */
+static uint64_t dm_fnv1a(const unsigned char *bytes, size_t n) {
+  uint64_t h = UINT64_C(0xcbf29ce484222325);
+  for (size_t i = 0; i < n; i++) {
+    h ^= bytes[i];
+    h *= UINT64_C(0x100000001b3);
+  }
+  return h;
+}
+
+static uint64_t dm_f64_bits(double k) {
+  if (k != k) return UINT64_C(0x7ff8000000000000); /* canonical NaN */
+  if (k == 0) k = 0;                               /* -0 -> +0 */
+  uint64_t bits;
+  memcpy(&bits, &k, sizeof bits);
+  return bits;
+}
+
+static uint64_t dm_hash_key(void *p) {
+  const ScrDyn *d = (const ScrDyn *)p;
+  uint64_t parts[2];
+  parts[0] = (uint64_t)d->kind;
+  switch (d->kind) {
+    case SCR_DYN_UNDEF:
+    case SCR_DYN_NULL:
+      parts[1] = 0;
+      break;
+    case SCR_DYN_BOOL:
+      parts[1] = d->v.b ? 1 : 0;
+      break;
+    case SCR_DYN_NUM:
+      parts[1] = dm_f64_bits(d->v.num);
+      break;
+    case SCR_DYN_STR:
+      parts[1] = dm_fnv1a((const unsigned char *)d->v.str->data, d->v.str->len);
+      break;
+    case SCR_DYN_BIG: {
+      const ScrBigInt *b = d->v.big;
+      uint64_t h = dm_fnv1a((const unsigned char *)b->limbs, b->n * sizeof(uint32_t));
+      parts[1] = h ^ (uint64_t)(b->sign < 0 ? 1 : 0);
+      break;
+    }
+    case SCR_DYN_FUNC:
+      parts[1] = (uint64_t)(uintptr_t)d->v.fn.clo;
+      break;
+    case SCR_DYN_HANDLE:
+      parts[0] ^= ((uint64_t)d->v.handle.tag + 1) << 8;
+      parts[1] = (uint64_t)(uintptr_t)d->v.handle.ptr;
+      break;
+    case SCR_DYN_PROMISE:
+      parts[1] = (uint64_t)(uintptr_t)d->v.promise;
+      break;
+    case SCR_DYN_OBJINST:
+      parts[1] = (uint64_t)(uintptr_t)d->v.inst.o;
+      break;
+    case SCR_DYN_BYTES:
+    case SCR_DYN_ARRBUF:
+      parts[1] = (uint64_t)(uintptr_t)d->v.bytes;
+      break;
+    case SCR_DYN_MAP:
+      parts[1] = (uint64_t)(uintptr_t)d->v.map.m;
+      break;
+    case SCR_DYN_JSVAL:
+      parts[1] = 0; /* engine identity is not addressable here: one bucket, strict_eq decides */
+      break;
+    case SCR_DYN_ARR:
+    case SCR_DYN_OBJ: {
+      void *o = scr_dyn_origin_peek(d, NULL);
+      parts[1] = (uint64_t)(uintptr_t)(o != NULL ? o : (const void *)d);
+      break;
+    }
+    default:
+      parts[1] = (uint64_t)(uintptr_t)d;
+      break;
+  }
+  return dm_fnv1a((const unsigned char *)parts, sizeof parts);
+}
+
+static bool dm_eq_key(void *pa, void *pb) {
+  const ScrDyn *a = (const ScrDyn *)pa, *b = (const ScrDyn *)pb;
+  if (a == b) return true;
+  if (a->kind != b->kind) return false;
+  if (a->kind == SCR_DYN_NUM) return dm_f64_bits(a->v.num) == dm_f64_bits(b->v.num);
+  if (a->kind == SCR_DYN_ARR || a->kind == SCR_DYN_OBJ) {
+    void *oa = scr_dyn_origin_peek(a, NULL);
+    void *ob = scr_dyn_origin_peek(b, NULL);
+    return oa != NULL && oa == ob; /* a != b settled above: one value only through one origin */
+  }
+  return scr_dyn_strict_eq(a, b);
+}
+
+/* DYN-KEYED containers: keys are retained ScrDyn boxes hashed and compared by
+ * the value they carry. A Map's values are ScrDyn boxes too (retain/release
+ * adapters, no trace: cycles through the checked-dynamic tree are never
+ * collected, the tree's standing stance); a Set has no value side. */
+ScrMap *scr_map_new_dynkey(void) {
+  ScrMap *m = scr_map_new(SCR_MAP_KEY_DYN, SCR_MAP_VAL_REF, scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  m->key_retain = scr_dyn_retain_v;
+  m->key_release = scr_dyn_release_v;
+  m->key_hash = dm_hash_key;
+  m->key_eq = dm_eq_key;
+  return m;
+}
+
+ScrMap *scr_set_new_dynkey(void) {
+  ScrMap *m = scr_map_new(SCR_MAP_KEY_DYN, SCR_MAP_VAL_F64, NULL, NULL, NULL);
+  m->key_retain = scr_dyn_retain_v;
+  m->key_release = scr_dyn_release_v;
+  m->key_hash = dm_hash_key;
+  m->key_eq = dm_eq_key;
+  return m;
+}
+
 static const char scr_dynmap_tkey_map[] = "map<dyn,dyn>";
 static const char scr_dynmap_tkey_set[] = "set<dyn>";
 static const char scr_dynmap_tkey_wmap[] = "dynweakmap";
