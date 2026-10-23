@@ -20981,6 +20981,16 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         return dynUndefinedExpr(locOf(expr));
       }
     }
+    // A receiver typed as a class whose collection deferred or poisoned has no
+    // ClassInfo: flush its deferred diagnostics like the sibling sites (they
+    // explain the miss) and keep the read off the subclass-field path, which
+    // needs the class.
+    if (
+      receiverIr?.kind === "object" && isJsSourceFile(expr.getSourceFile()) &&
+      L.classes.get(receiverIr.className) === undefined
+    ) {
+      L.flushDeferredClass(receiverIr.className);
+    }
     if (
       receiverIr?.kind === "object" && isJsSourceFile(expr.getSourceFile()) &&
       expr.questionDotToken === undefined &&
