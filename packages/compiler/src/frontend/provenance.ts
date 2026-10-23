@@ -316,7 +316,20 @@ function bareImportsWalk(
       if (isRelativeSpecifier(spec)) {
         const dep = resolveRelativeModule(file, spec);
         if (dep !== null && !dep.endsWith(".json") && !dep.endsWith(".d.ts")) queue.push(dep);
-        else if (dep !== null && dep.endsWith(".d.ts")) noteDeclTwin(dep);
+        else if (dep !== null && dep.endsWith(".d.ts")) {
+          noteDeclTwin(dep);
+          /* The twin is the file the program compiles, so ITS bare imports
+           * are the package's dependencies (ioredis: built/Redis.js requires
+           * @ioredis/commands, denque and standard-as-callback; its
+           * built/Redis.d.ts imports none of them). */
+          const stem = dep.slice(0, -".d.ts".length);
+          for (const ext of [".js", ".mjs", ".cjs"]) {
+            if (isFile(`${stem}${ext}`)) {
+              queue.push(`${stem}${ext}`);
+              break;
+            }
+          }
+        }
         continue;
       }
       if (spec.startsWith("#") || spec.startsWith("node:")) continue;
