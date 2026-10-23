@@ -187,18 +187,27 @@ async function buildArm(knob: boolean, poison: string | undefined): Promise<stri
   else process.env["SCRIPTC_STACKLESS"] = "0";
   arm(poison);
   try {
-    // ONE directory and ONE source path for every arm. A per-arm directory
-    // bakes its own path into the emitted C -- the generated-from header and
-    // every srcComment -- so two arms would differ by 26 lines of path and
+    // ONE SOURCE PATH for every arm. A per-arm source path bakes its own
+    // path into the emitted C -- the generated-from header and every
+    // srcComment -- so two arms would differ by 26 lines of path and
     // nothing else, which is how the first version of this test failed.
     // Same lesson as zapobench: vary the output NAME, never the app path.
     //
-    // Sharing a directory is safe BECAUSE the poison is in the cache key: a
+    // The OUTPUT directory, by contrast, is unique per arm. It used to be
+    // shared, and a build that outlived its test (the opt-out arm timed out
+    // at 120 s on the Windows lane and kept running) went on writing the
+    // SAME prog.c, which the next test then read as its own: a cascade, the
+    // knob-ON test seeing a stray fiber-lane file. With one directory per
+    // (knob, poison) arm a straggler can only ever overwrite its own arm's
+    // files, which no other test reads.
+    //
+    // Sharing the source is safe BECAUSE the poison is in the cache key: a
     // false hit would return identical C, and the knob-ON test below asserts
     // the C DIFFERS, so the pair catches a cache that ignored the flag.
-    const outDir = join(import.meta.dirname, "../../..", "node_modules/.cache/scriptc-tests", "coro-poison-arms");
+    const armsDir = join(import.meta.dirname, "../../..", "node_modules/.cache/scriptc-tests", "coro-poison-arms");
+    const outDir = join(armsDir, "out-" + (knob ? "on" : "off") + "-" + (poison ?? "clean"));
     mkdirSync(outDir, { recursive: true });
-    const file = join(outDir, "prog.ts");
+    const file = join(armsDir, "prog.ts");
     writeFileSync(file, PROG);
     const exe = "prog-" + (knob ? "on" : "off") + "-" + (poison ?? "clean") + ".exe";
     const r = await compile(file, { outPath: join(outDir, exe), outDir, backend: "c", keepC: true });
