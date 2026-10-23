@@ -622,6 +622,69 @@ function envProbeBranchEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* TYPESCRIPT HELPER DECLARATIONS. Every helper `tsc` emits into a CommonJS
+ * file (`__classPrivateFieldGet`, `__awaiter`, `__rest`, `__extends`, ...) is
+ * declared as
+ *
+ *     var __helper = (this && this.__helper) || function (...) { ... };
+ *
+ * so a file that is inlined into another bundle reuses the bundle's copy. At a
+ * module's top level `this` is the module's own `exports` object (ESM: undefined),
+ * and no module assigns a `__`-named member of it, so the left operand is
+ * always falsy and the binding is the function expression. The lowering needs
+ * the binding to BE a function declaration form: a read of the `||` value from
+ * inside a function (a class constructor calling `__classPrivateFieldSet`) has
+ * no static callee. Only a top-level single-declarator `var`, only a `__`
+ * prefixed name that spells the idiom exactly, and only when the file never
+ * assigns that name as a member of `exports`/`this`/`module.exports`. */
+const TS_HELPER_PREFILTER = /\(this\s*&&\s*this\.__\w+\)\s*\|\|/;
+
+function tsHelperVarEdits(fileName: string, text: string): string | null {
+  if (!TS_HELPER_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  for (const stmt of sf.statements) {
+    if (!ts.isVariableStatement(stmt) || stmt.declarationList.declarations.length !== 1) continue;
+    const d = stmt.declarationList.declarations[0]!;
+    if (!ts.isIdentifier(d.name) || !d.name.text.startsWith("__") || d.initializer === undefined) continue;
+    const init = d.initializer;
+    if (!ts.isBinaryExpression(init) || init.operatorToken.kind !== ts.SyntaxKind.BarBarToken) continue;
+    if (!ts.isFunctionExpression(init.right)) continue;
+    let left: ts.Expression = init.left;
+    while (ts.isParenthesizedExpression(left)) left = left.expression;
+    if (!ts.isBinaryExpression(left) || left.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken) continue;
+    if (left.left.kind !== ts.SyntaxKind.ThisKeyword) continue;
+    if (!ts.isPropertyAccessExpression(left.right) || left.right.expression.kind !== ts.SyntaxKind.ThisKeyword) continue;
+    if (left.right.name.text !== d.name.text) continue;
+    // The member is never written anywhere in the file.
+    const name = d.name.text;
+    let written = false;
+    const visit = (n: ts.Node): void => {
+      if (written) return;
+      if (
+        ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isPropertyAccessExpression(n.left) &&
+        n.left.name.text === name
+      ) {
+        written = true;
+        return;
+      }
+      n.forEachChild(visit);
+    };
+    visit(sf);
+    if (written) continue;
+    edits.push({ start: init.getStart(sf), end: init.right.getStart(sf), text: "" });
+  }
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -631,6 +694,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const tsCjs = tsCjsEdits(fileName, text);
     if (tsCjs !== null) return jsDesugar(fileName, tsCjs) ?? tsCjs;
+  }
+  {
+    const helpers = tsHelperVarEdits(fileName, text);
+    if (helpers !== null) return jsDesugar(fileName, helpers) ?? helpers;
   }
   {
     const probes = envProbeBranchEdits(fileName, text);
