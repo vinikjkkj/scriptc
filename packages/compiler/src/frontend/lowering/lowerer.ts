@@ -856,10 +856,30 @@ export function nodeThrowExpr(kind: 0 | 1 | 2, code: string, message: string, ty
  * this fallback for `any` (mapType answers jsval first).
  *
  * Null for void (no value exists to represent). */
+function spelledAnyArrayDecl(node: ts.Node): boolean {
+  const d = node.parent;
+  if (d === undefined) return false;
+  if (!(ts.isParameter(d) || ts.isPropertyDeclaration(d) || ts.isVariableDeclaration(d) || ts.isPropertySignature(d))) return false;
+  if (d.name !== node) return false;
+  let tn: ts.TypeNode | undefined = d.type;
+  while (tn !== undefined && ts.isParenthesizedTypeNode(tn)) tn = tn.type;
+  if (tn === undefined) return false;
+  if (ts.isArrayTypeNode(tn)) return tn.elementType.kind === ts.SyntaxKind.AnyKeyword;
+  if (ts.isTypeReferenceNode(tn) && ts.isIdentifier(tn.typeName) && tn.typeName.text === "Array") {
+    return tn.typeArguments?.length === 1 && tn.typeArguments[0]!.kind === ts.SyntaxKind.AnyKeyword;
+  }
+  return false;
+}
+
 export function dynFallbackType(L: Lowerer, node: ts.Node, t: ts.Type): IrType | null {
   if (t.flags & ts.TypeFlags.Void) return null;
   if (!isJsSourceFile(node.getSourceFile())) {
     if (t.flags & ts.TypeFlags.Any) return DYN;
+    // A declaration that SPELLS `any[]` (`public fields: any[]`, `values:
+    // any[]` — pg-protocol): the checked-dynamic array, the `unknown[]`
+    // stance. Only the spelled annotation: an inferred any[] keeps the
+    // evolving-array rules that own it.
+    if (L.checker.isArrayType(t) && spelledAnyArrayDecl(node)) return DYN;
     // TS single-call-signature function types: per-piece fallback, but
     // ONLY `any` pieces fall to dyn — any other unmappable piece keeps
     // the whole type's own fence.

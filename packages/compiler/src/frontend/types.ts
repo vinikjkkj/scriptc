@@ -2511,9 +2511,6 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // lazy `any`, one array layer out, reads as the checked-dynamic array
     // exactly like `unknown[]` does (dyn). See ctx.declMember.
     if (elem === null && ctx.declMember === true && (elemTs.flags & ts.TypeFlags.Any) !== 0) return DYN;
-    // An explicit `any[]` in program source (pg-protocol's `fields: any[]`,
-    // `values: any[]`): the checked-dynamic array, the `unknown[]` stance.
-    if (elem === null && !ctx.dynamic && (elemTs.flags & ts.TypeFlags.Any) !== 0) return DYN;
     // `undefined[]` (sparse literals — `[,]` — and explicit annotations):
     // the element rides the unit-only union like a record field would; the
     // VOID mapping is a return-position artifact, not a value.
