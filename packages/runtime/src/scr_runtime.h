@@ -1355,6 +1355,8 @@ bool scr_str_ends_with(ScrStr *s, ScrStr *needle);
 ScrStr *scr_str_slice(ScrStr *s, double start, double end);
 /* substring: clamp-and-swap (negatives clamp to 0, start > end swaps). */
 ScrStr *scr_str_substring(ScrStr *s, double start, double end);
+/* substr (Annex B): (start, length); a missing length is +Infinity. */
+ScrStr *scr_str_substr(ScrStr *s, double start, double length);
 
 /* repeat(count): count < 0 or Infinity is a JS RangeError; scriptc has no
  * exceptions, so it prints "scriptc: RangeError: Invalid count value" to

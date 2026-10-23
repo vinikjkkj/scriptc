@@ -13697,6 +13697,14 @@ class LlEmitter {
           "ptr",
           true,
         );
+      case "substr":
+        return call(
+          "scr_str_substr",
+          "ptr (ptr, double, double)",
+          `ptr ${r.name}, double ${args[0]!.name}, double ${args[1]?.name ?? F64_INF}`,
+          "ptr",
+          true,
+        );
       case "repeat":
         return call("scr_str_repeat", "ptr (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, "ptr", true);
       case "trim":

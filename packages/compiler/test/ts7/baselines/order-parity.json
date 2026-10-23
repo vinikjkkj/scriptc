@@ -11983,6 +11983,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8511-string-substr-static-and-dynamic.js": {
+   "order": [
+    "<repo>/tests/corpus/8511-string-substr-static-and-dynamic.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"

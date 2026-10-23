@@ -920,6 +920,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               e.type,
               `scr_str_substring(${r.name}, ${args[0]!.name}, ${args[1]?.name ?? "INFINITY"})`,
             );
+          case "substr":
+            return E.newTemp(
+              e.type,
+              `scr_str_substr(${r.name}, ${args[0]!.name}, ${args[1]?.name ?? "INFINITY"})`,
+            );
           case "repeat":
             return E.newTemp(e.type, `scr_str_repeat(${r.name}, ${args[0]!.name})`);
           case "trim":
