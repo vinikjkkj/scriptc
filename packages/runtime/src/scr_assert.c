@@ -494,6 +494,52 @@ static bool scr_assert_err_pair_eq(const ScrDyn *a, const ScrDyn *b) {
          scr_assert_err_key_eq(a, b, "message", 7);
 }
 
+/* Entries of two same-class drivable map boxes, Node's mapEquiv / setEquiv
+ * for deepStrictEqual: equal sizes, then every entry of `a` pairs with a
+ * DISTINCT entry of `b` whose key is the same value (SameValueZero for a
+ * primitive key, deepStrictEqual for an object key) and whose value is
+ * deepStrictEqual. Quadratic by design: it is an assertion helper, and the
+ * object-key case has no hash to lean on. */
+static bool scr_assert_dyn_map_entries_eq(const ScrDyn *a, const ScrDyn *b, bool is_set) {
+  const ScrMap *ma = a->v.map.m, *mb = b->v.map.m;
+  if (scr_map_size(ma) != scr_map_size(mb)) return false;
+  size_t nb = (size_t)scr_map_iter_count(mb);
+  unsigned char *used = calloc(nb ? nb : 1, 1);
+  if (!used) scr_assert_oom();
+  bool equal = true;
+  for (double i = 0; i < scr_map_iter_count(ma) && equal; i++) {
+    if (!scr_map_iter_live(ma, i)) continue;
+    ScrDyn *ka = scr_dyn_map_key_at(a, i);
+    ScrDyn *va = is_set ? NULL : scr_dyn_map_val_at(a, i);
+    bool found = false;
+    for (size_t j = 0; j < nb && !found; j++) {
+      if (used[j] || !scr_map_iter_live(mb, (double)j)) continue;
+      ScrDyn *kb = scr_dyn_map_key_at(b, (double)j);
+      bool key_eq = ka->kind == SCR_DYN_NUM && kb->kind == SCR_DYN_NUM
+                        ? (ka->v.num == kb->v.num || (ka->v.num != ka->v.num && kb->v.num != kb->v.num))
+                        : scr_assert_dyn_deep_eq(ka, kb);
+      if (key_eq) {
+        bool val_eq = true;
+        if (!is_set) {
+          ScrDyn *vb = scr_dyn_map_val_at(b, (double)j);
+          val_eq = scr_assert_dyn_deep_eq(va, vb);
+          scr_dyn_release(vb);
+        }
+        if (val_eq) {
+          used[j] = 1;
+          found = true;
+        }
+      }
+      scr_dyn_release(kb);
+    }
+    scr_dyn_release(ka);
+    scr_dyn_release(va);
+    if (!found) equal = false;
+  }
+  free(used);
+  return equal;
+}
+
 static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
   if (a == b) return true;
   if (a->kind != b->kind) {
@@ -547,6 +593,17 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
        * with a quiet wrong boolean is the one trade this project does not
        * make, so the loudness moves here rather than disappearing. */
       if (a->v.map.m == b->v.map.m) return true;
+      /* A drivable box (dyn-flavored, or typed with its conversion table)
+       * hands out every entry as a dyn, so Node's own walk runs: same
+       * class and size, then each entry of a has an equal entry in b. A
+       * weak collection compares by identity only (Node: unequal unless
+       * the same object), and a typed box with no table keeps the fence. */
+      if (scr_dyn_is_dynmap(a) && scr_dyn_is_dynmap(b)) {
+        int fa = scr_dyn_map_flavor(a), fb = scr_dyn_map_flavor(b);
+        if (fa != fb) return false; /* Map vs Set vs weak: different prototypes */
+        if (fa >= 2) return false;  /* distinct weak collections */
+        return scr_assert_dyn_map_entries_eq(a, b, fa == 1);
+      }
       scr_dyn_map_fence(a, "deepStrictEqual");
       return false;
     case SCR_DYN_PROMISE:
