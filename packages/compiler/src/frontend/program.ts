@@ -3546,6 +3546,12 @@ function cjsNamedImportLinkCheck(
    * check order: all regular named imports sorted by local binding name,
    * then `export { x } from` elements in source order. */
   const firstInvisibleOf = (sf: ts.SourceFile): BadCjsImport | null => {
+    /* A declaration file is never evaluated, so no import in it is a link
+     * Node performs: the implementation twin's own requires are the runtime
+     * edges (ioredis built/errors/*.d.ts name `{ RedisError }` from the
+     * lexer-opaque redis-errors; built/errors/*.js read it off the require
+     * binding). */
+    if (sf.isDeclarationFile) return null;
     const entries: { local: string; exportName: string; nameNode: ts.Node; spec: string; dep: ts.SourceFile }[] = [];
     for (const stmt of sf.statements) {
       if (!ts.isImportDeclaration(stmt) || stmt.moduleSpecifier === undefined || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
