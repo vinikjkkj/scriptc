@@ -11876,6 +11876,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8414-a-non-participating-split-capture-is-absent-at-member-use-and-in-const-bindings.ts": {
+   "order": [
+    "<repo>/tests/corpus/8414-a-non-participating-split-capture-is-absent-at-member-use-and-in-const-bindings.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"
