@@ -509,6 +509,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "buffer.concatDynLen": "scr_buffer_concat_dyn_len",
   "buffer.byteLenStr": "scr_bytes_byte_length_str",
   "buffer.isEncoding": "scr_bytes_is_encoding",
+  "buffer.byteLenDyn": "scr_buffer_byte_length_dyn",
+  "buffer.isEncodingDyn": "scr_buffer_is_encoding_dyn",
   // The Cipher/Decipher constructors. Both entry points are the ones the
   // C tier calls, and the trailing `bool decrypt` rides LIB_FN_TAIL — a
   // Buffer key and a secret KeyObject need different runtime entries

@@ -4639,6 +4639,8 @@ export type IrLibFn =
    * a copy for bytes / ArrayBuffer, a ToUint8 pack for an array, Node's
    * ERR_INVALID_ARG_TYPE otherwise. Borrowed dyn in, +1 u8 bytes out. May throw. */
   | "buffer.fromDyn"
+  | "buffer.byteLenDyn"
+  | "buffer.isEncodingDyn"
   /** A checked-dynamic Hash/Hmac update input (scr_json.c): UTF-8 bytes for a
    * string, the bytes of a typed array, Node's ERR_INVALID_ARG_TYPE otherwise.
    * Borrowed dyn in, +1 u8 bytes out. May throw. */
@@ -10303,7 +10305,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
  * moduleUsesZlib. */
 const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
   "fs.readFileCb", "fs.mkdtempCb", "fs.mkdtempSyncOpts", "fs.readCb", "fs.lchmodCb", "fs.lchmodSyncChk", "fsp.lchmodChk",
-  "buffer.concatDyn", "buffer.concatDynLen", "dyn.isBuffer", "dyn.looseEq", "error.ext",
+  "buffer.concatDyn", "buffer.concatDynLen", "buffer.byteLenDyn", "buffer.isEncodingDyn", "dyn.isBuffer", "dyn.looseEq", "error.ext",
 ]);
 export function moduleUsesDynExt(mod: IrModule): boolean {
   let found = false;
@@ -12775,6 +12777,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "buffer.concatDynLen",
   "dyn.dataViewNew",
   "dyn.u8ViewNew",
+  "buffer.byteLenDyn",
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.
   "buffer.compareChk",

@@ -8726,6 +8726,17 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       // read at heart).
       if (args.length >= 1 && args.length <= 2 && !ts.isSpreadElement(args[0]!)) {
         const srcIr = L.mapTypeOf(L.typeOf(args[0]!));
+        // An untyped value (a JS file's implicit-any parameter) or a
+        // non-literal encoding: the runtime does Node's own dispatch
+        // (string per the lowercased encoding, bytes/ArrayBuffer by
+        // length, else the catchable ERR_INVALID_ARG_TYPE).
+        const encT = args[1] ? L.typeOf(args[1]) : undefined;
+        const encDynamic = args[1] !== undefined && !(encT !== undefined && encT.isStringLiteralType());
+        if (srcIr === null || srcIr.kind === "dyn" || (srcIr.kind === "string" && encDynamic)) {
+          const v = L.lowerExprExpecting(args[0]!, DYN);
+          const e = args[1] ? L.lowerExprExpecting(args[1], DYN) : dynUndefinedExpr(loc);
+          return { kind: "libCall", fn: "buffer.byteLenDyn", args: [v, e], type: F64, loc };
+        }
         if (srcIr?.kind === "string") {
           const encName = args[1] ? bufEncoding(L, "Buffer.byteLength", args[1]) : "utf8";
           const s = L.lowerExprExpecting(args[0]!, STRING);
@@ -8749,6 +8760,11 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       if (args.length === 1 && !ts.isSpreadElement(args[0]!) && L.mapTypeOf(L.typeOf(args[0]!))?.kind === "string") {
         const s = L.lowerExprExpecting(args[0]!, STRING);
         return { kind: "libCall", fn: "buffer.isEncoding", args: [s], type: BOOL, loc };
+      }
+      // An untyped value: false for every non-string (Node never throws).
+      if (args.length === 1 && !ts.isSpreadElement(args[0]!) && (L.mapTypeOf(L.typeOf(args[0]!)) ?? DYN).kind === "dyn") {
+        const v = L.lowerExprExpecting(args[0]!, DYN);
+        return { kind: "libCall", fn: "buffer.isEncodingDyn", args: [v], type: BOOL, loc };
       }
       L.noLowering(
         "Buffer.isEncoding with this argument shape",

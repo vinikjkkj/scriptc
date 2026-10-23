@@ -6403,6 +6403,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_buffer_concat_dyn_len(${arg(0)}, ${arg(1)})`);
           case "buffer.byteLenStr":
             return finish(`scr_bytes_byte_length_str(${arg(0)}, ${arg(1)})`);
+          case "buffer.byteLenDyn":
+            return finish(`scr_buffer_byte_length_dyn(${arg(0)}, ${arg(1)})`);
+          case "buffer.isEncodingDyn":
+            return finish(`scr_buffer_is_encoding_dyn(${arg(0)})`);
           case "buffer.isEncoding":
             return finish(`scr_bytes_is_encoding(${arg(0)})`);
           // The bytes flavor trio (scr_bytes.c): the marks stamp a fresh

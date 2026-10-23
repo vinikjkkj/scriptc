@@ -695,6 +695,52 @@ static ScrBytes *scr_buffer_concat_dyn_impl(const ScrDyn *list, const ScrDyn *to
   return out;
 }
 
+/* Buffer.byteLength(value, encoding) over an untyped value (a JS file's
+ * implicit-any parameters). A string counts per the encoding, which Node
+ * lowercases and which falls back to utf8 when it is unknown or not a
+ * string; a Buffer/typed array/ArrayBuffer answers its byteLength; anything
+ * else throws the catchable ERR_INVALID_ARG_TYPE. */
+static const char *scr_dyn_norm_encoding(const ScrDyn *enc) {
+  if (enc == NULL || enc->kind != SCR_DYN_STR) return "utf8";
+  const ScrStr *s = enc->v.str;
+  if (s->len < 3 || s->len > 9) return "utf8";
+  char low[10];
+  for (size_t i = 0; i < s->len; i++) {
+    char c = s->data[i];
+    low[i] = c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
+  }
+  low[s->len] = 0;
+  static const char *const table[][2] = {
+      {"utf8", "utf8"},       {"utf-8", "utf8"},     {"hex", "hex"},          {"base64", "base64"},
+      {"base64url", "base64url"}, {"latin1", "latin1"}, {"binary", "latin1"}, {"ascii", "ascii"},
+      {"utf16le", "utf16le"}, {"utf-16le", "utf16le"}, {"ucs2", "utf16le"},   {"ucs-2", "utf16le"},
+  };
+  for (size_t i = 0; i < sizeof table / sizeof table[0]; i++) {
+    if (strcmp(low, table[i][0]) == 0) return table[i][1];
+  }
+  return "utf8";
+}
+
+double scr_buffer_byte_length_dyn(const ScrDyn *v, const ScrDyn *enc) {
+  if (v->kind == SCR_DYN_STR) {
+    const char *name = scr_dyn_norm_encoding(enc);
+    ScrStr *e = scr_str_new(name, strlen(name));
+    double n = scr_bytes_byte_length_str(v->v.str, e);
+    scr_str_release(e);
+    return n;
+  }
+  if (v->kind == SCR_DYN_BYTES || v->kind == SCR_DYN_ARRBUF) {
+    return (double)(v->v.bytes->len * scr_bytes_elem_size(v->v.bytes->elem));
+  }
+  scr_dyn_arg_type_fail("string", "of type string or an instance of Buffer or ArrayBuffer", v);
+  return 0.0;
+}
+
+/* Buffer.isEncoding(value): false for every non-string, never a throw. */
+bool scr_buffer_is_encoding_dyn(const ScrDyn *v) {
+  return v->kind == SCR_DYN_STR && scr_bytes_is_encoding(v->v.str);
+}
+
 ScrBytes *scr_buffer_concat_dyn(const ScrDyn *list) { return scr_buffer_concat_dyn_impl(list, NULL); }
 /* `total` is whatever the program passed: undefined means "no total" (JS
  * treats a missing and an undefined argument alike). */

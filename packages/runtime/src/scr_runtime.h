@@ -9108,6 +9108,8 @@ ScrBytes *scr_crypto_input_bytes(const struct ScrDyn *v); /* hash/hmac update in
  * Borrow; never throw. */
 double scr_bytes_byte_length_str(ScrStr *s, const ScrStr *enc);
 bool scr_bytes_is_encoding(const ScrStr *s);
+double scr_buffer_byte_length_dyn(const struct ScrDyn *v, const struct ScrDyn *enc); /* Buffer.byteLength over an untyped value (scr_dyn_ext.c) */
+bool scr_buffer_is_encoding_dyn(const struct ScrDyn *v); /* Buffer.isEncoding over an untyped value (scr_dyn_ext.c) */
 
 /* equals / compare / indexOf-lastIndexOf / fill / copy / swap / write on
  * u8 bytes, Node-exact (corpus 1663). compare and copy take nargs — the
