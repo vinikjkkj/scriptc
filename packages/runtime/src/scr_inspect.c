@@ -1187,13 +1187,13 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         size_t shown = 0;
         for (double i = 0; i < scr_map_iter_count(dm) && shown < 100; i++) {
           if (!scr_map_iter_live(dm, i)) continue;
-          ScrDyn *k = (ScrDyn *)scr_map_iter_key_ref(dm, i);
+          ScrDyn *k = scr_dyn_map_key_at(d, i);
           ScrStr *ks = scr_insp_dyn(k, recurse + 1, depth);
           InspBuf eb = {0};
           ib_bytes(&eb, ks->data, ks->len);
           scr_str_release(ks);
           if (!dm_set) {
-            ScrDyn *v = (ScrDyn *)scr_map_iter_val_ref(dm, i);
+            ScrDyn *v = scr_dyn_map_val_at(d, i);
             ScrStr *vs = scr_insp_dyn(v, recurse + 1, depth);
             ib_cstr(&eb, " => ");
             ib_bytes(&eb, vs->data, vs->len);

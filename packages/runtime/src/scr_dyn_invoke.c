@@ -1254,25 +1254,80 @@ ScrDyn *scr_dyn_proxy_invoke(ScrDyn *p, const ScrStr *key, ScrDyn *const *args, 
   return r;
 }
 
-/* ── Map / Set methods on a dyn-flavored box (SCR_DYN_MAP, key kind DYN) ─
+/* `a.keys()` / `a.values()` / `a.entries()` on a dyn ARRAY or typed-array
+ * (BYTES) receiver, drained where they are made: a fresh dyn array of the
+ * indices, the elements, or the [index, element] pairs. The frontend routes
+ * these names here only in the contexts that consume the iterator at once (a
+ * for-of subject, a spread element, the sole argument of Array.from or of
+ * new Map / new Set), where a snapshot IS what the live iterator would have
+ * produced. mode: 1 keys, 2 values, 3 entries. */
+static ScrDyn *dyn_seq_snapshot(ScrDyn *recv, int mode) {
+  ScrDyn *out = scr_dyn_new_arr();
+  size_t n = recv->kind == SCR_DYN_ARR ? recv->v.arr.len : (size_t)scr_bytes_len(recv->v.bytes);
+  for (size_t i = 0; i < n; i++) {
+    ScrDyn *el = recv->kind == SCR_DYN_ARR ? scr_dyn_retain(recv->v.arr.items[i])
+                                           : scr_dyn_new_num(scr_bytes_get(recv->v.bytes, (double)i));
+    if (mode == 2) {
+      scr_dyn_arr_push(out, el);
+    } else if (mode == 1) {
+      scr_dyn_release(el);
+      scr_dyn_arr_push(out, scr_dyn_new_num((double)i));
+    } else {
+      ScrDyn *pair = scr_dyn_new_arr();
+      scr_dyn_arr_push(pair, scr_dyn_new_num((double)i));
+      scr_dyn_arr_push(pair, el);
+      scr_dyn_arr_push(out, pair);
+    }
+  }
+  return out;
+}
+
+static int dyn_iter_name_mode(const char *method) {
+  return dyn_name_is(method, "keys") ? 1 : dyn_name_is(method, "values") ? 2 : dyn_name_is(method, "entries") ? 3 : 0;
+}
+
+/* ── Map / Set methods on a drivable map box (SCR_DYN_MAP) ────────────────
  *
- * `m.set(k, v)`, `m.get(k)`, `s.add(x)`, ... on a Map or Set that untyped JS
- * built (scr_dyn_new_dynmap). Every argument is already a dyn box and the
- * store is a SCR_MAP_KEY_DYN ScrMap, so each method is the map primitive
- * over the boxes themselves: SameValueZero comes from the key kind, and a
- * miss answers the undefined singleton like Map.prototype.get does.
+ * `m.set(k, v)`, `m.get(k)`, `s.add(x)`, ... on a Map or Set reached through
+ * a dyn value. Two kinds of box are driven here:
+ *
+ *  - a DYN-FLAVORED one (scr_dyn_new_dynmap: untyped JS's `new Map()`), whose
+ *    keys and values are dyn boxes, so each method is the map primitive over
+ *    the boxes themselves and SameValueZero comes from the key kind;
+ *  - a TYPED one boxed across the boundary (a `Map<string, number>` handed to
+ *    an `any` parameter), whose slots are static: its box carries the emitted
+ *    conversion table (ScrDynMapOps), and each method converts the dyn
+ *    argument to the slot (a probe that does not fit the key type is a MISS,
+ *    exactly what Map.prototype.get answers for a key that is not there; a
+ *    STORE that does not fit throws the path-annotated TypeError, because a
+ *    typed map has no slot for it) and the answer back to a dyn.
  *
  * forEach is LIVE: it walks the entry table by index with the iteration
  * bracket open (appends are visited, a delete is skipped, clear() ends it),
  * which is the specified behaviour and what the typed lowering's forEach
- * desugar already does. A map that is not dyn-flavored (a typed Map boxed
- * across the boundary) is NOT handled here and keeps the loud ladder:
- * its keys and values are static slots this unit has no converters for. */
+ * desugar already does. A typed box with NO table (a member type that has no
+ * dyn form) is not handled and keeps the loud ladder. */
+/* A probe key: false = no entry can hold it (typed map, wrong key type). The
+ * slot is released by dm_key_done. */
+static bool dm_probe(const ScrMap *m, const ScrDynMapOps *ops, const ScrDyn *k, uint64_t *slot) {
+  if (ops == NULL) {
+    *slot = (uint64_t)(uintptr_t)k;
+    return true;
+  }
+  (void)m;
+  return ops->key_probe(k, slot);
+}
+
+static void dm_key_done(const ScrDynMapOps *ops, uint64_t slot) {
+  if (ops != NULL && ops->key_drop != NULL) ops->key_drop(slot);
+}
+
 ScrDyn *scr_dyn_map_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc,
                            const char *what, bool *handled) {
   *handled = false;
   if (!scr_dyn_is_dynmap(recv)) return NULL;
   ScrMap *m = recv->v.map.m;
+  const ScrDynMapOps *ops = recv->v.map.ops;
   int flavor = scr_dyn_map_flavor(recv);
   bool is_set = flavor == 1 || flavor == 3;
   bool weak = flavor >= 2;
@@ -1280,8 +1335,16 @@ ScrDyn *scr_dyn_map_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args
   ScrDyn *a0 = argc > 0 ? args[0] : und;
   ScrDyn *a1 = argc > 1 ? args[1] : und;
   *handled = true;
-  if (dyn_name_is(method, "has")) return scr_dyn_new_bool(scr_map_has_ref(m, a0));
-  if (dyn_name_is(method, "delete")) return scr_dyn_new_bool(scr_map_delete_ref(m, a0));
+  if (dyn_name_is(method, "has") || dyn_name_is(method, "delete")) {
+    bool del = method[0] == 'd';
+    uint64_t slot;
+    if (!dm_probe(m, ops, a0, &slot)) return scr_dyn_new_bool(false);
+    bool r;
+    if (ops == NULL) r = del ? scr_map_delete_ref(m, a0) : scr_map_has_ref(m, a0);
+    else r = del ? scr_map_delete_slot(m, slot) : scr_map_has_slot(m, slot);
+    dm_key_done(ops, slot);
+    return scr_dyn_new_bool(r);
+  }
   /* clear() is a Map/Set member only: a weak collection has none (and no
    * forEach, size, keys, values or entries). */
   if (!weak && dyn_name_is(method, "clear")) {
@@ -1290,18 +1353,45 @@ ScrDyn *scr_dyn_map_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args
   }
   if (is_set) {
     if (dyn_name_is(method, "add")) {
-      if (weak && !scr_dynmap_weak_key_check(a0, true)) return NULL;
-      scr_dynmap_put(m, a0, NULL);
+      if (ops == NULL) {
+        if (weak && !scr_dynmap_weak_key_check(a0, true)) return NULL;
+        scr_dynmap_put(m, a0, NULL);
+      } else {
+        uint64_t slot;
+        if (!ops->key_check(a0, &slot)) return NULL;
+        scr_map_set_slot(m, slot, 0);
+        dm_key_done(ops, slot);
+      }
       return scr_dyn_retain(recv);
     }
   } else {
     if (dyn_name_is(method, "get")) {
-      ScrDyn *v = (ScrDyn *)scr_map_get_ref_ref(m, a0); /* +1 or NULL */
+      uint64_t slot;
+      if (!dm_probe(m, ops, a0, &slot)) return scr_dyn_retain(und);
+      ScrDyn *v;
+      if (ops == NULL) {
+        v = (ScrDyn *)scr_map_get_ref_ref(m, a0); /* +1 or NULL */
+      } else {
+        uint64_t vs;
+        v = scr_map_get_slot(m, slot, &vs) ? ops->val_to_dyn(vs) : NULL;
+      }
+      dm_key_done(ops, slot);
       return v != NULL ? v : scr_dyn_retain(und);
     }
     if (dyn_name_is(method, "set")) {
-      if (weak && !scr_dynmap_weak_key_check(a0, false)) return NULL;
-      scr_dynmap_put(m, a0, a1);
+      if (ops == NULL) {
+        if (weak && !scr_dynmap_weak_key_check(a0, false)) return NULL;
+        scr_dynmap_put(m, a0, a1);
+      } else {
+        uint64_t slot, vs;
+        if (!ops->key_check(a0, &slot)) return NULL;
+        if (!ops->val_check(a1, &vs)) {
+          dm_key_done(ops, slot);
+          return NULL;
+        }
+        scr_map_set_slot(m, slot, vs); /* the value slot moves in */
+        dm_key_done(ops, slot);
+      }
       return scr_dyn_retain(recv);
     }
   }
@@ -1315,8 +1405,8 @@ ScrDyn *scr_dyn_map_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args
     scr_map_iter_enter(m);
     for (double i = 0; i < scr_map_iter_count(m); i++) {
       if (!scr_map_iter_live(m, i)) continue;
-      ScrDyn *k = (ScrDyn *)scr_map_iter_key_ref(m, i); /* +1 */
-      ScrDyn *v = is_set ? scr_dyn_retain(k) : (ScrDyn *)scr_map_iter_val_ref(m, i);
+      ScrDyn *k = scr_dyn_map_key_at(recv, i); /* +1 */
+      ScrDyn *v = is_set ? scr_dyn_retain(k) : scr_dyn_map_val_at(recv, i);
       ScrDyn *cbargs[3] = { v, k, recv };
       if (argc > 1) scr_dyn_this_push_dyn(a1);
       ScrDyn *r = scr_dyn_call(cb, cbargs, 3, "callback");
@@ -1368,6 +1458,20 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     if (scr_dyn_is_dynmap(recv)) {
       dyn_throw_not_fn(what); /* a method the Map/Set prototype lacks: Node's own answer */
       return NULL;
+    }
+    /* A typed box with NO conversion table (a member type with no dyn form):
+     * a method Node's Map/Set HAS must not answer "is not a function", the
+     * lie this tail told for every typed map before the table existed. The
+     * loud ladder names it; a name the prototype lacks still falls through
+     * to Node's own answer. */
+    static const char *const map_members[] = { "get", "set", "has", "delete", "clear", "forEach", "keys", "values", "entries", NULL };
+    static const char *const set_members[] = { "add", "has", "delete", "clear", "forEach", "keys", "values", "entries", NULL };
+    const char *const *members = scr_dyn_map_flavor(recv) == 1 ? set_members : map_members;
+    for (size_t i = 0; members[i] != NULL; i++) {
+      if (dyn_name_is(method, members[i])) {
+        scr_dyn_map_fence(recv, "calling a method");
+        return NULL;
+      }
     }
   }
 
@@ -2055,6 +2159,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_str_release(s);
       return d;
     }
+    if (dyn_iter_name_mode(method) != 0) return dyn_seq_snapshot(recv, dyn_iter_name_mode(method));
     if (dyn_arr_proto_unimpl(method)) {
       dyn_throw_unsupported("Array", method);
       return NULL;
@@ -2081,6 +2186,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
   }
 
   if (recv->kind == SCR_DYN_BYTES) {
+    if (dyn_iter_name_mode(method) != 0) return dyn_seq_snapshot(recv, dyn_iter_name_mode(method));
     /* The typed-array methods live in scr_json.c — ONE body, shared with
      * the %TypedArray%.prototype thunks, so `b.subarray(1, 3)` and
      * `Uint8Array.prototype.subarray.call(b, 1, 3)` cannot answer

@@ -2915,6 +2915,13 @@ ScrDyn *scr_dyn_new_map_ref(ScrMap *m, const char *tkey) {
    * the other, the reference stance the shared representation forces. */
   d->v.map.m = scr_map_retain(m);
   d->v.map.tkey = tkey; /* a static emitted literal; never owned */
+  d->v.map.ops = NULL;
+  return d;
+}
+
+ScrDyn *scr_dyn_new_map_ops(ScrMap *m, const char *tkey, const ScrDynMapOps *ops) {
+  ScrDyn *d = scr_dyn_new_map_ref(m, tkey);
+  d->v.map.ops = ops; /* a static emitted table; never owned */
   return d;
 }
 
@@ -3031,7 +3038,19 @@ bool scr_dynmap_weak_key_check(const ScrDyn *k, bool is_set) {
 }
 
 bool scr_dyn_is_dynmap(const ScrDyn *d) {
-  return d != NULL && d->kind == SCR_DYN_MAP && d->v.map.m->key_kind == SCR_MAP_KEY_DYN;
+  return d != NULL && d->kind == SCR_DYN_MAP &&
+         (d->v.map.ops != NULL || d->v.map.m->key_kind == SCR_MAP_KEY_DYN);
+}
+
+/* One entry as a +1 dyn. A dyn-flavored map stores dyn boxes (retained out);
+ * a typed one converts its raw slot through the box's emitted table. */
+ScrDyn *scr_dyn_map_key_at(const ScrDyn *d, double i) {
+  if (d->v.map.ops == NULL) return (ScrDyn *)scr_map_iter_key_ref(d->v.map.m, i);
+  return d->v.map.ops->key_to_dyn(scr_map_iter_key_slot(d->v.map.m, i));
+}
+ScrDyn *scr_dyn_map_val_at(const ScrDyn *d, double i) {
+  if (d->v.map.ops == NULL) return (ScrDyn *)scr_map_iter_val_ref(d->v.map.m, i);
+  return d->v.map.ops->val_to_dyn(scr_map_iter_val_slot(d->v.map.m, i));
 }
 
 /* The key a dyn-flavored map STORES for `k`: Map normalizes -0 to +0 on the
@@ -3130,8 +3149,8 @@ ScrDyn *scr_dyn_map_snapshot(const ScrDyn *d, int mode) {
   if (mode == 0) mode = is_set ? 2 : 3;
   for (double i = 0; i < scr_map_iter_count(m); i++) {
     if (!scr_map_iter_live(m, i)) continue;
-    ScrDyn *k = (ScrDyn *)scr_map_iter_key_ref(m, i); /* +1 */
-    ScrDyn *v = is_set ? NULL : (ScrDyn *)scr_map_iter_val_ref(m, i); /* +1 */
+    ScrDyn *k = scr_dyn_map_key_at(d, i); /* +1 */
+    ScrDyn *v = is_set ? NULL : scr_dyn_map_val_at(d, i); /* +1 */
     if (mode == 1 || (mode == 2 && is_set)) {
       scr_dyn_arr_push(out, k);
       scr_dyn_release(v);

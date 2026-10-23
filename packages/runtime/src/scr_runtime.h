@@ -2177,6 +2177,18 @@ void *scr_map_iter_key_ref(const ScrMap *m, double i);     /* +1 */
 double scr_map_iter_val_f64(const ScrMap *m, double i);
 bool scr_map_iter_val_bool(const ScrMap *m, double i);
 void *scr_map_iter_val_ref(const ScrMap *m, double i); /* +1 */
+/* SLOT-LEVEL access, for a caller that holds the key and value as the raw
+ * 8-byte slots the map stores (the type-erased dyn-side dispatch). An f64 key
+ * arrives as its double's bits and is normalized here (-0 is +0, one NaN); a
+ * string or ref key is the borrowed pointer (a NEW entry retains it); a
+ * value slot is the double's bits, 0/1, or the pointer that MOVES into the
+ * map on set. get answers a BORROWED value slot. */
+bool scr_map_has_slot(const ScrMap *m, uint64_t key);
+bool scr_map_delete_slot(ScrMap *m, uint64_t key);
+bool scr_map_get_slot(const ScrMap *m, uint64_t key, uint64_t *val);
+void scr_map_set_slot(ScrMap *m, uint64_t key, uint64_t val);
+uint64_t scr_map_iter_key_slot(const ScrMap *m, double i); /* borrowed */
+uint64_t scr_map_iter_val_slot(const ScrMap *m, double i); /* borrowed */
 void scr_map_iter_enter(ScrMap *m);
 void scr_map_iter_exit(ScrMap *m);
 
@@ -4964,7 +4976,7 @@ struct ScrDyn {
      * emitted literal and is never owned — the FUNC box's `sig`, and for
      * the same job. See the kind's comment for why a bare `ScrMap *`
      * would be a silent wrong answer. */
-    struct { ScrMap *m; const char *tkey; } map;
+    struct { ScrMap *m; const char *tkey; const struct ScrDynMapOps *ops; } map;
     /* SCR_DYN_PROXY: target and handler, both owned and traced. */
     struct { struct ScrDyn *target; struct ScrDyn *handler; bool strict; bool revoked; } proxy;
   } v;
@@ -6476,6 +6488,24 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key);
  * an untagged box is the one shape that turns this kind into the silent
  * wrong answer it exists to avoid. */
 ScrDyn *scr_dyn_new_map_ref(ScrMap *m, const char *tkey);
+/* The same box with the type's CONVERSION TABLE: a typed Map/Set boxed
+ * across the boundary is driven from the dyn side (`m.get(k)`, `m.set(k, v)`,
+ * size, forEach, iteration, inspect) through the emitted adapters that turn
+ * the map's static key/value slots into dyn values and back. `ops` is a
+ * static emitted table, never owned; NULL boxes with no dispatch (the loud
+ * ladder), which is what a type with a member that has no dyn form gets. */
+typedef struct ScrDynMapOps {
+  ScrDyn *(*key_to_dyn)(uint64_t slot);               /* +1; the slot is borrowed */
+  ScrDyn *(*val_to_dyn)(uint64_t slot);               /* +1; NULL for a set */
+  bool (*key_probe)(const ScrDyn *d, uint64_t *slot); /* soft: false = not of this key type, so a miss */
+  bool (*key_check)(const ScrDyn *d, uint64_t *slot); /* hard: false with the TypeError pending */
+  void (*key_drop)(uint64_t slot);                    /* releases a +1 key slot; NULL for scalars */
+  bool (*val_check)(const ScrDyn *d, uint64_t *slot); /* hard; the +1 slot MOVES into the map; NULL for a set */
+} ScrDynMapOps;
+ScrDyn *scr_dyn_new_map_ops(ScrMap *m, const char *tkey, const ScrDynMapOps *ops);
+/* A map slot is 8 raw bytes: an f64 key or value is its double's bits. */
+static inline double scr_mslot_to_f64(uint64_t s) { double d; memcpy(&d, &s, sizeof d); return d; }
+static inline uint64_t scr_mslot_from_f64(double d) { uint64_t s; memcpy(&s, &d, sizeof s); return s; }
 /* `dynMatch` against a map/set target: a MAP box whose interned typeKey
  * is byte-equal to `tkey`. False for every other kind and for every other
  * map type — never throws. The strcmp is not belt-and-braces: ScrMap
@@ -6530,7 +6560,11 @@ bool scr_dynmap_weak_key_check(const ScrDyn *k, bool is_set);
  * 2 WeakMap, 3 WeakSet (the dyn-flavored weak boxes are "dynweakmap" /
  * "dynweakset"; typed boxes are only ever "map<..>" / "set<..>"). */
 int scr_dyn_map_flavor(const ScrDyn *d);
-bool scr_dyn_is_dynmap(const ScrDyn *d);
+bool scr_dyn_is_dynmap(const ScrDyn *d); /* a map box whose entries the dyn side can drive: dyn-flavored, or typed with a conversion table */
+/* One entry of a drivable map box as a +1 dyn: the key (map or set element)
+ * and, for a map, the value; `i` is a LIVE entry index (scr_map_iter_live). */
+ScrDyn *scr_dyn_map_key_at(const ScrDyn *d, double i);
+ScrDyn *scr_dyn_map_val_at(const ScrDyn *d, double i);
 bool scr_dyn_is_iterable_dynmap(const ScrDyn *d);
 /* Drain into a fresh ARR (+1): mode 0 default iteration, 1 keys, 2 values,
  * 3 entries. Only for a dyn-flavored box. */

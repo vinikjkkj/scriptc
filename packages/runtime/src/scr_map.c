@@ -1089,6 +1089,36 @@ void *scr_map_get_str_ref(const ScrMap *m, const ScrStr *key) {
   return m->val_retain(scr_map_slot_to_ptr(m->entries[e].val)); /* +1 */
 }
 
+/* ── slot-level access (the dyn-side dispatch over a TYPED map) ────────── */
+
+static uint64_t scr_map_slot_key(const ScrMap *m, uint64_t key) {
+  /* An f64 key is stored pre-normalized; the caller hands raw double bits. */
+  return m->key_kind == SCR_MAP_KEY_F64 ? scr_map_f64_bits(scr_map_slot_to_f64(key)) : key;
+}
+
+bool scr_map_has_slot(const ScrMap *m, uint64_t key) {
+  key = scr_map_slot_key(m, key);
+  return scr_map_find(m, scr_map_hash_slot(m, key), key) != SCR_MAP_EMPTY;
+}
+
+bool scr_map_delete_slot(ScrMap *m, uint64_t key) {
+  key = scr_map_slot_key(m, key);
+  return scr_map_delete_found(m, scr_map_find(m, scr_map_hash_slot(m, key), key));
+}
+
+bool scr_map_get_slot(const ScrMap *m, uint64_t key, uint64_t *val) {
+  key = scr_map_slot_key(m, key);
+  size_t e = scr_map_find(m, scr_map_hash_slot(m, key), key);
+  if (e == SCR_MAP_EMPTY) return false;
+  *val = m->entries[e].val;
+  return true;
+}
+
+void scr_map_set_slot(ScrMap *m, uint64_t key, uint64_t val) {
+  key = scr_map_slot_key(m, key);
+  scr_map_set(m, scr_map_hash_slot(m, key), key, val);
+}
+
 /* ── iteration primitives (the forEach desugar) ────────────────────────── */
 
 double scr_map_iter_count(const ScrMap *m) { return (double)m->nentries; }
@@ -1116,6 +1146,9 @@ ScrStr *scr_map_iter_key_str(const ScrMap *m, double i) {
 void *scr_map_iter_key_ref(const ScrMap *m, double i) {
   return m->key_retain(scr_map_slot_to_ptr(scr_map_iter_at(m, i)->key)); /* +1 */
 }
+
+uint64_t scr_map_iter_key_slot(const ScrMap *m, double i) { return scr_map_iter_at(m, i)->key; }
+uint64_t scr_map_iter_val_slot(const ScrMap *m, double i) { return scr_map_iter_at(m, i)->val; }
 
 double scr_map_iter_val_f64(const ScrMap *m, double i) {
   return scr_map_slot_to_f64(scr_map_iter_at(m, i)->val);
