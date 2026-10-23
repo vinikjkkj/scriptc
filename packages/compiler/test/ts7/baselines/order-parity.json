@@ -11354,6 +11354,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8506-any-spelled-record-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/8506-any-spelled-record-members.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"

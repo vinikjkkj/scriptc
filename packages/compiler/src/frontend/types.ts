@@ -7966,6 +7966,22 @@ function declTwinTupleAsArray(
  * the target is dyn-checkable, a fence where it is not. What tsc would
  * have allowed silently (`const n: number = doc.x`) the lowering still
  * has to answer for, and answers with a path-carrying TypeError. */
+function declSpellsAny(decls: readonly ts.Node[]): boolean {
+  if (decls.length === 0) return false;
+  return decls.every((d) => {
+    if (!(ts.isPropertySignature(d) || ts.isPropertyDeclaration(d))) return false;
+    let tn: ts.TypeNode | undefined = d.type;
+    while (tn !== undefined && ts.isParenthesizedTypeNode(tn)) tn = tn.type;
+    if (tn === undefined) return false;
+    if (tn.kind === ts.SyntaxKind.AnyKeyword) return true;
+    if (ts.isArrayTypeNode(tn)) return tn.elementType.kind === ts.SyntaxKind.AnyKeyword;
+    return (
+      ts.isTypeReferenceNode(tn) && ts.isIdentifier(tn.typeName) && tn.typeName.text === "Array" &&
+      tn.typeArguments?.length === 1 && tn.typeArguments[0]!.kind === ts.SyntaxKind.AnyKeyword
+    );
+  });
+}
+
 function mapIndexSignatureValue(t: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if ((t.flags & ts.TypeFlags.Any) !== 0 && !ctx.dynamic) return DYN;
   return mapType(t, ctx);
@@ -8586,6 +8602,13 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       ) {
         pt = DYN;
       }
+      // A member that SPELLS `any` / `any[]` in a property declaration
+      // (`type BindOpts = { values?: any[] }`): the declared slot is the
+      // checked-dynamic one. An object LITERAL's member (`{ item: {} as
+      // any }`) is not a spelled declaration and keeps its refusal.
+      if (pt === null && !ctx.dynamic && declSpellsAny(checker.declarationsOf(p))) {
+        pt = DYN;
+      }
       // dyn FIELDS map now (`{ v: unknown }`, `[string, unknown]` tuples):
       // the slot carries a dyn value exactly like an `unknown`-valued
       // overflow entry — same RC adapters, same dynFrom conversion on the
@@ -8992,6 +9015,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     ) {
       continue;
     }
+    if (pt === null && !ctx.dynamic && declSpellsAny(checker.declarationsOf(p))) continue;
     if (!pt || pt.kind === "void") {
       return `the record shape is supported, but its member '${p.name}' has type '${checker.typeToString(fieldTs)}', which does not compile`;
     }
