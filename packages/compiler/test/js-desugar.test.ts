@@ -48,4 +48,20 @@ describe("jsDesugar", () => {
     expect(run(src, "/p/m.d.ts")).toBeNull();
     expect(run(src, "/p/m.cjs")).not.toBeNull();
   });
+  test("process module, getBuiltinModule and the UMD wrapper", () => {
+    expect(run("const process = require('process');\nprocess.nextTick(f);\n")).toBe(";\nprocess.nextTick(f);\n");
+    expect(run("const dc = process.getBuiltinModule('node:diagnostics_channel');\n")).toBe(
+      "const dc = require('node:diagnostics_channel');\n",
+    );
+    const umd =
+      "(function (global, factory) {\n  if (typeof exports === 'object') { factory(exports); if (typeof module === 'object') module.exports = preferDefault(exports); }\n})(this, function (_exports) {\n  Object.defineProperty(_exports, '__esModule', { value: true });\n  _exports.default = void 0;\n  function Pair() {}\n  var _default = (_exports.default = Pair);\n});\n";
+    const out = run(umd)!;
+    expect(out).toContain("function Pair() {}");
+    expect(out).toContain("var _default = Pair;");
+    expect(out).toContain("module.exports = Pair;");
+    expect(out).not.toContain("_exports");
+    expect(out.split("\n").length).toBe(umd.split("\n").length);
+    // a wrapper that uses the exports parameter any other way is left alone
+    expect(run(umd.replace("function Pair() {}", "_exports.extra = 1; function Pair() {}"))).toBeNull();
+  });
 });

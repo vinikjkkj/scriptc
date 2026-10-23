@@ -98,8 +98,67 @@ const PROCESS_MODULE_USE = /\brequire\(\s*(['"])(?:node:)?process\1\s*\)/g;
  * `require("node:x")` (Node 22+ answers the same module object). */
 const GET_BUILTIN_MODULE = /\bprocess\.getBuiltinModule\(\s*(['"])((?:node:)?[a-z_/]+)\1\s*\)/g;
 
+/** The Babel/rollup UMD wrapper (`long/umd/index.js`, many others):
+ *
+ *     (function (global, factory) {
+ *       function preferDefault(exports) { return exports.default || exports; }
+ *       if (typeof define === "function" && define.amd) {...}
+ *       else if (typeof exports === "object") {
+ *         factory(exports);
+ *         if (typeof module === "object") module.exports = preferDefault(exports);
+ *       } else {...}
+ *     })(<global expr>, function (_exports) { <body> });
+ *
+ * Under CommonJS (the only branch a compiled program takes) that is the body
+ * run against the `exports` object, then `module.exports = exports.default ||
+ * exports`. The body is hoisted to module level so its function declarations
+ * are what the lowering already models (a nested constructor function is not
+ * a module-level class). Only this exact wrapper shape is rewritten. */
+const UMD_PREFILTER = /factory\(exports\)[\s\S]*module\.exports\s*=\s*preferDefault\(exports\)/;
+
+function umdUnwrap(fileName: string, text: string): string | null {
+  if (!UMD_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  for (const stmt of sf.statements) {
+    if (!ts.isExpressionStatement(stmt)) continue;
+    let call: ts.Expression = stmt.expression;
+    while (ts.isParenthesizedExpression(call)) call = call.expression;
+    if (!ts.isCallExpression(call) || call.arguments.length !== 2) continue;
+    let callee: ts.Expression = call.expression;
+    while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+    if (!ts.isFunctionExpression(callee) || callee.parameters.length !== 2) continue;
+    const factory = call.arguments[1]!;
+    if (!ts.isFunctionExpression(factory) || factory.parameters.length !== 1 || !ts.isIdentifier(factory.parameters[0]!.name)) continue;
+    if (!/factory\(exports\)/.test(callee.getText(sf))) continue;
+    const exp = (factory.parameters[0]!.name as ts.Identifier).text;
+    const body = factory.body;
+    const inner = text.slice(body.getStart(sf) + 1, body.getEnd() - 1);
+    // Only the default-export-of-one-binding shape: every use of the exports
+    // parameter is the __esModule marker, the `default = void 0` reset, and ONE
+    // `(exports.default = Name)`. The rest of the body is the module.
+    const esc = exp.replace(/[$]/g, "\\$&");
+    let rest = inner
+      .replace(new RegExp(`Object\\.defineProperty\\(\\s*${esc}\\s*,\\s*["']__esModule["']\\s*,\\s*\\{[^}]*\\}\\s*\\);?`), (m) => m.replace(/[^\n]/g, " "))
+      .replace(new RegExp(`${esc}\\.default\\s*=\\s*void 0;?`), (m) => m.replace(/[^\n]/g, " "));
+    const defMatch = new RegExp(`\\(\\s*${esc}\\.default\\s*=\\s*([A-Za-z_$][\\w$]*)\\s*\\)`).exec(rest);
+    if (defMatch === null) continue;
+    rest = rest.replace(defMatch[0], defMatch[1]!);
+    if (new RegExp(`(?<![\\w$.])${esc}(?![\\w$])`).test(rest)) continue;
+    const newlinesBefore = (text.slice(stmt.getStart(sf), body.getStart(sf)).match(/\n/g) ?? []).length;
+    const newlinesAfter = (text.slice(body.getEnd(), stmt.getEnd()).match(/\n/g) ?? []).length;
+    const head = "\n".repeat(newlinesBefore);
+    const tail = `module.exports = ${defMatch[1]};` + "\n".repeat(newlinesAfter);
+    return text.slice(0, stmt.getStart(sf)) + head + rest + tail + text.slice(stmt.getEnd());
+  }
+  return null;
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
+  {
+    const unwrapped = umdUnwrap(fileName, text);
+    if (unwrapped !== null) return jsDesugar(fileName, unwrapped) ?? unwrapped;
+  }
   if (/\bprocess\.getBuiltinModule\(/.test(text)) {
     const out = text.replace(GET_BUILTIN_MODULE, "require($1$2$1)");
     if (out !== text) return jsDesugar(fileName, out) ?? out;
