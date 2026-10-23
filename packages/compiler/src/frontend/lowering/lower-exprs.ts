@@ -21019,6 +21019,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (
       receiverIr?.kind === "object" && isJsSourceFile(expr.getSourceFile()) &&
       expr.questionDotToken === undefined &&
+      L.classes.get(receiverIr.className) !== undefined &&
       L.findMethodOn(L.classes.get(receiverIr.className) ?? null, expr.name.text) === null &&
       !(L.classes.get(receiverIr.className)?.fields.has(expr.name.text) ?? false)
     ) {
