@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "mixinpool": {
+      "dir": "./attested-src/mixinpool",
+      "commit": "6666666666666666666666666666666666666666",
+      "repo": "https://github.com/example/mixinpool"
+    }
+  }
+}
