@@ -12038,6 +12038,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8535-dyn-index-arguments-coerce-primitives.js": {
+   "order": [
+    "<repo>/tests/corpus/8535-dyn-index-arguments-coerce-primitives.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
