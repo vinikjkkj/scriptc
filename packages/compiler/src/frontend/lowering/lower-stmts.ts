@@ -538,6 +538,55 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     return (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.BlockScoped) === 0;
   }
 
+/** Shared-field WRITE `r.f = v` on a UNION receiver: every arm is a class
+   * or record that owns the field at ONE IR type. The receiver and the value
+   * evaluate once (receiver first, as JS does), then the runtime tag picks
+   * the arm whose slot is written. Null when any arm cannot take the write
+   * (the caller's fences stand). */
+  function lowerUnionFieldWrite(L: Lowerer, expr: ts.BinaryExpression, left: ts.PropertyAccessExpression): IrStmt | null {
+    if (left.questionDotToken) return null;
+    const recvT = L.mapTypeOf(L.typeOf(left.expression));
+    if (recvT?.kind !== "union") return null;
+    const field = left.name.text;
+    const loc = locOf(expr);
+    const probe = probeLower(L, left.expression);
+    if (!probe || probe.type.kind !== "union") return null;
+    const def = L.unions.get(probe.type.unionId);
+    if (!def) return null;
+    let common: IrType | null = null;
+    for (const arm of def.arms) {
+      let ft: IrType | undefined;
+      if (arm.kind === "record") ft = L.shapes.get(arm.shapeId)?.fields.find((f) => f.name === field)?.type;
+      else if (arm.kind === "object") ft = L.classes.get(arm.className)?.fields.get(field);
+      if (!ft || ft.kind === "void" || (common && !typeEquals(common, ft))) return null;
+      common = ft;
+    }
+    if (!common) return null;
+    const recv = L.lowerExpr(left.expression);
+    if (recv.type.kind !== "union" || recv.type.unionId !== probe.type.unionId) return null;
+    const value = L.lowerExprExpecting(expr.right, common);
+    const out: IrStmt[] = [];
+    const utmp = L.declareHiddenLocal("%uwU", recv.type);
+    out.push({ kind: "varDecl", localId: utmp.id, init: recv, loc });
+    const vtmp = L.declareHiddenLocal("%uwV", common);
+    out.push({ kind: "varDecl", localId: vtmp.id, init: value, loc });
+    const uref: IrExpr = { kind: "varRef", localId: utmp.id, type: recv.type, loc };
+    const vref: IrExpr = { kind: "varRef", localId: vtmp.id, type: common, loc };
+    let chain: IrStmt[] | null = null;
+    for (let i = def.arms.length - 1; i >= 0; i--) {
+      const arm = def.arms[i]!;
+      const narrowed: IrExpr = { kind: "unionNarrow", unionId: recv.type.unionId, tag: i, value: uref, type: arm, loc };
+      const write: IrStmt =
+        arm.kind === "record"
+          ? { kind: "recordSet", obj: narrowed, shapeId: arm.shapeId, field, value: vref, loc }
+          : { kind: "fieldSet", obj: narrowed, className: (arm as { className: string }).className, field, value: vref, loc };
+      const cond: IrExpr = { kind: "unionIsTag", unionId: recv.type.unionId, tag: i, negated: false, value: uref, type: BOOL, loc };
+      chain = [{ kind: "if", cond, then: [write], else_: chain, loc }];
+    }
+    out.push(...(chain ?? []));
+    return { kind: "block", body: out, loc };
+  }
+
 /** Does the scope write a member through this binding — `x.p = v`,
    * `x[k] = v`, `x.p += v`, `x.p++`, `delete x.p` — where the binding is a
    * checker-`any` declaration initialized with an object literal? */
@@ -7351,6 +7400,13 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           {
             const viaStream = lowerStreamUnderscoreAssign(L, expr);
             if (viaStream) return viaStream;
+          }
+          // `message.severity = v` over a UNION of classes/records that all
+          // carry `severity` at one slot type: the write twin of the
+          // shared-field read (unionDisc).
+          {
+            const unionWrite = lowerUnionFieldWrite(L, expr, expr.left);
+            if (unionWrite) return unionWrite;
           }
           const target = L.fieldTarget(expr.left, true);
           if (target) {

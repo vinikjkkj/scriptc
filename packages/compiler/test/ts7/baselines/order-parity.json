@@ -11894,6 +11894,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8502-union-shared-field-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/8502-union-shared-field-write.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
