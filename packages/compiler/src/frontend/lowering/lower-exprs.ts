@@ -22,7 +22,7 @@ import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, built
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
-import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
+import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerBufferFlavorTest, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
 import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf } from "./lower-modules.js";
@@ -18589,6 +18589,16 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             `'instanceof ${rSym!.name}' on this operand (supported: a union carrying the flavor as an arm, or a bound value of a bytes type — an 'unknown' operand needs a runtime flavor test the checked-dynamic tree does not carry yet: it tags bytes as one kind, and only Uint8Array reads that tag)`,
           );
         }
+      }
+      // `x instanceof Buffer`: the flavor question Buffer.isBuffer asks,
+      // over any operand that can carry bytes (a bytes value, a union with
+      // a bytes arm, a checked-dynamic operand).
+      if (
+        ts.isIdentifier(expr.right) &&
+        L.isStdlibGlobal(expr.right, "Buffer") &&
+        !L.caughtLocalOf(expr.left)
+      ) {
+        return lowerBufferFlavorTest(L, expr, expr.left, L.lowerExpr(expr.left), loc);
       }
       // `x instanceof String` / `Number` / `Boolean` — the BOXED WRAPPER
       // test, and the answer is a constant because the constructor that
