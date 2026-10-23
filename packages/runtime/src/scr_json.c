@@ -7923,6 +7923,15 @@ double scr_dyn_index_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt
     if (n != n) return 0;
     return trunc(n);
   }
+  /* The PRIMITIVE kinds coerce exactly as JS's ToNumber does (a string parses,
+   * true is 1, null is 0): `arr.slice('1')`, `arr.splice('1', 1)`. Only the
+   * reference kinds still fence — their ToNumber runs ToPrimitive, which calls
+   * user code this model holds no prototype chain for. */
+  if (args[i]->kind == SCR_DYN_STR || args[i]->kind == SCR_DYN_BOOL || args[i]->kind == SCR_DYN_NULL) {
+    double n = scr_dyn_to_number(args[i]);
+    if (n != n) return 0;
+    return trunc(n);
+  }
   ScrJsonBuf b;
   scr_jb_init(&b);
   scr_jb_puts(&b, what);
