@@ -12002,6 +12002,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8527-builtin-module-member-existence-test.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8527-builtin-module-member-existence-test.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",

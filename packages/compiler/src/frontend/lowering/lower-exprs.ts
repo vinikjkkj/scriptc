@@ -7311,6 +7311,15 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     if (ts.isPropertyAccessExpression(e) && e.name.text === "emitWarning" && L.stdlibGlobalMember(e, "process") === "emitWarning") {
       return { kind: "boolLit", value: true, type: BOOL, loc: locOf(e) };
     }
+    // The same existence question over a member of a builtin module whose call
+    // form has a lowering row (`const net = require('net'); net.isIP && net.isIP(h)`
+    // in pg's connection.js): the member is a function the binary has.
+    if (ts.isPropertyAccessExpression(e) && !e.questionDotToken) {
+      const bi = L.builtinMemberOf(e);
+      if (bi !== null && builtinModuleFnOf(L, bi.module, bi.member) !== null) {
+        return { kind: "boolLit", value: true, type: BOOL, loc: locOf(e) };
+      }
+    }
     if (ts.isBinaryExpression(e)) {
       const op = e.operatorToken.kind;
       if (op === ts.SyntaxKind.AmpersandAmpersandToken || op === ts.SyntaxKind.BarBarToken) {
