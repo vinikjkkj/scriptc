@@ -11882,6 +11882,16 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
+    "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/isArguments.js",
+    "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/lodash.js",
+    "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/utils.js",
+    "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"
