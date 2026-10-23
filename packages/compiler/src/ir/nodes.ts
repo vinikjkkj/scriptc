@@ -1592,6 +1592,14 @@ export interface IrClassDef {
    * `get:<prop>` / `set:<prop>` entries — names no user identifier can
    * spell — and behave as ordinary methods here. */
   methods?: string[];
+  /** IMPLICIT-ANY methods of this class (untyped JS parameters): they own no
+   * vtable slot and no `%<class>.<method>` function, because each call site
+   * monomorphizes them. A class whose instances box into a dyn value still
+   * has to answer `x.m()` by name, so the all-dyn DEFAULT instance of each
+   * is compiled and listed here: `fn` is that instance's module function
+   * (first parameter the receiver). Only classes the program boxes into
+   * dyn carry the list. */
+  dynMethods?: { name: string; fn: string }[];
   /** Declared `abstract class` — never instantiated (tsc rejects `new` on
    * it, including through class values), so its own vtable entries for
    * abstract slots may stay empty. */
