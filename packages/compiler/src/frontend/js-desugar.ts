@@ -685,6 +685,45 @@ function tsHelperVarEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* FIELDS INITIALIZED TO UNDEFINED. A class field declared `next = undefined;`
+ * (or `void 0`, the spelling tsc and Babel emit for a bare `#x;`) defines the
+ * same own property as the bare declaration `next;`: both [[Define]] it as
+ * undefined at the field's position. They are NOT the same to the type
+ * checker: the initializer pins the field's type to `undefined`, a type with
+ * no representation, while a bare declaration in a JavaScript file is typed
+ * by what the class assigns to it (`this.next = fn` elsewhere), exactly like
+ * the constructor-assigned form. Only an INSTANCE field with no type annotation
+ * (the JavaScript spelling), private or not: an initializer-less STATIC field has
+ * no lowering, so a static one keeps its spelling. */
+function undefinedFieldEdits(fileName: string, text: string): string | null {
+  if (!/=\s*(?:undefined|void\s+0)\s*[;\n}]/.test(text) || !/\bclass\b/.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const visit = (n: ts.Node): void => {
+    if (ts.isPropertyDeclaration(n) && n.type === undefined && n.initializer !== undefined && !n.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword)) {
+      let init: ts.Expression = n.initializer;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      const isUndef =
+        (ts.isIdentifier(init) && init.text === "undefined") ||
+        (ts.isVoidExpression(init) && ts.isNumericLiteral(init.expression) && init.expression.text === "0");
+      if (isUndef && n.name !== undefined) {
+        edits.push({ start: n.name.getEnd(), end: n.initializer.getEnd(), text: "" });
+      }
+    }
+    n.forEachChild(visit);
+  };
+  visit(sf);
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -694,6 +733,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const tsCjs = tsCjsEdits(fileName, text);
     if (tsCjs !== null) return jsDesugar(fileName, tsCjs) ?? tsCjs;
+  }
+  {
+    const undef = undefinedFieldEdits(fileName, text);
+    if (undef !== null) return jsDesugar(fileName, undef) ?? undef;
   }
   {
     const helpers = tsHelperVarEdits(fileName, text);
