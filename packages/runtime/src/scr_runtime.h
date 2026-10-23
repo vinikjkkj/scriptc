@@ -5423,6 +5423,17 @@ double scr_dyn_index_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt
  * the coercion threw. +1 on success. */
 ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *args,
                              size_t argc, const char *what, bool *known);
+/* The callable-callback gate every array-style callback method runs first:
+ * true for a function (a dyn closure or a wrapped engine function), else
+ * throws JS's "<type of cb> is not a function" with V8's
+ * CalledNonCallable rendering and answers false. Shared by the typed-array
+ * callbacks (scr_json.c, always linked) and the dispatch unit's array
+ * callbacks. Borrows cb. */
+bool scr_dyn_cb_check(const ScrDyn *cb);
+/* The sort/toSorted "comparison function must be either a function or
+ * undefined: <offender>" TypeError, V8's rendering of the offender. Always
+ * throws; one body for arrays and typed arrays. */
+void scr_dyn_comparefn_throw(const ScrDyn *cmp);
 
 /* ── ACCESSOR PROPERTIES (Object.defineProperty's get/set half) ────────
  *

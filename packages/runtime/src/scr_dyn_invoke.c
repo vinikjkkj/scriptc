@@ -306,84 +306,13 @@ static ScrDyn *dyn_call_cb(ScrDyn *cb, ScrDyn *item, size_t i, ScrDyn *recv) {
   return r;
 }
 
-/* V8's CalledNonCallable rendering — a THIRD table, and deliberately not
- * either mode of dyn_str_buf above. `[1].forEach(x)` does not name x by
- * its string image; it names x by its TYPE, and only the three primitive
- * types that print short carry their value. Measured, Node v25.9.0:
- *
- *   {} / [] / /x/ / new Date / Object.create(null)  ->  "object"
- *   null            -> "object null"      undefined -> "undefined"
- *   5 / NaN / -0    -> "number 5" / "number NaN" / "number 0"
- *   "hi" / 'a"b'    -> 'string "hi"' / 'string "a"b"'  (NOT re-escaped)
- *   true / false    -> "boolean true" / "boolean false"
- *   Symbol("s")     -> "symbol"           5n        -> "bigint"
- *
- * Every object renders as the bare word, so an object carrying a user
- * `toString` cannot be reached through this message at all — the
- * property that makes it safe to build while an exception is being
- * raised. The `o.m()` spelling is a DIFFERENT template (V8's
- * CallPrinter names the source text) and stays with dyn_throw_not_fn. */
-static void dyn_notfn_buf(ScrJsonBuf *b, const ScrDyn *cb) {
-  switch (cb->kind) {
-  case SCR_DYN_UNDEF: scr_jb_puts(b, "undefined"); return;
-  case SCR_DYN_NULL: scr_jb_puts(b, "object null"); return;
-  case SCR_DYN_BOOL:
-    scr_jb_puts(b, cb->v.b ? "boolean true" : "boolean false");
-    return;
-  case SCR_DYN_NUM: {
-    scr_jb_puts(b, "number ");
-    ScrStr *s = scr_f64_to_scrstr(cb->v.num);
-    for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);
-    scr_str_release(s);
-    return;
-  }
-  case SCR_DYN_STR:
-    scr_jb_puts(b, "string \"");
-    for (size_t i = 0; i < cb->v.str->len; i++) scr_jb_putc(b, cb->v.str->data[i]);
-    scr_jb_putc(b, '"');
-    return;
-  case SCR_DYN_FUNC:
-    /* Unreachable — a FUNC is callable and returned above. */
-    scr_jb_puts(b, "function");
-    return;
-  case SCR_DYN_JSVAL:
-    /* A wrapped value that is not a function. Primitives normalize to
-     * the native kinds above when they cross, so what survives here is
-     * an engine OBJECT; asking the engine for a value image would run
-     * its ToString, which this message must not do. */
-    scr_jb_puts(b, "object");
-    return;
-  case SCR_DYN_BIG:
-    /* The bare type word — measured, and NOT the "number 5" shape the
-     * NUM arm above uses; see the sibling template in scr_json.c. */
-    scr_jb_puts(b, "bigint");
-    return;
-  case SCR_DYN_ARR:
-  case SCR_DYN_OBJ:
-  case SCR_DYN_BYTES:
-  case SCR_DYN_ARRBUF:
-  case SCR_DYN_HANDLE:
-  case SCR_DYN_OBJINST:
-  case SCR_DYN_MAP:
-  case SCR_DYN_PROMISE: scr_jb_puts(b, "object"); return;
-  case SCR_DYN_PROXY: scr_jb_puts(b, scr_dyn_proxy_is_function(cb) ? "function" : "object"); return;
-  }
-}
-
-/* The callable-callback gate: JS's "<type of cb> is not a function". */
+/* The callable-callback gate: JS's "<type of cb> is not a function", with
+ * V8's CalledNonCallable rendering. The body lives in scr_json.c
+ * (scr_dyn_cb_check) beside the typed-array callbacks that share it, so a
+ * callback refused by an array and one refused by a typed array say the
+ * same thing. */
 static bool dyn_cb_check(ScrDyn *const *args, size_t argc) {
-  ScrDyn *cb = argc > 0 ? args[0] : scr_dyn_undefined();
-  if (cb->kind == SCR_DYN_FUNC) return true;
-  /* An ENGINE function is callable — scr_dyn_call's JSVAL arm routes it
-   * (the loops below call through scr_dyn_call, which converts the checked-dynamic tree
-   * element arguments per the uniform crossing). */
-  if (cb->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(cb, "function")) return true;
-  ScrJsonBuf b;
-  scr_jb_init(&b);
-  dyn_notfn_buf(&b, cb);
-  scr_jb_puts(&b, " is not a function");
-  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
-  return false;
+  return scr_dyn_cb_check(argc > 0 ? args[0] : scr_dyn_undefined());
 }
 
 static bool dyn_name_is(const char *m, const char *n) { return strcmp(m, n) == 0; }
@@ -709,6 +638,28 @@ static ScrStr *dyn_locale_str(const ScrDyn *v, int depth, const ScrDyn *locales,
       free(buf);
       return r;
     }
+    case SCR_DYN_BYTES: {
+      /* %TypedArray%.prototype.toLocaleString: the elements' own answers
+       * joined with ",", exactly the array's. A DataView has none of its
+       * own (Object.prototype's runs toString). */
+      if (v->v.bytes->flavor == SCR_BF_DATAVIEW) return scr_dyn_string_coerce_js(v);
+      ScrJsonBuf jb;
+      scr_jb_init(&jb);
+      for (size_t i = 0; i < v->v.bytes->len; i++) {
+        if (i) scr_jb_putc(&jb, ',');
+        ScrDyn *n = scr_dyn_new_num((double)v->v.bytes->data[i]);
+        ScrStr *e = dyn_locale_str(n, depth + 1, locales, opts);
+        scr_dyn_release(n);
+        if (e == NULL) {
+          ScrStr *drop = scr_jb_finish(&jb);
+          scr_str_release(drop);
+          return NULL;
+        }
+        scr_jb_write(&jb, e->data, e->len);
+        scr_str_release(e);
+      }
+      return scr_jb_finish(&jb);
+    }
     case SCR_DYN_HANDLE:
       if (v->v.handle.tag == SCR_DYNH_DATE) {
         const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(v);
@@ -802,9 +753,8 @@ static bool dyn_arr_proto_unimpl(const char *m) {
    * must not sit in a list called *_unimpl. Keeping them here made two of
    * the static-copy guard's nine arms unreachable, because this predicate
    * throws "not supported" before that guard can fire. */
-  static const char *names[] = { "reduce", "reduceRight", "flat",
-    "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
-    "with", NULL };
+  static const char *names[] = { "flat",
+    "keys", "values", "entries", "toSpliced", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
@@ -1126,9 +1076,10 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
        * predicate exists to prevent, reintroduced by a tidy-up. */
       static const char *const impl[] = { "at", "concat", "copyWithin", "every",
         "fill", "filter",
-        "find", "findIndex", "flatMap", "forEach", "includes", "indexOf",
-        "join", "lastIndexOf", "map", "pop", "push", "reverse", "shift",
-        "slice", "some", "sort", "splice", "toString", "unshift", NULL };
+        "find", "findIndex", "findLast", "findLastIndex", "flatMap", "forEach", "includes", "indexOf",
+        "join", "lastIndexOf", "map", "pop", "push", "reduce", "reduceRight", "reverse", "shift",
+        "slice", "some", "sort", "splice", "toReversed", "toSorted", "toString", "unshift",
+        "with", NULL };
       return dyn_name_in(m, impl) || dyn_arr_proto_unimpl(m) || dyn_objproto_knows(m);
     }
     case SCR_DYN_BYTES:
@@ -1147,7 +1098,19 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
        * static in another unit) stays unclaimed: widening the read to a
        * table nobody measured is how the read/call split happened in the
        * first place, and it is not this branch's name to claim. */
-      return dyn_name_is(m, "toString");
+      {
+        /* The typed-array surface, whole: every name scr_dyn_bytes_method
+         * answers, plus the four it fences LOUDLY by name (the iterator
+         * trio and toLocaleString) — the rule this list lives by. The read
+         * and the call agree name for name, so `typeof u8.fill` is
+         * "function" exactly where `u8.fill(0)` runs. */
+        static const char *const impl[] = { "at", "copyWithin", "every", "fill", "filter",
+          "find", "findIndex", "findLast", "findLastIndex", "forEach", "includes", "indexOf",
+          "join", "lastIndexOf", "map", "reduce", "reduceRight", "reverse", "set", "slice",
+          "some", "sort", "subarray", "toReversed", "toSorted", "toString", "with",
+          "keys", "values", "entries", "toLocaleString", NULL };
+        return dyn_name_in(m, impl) || dyn_objproto_knows(m);
+      }
     case SCR_DYN_NUM:
     case SCR_DYN_BOOL:
       return dyn_name_is(m, "toString") || dyn_num_proto_unimpl(m) || dyn_objproto_knows(m);
@@ -2291,6 +2254,115 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       if (dyn_name_is(method, "findIndex")) return scr_dyn_new_num(-1);
       return scr_dyn_retain(scr_dyn_undefined()); /* forEach */
     }
+    /* reduce / reduceRight / findLast / findLastIndex / toReversed /
+     * toSorted / with: the Array.prototype names that sat in
+     * dyn_arr_proto_unimpl (or in no list at all, which answered "is not a
+     * function" for a method every array has) and in the compiler's
+     * name-level fence, so a call on an untyped array was a build refusal
+     * in the dotted spelling and a loud throw in the computed one. They
+     * run now, with the typed-array versions' order of coercions
+     * (scr_json.c's tbm_* block is the Uint8Array twin of this block). */
+    if (dyn_name_is(method, "reduce") || dyn_name_is(method, "reduceRight")) {
+      const bool right = dyn_name_is(method, "reduceRight");
+      if (!dyn_cb_check(args, argc)) return NULL;
+      ScrDyn *cb = args[0];
+      const size_t len0 = recv->v.arr.len; /* captured once, like the spec */
+      size_t k = 0;
+      ScrDyn *acc = NULL;
+      if (argc > 1) {
+        acc = scr_dyn_retain(args[1]);
+      } else {
+        /* the first PRESENT element seeds the accumulator */
+        for (; k < len0 && acc == NULL; k++) {
+          const size_t i = right ? len0 - 1 - k : k;
+          if (i < recv->v.arr.len) acc = scr_dyn_retain(recv->v.arr.items[i]);
+        }
+        if (acc == NULL) {
+          static const char msg[] = "Reduce of empty array with no initial value";
+          scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+          return NULL;
+        }
+      }
+      for (; k < len0; k++) {
+        const size_t i = right ? len0 - 1 - k : k;
+        if (i >= recv->v.arr.len) continue; /* the callback shrank it: a missing index is skipped */
+        ScrDyn *item = scr_dyn_retain(recv->v.arr.items[i]);
+        ScrDyn *idx = scr_dyn_new_num((double)i);
+        ScrDyn *av[4] = { acc, item, idx, recv };
+        scr_dyn_this_push_dyn(scr_dyn_undefined());
+        ScrDyn *r = scr_dyn_call(cb, av, 4, "callback");
+        scr_dyn_this_pop();
+        scr_dyn_release(item);
+        scr_dyn_release(idx);
+        scr_dyn_release(acc);
+        if (r == NULL) return NULL;
+        acc = r;
+      }
+      return acc;
+    }
+    if (dyn_name_is(method, "findLast") || dyn_name_is(method, "findLastIndex")) {
+      const bool wantIndex = dyn_name_is(method, "findLastIndex");
+      if (!dyn_cb_check(args, argc)) return NULL;
+      ScrDyn *cb = args[0];
+      ScrDyn *thisArg = argc > 1 ? args[1] : scr_dyn_undefined();
+      const size_t len0 = recv->v.arr.len;
+      for (size_t step = 0; step < len0; step++) {
+        const size_t i = len0 - 1 - step;
+        /* findLast visits EVERY index (a shrunk one reads undefined) */
+        ScrDyn *item = i < recv->v.arr.len ? scr_dyn_retain(recv->v.arr.items[i]) : scr_dyn_retain(scr_dyn_undefined());
+        scr_dyn_this_push_dyn(thisArg);
+        ScrDyn *r = dyn_call_cb(cb, item, i, recv);
+        scr_dyn_this_pop();
+        if (r == NULL) { scr_dyn_release(item); return NULL; }
+        const bool hit = scr_dyn_truthy(r);
+        scr_dyn_release(r);
+        if (hit) {
+          if (wantIndex) { scr_dyn_release(item); return scr_dyn_new_num((double)i); }
+          return item;
+        }
+        scr_dyn_release(item);
+      }
+      return wantIndex ? scr_dyn_new_num(-1) : scr_dyn_retain(scr_dyn_undefined());
+    }
+    if (dyn_name_is(method, "toReversed")) {
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = recv->v.arr.len; i-- > 0;) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      return out;
+    }
+    if (dyn_name_is(method, "toSorted")) {
+      ScrDyn *cmp = argc > 0 ? args[0] : scr_dyn_undefined();
+      if (cmp->kind != SCR_DYN_UNDEF && cmp->kind != SCR_DYN_FUNC) {
+        scr_dyn_comparefn_throw(cmp);
+        return NULL;
+      }
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < recv->v.arr.len; i++) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      if (out->v.arr.len > 1 && !dyn_arr_sort(out, cmp->kind == SCR_DYN_FUNC ? cmp : NULL)) {
+        scr_dyn_release(out);
+        return NULL;
+      }
+      return out;
+    }
+    if (dyn_name_is(method, "with")) {
+      double rel = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      const double actual = rel >= 0 ? rel : (double)len + rel;
+      if (!(actual >= 0 && actual < (double)len)) {
+        ScrJsonBuf b;
+        scr_jb_init(&b);
+        scr_jb_puts(&b, "Invalid index : ");
+        scr_dyn_display_buf(&b, argc > 0 ? args[0] : scr_dyn_undefined());
+        scr_throw_error(SCR_ERR_RANGE, scr_jb_finish(&b));
+        return NULL;
+      }
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < recv->v.arr.len; i++) {
+        scr_dyn_arr_push(out, scr_dyn_retain(i == (size_t)actual && argc > 1 ? args[1]
+                                             : i == (size_t)actual ? scr_dyn_undefined()
+                                                                   : recv->v.arr.items[i]));
+      }
+      return out;
+    }
     if (dyn_name_is(method, "flatMap")) {
       /* JS Array.prototype.flatMap over a dyn array: map + a depth-1
        * flatten. Native dyn-array results flatten element-by-element; a
@@ -2341,12 +2413,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     if (dyn_name_is(method, "sort")) {
       ScrDyn *cmp = argc > 0 ? args[0] : scr_dyn_undefined();
       if (cmp->kind != SCR_DYN_UNDEF && cmp->kind != SCR_DYN_FUNC) {
-        /* V8 appends the received value's string image. */
-        ScrJsonBuf b;
-        scr_jb_init(&b);
-        scr_jb_puts(&b, "The comparison function must be either a function or undefined: ");
-        scr_dyn_diag_buf(&b, cmp);
-        scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+        scr_dyn_comparefn_throw(cmp); /* V8 appends the offender's string image */
         return NULL;
       }
       if (len > 1 && !dyn_arr_sort(recv, cmp->kind == SCR_DYN_FUNC ? cmp : NULL)) return NULL;
@@ -2465,6 +2532,21 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
      * `Uint8Array.prototype.subarray.call(b, 1, 3)` cannot answer
      * differently. A name that is no method of this kind at all falls
      * through to JS's is-not-a-function below. */
+    /* Buffer.prototype.toLocaleString IS Buffer.prototype.toString (an
+     * alias in Node), so a Buffer decodes; a plain typed array joins its
+     * elements' locale answers. */
+    if (dyn_name_is(method, "toLocaleString") && (recv->buffer || recv->v.bytes->flavor == SCR_BF_BUFFER)) {
+      bool tk = false;
+      ScrDyn *tr = scr_dyn_bytes_method(recv, "toString", args, argc, what, &tk);
+      if (tk) return tr;
+    }
+    if (dyn_name_is(method, "toLocaleString") && dyn_locale_answerable(args, argc)) {
+      ScrStr *ls = dyn_locale_str(recv, 0, argc >= 1 ? args[0] : NULL, argc >= 2 ? args[1] : NULL);
+      if (ls == NULL) return NULL;
+      ScrDyn *ld = scr_dyn_new_str(ls);
+      scr_str_release(ls);
+      return ld;
+    }
     bool known = false;
     ScrDyn *r = scr_dyn_bytes_method(recv, method, args, argc, what, &known);
     if (known) return r;

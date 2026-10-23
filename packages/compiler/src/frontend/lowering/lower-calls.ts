@@ -6718,6 +6718,15 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   "fill", "copyWithin",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "reverse", "sort",
   "forEach", "map", "filter", "some", "every", "find", "findIndex",
+  // reduce / reduceRight / findLast / findLastIndex / toReversed / toSorted /
+  // with joined the routed set when the runtime started ANSWERING them for
+  // an untyped array and a typed array (scr_dyn_invoke.c's ARR arm and
+  // scr_json.c's tbm_* block). They sat in DYN_PROTO_METHOD_NAMES alone, so
+  // the dotted spelling was an SC1090 build refusal for a capability the
+  // computed spelling already reached as a loud throw. Routing can only
+  // move cells REFUSE -> MATCH: every other receiver kind answers the same
+  // is-not-a-function / own-member call it answered for `map`.
+  "reduce", "reduceRight", "findLast", "findLastIndex", "toReversed", "toSorted", "with",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
   // boxed through the checked-dynamic boundary): these names dispatch on
   // the runtime kind so a boxed IncomingMessage/ServerResponse/Socket

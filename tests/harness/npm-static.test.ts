@@ -950,8 +950,11 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(rows.get("dSlice")).toBe(rows.get("tSlice"));
     expect(rows.get("dHasOwn")).toBe(rows.get("tHasOwn"));
     expect(rows.get("dFnApply")).toBe(rows.get("tFnApply"));
-    // HONEST REFUSALS -- still failing, no longer lying about why
-    expect(rows.get("dReduce")).toBe("THREW 'Array.prototype.reduce' on a dynamic value is not supported yet");
+    // dReduce: CLOSED. reduce used to be a loud not-supported ladder entry;
+    // the ARR arm answers it now, so the keyed spelling runs and says what
+    // its dot twin and Node say (the sum of [1,2,3]).
+    expect(rows.get("dReduce")).toBe("6");
+    // HONEST REFUSAL -- still failing, no longer lying about why
     expect(rows.get("dFlat")).toBe("THREW 'Array.prototype.flat' on a dynamic value is not supported yet");
     // THE RESIDUAL GAP -- HALF CLOSED, and the two halves went different
     // ways, which is the whole reason this row is worth reading.
