@@ -1334,11 +1334,113 @@ function chainedPropertyAssignEdits(fileName: string, text: string): string | nu
   return out + text.slice(at);
 }
 
+/* AN OWN PROPERTY THAT SHADOWS A METHOD WITH ANOTHER METHOD OF THE SAME CLASS.
+ * pg's Result picks its row parser per instance:
+ *
+ *     class Result {
+ *       constructor(rowMode) { if (rowMode === 'array') this.parseRow = this._parseRowAsArray }
+ *       _parseRowAsArray(rowData) { ... }
+ *       parseRow(rowData) { ... }
+ *     }
+ *
+ * The write defines an own `parseRow` on that instance, and every
+ * `this.parseRow(row)` then runs the other method with the same receiver. The
+ * class is closed over its own members, so the choice is a per-instance state:
+ * a PRIVATE flag (invisible to keys, inspection and JSON, which the own
+ * property is not, see the divergence note in SEMANTICS) records the write,
+ * and the shadowed method forwards to its replacement while the flag is set.
+ * Only `this.M = this.K` where M and K are both instance methods of this
+ * class declared with plain identifier parameters, K taking no more than M,
+ * is rewritten; any other right-hand side keeps the refusal. */
+function methodShadowEdits(fileName: string, text: string): string | null {
+  if (!/this\.[\w$]+\s*=\s*this\.[\w$]+\s*;?/.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const plainParams = (m: ts.MethodDeclaration): string[] | null => {
+    const out: string[] = [];
+    for (const p of m.parameters) {
+      if (!ts.isIdentifier(p.name) || p.dotDotDotToken !== undefined || p.initializer !== undefined) return null;
+      out.push(p.name.text);
+    }
+    return out;
+  };
+  const visitClass = (cls: ts.ClassDeclaration | ts.ClassExpression): void => {
+    const methods = new Map<string, ts.MethodDeclaration>();
+    for (const m of cls.members) {
+      if (
+        ts.isMethodDeclaration(m) && m.body !== undefined && ts.isIdentifier(m.name) && m.asteriskToken === undefined &&
+        !m.modifiers?.some((mod) => mod.kind === ts.SyntaxKind.StaticKeyword || mod.kind === ts.SyntaxKind.AsyncKeyword)
+      ) {
+        methods.set(m.name.text, m);
+      }
+    }
+    const shadowed = new Map<string, string>();
+    const stmts: Array<{ st: ts.ExpressionStatement; m: string }> = [];
+    const walk = (n: ts.Node): void => {
+      if (ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isClassLike(n)) return;
+      if (ts.isExpressionStatement(n) && ts.isBinaryExpression(n.expression) && n.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const { left, right } = n.expression;
+        if (
+          ts.isPropertyAccessExpression(left) && left.expression.kind === ts.SyntaxKind.ThisKeyword && ts.isIdentifier(left.name) &&
+          ts.isPropertyAccessExpression(right) && right.expression.kind === ts.SyntaxKind.ThisKeyword && ts.isIdentifier(right.name)
+        ) {
+          const m = left.name.text;
+          const k = right.name.text;
+          const mm = methods.get(m);
+          const km = methods.get(k);
+          const mp = mm && plainParams(mm);
+          const kp = km && plainParams(km);
+          if (mm && km && m !== k && mp && kp && kp.length <= mp.length && (shadowed.get(m) ?? k) === k) {
+            shadowed.set(m, k);
+            stmts.push({ st: n, m });
+          }
+        }
+      }
+      ts.forEachChild(n, walk);
+    };
+    for (const m of methods.values()) walk(m.body!);
+    for (const c of cls.members) if (ts.isConstructorDeclaration(c) && c.body !== undefined) walk(c.body);
+    if (stmts.length === 0) return;
+    // A replacement that is itself shadowed would chain; keep to the flat case.
+    for (const k of shadowed.values()) if (shadowed.has(k)) return;
+    const heritageEnd = cls.heritageClauses?.length ? cls.heritageClauses[cls.heritageClauses.length - 1]!.getEnd() : -1;
+    const bodyOpen = text.indexOf("{", Math.max(heritageEnd, cls.name !== undefined ? cls.name.getEnd() : cls.getStart(sf)));
+    const fields = [...shadowed.keys()].map((m) => `#__sc_own_${m} = false;`).join(" ");
+    edits.push({ start: bodyOpen + 1, end: bodyOpen + 1, text: ` ${fields} ` });
+    for (const { st, m } of stmts) edits.push({ start: st.getStart(sf), end: st.getEnd(), text: `this.#__sc_own_${m} = true;` });
+    for (const [m, k] of shadowed) {
+      const mm = methods.get(m)!;
+      const args = plainParams(mm)!.slice(0, plainParams(methods.get(k)!)!.length).join(", ");
+      const at = mm.body!.getStart(sf) + 1;
+      edits.push({ start: at, end: at, text: ` if (this.#__sc_own_${m}) { return this.${k}(${args}); } ` });
+    }
+  };
+  const visit = (n: ts.Node): void => {
+    if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) visitClass(n);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    if (ed.start < at) continue;
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
     const unwrapped = umdUnwrap(fileName, text);
     if (unwrapped !== null) return jsDesugar(fileName, unwrapped) ?? unwrapped;
+  }
+  {
+    const shadow = methodShadowEdits(fileName, text);
+    if (shadow !== null) return jsDesugar(fileName, shadow) ?? shadow;
   }
   {
     const chained = chainedPropertyAssignEdits(fileName, text);
