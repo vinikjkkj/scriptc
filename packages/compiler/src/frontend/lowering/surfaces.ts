@@ -388,6 +388,8 @@ export const STR_METHODS: Record<
   // substring: slice's clamp-and-swap sibling (negatives clamp to 0
   // instead of counting from the end; start > end swaps).
   substring: { method: "substring", result: STRING, minArgs: 1, maxArgs: 2 },
+  // substr (Annex B): (start, length); a negative start counts from the end.
+  substr: { method: "substr", result: STRING, minArgs: 1, maxArgs: 2 },
   repeat: { method: "repeat", result: STRING, minArgs: 1, maxArgs: 1 },
   trim: { method: "trim", result: STRING, minArgs: 0, maxArgs: 0 },
   trimStart: { method: "trimStart", result: STRING, minArgs: 0, maxArgs: 0 },

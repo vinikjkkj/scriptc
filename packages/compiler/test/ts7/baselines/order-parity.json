@@ -11666,6 +11666,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8511-string-substr-static-and-dynamic.js": {
+   "order": [
+    "<repo>/tests/corpus/8511-string-substr-static-and-dynamic.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"

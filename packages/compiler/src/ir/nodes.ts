@@ -2714,6 +2714,7 @@ export type IrStrIntrinsicMethod =
   | "endsWith"
   | "slice"
   | "substring"
+  | "substr"
   | "repeat"
   | "trim"
   | "trimStart"

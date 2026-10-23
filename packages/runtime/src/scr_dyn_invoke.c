@@ -697,7 +697,6 @@ static bool dyn_str_proto_unimpl(const char *m) {
   static const char *names[] = { "split", "replace", "replaceAll", "match",
     "matchAll", "search", "localeCompare", "normalize", "codePointAt",
     "toLocaleLowerCase", "toLocaleUpperCase", "isWellFormed", "toWellFormed",
-    "substr",
     /* Behind libregexp -- see the note in the STR arm. */
     "toUpperCase", "toLowerCase", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
@@ -797,7 +796,7 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
     case SCR_DYN_STR: {
       static const char *const impl[] = { "at", "charAt", "charCodeAt", "concat",
         "endsWith", "includes", "indexOf", "lastIndexOf", "padEnd", "padStart",
-        "repeat", "slice", "startsWith", "substring", "toString", "trim",
+        "repeat", "slice", "startsWith", "substring", "substr", "toString", "trim",
         "trimEnd", "trimStart", NULL };
       return dyn_name_in(m, impl) || dyn_str_proto_unimpl(m) || dyn_objproto_knows(m);
     }
@@ -1480,6 +1479,17 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       double a1 = dyn_index_arg(args, argc, 1, scr_str_utf16_len(s), what);
       if (scr_exc_pending()) return NULL;
       ScrStr *r = scr_str_substring(s, a0, a1);
+      if (scr_exc_pending()) { if (r) scr_str_release(r); return NULL; }
+      ScrDyn *d = scr_dyn_new_str(r);
+      scr_str_release(r);
+      return d;
+    }
+    if (dyn_name_is(method, "substr")) {
+      double a0 = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      double a1 = dyn_index_arg(args, argc, 1, INFINITY, what);
+      if (scr_exc_pending()) return NULL;
+      ScrStr *r = scr_str_substr(s, a0, a1);
       if (scr_exc_pending()) { if (r) scr_str_release(r); return NULL; }
       ScrDyn *d = scr_dyn_new_str(r);
       scr_str_release(r);

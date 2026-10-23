@@ -1746,6 +1746,23 @@ ScrStr *scr_str_substring(ScrStr *s, double start, double end) {
   return fa < fb ? scr_str_slice(s, fa, fb) : scr_str_slice(s, fb, fa);
 }
 
+/* substr (Annex B): ToIntegerOrInfinity start (negative counts from the end,
+ * clamped into [0, len16]), then ToIntegerOrInfinity length (NaN -> 0; a
+ * missing length arrives as +Infinity = to the end), clamped into
+ * [0, len16 - start]; the window [start, start + length) is extracted like
+ * slice. */
+ScrStr *scr_str_substr(ScrStr *s, double start, double length) {
+  ScrSidx *e = scr_sidx(s);
+  double len16 = (double)scr_sidx_len(s, e);
+  double a = scr_to_integer_or_infinity(start);
+  double fa = a < 0 ? (len16 + a < 0 ? 0 : len16 + a) : (a > len16 ? len16 : a);
+  double l = scr_to_integer_or_infinity(length);
+  double room = len16 - fa;
+  double fl = l < 0 ? 0 : (l > room ? room : l);
+  if (fl <= 0) return scr_str_slice(s, 0, 0);
+  return scr_str_slice(s, fa, fa + fl);
+}
+
 bool scr_str_includes(ScrStr *s, ScrStr *needle) {
   return scr_byte_find(s->data, s->len, needle->data, needle->len) != NULL;
 }
