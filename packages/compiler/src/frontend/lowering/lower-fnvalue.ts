@@ -83,7 +83,7 @@ import {
   typeEquals,
 } from "../../ir/nodes.js";
 import { type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf } from "./surfaces.js";
-import { isJsSourceFile } from "../program.js";
+
 
 interface BuiltinFnValue {
   /** The value form's exact parameter types, in order. */
