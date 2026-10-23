@@ -6930,6 +6930,22 @@ let digestInputValueDispatches = 0;
       const ekey: IrExpr = { kind: "strLit", value: member, type: STRING, loc: eloc };
       return { kind: "libCall", fn: "error.ext", args: [erecv, ekey], type: DYN, loc: eloc };
     }
+    if (member === "cause") {
+      // ES2022 `Error.cause`: the own property the options form stored in
+      // the expando bag (the dyn undefined when none was).
+      let cInfo = L.classes.get(recvT.className) ?? null;
+      while (cInfo && cInfo.base) cInfo = cInfo.base;
+      if (!cInfo || cInfo.def.name !== "%Error" || !L.isStdlibMember(expr)) return null;
+      const cloc = locOf(expr);
+      const crecv = L.lowerExpr(expr.expression);
+      return {
+        kind: "libCall",
+        fn: "error.propGet",
+        args: [L.upcastTo(crecv, "%Error"), { kind: "strLit", value: "cause", type: STRING, loc: cloc }],
+        type: DYN,
+        loc: cloc,
+      };
+    }
     if (member !== "code" && member !== "stack") return null;
     // Error-rooted classes only — builtin or user subclass (both embed the
     // code slot in their layout prefix).

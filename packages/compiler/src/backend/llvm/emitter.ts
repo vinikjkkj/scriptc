@@ -526,6 +526,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // The checked-dynamic compare/equals validators (scr_bytes_io.c):
   // Node's argument ladders throw catchably (MAY_THROW_LIB_FNS).
   "dyn.toStringCoerce": "scr_dyn_string_coerce_js",
+  "error.msgDyn": "scr_error_message_dyn",
   "buffer.compareChk": "scr_buffer_compare_chk",
   "bytes.equalsChk": "scr_bytes_equals_chk",
   "bytes.compareChk": "scr_bytes_compare_chk",

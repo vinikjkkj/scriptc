@@ -15973,8 +15973,8 @@ export class Lowerer {
     return lowerDeleteValue(this, expr);
   }
 
-  errorMessageArg(args: readonly ts.Expression[], loc: SrcLoc, blame: ts.Node): IrExpr {
-    return errorMessageArg(this, args, loc, blame);
+  errorMessageArg(args: readonly ts.Expression[], loc: SrcLoc, blame: ts.Node, optionsHandled = false): IrExpr {
+    return errorMessageArg(this, args, loc, blame, optionsHandled);
   }
 
   inheritsBuiltinErrorCtor(info: ClassInfo): boolean {

@@ -1164,6 +1164,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // Always throws; the result is the replaced expression type (skipped
   // below with the rest of the always-throw family).
   "dyn.toStringCoerce": { argTypes: [DYN], result: STRING },
+  "error.msgDyn": { argTypes: [DYN], result: STRING },
   // Always throws; the result is the READ's declared type (a typed dummy
   // the unwind abandons) — the libCall case skips the result check.
   "global.undefRead": { argTypes: [STRING], result: VOID },

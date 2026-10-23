@@ -695,6 +695,11 @@ static ScrBytes *scr_buffer_concat_dyn_impl(const ScrDyn *list, const ScrDyn *to
   return out;
 }
 
+ScrStr *scr_error_message_dyn(const ScrDyn *v) {
+  if (v->kind == SCR_DYN_UNDEF) return scr_str_new("", 0);
+  return scr_dyn_string_coerce_js(v);
+}
+
 /* Buffer.byteLength(value, encoding) over an untyped value (a JS file's
  * implicit-any parameters). A string counts per the encoding, which Node
  * lowercases and which falls back to utf8 when it is unknown or not a

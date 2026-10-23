@@ -6133,6 +6133,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_http2_stream_pending(${arg(0)})`);
           case "http2.streamSession":
             return finish(`scr_http2_stream_session(${arg(0)})`);
+          case "error.msgDyn":
+            return finish(`scr_error_message_dyn(${arg(0)})`);
           case "dyn.toStringCoerce":
             // +1 string or NULL with the exception pending (user
             // toString/valueOf throws propagate). Borrows the dyn.

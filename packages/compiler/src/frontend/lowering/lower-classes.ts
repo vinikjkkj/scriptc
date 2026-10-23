@@ -8053,14 +8053,33 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
           out.push(...paramPropInitStmts(L, info, thisLocal));
           continue;
         }
+        const causeOpts = forward === undefined && base.builtinError
+          ? errorOptionsCause(L, superCall.arguments, stmt)
+          : null;
         const args = forward !== undefined
           ? forward
           : base.builtinError
-            ? [L.errorMessageArg(superCall.arguments, locOf(stmt), stmt)]
+            ? [L.errorMessageArg(superCall.arguments, locOf(stmt), stmt, true)]
             : base.builtinEmitter
               ? []
               : L.completeArgs(superCall.arguments, base.ctorParams, locOf(stmt), stmt);
+        if (causeOpts !== null) out.push(...causeOpts.effects);
         out.push(L.superCallStmt(info, thisLocal, args, locOf(stmt)));
+        if (causeOpts !== null && causeOpts.cause !== null) {
+          const sloc = locOf(stmt);
+          const selfRef: IrExpr = { kind: "varRef", localId: thisLocal.id, type: { kind: "object", className: info.def.name }, loc: sloc };
+          out.push({
+            kind: "exprStmt",
+            expr: {
+              kind: "libCall",
+              fn: "error.propSet",
+              args: [L.upcastTo(selfRef, "%Error"), { kind: "strLit", value: "cause", type: STRING, loc: sloc }, causeOpts.cause],
+              type: VOID,
+              loc: sloc,
+            },
+            loc: sloc,
+          });
+        }
         // super() returns → field initializers → parameter-property
         // assignments (Node's order, probed) → the rest of the body.
         out.push(...L.fieldInitStmts(info, thisLocal));
@@ -8353,13 +8372,16 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
    * super() call: "" when omitted or explicitly undefined (Node's message
    * property default), the string otherwise. The lib signature's second
    * parameter (options/cause) has no lowering. */
-  export function errorMessageArg(L: Lowerer, args: readonly ts.Expression[], loc: SrcLoc, blame: ts.Node): IrExpr {
-    if (args.length > 1) {
+  export function errorMessageArg(L: Lowerer, args: readonly ts.Expression[], loc: SrcLoc, blame: ts.Node, optionsHandled = false): IrExpr {
+    if (args.length > 1 && !optionsHandled) {
       L.unsupported("SC1090", args[1] ?? blame, "Error constructor options ('cause')");
     }
     if (args.length === 0) return { kind: "strLit", value: "", type: STRING, loc };
     const value = L.lowerExpr(args[0]!);
     if (value.type.kind === "string") return value;
+    // An untyped message (a JS file's implicit-any parameter): the
+    // runtime does ToString, "" for undefined.
+    if (value.type.kind === "dyn") return { kind: "libCall", fn: "error.msgDyn", args: [value], type: STRING, loc };
     if (value.kind === "unitLit" && value.unit === "undefined") {
       return { kind: "strLit", value: "", type: STRING, loc };
     }
@@ -8368,6 +8390,92 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       args[0]!,
       `Error messages of type '${L.fmt(value.type)}' (the message must be a string)`,
     );
+  }
+
+/** The options bag of `new Error(message, { cause })` / `Error(message, {
+   * cause })` / `super(message, { cause })`: the own `cause` property. Only
+   * an object LITERAL options argument lowers (its members are all
+   * statically known, so `'cause' in options` is a compile-time fact);
+   * every other form keeps the named fence. The other members of the
+   * literal still evaluate, in order, for their effects. Returns the
+   * effect statements and the dyn cause value, or null when the options
+   * carry no cause. */
+  export function errorOptionsCause(
+    L: Lowerer,
+    args: readonly ts.Expression[],
+    blame: ts.Node,
+  ): { effects: IrStmt[]; cause: IrExpr | null } | null {
+    if (args.length < 2) return null;
+    if (args.length > 2) L.unsupported("SC1090", args[2]!, "Error constructor with more than two arguments");
+    let opts: ts.Expression = args[1]!;
+    while (ts.isParenthesizedExpression(opts) || ts.isAsExpression(opts) || ts.isSatisfiesExpression(opts)) opts = opts.expression;
+    if (ts.isIdentifier(opts) && opts.text === "undefined") return { effects: [], cause: null };
+    if (!ts.isObjectLiteralExpression(opts)) {
+      L.unsupported("SC1090", args[1] ?? blame, "Error constructor options ('cause') other than an object literal");
+    }
+    const effects: IrStmt[] = [];
+    let cause: IrExpr | null = null;
+    let causeHolder: IrLocal | null = null;
+    for (const p of opts.properties) {
+      let key: string | undefined;
+      if ((ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) {
+        key = p.name.text;
+      } else {
+        L.unsupported("SC1090", p, "Error constructor options with spread, computed or accessor members");
+      }
+      const init: ts.Expression = ts.isPropertyAssignment(p) ? p.initializer : (p as ts.ShorthandPropertyAssignment).name as ts.Expression;
+      const loc = locOf(p);
+      if (key === "cause") {
+        // Evaluated now, in source order; a later duplicate replaces it.
+        const v = L.lowerExprExpecting(init, DYN);
+        const h = L.declareHiddenLocal("%errCause", DYN);
+        effects.push({ kind: "varDecl", localId: h.id, init: v, loc });
+        causeHolder = h;
+      } else {
+        const v = L.lowerExpr(init);
+        if (v.kind !== "numLit" && v.kind !== "strLit" && v.kind !== "boolLit") effects.push({ kind: "exprStmt", expr: v, loc });
+      }
+    }
+    if (causeHolder !== null) cause = { kind: "varRef", localId: causeHolder.id, type: DYN, loc: locOf(opts) };
+    return { effects, cause };
+  }
+
+/** `new Error(...)`/`Error(...)` result with its options' own `cause`
+   * stored (the `%props` expando bag, the same slot `err.fatal = true`
+   * uses): the construction binds to a hidden local, the cause is stored
+   * through error.propSet, and the local is the value. */
+  export function errorWithCause(
+    L: Lowerer,
+    made: IrExpr,
+    args: readonly ts.Expression[],
+    blame: ts.Node,
+  ): IrExpr {
+    const c = errorOptionsCause(L, args, blame);
+    if (c === null) return made;
+    const loc = made.loc;
+    if (c.cause === null) {
+      return c.effects.length === 0 ? made : { kind: "seqExpr", stmts: c.effects, result: made, type: made.type, loc };
+    }
+    // Node evaluates the message before the options; both are lowered
+    // already, the construction itself runs after the options' effects.
+    const h = L.declareHiddenLocal("%errNew", made.type);
+    const ref: IrExpr = { kind: "varRef", localId: h.id, type: made.type, loc };
+    const stmts: IrStmt[] = [
+      ...c.effects,
+      { kind: "varDecl", localId: h.id, init: made, loc },
+      {
+        kind: "exprStmt",
+        expr: {
+          kind: "libCall",
+          fn: "error.propSet",
+          args: [L.upcastTo(ref, "%Error"), { kind: "strLit", value: "cause", type: STRING, loc }, c.cause],
+          type: VOID,
+          loc,
+        },
+        loc,
+      },
+    ];
+    return { kind: "seqExpr", stmts, result: ref, type: made.type, loc };
   }
 
 /** `new C(...)` of a registered PROGRAM class — the shared tail of the
@@ -9060,14 +9168,14 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         };
       }
       if (errInfo) {
-        const msg = L.errorMessageArg(expr.arguments ?? [], loc, expr);
-        return {
+        const msg = L.errorMessageArg(expr.arguments ?? [], loc, expr, true);
+        return errorWithCause(L, {
           kind: "libCall",
           fn: "error.new",
           args: [msg],
           type: { kind: "object", className: errInfo.def.name },
           loc,
-        };
+        }, expr.arguments ?? [], expr);
       }
       // `new EventEmitter()`: the runtime-provided emitter constructs
       // through one libCall. Zero arguments — the options bag

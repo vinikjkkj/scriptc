@@ -5181,6 +5181,11 @@ export type IrLibFn =
    * render "null"/"undefined") — the WHATWG USVString conversions
    * (URLSearchParams names/values). Borrowed dyn; +1 string. May-throw. */
   | "dyn.toStringCoerce"
+  /** The message of `new Error(m)` over an untyped m (scr_dyn_ext.c): the
+   * dyn undefined answers "", anything else its ToString with the object
+   * protocol (so a user toString throw propagates). Borrowed dyn; +1 string.
+   * May throw. */
+  | "error.msgDyn"
   /** A read of a `declare`d const NOTHING defines (the bundler-define
    * pattern — __VERSION__): always throws the catchable ReferenceError
    * Node raises at the access ("<name> is not defined"). args[0] is the
@@ -10305,7 +10310,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
  * moduleUsesZlib. */
 const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
   "fs.readFileCb", "fs.mkdtempCb", "fs.mkdtempSyncOpts", "fs.readCb", "fs.lchmodCb", "fs.lchmodSyncChk", "fsp.lchmodChk",
-  "buffer.concatDyn", "buffer.concatDynLen", "buffer.byteLenDyn", "buffer.isEncodingDyn", "dyn.isBuffer", "dyn.looseEq", "error.ext",
+  "buffer.concatDyn", "buffer.concatDynLen", "buffer.byteLenDyn", "buffer.isEncodingDyn", "error.msgDyn", "dyn.isBuffer", "dyn.looseEq", "error.ext",
 ]);
 export function moduleUsesDynExt(mod: IrModule): boolean {
   let found = false;
@@ -12533,6 +12538,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "error.nodeThrow",
   // USVString coercion runs user toString/valueOf — throws propagate.
   "dyn.toStringCoerce",
+  "error.msgDyn",
   "child.kill",
   // The caller's lookup runs synchronously inside the connect call — a
   // throw there propagates like Node's.
