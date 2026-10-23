@@ -2930,6 +2930,12 @@ static JSValue isl_host_fs(JSContext *ctx, JSValueConst this_val, int argc,
       ret = JS_NewStringLen(ctx, r->data, r->len);
       scr_str_release(r);
     }
+  } else if (strcmp(op, "realpathNative") == 0) {
+    ScrStr *r = scr_fs_realpath_native(a);
+    if (r) {
+      ret = JS_NewStringLen(ctx, r->data, r->len);
+      scr_str_release(r);
+    }
   } else if (strcmp(op, "mkdir") == 0) {
     int32_t recursive = 0;
     double mode = -1;
@@ -4064,7 +4070,7 @@ static const char isl_modules_bootstrap[] =
     "    }\n"
     "  };\n"
     "  const realpathSync = (p) => call(\"realpath\", pathOf(p));\n"
-    "  realpathSync.native = realpathSync;\n"
+    "  realpathSync.native = (p) => call(\"realpathNative\", pathOf(p));\n"
     "  const mkdirSync = (p, options) => {\n"
     "    const recursive = !!(options && options.recursive);\n"
     "    const mode = options && options.mode !== undefined ? options.mode : -1;\n"
@@ -4148,7 +4154,7 @@ static const char isl_modules_bootstrap[] =
     "    exists: (p, cb) => {\n"
     "      env.nextTick(() => cb(existsSync(p)));\n"
     "    },\n"
-    "    realpath: Object.assign(callbackify(realpathSync), { native: callbackify(realpathSync) }),\n"
+    "    realpath: Object.assign(callbackify(realpathSync), { native: callbackify(realpathSync.native) }),\n"
     "    mkdir: callbackify(mkdirSync),\n"
     "    rm: callbackify(rmSync),\n"
     "    rmdir: callbackify(rmdirSync),\n"

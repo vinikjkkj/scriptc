@@ -3203,6 +3203,9 @@ ScrStr *scr_fs_read_file(ScrStr *path);
 /* realpath(3) (+1 fresh); failures throw with Node's realpathSync
  * spelling (syscall "lstat"). */
 ScrStr *scr_fs_realpath(ScrStr *path);
+/* fs.realpathSync.native: the OS answer (GetFinalPathNameByHandleW on
+ * Windows: expands 8.3 names); failures spell syscall "realpath". */
+ScrStr *scr_fs_realpath_native(ScrStr *path);
 void scr_fs_write_file(ScrStr *path, ScrStr *data);
 void scr_fs_append_file(ScrStr *path, ScrStr *data);
 bool scr_fs_exists(ScrStr *path);

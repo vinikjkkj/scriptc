@@ -1976,6 +1976,65 @@ ScrStr *scr_fs_realpath(ScrStr *path) {
 #endif
 }
 
+/* fs.realpathSync.native / fs.realpath.native: libuv's uv_fs_realpath, the
+ * OS's own answer. On POSIX that is realpath(3), the same call the JS
+ * spelling resolves to here, except that a failure names syscall
+ * "realpath" (the JS walk names "lstat"). On Windows it is
+ * GetFinalPathNameByHandleW over the opened path, which differs from the
+ * JS realpath in the observable way: it EXPANDS 8.3 short names
+ * (C:\Users\RUNNER~1 becomes C:\Users\runneradmin), restores the on-disk
+ * case, and resolves symlinks and junctions; the JS spelling keeps the
+ * path as written. libuv strips the \\?\ and \\?\UNC\ prefixes; so does this. */
+ScrStr *scr_fs_realpath_native(ScrStr *path) {
+#ifdef _WIN32
+  wchar_t wpath[PATH_MAX];
+  int wn = MultiByteToWideChar(CP_UTF8, 0, path->data, (int)path->len + 1, wpath, PATH_MAX);
+  if (wn <= 0) {
+    scr_fs_throw(EINVAL, "realpath", path);
+    return NULL;
+  }
+  HANDLE h = CreateFileW(wpath, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                         OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  if (h == INVALID_HANDLE_VALUE) {
+    DWORD err = GetLastError();
+    int e = (err == ERROR_ACCESS_DENIED || err == ERROR_SHARING_VIOLATION) ? EACCES : ENOENT;
+    scr_fs_throw(e, "realpath", path);
+    return NULL;
+  }
+  wchar_t wfinal[PATH_MAX + 8];
+  DWORD fn = GetFinalPathNameByHandleW(h, wfinal, PATH_MAX + 8, VOLUME_NAME_DOS);
+  CloseHandle(h);
+  if (fn == 0 || fn >= PATH_MAX + 8) {
+    scr_fs_throw(fn == 0 ? ENOENT : ENAMETOOLONG, "realpath", path);
+    return NULL;
+  }
+  const wchar_t *w = wfinal;
+  wchar_t unc[PATH_MAX + 8];
+  if (fn >= 8 && wcsncmp(w, L"\\\\?\\UNC\\", 8) == 0) {
+    unc[0] = L'\\';
+    unc[1] = L'\\';
+    wcscpy(unc + 2, w + 8);
+    w = unc;
+  } else if (fn >= 6 && wcsncmp(w, L"\\\\?\\", 4) == 0 && w[5] == L':') {
+    w += 4;
+  }
+  char buf[PATH_MAX * 3];
+  int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, buf, (int)sizeof buf, NULL, NULL);
+  if (n <= 0) {
+    scr_fs_throw(ENAMETOOLONG, "realpath", path);
+    return NULL;
+  }
+  return scr_str_new(buf, (size_t)n - 1);
+#else
+  char buf[PATH_MAX];
+  if (realpath(path->data, buf) == NULL) {
+    scr_fs_throw(errno, "realpath", path);
+    return NULL;
+  }
+  return scr_str_new(buf, strlen(buf));
+#endif
+}
+
 static void scr_fs_write_common(ScrStr *path, ScrStr *data, const char *mode) {
   FILE *f = fopen(path->data, mode);
   if (!f) {
