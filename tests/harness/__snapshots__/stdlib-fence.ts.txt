@@ -48,7 +48,7 @@ stdlib-fence.ts:20:7 - error SC2020: 'NumberFormat' is part of the standard libr
      |       ^~~
   21 | 
 
-  hint: Intl formatter values have no representation yet — the COMPOSED forms lower: new Intl.NumberFormat(locales, options).format(x) and x.toLocaleString(locales, options); call format at the construction site instead of hoisting the formatter
+  hint: Intl formatter values have no representation yet — the COMPOSED forms lower: new Intl.NumberFormat(locales, options).format(x), new Intl.DateTimeFormat(locales, options).format(x), x.toLocaleString(locales, options) and date.toLocale*String(locales, options); call format at the construction site instead of hoisting the formatter
 
 stdlib-fence.ts:20:13 - error SC1090: constructing values other than classes declared in the program is not supported yet
 

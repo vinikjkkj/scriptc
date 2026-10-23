@@ -5,7 +5,7 @@ intl.ts:9:7 - error SC2020: 'NumberFormat' is part of the standard library types
      |       ^~~~~~~
   10 | const viaValue = hoisted.format(1234.5);
 
-  hint: Intl formatter values have no representation yet — the COMPOSED forms lower: new Intl.NumberFormat(locales, options).format(x) and x.toLocaleString(locales, options); call format at the construction site instead of hoisting the formatter
+  hint: Intl formatter values have no representation yet — the COMPOSED forms lower: new Intl.NumberFormat(locales, options).format(x), new Intl.DateTimeFormat(locales, options).format(x), x.toLocaleString(locales, options) and date.toLocale*String(locales, options); call format at the construction site instead of hoisting the formatter
 
 intl.ts:9:17 - error SC1090: constructing values other than classes declared in the program is not supported yet
 
@@ -21,7 +21,7 @@ intl.ts:10:18 - error SC2020: 'NumberFormat.format' is part of the standard libr
      |                  ^~~~~~~~~~~~~~
   11 | 
 
-  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String at en-US
+  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String and the composed new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone
 
 intl.ts:13:7 - error SC2020: 'DateTimeFormat' is part of the standard library types but has no scriptc lowering yet
 
@@ -30,7 +30,7 @@ intl.ts:13:7 - error SC2020: 'DateTimeFormat' is part of the standard library ty
      |       ^~~~~~~~~~~
   14 | const when = hoistedDate.format(0);
 
-  hint: Intl formatter values have no representation yet — the COMPOSED forms lower: new Intl.NumberFormat(locales, options).format(x) and x.toLocaleString(locales, options); call format at the construction site instead of hoisting the formatter
+  hint: Intl formatter values have no representation yet — the COMPOSED forms lower: new Intl.NumberFormat(locales, options).format(x), new Intl.DateTimeFormat(locales, options).format(x), x.toLocaleString(locales, options) and date.toLocale*String(locales, options); call format at the construction site instead of hoisting the formatter
 
 intl.ts:13:21 - error SC1090: constructing values other than classes declared in the program is not supported yet
 
@@ -46,7 +46,7 @@ intl.ts:14:14 - error SC2020: 'DateTimeFormat.format' is part of the standard li
      |              ^~~~~~~~~~~~~~~~~~
   15 | const dur = new Intl.DurationFormat("en-US").format({ hours: 1, minutes: 23 });
 
-  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String at en-US
+  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String and the composed new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone
 
 intl.ts:15:13 - error SC2020: 'DurationFormat.format' is part of the standard library types but has no scriptc lowering yet
 
@@ -55,7 +55,7 @@ intl.ts:15:13 - error SC2020: 'DurationFormat.format' is part of the standard li
      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   16 | const rule = new Intl.PluralRules("en-US").select(1);
 
-  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String at en-US
+  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String and the composed new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone
 
 intl.ts:16:14 - error SC2020: 'PluralRules.select' is part of the standard library types but has no scriptc lowering yet
 
@@ -64,7 +64,7 @@ intl.ts:16:14 - error SC2020: 'PluralRules.select' is part of the standard libra
      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   17 | const canon = Intl.getCanonicalLocales("en-us");
 
-  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String at en-US
+  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String and the composed new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone
 
 intl.ts:17:15 - error SC2020: 'Intl.getCanonicalLocales' is part of the standard library types but has no scriptc lowering yet
 
@@ -73,4 +73,4 @@ intl.ts:17:15 - error SC2020: 'Intl.getCanonicalLocales' is part of the standard
      |               ^~~~~~~~~~~~~~~~~~~~~~~~
   18 | 
 
-  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String at en-US
+  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String and the composed new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone
