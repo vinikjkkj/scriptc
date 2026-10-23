@@ -11342,6 +11342,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8504-any-return-in-function-type.ts": {
+   "order": [
+    "<repo>/tests/corpus/8504-any-return-in-function-type.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"

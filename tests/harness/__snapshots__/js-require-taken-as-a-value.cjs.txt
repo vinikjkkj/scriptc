@@ -25,6 +25,15 @@ js-require-taken-as-a-value.cjs:27:18 - error SC2020: 'require taken as a value'
 
   hint: calling it would need the run-time-specifier require, which has no static lowering: the compiled module graph is fixed at build time
 
+js-require-taken-as-a-value.cjs:29:66 - error SC2004: uses of 'obj' inherit the blocker on its declaration
+
+  28 | 
+  29 | console.log('1', typeof require, typeof r, typeof arr[0], typeof obj.q);
+     |                                                                  ^~~~~
+  30 | 
+
+  hint: the declaration of 'obj' did not compile — fix the diagnostic reported there and these sites clear with it
+
 js-require-taken-as-a-value.cjs:35:18 - error SC2020: 'require taken as a value' is part of the standard library types but has no scriptc lowering yet
 
   34 | // Identity: one interned value per program, so the alias IS require.
