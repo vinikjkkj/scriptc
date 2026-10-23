@@ -59,6 +59,7 @@ import { provenanceAliasRewrite, readSourceForRewrite } from "./provenance-rewri
 import { setServedSourceText } from "../source-text.js";
 import { jsDesugar } from "./js-desugar.js";
 import { applySeedPins, computeSeedPins, type SeedPin } from "./seed-pin.js";
+import { applyRetypePins, computeRetypePins, shiftRetypePins, type RetypePin } from "./retype-pin.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
   ADOPTED_OPTIONS,
@@ -399,6 +400,7 @@ export function loadProgram(
   // bytes to work from rather than the disk's.
   const open = (
     pins: ReadonlyMap<string, readonly SeedPin[]> | null,
+    retypePins: ReadonlyMap<string, readonly RetypePin[]> | null = null,
   ): { host: ts.Ts7Host; load: LoadResult & { disposeAll: () => void } } => {
     const fsShadow = {
       readFile: (path: string) => {
@@ -411,7 +413,8 @@ export function loadProgram(
         // an `any` cast. Applied on top of whatever the shadows above
         // served, because the offsets were taken from that text.
         const filePins = pins?.get(path.split("\\").join("/"));
-        if (filePins !== undefined) {
+        const fileRetype = retypePins?.get(path.split("\\").join("/"));
+        if (filePins !== undefined || fileRetype !== undefined) {
           // The offsets were taken from the text the CHECKER saw, which is the
           // shadows' text AFTER js-desugar (the host desugars what this hook
           // returns). Pin on that same text: desugar here, wrap the seeds,
@@ -419,13 +422,22 @@ export function loadProgram(
           // idempotent on its output).
           const raw = served ?? readSourceForRewrite(path);
           const base = raw === undefined ? undefined : (jsDesugar(path, raw) ?? raw);
-          const pinned = base === undefined ? null : applySeedPins(base, filePins);
+          let pinned: string | null = base === undefined ? null : base;
+          let retype = fileRetype;
+          if (filePins !== undefined) {
+            pinned = base === undefined ? null : applySeedPins(base, filePins);
+            // The retype offsets were taken on the unpinned text: move them past the
+            // seed wrappers inserted before them (an opener before the start, a closer
+            // at or before it; a seed inside an initializer widens the initializer).
+            if (retype !== undefined) retype = shiftRetypePins(retype, filePins, pinned);
+          }
+          if (pinned !== null && retype !== undefined) pinned = applyRetypePins(pinned, retype);
           if (pinned === null) {
-            throw new Error(`seed pin: the text of ${path} changed between the two loads`);
+            throw new Error(`pin: the text of ${path} changed between the two loads`);
           }
           served = pinned;
         }
-        if (served !== undefined && (rewritten !== null || filePins !== undefined)) {
+        if (served !== undefined && (rewritten !== null || filePins !== undefined || fileRetype !== undefined)) {
           // srcSite (the C emitter) turns a SrcLoc OFFSET into file:line:col
           // by reading the file off disk a second time. A rewrite changes no
           // lines but does change the offsets after each edit, so the disk
@@ -442,21 +454,31 @@ export function loadProgram(
     return { host, load: loadProgram7(host, entryPath) };
   };
   let { host, load } = open(null);
+  // THE RETYPE PIN (retype-pin.ts) is decided on the same checked program and
+  // applied by the same second load as the seed pin.
+  const retypePins = process.env["SCRIPTC_RETYPE_PIN"] !== "0" ? computeRetypePins(load.program) : new Map<string, RetypePin[]>();
+  if (retypePins.size > 0 && process.env["SCRIPTC_RETYPE_PIN_WHY"] !== undefined) {
+    for (const [file, list] of retypePins) {
+      for (const pin of list) process.stderr.write(`[retypepin] ${pin.why} at ${file}:${pin.start}\n`);
+    }
+  }
+  const retypeKeyed = new Map<string, readonly RetypePin[]>();
+  for (const [file, list] of retypePins) retypeKeyed.set(file.split("\\").join("/"), list);
   // THE SEED PIN (seed-pin.ts): decided on the checked program, applied by
   // loading it a second time with the named seeds wrapped in an `any` cast.
   // Programs with nothing to pin (every TypeScript program, most JavaScript)
   // pay one walk over the files that mention a container constructor.
-  if (process.env["SCRIPTC_SEED_PIN"] !== "0") {
-    const pins = computeSeedPins(load.program);
-    if (pins.size > 0) {
-      if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
-        for (const [file, list] of pins) {
-          for (const pin of list) process.stderr.write(`[seedpin] ${pin.why} at ${file}:${pin.start}\n`);
-        }
+  {
+    const pins = process.env["SCRIPTC_SEED_PIN"] !== "0" ? computeSeedPins(load.program) : new Map<string, SeedPin[]>();
+    if (pins.size > 0 && process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
+      for (const [file, list] of pins) {
+        for (const pin of list) process.stderr.write(`[seedpin] ${pin.why} at ${file}:${pin.start}\n`);
       }
+    }
+    if (pins.size > 0 || retypeKeyed.size > 0) {
       load.disposeAll();
       host.close();
-      ({ host, load } = open(pins));
+      ({ host, load } = open(pins.size > 0 ? pins : null, retypeKeyed.size > 0 ? retypeKeyed : null));
     }
   }
   return {
