@@ -11756,6 +11756,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8530-process-env-indexed-by-an-untyped-key.js": {
+   "order": [
+    "<repo>/tests/corpus/8530-process-env-indexed-by-an-untyped-key.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js": {
    "order": [
     "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js"

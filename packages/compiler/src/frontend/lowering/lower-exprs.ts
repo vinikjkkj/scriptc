@@ -12753,7 +12753,12 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // lower to the ONE process.envGet intrinsic. The read narrows like any
     // union-typed expression when the checker narrowed this occurrence.
     if (L.isProcessEnv(expr.expression)) {
-      const key = L.lowerExpr(expr.argumentExpression);
+      let key = L.lowerExpr(expr.argumentExpression);
+      // The environment's keys are strings: any other key is ToString'd first
+      // (`process.env[x]` over an untyped x, pg-connection-string's envVar).
+      if (key.type.kind === "dyn" || key.type.kind === "f64" || key.type.kind === "bool") {
+        key = { kind: "toString", operand: key, type: STRING, loc: locOf(expr.argumentExpression) };
+      }
       if (key.type.kind !== "string") {
         L.unsupported(
           "SC1090",
@@ -13908,7 +13913,10 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
     // setenv(3), string keys and string values only.
     if (L.isProcessEnv(target.expression) && !target.questionDotToken) {
       const loc = locOf(expr);
-      const key = L.lowerExpr(target.argumentExpression);
+      let key = L.lowerExpr(target.argumentExpression);
+      if (key.type.kind === "dyn" || key.type.kind === "f64" || key.type.kind === "bool") {
+        key = { kind: "toString", operand: key, type: STRING, loc: locOf(target.argumentExpression) };
+      }
       if (key.type.kind !== "string") {
         L.unsupported("SC1090", target.argumentExpression, "indexing process.env with non-string keys");
       }
