@@ -2084,6 +2084,28 @@ export function ownMaskBit(
   return { byte: 1 + (i >> 3), bit: 1 << (i & 7) };
 }
 
+/** What a literal's `presence` stores into the mask: byte 0 (VALID, plus the
+ * shape's own null-prototype claim, which an instance no crossing wrote
+ * answers with) and ONE constant per mask byte holding the bits of every
+ * field entry flagged `own`. Constants, so a literal costs one byte store
+ * per mask byte rather than a read-modify-write per field. Null when the
+ * shape did not arm the mask. Both backends call this, so they cannot
+ * disagree about which bits a literal sets. */
+export function presenceMaskStores(
+  shape: OwnMaskShape & { builtin?: { nullProto?: boolean } },
+  fields: { name: string; overflow?: true; drop?: true; own?: true; ownIf?: unknown }[],
+): { byte: number; value: number }[] | null {
+  if (shape.ownmask !== true) return null;
+  const bytes = new Map<number, number>();
+  bytes.set(0, OWNMASK_VALID | (shape.builtin?.nullProto === true ? OWNMASK_SRC_NULL_PROTO : 0));
+  for (const f of fields) {
+    if (f.own !== true || f.overflow || f.drop) continue;
+    const bit = ownMaskKeyBit(shape, f.name);
+    if (bit) bytes.set(bit.byte, (bytes.get(bit.byte) ?? 0) | bit.bit);
+  }
+  return [...bytes].sort((a, b) => a[0] - b[0]).map(([byte, value]) => ({ byte, value }));
+}
+
 /** The shape fields ownMaskKeyBit needs, so both the structural callers
  * (emit-shapes, llvm/shapes) and IrRecordShape itself fit. */
 export type OwnMaskShape = {
@@ -2500,8 +2522,11 @@ export type IrStmt =
   | { kind: "fieldSet"; obj: IrExpr; className: string; field: string; value: IrExpr; loc: SrcLoc }
   /** Record field write `r.f = v` — mirrors `fieldSet` exactly (evaluation
    * order obj then value; old value released; refcounted new value moved
-   * in), with a shape id in place of a class name. */
-  | { kind: "recordSet"; obj: IrExpr; shapeId: string; field: string; value: IrExpr; loc: SrcLoc }
+   * in), with a shape id in place of a class name. `unset: true` is
+   * `delete r.f` of an optional member: the slot takes the undefined arm AND
+   * the field's own-key bit CLEARS (a plain write sets it - [[Set]] creates
+   * an own property, `r.f = undefined` included). */
+  | { kind: "recordSet"; obj: IrExpr; shapeId: string; field: string; value: IrExpr; unset?: true; loc: SrcLoc }
   /** Dynamic-keyed record write `r[k] = v` — index-signature shapes only.
    * `value` has the index signature's value type (dyn included). Declared
    * keys write THROUGH to the struct slot: a dyn value validates against
@@ -7073,7 +7098,25 @@ export type IrExpr =
    * where V has no undefined arm. Only an `as` cast can spell an object
    * literal missing a required member, which is why nothing else sets
    * this. */
-  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[]; toStr?: IrExpr; ownmask?: true; type: IrType; loc: SrcLoc }
+  /** `presence: true` marks a literal whose PROPERTIES are all written by
+   * the source (no spread, no builder desugar): when its shape armed the
+   * own-key mask the literal ESTABLISHES it, byte 0 = OWNMASK_VALID (plus the
+   * shape's own null-prototype claim) and the bit of every field entry
+   * flagged `own: true`. An entry WITHOUT `own` is a COMPLETION - the
+   * undefined arm a literal that omitted an optional member is given, or
+   * what a width merge (shape-unify) adds for a member a sibling literal
+   * has - and keeps a clear bit: `{ a: 1 }` against `{ a?: number; c?:
+   * number }` has ONE own key however wide the struct is, while an explicit
+   * `{ c: undefined }` has its key. Without this the slot's undefined arm
+   * was the only presence signal, so "written undefined" and "never
+   * written" were one value (IrRecordShape.ownmask, SEMANTICS 55).
+   * `ownIf` is the same bit decided at RUN TIME by a bool expression (a
+   * width copy: the member is own in the copy exactly when it is own in the
+   * source), evaluated after the fields and before the literal's value is
+   * used. Ignored when the shape did not arm; the arm is decided after the walk
+   * (Lowerer.armOwnMasks). The bits are constants, stored after the last
+   * field, so an unwinding half-built literal stays mask-less. */
+  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true; own?: true; ownIf?: IrExpr }[]; toStr?: IrExpr; ownmask?: true; presence?: true; type: IrType; loc: SrcLoc }
   /** Record field read `r.f` — mirrors `fieldGet`: refcounted fields come
    * out retained (+1). */
   | { kind: "recordGet"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }

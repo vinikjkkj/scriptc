@@ -6120,7 +6120,7 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
         const absent = L.wrappedUndefined(field.type, loc);
         if (absent) {
           return {
-            pre: [{ kind: "recordSet", obj, shapeId: obj.type.shapeId, field: field.name, value: absent, loc }],
+            pre: [{ kind: "recordSet", obj, shapeId: obj.type.shapeId, field: field.name, value: absent, unset: true, loc }],
             result: yes,
           };
         }

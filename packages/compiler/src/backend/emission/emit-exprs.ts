@@ -6,7 +6,7 @@ import { poisonYieldArm } from "./gen-poison.js";
 import { emitCoroYield } from "./emit-gen-coro.js";
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel, srcSite } from "./emitter.js";
-import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
@@ -2447,7 +2447,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // - all of them, whatever the value. Only a completed literal
             // owns the mask; every other literal leaves byte 0 zero and the
             // surfaces read the undefined arm exactly as they always have.
-            if (e.ownmask) {
+            if (e.ownmask && (!e.presence || f.own === true)) {
               const bit = ownMaskKeyBit(E.recordsById.get(e.type.shapeId)!, f.name);
               if (bit) {
                 E.line(`${rec.name}->${OWNMASK_MEMBER}[${bit.byte}] |= ${bit.bit}; /* own key ${f.name} */`);
@@ -2455,6 +2455,31 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             }
           } finally {
             E.releaseFrame(E.frames.pop()!);
+          }
+        }
+        // PRESENCE (recordLit.presence): a literal the source wrote in full
+        // establishes the mask of an armed shape, after the last field so an
+        // unwind through a half-built literal never sees a bit over an
+        // unwritten slot. The completed literal above already owns it.
+        if (e.presence && !e.ownmask) {
+          const stores = presenceMaskStores(E.recordsById.get(e.type.shapeId)!, e.fields);
+          if (stores) {
+            for (const st of stores) {
+              E.line(`${rec.name}->${OWNMASK_MEMBER}[${st.byte}] = ${st.value};${st.byte === 0 ? " /* literal: the bits are the own keys */" : ""}`);
+            }
+            // The bits a width copy decides at run time (`ownIf`).
+            for (const f of e.fields) {
+              if (f.ownIf === undefined || f.drop || f.overflow) continue;
+              const bit = ownMaskKeyBit(E.recordsById.get(e.type.shapeId)!, f.name);
+              if (!bit) continue;
+              E.frames.push([]);
+              try {
+                const c = E.emitExpr(f.ownIf);
+                E.line(`if (${c.name}) ${rec.name}->${OWNMASK_MEMBER}[${bit.byte}] |= ${bit.bit}; /* own key ${f.name}: own in the source */`);
+              } finally {
+                E.releaseFrame(E.frames.pop()!);
+              }
+            }
           }
         }
         // The hidden per-instance toString slot, written LAST (it is not a

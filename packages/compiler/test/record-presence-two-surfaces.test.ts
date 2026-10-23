@@ -112,13 +112,15 @@ console.log(x.a, y.a);
   expect((mod!.records ?? []).length).toBe(1);
 });
 
-test("Object.keys GUARDS the key on the undefined arm", () => {
+test("Object.keys asks the own-key question for each optional member", () => {
   const mod = lower(PROGRAM);
   expect(mod).not.toBeNull();
   const keys = recordHelper(mod!, "%obj.keys.");
   expect(keys, "the interned Object.keys helper should exist").toBeDefined();
-  // Two optional fields, two guards; the required one pushes unconditionally.
-  expect(presenceGuards(keys!.body)).toBe(2);
+  // Two optional fields, two guards (recordKeyPresent: the undefined arm's
+  // tag test on an instance no literal wrote, the mask on one that did); the
+  // required one pushes unconditionally.
+  expect(nodesOfKind(keys!.body, "recordKeyPresent").length).toBe(2);
 });
 
 test("util.inspect emits every declared field UNCONDITIONALLY", () => {

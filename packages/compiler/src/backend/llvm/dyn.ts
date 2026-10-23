@@ -2732,6 +2732,15 @@ export class LlDyn {
               B.line(`call void @scr_dyn_release(ptr ${conv}) ; absent on the source object entirely`);
               B.br(lE);
               B.startBlock(lKeep);
+              if (!shape.srcproto) {
+                // A shape armed for OPTIONAL members only (no crossing built
+                // it) has no inherited members to demote: a value in the
+                // slot under a clear bit is a member whose bit nobody set,
+                // and dropping it to a synthesised prototype would lose the
+                // key. It is own (emit-walkers.ts's row).
+                B.line(`call void @scr_dyn_obj_set_lit(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+                B.br(lE);
+              } else {
               if (shape.srcproto) {
                 // The SOURCE's own chain still answers this member, so
                 // linking it at the tail IS the demotion and there is
@@ -2771,6 +2780,7 @@ export class LlDyn {
               B.line(`${pp} = load ptr, ptr ${protoSlot}`);
               B.line(`call void @scr_dyn_obj_set_lit(ptr ${pp}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; inherited .${f.name}`);
               B.br(lE);
+              }
             }
             B.startBlock(lB);
             setPresent();
