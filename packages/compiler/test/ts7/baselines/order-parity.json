@@ -11924,6 +11924,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8508-util-deprecate-wrapper.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8508-util-deprecate-wrapper.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8509-array-hof-this-arg.js": {
+   "order": [
+    "<repo>/tests/corpus/8509-array-hof-this-arg.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8510-js-ctor-identity-after-prototype-create.js": {
+   "order": [
+    "<repo>/tests/corpus/8510-js-ctor-identity-after-prototype-create.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8511-string-substr-static-and-dynamic.js": {
+   "order": [
+    "<repo>/tests/corpus/8511-string-substr-static-and-dynamic.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8512-js-library-functions-as-values-and-dynamic-parsefloat.js": {
+   "order": [
+    "<repo>/tests/corpus/8512-js-library-functions-as-values-and-dynamic-parsefloat.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8513-json-parse-as-a-value.js": {
+   "order": [
+    "<repo>/tests/corpus/8513-json-parse-as-a-value.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8520-chained-property-assignment-statements.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8520-chained-property-assignment-statements.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
@@ -11962,42 +12004,6 @@
     "<repo>/tests/corpus/8604-module-exports-is-another-required-module/literal-barrel.js",
     "<repo>/tests/corpus/8604-module-exports-is-another-required-module/deep.js",
     "<repo>/tests/corpus/8604-module-exports-is-another-required-module/main.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8508-util-deprecate-wrapper.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8508-util-deprecate-wrapper.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8509-array-hof-this-arg.js": {
-   "order": [
-    "<repo>/tests/corpus/8509-array-hof-this-arg.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8510-js-ctor-identity-after-prototype-create.js": {
-   "order": [
-    "<repo>/tests/corpus/8510-js-ctor-identity-after-prototype-create.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8511-string-substr-static-and-dynamic.js": {
-   "order": [
-    "<repo>/tests/corpus/8511-string-substr-static-and-dynamic.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8512-js-library-functions-as-values-and-dynamic-parsefloat.js": {
-   "order": [
-    "<repo>/tests/corpus/8512-js-library-functions-as-values-and-dynamic-parsefloat.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8513-json-parse-as-a-value.js": {
-   "order": [
-    "<repo>/tests/corpus/8513-json-parse-as-a-value.js"
    ],
    "diags": []
   },

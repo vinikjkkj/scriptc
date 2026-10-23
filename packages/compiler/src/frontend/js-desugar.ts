@@ -1263,11 +1263,86 @@ function versionProbeEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* CHAINED PROPERTY ASSIGNMENT AS A STATEMENT. The CommonJS idiom
+ *
+ *     var matcher = module.exports.match = function (a, b) { ... };
+ *     a.b = c.d = e;   x = c.d = e;
+ *
+ * assigns a property and yields the stored value in one expression. The two
+ * statements `P = e; var matcher = P;` do the same thing in the same order
+ * (the right-hand side is evaluated once, the property is written, the
+ * outer target takes the stored value), and keep the anonymous function
+ * anonymous the way a property assignment does. Only a PLAIN property path
+ * (identifiers, `this`, dotted names) is re-read, so the re-read has no
+ * effect of its own, and only as a whole statement, so nothing else can sit
+ * between the write and the read. */
+function isPlainPropertyPath(e: ts.Expression): boolean {
+  if (ts.isIdentifier(e) || e.kind === ts.SyntaxKind.ThisKeyword) return true;
+  return ts.isPropertyAccessExpression(e) && !e.questionDotToken && ts.isIdentifier(e.name) && isPlainPropertyPath(e.expression);
+}
+
+function chainedPropertyAssignEdits(fileName: string, text: string): string | null {
+  if (!/\.\s*[\w$]+\s*=(?!=)[^;]*=(?!=)/.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const isEq = (e: ts.Expression): e is ts.BinaryExpression =>
+    ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+  const visit = (n: ts.Node): void => {
+    if (ts.isSourceFile(n) || ts.isBlock(n) || ts.isModuleBlock(n) || ts.isCaseClause(n) || ts.isDefaultClause(n)) {
+      for (const st of n.statements) {
+        if (ts.isVariableStatement(st)) {
+          const decls = st.declarationList.declarations;
+          if (decls.length !== 1) continue;
+          const d = decls[0]!;
+          if (!ts.isIdentifier(d.name) || d.initializer === undefined || !isEq(d.initializer)) continue;
+          const inner = d.initializer;
+          if (!ts.isPropertyAccessExpression(inner.left) || !isPlainPropertyPath(inner.left)) continue;
+          const flags = st.declarationList.flags;
+          const kw = flags & ts.NodeFlags.Const ? "const" : flags & ts.NodeFlags.Let ? "let" : "var";
+          const path = inner.left.getText(sf);
+          edits.push({
+            start: st.getStart(sf),
+            end: st.getEnd(),
+            text: `${path} = ${inner.right.getText(sf)}; ${kw} ${d.name.text} = ${path};`,
+          });
+        } else if (ts.isExpressionStatement(st) && isEq(st.expression) && isEq(st.expression.right)) {
+          const outer = st.expression;
+          const inner = outer.right as ts.BinaryExpression;
+          if (!ts.isPropertyAccessExpression(inner.left) || !isPlainPropertyPath(inner.left)) continue;
+          if (!isPlainPropertyPath(outer.left)) continue;
+          const path = inner.left.getText(sf);
+          edits.push({
+            start: st.getStart(sf),
+            end: st.getEnd(),
+            text: `${path} = ${inner.right.getText(sf)}; ${outer.left.getText(sf)} = ${path};`,
+          });
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    if (ed.start < at) continue;
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
     const unwrapped = umdUnwrap(fileName, text);
     if (unwrapped !== null) return jsDesugar(fileName, unwrapped) ?? unwrapped;
+  }
+  {
+    const chained = chainedPropertyAssignEdits(fileName, text);
+    if (chained !== null) return jsDesugar(fileName, chained) ?? chained;
   }
   {
     const tsCjs = tsCjsEdits(fileName, text);
