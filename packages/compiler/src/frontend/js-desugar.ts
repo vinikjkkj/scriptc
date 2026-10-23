@@ -609,7 +609,12 @@ function openRecordEdits(fileName: string, text: string): string | null {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
       let init: ts.Expression = n.initializer;
       while (ts.isParenthesizedExpression(init)) init = init.expression;
-      if (ts.isObjectLiteralExpression(init) && n.initializer === init && writesDynamicKey(scopeOf(n), n.name.text)) cast(init);
+      // Module-scope bindings are not cast: the module-global dictionary idiom
+      // (`var table = {}` written by functions) already lowers, and a cast
+      // would replace that storage with a dynamic slot the global path
+      // does not take writes through.
+      const scope = scopeOf(n);
+      if (!ts.isSourceFile(scope) && ts.isObjectLiteralExpression(init) && n.initializer === init && writesDynamicKey(scope, n.name.text)) cast(init);
     }
     if (
       ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
