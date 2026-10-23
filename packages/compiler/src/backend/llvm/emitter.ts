@@ -1467,6 +1467,12 @@ class LlEmitter {
    * emitter's dynClassDescs, ported. Emitted as internal constants beside
    * the other interned globals; see dynClassDesc. */
   private readonly dynClassDescSyms = new Map<string, { sym: string; body: string }>();
+  /** The boxed Map/Set conversion tables (`@sc_mo_<n>`, dyn.ts's
+   * dynMapOpsHelper), emitted beside the class descriptors. */
+  private readonly dynMapOpsSyms = new Map<string, string>();
+  dynMapOpsGlobal(sym: string, body: string): void {
+    this.dynMapOpsSyms.set(sym, body);
+  }
   /** The kind-gate WIDE lane's per-shape key tables, by shape id. Empty
    * unless a dial is on. */
   private readonly recWideTables = new Map<
@@ -2437,6 +2443,8 @@ class LlEmitter {
       out.push(`@${d.sym} = internal constant ${d.body} ; dyn box: class ${className}`);
     }
     if (this.dynClassDescSyms.size > 0) out.push(``);
+    for (const [sym, body] of this.dynMapOpsSyms) out.push(`@${sym} = internal constant ${body}`);
+    if (this.dynMapOpsSyms.size > 0) out.push(``);
     // The kind-gate WIDE lane's key tables. Empty with the dials off,
     // which is every shipped build.
     for (const [shapeId, w] of this.recWideTables) {

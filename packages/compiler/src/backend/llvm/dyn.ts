@@ -31,7 +31,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
-import { bytesAliasOnExtract, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
+import { bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
@@ -112,6 +112,9 @@ export interface DynHost extends WalkerHost {
   recWideTable(shapeId: string, fields: readonly { name: string }[]): { keys: string; lens: string };
   /** `@`-ref of the interned SCR_DYN_OBJINST descriptor for a class. */
   dynClassDesc(className: string): string;
+  /** Registers one module-level constant (a boxed Map/Set's conversion
+   * table, `@sc_mo_<n>`), emitted beside the other interned globals. */
+  dynMapOpsGlobal(sym: string, body: string): void;
   /** The class's preorder interval and hierarchy membership — the same
    * numbers `instanceof` compares against. */
   classInterval(className: string): { pre: number; post: number };
@@ -2268,6 +2271,127 @@ export class LlDyn {
   /** `sc_td_<n>(<T> v) -> ptr` — build a fresh dyn value from a
    * static one (+1), DEEP-COPYING composites. Borrows the operand.
    * Never throws. */
+  /** The CONVERSION TABLE a boxed typed Map/Set carries (`ScrDynMapOps`):
+   * emit-walkers.ts's dynMapOpsHelper, ported. Returns `@sc_mo_<n>`, or null
+   * when a key or value type has no dyn form (no table: the box keeps the
+   * loud ladder). The table is a six-pointer constant in the struct's field
+   * order: key_to_dyn, val_to_dyn, key_probe, key_check, key_drop,
+   * val_check. A slot is the i64 the ScrMap stores: a double's bits, 0/1, or
+   * the pointer. */
+  dynMapOpsHelper(t: IrType): string | null {
+    if (t.kind !== "map" && t.kind !== "set") throw new Error("llvm emitter bug: map ops of a non-map");
+    const key = `ops:${typeKey(t)}`;
+    const existing = this.toDynFns.get(key);
+    if (existing !== undefined) return existing === "" ? null : existing;
+    const kt = t.kind === "map" ? t.key : t.elem;
+    const vt = t.kind === "map" ? t.value : null;
+    const getRec = (id: string) => this.host.recordsById.get(id);
+    const getUni = (id: string) => this.host.unionsById.get(id);
+    const drivable = (x: IrType): boolean =>
+      canConvertToDyn(x, getRec, getUni) && canDynCheckTo(x, getRec, getUni);
+    if (!drivable(kt) || (vt !== null && !drivable(vt))) {
+      this.toDynFns.set(key, "");
+      return null;
+    }
+    const n = this.toDynFns.size;
+    const sym = `@sc_mo_${n}`;
+    this.toDynFns.set(key, sym);
+    const host = this.host;
+    host.declare(`declare void @scr_dyn_check_fail(ptr, ptr, ptr)`);
+    host.declare(`declare zeroext i1 @scr_exc_pending()`);
+    /** i64 slot -> the type's value (double / i1 / ptr). */
+    const slotToVal = (B: BlockBuilder, x: IrType, s: string): string => {
+      const r = B.tmp();
+      if (x.kind === "f64") B.line(`${r} = bitcast i64 ${s} to double`);
+      else if (x.kind === "bool") B.line(`${r} = icmp ne i64 ${s}, 0`);
+      else B.line(`${r} = inttoptr i64 ${s} to ptr`);
+      return r;
+    };
+    const valToSlot = (B: BlockBuilder, x: IrType, v: string): string => {
+      const r = B.tmp();
+      if (x.kind === "f64") B.line(`${r} = bitcast double ${v} to i64`);
+      else if (x.kind === "bool") B.line(`${r} = zext i1 ${v} to i64`);
+      else B.line(`${r} = ptrtoint ptr ${v} to i64`);
+      return r;
+    };
+    const def = (head: string, B: BlockBuilder): void => {
+      this.defs.push(`define internal ${head} ${FN_ATTRS} {`, B.render(), `}`, ``);
+    };
+    // slot -> dyn
+    const toDyn = (suffix: string, x: IrType): string => {
+      const B = new BlockBuilder();
+      const v = slotToVal(B, x, "%s");
+      const r = B.tmp();
+      B.line(`${r} = call ptr @${this.toDynHelper(x)}(${this.valTy(x)} ${v})`);
+      B.terminate(`ret ptr ${r}`);
+      const fname = `sc_${suffix}_${n}`;
+      def(`ptr @${fname}(i64 %s)`, B);
+      return `ptr @${fname}`;
+    };
+    const kToDyn = toDyn("mk", kt);
+    const vToDyn = vt !== null ? toDyn("mv", vt) : "ptr null";
+    // soft probe: false = a miss
+    {
+      const B = new BlockBuilder();
+      const ok = B.tmp();
+      B.line(`${ok} = alloca i1`);
+      B.line(`store i1 true, ptr ${ok}`);
+      const v = B.tmp();
+      B.line(`${v} = call ${this.valTy(kt)} @${this.dynArmHelper(kt)}(ptr %d, ptr null, ptr ${ok})`);
+      const okv = B.tmp();
+      B.line(`${okv} = load i1, ptr ${ok}`);
+      const lOk = B.newLabel("mp.ok");
+      const lBad = B.newLabel("mp.no");
+      B.condBr(okv, lOk, lBad);
+      B.startBlock(lBad);
+      B.terminate(`ret i1 false`);
+      B.startBlock(lOk);
+      const s = valToSlot(B, kt, v);
+      B.line(`store i64 ${s}, ptr %out`);
+      B.terminate(`ret i1 true`);
+      def(`zeroext i1 @sc_mp_${n}(ptr %d, ptr %out)`, B);
+    }
+    // hard check (key, then value)
+    const check = (suffix: string, x: IrType): void => {
+      const B = new BlockBuilder();
+      const v = B.tmp();
+      B.line(`${v} = call ${this.valTy(x)} @${this.dynCheckHelper(x)}(ptr %d, ptr null)`);
+      const pe = B.tmp();
+      B.line(`${pe} = call zeroext i1 @scr_exc_pending()`);
+      const lBad = B.newLabel("mc.bad");
+      const lOk = B.newLabel("mc.ok");
+      B.condBr(pe, lBad, lOk);
+      B.startBlock(lBad);
+      B.terminate(`ret i1 false`);
+      B.startBlock(lOk);
+      const s = valToSlot(B, x, v);
+      B.line(`store i64 ${s}, ptr %out`);
+      B.terminate(`ret i1 true`);
+      def(`zeroext i1 @sc_${suffix}_${n}(ptr %d, ptr %out)`, B);
+    };
+    check("mc", kt);
+    let kDrop = "ptr null";
+    if (isRefCounted(kt)) {
+      const B = new BlockBuilder();
+      const p = B.tmp();
+      B.line(`${p} = inttoptr i64 %s to ptr`);
+      B.line(`call void ${vAdapters(host, kt).release}(ptr ${p})`);
+      B.terminate(`ret void`);
+      def(`void @sc_md_${n}(i64 %s)`, B);
+      kDrop = `ptr @sc_md_${n}`;
+    }
+    let vCheck = "ptr null";
+    if (vt !== null) {
+      check("mx", vt);
+      vCheck = `ptr @sc_mx_${n}`;
+    }
+    host.dynMapOpsGlobal(
+      `sc_mo_${n}`,
+      `[6 x ptr] [${kToDyn}, ${vToDyn}, ptr @sc_mp_${n}, ptr @sc_mc_${n}, ${kDrop}, ${vCheck}] ; dyn map ops ${typeKey(t)}`,
+    );
+    return sym;
+  }
+
   toDynHelper(t: IrType): string {
     const key = typeKey(t);
     const existing = this.toDynFns.get(key);
@@ -2925,9 +3049,15 @@ export class LlDyn {
         // ScrMap), beside the interned typeKey that makes the box's
         // matcher and its unwrap exact. scr_dyn_new_map_ref retains the
         // borrowed operand. The C twin carries the reasoning.
-        host.declare(`declare ptr @scr_dyn_new_map_ref(ptr, ptr)`);
+        const ops = this.dynMapOpsHelper(t);
         const r = B.tmp();
-        B.line(`${r} = call ptr @scr_dyn_new_map_ref(ptr %v, ptr ${host.cstr(key)})`);
+        if (ops === null) {
+          host.declare(`declare ptr @scr_dyn_new_map_ref(ptr, ptr)`);
+          B.line(`${r} = call ptr @scr_dyn_new_map_ref(ptr %v, ptr ${host.cstr(key)})`);
+        } else {
+          host.declare(`declare ptr @scr_dyn_new_map_ops(ptr, ptr, ptr)`);
+          B.line(`${r} = call ptr @scr_dyn_new_map_ops(ptr %v, ptr ${host.cstr(key)}, ptr ${ops})`);
+        }
         B.terminate(`ret ptr ${r}`);
         break;
       }

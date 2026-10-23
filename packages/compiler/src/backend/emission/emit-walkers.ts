@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { bytesAliasOnExtract } from "../../ir/nodes.js";
+import { bytesAliasOnExtract, canConvertToDyn, canDynCheckTo } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -3021,6 +3021,79 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
    * plus undefined-armed unions (the undefined arm becomes the undefined
    * dyn singleton) and index-signature records (whose overflow entries
    * copy over). The operand is borrowed. Never throws. */
+  /** The CONVERSION TABLE a boxed typed Map/Set carries (`ScrDynMapOps`,
+   * scr_runtime.h): the adapters that let the dyn side drive the map's
+   * static slots. Returns `&sc_mo_N`, or `NULL` when a key or value type has
+   * no dyn form (no table: the box keeps the loud ladder).
+   *
+   * Every adapter is a one-liner over the walkers the type already has: the
+   * to-dyn walker (slot -> dyn), the soft ARM walker (a probe that does not
+   * fit the key type is a MISS, not an error) and the hard checked builder
+   * (a STORE that does not fit throws the path-annotated TypeError). A slot is
+   * the double's bits, 0/1, or the pointer, exactly as the ScrMap stores it. */
+  export function dynMapOpsHelper(E: CEmitter, t: IrType): string {
+    if (t.kind !== "map" && t.kind !== "set") throw new Error("emitter bug: map ops of a non-map");
+    const key = `ops:${typeKey(t)}`;
+    const existing = E.toDynFns.get(key);
+    if (existing) return existing;
+    const kt = t.kind === "map" ? t.key : t.elem;
+    const vt = t.kind === "map" ? t.value : null;
+    const getRec = (id: string) => E.recordsById.get(id);
+    const getUni = (id: string) => E.unionsById.get(id);
+    const drivable = (x: IrType): boolean =>
+      canConvertToDyn(x, getRec, getUni) && canDynCheckTo(x, getRec, getUni);
+    if (!drivable(kt) || (vt !== null && !drivable(vt))) {
+      E.toDynFns.set(key, "NULL");
+      return "NULL";
+    }
+    const n = E.toDynFns.size;
+    const name = `&sc_mo_${n}`;
+    E.toDynFns.set(key, name);
+    const slotToVal = (x: IrType, s: string): string =>
+      x.kind === "f64" ? `scr_mslot_to_f64(${s})` : x.kind === "bool" ? `(${s} != 0)` : `(${cType(x).trim()})(uintptr_t)${s}`;
+    const valToSlot = (x: IrType, v: string): string =>
+      x.kind === "f64" ? `scr_mslot_from_f64(${v})` : x.kind === "bool" ? `(uint64_t)(${v} ? 1 : 0)` : `(uint64_t)(uintptr_t)${v}`;
+    const defs: string[] = [];
+    const protos: string[] = [];
+    const fn = (sig: string, body: string[]): void => {
+      protos.push(`${E.link}${sig};`);
+      defs.push(`${E.link}${sig} {`, ...body, `}`, ``);
+    };
+    fn(`ScrDyn *sc_mk_${n}(uint64_t s)`, [`  return ${E.toDynHelper(kt)}(${slotToVal(kt, "s")});`]);
+    if (vt !== null) fn(`ScrDyn *sc_mv_${n}(uint64_t s)`, [`  return ${E.toDynHelper(vt)}(${slotToVal(vt, "s")});`]);
+    fn(`bool sc_mp_${n}(const ScrDyn *d, uint64_t *out)`, [
+      `  bool ok = true;`,
+      `  ${cDecl(kt, "v")} = ${E.dynArmHelper(kt)}(d, NULL, &ok);`,
+      `  if (!ok) return false;`,
+      `  *out = ${valToSlot(kt, "v")};`,
+      `  return true;`,
+    ]);
+    fn(`bool sc_mc_${n}(const ScrDyn *d, uint64_t *out)`, [
+      `  ${cDecl(kt, "v")} = ${E.dynCheckHelper(kt)}(d, NULL);`,
+      `  if (scr_exc_pending()) return false;`,
+      `  *out = ${valToSlot(kt, "v")};`,
+      `  return true;`,
+    ]);
+    const kRel = isRefCounted(kt) ? vAdapters(kt).release : null;
+    if (kRel !== null) fn(`void sc_md_${n}(uint64_t s)`, [`  ${kRel}((void *)(uintptr_t)s);`]);
+    if (vt !== null) {
+      fn(`bool sc_mx_${n}(const ScrDyn *d, uint64_t *out)`, [
+        `  ${cDecl(vt, "v")} = ${E.dynCheckHelper(vt)}(d, NULL);`,
+        `  if (scr_exc_pending()) return false;`,
+        `  *out = ${valToSlot(vt, "v")};`,
+        `  return true;`,
+      ]);
+    }
+    E.walkerProtos.push(...protos);
+    E.walkerDefs.push(...defs);
+    E.walkerData(
+      `extern const ScrDynMapOps sc_mo_${n};`,
+      `${E.link}const ScrDynMapOps sc_mo_${n} = { sc_mk_${n}, ${vt !== null ? `sc_mv_${n}` : "NULL"}, sc_mp_${n}, sc_mc_${n}, ` +
+        `${kRel !== null ? `sc_md_${n}` : "NULL"}, ${vt !== null ? `sc_mx_${n}` : "NULL"} }; /* dyn map ops ${typeKey(t)} */`,
+    );
+    return name;
+  }
+
   export function toDynHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(t);
     const existing = E.toDynFns.get(key);
@@ -3117,7 +3190,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // matcher and its unwrap exact; see the kind's comment in
         // scr_runtime.h for the Map<string,number>/Set<string> collision
         // that makes it necessary rather than tidy.
-        d.push(`  return scr_dyn_new_map_ref(v, ${cStringLiteral(Buffer.from(key, "utf8"))});`);
+        {
+          const ops = dynMapOpsHelper(E, t);
+          d.push(
+            ops === "NULL"
+              ? `  return scr_dyn_new_map_ref(v, ${cStringLiteral(Buffer.from(key, "utf8"))});`
+              : `  return scr_dyn_new_map_ops(v, ${cStringLiteral(Buffer.from(key, "utf8"))}, ${ops});`,
+          );
+        }
         break;
       case "record": {
         const shape = E.recordsById.get(t.shapeId);
