@@ -11972,6 +11972,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8522-net-isip-isipv4-isipv6.js": {
+   "order": [
+    "<repo>/tests/corpus/8522-net-isip-isipv4-isipv6.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8523-net-isip-as-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/8523-net-isip-as-values.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",

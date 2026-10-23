@@ -4993,6 +4993,13 @@ export type IrLibFn =
    * never forces the net unit into the link. Never throw. */
   | "net.getAutoSelTimeout"
   | "net.setAutoSelTimeout"
+  /** node:net's isIP / isIPv4 / isIPv6 over a string (internal/net.js's
+   * regular expressions, ported byte-exact): pure, never throw, no
+   * allocation. Their own `netaddr.` prefix keeps the socket unit out of the
+   * link: an address test needs none of it. */
+  | "netaddr.isIP"
+  | "netaddr.isIPv4"
+  | "netaddr.isIPv6"
   /** realpath(3) with Node's error shape (syscall "lstat" in the message,
    * Node's own spelling for realpathSync failures). +1 fresh string. */
   | "fs.realpathSync"

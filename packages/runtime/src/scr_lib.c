@@ -1807,6 +1807,92 @@ static double scr_net_autosel_timeout_ms = 250;
 
 double scr_net_get_autosel_timeout(void) { return scr_net_autosel_timeout_ms; }
 
+/* node:net's isIPv4 / isIPv6 / isIP over a string, a byte-exact port of
+ * internal/net.js's regular expressions (v24): an IPv4 address is four dotted
+ * decimal octets with no leading zeros (25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d); an
+ * IPv6 address is eight 1-4 digit hex groups, or fewer with one "::" standing
+ * for at least one zero group, optionally ending in an IPv4 address (which
+ * counts as two groups), optionally followed by "%zone" with a zone of one or
+ * more of [0-9a-zA-Z-.:]. Pure; no allocation; no throw. */
+static bool scr_netaddr_v4_at(const char *p, size_t n) {
+  size_t i = 0;
+  for (int oct = 0; oct < 4; oct++) {
+    size_t start = i;
+    unsigned v = 0;
+    while (i < n && p[i] >= '0' && p[i] <= '9' && i - start < 3) v = v * 10 + (unsigned)(p[i++] - '0');
+    size_t digits = i - start;
+    if (digits == 0 || v > 255 || (digits > 1 && p[start] == '0')) return false;
+    if (oct < 3) {
+      if (i >= n || p[i] != '.') return false;
+      i++;
+    }
+  }
+  return i == n;
+}
+
+static bool scr_netaddr_hex(char c) {
+  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static bool scr_netaddr_v6_at(const char *p, size_t n) {
+  size_t zone = n;
+  for (size_t k = 0; k < n; k++) {
+    if (p[k] == '%') { zone = k; break; }
+  }
+  if (zone < n) {
+    if (zone + 1 >= n) return false;
+    for (size_t k = zone + 1; k < n; k++) {
+      char c = p[k];
+      bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '.' || c == ':';
+      if (!ok) return false;
+    }
+    n = zone;
+  }
+  size_t i = 0;
+  int groups = 0;
+  bool compressed = false;
+  if (n == 0) return false;
+  if (p[0] == ':') {
+    if (n < 2 || p[1] != ':') return false;
+    compressed = true;
+    i = 2;
+    if (i == n) return true;
+  }
+  while (i < n) {
+    size_t start = i;
+    size_t h = 0;
+    while (i < n && scr_netaddr_hex(p[i]) && h < 4) { i++; h++; }
+    if (i < n && p[i] == '.') {
+      /* the IPv4 tail: from this group's start to the end of the address */
+      if (!scr_netaddr_v4_at(p + start, n - start)) return false;
+      groups += 2;
+      i = n;
+      break;
+    }
+    if (h == 0) return false;
+    groups++;
+    if (i == n) break;
+    if (p[i] != ':') return false;
+    i++;
+    if (i == n) return false;              /* a single trailing colon */
+    if (p[i] == ':') {
+      if (compressed) return false;
+      compressed = true;
+      i++;
+      if (i == n) break;
+    }
+  }
+  return compressed ? groups <= 7 : groups == 8;
+}
+
+bool scr_netaddr_is_ipv4(ScrStr *s) { return scr_netaddr_v4_at(s->data, s->len); }
+bool scr_netaddr_is_ipv6(ScrStr *s) { return scr_netaddr_v6_at(s->data, s->len); }
+double scr_netaddr_is_ip(ScrStr *s) {
+  if (scr_netaddr_v4_at(s->data, s->len)) return 4;
+  if (scr_netaddr_v6_at(s->data, s->len)) return 6;
+  return 0;
+}
+
 /* Node's setDefaultAutoSelectFamilyAttemptTimeout: validateInt32(value,
  * 'value', 1), then the sub-10ms floor (Node clamps small budgets to
  * 10ms). Throws ERR_OUT_OF_RANGE catchably. */

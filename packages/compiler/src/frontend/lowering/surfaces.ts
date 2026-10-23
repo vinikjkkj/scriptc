@@ -853,6 +853,10 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // like Node's.
     getDefaultAutoSelectFamilyAttemptTimeout: { fn: "net.getAutoSelTimeout", params: [], result: F64 },
     setDefaultAutoSelectFamilyAttemptTimeout: { fn: "net.setAutoSelTimeout", params: [F64], result: VOID },
+    // The address tests: pure string predicates (scr_lib.c), no socket unit.
+    isIP: { fn: "netaddr.isIP", params: [STRING], result: F64 },
+    isIPv4: { fn: "netaddr.isIPv4", params: [STRING], result: BOOL },
+    isIPv6: { fn: "netaddr.isIPv6", params: [STRING], result: BOOL },
   },
   http: {},
   // node:tls and node:https ride the same spoke (tls.createServer's
@@ -1080,6 +1084,9 @@ export const BUILTIN_MEMBER_FN_VALUES: Record<string, ReadonlySet<string> | unde
   net: new Set([
     "getDefaultAutoSelectFamilyAttemptTimeout",
     "setDefaultAutoSelectFamilyAttemptTimeout",
+    "isIP",
+    "isIPv4",
+    "isIPv6",
   ]),
 };
 
