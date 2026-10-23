@@ -59,7 +59,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, internalSlotFields, isRefCounted, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -6793,6 +6793,12 @@ export class Lowerer {
       if (
         sf !== undefined && isJsSourceFile(sf) &&
         canConvertToDyn(expr.type, (id) => this.shapes.get(id), (id) => this.unions.get(id)) &&
+        // A target with a spelled rest slot the checked-dynamic adapter cannot serve
+        // (a typed pack, or a rest behind fixed parameters) would build here and THROW
+        // when the value is first adapted: both backends refuse it at run time
+        // ("function with a rest parameter behind fixed ones"). Those pairs belong to
+        // the static adapter below, which drops or unpacks the pack at compile time.
+        (expected.restIn !== true || dynRestApplyable(expected)) &&
         canAdaptDynFuncTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))
       ) {
         return {
