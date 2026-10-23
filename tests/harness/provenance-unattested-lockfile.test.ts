@@ -264,11 +264,11 @@ async function refusalOf(p: Promise<unknown>): Promise<ProvenanceRefusalError> {
   throw new Error("expected a ProvenanceRefusalError, but resolution succeeded");
 }
 
-async function buildAndRun(entry: string, name: string): Promise<string> {
+async function buildAndRun(entry: string, name: string, backend: "c" | "llvm" = "c"): Promise<string> {
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, process.platform === "win32" ? `${name}.exe` : name);
-  /* Pinned to the C lane for the reason the sibling provenance suites pin it. */
-  const result = await compile(entry, { outPath, outDir, dynamic: false, backend: "c" });
+  /* C by default, for the reason the sibling provenance suites pin it. */
+  const result = await compile(entry, { outPath, outDir, dynamic: false, backend });
   if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
   const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
   return stdout;
@@ -491,22 +491,24 @@ describe("provenance: an unattested package reached as a mapped package's depend
 });
 
 describe("provenance: the lane's ceiling for a verified dependency", () => {
-  test("the mapping lands, the VALUE still does not cross (refused at build time)", async () => {
-    /* Pinned deliberately: reading a value off a mapped dependency of a mapped
-     * authored-JS package is REFUSED at build time. That
-     * ceiling belongs to the authored lane, not to this arm, and pinning it
-     * stops "the blocker went away" being read as "the value arrived". */
+  test("the mapping lands AND the value crosses: both backends print what Node prints", async () => {
+    /* This used to pin a build-time refusal (SC1013, the default import of a
+     * CommonJS module as a value): a mapped authored-JS package's own
+     * `require('unattleaf')` took the generic-method / twin path that had no
+     * module-init for the declaration twin. With a provenance require bound
+     * to its implementation (and the twin's init called), the host's consts
+     * read off the mapped dependency and the binary prints the fixture's
+     * literals, which are exactly what Node prints for the same sources. */
     const depManifest = join(fixtureDir, "manifest-unattdep.json");
     const p = await makeProject("unattesteddep/main.ts", ["unattmid", "unattleaf"], "pnpm");
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = depManifest;
     stubFetch(404);
     setProvenanceSources(await resolveProvenanceSources(p.entry));
-    const refusals = analyze(p.entry).coverage.diagnostics.map((d) => `${d.code}: ${d.message}`);
-    expect(refusals.length).toBeGreaterThan(0);
-    /* The host's require() of the leaf is a CommonJS default import of the
-     * mapped dependency; the refusal names the binding ('leaf'). */
-    expect(refusals.join("\n")).toMatch(/SC1013: the default import of a CommonJS module as a value \(esModuleInterop types 'leaf'/);
-  });
+    expect(analyze(p.entry).coverage.diagnostics).toHaveLength(0);
+    const expected = "limit=19\ntag=leaf-through-dep-edge\n";
+    expect(await buildAndRun(p.entry, "unattdep-c", "c")).toBe(expected);
+    expect(await buildAndRun(p.entry, "unattdep-llvm", "llvm")).toBe(expected);
+  }, 300_000);
 });
 
 describe("in-process tarball extraction (no tar child process)", () => {
