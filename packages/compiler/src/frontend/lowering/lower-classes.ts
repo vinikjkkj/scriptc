@@ -2586,10 +2586,17 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // (import= alias chains included), with the source-order guard
           // (the class statement evaluates at its init position; a base
           // block below it would still be uninitialized in Node).
-          if (!t.expression.questionDotToken && nsMemberIdentOf(L, t.expression)) {
+          // A require binding of a program module reads the same way
+          // (`class X extends rs.Base`): the member resolves through the
+          // exporter's table, and a declaration whose compiled twin defines
+          // the class lands on the twin's class (resolveValueSymbol).
+          const viaRequire =
+            !t.expression.questionDotToken && L.cjsLocalModuleBindingOf(t.expression.expression);
+          if (!t.expression.questionDotToken && (viaRequire || nsMemberIdentOf(L, t.expression))) {
             if (t.typeArguments) L.unsupported("SC1090", t, "extending generic classes");
-            if (memberSym) fenceEarlyNsMemberRef(L, t.expression, memberSym);
-            const nsBase = resolved ? L.classBySymbol.get(resolved) : undefined;
+            if (memberSym && !viaRequire) fenceEarlyNsMemberRef(L, t.expression, memberSym);
+            const nsSym = viaRequire ? (L.resolveValueSymbol(t.expression.name) ?? resolved) : resolved;
+            const nsBase = nsSym ? L.classBySymbol.get(nsSym) : undefined;
             if (!nsBase) {
               L.unsupported(
                 "SC1090",
@@ -5447,10 +5454,27 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * compile-time name. Null for everything else — unresolved members
    * fall through to the ordinary chain so the static fence or the
    * generic member rejection names the site. */
+  /** The value symbol a CLASS receiver spells: a bare name, or a qualified
+   * one (`ns.C` over a namespace import, `rs.C` over a require binding of a
+   * program module) whose member resolves through the exporter's own table
+   * exactly like the bare name does. Null for any other receiver. */
+  function classReceiverSymbol(L: Lowerer, recv: ts.Expression): ts.Symbol | null {
+    if (ts.isIdentifier(recv)) return L.resolveValueSymbol(recv);
+    if (
+      ts.isPropertyAccessExpression(recv) &&
+      !recv.questionDotToken &&
+      ts.isIdentifier(recv.name) &&
+      (nsMemberIdentOf(L, recv) !== null || L.cjsLocalModuleBindingOf(recv.expression))
+    ) {
+      return L.resolveValueSymbol(recv.name);
+    }
+    return null;
+  }
+
   export function lowerStaticFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (L.chainBlocked(expr)) return null;
-    if (!ts.isIdentifier(expr.expression)) return null;
-    const symbol = L.resolveValueSymbol(expr.expression);
+    const symbol = classReceiverSymbol(L, expr.expression);
+    if (symbol === null) return null;
     const info =
       (symbol ? L.classBySymbol.get(symbol) : undefined) ??
       // A require binding over `module.exports = class {…}` (the alias
@@ -5474,7 +5498,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // WRONG at exit 0 on both backends, where Node exits 1. Every other
     // member took the "static member has no lowering" refusal, which is
     // loud but names the wrong cause. Both answer with the throw now.
-    if (ambientUndefinedClassSymbolOf(L, expr.expression) !== null) {
+    if (ts.isIdentifier(expr.expression) && ambientUndefinedClassSymbolOf(L, expr.expression) !== null) {
       return nsUndefRead(
         L,
         expr.expression.text,
@@ -6162,7 +6186,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // export assignment pins it) — the direct-name rules apply.
     if (!ts.isIdentifier(access.expression)) {
       if (!isModuleExportsAccess(access.expression) || !isCjsJsFile(access.getSourceFile())) {
-        return null;
+        const qualified = classReceiverSymbol(L, access.expression);
+        const qInfo = qualified ? L.classBySymbol.get(qualified) : undefined;
+        if (!qInfo || qInfo.classDecorators?.valueGlobalId !== undefined) return null;
+        return staticCallOn(L, call, access, qInfo, false);
       }
       const whole = cjsClassExprWholeExportOf(access.getSourceFile());
       if (!whole) return null;
