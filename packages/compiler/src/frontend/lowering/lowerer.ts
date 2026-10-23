@@ -5169,7 +5169,8 @@ export class Lowerer {
     if (stdlibNominal) {
       const intlHint =
         "Intl formatter values have no representation yet — the COMPOSED forms lower: " +
-        'new Intl.NumberFormat(locales, options).format(x) and x.toLocaleString(locales, options); ' +
+        'new Intl.NumberFormat(locales, options).format(x), new Intl.DateTimeFormat(locales, options).format(x), ' +
+        'x.toLocaleString(locales, options) and date.toLocale*String(locales, options); ' +
         "call format at the construction site instead of hoisting the formatter";
       const typeHints: Record<string, string | undefined> = {
         ArrayBuffer:

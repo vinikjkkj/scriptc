@@ -446,6 +446,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "process.cpuPrevValidate": "scr_cpu_prev_validate",
   "date.toISOString": "scr_date_to_iso",
   "date.formatOpts": "scr_date_format_opts",
+  "date.formatOptsDyn": "scr_date_format_opts_dyn",
   "process.chdir": "scr_process_chdir",
   "fs.writeFileSync": "scr_fs_write_file",
   "fs.appendFileSync": "scr_fs_append_file",

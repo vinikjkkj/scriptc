@@ -100,9 +100,11 @@ export function sliceIcu(bin: Buffer, use: IcuUse): IcuSlice {
     if (i === undefined || wanted.has(i)) return;
     wanted.add(i);
   };
+  // the supplemental bundles of the "misc" package are named like locales; date formatting reads all of them
+  const MISC_BUNDLES = new Set(["supplementalData", "metaZones", "dayPeriods", "timezoneTypes", "zoneinfo64"]);
   for (let i = 0; i < img.locales.length; i++) {
     const n = nameOf(i);
-    if (all || langs.has(langOf(n)) || n === "root") want(n);
+    if (all || langs.has(langOf(n)) || n === "root" || (use.date && MISC_BUNDLES.has(n))) want(n);
   }
   // CLDR's parent table for names that have no bundle of their own (yue_Hans -> zh_Hans, ...)
   for (const [k, v] of img.core) {
@@ -135,8 +137,8 @@ export function sliceIcu(bin: Buffer, use: IcuUse): IcuSlice {
       }
     }
   }
-  const pkgOk = (name: string): boolean => (name === "loc" ? true : name === "curr" ? use.curr : name === "unit" ? use.unit : name === "zone" ? use.zone : false);
-  const locKeep = (k: string): boolean => k === "%%Parent" || k === "%%ALIAS" || (use.nf && k === "NumberElements") || (use.zone && k === "calendar");
+  const pkgOk = (name: string): boolean => (name === "loc" ? true : name === "curr" ? use.curr : name === "unit" ? use.unit : name === "zone" ? use.zone : name === "misc" || name === "region" ? use.date : false);
+  const locKeep = (k: string): boolean => k === "%%Parent" || k === "%%ALIAS" || ((use.nf || use.date) && k === "NumberElements") || (use.date && (k === "calendar" || k === "fields"));
   const blocks: Block[] = [];
   for (const b of img.blocks) {
     const pkg = img.pkgs[b.pkg]!;
@@ -169,7 +171,7 @@ const cache = new Map<string, string>();
 
 /** The C translation unit supplying scr_ures_image() for the slice. */
 export function icuDataSource(rtDir: string, use: IcuUse): string {
-  const key = JSON.stringify([use.langs, use.nf, use.curr, use.unit, use.zone]);
+  const key = JSON.stringify([use.langs, use.nf, use.curr, use.unit, use.zone, use.date]);
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
   const bin = readFileSync(join(rtDir, "data", "icu-78.2.bin"));

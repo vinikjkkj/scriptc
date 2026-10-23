@@ -22,7 +22,7 @@ import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../dia
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
-import { lowerNumberLocaleFormat } from "./lower-numfmt.js";
+import { lowerDateLocaleFormat, lowerNumberLocaleFormat } from "./lower-numfmt.js";
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
@@ -5541,6 +5541,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // The composed en-US Intl.NumberFormat form — before the member
         // fences (the receiver's Intl.NumberFormat type has no mapping).
         lowerIntlNumberFormatCall(L, expr, expr.expression) ??
+        lowerIntlDateTimeFormatCall(L, expr, expr.expression) ??
         lowerGroupByStaticCall(L, expr, expr.expression) ??
         // Iterator-helper chains rooted at arr.values() — before the
         // array method paths (the terminal names collide with array
@@ -6726,7 +6727,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       if (call.arguments.length > 2 || call.arguments.some((x) => ts.isSpreadElement(x))) {
         L.noLowering(`BigInt.prototype.toLocaleString with ${call.arguments.length} arguments`, call);
       }
-      return lowerNumberLocaleFormat(L, L.lowerExpr(access.expression), call.arguments[0], call.arguments[1], locOf(call));
+      return lowerNumberLocaleFormat(L, L.lowerExpr(access.expression), call.arguments[0], call.arguments[1], locOf(call), true);
     }
     if (access.name.text !== "toString" || call.arguments.length > 1) return null;
     // `b.toString()` / `b.toString(16)` on a bigint: the DIGITS, no `n`
@@ -7319,7 +7320,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       }
       const operand = L.lowerExpr(recv);
       if (operand.type.kind !== "f64") return null;
-      return lowerNumberLocaleFormat(L, operand, call.arguments[0], call.arguments[1], loc);
+      return lowerNumberLocaleFormat(L, operand, call.arguments[0], call.arguments[1], loc, true);
     }
     if (name === "charAt" && recvKind === "string" && call.arguments.length === 1 &&
         !ts.isSpreadElement(call.arguments[0]!)) {
@@ -10315,6 +10316,50 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     const arg = L.lowerExprExpecting(call.arguments[0]!, STRING);
     if (arg.type.kind !== "string") L.badType(call.arguments[0]!, L.typeOf(call.arguments[0]!));
     return { kind: "libCall", fn: "regexp.escape", args: [arg], type: STRING, loc: locOf(call) };
+  }
+
+  /** The composed Intl.DateTimeFormat form: `new Intl.DateTimeFormat(locales, options).format(date)` (and the callable
+   * spelling without `new`), for every ICU locale, calendar, numbering system and time zone (scr_dtf.c). The
+   * argument is a Date, a number (a time value) or absent (now). Formatter VALUES have no representation, so only the
+   * composed form lowers. Null when the callee isn't a DateTimeFormat-construction .format. */
+  function lowerIntlDateTimeFormatCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(call, access)) return null;
+    if (access.name.text !== "format") return null;
+    let recv: ts.Expression = access.expression;
+    while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
+    if (!(ts.isNewExpression(recv) || (ts.isCallExpression(recv) && !recv.questionDotToken))) return null;
+    const ctor = recv.expression;
+    if (
+      !ts.isPropertyAccessExpression(ctor) || ctor.questionDotToken ||
+      ctor.name.text !== "DateTimeFormat" || !L.isStdlibGlobal(ctor.expression, "Intl")
+    ) {
+      return null;
+    }
+    const ctorArgs: readonly ts.Expression[] = recv.arguments ?? [];
+    const loc = locOf(call);
+    if (ctorArgs.length > 2 || ctorArgs.some((x) => ts.isSpreadElement(x))) {
+      L.noLowering(`Intl.DateTimeFormat with ${ctorArgs.length} constructor arguments`, recv);
+    }
+    if (call.arguments.length > 1 || call.arguments.some((x) => ts.isSpreadElement(x))) {
+      L.noLowering(`Intl.DateTimeFormat(...).format with ${call.arguments.length} arguments`, call);
+    }
+    let ms: IrExpr;
+    const argNode = call.arguments[0];
+    if (argNode === undefined) ms = { kind: "libCall", fn: "date.now", args: [], type: F64, loc };
+    else {
+      const k = L.mapTypeOf(L.typeOf(argNode))?.kind;
+      if (k === "date") ms = { kind: "libCall", fn: "date.value", args: [L.lowerExpr(argNode)], type: F64, loc };
+      else if (k === "f64") ms = L.lowerExprExpecting(argNode, F64);
+      else {
+        return L.noLowering(
+          `Intl.DateTimeFormat(...).format over a '${L.checker.typeToString(L.typeOf(argNode))}'`,
+          argNode,
+          "a Date or a number (a time value) is the lowered form",
+        );
+      }
+    }
+    return lowerDateLocaleFormat(L, ms, 7, ctorArgs[0], ctorArgs[1], loc, "Intl.DateTimeFormat");
   }
 
   /** The composed en-US Intl.NumberFormat form: `new Intl.NumberFormat(

@@ -715,8 +715,9 @@ export type ProgramNativeFeatures = Record<string, boolean>;
  * below. */
 function icuFeatureFlags(use: IcuUse): Record<string, boolean> {
   const out: Record<string, boolean> = {};
-  if (!use.nf && !use.zone) return out;
+  if (!use.nf && !use.date) return out;
   out["icuNf"] = use.nf;
+  out["icuDate"] = use.date;
   out["icuCurr"] = use.curr;
   out["icuUnit"] = use.unit;
   out["icuZone"] = use.zone;

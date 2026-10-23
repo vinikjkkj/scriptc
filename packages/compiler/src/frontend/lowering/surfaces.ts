@@ -1271,9 +1271,9 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
   {
     id: "stdlib.date.formatOpts",
     kind: "stdlib",
-    name: "Date.prototype.toLocaleString/toLocaleDateString/toLocaleTimeString with a locale and options (en-US)",
-    fns: ["date.formatOpts"],
-    note: "the en-US pattern for every option vector ICU accepts (generated, verified against Node), over the bundled zone database; the timeZone option and the zone names read the bundled zone and metazone-history tables",
+    name: "Date.prototype.toLocaleString/toLocaleDateString/toLocaleTimeString and the composed Intl.DateTimeFormat(...).format with locales and options",
+    fns: ["date.formatOpts", "date.formatOptsDyn"],
+    note: "V8's DateTimeFormat over the ICU 78.2 locale data for every locale, calendar, numbering system, option vector and time zone: the pattern generator, the calendars, the localized zone names and the zone rules are ported and run on the vendored data (verified against Node)",
   },
   {
     id: "stdlib.date.tzOffset",
@@ -1894,7 +1894,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
         "collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data " +
         "are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: " +
         "number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) " +
-        "for every ICU locale, option and numbering system, and Date toLocale*String at en-US";
+        "for every ICU locale, option and numbering system, and Date toLocale*String and the composed " +
+        "new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone";
     } else if (container === "Object" && member === "assign") {
       hint =
         "spread instead: { ...a, ...b } builds the merged record; what lowers: the empty-target " +
