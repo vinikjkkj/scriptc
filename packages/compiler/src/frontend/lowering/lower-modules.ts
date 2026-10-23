@@ -3154,6 +3154,14 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
     let elements: readonly (ts.ImportSpecifier | ts.ExportSpecifier)[];
     if (ts.isImportDeclaration(stmt)) {
       if (stmt.importClause === undefined) return "noClause";
+      // A DEFAULT binding of a CommonJS twin is module.exports (a function or
+      // member read off it, `mysql.createPool(...)`): Node evaluates the twin
+      // for it exactly as for a named import, so a READ default binding keeps
+      // the twin's init (an unread one is elided and must not run it).
+      const dflt = stmt.importClause.name;
+      if (dflt !== undefined && stmt.importClause.phaseModifier !== ts.SyntaxKind.TypeKeyword && isCjsJsFile(twin) && referencedInFile(L, stmt.getSourceFile(), dflt)) {
+        return "static";
+      }
       const nb = stmt.importClause.namedBindings;
       if (nb === undefined || !ts.isNamedImports(nb)) return "clause";
       elements = nb.elements;
