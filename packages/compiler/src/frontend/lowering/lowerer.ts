@@ -2342,9 +2342,13 @@ export class Lowerer {
     // their CJS entries take the same default-binding interop as a
     // relative require; every other bare import answers null and keeps
     // its own machinery.
-    const dep = isRelativeSpecifier(spec)
+    const named = isRelativeSpecifier(spec)
       ? resolveImport(this.program, importDecl.getSourceFile(), spec)
-      : npmStaticDepSf7(this.program, importDecl.getSourceFile(), spec);
+      : this.bareRequireDepOf(importDecl.getSourceFile(), spec);
+    // A declaration file with a compiled twin (--provenance-sources maps a
+    // package to its `.d.ts`): Node binds the default to the TWIN's
+    // module.exports, so the twin is the CommonJS module behind the binding.
+    const dep = named?.isDeclarationFile ? this.declTwinSourceOf(named) : named;
     if (!dep || !isJsSourceFile(dep) || isNodeEsmFile(dep)) return null;
     return dep;
   }
