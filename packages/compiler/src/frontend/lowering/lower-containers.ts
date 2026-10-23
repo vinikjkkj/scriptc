@@ -7418,6 +7418,19 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     // exactly this kind. Bad extents throw DataView's RangeError spelling
     // rather than the typed array's -- the divergence Buffer.from(x.buffer,
     // ...) already documents, on the same code path.
+    // `new Uint8Array(buffer, byteOffset, length)` over an UNTYPED first
+    // argument (`any`/`unknown`, e.g. `x.buffer` of an untyped `x`): the
+    // buffer is the ArrayBuffer box the keyed read answers, so the view is
+    // built at run time (scr_dyn_u8view_new); a first argument that turns
+    // out not to be one takes the one-argument constructor, as in Node.
+    // The one-argument form has its own dyn arm below.
+    if (elem === "u8" && args.length >= 2 && args.length <= 3 && !args.some(ts.isSpreadElement) &&
+        (L.typeOf(args[0]!).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
+      const dynArg = (i: number): IrExpr =>
+        args[i] !== undefined ? L.lowerExprExpecting(args[i]!, DYN) : dynUndefinedExpr(loc);
+      const v: IrExpr = { kind: "libCall", fn: "dyn.u8ViewNew", args: [dynArg(0), dynArg(1), dynArg(2)], type, loc };
+      return markFlavor(v, "plain", loc);
+    }
     if (elem === "u8" && args.length >= 1 && args.length <= 3 && !args.some(ts.isSpreadElement)) {
       const first = args[0]!;
       const peeled =
@@ -7621,6 +7634,17 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       const idxArgs = args.slice(1).map((a) => L.lowerExprExpecting(a, F64));
       const fresh: IrExpr = { kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type: BYTES_U8, loc };
       return markFlavor(fresh, "dataview", loc);
+    }
+    // A buffer reached through an UNTYPED value (`new DataView(x.buffer,
+    // x.byteOffset, x.byteLength)` with `x` an `any` parameter, or any
+    // `any`-typed expression): `x.buffer` is the ArrayBuffer the keyed read
+    // answers, so the view is built at run time over THAT value — the
+    // static erasure below needs a typed owner it can name.
+    if ((L.typeOf(bufNode).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
+      const dynArg = (i: number): IrExpr =>
+        args[i] !== undefined ? L.lowerExprExpecting(args[i]!, DYN) : dynUndefinedExpr(loc);
+      const dv: IrExpr = { kind: "libCall", fn: "dyn.dataViewNew", args: [dynArg(0), dynArg(1), dynArg(2)], type: BYTES_U8, loc };
+      return markFlavor(dv, "dataview", loc);
     }
     const hint =
       "views compile over a typed array's own storage — new DataView(x.buffer, byteOffset?, byteLength?) " +

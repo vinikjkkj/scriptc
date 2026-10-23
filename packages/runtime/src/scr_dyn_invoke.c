@@ -1151,6 +1151,13 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
         static const char *const impl[] = { "then", "catch", "finally", NULL };
         return dyn_name_in(m, impl) || dyn_objproto_knows(m);
       }
+    case SCR_DYN_ARRBUF: {
+      /* slice runs, resize throws Node's TypeError, transfer refuses by
+       * name — every one answers `function` on the read. */
+      static const char *const abm[] = { "slice", "resize", "transfer", "transferToFixedLength",
+                                         "toString", NULL };
+      return dyn_name_in(m, abm) || dyn_objproto_knows(m);
+    }
     case SCR_DYN_HANDLE:
       if (recv->v.handle.tag == SCR_DYNH_REGEX) {
         /* RegExp.prototype: the three methods the ops answer (exec, test,
@@ -2509,6 +2516,44 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     }
     if (dyn_name_is(method, "finally")) {
       return scr_dyn_promise_then(recv->v.promise, NULL, NULL, argc >= 1 ? args[0] : NULL);
+    }
+    return dyn_object_proto_method(recv, method, args, argc, what);
+  }
+
+  /* An ArrayBuffer (the value `x.buffer` answers): slice copies a byte
+   * range into a fresh buffer; a fixed-length buffer cannot resize (V8's
+   * incompatible-receiver TypeError); transfer detaches its receiver, which
+   * this tier cannot represent, so it refuses by name. */
+  if (recv->kind == SCR_DYN_ARRBUF) {
+    ScrBytes *ab = recv->v.bytes;
+    if (dyn_name_is(method, "slice")) {
+      double s = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      double e = dyn_index_arg(args, argc, 1, (double)ab->len, what);
+      if (scr_exc_pending()) return NULL;
+      size_t si = dyn_rel_index(s, ab->len), ei = dyn_rel_index(e, ab->len);
+      size_t count = ei > si ? ei - si : 0;
+      ScrBytes *out = scr_bytes_new(SCR_BYTES_BUF, (double)count);
+      if (out == NULL) return NULL;
+      if (count > 0) memcpy(out->data, ab->data + si, count);
+      ScrDyn *d = scr_dyn_new_arrbuf_ref(out);
+      scr_bytes_release(out);
+      return d;
+    }
+    if (dyn_name_is(method, "resize")) {
+      static const char msg[] = "Method ArrayBuffer.prototype.resize called on incompatible receiver #<ArrayBuffer>";
+      scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+      return NULL;
+    }
+    if (dyn_name_is(method, "transfer") || dyn_name_is(method, "transferToFixedLength")) {
+      dyn_throw_unsupported("ArrayBuffer", method);
+      return NULL;
+    }
+    if (dyn_name_is(method, "toString")) {
+      ScrStr *ts = scr_str_new("[object ArrayBuffer]", 20);
+      ScrDyn *td = scr_dyn_new_str(ts);
+      scr_str_release(ts);
+      return td;
     }
     return dyn_object_proto_method(recv, method, args, argc, what);
   }

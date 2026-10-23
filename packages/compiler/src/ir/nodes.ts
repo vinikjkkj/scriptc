@@ -4630,6 +4630,13 @@ export type IrLibFn =
    * adds the totalLength truncate or zero-pad). Borrows; may throw. */
   | "buffer.concatDyn"
   | "buffer.concatDynLen"
+  /** `new DataView(buffer, off?, len?)` / `new Uint8Array(buffer, off?,
+   * len?)` over a checked-dynamic first argument (the ArrayBuffer box an
+   * untyped `x.buffer` answers): scr_dyn_dataview_new / scr_dyn_u8view_new.
+   * Args [buffer, byteOffset, length] as dyn (undefined for omitted); borrows;
+   * +1 view or Node's TypeError/RangeError (may-throw seed). */
+  | "dyn.dataViewNew"
+  | "dyn.u8ViewNew"
   /** The checked-dynamic compare/equals validators (scr_bytes_io.c) —
    * the lowered form when an argument is NOT statically bytes<u8> (the
    * invalid-input probes; a dyn from an untyped JS helper): Node's own
@@ -12650,6 +12657,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "buffer.concatLen",
   "buffer.concatDyn",
   "buffer.concatDynLen",
+  "dyn.dataViewNew",
+  "dyn.u8ViewNew",
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.
   "buffer.compareChk",

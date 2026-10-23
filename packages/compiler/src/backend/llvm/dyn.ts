@@ -4078,7 +4078,18 @@ export class LlDyn {
       host.declare(`declare ptr @scr_dyn_arrbuf_key_get(ptr, ptr)`);
       const r = B.tmp();
       B.line(`${r} = call ptr @scr_dyn_arrbuf_key_get(ptr %d, ptr %k)`);
+      // The C twin: a property answers, and the undefined singleton falls
+      // on to the intrinsic-method tail so a method NAME reads as a function.
+      const rk = this.kindOf(B, r);
+      const rUndef = B.tmp();
+      B.line(`${rUndef} = icmp eq i32 ${rk}, ${DK.UNDEF}`);
+      const lMissA = B.newLabel("kg.abm");
+      const lRetA = B.newLabel("kg.abr");
+      B.condBr(rUndef, lMissA, lRetA);
+      B.startBlock(lRetA);
       B.terminate(`ret ptr ${r}`);
+      B.startBlock(lMissA);
+      intrinsicOrUndef();
       B.startBlock(lNext);
     }
     // The canonical-index parse, shared by BYTES/ARR/STR: digits only,

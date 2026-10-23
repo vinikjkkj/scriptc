@@ -503,6 +503,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "bytes.argChk": "scr_bytes_arg_chk",
   "buffer.concat": "scr_bytes_concat",
   "buffer.concatLen": "scr_bytes_concat_len",
+  "dyn.dataViewNew": "scr_dyn_dataview_new",
+  "dyn.u8ViewNew": "scr_dyn_u8view_new",
   "buffer.concatDynLen": "scr_buffer_concat_dyn_len",
   "buffer.byteLenStr": "scr_bytes_byte_length_str",
   "buffer.isEncoding": "scr_bytes_is_encoding",

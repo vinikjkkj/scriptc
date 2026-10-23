@@ -3741,6 +3741,16 @@ ScrDyn *scr_dyn_arrbuf_key_get(const ScrDyn *d, const ScrStr *k) {
   if (k->len == 10 && memcmp(k->data, "byteLength", 10) == 0) {
     return scr_dyn_new_num((double)d->v.bytes->len);
   }
+  /* A fixed-length, attached ArrayBuffer: maxByteLength is its length and
+   * neither resizable nor detached can be true (no resizable buffer or
+   * detach exists in this tier). */
+  if (k->len == 13 && memcmp(k->data, "maxByteLength", 13) == 0) {
+    return scr_dyn_new_num((double)d->v.bytes->len);
+  }
+  if ((k->len == 9 && memcmp(k->data, "resizable", 9) == 0) ||
+      (k->len == 8 && memcmp(k->data, "detached", 8) == 0)) {
+    return scr_dyn_new_bool(false);
+  }
   /* `length`, every index, and every other name: undefined, and that is
    * Node's real answer rather than a fence standing in for one. An
    * ArrayBuffer has no index signature and no length — the typed-array
@@ -8698,6 +8708,9 @@ static bool scr_dyn_bytes_proto_name(const char *m) {
  * Borrows d; returns +1. */
 ScrBytes *scr_bytes_from_dyn(ScrBytesElem elem, const ScrDyn *d) {
   if (d->kind == SCR_DYN_NUM) return scr_bytes_new(elem, d->v.num); /* may throw */
+  /* An ArrayBuffer is not copied: `new Uint8Array(buf)` is a VIEW over its
+   * storage (it used to be a loud cross-kind refusal). */
+  if (d->kind == SCR_DYN_ARRBUF) return scr_typed_view_over(d->v.bytes, elem);
   if (d->kind == SCR_DYN_BYTES || d->kind == SCR_DYN_ARRBUF) {
     const ScrBytes *src = d->v.bytes;
     /* Same element kind: the byte-for-byte copy, which is what Node's
@@ -10487,6 +10500,14 @@ ScrDyn *scr_dyn_bytes_key_get(const ScrDyn *d, const ScrStr *k) {
   if (kl == 10 && memcmp(kd, "byteLength", 10) == 0) return scr_dyn_new_num(scr_bytes_byte_len(b));
   if (kl == 10 && memcmp(kd, "byteOffset", 10) == 0) return scr_dyn_new_num(scr_bytes_byte_offset(b));
   if (kl == 11 && memcmp(kd, "constructor", 11) == 0) return scr_dyn_bytes_constructor(d);
+  if (kl == 6 && memcmp(kd, "buffer", 6) == 0) {
+    /* the ArrayBuffer over this storage, minted once per owner and cached
+     * there, so `x.buffer === x.buffer` and two views of one buffer agree */
+    ScrBytes *ab = scr_bytes_array_buffer((ScrBytes *)(uintptr_t)b);
+    ScrDyn *r = scr_dyn_new_arrbuf_ref(ab);
+    scr_bytes_release(ab);
+    return r;
+  }
   if (dv) return NULL; /* nothing else is a data property of a DataView */
   if (kl == 6 && memcmp(kd, "length", 6) == 0) return scr_dyn_new_num((double)b->len);
   if (kl == 17 && memcmp(kd, "BYTES_PER_ELEMENT", 17) == 0) {
@@ -10501,6 +10522,63 @@ ScrDyn *scr_dyn_bytes_key_get(const ScrDyn *d, const ScrStr *k) {
     if (idx < b->len) return scr_dyn_new_num(scr_bytes_get(b, (double)idx));
   }
   return NULL;
+}
+
+/* `new DataView(buffer, byteOffset?, byteLength?)` over a CHECKED-DYNAMIC
+ * buffer — the spelling `new DataView(x.buffer, x.byteOffset, x.byteLength)`
+ * takes when `x` is untyped and `x.buffer` is therefore the ArrayBuffer box
+ * the keyed read answers. The static spelling erases the buffer (it never
+ * exists as a value); here it does, and the view is built over its storage
+ * exactly as the static intrinsic builds it. Node's order: the first
+ * argument must be an ArrayBuffer (TypeError), then ToIndex of the offset
+ * and length with scr_dataview_new's own RangeErrors. +1, or NULL with the
+ * exception pending. Borrows all three. */
+ScrBytes *scr_dyn_dataview_new(const ScrDyn *buf, const ScrDyn *off, const ScrDyn *len) {
+  if (buf->kind != SCR_DYN_ARRBUF) {
+    static const char msg[] = "First argument to DataView constructor must be an ArrayBuffer";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  double o = scr_dyn_to_number(off);
+  if (scr_exc_pending()) return NULL;
+  const bool has_len = len->kind != SCR_DYN_UNDEF;
+  double l = 0;
+  if (has_len) {
+    l = scr_dyn_to_number(len);
+    if (scr_exc_pending()) return NULL;
+  }
+  return scr_dataview_new(buf->v.bytes, o, has_len, l);
+}
+
+/* `new Uint8Array(buffer, byteOffset?, length?)` over a checked-dynamic
+ * first argument. An ArrayBuffer yields a VIEW (offset and length are
+ * validated with the typed array's own RangeErrors: "Start offset N is
+ * outside the bounds of the buffer", "Invalid typed array length: N"); any
+ * other first argument is the one-argument constructor (the extra
+ * arguments are ignored, as in Node). +1, or NULL with the exception
+ * pending. Borrows all three. */
+ScrBytes *scr_dyn_u8view_new(const ScrDyn *buf, const ScrDyn *off, const ScrDyn *len) {
+  if (buf->kind != SCR_DYN_ARRBUF) return scr_bytes_from_dyn(SCR_BYTES_U8, buf);
+  const double bytes = (double)buf->v.bytes->len;
+  double o = scr_dyn_to_number(off);
+  if (scr_exc_pending()) return NULL;
+  const bool has_len = len->kind != SCR_DYN_UNDEF;
+  double l = 0;
+  if (has_len) {
+    l = scr_dyn_to_number(len);
+    if (scr_exc_pending()) return NULL;
+    l = (l != l) ? 0 : trunc(l);
+    const double oo = (o != o) ? 0 : trunc(o);
+    if (l < 0 || l > 9007199254740991.0 || (oo >= 0 && oo <= bytes && oo + l > bytes)) {
+      char num[32];
+      size_t nl = scr_f64_to_str(l, num);
+      char msg[96];
+      int n = snprintf(msg, sizeof msg, "Invalid typed array length: %.*s", (int)nl, num);
+      scr_throw_error_msg(SCR_ERR_RANGE, msg, (size_t)n);
+      return NULL;
+    }
+  }
+  return scr_dataview_new(buf->v.bytes, o, has_len, l);
 }
 
 /* `new Uint8Array(…)` through the singleton. scr_dyn_construct routes
