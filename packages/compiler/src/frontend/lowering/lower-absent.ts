@@ -158,6 +158,16 @@ function lowerInit(L: Lowerer, shape: Shape, loc: SrcLoc): Init | null {
     const arr = hoist(arr0, "%absArr") as IrExpr & { type: { kind: "array" } };
     const index = hoist(idx0, "%absIdx");
     const ok: IrExpr = { kind: "arrIntrinsic", method: "hasIndex", receiver: arr, args: [index], type: BOOL, loc };
+    if (elem.kind === "string") {
+      // A split capture that did not participate is the ABSENT string, a
+      // non-NULL sentinel: it reads as a miss too, so the flag asks for it.
+      const present: IrExpr = {
+        kind: "logical", op: "&&", left: ok,
+        right: { kind: "unary", op: "!", type: BOOL, loc, operand: { kind: "libCall", fn: "str.isAbsent", args: [{ kind: "arrayGet", arr, index, type: elem, loc }], type: BOOL, loc } },
+        type: BOOL, loc,
+      };
+      return { pre, ok: present, val: { kind: "arrayGet", arr, index, type: elem, loc }, type: elem };
+    }
     if (elem.kind !== "f64" && elem.kind !== "bool") {
       return { pre, ok, val: { kind: "arrayGet", arr, index, type: elem, loc }, type: elem, tryGet: { kind: "arrayGet", arr, index, type: elem, tryRef: true, loc } };
     }
