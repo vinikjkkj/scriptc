@@ -1796,8 +1796,8 @@ static double scr_net_autosel_timeout_ms = 250;
 double scr_net_get_autosel_timeout(void) { return scr_net_autosel_timeout_ms; }
 
 /* The navigator global (Node 21+): userAgent, platform and hardwareConcurrency
- * (language/languages ride scr_intl_default_locale). Each string is interned
- * and returned +1; none throws.
+ * (language/languages ride scr_intl_default_locale). Each string is built fresh
+ * and returned +1 (a cached copy would be a live string at exit, which the RC audit reports); none throws.
  *
  * userAgent is `Node.js/<major>` of the compatibility target — the same
  * version process.versions.node answers (SCR_NODE_COMPAT_VERSION), which is
@@ -1811,43 +1811,34 @@ double scr_net_get_autosel_timeout(void) { return scr_net_autosel_timeout_ms; }
  * allowed to run on — the scheduler affinity mask on Linux (what libuv's
  * uv_available_parallelism starts from; its further clamp to a cgroup CPU
  * quota is NOT modelled), the online processor count elsewhere. */
-static ScrStr *scr_navigator_ua_str;
-static ScrStr *scr_navigator_platform_str;
-
 ScrStr *scr_navigator_user_agent(void) {
-  if (!scr_navigator_ua_str) {
-    char buf[64];
-    size_t n = 0;
-    const char *v = SCR_NODE_COMPAT_VERSION;
-    memcpy(buf, "Node.js/", 8);
-    n = 8;
-    while (*v && *v != '.' && n < sizeof buf - 1) buf[n++] = *v++;
-    scr_navigator_ua_str = scr_str_new(buf, n);
-  }
-  return scr_str_retain(scr_navigator_ua_str);
+  char buf[64];
+  size_t n = 0;
+  const char *v = SCR_NODE_COMPAT_VERSION;
+  memcpy(buf, "Node.js/", 8);
+  n = 8;
+  while (*v && *v != '.' && n < sizeof buf - 1) buf[n++] = *v++;
+  return scr_str_new(buf, n);
 }
 
 ScrStr *scr_navigator_platform(void) {
-  if (!scr_navigator_platform_str) {
 #if defined(__APPLE__)
-    scr_navigator_platform_str = scr_str_new("MacIntel", 8);
+  return scr_str_new("MacIntel", 8);
 #elif defined(_WIN32)
-    scr_navigator_platform_str = scr_str_new("Win32", 5);
+  return scr_str_new("Win32", 5);
 #elif defined(__linux__)
 #if defined(__x86_64__)
-    scr_navigator_platform_str = scr_str_new("Linux x86_64", 12);
+  return scr_str_new("Linux x86_64", 12);
 #elif defined(__i386__)
-    scr_navigator_platform_str = scr_str_new("Linux i686", 10);
+  return scr_str_new("Linux i686", 10);
 #elif defined(__aarch64__)
-    scr_navigator_platform_str = scr_str_new("Linux arm64", 11);
+  return scr_str_new("Linux arm64", 11);
 #else
-    scr_navigator_platform_str = scr_str_new("Linux unknown", 13);
+  return scr_str_new("Linux unknown", 13);
 #endif
 #else
-    scr_navigator_platform_str = scr_str_new("Unknown", 7);
+  return scr_str_new("Unknown", 7);
 #endif
-  }
-  return scr_str_retain(scr_navigator_platform_str);
 }
 
 double scr_navigator_hardware_concurrency(void) {
