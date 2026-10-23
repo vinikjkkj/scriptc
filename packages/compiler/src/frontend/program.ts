@@ -2115,7 +2115,7 @@ export function makeCycleAdmission(
       // the loop and keeps the fence on its first CommonJS member — the
       // two module systems' init windows interleave in ways neither
       // analysis models.
-      if (!comp.every((m) => isCjsJsFile7(m))) {
+      if (!comp.every((m) => m.isDeclarationFile || isCjsJsFile7(m))) {
         // The whole cluster is surveyed, not just up to the first
         // offender, and the count rides the message.
         //
@@ -2176,7 +2176,7 @@ export function makeCycleAdmission(
     // preflight refuses require() in an ES module long before this), so
     // it keeps the fence.
     if (e.stmt === undefined) {
-      return comp.every((m) => isCjsJsFile7(m))
+      return comp.every((m) => m.isDeclarationFile || isCjsJsFile7(m))
         ? cjsBackEdgeUseOffence7(program, importer, e, lineOf)
         : "the cycle closes through a require() edge into a module cluster that is not all CommonJS";
     }
