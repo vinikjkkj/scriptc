@@ -43,8 +43,14 @@ const server = net.createServer((sock) => {
 server.listen(0, "127.0.0.1", () => {
   const port = server.address().port;
   const c = net.connect(bag2(port, "127.0.0.1"));
-  c.on("data", (d) => console.log("data", d.length));
+  // TCP is a byte stream: how the payload splits across 'data' events is
+  // the transport's choice and varies run to run, so the program prints the
+  // concatenated payload once, at close.
+  const chunks = [];
+  c.on("data", (d) => chunks.push(d));
   c.on("close", () => {
+    const payload = Buffer.concat(chunks);
+    console.log("data", payload.length, payload.toString());
     server.close(() => {
       const dead = net.connect(bag2(1, "127.0.0.1"));
       dead.on("error", (e) => console.log("error", e.message.replace(/:\d+$/, ":PORT")));
