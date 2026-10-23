@@ -661,6 +661,25 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
             loc,
           });
         }
+        // An OPTIONAL member's entry renders only when the key is OWN. The
+        // slot's undefined arm cannot say that (`{a: undefined}` and `{}`
+        // both leave it there), so this asks the same node Object.keys,
+        // `in` and hasOwn ask (recordKeyPresent): the instance's own-key
+        // mask when its literal established one, the undefined-arm tag
+        // test otherwise. Before this, every record printed every declared
+        // field, `a: undefined` for a key its own Object.keys said it did
+        // not have (SEMANTICS 37 against corpus 1632's explicit undefined:
+        // the trade record-presence-two-surfaces.test.ts documented).
+        if (ft.kind === "union" && L.armTag(ft.unionId, UNDEFINED_T) >= 0) {
+          body.push({
+            kind: "if",
+            cond: { kind: "recordKeyPresent", obj: v(), shapeId: t.shapeId, field: fname, type: BOOL, loc },
+            then: [st],
+            else_: null,
+            loc,
+          });
+          continue;
+        }
         body.push(st);
       }
       for (const [fname, desc] of internalSyms) {
