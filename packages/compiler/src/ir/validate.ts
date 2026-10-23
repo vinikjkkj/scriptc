@@ -2174,7 +2174,10 @@ function validateFunction(
       case "varRef": {
         const binding = locals.get(e.localId) ?? globals.get(e.localId);
         if (!binding) err(`varRef to undeclared local/global "${e.localId}"`, e.loc);
-        else if (!typeEquals(binding.type, e.type)) {
+        else if (e.nullTest) {
+          if (e.type.kind !== "bool") err(`varRef nullTest must be bool, got ${e.type.kind}`, e.loc);
+          if (!isRefCounted(binding.type)) err(`varRef nullTest on non-pointer binding "${e.localId}"`, e.loc);
+        } else if (!typeEquals(binding.type, e.type)) {
           err(`varRef "${e.localId}" type ${e.type.kind} != binding ${binding.type.kind}`, e.loc);
         }
         break;
@@ -2294,8 +2297,17 @@ function validateFunction(
         // Statements in an expression: straight-line writes only — no
         // control flow, no jumps (the C emission point is mid-expression).
         const allowed = new Set(["varDecl", "assign", "exprStmt", "fieldSet", "recordSet", "recordKeySet", "recordKeyDelete", "arraySet", "bytesSet", "block"]);
+        // The one branch admitted: a GUARD, `if (c) {} else { throw-fence }`.
+        // Its cold side leaves the region by unwinding, exactly like a throw
+        // anywhere else in an expression.
+        const isGuard = (s: IrStmt): boolean =>
+          s.kind === "if" && s.then.length === 0 && s.else_ !== null && s.else_.length === 1 && s.else_[0]!.kind === "runtimeFence";
         const flat = (ss: IrStmt[]): void => {
           for (const s of ss) {
+            if (isGuard(s)) {
+              checkStmt(s);
+              continue;
+            }
             if (!allowed.has(s.kind)) {
               err(`seqExpr statement kind "${s.kind}" is not straight-line`, s.loc);
               continue;
@@ -2739,6 +2751,8 @@ function validateFunction(
           err(`arrayGet result ${e.type.kind} != element ${e.arr.type.elem.kind}`, e.loc);
         } else if (e.nanOnMiss && e.arr.type.elem.kind !== "f64") {
           err(`arrayGet nanOnMiss over ${e.arr.type.elem.kind} elements`, e.loc);
+        } else if (e.tryRef && (e.arr.type.elem.kind === "f64" || e.arr.type.elem.kind === "bool")) {
+          err(`arrayGet tryRef over ${e.arr.type.elem.kind} elements`, e.loc);
         }
         break;
       }

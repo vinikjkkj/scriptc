@@ -1532,6 +1532,7 @@ function lowerOptionalDefaultArg(
         },
         loc,
       }],
+      cold: true,
       loc,
     });
     return name;
@@ -1605,7 +1606,37 @@ function lowerOptionalDefaultArg(
       // One runtime question: an integer index inside the array that is not a
       // hole (a fractional index reads the property "1.5", i.e. undefined).
       const inRange: IrExpr = { kind: "arrIntrinsic", method: "hasIndex", receiver: arr, args: [index], type: BOOL, loc };
-      const hit: IrExpr = { kind: "arrayGet", arr, index, type: elem, loc };
+      if (typeof ctx === "object" && dynKeyIr === null && elem.kind !== "f64" && elem.kind !== "bool") {
+        // Reference element, member use: ONE miss-tolerant read into a hidden
+        // local; the hit tests it against NULL (no second bounds check), the
+        // miss is the cold throw.
+        const pc0 = ctx as { prop: string; set: boolean; callText?: string };
+        const mmsg0 = pc0.callText !== undefined ? `${pc0.callText} is not a function` : pc0.set
+          ? `Cannot set properties of undefined (setting '${pc0.prop}')`
+          : `Cannot read properties of undefined (reading '${pc0.prop}')`;
+        const h = L.declareHiddenLocal("%idxTry", elem);
+        const t0: IrExpr = {
+          kind: "seqExpr",
+          stmts: [
+            { kind: "varDecl", localId: h.id, init: { kind: "arrayGet", arr, index, type: elem, tryRef: true, loc }, loc },
+            { kind: "if", cond: ((): IrExpr => {
+              const present: IrExpr = { kind: "unary", op: "!", operand: { kind: "varRef", localId: h.id, type: BOOL, nullTest: true, loc }, type: BOOL, loc };
+              // A string element can be the ABSENT string (a split capture that
+              // did not participate): a non-NULL sentinel that reads as a miss.
+              if (elem.kind !== "string") return present;
+              return {
+                kind: "logical", op: "&&", left: present,
+                right: { kind: "unary", op: "!", type: BOOL, loc, operand: { kind: "libCall", fn: "str.isAbsent", args: [{ kind: "varRef", localId: h.id, type: elem, loc }], type: BOOL, loc } },
+                type: BOOL, loc,
+              };
+            })(), then: [], else_: [strandTrap(mmsg0, loc)], loc },
+          ],
+          result: { kind: "varRef", localId: h.id, type: elem, loc }, type: elem, loc,
+        };
+        L.lyingResults.add(t0);
+        return t0;
+      }
+      const hit: IrExpr = { kind: "arrayGet", arr, index, type: elem, inRange: true, loc };
       let miss: IrExpr;
       if (isNum()) {
         miss = { kind: "numLit", value: NaN, type: F64, loc };
@@ -1622,7 +1653,7 @@ function lowerOptionalDefaultArg(
         if (!mname) {
           mname = `%arr.idxMiss.${L.arrHofHelpers.size}`;
           L.arrHofHelpers.set(mkey, mname);
-          L.liftedFns.push({ name: mname, params: [], returnType: elem, locals: [], body: [strandTrap(mmsg, loc)], loc });
+          L.liftedFns.push({ name: mname, params: [], returnType: elem, locals: [], body: [strandTrap(mmsg, loc)], cold: true, loc });
         }
         miss = { kind: "call", callee: mname, args: [], type: elem, loc };
         }
@@ -1642,30 +1673,22 @@ function lowerOptionalDefaultArg(
       const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
       const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
       const i = ref("i.0", F64);
-      const n = ref("n.0", F64);
-      const lt = (l: IrExpr, r: IrExpr): IrExpr => ({ kind: "bin", op: "<", left: l, right: r, type: BOOL, loc });
       const missStmt: IrStmt = isNum()
         ? { kind: "return", value: num(NaN), loc }
         : dynKeyIr !== null
           ? { kind: "return", value: { kind: "call", callee: idxMissKeyHelper(L, elem, dynKeyIr.type, (ctx as { set: boolean }).set, loc), args: [ref("k.0", dynKeyIr.type)], type: elem, loc }, loc }
           : strandTrap(msg, loc);
+      // One inline question (an integer index naming an element, not a hole),
+      // predicted true; the miss is the cold side.
+      const has: IrExpr = { kind: "arrIntrinsic", method: "hasIndex", receiver: ref("a.0", arrT), args: [i], type: BOOL, loc };
       const body: IrStmt[] = [
-        readLenStmt(arrT, loc),
-        { kind: "if", cond: { kind: "unary", op: "!", operand: { kind: "bin", op: ">=", left: i, right: num(0), type: BOOL, loc }, type: BOOL, loc }, then: [missStmt], else_: null, loc },
-        { kind: "if", cond: { kind: "bin", op: ">=", left: i, right: n, type: BOOL, loc }, then: [missStmt], else_: null, loc },
-        {
-          kind: "if",
-          cond: lt({ kind: "libCall", fn: "math.floor", args: [i], type: F64, loc }, i),
-          then: [missStmt],
-          else_: null,
-          loc,
-        },
+        { kind: "if", cond: has, then: [], else_: [missStmt], loc },
         ...(elem.kind === "string" ? [{
           kind: "if" as const,
           cond: { kind: "libCall" as const, fn: "str.isAbsent" as const, args: [{ kind: "arrayGet" as const, arr: ref("a.0", arrT), index: i, type: elem, loc }], type: BOOL, loc },
           then: [missStmt], else_: null, loc,
         }] : []),
-        { kind: "return", value: { kind: "arrayGet", arr: ref("a.0", arrT), index: i, type: elem, loc }, loc },
+        { kind: "return", value: { kind: "arrayGet", arr: ref("a.0", arrT), index: i, type: elem, ...(elem.kind === "f64" || elem.kind === "bool" ? { inRange: true as const } : {}), loc }, loc },
       ];
       L.liftedFns.push({
         name,
@@ -1678,7 +1701,6 @@ function lowerOptionalDefaultArg(
         locals: [
           { id: "a.0", name: "a", type: arrT, mutable: true },
           { id: "i.0", name: "i", type: F64, mutable: true },
-          { id: "n.0", name: "n", type: F64, mutable: false },
           ...(dynKeyIr !== null ? [{ id: "k.0", name: "k", type: dynKeyIr.type, mutable: false }] : []),
         ],
         body,

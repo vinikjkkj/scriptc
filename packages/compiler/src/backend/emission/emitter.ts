@@ -2896,7 +2896,7 @@ export class CEmitter {
     // Lifted functions receive their closure first.
     if (fn.captures !== undefined) parts.unshift("ScrClosure *sc_env");
     const params = parts.length ? parts.join(", ") : "void";
-    return `${this.link}${cType(fn.returnType)} ${mangleFunction(fn.name)}(${params})`;
+    return `${fn.cold ? "__attribute__((cold, noinline)) " : ""}${this.link}${cType(fn.returnType)} ${mangleFunction(fn.name)}(${params})`;
   }
 
   emitFunction(fn: IrFunction): void {

@@ -1284,6 +1284,9 @@ struct ScrDyn *scr_error_ext_dyn(ScrError *e, const ScrStr *key);
 void scr_throw_errno_error(int err_no, const char *code, const char *message, size_t len, const char *syscall,
                            const char *path, const char *dest);
 ScrStr *scr_error_code(ScrError *e);
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((cold))
+#endif
 void scr_throw_error_msg_code(int kind, const char *message, size_t len, const char *code);
 /* scr_trap_fmt's catchable twin (SC9003): vsnprintf's `fmt`/varargs into a
  * stack buffer, then scr_throw_error_msg_code with the result. Built for
@@ -1762,8 +1765,46 @@ double scr_math_ceil(double x);
 double scr_arr_get_f64(ScrArr *a, double i); /* trap OOB */
 double scr_arr_get_f64_nan(ScrArr *a, double i); /* NaN on a miss */
 bool scr_arr_get_bool(ScrArr *a, double i);  /* trap OOB */
-bool scr_arr_has_index(ScrArr *a, double i); /* i is an element index (not a hole) */
+/* `a[i]` names an element: an integer index in [0, len). Inline and branch-
+ * predicted for the HIT: the miss (Node's undefined) is the cold side of
+ * every consumer. Holes are not asked here - the read that follows traps an
+ * absent slot exactly as an unguarded read does. */
+static inline bool scr_arr_has_index(const ScrArr *a, double i) {
+  bool ok = false;
+  if (i >= 0.0 && i < 9007199254740992.0) {
+    int64_t n = (int64_t)i;
+    ok = (double)n == i && (uint64_t)n < (uint64_t)a->len;
+  }
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_expect(ok, 1);
+#else
+  return ok;
+#endif
+}
+/* The reference-element twin: the slot must also be non-NULL (a hole reads
+ * undefined in Node; the checked read would refuse it). One more load of the
+ * slot the read that follows needs anyway. */
+static inline bool scr_arr_has_index_ref(const ScrArr *a, double i) {
+  bool ok = false;
+  if (i >= 0.0 && i < 9007199254740992.0) {
+    int64_t n = (int64_t)i;
+    ok = (double)n == i && (uint64_t)n < (uint64_t)a->len && a->data[n] != 0;
+  }
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_expect(ok, 1);
+#else
+  return ok;
+#endif
+}
+/* The reads behind a proven scr_arr_has_index: no bounds check, no call. */
+static inline double scr_arr_nochk_f64(const ScrArr *a, double i) {
+  double v;
+  memcpy(&v, &a->data[(size_t)i], sizeof v);
+  return v;
+}
+static inline bool scr_arr_nochk_bool(const ScrArr *a, double i) { return a->data[(size_t)i] != 0; }
 void *scr_arr_get_ref(ScrArr *a, double i);  /* trap OOB/ABSENT; returns +1 */
+void *scr_arr_try_ref(ScrArr *a, double i);  /* NULL on OOB/ABSENT; else +1 */
 /* get_ref's copy twin: an ABSENT slot copies through as absent instead of
  * trapping. Only the emitters' spread / pushSpread loops use it. +1. */
 void *scr_arr_copy_ref(ScrArr *a, double i);
