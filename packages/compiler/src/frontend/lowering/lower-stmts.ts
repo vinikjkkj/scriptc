@@ -5793,24 +5793,23 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
       // the next body, exactly JS's grouped-case idiom.
       const groups: { tests: IrExpr[]; body: IrStmt[]; isDefault: boolean }[] = [];
       let pendingTests: IrExpr[] = [];
+      let pendingImpure: ts.Node | null = null;
       for (let i = 0; i < clauses.length; i++) {
         const clause = clauses[i]!;
         if (ts.isCaseClause(clause)) {
           const test = L.lowerExpr(clause.expression);
-          // Case tests must be side-effect-free (literals or plain reads):
-          // the chain evaluates exactly the tests JS would EXCEPT those of
-          // a default-sharing group (dropped — the shared body is the
-          // final else, so matching them changes nothing when pure).
+          // The chain evaluates the tests JS would, in JS's order, each at most
+          // once — EXCEPT those of a default-sharing group, which are dropped
+          // (the shared body is the final else, so matching them changes
+          // nothing when they are pure). Only a dropped test has to be
+          // side-effect-free (literals or plain reads); the check runs where
+          // the group is known to be one (below).
           if (
             test.kind !== "strLit" && test.kind !== "numLit" &&
             test.kind !== "boolLit" && test.kind !== "unitLit" &&
-            !pureReemittable(test)
+            !pureReemittable(test) && pendingImpure === null
           ) {
-            L.unsupported(
-              "SC1090",
-              clause.expression,
-              "effectful case tests in a union-typed switch (bind the test value to a const first)",
-            );
+            pendingImpure = clause.expression;
           }
           // A unit-literal test takes the unit-comparison lowering: a tag
           // test when the arm exists, the constant FALSE when the union
@@ -5862,9 +5861,17 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
             "fall-through between case bodies in a union-typed switch (end each case with break/return/throw/continue)",
           );
         }
+        if (isDefault && pendingImpure !== null) {
+          L.unsupported(
+            "SC1090",
+            pendingImpure,
+            "effectful case tests that share a body with 'default' in a union-typed switch (the shared body is the chain's final else, so the test would never run — bind the test value to a const first)",
+          );
+        }
         const body = lowerClauseBodyWithoutExitBreak(L, clause.statements);
         groups.push({ tests: pendingTests, body, isDefault });
         pendingTests = [];
+        pendingImpure = null;
       }
       // A default clause anywhere lands in the chain's final else; JS
       // reaches it only after every case test fails, which the chain
