@@ -8577,18 +8577,21 @@ ScrDyn *scr_dyn_obj_create_proto(const ScrDyn *proto) {
  * unit cannot be called from this always-linked one. */
 double scr_dyn_index_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt,
                          const char *what) {
+  (void)what;
   if (i >= argc || args[i]->kind == SCR_DYN_UNDEF) return dflt;
   if (args[i]->kind == SCR_DYN_NUM) {
     double n = args[i]->v.num;
     if (n != n) return 0;
     return trunc(n);
   }
-  ScrJsonBuf b;
-  scr_jb_init(&b);
-  scr_jb_puts(&b, what);
-  scr_jb_puts(&b, ": non-number index arguments on a dynamic receiver are not supported yet");
-  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
-  return 0;
+  /* ToIntegerOrInfinity is ToNumber first: "2", true, null and an object
+   * with a valueOf all convert, exactly as in Node. This used to refuse
+   * every non-number with a loud TypeError, which made `b.slice("1")` and
+   * `b.fill(0, null)` throw where Node answers. A value ToNumber cannot
+   * convert (a bigint, a symbol) throws from scr_dyn_to_number. */
+  double n = scr_dyn_to_number(args[i]);
+  if (scr_exc_pending()) return 0;
+  return n != n ? 0 : trunc(n);
 }
 
 /* Names Uint8Array.prototype and %TypedArray%.prototype declare BEYOND
@@ -8606,11 +8609,12 @@ double scr_dyn_index_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt
  * has it and scriptc doesn't -- when the true answer for this target is
  * Node doesn't have it either. See scr_u8_build's matching omission. */
 static bool scr_dyn_bytes_proto_name(const char *m) {
-  static const char *names[] = { "slice", "at", "indexOf", "lastIndexOf", "includes", "join",
-    "forEach", "map", "filter", "some", "every", "find", "findIndex", "findLast",
-    "findLastIndex", "reverse", "fill", "set", "subarray", "sort", "keys", "values", "entries",
-    "reduce", "reduceRight", "copyWithin", "toReversed", "toSorted", "with", "toString",
-    "toLocaleString", NULL };
+  /* Every other %TypedArray%.prototype name is IMPLEMENTED in
+   * scr_dyn_bytes_method now (the tbm_* block). What is left is the
+   * iterator trio, which cannot be a plain value in this tier (a live
+   * iterator has no representation; the compiler drains it where it is
+   * made), and toLocaleString, which is locale-dependent. */
+  static const char *names[] = { "keys", "values", "entries", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (strcmp(m, names[i]) == 0) return true;
   return false;
 }
@@ -8733,6 +8737,691 @@ static ScrStr *scr_dyn_bytes_enc_canon(const ScrStr *raw) {
   return NULL;
 }
 
+/* ── the typed-array methods on a BYTES receiver (all of them) ─────────
+ *
+ * This block is the other half of scr_dyn_bytes_method below. That
+ * function answered at / slice / subarray / set / toString and fenced the
+ * rest of the typed-array surface by name — `Uint8Array.prototype.fill`
+ * on a dynamic value threw "is not supported yet" where Node answers, and
+ * so did join, indexOf, forEach, map, sort and a dozen more. They are
+ * ordinary algorithms over a fixed-length run of unsigned bytes, so they
+ * are written once, here, in the spec's order of coercions:
+ *
+ *   - every index argument is ToIntegerOrInfinity(ToNumber(x)), clamped
+ *     the way the method's own relative-index rule says (the arguments
+ *     used to be accepted only when they were already numbers);
+ *   - a value stored into the array is ToNumber'd first and then wrapped
+ *     by the element write (scr_bytes_set — the static tier's routine);
+ *   - a callback is checked callable BEFORE any element is read, with
+ *     V8's own CalledNonCallable text (scr_dyn_cb_check);
+ *   - results are fresh typed arrays: the receiver's species for the
+ *     methods that build through it (slice, map, filter — a Buffer stays a
+ *     Buffer) and a plain Uint8Array for the three that build the SAME
+ *     TYPE without consulting it (toReversed, toSorted, with — measured on
+ *     Node v24.15.0: Buffer.from([1]).toReversed() is a Uint8Array).
+ *
+ * A Buffer is the one receiver whose fill / indexOf / lastIndexOf /
+ * includes are NOT the typed-array methods: Buffer.prototype overrides
+ * them with the encoding-aware, byteOffset-validating family the static
+ * lowering already reaches (scr_bytes_fill_*, scr_bytes_index_of*), so a
+ * Buffer receiver is routed there with Node's argument ladder spelled out
+ * at run time. Everything else a Buffer inherits unchanged. */
+
+/* The callable-callback gate, and V8's CalledNonCallable rendering — the
+ * table scr_dyn_invoke.c's array callbacks use, moved here so the typed-
+ * array callbacks (always linked) and the dispatch unit's (optional) share
+ * ONE body. `[1].forEach(x)` does not name x by its string image; it names
+ * x by its TYPE, and only the three primitive types that print short carry
+ * their value. Measured, Node v25.9.0:
+ *
+ *   {} / [] / /x/ / new Date / Object.create(null)  ->  "object"
+ *   null            -> "object null"      undefined -> "undefined"
+ *   5 / NaN / -0    -> "number 5" / "number NaN" / "number 0"
+ *   "hi" / 'a"b'    -> 'string "hi"' / 'string "a"b"'  (NOT re-escaped)
+ *   true / false    -> "boolean true" / "boolean false"
+ *   Symbol("s")     -> "symbol"           5n        -> "bigint"
+ *
+ * Every object renders as the bare word, so an object carrying a user
+ * `toString` cannot be reached through this message at all — the
+ * property that makes it safe to build while an exception is being
+ * raised. The `o.m()` spelling is a DIFFERENT template (V8's CallPrinter
+ * names the source text) and stays with dyn_throw_not_fn. */
+static void scr_dyn_notfn_buf(ScrJsonBuf *b, const ScrDyn *cb) {
+  switch (cb->kind) {
+  case SCR_DYN_UNDEF: scr_jb_puts(b, "undefined"); return;
+  case SCR_DYN_NULL: scr_jb_puts(b, "object null"); return;
+  case SCR_DYN_BOOL:
+    scr_jb_puts(b, cb->v.b ? "boolean true" : "boolean false");
+    return;
+  case SCR_DYN_NUM: {
+    scr_jb_puts(b, "number ");
+    ScrStr *s = scr_f64_to_scrstr(cb->v.num);
+    for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);
+    scr_str_release(s);
+    return;
+  }
+  case SCR_DYN_STR:
+    scr_jb_puts(b, "string \"");
+    for (size_t i = 0; i < cb->v.str->len; i++) scr_jb_putc(b, cb->v.str->data[i]);
+    scr_jb_putc(b, '"');
+    return;
+  case SCR_DYN_FUNC:
+    /* Unreachable — a FUNC is callable and returned above. */
+    scr_jb_puts(b, "function");
+    return;
+  case SCR_DYN_JSVAL:
+    /* A wrapped value that is not a function. Primitives normalize to
+     * the native kinds above when they cross, so what survives here is
+     * an engine OBJECT; asking the engine for a value image would run
+     * its ToString, which this message must not do. */
+    scr_jb_puts(b, "object");
+    return;
+  case SCR_DYN_BIG:
+    /* The bare type word — measured, and NOT the "number 5" shape the
+     * NUM arm above uses. */
+    scr_jb_puts(b, "bigint");
+    return;
+  case SCR_DYN_ARR:
+  case SCR_DYN_OBJ:
+  case SCR_DYN_BYTES:
+  case SCR_DYN_ARRBUF:
+  case SCR_DYN_HANDLE:
+  case SCR_DYN_OBJINST:
+  case SCR_DYN_MAP:
+  case SCR_DYN_PROMISE: scr_jb_puts(b, "object"); return;
+  /* The proxy's own `typeof` answer, through the ops table the dispatch
+   * unit installs: a direct call would name scr_dyn_proxy_is_function, which
+   * lives in the OPTIONAL dispatch unit — an undefined symbol in every
+   * binary that does not link it (lld-link reports it, ELF's section GC hid
+   * it). A PROXY node only exists once the table is installed. */
+  case SCR_DYN_PROXY: scr_jb_puts(b, SCR_PX->is_function(cb) ? "function" : "object"); return;
+  default: scr_jb_puts(b, "object"); return;
+  }
+}
+
+/* The callable-callback gate: JS's "<type of cb> is not a function". */
+bool scr_dyn_cb_check(const ScrDyn *cb) {
+  if (cb->kind == SCR_DYN_FUNC) return true;
+  /* An ENGINE function is callable — scr_dyn_call's JSVAL arm routes it. */
+  if (cb->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(cb, "function")) return true;
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_dyn_notfn_buf(&b, cb);
+  scr_jb_puts(&b, " is not a function");
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+  return false;
+}
+
+/* The clamp every relative-index method applies after ToIntegerOrInfinity:
+ * a negative counts from the end (floored at 0), a positive stops at len. */
+static size_t tbm_rel(double rel, size_t len) {
+  if (rel < 0) {
+    double r = (double)len + rel;
+    return r < 0 ? 0 : (size_t)r;
+  }
+  return rel > (double)len ? len : (size_t)rel;
+}
+
+static bool tbm_is_buffer(const ScrDyn *recv) {
+  return recv->buffer || recv->v.bytes->flavor == SCR_BF_BUFFER;
+}
+
+/* A fresh u8 typed array (+1, MOVED in; NULL passes through) boxed as a
+ * dyn value of the right flavor. The stamp goes on BEFORE the box is made,
+ * because the box derives its Buffer-ness from it. */
+static ScrDyn *tbm_box_new(ScrBytes *b, bool buffer) {
+  if (b == NULL) return NULL;
+  if (buffer) scr_bytes_stamp_buffer(b);
+  else scr_bytes_stamp_plain(b);
+  ScrDyn *d = scr_dyn_new_bytes_ref(b);
+  scr_bytes_release(b);
+  return d;
+}
+
+/* callback(...) with `this` bound to thisArg for the call's window. */
+static ScrDyn *tbm_call(ScrDyn *cb, ScrDyn *thisArg, ScrDyn **av, size_t n, const char *what) {
+  scr_dyn_this_push_dyn(thisArg);
+  ScrDyn *r = scr_dyn_call(cb, av, n, what);
+  scr_dyn_this_pop();
+  return r;
+}
+
+/* ── fill ─────────────────────────────────────────────────────────────── */
+
+/* Buffer.prototype.fill(value, offset, end, encoding) — Node's _fill. The
+ * value picks the path (string -> encoded pattern, a Uint8Array -> byte
+ * pattern, everything else -> ToNumber then the low byte), and the index
+ * arguments are validated as NUMBERS by Node's own ladder. */
+static ScrDyn *tbm_buffer_fill(ScrDyn *recv, ScrDyn *const *args, size_t argc) {
+  ScrBytes *b = recv->v.bytes;
+  ScrDyn *undef = scr_dyn_undefined();
+  ScrDyn *value = argc > 0 ? args[0] : undef;
+  ScrDyn *offA = argc > 1 ? args[1] : undef;
+  ScrDyn *endA = argc > 2 ? args[2] : undef;
+  ScrDyn *encA = argc > 3 ? args[3] : undef;
+  if (value->kind == SCR_DYN_STR) {
+    if (offA->kind == SCR_DYN_UNDEF || offA->kind == SCR_DYN_STR) {
+      encA = offA;
+      offA = undef;
+      endA = undef;
+    } else if (endA->kind == SCR_DYN_STR) {
+      encA = endA;
+      endA = undef;
+    }
+  } else {
+    encA = undef;
+  }
+  double nidx = 0, off = 0, end = (double)b->len;
+  if (offA->kind != SCR_DYN_UNDEF) {
+    if (offA->kind != SCR_DYN_NUM) {
+      scr_dyn_arg_type_fail("offset", "of type number", offA);
+      return NULL;
+    }
+    off = trunc(offA->v.num);
+    nidx = 1;
+    if (endA->kind != SCR_DYN_UNDEF) {
+      if (endA->kind != SCR_DYN_NUM) {
+        scr_dyn_arg_type_fail("end", "of type number", endA);
+        return NULL;
+      }
+      end = trunc(endA->v.num);
+      nidx = 2;
+    }
+  }
+  ScrBytes *r = NULL;
+  if (value->kind == SCR_DYN_STR) {
+    ScrStr *enc;
+    if (encA->kind == SCR_DYN_UNDEF) {
+      enc = scr_str_new("utf8", 4);
+    } else {
+      ScrStr *raw = scr_dyn_to_string(encA, NULL);
+      if (scr_exc_pending()) { if (raw) scr_str_release(raw); return NULL; }
+      enc = scr_dyn_bytes_enc_canon(raw);
+      scr_str_release(raw);
+      if (enc == NULL) return NULL; /* ERR_UNKNOWN_ENCODING pending */
+    }
+    r = scr_bytes_fill_str(b, value->v.str, enc, nidx, off, end);
+    scr_str_release(enc);
+  } else if (value->kind == SCR_DYN_BYTES && value->v.bytes->flavor != SCR_BF_DATAVIEW) {
+    if (value->v.bytes->len == 0 && !tbm_is_buffer(value)) {
+      /* An EMPTY plain Uint8Array pattern: Node names it by its own
+       * inspection ("Uint8Array(0) []"); the shared core's constant text is
+       * the Buffer one ("<Buffer >"), which stays right for a Buffer. */
+      static const char m[] = "The argument 'value' is invalid. Received Uint8Array(0) []";
+      scr_throw_error_msg_code(SCR_ERR_TYPE, m, sizeof m - 1, "ERR_INVALID_ARG_VALUE");
+      return NULL;
+    }
+    r = scr_bytes_fill(b, value->v.bytes, nidx, off, end);
+  } else {
+    double v = scr_dyn_to_number(value);
+    if (scr_exc_pending()) return NULL;
+    r = scr_bytes_fill_num(b, v, nidx, off, end);
+  }
+  if (r == NULL) return NULL;
+  scr_bytes_release(r); /* the helper answers the receiver +1; we answer the box */
+  return scr_dyn_retain(recv);
+}
+
+static ScrDyn *tbm_fill(ScrDyn *recv, ScrDyn *const *args, size_t argc, const char *what) {
+  if (tbm_is_buffer(recv)) return tbm_buffer_fill(recv, args, argc);
+  ScrBytes *b = recv->v.bytes;
+  /* The value is converted FIRST, once (ToNumber), then start and end. */
+  double v = scr_dyn_to_number(argc > 0 ? args[0] : scr_dyn_undefined());
+  if (scr_exc_pending()) return NULL;
+  double s = scr_dyn_index_arg(args, argc, 1, 0, what);
+  if (scr_exc_pending()) return NULL;
+  double e = scr_dyn_index_arg(args, argc, 2, (double)b->len, what);
+  if (scr_exc_pending()) return NULL;
+  size_t si = tbm_rel(s, b->len), ei = tbm_rel(e, b->len);
+  for (size_t i = si; i < ei; i++) scr_bytes_set(b, (double)i, v);
+  return scr_dyn_retain(recv);
+}
+
+/* ── indexOf / lastIndexOf / includes ─────────────────────────────────── */
+
+/* Buffer.prototype.indexOf / lastIndexOf / includes — Node's
+ * bidirectionalIndexOf: a string byteOffset is the encoding, the offset is
+ * coerced with unary + (NaN means "search everything"), and the needle is a
+ * number (its low byte), a string (encoded) or a Uint8Array. */
+static ScrDyn *tbm_buffer_search(ScrDyn *recv, ScrDyn *const *args, size_t argc, int mode) {
+  ScrBytes *b = recv->v.bytes;
+  ScrDyn *undef = scr_dyn_undefined();
+  ScrDyn *val = argc > 0 ? args[0] : undef;
+  ScrDyn *offA = argc > 1 ? args[1] : undef;
+  ScrDyn *encA = argc > 2 ? args[2] : undef;
+  if (offA->kind == SCR_DYN_STR) {
+    encA = offA;
+    offA = undef;
+  }
+  double off;
+  if (offA->kind == SCR_DYN_NUM) {
+    off = offA->v.num;
+    if (off > 2147483647.0) off = 2147483647.0;
+    else if (off < -2147483648.0) off = -2147483648.0;
+  } else {
+    off = scr_dyn_to_number(offA);
+    if (scr_exc_pending()) return NULL;
+    if (off > 2147483647.0) off = 2147483647.0;
+    else if (off < -2147483648.0) off = -2147483648.0;
+  }
+  /* NaN: forward searches start at 0, backward ones at the end — the core's
+   * own NaN rule (scr_bytes_index_of). */
+  const bool fwd = mode != 1;
+  double r;
+  if (val->kind == SCR_DYN_NUM) {
+    r = scr_bytes_index_of_num(b, val->v.num, off, fwd);
+  } else {
+    if (val->kind == SCR_DYN_STR) {
+      /* An unknown encoding is ERR_UNKNOWN_ENCODING for a STRING needle
+       * only: a Uint8Array needle takes utf8 silently (Node: `ops ===
+       * undefined ? encodingsMap.utf8`), a number needle ignores it. */
+      ScrStr *e2;
+      if (encA->kind == SCR_DYN_UNDEF) {
+        e2 = scr_str_new("utf8", 4);
+      } else {
+        ScrStr *raw = scr_dyn_to_string(encA, NULL);
+        if (scr_exc_pending()) { if (raw) scr_str_release(raw); return NULL; }
+        e2 = scr_dyn_bytes_enc_canon(raw);
+        scr_str_release(raw);
+        if (e2 == NULL) return NULL; /* ERR_UNKNOWN_ENCODING pending */
+      }
+      ScrBytes *needle = scr_bytes_from_str(val->v.str, e2);
+      const bool u16 = e2->len == 7 && memcmp(e2->data, "utf16le", 7) == 0;
+      r = scr_bytes_index_of(b, needle, off, u16 ? 2 : 1, fwd);
+      scr_bytes_release(needle);
+      scr_str_release(e2);
+    } else if (val->kind == SCR_DYN_BYTES && val->v.bytes->flavor != SCR_BF_DATAVIEW) {
+      r = scr_bytes_index_of(b, val->v.bytes, off, 1, fwd);
+    } else {
+      scr_dyn_arg_type_fail("value", "one of type number or string or an instance of Buffer or Uint8Array", val);
+      return NULL;
+    }
+  }
+  return mode == 2 ? scr_dyn_new_bool(r != -1) : scr_dyn_new_num(r);
+}
+
+/* TypedArray.prototype.indexOf / lastIndexOf / includes: strict equality
+ * (includes: SameValueZero, which differs only for NaN, and no element is
+ * NaN). Only a Number needle can ever match a byte. */
+static ScrDyn *tbm_search(ScrDyn *recv, ScrDyn *const *args, size_t argc, const char *what, int mode) {
+  if (tbm_is_buffer(recv)) return tbm_buffer_search(recv, args, argc, mode);
+  ScrBytes *b = recv->v.bytes;
+  const size_t len = b->len;
+  ScrDyn *search = argc > 0 ? args[0] : scr_dyn_undefined();
+  if (len == 0) return mode == 2 ? scr_dyn_new_bool(false) : scr_dyn_new_num(-1);
+  const bool numeric = search->kind == SCR_DYN_NUM;
+  const double want = numeric ? search->v.num : 0;
+  if (mode == 1) {
+    /* lastIndexOf: an ABSENT fromIndex is len-1; an explicit undefined is
+     * ToIntegerOrInfinity(undefined) = 0. */
+    double n = (double)len - 1;
+    if (argc > 1) {
+      ScrDyn *fa = args[1];
+      double t = scr_dyn_to_number(fa);
+      if (scr_exc_pending()) return NULL;
+      n = (t != t) ? 0 : trunc(t);
+    }
+    (void)what;
+    if (n == -INFINITY) return scr_dyn_new_num(-1);
+    double k = n >= 0 ? (n < (double)len - 1 ? n : (double)len - 1) : (double)len + n;
+    if (!numeric || k < 0) return scr_dyn_new_num(-1);
+    for (size_t i = (size_t)k + 1; i-- > 0;) {
+      if ((double)b->data[i] == want) return scr_dyn_new_num((double)i);
+    }
+    return scr_dyn_new_num(-1);
+  }
+  double n = scr_dyn_index_arg(args, argc, 1, 0, what);
+  if (scr_exc_pending()) return NULL;
+  if (n == INFINITY) return mode == 2 ? scr_dyn_new_bool(false) : scr_dyn_new_num(-1);
+  size_t k = n >= 0 ? (size_t)(n < (double)len ? n : (double)len) : tbm_rel(n, len);
+  if (numeric) {
+    for (size_t i = k; i < len; i++) {
+      if ((double)b->data[i] == want) return mode == 2 ? scr_dyn_new_bool(true) : scr_dyn_new_num((double)i);
+    }
+  }
+  return mode == 2 ? scr_dyn_new_bool(false) : scr_dyn_new_num(-1);
+}
+
+/* ── join ─────────────────────────────────────────────────────────────── */
+
+static ScrDyn *tbm_join(ScrDyn *recv, ScrDyn *const *args, size_t argc) {
+  ScrBytes *b = recv->v.bytes;
+  ScrStr *sep;
+  if (argc > 0 && args[0]->kind != SCR_DYN_UNDEF) {
+    sep = scr_dyn_string_coerce_js(args[0]);
+    if (sep == NULL) return NULL;
+  } else {
+    sep = scr_str_new(",", 1);
+  }
+  ScrJsonBuf jb;
+  scr_jb_init(&jb);
+  for (size_t i = 0; i < b->len; i++) {
+    if (i > 0) scr_jb_write(&jb, sep->data, sep->len);
+    char n[8];
+    snprintf(n, sizeof n, "%u", (unsigned)b->data[i]);
+    scr_jb_puts(&jb, n);
+  }
+  scr_str_release(sep);
+  ScrStr *out = scr_jb_finish(&jb);
+  ScrDyn *d = scr_dyn_new_str(out);
+  scr_str_release(out);
+  return d;
+}
+
+/* ── the callback family ──────────────────────────────────────────────── */
+
+typedef enum {
+  TBM_FOREACH, TBM_MAP, TBM_FILTER, TBM_SOME, TBM_EVERY, TBM_FIND, TBM_FINDINDEX,
+  TBM_FINDLAST, TBM_FINDLASTINDEX
+} TbmIter;
+
+static ScrDyn *tbm_iterate(ScrDyn *recv, ScrDyn *const *args, size_t argc, TbmIter m) {
+  ScrBytes *b = recv->v.bytes;
+  ScrDyn *cb = argc > 0 ? args[0] : scr_dyn_undefined();
+  if (!scr_dyn_cb_check(cb)) return NULL;
+  ScrDyn *thisArg = argc > 1 ? args[1] : scr_dyn_undefined();
+  const size_t len = b->len;
+  const bool rev = m == TBM_FINDLAST || m == TBM_FINDLASTINDEX;
+  ScrBytes *mapped = NULL;
+  uint8_t *kept = NULL;
+  size_t nkept = 0;
+  if (m == TBM_MAP) {
+    mapped = scr_bytes_new(SCR_BYTES_U8, (double)len);
+    if (mapped == NULL) return NULL;
+  } else if (m == TBM_FILTER && len > 0) {
+    kept = (uint8_t *)malloc(len);
+    if (kept == NULL) scr_json_oom();
+  }
+  ScrDyn *result = NULL;
+  bool done = false;
+  for (size_t step = 0; step < len && !done; step++) {
+    const size_t i = rev ? len - 1 - step : step;
+    ScrDyn *item = scr_dyn_new_num((double)b->data[i]);
+    ScrDyn *idx = scr_dyn_new_num((double)i);
+    ScrDyn *av[3] = { item, idx, recv };
+    ScrDyn *r = tbm_call(cb, thisArg, av, 3, "callback");
+    if (r == NULL) {
+      scr_dyn_release(item);
+      scr_dyn_release(idx);
+      scr_bytes_release(mapped);
+      free(kept);
+      return NULL;
+    }
+    switch (m) {
+    case TBM_FOREACH: break;
+    case TBM_MAP: {
+      double v = scr_dyn_to_number(r);
+      if (scr_exc_pending()) {
+        scr_dyn_release(r); scr_dyn_release(item); scr_dyn_release(idx);
+        scr_bytes_release(mapped);
+        return NULL;
+      }
+      scr_bytes_set(mapped, (double)i, v);
+      break;
+    }
+    case TBM_FILTER:
+      if (scr_dyn_truthy(r)) kept[nkept++] = b->data[i];
+      break;
+    case TBM_SOME:
+      if (scr_dyn_truthy(r)) { result = scr_dyn_new_bool(true); done = true; }
+      break;
+    case TBM_EVERY:
+      if (!scr_dyn_truthy(r)) { result = scr_dyn_new_bool(false); done = true; }
+      break;
+    case TBM_FIND:
+    case TBM_FINDLAST:
+      if (scr_dyn_truthy(r)) { result = scr_dyn_retain(item); done = true; }
+      break;
+    case TBM_FINDINDEX:
+    case TBM_FINDLASTINDEX:
+      if (scr_dyn_truthy(r)) { result = scr_dyn_new_num((double)i); done = true; }
+      break;
+    }
+    scr_dyn_release(r);
+    scr_dyn_release(item);
+    scr_dyn_release(idx);
+  }
+  if (done) { scr_bytes_release(mapped); free(kept); return result; }
+  switch (m) {
+  case TBM_FOREACH: return scr_dyn_retain(scr_dyn_undefined());
+  case TBM_MAP: return tbm_box_new(mapped, tbm_is_buffer(recv));
+  case TBM_FILTER: {
+    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)nkept);
+    if (out != NULL && nkept > 0) memcpy(out->data, kept, nkept);
+    free(kept);
+    return tbm_box_new(out, tbm_is_buffer(recv));
+  }
+  case TBM_SOME: return scr_dyn_new_bool(false);
+  case TBM_EVERY: return scr_dyn_new_bool(true);
+  case TBM_FIND:
+  case TBM_FINDLAST: return scr_dyn_retain(scr_dyn_undefined());
+  case TBM_FINDINDEX:
+  case TBM_FINDLASTINDEX: return scr_dyn_new_num(-1);
+  }
+  return NULL;
+}
+
+/* reduce / reduceRight(callback, initialValue): callback(acc, v, i, recv). */
+static ScrDyn *tbm_reduce(ScrDyn *recv, ScrDyn *const *args, size_t argc, bool right) {
+  ScrBytes *b = recv->v.bytes;
+  ScrDyn *cb = argc > 0 ? args[0] : scr_dyn_undefined();
+  if (!scr_dyn_cb_check(cb)) return NULL;
+  const size_t len = b->len;
+  size_t step = 0;
+  ScrDyn *acc;
+  if (argc > 1) {
+    acc = scr_dyn_retain(args[1]);
+  } else {
+    if (len == 0) {
+      static const char msg[] = "Reduce of empty array with no initial value";
+      scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+      return NULL;
+    }
+    acc = scr_dyn_new_num((double)b->data[right ? len - 1 : 0]);
+    step = 1;
+  }
+  for (; step < len; step++) {
+    const size_t i = right ? len - 1 - step : step;
+    ScrDyn *item = scr_dyn_new_num((double)b->data[i]);
+    ScrDyn *idx = scr_dyn_new_num((double)i);
+    ScrDyn *av[4] = { acc, item, idx, recv };
+    ScrDyn *r = tbm_call(cb, scr_dyn_undefined(), av, 4, "callback");
+    scr_dyn_release(item);
+    scr_dyn_release(idx);
+    scr_dyn_release(acc);
+    if (r == NULL) return NULL;
+    acc = r;
+  }
+  return acc;
+}
+
+/* ── reverse / sort / toReversed / toSorted / with / copyWithin ──────── */
+
+typedef struct {
+  ScrDyn *cmp; /* NULL: numeric ascending */
+  bool failed;
+} TbmSort;
+
+static int tbm_sort_compare(TbmSort *c, uint8_t x, uint8_t y) {
+  if (c->cmp == NULL) return x < y ? -1 : (x > y ? 1 : 0);
+  ScrDyn *ax = scr_dyn_new_num((double)x);
+  ScrDyn *ay = scr_dyn_new_num((double)y);
+  ScrDyn *av[2] = { ax, ay };
+  ScrDyn *r = tbm_call(c->cmp, scr_dyn_undefined(), av, 2, "comparefn");
+  scr_dyn_release(ax);
+  scr_dyn_release(ay);
+  if (r == NULL) { c->failed = true; return 0; }
+  double v = scr_dyn_to_number(r);
+  scr_dyn_release(r);
+  if (scr_exc_pending()) { c->failed = true; return 0; }
+  return v < 0 ? -1 : (v > 0 ? 1 : 0); /* NaN counts as 0 */
+}
+
+/* Stable merge sort of work[0, n) through `aux`. False when the comparator
+ * (or its ToNumber) threw: the spec sorts a COPY and writes it back only on
+ * success, so a failure leaves the receiver untouched. */
+static bool tbm_merge_sort(TbmSort *c, uint8_t *work, uint8_t *aux, size_t lo, size_t hi) {
+  if (hi - lo < 2) return true;
+  size_t mid = lo + (hi - lo) / 2;
+  if (!tbm_merge_sort(c, work, aux, lo, mid)) return false;
+  if (!tbm_merge_sort(c, work, aux, mid, hi)) return false;
+  size_t i = lo, j = mid, k = lo;
+  while (i < mid && j < hi) {
+    int r = tbm_sort_compare(c, work[i], work[j]);
+    if (c->failed) return false;
+    aux[k++] = r <= 0 ? work[i++] : work[j++];
+  }
+  while (i < mid) aux[k++] = work[i++];
+  while (j < hi) aux[k++] = work[j++];
+  memcpy(work + lo, aux + lo, hi - lo);
+  return true;
+}
+
+/* V8's NoSideEffectsToString for the one message below that quotes its
+ * offender: primitives print their string image, an array and the other
+ * builtin objects their [object Tag], a plain object `#<Object>`. Never
+ * runs user code. */
+static void tbm_diag(ScrJsonBuf *b, const ScrDyn *d) {
+  switch (d->kind) {
+  case SCR_DYN_NULL: scr_jb_puts(b, "null"); return;
+  case SCR_DYN_UNDEF: scr_jb_puts(b, "undefined"); return;
+  case SCR_DYN_BOOL: scr_jb_puts(b, d->v.b ? "true" : "false"); return;
+  case SCR_DYN_NUM: {
+    ScrStr *s = scr_f64_to_scrstr(d->v.num);
+    scr_jb_write(b, s->data, s->len);
+    scr_str_release(s);
+    return;
+  }
+  case SCR_DYN_STR: scr_jb_write(b, d->v.str->data, d->v.str->len); return;
+  case SCR_DYN_BIG: {
+    ScrStr *s = scr_dyn_big_ops()->to_str(d->v.big, 10);
+    scr_jb_write(b, s->data, s->len);
+    scr_str_release(s);
+    return;
+  }
+  case SCR_DYN_ARR: scr_jb_puts(b, "[object Array]"); return;
+  case SCR_DYN_BYTES:
+    scr_jb_puts(b, d->v.bytes->flavor == SCR_BF_DATAVIEW ? "[object DataView]" : "[object Uint8Array]");
+    return;
+  case SCR_DYN_ARRBUF: scr_jb_puts(b, "[object ArrayBuffer]"); return;
+  case SCR_DYN_PROMISE: scr_jb_puts(b, "[object Promise]"); return;
+  case SCR_DYN_MAP: scr_jb_puts(b, d->v.map.tkey[0] == 's' ? "[object Set]" : "[object Map]"); return;
+  case SCR_DYN_HANDLE:
+    scr_jb_puts(b, d->v.handle.tag == SCR_DYNH_REGEX ? "[object RegExp]"
+                   : d->v.handle.tag == SCR_DYNH_DATE ? "[object Date]" : "#<Object>");
+    return;
+  default: scr_jb_puts(b, "#<Object>"); return;
+  }
+}
+
+/* V8's TypeError for a sort/toSorted comparator that is neither undefined
+ * nor a function: the message quotes the offender through
+ * NoSideEffectsToString. ONE body for the array and typed-array forms. */
+void scr_dyn_comparefn_throw(const ScrDyn *cmp) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, "The comparison function must be either a function or undefined: ");
+  tbm_diag(&b, cmp);
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+}
+
+/* The comparator argument shared by sort and toSorted: undefined, or a
+ * function; anything else is V8's TypeError, thrown before any work. */
+static bool tbm_sort_arg(ScrDyn *const *args, size_t argc, ScrDyn **cmp) {
+  *cmp = NULL;
+  if (argc == 0 || args[0]->kind == SCR_DYN_UNDEF) return true;
+  ScrDyn *c = args[0];
+  if (c->kind == SCR_DYN_FUNC || (c->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(c, "function"))) {
+    *cmp = c;
+    return true;
+  }
+  scr_dyn_comparefn_throw(c);
+  return false;
+}
+
+/* Sorts a copy of recv's bytes into `out` (len bytes). False on a throw. */
+static bool tbm_sorted_copy(ScrDyn *recv, ScrDyn *cmp, uint8_t *out) {
+  ScrBytes *b = recv->v.bytes;
+  if (b->len == 0) return true;
+  uint8_t *aux = (uint8_t *)malloc(b->len);
+  if (aux == NULL) scr_json_oom();
+  memcpy(out, b->data, b->len);
+  TbmSort c = { cmp, false };
+  bool ok = tbm_merge_sort(&c, out, aux, 0, b->len);
+  free(aux);
+  return ok;
+}
+
+static ScrDyn *tbm_sort(ScrDyn *recv, ScrDyn *const *args, size_t argc, bool copy) {
+  ScrDyn *cmp;
+  if (!tbm_sort_arg(args, argc, &cmp)) return NULL;
+  ScrBytes *b = recv->v.bytes;
+  if (!copy) {
+    uint8_t *tmp = b->len ? (uint8_t *)malloc(b->len) : NULL;
+    if (b->len && tmp == NULL) scr_json_oom();
+    bool ok = tbm_sorted_copy(recv, cmp, tmp);
+    if (ok && b->len) memcpy(b->data, tmp, b->len);
+    free(tmp);
+    return ok ? scr_dyn_retain(recv) : NULL;
+  }
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)b->len);
+  if (out == NULL) return NULL;
+  if (!tbm_sorted_copy(recv, cmp, out->data)) {
+    scr_bytes_release(out);
+    return NULL;
+  }
+  return tbm_box_new(out, false);
+}
+
+static ScrDyn *tbm_reverse(ScrDyn *recv, bool copy) {
+  ScrBytes *b = recv->v.bytes;
+  if (copy) {
+    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)b->len);
+    if (out == NULL) return NULL;
+    for (size_t i = 0; i < b->len; i++) out->data[i] = b->data[b->len - 1 - i];
+    return tbm_box_new(out, false);
+  }
+  for (size_t i = 0, j = b->len; i + 1 < j; i++, j--) {
+    uint8_t t = b->data[i];
+    b->data[i] = b->data[j - 1];
+    b->data[j - 1] = t;
+  }
+  return scr_dyn_retain(recv);
+}
+
+static ScrDyn *tbm_with(ScrDyn *recv, ScrDyn *const *args, size_t argc, const char *what) {
+  ScrBytes *b = recv->v.bytes;
+  double rel = scr_dyn_index_arg(args, argc, 0, 0, what);
+  if (scr_exc_pending()) return NULL;
+  double actual = rel >= 0 ? rel : (double)b->len + rel;
+  /* The value converts BEFORE the range check (a throwing valueOf wins). */
+  double v = scr_dyn_to_number(argc > 1 ? args[1] : scr_dyn_undefined());
+  if (scr_exc_pending()) return NULL;
+  if (!(actual >= 0 && actual < (double)b->len)) {
+    static const char msg[] = "Invalid typed array index";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)b->len);
+  if (out == NULL) return NULL;
+  if (b->len > 0) memcpy(out->data, b->data, b->len);
+  scr_bytes_set(out, actual, v);
+  return tbm_box_new(out, false);
+}
+
+static ScrDyn *tbm_copy_within(ScrDyn *recv, ScrDyn *const *args, size_t argc, const char *what) {
+  ScrBytes *b = recv->v.bytes;
+  double t = scr_dyn_index_arg(args, argc, 0, 0, what);
+  if (scr_exc_pending()) return NULL;
+  double s = scr_dyn_index_arg(args, argc, 1, 0, what);
+  if (scr_exc_pending()) return NULL;
+  double e = scr_dyn_index_arg(args, argc, 2, (double)b->len, what);
+  if (scr_exc_pending()) return NULL;
+  ScrBytes *r = scr_bytes_copy_within(b, t, s, e); /* the receiver +1 */
+  scr_bytes_release(r);
+  return scr_dyn_retain(recv);
+}
+
 /* Every typed-array METHOD, over a BYTES receiver — the ONE body, and
  * the reason it lives in this unit rather than in scr_dyn_invoke.c: the
  * %TypedArray%.prototype thunks below are reachable from an
@@ -8757,6 +9446,29 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
     if (idx < 0 || idx >= (double)blen) return scr_dyn_retain(scr_dyn_undefined());
     return scr_dyn_new_num((double)bytes->data[(size_t)idx]);
   }
+  /* The rest of the typed-array surface (the tbm_* block above). */
+  if (strcmp(method, "fill") == 0) return tbm_fill(recv, args, argc, what);
+  if (strcmp(method, "indexOf") == 0) return tbm_search(recv, args, argc, what, 0);
+  if (strcmp(method, "lastIndexOf") == 0) return tbm_search(recv, args, argc, what, 1);
+  if (strcmp(method, "includes") == 0) return tbm_search(recv, args, argc, what, 2);
+  if (strcmp(method, "join") == 0) return tbm_join(recv, args, argc);
+  if (strcmp(method, "forEach") == 0) return tbm_iterate(recv, args, argc, TBM_FOREACH);
+  if (strcmp(method, "map") == 0) return tbm_iterate(recv, args, argc, TBM_MAP);
+  if (strcmp(method, "filter") == 0) return tbm_iterate(recv, args, argc, TBM_FILTER);
+  if (strcmp(method, "some") == 0) return tbm_iterate(recv, args, argc, TBM_SOME);
+  if (strcmp(method, "every") == 0) return tbm_iterate(recv, args, argc, TBM_EVERY);
+  if (strcmp(method, "find") == 0) return tbm_iterate(recv, args, argc, TBM_FIND);
+  if (strcmp(method, "findIndex") == 0) return tbm_iterate(recv, args, argc, TBM_FINDINDEX);
+  if (strcmp(method, "findLast") == 0) return tbm_iterate(recv, args, argc, TBM_FINDLAST);
+  if (strcmp(method, "findLastIndex") == 0) return tbm_iterate(recv, args, argc, TBM_FINDLASTINDEX);
+  if (strcmp(method, "reduce") == 0) return tbm_reduce(recv, args, argc, false);
+  if (strcmp(method, "reduceRight") == 0) return tbm_reduce(recv, args, argc, true);
+  if (strcmp(method, "reverse") == 0) return tbm_reverse(recv, false);
+  if (strcmp(method, "toReversed") == 0) return tbm_reverse(recv, true);
+  if (strcmp(method, "sort") == 0) return tbm_sort(recv, args, argc, false);
+  if (strcmp(method, "toSorted") == 0) return tbm_sort(recv, args, argc, true);
+  if (strcmp(method, "with") == 0) return tbm_with(recv, args, argc, what);
+  if (strcmp(method, "copyWithin") == 0) return tbm_copy_within(recv, args, argc, what);
   if (strcmp(method, "slice") == 0 || strcmp(method, "subarray") == 0) {
     /* slice COPIES and subarray is a VIEW — JS's own split, and the one
      * the STATIC spelling has always taken (scr_bytes_subarray, chain
@@ -8770,7 +9482,11 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
     if (scr_exc_pending()) return NULL;
     double endD = scr_dyn_index_arg(args, argc, 1, (double)blen, what);
     if (scr_exc_pending()) return NULL;
-    if (method[0] == 's' && method[1] == 'u') {
+    /* Buffer.prototype.slice is subarray's deprecated alias, not the typed
+     * array's copying slice: `buf.slice(1, 3)[0] = 9` is visible in buf
+     * (measured on Node v24.15.0). Copying here made one Buffer slice
+     * answer a stale byte forever. */
+    if ((method[0] == 's' && method[1] == 'u') || tbm_is_buffer(recv)) {
       ScrBytes *view = scr_bytes_subarray(bytes, startD, endD); /* +1, aliasing */
       ScrDyn *d = scr_dyn_new_bytes_ref(view);                  /* +1 on view */
       d->buffer = recv->buffer;
@@ -8842,11 +9558,70 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
       }
       return scr_dyn_retain(scr_dyn_undefined());
     }
-    /* Every other source kind (undefined, null, a plain object with a
-     * `length`, a string) falls through to the refusal below rather than
-     * guessing: Node converts them through ToObject and reads a `length`
-     * property, and answering that from here would be a shape claim this
-     * tier has not measured. */
+    /* Every other source is ToObject'd and read as an ARRAY-LIKE (ES
+     * 23.2.3.26.2 SetTypedArrayFromArrayLike): its `length`, then each
+     * index in turn through ToNumber. undefined and null cannot be
+     * ToObject'd; a number, a boolean, a bigint and the other opaque kinds
+     * have no `length` and so set nothing; a string has one code unit per
+     * element; an object (or a function, whose `length` is its arity)
+     * answers its own `length` and indexed members. A class instance, an
+     * engine value or a proxy could carry either in ways this tier cannot
+     * read, and keep the refusal below. */
+    if (src->kind == SCR_DYN_UNDEF || src->kind == SCR_DYN_NULL) {
+      static const char m[] = "Cannot convert undefined or null to object";
+      scr_throw_error_msg(SCR_ERR_TYPE, m, sizeof m - 1);
+      return NULL;
+    }
+    const bool alStr = src->kind == SCR_DYN_STR;
+    const bool alObj = src->kind == SCR_DYN_OBJ;
+    const bool alFn = src->kind == SCR_DYN_FUNC;
+    const bool alNone = src->kind == SCR_DYN_NUM || src->kind == SCR_DYN_BOOL ||
+                        src->kind == SCR_DYN_BIG || src->kind == SCR_DYN_ARRBUF ||
+                        src->kind == SCR_DYN_MAP || src->kind == SCR_DYN_PROMISE ||
+                        (src->kind == SCR_DYN_BYTES && src->v.bytes->elem == SCR_BYTES_BUF);
+    if (alStr || alObj || alFn || alNone) {
+      double srcLen = 0;
+      if (alStr) {
+        srcLen = scr_str_utf16_len(src->v.str);
+      } else if (alObj || alFn) {
+        ScrDyn *lv = alObj ? scr_dyn_obj_key_get(src, "length", 6) : scr_dyn_fn_get(src, "length", 6);
+        if (lv == NULL && scr_exc_pending()) return NULL; /* a getter threw */
+        if (lv != NULL) {
+          double ln = scr_dyn_to_number(lv);
+          scr_dyn_release(lv);
+          if (scr_exc_pending()) return NULL;
+          /* ToLength: NaN and negatives are 0, the rest truncate, capped at 2^53-1. */
+          srcLen = (ln != ln || ln <= 0) ? 0 : (ln > 9007199254740991.0 ? 9007199254740991.0 : trunc(ln));
+        }
+      }
+      if (offD < 0 || srcLen + offD > (double)blen) {
+        scr_throw_error_msg(SCR_ERR_RANGE, "offset is out of bounds", 23);
+        return NULL;
+      }
+      size_t off = (size_t)offD;
+      for (size_t i = 0; i < (size_t)srcLen; i++) {
+        double v;
+        if (alStr) {
+          ScrStr *ch = scr_str_char_at(src->v.str, (double)i);
+          v = scr_string_to_number(ch);
+          scr_str_release(ch);
+        } else {
+          char key[32];
+          int kl = snprintf(key, sizeof key, "%zu", i);
+          ScrDyn *e = alObj ? scr_dyn_obj_key_get(src, key, (size_t)kl) : scr_dyn_fn_get(src, key, (size_t)kl);
+          if (e == NULL) {
+            if (scr_exc_pending()) return NULL;
+            v = (double)NAN; /* an absent index reads undefined, ToNumber NaN */
+          } else {
+            v = scr_dyn_to_number(e);
+            scr_dyn_release(e);
+            if (scr_exc_pending()) return NULL;
+          }
+        }
+        scr_bytes_set(bytes, (double)(off + i), v);
+      }
+      return scr_dyn_retain(scr_dyn_undefined());
+    }
   }
   if (strcmp(method, "toString") == 0) {
     /* A dyn receiver reaching `toString(enc)` through the METHOD spelling
@@ -9021,6 +9796,9 @@ static void scr_u8_put_recv(ScrJsonBuf *b, const ScrDyn *self, bool accessor) {
     scr_str_release(s);
     return;
   }
+  case SCR_DYN_BYTES: /* only a DataView gets here: a typed array is a compatible receiver */
+    scr_jb_puts(b, accessor ? "[object DataView]" : "#<DataView>");
+    return;
   default:
     break;
   }
@@ -9033,7 +9811,9 @@ static void scr_u8_put_recv(ScrJsonBuf *b, const ScrDyn *self, bool accessor) {
  * the same function object and neither is bound. */
 static ScrDyn *scr_u8_proto_forward(const char *method, ScrDyn *const *args, size_t argc) {
   ScrDyn *self = scr_dyn_this_get(); /* +1; the undefined singleton with no binding */
-  if (self->kind != SCR_DYN_BYTES) {
+  /* A DataView rides SCR_DYN_BYTES but is no typed array: V8 refuses it as
+   * an incompatible receiver, like any other non-typed-array. */
+  if (self->kind != SCR_DYN_BYTES || self->v.bytes->flavor == SCR_BF_DATAVIEW) {
     ScrJsonBuf b;
     scr_jb_init(&b);
     scr_jb_puts(&b, "Method %TypedArray%.prototype.");

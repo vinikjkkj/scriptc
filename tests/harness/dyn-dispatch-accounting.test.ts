@@ -117,7 +117,11 @@ describe("the dyn method dispatch and the fence set", () => {
   test("the extraction still finds something", () => {
     // A regex that stopped matching would make every check below vacuous.
     expect(dispatchNames.size).toBeGreaterThanOrEqual(20);
-    expect(arrUnimpl.size).toBeGreaterThanOrEqual(10);
+    // The unimplemented list shrinks as arms learn their methods (reduce,
+    // reduceRight, toReversed, toSorted and with left it when the ARR arm
+    // started answering them); the guard is against the extraction going
+    // blind, so it asks only that SOMETHING is still found.
+    expect(arrUnimpl.size).toBeGreaterThanOrEqual(5);
     expect(DYN_DISPATCH_METHODS.size).toBeGreaterThanOrEqual(50);
   });
 
