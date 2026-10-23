@@ -438,7 +438,7 @@ static int func_equiv_calendar(const DtLoc *loc, char *out, size_t cap) {
   snprintf(found, sizeof found, "%s", base);
   do {
     int res = scr_ures_bundle_open(parent);
-    int exact = scr_ures_bundle_exact(parent) >= 0 && parent[0];
+    int exact = parent[0] ? scr_ures_bundle_exact(parent) >= 0 : 1; /* "" is the root bundle, which opens exactly */
     ScrRes tmp;
     if (exact && scr_ures_bundle_own(res, "calendar", &tmp)) {
       char d[48];
@@ -458,7 +458,7 @@ static int func_equiv_calendar(const DtLoc *loc, char *out, size_t cap) {
     snprintf(found, sizeof found, "%s", base);
     do {
       int res = scr_ures_bundle_open(parent);
-      int exact = scr_ures_bundle_exact(parent) >= 0 && parent[0];
+      int exact = parent[0] ? scr_ures_bundle_exact(parent) >= 0 : 1; /* "" is the root bundle, which opens exactly */
       if (exact) {
         char path[96];
         ScrRes tmp;
