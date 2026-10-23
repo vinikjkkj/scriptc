@@ -10,7 +10,7 @@ import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
-import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
@@ -28,7 +28,7 @@ import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
-import { lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
+import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
@@ -6513,6 +6513,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
     }
     const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+    fenceObservableContainerStore(L, call, access, recvTs, args);
     // dynInvoke, NOT a keyed read plus a plain call. `o.m(x)` in JS binds
     // `o` as the callee's `this`, and a read-then-call DROPS it: the
     // member runs with the ambient receiver (undefined), so a body that
@@ -14311,3 +14312,37 @@ function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
 registerEnumRefill("obj.keys", refillObjKeysHelper);
 registerEnumRefill("obj.values", refillObjValuesHelper);
 registerEnumRefill("obj.entries", refillObjValuesHelper);
+
+
+/** `m.set(k, v)` / `m.add(v)` on an untyped Map or Set refuses a key or value
+ * that would be stored as an OBSERVABLE COPY. A static record or array
+ * crosses into the dyn container by a copy (the two representations are
+ * different memory), so the container would hold a snapshot while the
+ * program keeps mutating the original, and `m.get(k).n` would answer the
+ * stale value where Node has one object. Nothing here can alias them, so the
+ * build says so instead of storing the copy. A binding initialized by an
+ * object or array LITERAL never reaches this: markProxyBindings makes it the
+ * dyn value itself, one identity. A literal or call result is consumed by
+ * the conversion and nothing can observe the difference. */
+function fenceObservableContainerStore(
+  L: Lowerer,
+  call: ts.CallExpression,
+  access: ts.PropertyAccessExpression,
+  recvTs: ts.Type,
+  args: IrExpr[],
+): void {
+  const name = access.name.text;
+  if ((name !== "set" && name !== "add") || !isAnyDynContainer(L, recvTs)) return;
+  args.forEach((a, i) => {
+    if (a.kind === "dynFrom" && dynCopyIsObservable(a.value)) {
+      L.unsupported(
+        "SC1090",
+        call.arguments[i] ?? call,
+        `storing '${L.fmt(a.value.type)}' value '${call.arguments[i]?.getText() ?? ""}' in an untyped Map or Set ` +
+          `(the container would hold a COPY: the program keeps naming the original, so a later mutation would ` +
+          `be invisible through the container where Node has one object — bind it with an object or array ` +
+          `literal in this scope, or hold it as an untyped value)`,
+      );
+    }
+  });
+}

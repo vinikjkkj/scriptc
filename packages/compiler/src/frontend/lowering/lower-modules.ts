@@ -27,7 +27,7 @@ import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-name
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDefinitionThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
+import { isAnyDynContainer, decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDefinitionThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
@@ -125,6 +125,35 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
             L.dynProxyTargetLiterals.add(init);
             if (ts.isObjectLiteralExpression(init)) L.dynObjectLiterals.add(init);
           }
+        }
+      }
+    }
+    // `m.set(k, v)` / `m.add(v)` on an untyped (dyn-flavored) Map or Set: a
+    // value stored in a JS container keeps its identity, so an argument that
+    // NAMES a never-reassigned binding initialized by an object or array
+    // literal makes that binding the dyn value itself (one identity shared by
+    // the container and every direct use), exactly as a Proxy target does --
+    // a static record or array would be COPIED at the boundary and the
+    // container would hold a stale snapshot.
+    if (
+      ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+      (n.expression.name.text === "set" || n.expression.name.text === "add") &&
+      isAnyDynContainer(L, L.typeOf(n.expression.expression))
+    ) {
+      for (const a of n.arguments) {
+        let t: ts.Expression = a;
+        while (ts.isParenthesizedExpression(t) || ts.isAsExpression(t) || ts.isTypeAssertion(t)) t = t.expression;
+        if (!ts.isIdentifier(t)) continue;
+        const ts0 = L.checker.getSymbolAtLocation(t);
+        const decl = ts0 === undefined ? undefined : L.checker.declarationsOf(ts0)[0];
+        if (decl === undefined || !ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name) || decl.initializer === undefined) continue;
+        let init: ts.Expression = decl.initializer;
+        while (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || ts.isTypeAssertion(init)) init = init.expression;
+        if ((ts.isObjectLiteralExpression(init) || ts.isArrayLiteralExpression(init)) && bindingNeverReassigned(L, ts0!, decl)) {
+          if (!syms.includes(ts0!)) syms.push(ts0!);
+          L.dynProxyTargetLiterals.add(init);
+          if (ts.isObjectLiteralExpression(init)) L.dynObjectLiterals.add(init);
+          else L.dynArrayLiterals.add(init);
         }
       }
     }

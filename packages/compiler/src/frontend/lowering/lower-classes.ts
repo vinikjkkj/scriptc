@@ -11267,7 +11267,7 @@ function dynWeakContainer(
  * `new WeakMap()` / `new WeakSet()` is typed as? Such a value
  * is a dyn-flavored container (dynMapNew), whose box carries the Map/Set
  * method table, so a dyn slot can hold it without losing a member. */
-function isAnyDynContainer(L: Lowerer, t: ts.Type): boolean {
+export function isAnyDynContainer(L: Lowerer, t: ts.Type): boolean {
   const sym = t.getSymbol();
   if (
     sym === undefined ||
