@@ -85,13 +85,29 @@ const SHAPE = `interface M { readonly a: number; readonly b?: number; readonly c
 
 /* -- armed only where a crossing can reach ---------------------------- */
 
-test("a shape NO dynCheck materialises does not carry the mask", () => {
-  const mod = lower(`${SHAPE}
-const m: M = { a: 1 };
+test("a shape NO dynCheck materialises and with no optional member does not carry the mask", () => {
+  const mod = lower(`interface R { readonly a: number; readonly b: string }
+const m: R = { a: 1, b: "x" };
 console.log(Object.keys(m).join("|"), JSON.stringify(m));
 `);
   expect((mod.records ?? []).length).toBeGreaterThan(0);
   for (const r of mod.records ?? []) expect(r.ownmask).toBeUndefined();
+});
+
+test("a shape with an OPTIONAL member arms the mask for presence, with no source prototype", () => {
+  // The slot's undefined arm cannot tell `{a: undefined}` from `{}`; the
+  // instance's mask does (recordLit.presence). No crossing built it, so
+  // there is no chain to keep: srcproto stays off.
+  const mod = lower(`${SHAPE}
+const m: M = { a: 1 };
+console.log(Object.keys(m).join("|"), JSON.stringify(m));
+`);
+  const recs = mod.records ?? [];
+  expect(recs.length).toBeGreaterThan(0);
+  for (const r of recs) {
+    expect(r.ownmask).toBe(true);
+    expect(r.srcproto).toBeUndefined();
+  }
 });
 
 test("a shape a checked cast materialises DOES", () => {
@@ -160,17 +176,17 @@ console.log(String(ms.length));
 
 /* -- additive at the surfaces ------------------------------------------ */
 
-test("an UNARMED shape's Object.keys helper still guards on the undefined arm", () => {
-  // record-presence-two-surfaces.test.ts's node, unchanged: nothing about
-  // this program's IR moved.
+test("a shape armed only for its OPTIONAL members asks the own-key question for those", () => {
+  // The REQUIRED member pushes unconditionally here: nothing crossed, so
+  // nothing can have inherited it.
   const mod = lower(`${SHAPE}
 const m: M = { a: 1 };
 console.log(Object.keys(m).join("|"));
 `);
   const keys = keysHelper(mod);
   expect(keys).toBeDefined();
-  expect(nodesOfKind(keys!.body, "unionIsTag").length).toBe(2);
-  expect(nodesOfKind(keys!.body, "recordKeyPresent").length).toBe(0);
+  expect(nodesOfKind(keys!.body, "recordKeyPresent").length).toBe(2);
+  expect(nodesOfKind(keys!.body, "unionIsTag").length).toBe(0);
 });
 
 test("an ARMED shape's Object.keys helper asks the own-key question instead", () => {

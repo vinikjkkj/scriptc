@@ -912,8 +912,11 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           const shape = E.recordsById.get(s.shapeId);
           const bit = shape ? ownMaskKeyBit(shape, s.field) : null;
           if (bit) {
+            // `delete r.f` is the one write that REMOVES the key.
             E.line(
-              `${obj.name}->${OWNMASK_MEMBER}[${bit.byte}] |= ${bit.bit}; /* a write is an own key */`,
+              s.unset === true
+                ? `${obj.name}->${OWNMASK_MEMBER}[${bit.byte}] &= (uint8_t)~${bit.bit}; /* delete removes the own key */`
+                : `${obj.name}->${OWNMASK_MEMBER}[${bit.byte}] |= ${bit.bit}; /* a write is an own key */`,
             );
           }
         }
