@@ -11618,6 +11618,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8503-any-array-and-any-function-params.ts": {
+   "order": [
+    "<repo>/tests/corpus/8503-any-array-and-any-function-params.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
