@@ -6728,6 +6728,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_net_get_autosel_timeout()`);
           case "net.setAutoSelTimeout":
             return finish(`scr_net_set_autosel_timeout(${arg(0)})`);
+          case "netaddr.isIP":
+            return finish(`scr_netaddr_is_ip(${arg(0)})`);
+          case "netaddr.isIPv4":
+            return finish(`scr_netaddr_is_ipv4(${arg(0)})`);
+          case "netaddr.isIPv6":
+            return finish(`scr_netaddr_is_ipv6(${arg(0)})`);
           case "fs.realpathSync":
             return finish(`scr_fs_realpath(${arg(0)})`);
           case "process.kill":

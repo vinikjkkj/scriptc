@@ -2333,6 +2333,11 @@ declare module "net" {
    * like Node's. */
   export function getDefaultAutoSelectFamilyAttemptTimeout(): number;
   export function setDefaultAutoSelectFamilyAttemptTimeout(value: number): void;
+  /* The address tests (internal/net.js's regular expressions, byte-exact):
+   * 4, 6 or 0 / the two predicates. Pure string functions. */
+  export function isIP(input: string): number;
+  export function isIPv4(input: string): boolean;
+  export function isIPv6(input: string): boolean;
 }
 declare module "node:net" {
   export * from "net";
