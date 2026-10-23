@@ -11360,6 +11360,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8507-instanceof-buffer-over-any-and-bytes.ts": {
+   "order": [
+    "<repo>/tests/corpus/8507-instanceof-buffer-over-any-and-bytes.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
