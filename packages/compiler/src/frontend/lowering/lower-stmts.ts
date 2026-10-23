@@ -5,7 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
-import { BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
@@ -2142,6 +2142,42 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
         }
         return;
       }
+    }
+    // A URL source under an OBJECT pattern (`const { hostname, port } = url`):
+    // one getter read per bound name — the same libCalls the dot access
+    // builds. Methods (detached, they would lose their receiver), setters
+    // as reads and unsupported members fence by name; rest fences.
+    if (srcType.kind === "url") {
+      const URL_GETTERS = ["protocol", "pathname", "href", "host", "hostname", "search", "hash", "port", "username", "password"];
+      for (const el of pattern.elements) {
+        if (el.name === undefined) continue;
+        const loc = locOf(el);
+        if (el.dotDotDotToken) {
+          L.unsupported("SC1031", el, "rest bindings over URL sources (the instance's own properties are accessors on the prototype)");
+        }
+        const prop = el.propertyName ?? el.name;
+        const propName = ts.isIdentifier(prop) || ts.isComputedPropertyName(prop) || ts.isStringLiteralLike(prop) || ts.isNumericLiteral(prop)
+          ? patternKeyNameOf(L, prop as ts.PropertyName)
+          : null;
+        if (propName === null) {
+          L.unsupported("SC1031", el, "destructuring with computed keys that do not fold to one property name");
+        }
+        let value: IrExpr;
+        if (URL_GETTERS.includes(propName)) {
+          value = { kind: "libCall", fn: `url.${propName}` as "url.href", args: [srcRef()], type: STRING, loc };
+        } else if (propName === "searchParams") {
+          value = { kind: "libCall", fn: "url.searchParams", args: [srcRef()], type: SEARCH_PARAMS_T, loc };
+        } else {
+          L.unsupported(
+            "SC1031",
+            el,
+            `destructuring the URL member '${propName}' (protocol, pathname, href, host, hostname, search, hash, port, username, password and searchParams are the supported members)`,
+          );
+        }
+        if (el.initializer) value = applyBindingDefault(L, el, value);
+        L.bindPatternTarget(el.name, value, isLet, out);
+      }
+      return;
     }
     // A STRING source under an OBJECT pattern (`const { length } = str`):
     // JS reads through the wrapper object, whose one own DATA property is
