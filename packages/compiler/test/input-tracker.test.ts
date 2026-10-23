@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
   FRONTEND_PROBE_OPS,
   FrontendInputTracker,
+  canonicalRealpathSync,
   type FrontendInputProbe,
   type FrontendProbeOp,
   frontendInputsStillMatch,
@@ -280,6 +281,39 @@ describe("frontend input tracker", () => {
       }
       expect(uncovered, `probe ops with no case in this test: ${uncovered.join(", ")}`).toEqual([]);
       expect(wrong, `probe ops behaving wrongly:\n  ${wrong.join("\n  ")}`).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("canonicalRealpathSync follows ts.sys.realpath", () => {
+  // Simulated 8.3 alias: the native call expands it, the JS one keeps it.
+  const short = "C:/Users/RUNNER~1/AppData/Local/Temp/x";
+  const long = "C:/Users/runneradmin/AppData/Local/Temp/x";
+  const impl = {
+    native: (p: string) => (p === short ? long : p),
+    js: (p: string) => p,
+  };
+  it("expands an 8.3 alias on win32 below 260 characters", () => {
+    expect(canonicalRealpathSync(short, "win32", impl)).toBe(long);
+  });
+  it("keeps the JS realpath at 260 characters and beyond on win32", () => {
+    const deep = `${short}/${"d".repeat(260)}`;
+    expect(canonicalRealpathSync(deep, "win32", impl)).toBe(deep);
+    const edge = short + "a".repeat(259 - short.length);
+    expect(edge.length).toBe(259);
+    expect(canonicalRealpathSync(edge, "win32", { native: () => "N", js: () => "J" })).toBe("N");
+    expect(canonicalRealpathSync(edge + "a", "win32", { native: () => "N", js: () => "J" })).toBe("J");
+  });
+  it("uses the JS realpath off win32 (positive control: native would differ)", () => {
+    expect(impl.native(short)).toBe(long);
+    expect(canonicalRealpathSync(short, "linux", impl)).toBe(short);
+  });
+  it("the real default impl agrees with fs on this host", () => {
+    const dir = scratch();
+    try {
+      expect(canonicalRealpathSync(dir)).toBe(realpathSync(dir));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

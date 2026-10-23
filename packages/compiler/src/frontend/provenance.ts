@@ -29,13 +29,14 @@
  * this); unlisted packages still take the live pipeline. */
 
 import { execFile } from "node:child_process";
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { builtinModules } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import ts from "typescript5";
+import { canonicalRealpathSync } from "./input-tracker.js";
 import { resolveExports } from "./npm.js";
 import { resolveBareModule, resolveRelativeModule } from "./resolve.js";
 import { isRelativeSpecifier, tsgoPath } from "./shared.js";
@@ -1077,7 +1078,7 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
     // wants the package's lockfile).
     let requirer: string | undefined;
     try {
-      requirer = realpathSync(tree.installed.dir);
+      requirer = canonicalRealpathSync(tree.installed.dir);
     } catch {
       requirer = undefined;
     }

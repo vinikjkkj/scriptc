@@ -218,10 +218,30 @@ export function trackedExists(path: string): boolean {
   return kind !== "missing";
 }
 
+/** The realpath TypeScript's own ts.sys.realpath answers (5.9.3 sys.js
+ * fsRealpath): on win32, fs.realpathSync.native below 260 characters (it
+ * asks the OS for the final path, so it EXPANDS 8.3 short names such as
+ * C:/Users/RUNNER~1 to runneradmin), and the JS realpathSync at or past
+ * that length (the native call cannot take long paths). The JS
+ * realpathSync keeps a short-name spelling as written, so a resolver built
+ * on it names the same file differently from tsgo and TypeScript. Other
+ * platforms keep realpathSync (symlink-only there; native adds nothing). */
+export function canonicalRealpathSync(
+  path: string,
+  platform: NodeJS.Platform = process.platform,
+  impl: { native: (p: string) => string; js: (p: string) => string } = {
+    native: realpathSync.native,
+    js: realpathSync,
+  },
+): string {
+  if (platform !== "win32") return impl.js(path);
+  return path.length < 260 ? impl.native(path) : impl.js(path);
+}
+
 export function trackedRealpath(path: string): string | null {
   path = resolve(path);
   try {
-    const target = realpathSync(path);
+    const target = canonicalRealpathSync(path);
     record({ op: "realpath", path, target });
     return target;
   } catch {
@@ -340,7 +360,7 @@ export function frontendInputsStillMatch(
       }
       if (probe.op === "realpath" && probe.target === null) {
         try {
-          realpathSync(probe.path);
+          canonicalRealpathSync(probe.path);
           return generatedOnlyDirectory(probe.path);
         } catch {
           return true;
@@ -413,7 +433,7 @@ export function frontendInputsStillMatch(
       }
       case "realpath": {
         try {
-          return realpathSync(probe.path) === probe.target;
+          return canonicalRealpathSync(probe.path) === probe.target;
         } catch {
           return probe.target === null;
         }
