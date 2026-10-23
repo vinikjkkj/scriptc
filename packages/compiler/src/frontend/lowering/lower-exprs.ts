@@ -13,7 +13,7 @@ import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
-import { builtinFnValueOf, builtinMemberFnValueOf } from "./lower-fnvalue.js";
+import { builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction } from "./lower-fnvalue.js";
 import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
@@ -1361,6 +1361,23 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           // is the same identity-token story as stdlib globals above (the
           // harness adds worker_threads.Worker to its identity Set).
           if (isJsSourceFile(expr.getSourceFile())) {
+            // A FUNCTION member (`const { isIP } = require('net'); const f = isIP`)
+            // has to be a function value: the token is a string, `typeof f` says
+            // 'string', and `f(x)` throws "f is not a function" where Node
+            // answers. A member the value table covers is the same interned
+            // closure a TypeScript source gets; any other function member is
+            // refused here, at the reference, instead of being a string that
+            // fails at the call. Only the non-callable members (classes,
+            // namespaces, constants) keep the identity token.
+            if (builtinMemberIsFunction(L, expr)) {
+              const mv = builtinMemberFnValueOf(L, expr, bi, expr.text, loc);
+              if (mv) return mv;
+              L.unsupported(
+                "SC1090",
+                expr,
+                `library functions as values (call '${expr.text}' directly)`,
+              );
+            }
             return { kind: "strLit", value: `[builtin ${bi.module}.${bi.member}]`, type: STRING, loc };
           }
           // (The shape-probing diffieHellman lift that used to sit here was
@@ -1524,10 +1541,21 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         if (L.isStdlibSymbol(sym) || expr.text === "globalThis") {
           if (isJsSourceFile(expr.getSourceFile())) {
             const canonical = stdlibGlobalNameOf(L, expr) ?? expr.text;
-            return (
-              ctorObjectGlobalValue(L, canonical, loc) ??
-              { kind: "strLit", value: `[builtin ${canonical}]`, type: STRING, loc }
-            );
+            const obj = ctorObjectGlobalValue(L, canonical, loc);
+            if (obj !== null) return obj;
+            // A global FUNCTION taken as a value (`let f = setTimeout`) with no
+            // value form above: the token is a string, so `typeof f` says
+            // 'string' and `f(...)` throws where Node calls the function.
+            // Refused at the reference instead; constructors, namespaces
+            // and constants keep the identity token.
+            if (ts.isIdentifier(expr) && builtinMemberIsFunction(L, expr)) {
+              L.unsupported(
+                "SC1090",
+                expr,
+                `library functions as values (call '${expr.text}' directly)`,
+              );
+            }
+            return { kind: "strLit", value: `[builtin ${canonical}]`, type: STRING, loc };
           }
           // The families with a WHY: each hint states what makes the
           // surface genuinely non-static (or what to use instead).

@@ -473,22 +473,26 @@ export function builtinFnValueDeclType(L: Lowerer, decl: ts.VariableDeclaration)
  * row, reached through two specifiers — mint ONE function and compare
  * equal, which is what Node does (`path.dirname === path.posix.dirname`
  * is true there). */
+/** True when the checker types this builtin-module member as a plain callable:
+ * at least one call signature and no construct signature (a class such as
+ * EventEmitter or Worker has both, a namespace or a constant neither). */
+export function builtinMemberIsFunction(L: Lowerer, node: ts.Node): boolean {
+  const t = L.typeOf(node);
+  return L.checker.getCallSignatures(t).length > 0 && L.checker.getConstructSignatures(t).length === 0;
+}
+
 export function builtinMemberFnValueType(
   L: Lowerer,
   node: ts.Node,
   bi: { module: string; member: string },
 ): { want: IrType; row: BuiltinModuleFn } | null {
-  // TYPESCRIPT SOURCES ONLY, exactly like the globals table above.
-  //
-  // A JS source already has an identity story for a builtin member and it
-  // is a different one: the named-import spelling lowers to the token
-  // string `[builtin path.dirname]`. Offering a real closure for the
-  // NAMESPACE spelling and leaving the named one a token would make
-  // `path.dirname === dirname` refuse inside one file where Node answers
-  // true -- measured on a .cjs probe, which is why this guard exists
-  // rather than being assumed unnecessary. The JS lane keeps exactly the
-  // answers it had; nothing in this commit moves it.
-  if (isJsSourceFile(node.getSourceFile())) return null;
+  // BOTH SPELLINGS, in TypeScript and JavaScript sources. This used to bail
+  // for JS ("the named-import spelling lowers to the token string
+  // `[builtin path.dirname]`"), which kept the two spellings consistent only
+  // by making BOTH wrong: `typeof dirname` answered 'string' and a call through
+  // the value threw. A function member now has one value in every source,
+  // the interned closure, so `path.dirname === dirname` holds in a JS file
+  // too, and a member outside the table is refused at the reference.
   if (!builtinMemberFnValueAllowed(bi.module, bi.member)) return null;
   const row = builtinModuleFnOf(L, bi.module, bi.member);
   if (!row) return null;
