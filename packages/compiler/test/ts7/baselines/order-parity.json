@@ -11804,6 +11804,17 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8604-module-exports-is-another-required-module/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8604-module-exports-is-another-required-module/impl.js",
+    "<repo>/tests/corpus/8604-module-exports-is-another-required-module/passthrough.js",
+    "<repo>/tests/corpus/8604-module-exports-is-another-required-module/literal.js",
+    "<repo>/tests/corpus/8604-module-exports-is-another-required-module/literal-barrel.js",
+    "<repo>/tests/corpus/8604-module-exports-is-another-required-module/deep.js",
+    "<repo>/tests/corpus/8604-module-exports-is-another-required-module/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
