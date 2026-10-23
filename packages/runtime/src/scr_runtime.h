@@ -1284,9 +1284,6 @@ struct ScrDyn *scr_error_ext_dyn(ScrError *e, const ScrStr *key);
 void scr_throw_errno_error(int err_no, const char *code, const char *message, size_t len, const char *syscall,
                            const char *path, const char *dest);
 ScrStr *scr_error_code(ScrError *e);
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((cold))
-#endif
 void scr_throw_error_msg_code(int kind, const char *message, size_t len, const char *code);
 /* scr_trap_fmt's catchable twin (SC9003): vsnprintf's `fmt`/varargs into a
  * stack buffer, then scr_throw_error_msg_code with the result. Built for
