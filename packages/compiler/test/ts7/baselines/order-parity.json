@@ -11366,6 +11366,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8508-util-deprecate-wrapper.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8508-util-deprecate-wrapper.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"

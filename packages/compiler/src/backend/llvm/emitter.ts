@@ -1134,6 +1134,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "process.onWarning": "scr_process_on_warning",
   "process.offWarning": "scr_process_off_warning",
   "process.emitWarning": "scr_process_emit_warning",
+  "util.deprecationWarn": "scr_util_deprecation_warn",
   "process.onUnhandledRejection": "scr_process_on_unhandled_rejection",
   "process.offUnhandledRejection": "scr_process_off_unhandled_rejection",
   "process.onRejectionHandled": "scr_process_on_rejection_handled",
