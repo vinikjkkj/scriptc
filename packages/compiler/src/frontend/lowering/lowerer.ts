@@ -2043,6 +2043,7 @@ export class Lowerer {
       isProgramFile: (sf) => this.fileTag.has(sf),
       declFileHasCompiledImpl: (sf) => this.declTwinCompiled(sf),
       dtsWitnessClass: (t) => dtsWitnessClassOf(this, t),
+      declTwinClassDecl: (d) => this.declTwinClassDecl(d),
       accessorProducerProp: (sym) => this.accessorProducerProp(sym),
       nullPayloadPromiseProp: (sym) => this.nullPayloadPromiseProp(sym),
       unconstrainedTpArms: (tpDecl) => this.unconstrainedTpArms(tpDecl),
@@ -2203,6 +2204,15 @@ export class Lowerer {
     {
       const repointed = this.declTwinFunctionSymbol(symbol);
       if (repointed !== null) symbol = repointed;
+    }
+    // ... and the CLASS half: a class declared in the `.d.ts` re-points to the
+    // twin's compiled class, so construction, statics and `extends` land on
+    // the one class the binary holds.
+    {
+      const classDecl = this.checker.declarationsOf(symbol).find(ts.isClassDeclaration);
+      const twinClass = classDecl !== undefined ? this.declTwinClassDecl(classDecl) : null;
+      const twinSym = twinClass?.name !== undefined ? this.checker.getSymbolAtLocation(twinClass.name) : undefined;
+      if (twinSym !== undefined) symbol = twinSym;
     }
     this.flushDeferred(symbol);
     return symbol;
@@ -14933,6 +14943,47 @@ export class Lowerer {
       .declarationsOf(target)
       .some((d) => ts.isFunctionDeclaration(d) && d.body !== undefined);
     return hasFn ? target : null;
+  }
+
+  /** The compiled twin's CLASS declaration behind a class declared in a
+   * declaration file, or null. The class half of what a module exports
+   * (declTwinGlobalOf owns storage, declTwinFunctionSymbol functions): the
+   * twin's class IS the class the binary holds, so the declaration's type
+   * surface and the twin's compiled body are one class.
+   *
+   * The twin's export TABLE answers first (`exports.Box = Box`, `export class
+   * Box`), then the structural scan of the twin's own top-level statements,
+   * for the same reason the function bridge needs it. A `default` export
+   * (`export default class Box` beside `exports.default = Box`) is looked up
+   * under the name `default`. Null when the declaration is not a plain class
+   * of a stdlib-free declaration file with a compiled twin, or the twin does
+   * not define a class under that export name. */
+  declTwinClassDecl(d: ts.ClassDeclaration): ts.ClassDeclaration | null {
+    const sf = d.getSourceFile();
+    if (!sf.isDeclarationFile || this.isStdlibFile(sf)) return null;
+    const twin = this.declTwinSourceOf(sf);
+    if (twin === null) return null;
+    const isDefault = (ts.getCombinedModifierFlags(d) & ts.ModifierFlags.Default) !== 0;
+    const name = isDefault ? "default" : d.name?.text;
+    if (name === undefined) return null;
+    const classOf = (sym: ts.Symbol | undefined): ts.ClassDeclaration | null => {
+      if (sym === undefined) return null;
+      for (const x of [sym, this.cjsExportValueSymbol(sym)]) {
+        if (x === null || x === undefined) continue;
+        for (const c of this.checker.declarationsOf(x)) {
+          if (ts.isClassDeclaration(c) && c.getSourceFile() === twin) return c;
+        }
+      }
+      return null;
+    };
+    const viaTable = classOf(this.cjsModuleExportSymbol(twin, name));
+    if (viaTable !== null) return viaTable;
+    for (const stmt of twin.statements) {
+      if (!ts.isClassDeclaration(stmt) || stmt.name === undefined) continue;
+      const stmtDefault = (ts.getCombinedModifierFlags(stmt) & ts.ModifierFlags.Default) !== 0;
+      if ((isDefault && stmtDefault) || (!isDefault && stmt.name.text === name)) return stmt;
+    }
+    return null;
   }
 
   /** The DECLARATION file a compiled runtime file is the twin of -- the
