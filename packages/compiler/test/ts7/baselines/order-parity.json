@@ -11995,6 +11995,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8513-json-parse-as-a-value.js": {
+   "order": [
+    "<repo>/tests/corpus/8513-json-parse-as-a-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"

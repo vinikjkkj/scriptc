@@ -7136,6 +7136,27 @@ let digestInputValueDispatches = 0;
   export function lowerJsonProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     const member = L.stdlibGlobalMember(expr, "JSON");
     if (member === null) return null;
+    // `JSON.parse` taken as a VALUE (pg-types registers `JSON.parse` and
+    // `JSON.parse.bind(JSON)` as its json parsers): the interned zero-capture
+    // closure whose body IS the one-argument call form's json.parse. The
+    // reviver form stays fenced where it is spelled as a call.
+    if (member === "parse" && !L.dynamic) {
+      const loc = locOf(expr);
+      const name = "%json.parse.value";
+      const fnT = funcOf([STRING], DYN);
+      if (!L.liftedFns.some((f) => f.name === name)) {
+        const text: IrExpr = { kind: "varRef", localId: "text.0", type: STRING, loc };
+        L.liftedFns.push({
+          name,
+          params: [{ localId: "text.0", name: "text", type: STRING }],
+          returnType: DYN,
+          locals: [{ id: "text.0", name: "text", type: STRING, mutable: false }],
+          body: [{ kind: "return", value: { kind: "libCall", fn: "json.parse", args: [text], type: DYN, loc }, loc }],
+          loc,
+        });
+      }
+      return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
+    }
     L.unsupported("SC1090", expr, `JSON methods as values (call '${member}' directly)`);
   }
 
