@@ -6444,6 +6444,23 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     if (access.name.text === "toString" && call.arguments.length >= 2 &&
         call.arguments.length <= 3 && !call.questionDotToken && !access.questionDotToken &&
         !call.arguments.some((a) => ts.isSpreadElement(a))) {
+      // A RUN-TIME encoding (an untyped parameter): the runtime normalises it
+      // for the one receiver kind that uses it.
+      if (!L.typeOf(call.arguments[0]!).isStringLiteralType()) {
+        return {
+          kind: "libCall",
+          fn: "dyn.toStringRangeDyn",
+          args: [
+            recv,
+            L.lowerExprExpecting(call.arguments[0]!, DYN),
+            L.lowerExprExpecting(call.arguments[1]!, DYN),
+            call.arguments[2] ? L.lowerExprExpecting(call.arguments[2], DYN) : dynUndefinedExpr(locOf(call)),
+            { kind: "strLit", value: access.getText(), type: STRING, loc: locOf(call) },
+          ],
+          type: STRING,
+          loc: locOf(call),
+        };
+      }
       const encName = bufEncoding(L, "toString", call.arguments[0]!);
       return {
         kind: "libCall",

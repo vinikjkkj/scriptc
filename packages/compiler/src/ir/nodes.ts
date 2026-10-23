@@ -3338,6 +3338,16 @@ export type IrLibFn =
    * NUMBER takes V8's radix RangeError (an encoding is not a radix);
    * every other kind ignores both extra arguments, exactly Node. */
   | "dyn.toStringRange"
+  /** The range form with an encoding that is a RUN-TIME value (scr_json.c):
+   * args [recv, enc dyn, start, end, spelling]. The encoding is normalised
+   * (strictly: an unknown name throws ERR_UNKNOWN_ENCODING) only for the one
+   * receiver kind that uses it, a Buffer. May throw. */
+  | "dyn.toStringRangeDyn"
+  /** `Buffer.from(value, encoding)` with an untyped value and/or a run-time
+   * encoding (scr_json.c): a string decodes per the normalised encoding
+   * (unknown throws ERR_UNKNOWN_ENCODING), every other value takes the
+   * `Buffer.from(dyn)` ladder with the encoding ignored. May throw. */
+  | "buffer.fromDynEnc"
   | "fs.readFileSync"
   /** readFileSync(path) — the Buffer read (+1 bytes); throws catchably
    * like the utf8 form. */
@@ -12690,6 +12700,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // the range twin throws the same nullish/null-prototype TypeErrors,
   // plus the number receiver's radix RangeError
   "dyn.toStringRange",
+  "dyn.toStringRangeDyn",
+  "buffer.fromDynEnc",
   // util.format's %s runs an object's OWN toString (Node's
   // hasBuiltInToString test) — user code, so its throw is the
   // program's.

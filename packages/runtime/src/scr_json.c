@@ -11819,6 +11819,67 @@ ScrBytes *scr_bytes_arg_chk(const ScrDyn *v, const ScrStr *name) {
   return NULL;
 }
 
+/* An untyped encoding argument's canonical name (the runtime sees only
+ * canonical spellings). Undefined means utf8 (Buffer.from's and toString's
+ * default); an unknown name or a non-string throws Node's catchable
+ * ERR_UNKNOWN_ENCODING. NULL with the exception pending. */
+static const char *scr_enc_canon_dyn(const ScrDyn *enc, bool lenient) {
+  if (enc == NULL || enc->kind == SCR_DYN_UNDEF) return "utf8";
+  /* Buffer.from(value, encoding): anything but a non-empty string means
+   * utf8 (Node's `typeof encoding !== 'string' || encoding.length === 0`). */
+  if (lenient && (enc->kind != SCR_DYN_STR || enc->v.str->len == 0)) return "utf8";
+  if (enc->kind == SCR_DYN_STR) {
+    const ScrStr *s = enc->v.str;
+    char low[16];
+    if (s->len > 0 && s->len < sizeof low) {
+      for (size_t i = 0; i < s->len; i++) {
+        char c = s->data[i];
+        low[i] = c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
+      }
+      low[s->len] = 0;
+      static const char *const table[][2] = {
+          {"utf8", "utf8"},         {"utf-8", "utf8"},       {"hex", "hex"},          {"base64", "base64"},
+          {"base64url", "base64url"}, {"latin1", "latin1"},  {"binary", "latin1"},    {"ascii", "ascii"},
+          {"utf16le", "utf16le"},   {"utf-16le", "utf16le"}, {"ucs2", "utf16le"},     {"ucs-2", "utf16le"},
+      };
+      for (size_t i = 0; i < sizeof table / sizeof table[0]; i++) {
+        if (strcmp(low, table[i][0]) == 0) return table[i][1];
+      }
+    }
+  }
+  ScrStr *shown = scr_dyn_string_coerce(enc);
+  char msg[160];
+  int n = snprintf(msg, sizeof msg, "Unknown encoding: %.*s", (int)(shown->len < 64 ? shown->len : 64), shown->data);
+  scr_str_release(shown);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_UNKNOWN_ENCODING");
+  return NULL;
+}
+
+ScrBytes *scr_buffer_from_dyn_enc(const ScrDyn *v, const ScrDyn *enc) {
+  if (v->kind == SCR_DYN_STR) {
+    const char *canon = scr_enc_canon_dyn(enc, true);
+    if (canon == NULL) return NULL;
+    ScrStr *e = scr_str_new(canon, strlen(canon));
+    ScrBytes *b = scr_bytes_from_str(v->v.str, e);
+    scr_str_release(e);
+    return b;
+  }
+  return scr_buffer_from_dyn(v);
+}
+
+ScrStr *scr_dyn_to_string_range_dyn(const ScrDyn *d, const ScrDyn *enc, ScrDyn *start, ScrDyn *end,
+                                    const ScrStr *what) {
+  const char *canon = "utf8";
+  if (d->kind == SCR_DYN_BYTES && d->buffer) {
+    canon = scr_enc_canon_dyn(enc, false);
+    if (canon == NULL) return scr_str_new("", 0);
+  }
+  ScrStr *e = scr_str_new(canon, strlen(canon));
+  ScrStr *r = scr_dyn_to_string_range(d, e, start, end, what);
+  scr_str_release(e);
+  return r;
+}
+
 ScrBytes *scr_buffer_from_dyn(const ScrDyn *v) {
   switch (v->kind) {
     case SCR_DYN_STR: {

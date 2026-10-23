@@ -3641,6 +3641,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // TypeError on null-prototype dictionaries (may-throw seed
             // set) — args[2] carries the call's source spelling.
             return finish(`scr_dyn_to_string_method(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.toStringRangeDyn":
+            return finish(`scr_dyn_to_string_range_dyn(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
+          case "buffer.fromDynEnc":
+            return finish(`scr_buffer_from_dyn_enc(${arg(0)}, ${arg(1)})`);
           case "dyn.toStringRange":
             // The RANGE form (+1): args[2]/args[3] are the dyn start/end
             // (an omitted end is the undefined literal — the runtime

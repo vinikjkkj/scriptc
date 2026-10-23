@@ -7967,6 +7967,21 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       }
       if (nArgs > 3) L.noLowering(`.toString with ${nArgs} arguments on Buffers`, call);
       const encNode = call.arguments[0];
+      // A RUN-TIME encoding: the receiver rides as a dyn Buffer and the
+      // runtime normalises the name (an unknown one throws Node's
+      // ERR_UNKNOWN_ENCODING); the window arguments take JS coercion there.
+      if (encNode !== undefined && !L.typeOf(encNode).isStringLiteralType()) {
+        const recvDyn = L.coerceInto(access.expression, L.lowerExpr(access.expression), DYN);
+        const startArg = nArgs > 1 ? L.lowerExprExpecting(call.arguments[1]!, DYN) : dynUndefinedExpr(loc);
+        const endArg = nArgs > 2 ? L.lowerExprExpecting(call.arguments[2]!, DYN) : dynUndefinedExpr(loc);
+        return {
+          kind: "libCall",
+          fn: "dyn.toStringRangeDyn",
+          args: [recvDyn, L.lowerExprExpecting(encNode, DYN), startArg, endArg, { kind: "strLit", value: access.getText(), type: STRING, loc }],
+          type: STRING,
+          loc,
+        };
+      }
       const encName = encNode ? bufEncoding(L, "Buffer.toString", encNode) : "utf8";
       const receiver = L.lowerExpr(access.expression);
       const enc: IrExpr = { kind: "strLit", value: encName, type: STRING, loc };
@@ -8552,6 +8567,17 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           }
         } else {
           const srcIr = L.mapTypeOf(L.typeOf(argNode));
+          // An untyped value and/or a RUN-TIME encoding: the runtime
+          // normalises the encoding (strictly) and runs the kind ladder.
+          const encNodeT = args[1] ? L.typeOf(args[1]) : undefined;
+          if (
+            args.length === 2 &&
+            (srcIr === null || srcIr.kind === "dyn" || (srcIr.kind === "string" && !encNodeT!.isStringLiteralType()))
+          ) {
+            const v = L.lowerExprExpecting(argNode, DYN);
+            const e = L.lowerExprExpecting(args[1]!, DYN);
+            return markFlavor({ kind: "libCall", fn: "buffer.fromDynEnc", args: [v, e], type: BYTES_U8, loc }, "buffer", loc);
+          }
           if (srcIr?.kind === "string") {
             const encNode = args[1];
             const encName = encNode ? bufEncoding(L, "Buffer.from", encNode) : "utf8";

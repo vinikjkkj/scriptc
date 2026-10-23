@@ -166,6 +166,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.instanceOf": { argTypes: [DYN, DYN], result: BOOL },
   "dyn.toString": { argTypes: [DYN, STRING, STRING], result: STRING },
   "dyn.toStringRange": { argTypes: [DYN, STRING, DYN, DYN, STRING], result: STRING },
+  "dyn.toStringRangeDyn": { argTypes: [DYN, DYN, DYN, DYN, STRING], result: STRING },
+  "buffer.fromDynEnc": { argTypes: [DYN, DYN], result: BYTES_U8 },
   "dyn.defineProps": { argTypes: [DYN, DYN], result: DYN },
   "dyn.defineProp": { argTypes: [DYN, STRING, DYN], result: DYN },
   // The per-instance property table of a COMPILED class instance: the
