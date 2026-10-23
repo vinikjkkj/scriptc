@@ -3311,6 +3311,9 @@ void scr_process_chdir(ScrStr *dir);
 /* net's process-wide happy-eyeballs attempt budget (default 250ms) — in
  * the core unit so the knob never links scr_net.c. Never throw. */
 double scr_net_get_autosel_timeout(void);
+ScrStr *scr_navigator_user_agent(void);
+ScrStr *scr_navigator_platform(void);
+double scr_navigator_hardware_concurrency(void);
 bool scr_netaddr_is_ipv4(ScrStr *s);
 bool scr_netaddr_is_ipv6(ScrStr *s);
 double scr_netaddr_is_ip(ScrStr *s);

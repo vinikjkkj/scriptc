@@ -6820,6 +6820,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_net_get_autosel_timeout()`);
           case "net.setAutoSelTimeout":
             return finish(`scr_net_set_autosel_timeout(${arg(0)})`);
+          case "navigator.userAgent":
+            return finish(`scr_navigator_user_agent()`);
+          case "navigator.platform":
+            return finish(`scr_navigator_platform()`);
+          case "navigator.hardwareConcurrency":
+            return finish(`scr_navigator_hardware_concurrency()`);
           case "netaddr.isIP":
             return finish(`scr_netaddr_is_ip(${arg(0)})`);
           case "netaddr.isIPv4":

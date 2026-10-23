@@ -14,7 +14,7 @@ import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
 import { builtinFnValueOf, builtinMemberFnValueOf } from "./lower-fnvalue.js";
-import { requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
+import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
@@ -2747,6 +2747,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         L.lowerDcTracingChannelProperty(expr) ??
         L.lowerTestCtxProperty(expr) ??
         L.lowerProcessProperty(expr) ??
+        lowerNavigatorProperty(L, expr) ??
         L.lowerProcessStreamProperty(expr) ??
         L.lowerFsConstantsProperty(expr) ??
         // http2.constants.NGHTTP2_CANCEL (any constants-object spelling):

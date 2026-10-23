@@ -4997,6 +4997,14 @@ export type IrLibFn =
    * regular expressions, ported byte-exact): pure, never throw, no
    * allocation. Their own `netaddr.` prefix keeps the socket unit out of the
    * link: an address test needs none of it. */
+  /** navigator.userAgent ("Node.js/" + the compatibility target's major),
+   * navigator.platform (Node's navigator.js mapping from platform and arch)
+   * and navigator.hardwareConcurrency (the processors this process may run
+   * on). Interned strings (+1 per read); never throw. navigator.language is
+   * the existing intl.defaultLocale read. */
+  | "navigator.userAgent"
+  | "navigator.platform"
+  | "navigator.hardwareConcurrency"
   | "netaddr.isIP"
   | "netaddr.isIPv4"
   | "netaddr.isIPv6"

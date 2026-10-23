@@ -123,6 +123,7 @@
 #include <net/if_dl.h>
 #elif defined(__linux__)
 #include <netpacket/packet.h>
+#include <sched.h> /* sched_getaffinity: navigator.hardwareConcurrency */
 #endif
 
 #define scr_sys_mkdir(p, m) mkdir((p), (m))
@@ -1806,6 +1807,80 @@ void scr_process_chdir(ScrStr *dir) {
 static double scr_net_autosel_timeout_ms = 250;
 
 double scr_net_get_autosel_timeout(void) { return scr_net_autosel_timeout_ms; }
+
+/* The navigator global (Node 21+): userAgent, platform and hardwareConcurrency
+ * (language/languages ride scr_intl_default_locale). Each string is interned
+ * and returned +1; none throws.
+ *
+ * userAgent is `Node.js/<major>` of the compatibility target — the same
+ * version process.versions.node answers (SCR_NODE_COMPAT_VERSION), which is
+ * what Node builds from process.version.
+ *
+ * platform is lib/internal/navigator.js's mapping from process.platform and
+ * process.arch: darwin "MacIntel", win32 "Win32", linux "Linux x86_64" for
+ * x64, "Linux i686" for ia32, else "Linux <arch>".
+ *
+ * hardwareConcurrency is os.availableParallelism(): the CPUs this process is
+ * allowed to run on — the scheduler affinity mask on Linux (what libuv's
+ * uv_available_parallelism starts from; its further clamp to a cgroup CPU
+ * quota is NOT modelled), the online processor count elsewhere. */
+static ScrStr *scr_navigator_ua_str;
+static ScrStr *scr_navigator_platform_str;
+
+ScrStr *scr_navigator_user_agent(void) {
+  if (!scr_navigator_ua_str) {
+    char buf[64];
+    size_t n = 0;
+    const char *v = SCR_NODE_COMPAT_VERSION;
+    memcpy(buf, "Node.js/", 8);
+    n = 8;
+    while (*v && *v != '.' && n < sizeof buf - 1) buf[n++] = *v++;
+    scr_navigator_ua_str = scr_str_new(buf, n);
+  }
+  return scr_str_retain(scr_navigator_ua_str);
+}
+
+ScrStr *scr_navigator_platform(void) {
+  if (!scr_navigator_platform_str) {
+#if defined(__APPLE__)
+    scr_navigator_platform_str = scr_str_new("MacIntel", 8);
+#elif defined(_WIN32)
+    scr_navigator_platform_str = scr_str_new("Win32", 5);
+#elif defined(__linux__)
+#if defined(__x86_64__)
+    scr_navigator_platform_str = scr_str_new("Linux x86_64", 12);
+#elif defined(__i386__)
+    scr_navigator_platform_str = scr_str_new("Linux i686", 10);
+#elif defined(__aarch64__)
+    scr_navigator_platform_str = scr_str_new("Linux arm64", 11);
+#else
+    scr_navigator_platform_str = scr_str_new("Linux unknown", 13);
+#endif
+#else
+    scr_navigator_platform_str = scr_str_new("Unknown", 7);
+#endif
+  }
+  return scr_str_retain(scr_navigator_platform_str);
+}
+
+double scr_navigator_hardware_concurrency(void) {
+#if defined(__linux__)
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  if (sched_getaffinity(0, sizeof set, &set) == 0) {
+    int n = CPU_COUNT(&set);
+    if (n > 0) return (double)n;
+  }
+#endif
+#if defined(_WIN32)
+  SYSTEM_INFO si;
+  GetSystemInfo(&si);
+  return si.dwNumberOfProcessors > 0 ? (double)si.dwNumberOfProcessors : 1.0;
+#else
+  long n = sysconf(_SC_NPROCESSORS_ONLN);
+  return n > 0 ? (double)n : 1.0;
+#endif
+}
 
 /* node:net's isIPv4 / isIPv6 / isIP over a string, a byte-exact port of
  * internal/net.js's regular expressions (v24): an IPv4 address is four dotted

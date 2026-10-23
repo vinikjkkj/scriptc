@@ -7276,6 +7276,36 @@ let digestInputValueDispatches = 0;
    * read in source order). Method members referenced without a call are
    * rejected specifically. Null for non-process receivers (the chain keeps
    * trying other property lowerings). */
+  /** The `navigator` global (Node 21+): userAgent, platform, language,
+   * languages, hardwareConcurrency. `language` is the default-locale read
+   * `Intl.DateTimeFormat().resolvedOptions().locale` already is (Node derives
+   * it from ICU's default), `languages` is the one-element array of it, and the
+   * other three are runtime reads (scr_navigator_*). Null for other receivers;
+   * any other member keeps the generic fence. */
+  export function lowerNavigatorProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (L.chainBlocked(expr) || !L.isStdlibGlobal(expr.expression, "navigator")) return null;
+    const loc = locOf(expr);
+    switch (expr.name.text) {
+      case "userAgent":
+        return { kind: "libCall", fn: "navigator.userAgent", args: [], type: STRING, loc };
+      case "platform":
+        return { kind: "libCall", fn: "navigator.platform", args: [], type: STRING, loc };
+      case "hardwareConcurrency":
+        return { kind: "libCall", fn: "navigator.hardwareConcurrency", args: [], type: F64, loc };
+      case "language":
+        return { kind: "libCall", fn: "intl.defaultLocale", args: [], type: STRING, loc };
+      case "languages":
+        return {
+          kind: "arrayLit",
+          elems: [{ kind: "libCall", fn: "intl.defaultLocale", args: [], type: STRING, loc }],
+          type: arrayOf(STRING),
+          loc,
+        };
+      default:
+        return null;
+    }
+  }
+
   export function lowerProcessProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     // process.versions.node / .openssl — the ONE lowered member family of
     // process.versions, in every spelling of the chain (see
