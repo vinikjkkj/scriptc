@@ -102,15 +102,6 @@ stdlib-fence.ts:31:13 - error SC2020: 'new AggregateError' is part of the standa
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-stdlib-fence.ts:35:15 - error SC2020: 'Error.cause' is part of the standard library types but has no scriptc lowering yet
-
-  34 | // error object is `.cause`, whose slot the ScrError layout does not carry.)
-  35 | const cause = new Error("boom").cause;
-     |               ^~~~~~~~~~~~~~~~~~~~~~~
-  36 | 
-
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
-
 stdlib-fence.ts:42:7 - error SC2020: 'ArrayIterator<[number, number]>' is part of the standard library types but has no scriptc lowering yet
 
   41 | // fences any more; `Math.SQRT2` above is the Math member that still does.)

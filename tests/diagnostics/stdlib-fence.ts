@@ -30,8 +30,8 @@ const st = new Set(new Set([1, 2])); // array seeds lower; Set/iterable seeds st
 // and the unlowered members of lowered error objects.)
 const agg = new AggregateError([]);
 // (`.stack` READS now lower — the header line a zero-frame capture
-// produces, corpus 4622 — so the member that still fences on a lowered
-// error object is `.cause`, whose slot the ScrError layout does not carry.)
+// produces, corpus 4622 — and so does `.cause`, the own property of the
+// options form, corpus 8751; this read answers undefined with no cause.)
 const cause = new Error("boom").cause;
 
 // Unlowered members on lowered containers.
