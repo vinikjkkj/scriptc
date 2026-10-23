@@ -606,21 +606,6 @@ double scr_arr_get_f64_nan(ScrArr *a, double i) {
   return NAN;
 }
 
-/* `a[i]` is an element: an integer index inside [0, len), and for a
- * reference-element array a slot that is not a hole. The exact question
- * behind Node's `a[i] !== undefined` over a dense or holey array. */
-bool scr_arr_has_index(ScrArr *a, double i) {
-  if (i >= 0.0 && i < SCR_ARR_FAST_MAX) {
-    int64_t n = (int64_t)i;
-    if ((double)n == i && (uint64_t)n < (uint64_t)a->len) {
-      if (a->elem == SCR_ELEM_F64 || a->elem == SCR_ELEM_BOOL) return true;
-      void *p = scr_slot_to_ptr(a->data[n]);
-      return !(p == NULL);
-    }
-  }
-  return false;
-}
-
 bool scr_arr_get_bool(ScrArr *a, double i) {
   return a->data[scr_arr_check_index(a, i, false)] != 0;
 }
@@ -630,6 +615,22 @@ void *scr_arr_get_ref(ScrArr *a, double i) {
   void *p = scr_slot_to_ptr(a->data[idx]);
   if (p == NULL) scr_arr_trap_absent(idx, a->len);
   return scr_elem_retain_p(a, p);
+}
+
+/* get_ref's miss-tolerant twin: an index that names no element (negative,
+ * fractional, NaN, past the end) or a hole answers NULL instead of trapping.
+ * The hit is the same work as get_ref (one bounds test, one retain), so a
+ * binding that must stay exact about Node's `undefined` pays nothing extra
+ * on the path that is almost always taken: "present" is `result != NULL`. */
+void *scr_arr_try_ref(ScrArr *a, double i) {
+  if (i >= 0.0 && i < SCR_ARR_FAST_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)a->len) {
+      void *p = scr_slot_to_ptr(a->data[n]);
+      if (p != NULL) return scr_elem_retain_p(a, p);
+    }
+  }
+  return NULL;
 }
 
 /* The COPY read: same +1, but an ABSENT slot copies through as absent

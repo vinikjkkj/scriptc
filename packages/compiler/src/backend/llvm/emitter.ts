@@ -2553,7 +2553,7 @@ class LlEmitter {
       // LIBRARY mode: no @main — the profile-declared external
       // symbols instead, from the same IR facts the C emission consumes.
       appendAll(out, this.emitLibDefs(globals, globalReleaseLines, stamps));
-      out.push(`attributes #0 = { sanitize_address }`, ``);
+      out.push(`attributes #0 = { sanitize_address }`, `attributes #9 = { cold noinline }`, ``);
       return out.join("\n");
     }
     out.push(
@@ -2703,6 +2703,7 @@ class LlEmitter {
       // lane's -fsanitize=address link activates instrumentation over the
       // emitted functions too (the runtime TUs get theirs from clang).
       `attributes #0 = { sanitize_address }`,
+      `attributes #9 = { cold noinline }`,
       ``,
     );
     return out.join("\n");
@@ -6577,7 +6578,7 @@ class LlEmitter {
     // Lifted functions receive their closure first (the callValue ABI).
     if (fn.captures !== undefined) params.unshift("ptr %sc_env");
     const ret = this.llType(fn.returnType);
-    return `define internal ${ret} @${mangleFunction(fn.name)}(${params.join(", ")}) ${FN_ATTRS} { ; ${fn.name}\n${B.render()}\n}`;
+    return `define internal ${ret} @${mangleFunction(fn.name)}(${params.join(", ")}) ${FN_ATTRS}${fn.cold ? " #9" : ""} { ; ${fn.name}\n${B.render()}\n}`;
   }
 
   // ── statements ──────────────────────────────────────────────────────────
@@ -7360,7 +7361,7 @@ class LlEmitter {
         const bytes = Buffer.byteLength(s.message, "utf8");
         this.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
         B.line(
-          `call void @scr_throw_error_msg_code(i32 ${s.errKind === "type" ? 1 : 0}, ptr ${this.cstr(s.message)}, i64 ${bytes}, ptr ${this.cstr(s.code)})`,
+          `call void @scr_throw_error_msg_code(i32 ${s.errKind === "type" ? 1 : 0}, ptr ${this.cstr(s.message)}, i64 ${bytes}, ptr ${this.cstr(s.code)}) #9`,
         );
         this.emitUnwind();
         break;
@@ -7721,6 +7722,23 @@ class LlEmitter {
         throw new Error(`llvm emitter bug: bare unitLit '${e.unit}'`);
       case "varRef": {
         const b = this.binding(e.localId);
+        if (e.nullTest) {
+          // "Is the pointer-backed binding NULL": no retain, no TDZ guard.
+          const nt = B.tmp();
+          if (b.kind === "boxed") {
+            const box = this.loadBox(b.slot);
+            const slotp = B.tmp();
+            const slotv = B.tmp();
+            B.line(`${slotp} = getelementptr inbounds %ScrBox, ptr ${box}, i64 0, i32 5`);
+            B.line(`${slotv} = load i64, ptr ${slotp}`);
+            B.line(`${nt} = icmp eq i64 ${slotv}, 0`);
+          } else {
+            const pv = B.tmp();
+            B.line(`${pv} = load ptr, ptr ${b.slot}`);
+            B.line(`${nt} = icmp eq ptr ${pv}, null`);
+          }
+          return { name: nt, type: e.type };
+        }
         if (b.kind === "boxed") {
           // Reads go through the shared binding; ref kinds come out +1.
           // Forward-captured consts (tdz) test the box's payload slot
@@ -8188,7 +8206,25 @@ class LlEmitter {
         // the owned temp in the frame like any other.
         const acc = elemAccess(e.arr.type.elem);
         const accTy = acc === "f64" ? "double" : acc === "bool" ? "i1" : "ptr";
-        const getFn = e.nanOnMiss ? "scr_arr_get_f64_nan" : `scr_arr_get_${acc}`;
+        if (e.inRange && (acc === "f64" || acc === "bool")) {
+          // Proven in range by a dominating hasIndex: load the slot directly.
+          const dp = B.tmp(), data = B.tmp(), nn = B.tmp(), sp = B.tmp();
+          this.declare(`declare i64 @llvm.fptosi.sat.i64.f64(double)`);
+          B.line(`${dp} = getelementptr inbounds %ScrArr, ptr ${arr.name}, i32 0, i32 7`);
+          B.line(`${data} = load ptr, ptr ${dp}`);
+          B.line(`${nn} = call i64 @llvm.fptosi.sat.i64.f64(double ${idx.name})`);
+          B.line(`${sp} = getelementptr inbounds i64, ptr ${data}, i64 ${nn}`);
+          const v = B.tmp();
+          if (acc === "f64") {
+            B.line(`${v} = load double, ptr ${sp}`);
+            return { name: v, type: e.type };
+          }
+          const w = B.tmp();
+          B.line(`${w} = load i64, ptr ${sp}`);
+          B.line(`${v} = icmp ne i64 ${w}, 0`);
+          return { name: v, type: e.type };
+        }
+        const getFn = e.nanOnMiss ? "scr_arr_get_f64_nan" : e.tryRef ? "scr_arr_try_ref" : `scr_arr_get_${acc}`;
         this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @${getFn}(ptr, double)`);
         const t = B.tmp();
         B.line(`${t} = call ${accTy} @${getFn}(ptr ${arr.name}, double ${idx.name})`);
@@ -13685,11 +13721,45 @@ class LlEmitter {
         return { name: t, type: e.type };
       }
       case "hasIndex": {
-        this.declare(`declare zeroext i1 @scr_arr_has_index(ptr, double)`);
-        const t = B.tmp();
+        // Inline: len < 2^63 and an integer index test through the saturating
+        // fptosi (NaN -> 0, which sitofp reads back as 0 != NaN), predicted
+        // true. No call: the hit path of every tolerant read is this and the
+        // read itself.
         const hx = this.emitExpr(e.args[0]!);
-        B.line(`${t} = call zeroext i1 @scr_arr_has_index(ptr ${r.name}, double ${hx.name})`);
-        return { name: t, type: e.type };
+        this.declare(`declare i64 @llvm.fptosi.sat.i64.f64(double)`);
+        this.declare(`declare i1 @llvm.expect.i1(i1, i1)`);
+        const lenP = B.tmp(), len = B.tmp(), n = B.tmp(), back = B.tmp(), e1 = B.tmp(), e2 = B.tmp(), ok0 = B.tmp(), ok = B.tmp();
+        B.line(`${lenP} = getelementptr inbounds %ScrArr, ptr ${r.name}, i32 0, i32 1`);
+        B.line(`${len} = load i64, ptr ${lenP}`);
+        B.line(`${n} = call i64 @llvm.fptosi.sat.i64.f64(double ${hx.name})`);
+        B.line(`${back} = sitofp i64 ${n} to double`);
+        B.line(`${e1} = fcmp oeq double ${back}, ${hx.name}`);
+        B.line(`${e2} = icmp ult i64 ${n}, ${len}`);
+        if (elemAccess(e.receiver.type.kind === "array" ? e.receiver.type.elem : F64) === "ref") {
+          // Reference elements: the slot must also be non-NULL (a hole).
+          const dp = B.tmp(), data = B.tmp(), sp = B.tmp(), sv = B.tmp(), e3 = B.tmp(), e4 = B.tmp();
+          B.line(`${dp} = getelementptr inbounds %ScrArr, ptr ${r.name}, i32 0, i32 7`);
+          B.line(`${data} = load ptr, ptr ${dp}`);
+          B.line(`${sp} = getelementptr inbounds i64, ptr ${data}, i64 ${n}`);
+          // Only read the slot when the index is in range: select keeps it
+          // branch-free but a wild n would fault, so guard with a branch.
+          const lChk = B.newLabel("hi.chk"), lJoin = B.newLabel("hi.join");
+          B.line(`${e4} = and i1 ${e1}, ${e2}`);
+          const from = B.newLabel("hi.pre");
+          B.br(from);
+          B.startBlock(from);
+          B.condBr(e4, lChk, lJoin);
+          B.startBlock(lChk);
+          B.line(`${sv} = load i64, ptr ${sp}`);
+          B.line(`${e3} = icmp ne i64 ${sv}, 0`);
+          B.br(lJoin);
+          B.startBlock(lJoin);
+          B.line(`${ok0} = phi i1 [ false, %${from} ], [ ${e3}, %${lChk} ]`);
+        } else {
+          B.line(`${ok0} = and i1 ${e1}, ${e2}`);
+        }
+        B.line(`${ok} = call i1 @llvm.expect.i1(i1 ${ok0}, i1 true)`);
+        return { name: ok, type: e.type };
       }
       case "push": {
         // Variadic like JS: every argument evaluates first (left to

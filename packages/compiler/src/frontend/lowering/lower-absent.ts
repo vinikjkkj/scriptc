@@ -19,7 +19,7 @@
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, F64, IrExpr, IrGlobal, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, isUnitType, strandTrap, typeEquals, VOID } from "../../ir/nodes.js";
+import { BOOL, F64, IrExpr, IrGlobal, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, isUnitType, strandTrap, typeEquals } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { checkedJsNumber } from "./lower-exprs.js";
 import { idxMissKeyHelper } from "./lower-containers.js";
@@ -127,7 +127,18 @@ function ref(id: string, type: IrType, loc: SrcLoc): IrExpr {
   return { kind: "varRef", localId: id, type, loc };
 }
 
-interface Init { pre: IrStmt[]; ok: IrExpr; val: IrExpr; type: IrType }
+/** `binding === NULL` for a pointer-backed binding: the slot's own test. */
+function nullTestOf(id: string, loc: SrcLoc): IrExpr {
+  return { kind: "varRef", localId: id, type: BOOL, nullTest: true, loc };
+}
+
+interface Init {
+  pre: IrStmt[]; ok: IrExpr; val: IrExpr; type: IrType;
+  /** Reference elements: the miss-tolerant read itself (NULL on a miss). The
+   * binding's own NULL-ness IS the exists flag, so the hit path is the one
+   * read plain code does, with no second read and no stored test. */
+  tryGet?: IrExpr;
+}
 
 function lowerInit(L: Lowerer, shape: Shape, loc: SrcLoc): Init | null {
   const pre: IrStmt[] = [];
@@ -147,7 +158,10 @@ function lowerInit(L: Lowerer, shape: Shape, loc: SrcLoc): Init | null {
     const arr = hoist(arr0, "%absArr") as IrExpr & { type: { kind: "array" } };
     const index = hoist(idx0, "%absIdx");
     const ok: IrExpr = { kind: "arrIntrinsic", method: "hasIndex", receiver: arr, args: [index], type: BOOL, loc };
-    return { pre, ok, val: { kind: "arrayGet", arr, index, type: elem, loc }, type: elem };
+    if (elem.kind !== "f64" && elem.kind !== "bool") {
+      return { pre, ok, val: { kind: "arrayGet", arr, index, type: elem, loc }, type: elem, tryGet: { kind: "arrayGet", arr, index, type: elem, tryRef: true, loc } };
+    }
+    return { pre, ok, val: { kind: "arrayGet", arr, index, type: elem, inRange: true, loc }, type: elem };
   }
   const inner0 = L.lowerExpr(shape.inner);
   if (inner0.type.kind !== "union") return null;
@@ -195,6 +209,14 @@ export function lowerAbsentLocal(L: Lowerer, decl: ts.VariableDeclaration): IrSt
   const ctx = L.ctx;
   ctx.scopes[ctx.scopes.length - 1]!.set(fake, okLocal);
   L.absentFlags.set(bsym, { sym: fake, global: null });
+  if (init.tryGet !== undefined) {
+    // One miss-tolerant read; the flag is the slot's own NULL-ness.
+    return [
+      ...init.pre,
+      { kind: "varDecl", localId: v.id, init: init.tryGet, loc },
+      { kind: "varDecl", localId: okLocal.id, init: { kind: "unary", op: "!", operand: nullTestOf(v.id, loc), type: BOOL, loc }, loc },
+    ];
+  }
   return [
     ...init.pre,
     { kind: "varDecl", localId: okLocal.id, init: init.ok, loc },
@@ -226,6 +248,17 @@ export function lowerAbsentGlobal(L: Lowerer, decl: ts.VariableDeclaration, g: I
   const init = lowerInit(L, shape, loc);
   if (init === null) return null;
   if (!typeEquals(init.type, g.type)) return null;
+  if (init.tryGet !== undefined) {
+    return {
+      kind: "block",
+      body: [
+        ...init.pre,
+        { kind: "assign", localId: g.id, value: init.tryGet, loc },
+        { kind: "assign", localId: flag.id, value: nullTestOf(g.id, loc), loc },
+      ],
+      loc,
+    };
+  }
   const okT = L.declareHiddenLocal("%absOk", BOOL);
   return {
     kind: "block",
@@ -239,30 +272,13 @@ export function lowerAbsentGlobal(L: Lowerer, decl: ts.VariableDeclaration, g: I
   };
 }
 
-/** `%absent.guard.<n>(ok: bool): void` — throws the TypeError unless the
- * value exists. Used as a statement before the plain slot read, so the hit
- * path is a bool test (no ternary temp, no extra reference traffic). */
-function guardHelper(L: Lowerer, msg: string, loc: SrcLoc): string {
-  const key = `absentguard:${msg}`;
-  const existing = L.narrowHelpers.get(key);
-  if (existing) return existing;
-  const name = `%absent.guard.${L.narrowHelpers.size}`;
-  L.narrowHelpers.set(key, name);
-  L.liftedFns.push({
-    name,
-    params: [{ localId: "ok.0", name: "ok", type: BOOL }],
-    returnType: VOID,
-    locals: [{ id: "ok.0", name: "ok", type: BOOL, mutable: false }],
-    body: [{ kind: "if", cond: { kind: "unary", op: "!", operand: ref("ok.0", BOOL, loc), type: BOOL, loc }, then: [strandTrap(msg, loc)], else_: null, loc }],
-    loc,
-  });
-  return name;
-}
-
-function guarded(L: Lowerer, okE: IrExpr, v: IrExpr, msg: string, loc: SrcLoc): IrExpr {
+/** A read behind an exists-test: `ok` hit is the plain slot read, the miss is
+ * the TypeError, thrown from an out-of-line cold block (`if (ok) {} else
+ * throw`: the branch is predicted to fall through, no call on the hit path). */
+function guarded(_L: Lowerer, okE: IrExpr, v: IrExpr, msg: string, loc: SrcLoc): IrExpr {
   return {
     kind: "seqExpr",
-    stmts: [{ kind: "exprStmt", expr: { kind: "call", callee: guardHelper(L, msg, loc), args: [okE], type: VOID, loc }, loc }],
+    stmts: [{ kind: "if", cond: okE, then: [], else_: [strandTrap(msg, loc)], loc }],
     result: v, type: v.type, loc,
   };
 }
@@ -450,7 +466,7 @@ export function nullableFieldRead(L: Lowerer, read: IrExpr & { kind: "fieldGet" 
   L.lyingResults.add(read);
   return {
     kind: "seqExpr",
-    stmts: [{ kind: "exprStmt", expr: { kind: "call", callee: guardHelper(L, msg, loc), args: [present], type: VOID, loc }, loc }],
+    stmts: [{ kind: "if", cond: present, then: [], else_: [strandTrap(msg, loc)], loc }],
     result: read, type: read.type, loc,
   };
 }

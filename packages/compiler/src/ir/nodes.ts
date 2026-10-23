@@ -2338,6 +2338,9 @@ export interface IrFunction {
    * variables received through the closure environment, in caps[] order.
    * Each is also listed in `locals` (with boxed: true); it is NOT a param. */
   captures?: IrParam[];
+  /** A function only the unlikely side of a branch calls (a miss handler that
+   * throws): emitted `cold` and out of line so the hit path stays tight. */
+  cold?: true;
   /** Async: the body runs on a fiber; `returnType` is the INNER type T (a
    * `return v` fulfills with v) while call sites receive Promise<T>. */
   async?: true;
@@ -6508,7 +6511,10 @@ export type IrExpr =
    * standalone runtime value, so a bare unitLit anywhere else is a
    * validator error and an emitter bug. */
   | { kind: "unitLit"; unit: "undefined" | "null"; type: IrType; loc: SrcLoc }
-  | { kind: "varRef"; localId: string; type: IrType; loc: SrcLoc }
+  | { kind: "varRef"; localId: string; type: IrType;
+      /** BOOL-typed: the pointer-backed binding holds NULL (an element read
+       * that named no element). Reads the slot without retaining it. */
+      nullTest?: true; loc: SrcLoc }
   /** Numeric operands; comparisons yield bool. `===`/`!==` additionally
    * accept two same-typed arrays: reference identity (pointer compare),
    * matching JS object equality — and two same-typed CLASS VALUES, where
@@ -6719,7 +6725,16 @@ export type IrExpr =
       /** NUMBER elements only: a miss (negative, fractional, NaN, or past the
        * end) answers NaN instead of trapping. The consumer is arithmetic or a
        * comparison, where Node's `undefined` and NaN behave alike. */
-      nanOnMiss?: true; loc: SrcLoc }
+      nanOnMiss?: true;
+      /** A dominating `hasIndex` test (same array, same index) already proved
+       * the index is an element: number and boolean elements are read with no
+       * bounds check and no call; reference elements keep their checked read
+       * (retain and the absent-slot trap live there). */
+      inRange?: true;
+      /** REFERENCE elements only: a miss (no such index, or a hole) answers
+       * NULL instead of trapping; a hit is the same +1 read. The consumer
+       * tests the binding it lands in for NULL (varRef nullTest). */
+      tryRef?: true; loc: SrcLoc }
   /** Array method/property on an array receiver: `length` (f64), `push`
    * (VARIADIC like JS — zero or more elem-typed args; every argument
    * evaluates before any appends, then each appends in order; returns the

@@ -113,6 +113,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         throw new Error(`emitter bug: bare unitLit '${e.unit}'`);
       case "varRef": {
         const local = E.currentLocals.get(e.localId);
+        if (e.nullTest) {
+          // "Is the pointer-backed binding NULL": no retain, no TDZ guard.
+          if (!local && E.globalsById.has(e.localId)) return E.newTemp(e.type, `(${mangleGlobal(e.localId)} == NULL)`);
+          if (local?.boxed) return E.newTemp(e.type, `(${mangleLocal(e.localId)}->slot == 0)`);
+          return E.newTemp(e.type, `(${mangleLocal(e.localId)} == NULL)`);
+        }
         if (!local && E.globalsById.has(e.localId)) {
           const gname = mangleGlobal(e.localId);
           const gl = E.globalsById.get(e.localId)!;
@@ -1160,6 +1166,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // registers the owned temp in the frame like any other.
         const acc = elemAccess(e.arr.type.elem);
         if (e.nanOnMiss) return E.newTemp(e.type, `scr_arr_get_f64_nan(${arr.name}, ${idx.name})`);
+        if (e.tryRef) return E.newTemp(e.type, `scr_arr_try_ref(${arr.name}, ${idx.name})`);
+        if (e.inRange && acc === "f64") return E.newTemp(e.type, `scr_arr_nochk_f64(${arr.name}, ${idx.name})`);
+        if (e.inRange && acc === "bool") return E.newTemp(e.type, `scr_arr_nochk_bool(${arr.name}, ${idx.name})`);
         return E.newTemp(e.type, `scr_arr_get_${acc}(${arr.name}, ${idx.name})`);
       }
       case "arrIntrinsic": {
@@ -1171,7 +1180,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "length":
             return E.newTemp(e.type, `scr_arr_len(${r.name})`);
           case "hasIndex":
-            return E.newTemp(e.type, `scr_arr_has_index(${r.name}, ${E.emitExpr(e.args[0]!).name})`);
+            return E.newTemp(e.type, `scr_arr_has_index${acc === "ref" ? "_ref" : ""}(${r.name}, ${E.emitExpr(e.args[0]!).name})`);
           case "push": {
             // Variadic like JS: every argument evaluates first (left to
             // right — an argument reading the array sees the pre-push

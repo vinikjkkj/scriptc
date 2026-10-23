@@ -60,9 +60,9 @@ const RULES: ReadonlyMap<string, Rule> = new Map([
   ["scr_arr_shift_ref", { cls: "refuses", why: "pop's mirror at the front, same reason" }],
 
   // ── the copies: JS spreads and slices holes, so do we ──────────────────
-  ["scr_arr_has_index", {
+  ["scr_arr_try_ref", {
     cls: "propagates",
-    why: "answers whether a[i] is an element WITHOUT reading it: a hole reports absent (Node reads undefined), so the absent-flag bindings never hand the NULL to a consumer",
+    why: "get_ref's miss-tolerant twin: a hole (or a missing index) answers NULL for the caller to test instead of trapping, so an absent-flag binding is exact about Node's undefined with no second read",
   }],
   ["scr_arr_copy_ref", {
     cls: "propagates",
