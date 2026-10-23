@@ -80,6 +80,36 @@ function containsReturn(node: ts.Node): boolean {
   return found;
 }
 
+const shadowCache = new WeakMap<ts.SourceFile, boolean>();
+
+/** The file declares its own binding named `require` (a function, a variable,
+ * a parameter, a class, an import): a call spelled `require(...)` there may
+ * be that binding and not the module global, so no rule that reads `require`
+ * as the CommonJS loader applies to it. Scope is not resolved (a declaration
+ * anywhere in the file declines the rule): declining only keeps the old
+ * behaviour for that file. */
+export function fileDeclaresRequire(sf: ts.SourceFile): boolean {
+  const known = shadowCache.get(sf);
+  if (known !== undefined) return known;
+  let found = false;
+  const walk = (n: ts.Node): void => {
+    if (found) return;
+    if (
+      (ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n) || ts.isVariableDeclaration(n) ||
+        ts.isParameter(n) || ts.isImportSpecifier(n) || ts.isImportClause(n) || ts.isNamespaceImport(n) ||
+        ts.isFunctionExpression(n) || ts.isClassExpression(n)) &&
+      n.name !== undefined && ts.isIdentifier(n.name) && n.name.text === "require"
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(sf);
+  shadowCache.set(sf, found);
+  return found;
+}
+
 /** A statement whose only effect is a binding, an assignment or a bare
  * `require("x")` that throws MODULE_NOT_FOUND every time it runs: the package
  * is not installed, the relative file does not exist, or the required module's
@@ -112,6 +142,7 @@ export function statementAlwaysThrowsOnRequire(ctx: RequireThrowCtx, stmt: ts.St
   const spec = requireSpecOf(init);
   if (spec === null || canonicalBuiltinModule(spec) !== null) return false;
   const sf = stmt.getSourceFile();
+  if (fileDeclaresRequire(sf)) return false;
   if (!isRelativeSpecifier(spec) && probeNodeRequireRefusal(sf.fileName, spec) !== null) return true;
   if (relativeRequireRefusal(ctx, sf, spec) !== null) return true;
   const dep = ctx.depOf(sf, spec);
