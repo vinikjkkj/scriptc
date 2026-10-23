@@ -51,17 +51,4 @@ int scr_tz_equiv_year(long long y, int end);
 int64_t scr_tz_year_start(long long year);               /* seconds of YEAR-01-01T00:00:00Z */
 int64_t scr_tz_map_tail(int64_t t_sec, int end);         /* the equivalent instant inside the window [end-27, end] */
 
-/* scr_date_tznames.c -- zone-name sequences (Intl names per instant) */
-typedef struct {
-  uint16_t cnt;  /* name changes */
-  uint16_t end;  /* year of the window the instants after the last change map into */
-  uint32_t off;  /* offset into scr_tzn_blob */
-} scr_tzn_rec;
-extern const char scr_tzn_names[];
-extern const uint16_t scr_tzn_name_off[];
-extern const uint8_t scr_tzn_blob[];
-extern const scr_tzn_rec scr_tzn_recs[];
-extern const size_t scr_tzn_nrecs;
-extern const uint16_t scr_tzn_id_rec[];
-extern const int64_t scr_tzn_meta_end;
 #endif
