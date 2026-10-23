@@ -5873,6 +5873,8 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
   const CONST_LIB_CALLS: ReadonlySet<string> = new Set([
     "process.versionsNode",
     "process.versionsOpenssl",
+    "navigator.userAgent",
+    "navigator.platform",
   ]);
 
 /** `{ ...maybe }` where `maybe` is `Record<K, V> | undefined` (an OPTIONAL

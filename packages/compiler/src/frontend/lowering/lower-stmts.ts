@@ -181,6 +181,14 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
           // They are not lowered, unless one declares something that hoists
           // out of the block.
           if (i < stmts.length - 1 && statementAlwaysThrowsOnRequire(stmt) && stmts.slice(i + 1).every(deadBranchSkippable)) break;
+          // Statements after one that ALWAYS exits (a return/throw, or a branch
+          // whose test folded to a constant and whose live arm exits) never run:
+          // they are not lowered, so a construct this compiler has no lowering for
+          // in a path Node cannot reach (pg's Cloudflare probe after
+          // `if (typeof navigator.userAgent === 'string') return ...`) is not a
+          // build error. Only when nothing after it hoists out of the list (a
+          // function declaration or a `var`), the same rule as the require case.
+          if (i < stmts.length - 1 && lowered && irAlwaysExits(lowered) && stmts.slice(i + 1).every(deadBranchSkippable)) break;
         } catch (e) {
           // A Go panic inside tsgo, surfaced by the sync channel as a
           // thrown Error (server intact — the prefetch fence's finding):
@@ -1087,6 +1095,29 @@ function statementAlwaysThrowsOnRequire(stmt: ts.Statement): boolean {
   const spec = requireSpecOf(init);
   if (spec === null || isRelativeSpecifier(spec) || canonicalBuiltinModule(spec) !== null) return false;
   return probeNodeRequireRefusal(stmt.getSourceFile().fileName, spec) !== null;
+}
+
+/** True when control cannot fall out of the end of this lowered statement:
+ * a return or throw, a block ending in one, or an `if` whose live arm does
+ * (a constant test picks the arm; otherwise both arms must). Conservative:
+ * every other kind (loops, try, switch) answers false. */
+function irAlwaysExits(s: IrStmt | readonly IrStmt[]): boolean {
+  if (Array.isArray(s)) return (s as readonly IrStmt[]).some((x) => irAlwaysExits(x));
+  const st = s as IrStmt;
+  switch (st.kind) {
+    case "return":
+    case "throw":
+      return true;
+    case "block":
+      return irAlwaysExits(st.body);
+    case "if":
+      if (st.cond.kind === "boolLit") {
+        return st.cond.value ? irAlwaysExits(st.then) : st.else_ !== null && irAlwaysExits(st.else_);
+      }
+      return st.else_ !== null && irAlwaysExits(st.then) && irAlwaysExits(st.else_);
+    default:
+      return false;
+  }
 }
 
 function deadBranchSkippable(node: ts.Node): boolean {
