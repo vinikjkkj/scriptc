@@ -571,6 +571,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "stats.size": "scr_stats_size",
   "stats.mtimeMs": "scr_stats_mtime_ms",
   "text.decode": "scr_text_decode",
+  "text.encoder": "scr_text_encoder_value",
+  "text.decoder": "scr_text_decoder_value",
   "zlib.deflateSync": "scr_zlib_deflate",
   "zlib.inflateSync": "scr_zlib_inflate",
   "zlib.gzipSync": "scr_zlib_gzip",

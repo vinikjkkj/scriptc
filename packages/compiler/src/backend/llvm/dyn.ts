@@ -564,9 +564,24 @@ export class LlDyn {
       case "f64":
         kindIs(DK.NUM);
         break;
-      case "string":
-        kindIs(DK.STR);
+      case "string": {
+        // The C twin's note: a TextEncoder/TextDecoder box is a string
+        // slot's value too.
+        const kd = this.kindOf(B, "%d");
+        const isStr = B.tmp();
+        B.line(`${isStr} = icmp eq i32 ${kd}, ${DK.STR}`);
+        const lYes = B.newLabel("dm.sy");
+        const lNo = B.newLabel("dm.sn");
+        B.condBr(isStr, lYes, lNo);
+        B.startBlock(lYes);
+        B.terminate(`ret i1 true`);
+        B.startBlock(lNo);
+        this.host.declare(`declare zeroext i1 @scr_dyn_is_textcodec(ptr)`);
+        const tc = B.tmp();
+        B.line(`${tc} = call zeroext i1 @scr_dyn_is_textcodec(ptr %d)`);
+        B.terminate(`ret i1 ${tc}`);
         break;
+      }
       case "bool":
         kindIs(DK.BOOL);
         break;
@@ -1164,7 +1179,33 @@ export class LlDyn {
         break;
       }
       case "string": {
-        requireKind(DK.STR, "dc");
+        // A TextEncoder/TextDecoder box is a string slot's value (the C
+        // walker's note): a plain string takes the inline path, anything
+        // else asks scr_dyn_is_textcodec before the standard failure.
+        const kd = this.kindOf(B, "%d");
+        const isStr = B.tmp();
+        B.line(`${isStr} = icmp eq i32 ${kd}, ${DK.STR}`);
+        const lStr = B.newLabel("dcs.s");
+        const lOther = B.newLabel("dcs.o");
+        const lCodec = B.newLabel("dcs.c");
+        const lFail = B.newLabel("dcs.f");
+        B.condBr(isStr, lStr, lOther);
+        B.startBlock(lOther);
+        host.declare(`declare zeroext i1 @scr_dyn_is_textcodec(ptr)`);
+        const tc = B.tmp();
+        B.line(`${tc} = call zeroext i1 @scr_dyn_is_textcodec(ptr %d)`);
+        B.condBr(tc, lCodec, lFail);
+        B.startBlock(lFail);
+        failRet();
+        B.startBlock(lCodec);
+        host.declare(`declare ptr @scr_dyn_str_value(ptr)`);
+        host.declare(`declare ptr @scr_str_retain_v(ptr)`);
+        const cv = B.tmp();
+        const cr = B.tmp();
+        B.line(`${cv} = call ptr @scr_dyn_str_value(ptr %d)`);
+        B.line(`${cr} = call ptr @scr_str_retain_v(ptr ${cv})`);
+        B.terminate(`ret ptr ${cr}`);
+        B.startBlock(lStr);
         host.declare(`declare ptr @scr_str_retain_v(ptr)`);
         const s = this.payloadOf(B, "%d", "ptr");
         const r = B.tmp();
@@ -4011,7 +4052,28 @@ export class LlDyn {
       host.declare(`declare ptr @scr_dyn_handle_key_get(ptr, ptr)`);
       const r = B.tmp();
       B.line(`${r} = call ptr @scr_dyn_handle_key_get(ptr %d, ptr %k)`);
+      // The C twin: a modeled property answers, a throw (NULL) returns, and
+      // a miss (the undefined singleton) falls on to the intrinsic-method
+      // tail so a method NAME the handle's dispatch implements reads as a
+      // bound function.
+      const hasR = B.tmp();
+      B.line(`${hasR} = icmp ne ptr ${r}, null`);
+      const lSome = B.newLabel("kg.hs");
+      const lNull = B.newLabel("kg.hn");
+      B.condBr(hasR, lSome, lNull);
+      B.startBlock(lNull);
+      B.terminate(`ret ptr null`);
+      B.startBlock(lSome);
+      const rk = this.kindOf(B, r);
+      const rUndef = B.tmp();
+      B.line(`${rUndef} = icmp eq i32 ${rk}, ${DK.UNDEF}`);
+      const lMissH = B.newLabel("kg.hm");
+      const lRetH = B.newLabel("kg.hr");
+      B.condBr(rUndef, lMissH, lRetH);
+      B.startBlock(lRetH);
       B.terminate(`ret ptr ${r}`);
+      B.startBlock(lMissH);
+      intrinsicOrUndef();
       B.startBlock(lNext);
     }
     // ARRBUF: 'byteLength' answers; 'length' and every index are

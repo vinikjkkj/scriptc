@@ -1188,6 +1188,17 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
         static const char *const impl[] = { "then", "catch", "finally", NULL };
         return dyn_name_in(m, impl) || dyn_objproto_knows(m);
       }
+    case SCR_DYN_HANDLE:
+      if (recv->v.handle.tag == SCR_DYNH_TEXTCODEC) {
+        /* TextEncoder: encode / encodeInto. TextDecoder: decode. Both
+         * inherit Object.prototype's names; the read agrees with the ops
+         * table's call arm (scr_json.c) name for name. */
+        const bool enc = scr_textcodec_name(recv)[4] == 'E';
+        static const char *const encm[] = { "encode", "encodeInto", "toString", "toLocaleString", NULL };
+        static const char *const decm[] = { "decode", "toString", "toLocaleString", NULL };
+        return dyn_name_in(m, enc ? encm : decm) || dyn_objproto_knows(m);
+      }
+      return false;
     default:
       /* BYTES, HANDLE, JSVAL, OBJINST, BIG and ARRBUF. Each has its own
        * arm in the emitted read (a modeled-property table, the engine, or

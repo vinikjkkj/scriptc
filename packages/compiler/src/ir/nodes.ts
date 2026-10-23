@@ -6271,6 +6271,15 @@ export type IrLibFn =
    * (identical bytes — ScrStr storage is well-formed UTF-8). Borrowed
    * arg; owned (+1) string; never throws. */
   | "text.decode"
+  /** `new TextEncoder()` / `new TextDecoder()`: the instance IS a string
+   * (types.ts), and these two answer the two IMMORTAL strings the runtime
+   * holds for them (scr_text_encoder_value / scr_text_decoder_value)
+   * instead of a fresh "utf-8" — so the boundary can tell a codec from a
+   * string when it escapes into the checked-dynamic tree (scr_dyn_new_str
+   * boxes exactly those two as a handle). No arguments; +1 (immortal, so a
+   * no-op count); never throws. */
+  | "text.encoder"
+  | "text.decoder"
   /** The wider sync fs slice (scr_lib.c), all throwing catchably with
    * Node's errno message shapes and `.code` stamped like the rest of
    * sync fs. unlink/chmod/chown wrap the syscalls 1:1 (Node reports the

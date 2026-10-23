@@ -1747,7 +1747,26 @@ ScrDyn *scr_dyn_new_num(double n) {
   return d;
 }
 
+/* The box function for the two codec strings, set by scr_text_encoder_value /
+ * scr_text_decoder_value (the TextCodec section below) — the only producers of
+ * such a string. NOT static: a file-local pointer with stores only in another
+ * function is turned into a flag and a direct call by the optimizer, which
+ * would link the whole section into every binary that boxes a string. */
+ScrDyn *(*scr_textcodec_box_fn)(ScrStr *s) = NULL;
+
+/* The class name the string/inspect/JSON arms print: read off the codec
+ * string's header (the `cap` marker), so naming a class links nothing. */
+const char *scr_textcodec_name(const ScrDyn *d) {
+  return ((const ScrStr *)d->v.handle.ptr)->cap == 0xFFFFFFF1u ? "TextEncoder" : "TextDecoder";
+}
+
 ScrDyn *scr_dyn_new_str(ScrStr *s) {
+  /* The two immortal strings new TextEncoder() / new TextDecoder() evaluate
+   * to cross as a native handle, not as the plain "utf-8" they spell (see
+   * the TextCodec section below). Two header loads on a path that already
+   * allocates; an immortal literal's cap is its length, so only a codec string
+   * has a cap this large. */
+  if (s->rc == SCR_STR_IMMORTAL && s->cap >= 0xFFFFFFF1u) return scr_textcodec_box_fn(s);
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_STR);
   d->v.str = scr_str_retain(s);
   return d;
@@ -2464,6 +2483,8 @@ static const ScrDynHandleOps *scr_dyn_handle_ops(ScrDynHandleTag tag) {
 /* The class display name for error texts ("IncomingMessage"); safe on
  * uninstalled tags (error paths render before anyone dispatches). */
 const char *scr_dyn_handle_cls(const ScrDyn *d) {
+  /* One tag, two classes: the codec box names the one it holds. */
+  if (d->v.handle.tag == SCR_DYNH_TEXTCODEC) return scr_textcodec_name(d);
   const ScrDynHandleOps *ops = scr_dynh_ops[d->v.handle.tag];
   return ops ? ops->cls : "object";
 }
@@ -2484,7 +2505,13 @@ const char *scr_dyn_specific_type(const ScrDyn *cb, char *detail, size_t cap) {
   case SCR_DYN_UNDEF: d = "undefined"; break;
   case SCR_DYN_OBJ: d = "an instance of Object"; break;
   case SCR_DYN_ARR: d = "an instance of Array"; break;
-  case SCR_DYN_BYTES: d = "an instance of Uint8Array"; break;
+  case SCR_DYN_BYTES:
+    /* determineSpecificType names the constructor: a DataView and a Buffer
+     * ride this kind too, and each says its own name. */
+    d = cb->v.bytes->flavor == SCR_BF_DATAVIEW ? "an instance of DataView"
+        : (cb->buffer || cb->v.bytes->flavor == SCR_BF_BUFFER) ? "an instance of Buffer"
+                                                                : "an instance of Uint8Array";
+    break;
   case SCR_DYN_FUNC:
     /* determineSpecificType: `function ${value.name}` — anonymous
      * functions keep Node's trailing space. */
@@ -2683,6 +2710,254 @@ ScrDyn *scr_dyn_new_handle(void *h, ScrDynHandleTag tag) {
   d->v.handle.ptr = scr_dyn_handle_ops(tag)->retain(h);
   d->v.handle.tag = tag;
   return d;
+}
+
+/* ── TextEncoder / TextDecoder as VALUES (SCR_DYNH_TEXTCODEC) ──────────
+ *
+ * The static side represents both objects by the one thing they carry: the
+ * constant string "utf-8" (types.ts — the Timeout-handle idiom: a stateless
+ * stdlib object stands for its only observable value). `new TextEncoder()`
+ * and `new TextDecoder()` therefore evaluate to one of the two IMMORTAL
+ * strings below instead of a fresh "utf-8", and the two are distinct
+ * objects so the boundary can tell an encoder from a decoder.
+ *
+ * That is the whole of how the value escapes into the checked-dynamic
+ * tree: every static string crosses through scr_dyn_new_str (both
+ * backends' to-dyn walkers, the union arms, the record fields), which asks
+ * `scr_textcodec_box_fn` first and boxes the pair as a native handle —
+ * typeof "object", String(x) "[object TextEncoder]", JSON "{}", and the
+ * members below. Before this a codec crossed as the plain string "utf-8":
+ * `typeof x` answered "string", `x.encoding` undefined, and `x.encode` /
+ * `x.decode` threw "is not a function" where Node answers, silently.
+ *
+ * The state a TextDecoder would need beyond the constants — the pending
+ * partial sequence and the BOM-seen bit of a streaming decode — has no
+ * home in a value that is the same immortal string for every decoder, so
+ * `decode(x, { stream: true })` (and the `null` options Node treats as
+ * "do not flush") refuses loudly instead of answering from state it does
+ * not have. Every other call is exact: a non-streaming decode is a pure
+ * function of its input, and a refused streaming call never leaves state
+ * behind that a later call would need. Identity is the one other casualty
+ * of the representation: two `new TextEncoder()` values are the same
+ * object here and `===` says so (the static side already says the same
+ * thing about two strings). Both are stated in SEMANTICS.md's neighbours
+ * and in the types.ts comment this arm lives beside. */
+/* What marks them is the header: an immortal string whose `cap` is one of two
+ * values no real string can carry (a literal's cap is its length), so the test in
+ * scr_dyn_new_str reads two header words and names NOTHING from this section --
+ * the lits, the ops and every member below link only into a program that
+ * evaluates `new TextEncoder()` / `new TextDecoder()` (scr_text_*_value, which
+ * installs the box function on first use). The two caps also keep the pair
+ * distinct objects: two identical immortal constants are mergeable. */
+#define SCR_TC_CAP_ENCODER 0xFFFFFFF1u
+#define SCR_TC_CAP_DECODER 0xFFFFFFF2u
+static const SCR_STR_LIT(6) scr_tc_encoder_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_CAP_ENCODER, "utf-8"};
+static const SCR_STR_LIT(6) scr_tc_decoder_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_CAP_DECODER, "utf-8"};
+
+static ScrDyn *scr_textcodec_box_impl(ScrStr *s);
+
+ScrStr *scr_text_encoder_value(void) {
+  scr_textcodec_box_fn = &scr_textcodec_box_impl;
+  return (ScrStr *)(uintptr_t)&scr_tc_encoder_lit;
+}
+ScrStr *scr_text_decoder_value(void) {
+  scr_textcodec_box_fn = &scr_textcodec_box_impl;
+  return (ScrStr *)(uintptr_t)&scr_tc_decoder_lit;
+}
+
+static bool scr_tc_is_encoder(const void *h) { return ((const ScrStr *)h)->cap == SCR_TC_CAP_ENCODER; }
+
+static void *scr_tc_retain(void *h) { return h; }  /* immortal: nothing to count */
+static void scr_tc_release(void *h) { (void)h; }
+
+static ScrDyn *scr_tc_new_plain_str(const char *lit) {
+  ScrStr *s = scr_str_new(lit, strlen(lit));
+  ScrDyn *d = scr_dyn_new_str(s);
+  scr_str_release(s);
+  return d;
+}
+
+/* The ScrBytes behind a BYTES/ARRBUF box, for the decoder's input: any
+ * ArrayBufferView or ArrayBuffer. Borrowed; NULL for anything else. */
+static const ScrBytes *scr_tc_input_bytes(const ScrDyn *d) {
+  if (d->kind == SCR_DYN_BYTES || d->kind == SCR_DYN_ARRBUF) return d->v.bytes;
+  return NULL;
+}
+
+static ScrDyn *scr_tc_encode(ScrDyn *const *args, size_t argc) {
+  /* `input = ""`: only an ABSENT or undefined argument takes the default;
+   * null is ToString'd to "null" (measured). */
+  ScrStr *s;
+  if (argc == 0 || args[0]->kind == SCR_DYN_UNDEF) {
+    s = scr_str_new("", 0);
+  } else {
+    s = scr_dyn_string_coerce_js(args[0]);
+    if (s == NULL) return NULL; /* ToString threw: pending */
+  }
+  ScrStr *enc = scr_str_new("utf8", 4);
+  ScrBytes *b = scr_bytes_from_str(s, enc);
+  scr_str_release(enc);
+  scr_str_release(s);
+  scr_bytes_stamp_plain(b); /* a plain Uint8Array, not a Buffer */
+  ScrDyn *d = scr_dyn_new_bytes_ref(b);
+  scr_bytes_release(b);
+  return d;
+}
+
+static ScrDyn *scr_tc_encode_into(ScrDyn *const *args, size_t argc) {
+  ScrDyn *src = argc > 0 ? args[0] : scr_dyn_undefined();
+  ScrDyn *dest = argc > 1 ? args[1] : scr_dyn_undefined();
+  /* Node's order: the source is checked as a string, then the destination
+   * as a Uint8Array (a Buffer is one; a DataView or ArrayBuffer is not). */
+  if (src->kind != SCR_DYN_STR) {
+    scr_dyn_arg_type_fail("src", "of type string", src);
+    return NULL;
+  }
+  if (dest->kind != SCR_DYN_BYTES || dest->v.bytes->flavor == SCR_BF_DATAVIEW) {
+    scr_dyn_arg_type_fail("dest", "an instance of Uint8Array", dest);
+    return NULL;
+  }
+  ScrBytes *db = dest->v.bytes;
+  ScrStr *enc = scr_str_new("utf8", 4);
+  /* Whole characters only, into the destination's own length — the
+   * static lowering's write (scr_bytes_write_str: the encodeInto rule
+   * verbatim). `read` is then a walk of the written prefix: every lead
+   * byte is one code point, one UTF-16 unit below U+10000 and two (a
+   * surrogate pair) from the 0xF0 lead. */
+  double written = scr_bytes_write_str(db, src->v.str, enc, 0, 0, false);
+  scr_str_release(enc);
+  if (scr_exc_pending()) return NULL;
+  double read = 0;
+  for (size_t i = 0; i < (size_t)written; i++) {
+    uint8_t c = db->data[i];
+    if ((c & 0xC0) != 0x80) read += c < 0xF0 ? 1 : 2;
+  }
+  ScrDyn *o = scr_dyn_new_obj();
+  scr_dyn_obj_set_lit(o, "read", 4, scr_dyn_new_num(read));
+  scr_dyn_obj_set_lit(o, "written", 7, scr_dyn_new_num(written));
+  return o;
+}
+
+static ScrDyn *scr_tc_decode(ScrDyn *const *args, size_t argc) {
+  /* `decode(input = empty, options = kEmptyObject)`: the options are
+   * validated FIRST (an object, an array, a function or null; anything
+   * else is ERR_INVALID_ARG_TYPE), then the input. */
+  ScrDyn *input = argc > 0 ? args[0] : scr_dyn_undefined();
+  ScrDyn *opts = argc > 1 ? args[1] : scr_dyn_undefined();
+  bool stream = false;
+  if (opts->kind != SCR_DYN_UNDEF) {
+    if (opts->kind == SCR_DYN_NULL) {
+      /* `null` skips the flush flag (Node: `if (options !== null) flags |=
+       * options.stream ? 0 : FLUSH`), i.e. it streams. */
+      stream = true;
+    } else if (opts->kind == SCR_DYN_OBJ) {
+      ScrDyn *sv = scr_dyn_obj_key_get(opts, "stream", 6); /* +1, or NULL when a getter threw */
+      if (sv == NULL) return NULL;
+      stream = scr_dyn_truthy(sv);
+      scr_dyn_release(sv);
+    } else if (opts->kind == SCR_DYN_ARR || opts->kind == SCR_DYN_FUNC) {
+      stream = false; /* an array or function has no `stream` of its own to read */
+    } else {
+      scr_dyn_arg_type_fail("options", "of type object", opts);
+      return NULL;
+    }
+  }
+  const ScrBytes *ib = NULL;
+  if (input->kind != SCR_DYN_UNDEF) {
+    ib = scr_tc_input_bytes(input);
+    if (ib == NULL) {
+      static const char msg[] =
+          "The \"list\" argument must be an instance of SharedArrayBuffer, ArrayBuffer or ArrayBufferView.";
+      scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_INVALID_ARG_TYPE");
+      return NULL;
+    }
+  }
+  if (stream) {
+    static const char msg[] =
+        "TextDecoder.prototype.decode with { stream: true } on a dynamic value is not supported yet"
+        " (a decoder is represented by its constant utf-8 value, which has nowhere to hold the pending"
+        " partial sequence and the BOM-seen bit a streaming decode carries between calls)";
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+    return NULL;
+  }
+  if (ib == NULL) return scr_tc_new_plain_str("");
+  ScrStr *s = scr_text_decode(ib);
+  ScrDyn *d = scr_dyn_new_str(s);
+  scr_str_release(s);
+  return d;
+}
+
+static ScrDyn *scr_tc_invoke(void *h, ScrDyn *self, const char *method, ScrDyn *const *args,
+                             size_t argc, const char *what) {
+  const bool enc = scr_tc_is_encoder(h);
+  if (enc && strcmp(method, "encode") == 0) return scr_tc_encode(args, argc);
+  if (enc && strcmp(method, "encodeInto") == 0) return scr_tc_encode_into(args, argc);
+  if (!enc && strcmp(method, "decode") == 0) return scr_tc_decode(args, argc);
+  /* Object.prototype's, which a codec inherits (it declares none of its
+   * own beyond the three above): toString answers the @@toStringTag form,
+   * valueOf the receiver, hasOwnProperty false (a codec has no own data
+   * properties — its three accessors and methods live on the prototype). */
+  if (strcmp(method, "toString") == 0 || strcmp(method, "toLocaleString") == 0) {
+    return scr_tc_new_plain_str(enc ? "[object TextEncoder]" : "[object TextDecoder]");
+  }
+  if (strcmp(method, "valueOf") == 0) return scr_dyn_retain(self);
+  if (strcmp(method, "hasOwnProperty") == 0) return scr_dyn_new_bool(false);
+  char msg[160];
+  const int n = snprintf(msg, sizeof msg, "%s is not a function", what);
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+  return NULL;
+}
+
+static ScrDyn *scr_tc_get(void *h, const char *key, size_t key_len) {
+  (void)key_len;
+  const bool enc = scr_tc_is_encoder(h);
+  if (strcmp(key, "encoding") == 0) return scr_tc_new_plain_str("utf-8");
+  if (!enc && strcmp(key, "fatal") == 0) return scr_dyn_new_bool(false);
+  if (!enc && strcmp(key, "ignoreBOM") == 0) return scr_dyn_new_bool(false);
+  return NULL; /* not a modeled property — the caller answers undefined */
+}
+
+static bool scr_tc_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)key_len;
+  (void)value;
+  const bool enc = scr_tc_is_encoder(h);
+  /* The accessors have no setter: a strict-mode write is V8's TypeError
+   * (sloppy mode drops it silently, which this runtime does not do). */
+  if (strcmp(key, "encoding") == 0 || (!enc && (strcmp(key, "fatal") == 0 || strcmp(key, "ignoreBOM") == 0))) {
+    char msg[160];
+    const int n = snprintf(msg, sizeof msg, "Cannot set property %s of #<%s> which has only a getter", key,
+                           enc ? "TextEncoder" : "TextDecoder");
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+    return true; /* handled, with the exception pending */
+  }
+  return false; /* an expando: the loud ladder every handle shares */
+}
+
+static const ScrDynHandleOps scr_tc_ops = {
+  "TextCodec", &scr_tc_retain, &scr_tc_release, &scr_tc_invoke, &scr_tc_get, &scr_tc_set, NULL,
+};
+
+/* The other direction of the boundary. A codec crossed as a handle; a
+ * static slot typed TextEncoder/TextDecoder (which is a string slot) takes
+ * it back through a dynCheck/dynMatch against `string`, so the string
+ * checks must accept the codec box and answer the immortal string it
+ * stands for (scr_dyn_str_like / scr_dyn_str_value). A slot that really is
+ * a `string` accepting one is the cast lying about its type, and receives
+ * "utf-8". */
+bool scr_dyn_is_textcodec(const ScrDyn *d) {
+  return d->kind == SCR_DYN_HANDLE && d->v.handle.tag == SCR_DYNH_TEXTCODEC;
+}
+bool scr_dyn_str_like(const ScrDyn *d) { return d->kind == SCR_DYN_STR || scr_dyn_is_textcodec(d); }
+ScrStr *scr_dyn_str_value(const ScrDyn *d) {
+  return d->kind == SCR_DYN_STR ? d->v.str : (ScrStr *)d->v.handle.ptr;
+}
+
+static ScrDyn *scr_textcodec_box_impl(ScrStr *s) {
+  /* The ops install lazily: the box is the only way a handle of this tag
+   * comes to exist, and the value functions above are the only way a codec
+   * string comes to exist, so no emitted main() has to know. */
+  if (scr_dynh_ops[SCR_DYNH_TEXTCODEC] == NULL) scr_dyn_handle_install(SCR_DYNH_TEXTCODEC, &scr_tc_ops);
+  return scr_dyn_new_handle(s, SCR_DYNH_TEXTCODEC);
 }
 
 /* ── class instances in the checked-dynamic tree (SCR_DYN_OBJINST) ────
@@ -4423,6 +4698,11 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
   }
   case SCR_DYN_HANDLE:
     if (scr_dyn_is_symbol(d)) return false; /* absent, like undefined */
+    if (d->v.handle.tag == SCR_DYNH_TEXTCODEC) {
+      /* A TextEncoder/TextDecoder has no own enumerable property: {} */
+      scr_jb_puts(b, "{}");
+      return true;
+    }
     /* fall through */
   default: {
     const char *msg = "JSON.stringify of a runtime handle is not supported yet";
@@ -5131,7 +5411,8 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
       scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
       return scr_str_new("", 0);
     }
-    if (d->v.handle.tag == SCR_DYNH_REGEX || d->v.handle.tag == SCR_DYNH_DATE) {
+    if (d->v.handle.tag == SCR_DYNH_REGEX || d->v.handle.tag == SCR_DYNH_DATE ||
+        d->v.handle.tag == SCR_DYNH_TEXTCODEC) {
       const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
       ScrDyn *r = ops->invoke(d->v.handle.ptr, (ScrDyn *)d, "toString", NULL, 0, "toString");
       if (r == NULL) return scr_str_new("", 0); /* threw — pending */
@@ -7042,6 +7323,10 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
   case SCR_DYN_HANDLE: {
     if (scr_dyn_is_symbol(d)) { /* an array slot or a bare value: like undefined */
       scr_jb_puts(b, "null");
+      return;
+    }
+    if (d->v.handle.tag == SCR_DYNH_TEXTCODEC) {
+      scr_jb_puts(b, "{}"); /* no own enumerable property */
       return;
     }
     /* Node's JSON.stringify over these classes throws the circular-

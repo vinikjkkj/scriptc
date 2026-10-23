@@ -7429,7 +7429,17 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
             : undefined,
         );
       }
-      return { kind: "strLit", value: "utf-8", type: STRING, loc: locOf(expr) };
+      // The instance is one of the runtime's two IMMORTAL "utf-8" strings,
+      // not a fresh literal: they are what scr_dyn_new_str recognizes at the
+      // boundary, so a codec that escapes into an `any` slot becomes an
+      // object with its members instead of the plain string it spells.
+      return {
+        kind: "libCall",
+        fn: symbol.name === "TextDecoder" ? "text.decoder" : "text.encoder",
+        args: [],
+        type: STRING,
+        loc: locOf(expr),
+      };
     }
     const elem = symbol ? own(BYTES_CTORS, symbol.name) : undefined;
     if (!elem || !symbol || !L.isStdlibSymbol(symbol)) return null;

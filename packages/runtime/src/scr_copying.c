@@ -301,6 +301,7 @@ ScrStr *scr_dyn_object_to_string(const ScrDyn *d) {
   case SCR_DYN_HANDLE:
     if (d->v.handle.tag == SCR_DYNH_DATE) tag = "Date";
     else if (d->v.handle.tag == SCR_DYNH_REGEX) tag = "RegExp";
+    else if (d->v.handle.tag == SCR_DYNH_TEXTCODEC) tag = scr_textcodec_name(d);
     break;
   case SCR_DYN_OBJ:
     if (scr_dyn_is_error_encoding(d)) { tag = "Error"; break; }

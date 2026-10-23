@@ -8049,6 +8049,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // WHATWG utf-8 decode with the leading BOM stripped
             // (scr_bytes.c). Borrowed bytes; +1 string; never throws.
             return finish(`scr_text_decode(${arg(0)})`);
+          case "text.encoder":
+            // The immortal string new TextEncoder() evaluates to (scr_json.c);
+            // scr_dyn_new_str boxes it as a handle. Never throws.
+            return finish(`scr_text_encoder_value()`);
+          case "text.decoder":
+            return finish(`scr_text_decoder_value()`);
           // The fs option forms (scr_lib.c) — all in the may-throw seed,
           // like the rest of sync fs.
           case "fs.mkdirRecursiveSync":

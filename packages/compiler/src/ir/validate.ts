@@ -1526,6 +1526,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "date.formatOptsDyn": { argTypes: [F64, F64, STRING, DYN], result: STRING },
   "bytes.jsString": { argTypes: [BYTES_U8], result: STRING },
   "text.decode": { argTypes: [BYTES_U8], result: STRING },
+  "text.encoder": { argTypes: [], result: STRING },
+  "text.decoder": { argTypes: [], result: STRING },
   "fs.mkdirRecursiveSync": { argTypes: [STRING], result: VOID },
   "fs.rmOptsSync": { argTypes: [STRING, BOOL, BOOL], result: VOID },
   "fs.rmRetrySync": { argTypes: [STRING, BOOL, BOOL, F64, F64], result: VOID },

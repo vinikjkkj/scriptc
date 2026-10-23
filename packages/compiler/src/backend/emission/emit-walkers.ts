@@ -1179,7 +1179,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return d->kind == SCR_DYN_NUM;`);
         break;
       case "string":
-        d.push(`  return d->kind == SCR_DYN_STR;`);
+        // A TextEncoder/TextDecoder box is a string slot's value too (the
+        // codec is represented by its immortal string): see scr_dyn_str_like.
+        d.push(`  return d->kind == SCR_DYN_STR || scr_dyn_is_textcodec(d);`);
         break;
       case "bool":
         d.push(`  return d->kind == SCR_DYN_BOOL;`);
@@ -1672,7 +1674,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`     * res.statusCode, ...) answer boxed values through the`);
     d.push(`     * installed ops; the rest is the undefined singleton or the`);
     d.push(`     * loud not-supported ladder (scr_json.c). */`);
-    d.push(`    return scr_dyn_handle_key_get(d, k);`);
+    // A modeled property answers here; a miss (the undefined singleton)
+    // falls on to the intrinsic-method tail below, which answers a method
+    // NAME the handle's dispatch implements (`typeof codec.encode`) with
+    // a bound function where this arm used to settle for undefined. A
+    // throw (NULL, pending) returns as before.
+    d.push(`    ScrDyn *hv = scr_dyn_handle_key_get(d, k);`);
+    d.push(`    if (hv == NULL || hv->kind != SCR_DYN_UNDEF) return hv;`);
+    d.push(`    scr_dyn_release(hv);`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_ARRBUF) {`);
     d.push(`    /* ArrayBuffer: 'byteLength' answers, and 'length' and every`);
@@ -2146,8 +2155,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         break;
       case "string":
         if (soft) d.push(`  (void)path;`);
-        d.push(fail(`  `, "prim.string", `d->kind != SCR_DYN_STR`, `NULL`));
-        d.push(`  return scr_str_retain(d->v.str);`);
+        // A codec box (TextEncoder/TextDecoder cross as a handle) is the
+        // value of a string slot: scr_dyn_str_like / scr_dyn_str_value.
+        d.push(fail(`  `, "prim.string", `d->kind != SCR_DYN_STR && !scr_dyn_is_textcodec(d)`, `NULL`));
+        d.push(`  return scr_str_retain(d->kind == SCR_DYN_STR ? d->v.str : scr_dyn_str_value(d));`);
         break;
       case "dyn":
         // An `unknown` slot (a dyn record field): the checked-dynamic tree subtree passes
