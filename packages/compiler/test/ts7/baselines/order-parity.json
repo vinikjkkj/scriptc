@@ -11977,6 +11977,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8510-js-ctor-identity-after-prototype-create.js": {
+   "order": [
+    "<repo>/tests/corpus/8510-js-ctor-identity-after-prototype-create.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"
