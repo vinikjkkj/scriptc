@@ -11,7 +11,7 @@ import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
-import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
+import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, resolveImport, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { requestInitWriteFence } from "./lower-fetch.js";
@@ -6538,6 +6538,25 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       const exportSym = L.checker.getSymbolAtLocation(expr.left);
       if (exportSym && !L.classBySymbol.has(exportSym)) L.classBySymbol.set(exportSym, info);
       return { kind: "block", body: [], loc };
+    }
+    // `module.exports = require('./impl')` — this module's export object IS
+    // the required module's (Node hands back the same object), so the
+    // statement is alias plumbing exactly like `module.exports = common`:
+    // requirers resolve through to the implementation's declarations, and the
+    // implementation's %init runs at the require edge. Only a literal
+    // specifier that resolves to a compiled CommonJS module.
+    if (
+      ts.isCallExpression(rhs) &&
+      ts.isIdentifier(rhs.expression) &&
+      rhs.expression.text === "require" &&
+      rhs.arguments.length === 1 &&
+      ts.isStringLiteral(rhs.arguments[0]!)
+    ) {
+      const dep = resolveImport(L.program, expr.getSourceFile(), (rhs.arguments[0] as ts.StringLiteral).text);
+      const rt = dep !== null && dep !== undefined && dep.isDeclarationFile ? (L.declTwinSourceOf(dep) ?? dep) : dep;
+      if (rt !== null && rt !== undefined && L.fileTag.has(rt) && isCjsJsFile(rt)) {
+        return L.requireInitStmt((rhs.arguments[0] as ts.StringLiteral).text, rhs) ?? { kind: "block", body: [], loc };
+      }
     }
     const g = L.globalsByDeclNode.get(expr);
     if (!g) return null;

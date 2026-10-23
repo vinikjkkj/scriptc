@@ -539,11 +539,30 @@ function isRequireStatement7(stmt: ts.Statement): boolean {
 
 /** The require() occurrences of one top-level statement: the declaration
  * forms and the bare side-effect call. Empty for everything else. */
+/** `module.exports = require("literal")` as an expression. */
+function isWholeExportRequire7(e: ts.Expression): boolean {
+  return (
+    ts.isBinaryExpression(e) &&
+    e.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    ts.isPropertyAccessExpression(e.left) &&
+    ts.isIdentifier(e.left.expression) &&
+    e.left.expression.text === "module" &&
+    e.left.name.text === "exports" &&
+    requireSpecOf7(e.right) !== null
+  );
+}
+
 function requiresOf7(
   stmt: ts.Statement,
 ): { spec: string; node: ts.Node; decl: ts.VariableDeclaration | null }[] {
   if (ts.isExpressionStatement(stmt)) {
     const spec = requireSpecOf7(stmt.expression);
+    if (spec === null && isWholeExportRequire7(stmt.expression)) {
+      // `module.exports = require("s")`: the module edge of a pass-through
+      // module (its export object IS the required module's).
+      const call = (stmt.expression as ts.BinaryExpression).right as ts.CallExpression;
+      return [{ spec: requireSpecOf7(call)!, node: call, decl: null }];
+    }
     return spec !== null ? [{ spec, node: stmt.expression, decl: null }] : [];
   }
   if (!ts.isVariableStatement(stmt)) return [];
