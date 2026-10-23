@@ -11906,6 +11906,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8504-any-return-in-function-type.ts": {
+   "order": [
+    "<repo>/tests/corpus/8504-any-return-in-function-type.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",

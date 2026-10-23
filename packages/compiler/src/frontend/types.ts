@@ -5023,7 +5023,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const ret =
       retT.flags & ts.TypeFlags.Never
         ? VOID
-        : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral) && (retT.flags & ts.TypeFlags.Any) !== 0
+        : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral || !ctx.dynamic) && (retT.flags & ts.TypeFlags.Any) !== 0
           ? DYN
           : mapType(retT, ctx);
     if (!ret) {
