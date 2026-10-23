@@ -52,7 +52,7 @@ async function runBinary(cmd: string, args: string[]): Promise<RunResult> {
 /** Compile one pilot statically (no --dynamic — the whole point) with the
  * named packages opted in; cache-keyed over the program and the vendored
  * packages. */
-async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise<string> {
+async function buildStatic(entry: string, npmStatic: string[] | "auto", backend: "c" | "llvm" = "c"): Promise<string> {
   const hash = createHash("sha256");
   const inputs = [
     entry,
@@ -74,6 +74,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
   const key = hash
     .update(npmStatic === "auto" ? "auto" : npmStatic.join(","))
     .update(sanitize ? "san" : "plain")
+    .update(backend === "c" ? "" : backend)
     .digest("hex")
     .slice(0, 16);
   // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
@@ -89,7 +90,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     // Pinned: the suite pins --npm-static's FRONTEND frontier (coverage
     // numbers, fence sites); the backend lane is held fixed so those pins
     // move only when the frontend moves.
-    backend: "c",
+    backend,
   });
   if (!result.ok) {
     throw new Error(
@@ -1259,9 +1260,12 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * The residual after 4151, pinned so it cannot quietly become a lie
    * again. Two of these rows are the good direction and two are not:
    *
-   *   rSplitFenced / rToFixedFenced  LIE -> honest refusal. Base said
+   *   rSplitFenced                   LIE -> honest refusal. Base said
    *     "s[SPL] is not a function" (Node has split); it now names the
    *     unimplemented method. Still not Node's answer.
+   *   rToFixedFenced                 the refusal CLOSED: toFixed on a dyn
+   *     number is implemented (corpus 8537), so the row answers `1.50`
+   *     like Node.
    *   rSplitDot                      the DOT twin ANSWERS `a,b`, which is
    *     what makes the row above an asymmetry rather than a shared gap.
    *   rToFixedDot                    the dot twin refuses too, so toFixed
@@ -1299,22 +1303,33 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(rows.get("rUpper")).toBe("THREW 'String.prototype.toUpperCase' on a dynamic value is not supported yet | AB | DIFFER");
     expect(rows.get("rLower")).toBe("THREW 'String.prototype.toLowerCase' on a dynamic value is not supported yet | ab | DIFFER");
     expect(rows.get("rSplitFenced")).toBe("THREW 'String.prototype.split' on a dynamic value is not supported yet");
-    expect(rows.get("rToFixedFenced")).toBe("THREW 'Number.prototype.toFixed' on a dynamic value is not supported yet");
+    expect(rows.get("rToFixedFenced")).toBe("1.50");
     expect(rows.get("rSplitDot")).toBe("a,b");
     expect(rows.get("rTrulyMissing")).toBe('THREW s["nope"] is not a function');
     // ...and the divergence from Node is asserted, not merely described.
     expect(native).not.toBe(node);
     expect(node.includes("rSplitFenced   = a,b")).toBe(true);
+    expect(node.includes("rToFixedFenced = 1.50")).toBe(true);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
-  test("4152 (refused row): toFixed through the dot spelling over a dyn number is a build refusal", () => {
+  // The row that used to pin a BUILD refusal ("method calls like 'n.toFixed'
+  // is not supported yet"): toFixed over a dyn number lowers now (corpus 8537),
+  // so the dot spelling builds and must print what Node prints, on both backends.
+  test.for(["c", "llvm"] as const)("4152 (formerly refused row): toFixed through the dot spelling over a dyn number matches Node (%s)", async (backend) => {
     const entry = join(fixturesRoot, "npm/cases/4152-keyed-strnum-residual-on-purpose/main-refused.ts");
     const { coverage } = analyze(entry, { npmStatic: ["keyedstrnum-refused"] });
     expect(coverage.npmStatic).toEqual([{ package: "keyedstrnum-refused", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics.map((d) => d.message)).toEqual(["method calls like 'n.toFixed' is not supported yet"]);
-  }, 120_000);
+    expect(coverage.diagnostics.map((d) => d.message)).toEqual([]);
+    const binary = await buildStatic(entry, ["keyedstrnum-refused"], backend);
+    const [nodeRes, nativeRes] = await Promise.all([runBinary("node", [entry]), runBinary(binary, [])]);
+    const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    expect(node.startsWith("rToFixedDot    = ")).toBe(true);
+    expect(native).toBe(node);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
 
   /* -- 4242: the dyn prototype-method READ, gridded -----------------------
    *
