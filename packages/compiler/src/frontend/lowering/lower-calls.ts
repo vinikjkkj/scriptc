@@ -6726,7 +6726,7 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // computed spelling already reached as a loud throw. Routing can only
   // move cells REFUSE -> MATCH: every other receiver kind answers the same
   // is-not-a-function / own-member call it answered for `map`.
-  "reduce", "reduceRight", "findLast", "findLastIndex", "toReversed", "toSorted", "with",
+  "reduce", "reduceRight", "findLast", "findLastIndex", "toReversed", "toSorted", "with", "flat", "toSpliced",
   // The ArrayBuffer box's own methods (the value `x.buffer` answers):
   // slice is routed above; resize answers V8's incompatible-receiver
   // TypeError and transfer/transferToFixedLength refuse by name. No
