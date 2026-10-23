@@ -510,6 +510,18 @@ export function nearestPkgJsonPath(fromFile: string): string | null {
   return dir === null ? null : tsgoPath(join(dir, "package.json"));
 }
 
+/** True when `file` is CommonJS by Node's rule — `.cjs`, or a `.js` whose
+ * package scope is not "type": "module" — so every bare edge it spells is a
+ * require() and takes the "require" export condition. TypeScript sources are
+ * ESM syntax and keep the import condition. */
+function isCommonJsFlavoredFile(file: string): boolean {
+  if (file.endsWith(".cjs")) return true;
+  if (!file.endsWith(".js")) return false;
+  const dir = nearestPkgDir(dirname(resolve(file)));
+  if (dir === null) return true;
+  return (pkgJsonOf(dir) as { type?: string } | null)?.type !== "module";
+}
+
 /** Resolves a PROJECT-INTERNAL package.json-mediated specifier from
  * `fromFile` — `#alias` (the imports field) or a self-name reference (the
  * nearest package.json's own name through its exports) — to an absolute
@@ -522,7 +534,7 @@ export function resolveProjectImport(fromFile: string, specifier: string): strin
   // chokepoint that makes preflight's user-module edges, the module
   // order, and the CJS link check all agree the package compiles as
   // program modules instead of island-embedding its published dist.
-  const provenance = provenanceEntryFor(specifier);
+  const provenance = provenanceEntryFor(specifier, isCommonJsFlavoredFile(fromFile));
   if (provenance !== null) return tsgoPath(provenance);
   // ...and a source tree's OWN tsconfig path alias ("@client/plugins"):
   // bare-looking, but it names source inside the registered tree, so it

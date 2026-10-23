@@ -596,9 +596,9 @@ function locatePackageDir(tree: string, name: string): string | null {
 
 /** The published dist target for `subpath` — "exports" with the import
  * condition, else module/main/types fields (root subpath only). */
-function publishedTargetOf(pkgJson: Record<string, unknown>, subpath: string): string | null {
+function publishedTargetOf(pkgJson: Record<string, unknown>, subpath: string, mode: "import" | "require" = "import"): string | null {
   if (pkgJson["exports"] !== undefined) {
-    return resolveExports(pkgJson["exports"], subpath, "import");
+    return resolveExports(pkgJson["exports"], subpath, mode);
   }
   if (subpath !== ".") return subpath;
   for (const field of ["module", "main", "types"]) {
@@ -914,6 +914,8 @@ interface MappedTree {
   aliases: Record<string, string[]> | undefined;
   /** specifier → mapped source file. Grows across rounds. */
   entries: Record<string, string>;
+  /** specifier → mapped file for a require() edge, only where it differs from `entries`. */
+  requireEntries: Record<string, string>;
   /** Driver-resolved externals of everything in `entries`. Grows likewise. */
   external: Record<string, string>;
   /** Specifiers whose mapping has been ATTEMPTED — mapped or noted. The
@@ -1053,6 +1055,19 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
         );
         continue;
       }
+      /* The CommonJS edge: a require() of this specifier takes the
+       * "require" condition's target, which for a package that ships an ESM
+       * wrapper beside its CJS body is a DIFFERENT file (pg: esm/index.mjs
+       * for import, lib/index.js for require). One answer for both made
+       * pg-pool's lazy require('pg') land on pg's ESM wrapper and close a
+       * CommonJS/ESM cycle through it that Node never forms. Recorded only
+       * when it differs from the import entry. */
+      const reqTarget = publishedTargetOf(tree.installed.pkgJson, subpath, "require");
+      const reqSource = reqTarget === null || reqTarget === target ? null : mapEntryToSource(tree.dir, reqTarget, subpath);
+      if (reqSource !== null && reqSource !== source && tree.requireEntries[spec] !== reqSource) {
+        tree.requireEntries[spec] = reqSource;
+        added.push(reqSource);
+      }
       if (tree.entries[spec] === source) continue;
       tree.entries[spec] = source;
       added.push(source);
@@ -1175,6 +1190,7 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
        * alias specifiers for a table to answer. */
       aliases: unattested === undefined ? sourceAliasesOf(dir) : undefined,
       entries: {},
+      requireEntries: {},
       external: {},
       considered: new Set(),
       announced: false,
@@ -1252,6 +1268,7 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       // checkout, which has no node_modules of its own.
       installedDir: tsgoPath(tree.installed.dir),
       entries: tree.entries,
+      ...(Object.keys(tree.requireEntries).length > 0 ? { requireEntries: tree.requireEntries } : {}),
       ...(tree.aliases !== undefined ? { aliases: tree.aliases } : {}),
       ...(Object.keys(tree.external).length > 0 ? { external: tree.external } : {}),
     });
