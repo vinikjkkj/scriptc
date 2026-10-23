@@ -283,3 +283,14 @@ describe("provenance: an authored package's own dependency", () => {
     expect(coverage.diagnostics.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
   });
 });
+
+describe("provenance: a relative module's declaration twin is walked", () => {
+  test("a package spelled only in inner.js beside inner.d.ts is discovered and mapped", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = join(fixtureDir, "manifest-authoredrel.json");
+    const relEntry = join(fixtureDir, "cases/authoredrel/main.ts");
+    const sources = await resolveProvenanceSources(relEntry);
+    /* Base: the walk records inner.js as a twin but never reads it, so `depts`
+     * is not in the graph and the list is ["authoredrel"] alone. */
+    expect(sources.packages.map((p) => p.name).sort()).toEqual(["authoredrel", "depts"]);
+  });
+});

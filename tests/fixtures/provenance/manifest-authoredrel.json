@@ -1,0 +1,14 @@
+{
+  "packages": {
+    "authoredrel": {
+      "dir": "./attested-src/authoredrel",
+      "commit": "2222333333333333333333333333333333333333",
+      "repo": "https://github.com/example/authoredrel"
+    },
+    "depts": {
+      "dir": "./attested-src/depts",
+      "commit": "4444444444444444444444444444444444444444",
+      "repo": "https://github.com/example/depts"
+    }
+  }
+}
