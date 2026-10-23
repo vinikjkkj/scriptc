@@ -50,7 +50,7 @@ const fixed = (1.5).toFixed(); // digit-free toFixed lowers now (the static ties
 const nums = [1, 2, 3];
 const found = nums.indexOf(2, 1);
 const joined = nums.join();
-nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
+nums.forEach((x) => console.log(x), { unused: true }); // thisArg lowers now (corpus 8509)
 const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
 const rev = JSON.parse("1", (_k, v) => v);
 // (stringify with a null replacer + LITERAL space now lowers — the pretty
