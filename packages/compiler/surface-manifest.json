@@ -1114,6 +1114,24 @@
       "status": "static"
     },
     {
+      "id": "node-builtin.net.isIP",
+      "kind": "node-builtin",
+      "name": "net.isIP",
+      "status": "static"
+    },
+    {
+      "id": "node-builtin.net.isIPv4",
+      "kind": "node-builtin",
+      "name": "net.isIPv4",
+      "status": "static"
+    },
+    {
+      "id": "node-builtin.net.isIPv6",
+      "kind": "node-builtin",
+      "name": "net.isIPv6",
+      "status": "static"
+    },
+    {
       "id": "node-builtin.net.setDefaultAutoSelectFamilyAttemptTimeout",
       "kind": "node-builtin",
       "name": "net.setDefaultAutoSelectFamilyAttemptTimeout",
@@ -2708,6 +2726,13 @@
       "id": "stdlib.string.startsWith",
       "kind": "stdlib",
       "name": "string.prototype.startsWith",
+      "status": "static",
+      "note": "the lowered call form takes 1 to 2 arguments"
+    },
+    {
+      "id": "stdlib.string.substr",
+      "kind": "stdlib",
+      "name": "string.prototype.substr",
       "status": "static",
       "note": "the lowered call form takes 1 to 2 arguments"
     },
