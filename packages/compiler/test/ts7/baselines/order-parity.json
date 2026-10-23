@@ -11654,6 +11654,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8509-array-hof-this-arg.js": {
+   "order": [
+    "<repo>/tests/corpus/8509-array-hof-this-arg.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
