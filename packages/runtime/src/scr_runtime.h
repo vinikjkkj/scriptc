@@ -2026,7 +2026,12 @@ void scr_sym_dyn_install(void);
 /* SCR_MAP_KEY_UNION: a Set whose element is a union. Keys are ScrUnion
  * boxes under the REF key API (retain/release adapters, borrowed probes),
  * but hashed and compared by the VALUE the box carries (scr_set_new_union). */
-typedef enum { SCR_MAP_KEY_F64, SCR_MAP_KEY_STR, SCR_MAP_KEY_REF, SCR_MAP_KEY_UNION } ScrMapKeyKind;
+/* SCR_MAP_KEY_DYN: a Map/Set of untyped JavaScript. Keys are retained ScrDyn
+ * boxes (REF key API, retain/release adapters) hashed and compared by the
+ * VALUE the box carries -- SameValueZero, arm for arm as scr_dyn_strict_eq
+ * decides === (scr_map_new_dynkey / scr_set_new_dynkey). Appended LAST: the
+ * LLVM backend hardcodes the key-kind numbers. */
+typedef enum { SCR_MAP_KEY_F64, SCR_MAP_KEY_STR, SCR_MAP_KEY_REF, SCR_MAP_KEY_UNION, SCR_MAP_KEY_DYN } ScrMapKeyKind;
 typedef enum { SCR_MAP_VAL_F64, SCR_MAP_VAL_BOOL, SCR_MAP_VAL_REF } ScrMapValKind;
 
 /* Exactly two 8-byte slots and NO padding. The liveness bit used to sit
@@ -6505,6 +6510,45 @@ bool scr_dyn_is_date(const ScrDyn *d); /* the Date handle tag; borrowed, never t
  * typeof, truthiness, String() and JSON.stringify are NOT on this ladder
  * — those four are answered exactly (see the kind's comment). */
 bool scr_dyn_map_fence(const ScrDyn *d, const char *what);
+
+/* ── DYN-FLAVORED maps and sets (scr_json.c) ───────────────────────────
+ * `new Map()` / `new Set()` in untyped JavaScript, where no static key or
+ * value type exists: a SCR_DYN_MAP box over a ScrMap keyed by retained dyn
+ * boxes (SCR_MAP_KEY_DYN) with dyn values, typeKey "map<dyn,dyn>" /
+ * "set<dyn>". flavor 0 = Map, 1 = Set, 2 = WeakMap, 3 = WeakSet (the weak
+ * ones keep their entries strongly: no collector hook exists for a dyn key,
+ * and a lookup can never see a dead key's address reused); `seed` (NULL or
+ * borrowed) is the
+ * constructor's iterable argument. +1, or NULL with the exception pending
+ * (a seed entry that is not an entry object). */
+ScrDyn *scr_dyn_new_dynmap(int flavor, const ScrDyn *seed);
+/* WeakMap key / WeakSet element admission: true for an object (or symbol);
+ * a primitive throws V8's TypeError ("Invalid value used as weak map key" /
+ * "Invalid value used in weak set") and answers false. */
+bool scr_dynmap_weak_key_check(const ScrDyn *k, bool is_set);
+/* The class of ANY map box, decided by its interned typeKey: 0 Map, 1 Set,
+ * 2 WeakMap, 3 WeakSet (the dyn-flavored weak boxes are "dynweakmap" /
+ * "dynweakset"; typed boxes are only ever "map<..>" / "set<..>"). */
+int scr_dyn_map_flavor(const ScrDyn *d);
+bool scr_dyn_is_dynmap(const ScrDyn *d);
+bool scr_dyn_is_iterable_dynmap(const ScrDyn *d);
+/* Drain into a fresh ARR (+1): mode 0 default iteration, 1 keys, 2 values,
+ * 3 entries. Only for a dyn-flavored box. */
+ScrDyn *scr_dyn_map_snapshot(const ScrDyn *d, int mode);
+/* The store half: `put` takes a borrowed key and (for a Map) value,
+ * normalizing -0 to +0; a Set passes v == NULL. */
+ScrMap *scr_map_new_dynkey(void);
+ScrMap *scr_set_new_dynkey(void);
+ScrDyn *scr_dynmap_store_key(ScrDyn *k, ScrDyn **hold);
+void scr_dynmap_put(ScrMap *m, ScrDyn *k, ScrDyn *v);
+/* The emitted keyed read's MAP arm: `size` for every map, undefined for a
+ * non-member, the loud ladder for a prototype method read as a value. +1. */
+ScrDyn *scr_dyn_map_key_get(ScrDyn *d, const ScrStr *k);
+/* The method dispatch (scr_dyn_invoke.c): *handled is false when the
+ * receiver is not a map this unit can drive; +1 result or NULL with the
+ * exception pending. */
+ScrDyn *scr_dyn_map_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc,
+                           const char *what, bool *handled);
 
 /* ── bigints in the checked-dynamic tree (SCR_DYN_BIG) ────────
  * The five value questions this always-linked core must ask a bigint,

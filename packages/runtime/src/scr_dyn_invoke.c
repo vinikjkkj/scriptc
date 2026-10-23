@@ -204,7 +204,9 @@ static void dyn_str_buf(ScrJsonBuf *b, const ScrDyn *d, bool protocol) {
     /* Object.prototype.toString with the Map / Set tag — a constant in
      * both modes for the ARRBUF arm's reason: neither has an own
      * toString for a user to override. */
-    scr_jb_puts(b, d->v.map.tkey[0] == 's' ? "[object Set]" : "[object Map]");
+    scr_jb_puts(b, "[object ");
+    scr_jb_puts(b, scr_dyn_map_cls(d));
+    scr_jb_putc(b, ']');
     return;
   case SCR_DYN_ARRBUF:
     /* Object.prototype.toString with the ArrayBuffer tag — a constant in
@@ -1252,6 +1254,94 @@ ScrDyn *scr_dyn_proxy_invoke(ScrDyn *p, const ScrStr *key, ScrDyn *const *args, 
   return r;
 }
 
+/* ── Map / Set methods on a dyn-flavored box (SCR_DYN_MAP, key kind DYN) ─
+ *
+ * `m.set(k, v)`, `m.get(k)`, `s.add(x)`, ... on a Map or Set that untyped JS
+ * built (scr_dyn_new_dynmap). Every argument is already a dyn box and the
+ * store is a SCR_MAP_KEY_DYN ScrMap, so each method is the map primitive
+ * over the boxes themselves: SameValueZero comes from the key kind, and a
+ * miss answers the undefined singleton like Map.prototype.get does.
+ *
+ * forEach is LIVE: it walks the entry table by index with the iteration
+ * bracket open (appends are visited, a delete is skipped, clear() ends it),
+ * which is the specified behaviour and what the typed lowering's forEach
+ * desugar already does. A map that is not dyn-flavored (a typed Map boxed
+ * across the boundary) is NOT handled here and keeps the loud ladder:
+ * its keys and values are static slots this unit has no converters for. */
+ScrDyn *scr_dyn_map_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc,
+                           const char *what, bool *handled) {
+  *handled = false;
+  if (!scr_dyn_is_dynmap(recv)) return NULL;
+  ScrMap *m = recv->v.map.m;
+  int flavor = scr_dyn_map_flavor(recv);
+  bool is_set = flavor == 1 || flavor == 3;
+  bool weak = flavor >= 2;
+  ScrDyn *und = scr_dyn_undefined();
+  ScrDyn *a0 = argc > 0 ? args[0] : und;
+  ScrDyn *a1 = argc > 1 ? args[1] : und;
+  *handled = true;
+  if (dyn_name_is(method, "has")) return scr_dyn_new_bool(scr_map_has_ref(m, a0));
+  if (dyn_name_is(method, "delete")) return scr_dyn_new_bool(scr_map_delete_ref(m, a0));
+  /* clear() is a Map/Set member only: a weak collection has none (and no
+   * forEach, size, keys, values or entries). */
+  if (!weak && dyn_name_is(method, "clear")) {
+    scr_map_clear(m);
+    return scr_dyn_retain(und);
+  }
+  if (is_set) {
+    if (dyn_name_is(method, "add")) {
+      if (weak && !scr_dynmap_weak_key_check(a0, true)) return NULL;
+      scr_dynmap_put(m, a0, NULL);
+      return scr_dyn_retain(recv);
+    }
+  } else {
+    if (dyn_name_is(method, "get")) {
+      ScrDyn *v = (ScrDyn *)scr_map_get_ref_ref(m, a0); /* +1 or NULL */
+      return v != NULL ? v : scr_dyn_retain(und);
+    }
+    if (dyn_name_is(method, "set")) {
+      if (weak && !scr_dynmap_weak_key_check(a0, false)) return NULL;
+      scr_dynmap_put(m, a0, a1);
+      return scr_dyn_retain(recv);
+    }
+  }
+  if (weak) {
+    *handled = false;
+    return NULL;
+  }
+  if (dyn_name_is(method, "forEach")) {
+    if (!dyn_cb_check(args, argc)) return NULL;
+    ScrDyn *cb = args[0];
+    scr_map_iter_enter(m);
+    for (double i = 0; i < scr_map_iter_count(m); i++) {
+      if (!scr_map_iter_live(m, i)) continue;
+      ScrDyn *k = (ScrDyn *)scr_map_iter_key_ref(m, i); /* +1 */
+      ScrDyn *v = is_set ? scr_dyn_retain(k) : (ScrDyn *)scr_map_iter_val_ref(m, i);
+      ScrDyn *cbargs[3] = { v, k, recv };
+      if (argc > 1) scr_dyn_this_push_dyn(a1);
+      ScrDyn *r = scr_dyn_call(cb, cbargs, 3, "callback");
+      if (argc > 1) scr_dyn_this_pop();
+      scr_dyn_release(k);
+      scr_dyn_release(v);
+      if (!r) {
+        scr_map_iter_exit(m);
+        return NULL;
+      }
+      scr_dyn_release(r);
+    }
+    scr_map_iter_exit(m);
+    return scr_dyn_retain(und);
+  }
+  if (dyn_name_is(method, "keys")) return scr_dyn_map_snapshot(recv, 1);
+  if (dyn_name_is(method, "values")) return scr_dyn_map_snapshot(recv, 2);
+  if (dyn_name_is(method, "entries")) return scr_dyn_map_snapshot(recv, 3);
+  /* Not a member of this prototype (Map has no `add`, Set has no `get`/`set`,
+   * and nothing else is declared): Node's own message for a missing method. */
+  (void)what;
+  *handled = false;
+  return NULL;
+}
+
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what) {
   if (recv->kind == SCR_DYN_PROXY) {
     ScrStr *k = scr_str_new(method, strlen(method));
@@ -1269,6 +1359,16 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     scr_jb_puts(&b, "')");
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return NULL;
+  }
+
+  if (recv->kind == SCR_DYN_MAP) {
+    bool handled = false;
+    ScrDyn *r = scr_dyn_map_invoke(recv, method, args, argc, what, &handled);
+    if (handled) return r;
+    if (scr_dyn_is_dynmap(recv)) {
+      dyn_throw_not_fn(what); /* a method the Map/Set prototype lacks: Node's own answer */
+      return NULL;
+    }
   }
 
   /* Native handles dispatch through the tag's ops onto the same entry

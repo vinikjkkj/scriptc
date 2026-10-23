@@ -1154,6 +1154,79 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       /* util.inspect (showProxy false) prints the TARGET, running no trap. */
       return scr_insp_dyn(d->v.proxy.target, recurse, depth);
     case SCR_DYN_MAP: {
+      /* A dyn-flavored Map/Set (untyped JS's `new Map()`) holds dyn boxes
+       * for every key and value, so its entries render by the same walk an
+       * array's items do: `Map(1) { 'a' => 1 }`, `Set(1) { 'a' }`, the
+       * empty `Map(0) {}`, and `[Map]` / `[Set]` past the depth limit. */
+      if (scr_dyn_is_dynmap(d)) {
+        ScrMap *dm = d->v.map.m;
+        const int dm_flavor = scr_dyn_map_flavor(d);
+        const bool dm_set = dm_flavor == 1;
+        const char *cls = scr_dyn_map_cls(d);
+        if (dm_flavor >= 2) {
+          /* Node cannot enumerate a weak collection: `WeakMap { <items unknown> }`. */
+          InspBuf wb = {0};
+          ib_cstr(&wb, cls);
+          ib_cstr(&wb, " { <items unknown> }");
+          return ib_take(&wb);
+        }
+        size_t n = (size_t)scr_map_size(dm);
+        InspBuf hb = {0};
+        if (n == 0) {
+          ib_cstr(&hb, cls);
+          ib_cstr(&hb, "(0) {}");
+          return ib_take(&hb);
+        }
+        if (recurse > depth) {
+          ib_char(&hb, '[');
+          ib_cstr(&hb, cls);
+          ib_char(&hb, ']');
+          return ib_take(&hb);
+        }
+        scr_insp_begin(recurse + 1);
+        size_t shown = 0;
+        for (double i = 0; i < scr_map_iter_count(dm) && shown < 100; i++) {
+          if (!scr_map_iter_live(dm, i)) continue;
+          ScrDyn *k = (ScrDyn *)scr_map_iter_key_ref(dm, i);
+          ScrStr *ks = scr_insp_dyn(k, recurse + 1, depth);
+          InspBuf eb = {0};
+          ib_bytes(&eb, ks->data, ks->len);
+          scr_str_release(ks);
+          if (!dm_set) {
+            ScrDyn *v = (ScrDyn *)scr_map_iter_val_ref(dm, i);
+            ScrStr *vs = scr_insp_dyn(v, recurse + 1, depth);
+            ib_cstr(&eb, " => ");
+            ib_bytes(&eb, vs->data, vs->len);
+            scr_str_release(vs);
+            scr_dyn_release(v);
+          }
+          scr_dyn_release(k);
+          ScrStr *entry = ib_take(&eb);
+          scr_insp_entry(entry, false);
+          scr_str_release(entry);
+          shown++;
+        }
+        bool more = n > 100;
+        if (more) {
+          ScrStr *m = scr_insp_more_items((double)(n - 100));
+          scr_insp_entry(m, false);
+          scr_str_release(m);
+        }
+        ib_cstr(&hb, cls);
+        ib_char(&hb, '(');
+        char nb[32];
+        snprintf(nb, sizeof nb, "%zu", n);
+        ib_cstr(&hb, nb);
+        ib_char(&hb, ')');
+        ScrStr *base = ib_take(&hb);
+        ScrStr *b0 = scr_str_new("{", 1);
+        ScrStr *b1 = scr_str_new("}", 1);
+        ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, false, false);
+        scr_str_release(base);
+        scr_str_release(b0);
+        scr_str_release(b1);
+        return out;
+      }
       /* Node prints `Map(1) { 'a' => 1 }` / `Set(1) { 'a' }` — the
        * ENTRIES, rendered by their own types. The box carries the
        * interned typeKey, not a per-element renderer, so it cannot walk
