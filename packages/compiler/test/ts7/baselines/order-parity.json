@@ -11792,6 +11792,60 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8710-untyped-map-methods-are-real.js": {
+   "order": [
+    "<repo>/tests/corpus/8710-untyped-map-methods-are-real.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8711-untyped-set-and-class-fields-are-real.js": {
+   "order": [
+    "<repo>/tests/corpus/8711-untyped-set-and-class-fields-are-real.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8712-untyped-weak-collections-are-real.js": {
+   "order": [
+    "<repo>/tests/corpus/8712-untyped-weak-collections-are-real.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8713-untyped-map-shapes-that-built-clean-and-threw.js": {
+   "order": [
+    "<repo>/tests/corpus/8713-untyped-map-shapes-that-built-clean-and-threw.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8714-typed-maps-driven-through-untyped-code.js": {
+   "order": [
+    "<repo>/tests/corpus/8714-typed-maps-driven-through-untyped-code.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8715-iterator-methods-on-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/8715-iterator-methods-on-untyped-receivers.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8716-deep-strict-equal-over-untyped-maps.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8716-deep-strict-equal-over-untyped-maps.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8717-array-from-over-untyped-map-and-set.js": {
+   "order": [
+    "<repo>/tests/corpus/8717-array-from-over-untyped-map-and-set.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8718-untyped-map-keeps-the-identity-of-what-it-stores.js": {
+   "order": [
+    "<repo>/tests/corpus/8718-untyped-map-keeps-the-identity-of-what-it-stores.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
