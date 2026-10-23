@@ -6734,6 +6734,30 @@ export class Lowerer {
           loc: expr.loc,
         };
       }
+      // A CLASS VALUE stored in an untyped slot (`parsers[2] = QueryEvent`,
+      // a registry object of constructors): it crosses as a function value
+      // whose call constructs the class. The construct thunk the typed
+      // construct-signature slots already mint, over dyn parameters, boxed
+      // like any zero-capture function; `new P(...)` through the dyn value
+      // then reaches [[Construct]]'s return rule (the object result
+      // replaces the fresh `this`), so the program holds a real instance.
+      if (expr.type.kind === "classval") {
+        const info = this.classes.get(expr.type.className);
+        if (info && !info.generic && !info.def.abstract) {
+          const slot: IrType & { kind: "func" } = {
+            kind: "func",
+            params: info.ctorParams.map(() => DYN),
+            ret: { kind: "object", className: expr.type.className },
+          };
+          const thunk = this.classCtorThunk(expr.type.className, slot, expr.loc);
+          if (thunk !== null && this.dynConvertible(thunk.type)) {
+            // The instances the thunk builds cross into dyn: their methods
+            // answer by name through the box, so they are reachability roots.
+            this.noteDynBoxedClass(expr.type.className);
+            return { kind: "dynFrom", value: thunk, type: DYN, loc: expr.loc };
+          }
+        }
+      }
       return expr;
     }
     // A dyn ('unknown') ACTUAL flowing into a typed slot the checker
