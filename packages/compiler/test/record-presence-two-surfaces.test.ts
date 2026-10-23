@@ -151,14 +151,16 @@ console.log(x, y);
   expect(both, "the explicit-undefined literal owns every field it spells").toBeDefined();
 });
 
-test("`delete` clears the own-key bit", () => {
+test("`delete` clears the own-key bit and `in` also reads the slot", () => {
   const mod = lower(`
 interface P { a?: number; c?: number }
 const p: P = { a: 1, c: 2 };
 delete p.a;
-console.log(Object.keys(p));
+console.log("a" in p);
 `);
   expect(mod).not.toBeNull();
   const sets = nodesOfKind(mod!, "recordSet");
   expect(sets.some((s) => s["unset"] === true && s["field"] === "a")).toBe(true);
+  const inq = nodesOfKind(mod!, "recordKeyPresent").filter((n) => n["orSlot"] === true);
+  expect(inq.length).toBe(1);
 });

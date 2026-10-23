@@ -557,6 +557,7 @@ export function emitOwnPresentLl(
   recv: string,
   utag: number,
   dropUndefined: boolean,
+  orSlot = false,
 ): string | null {
   const struct = mangleRecordStruct(shape.id);
   const fieldIdx = shape.fields.findIndex((f) => f.name === fieldName);
@@ -594,8 +595,16 @@ export function emitOwnPresentLl(
   B.line(`${bv} = load i8, ptr ${bp}`);
   const msk = B.tmp();
   B.line(`${msk} = and i8 ${bv}, ${bit.bit}`);
-  const own = B.tmp();
-  B.line(`${own} = icmp ne i8 ${msk}, 0`);
+  const own0 = B.tmp();
+  B.line(`${own0} = icmp ne i8 ${msk}, 0`);
+  // `in` asks own OR inherited: an instance a crossing wrote can carry a
+  // member as a prototype default (clear bit, value in the slot).
+  let own = own0;
+  if (orSlot && utag >= 0) {
+    const a = armTest();
+    own = B.tmp();
+    B.line(`${own} = or i1 ${own0}, ${a}`);
+  }
   B.br(lJoin);
   B.startBlock(lArm);
   const fall = utag >= 0 ? armTest() : "true";

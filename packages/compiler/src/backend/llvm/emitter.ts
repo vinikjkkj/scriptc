@@ -8456,7 +8456,7 @@ class LlEmitter {
         if (!shape) throw new Error(`llvm emitter bug: recordKeyPresent of unknown shape ${e.shapeId}`);
         const f = shape.fields.find((x) => x.name === e.field);
         if (!f) throw new Error(`llvm emitter bug: recordKeyPresent of unknown field ${e.shapeId}.${e.field}`);
-        const r = emitOwnPresentLl(B, shape, e.field, obj.name, this.undefinedArmTag(f.type), false);
+        const r = emitOwnPresentLl(B, shape, e.field, obj.name, this.undefinedArmTag(f.type), false, e.orSlot === true);
         if (r === null) return { name: "true", type: e.type };
         return { name: r, type: e.type };
       }
