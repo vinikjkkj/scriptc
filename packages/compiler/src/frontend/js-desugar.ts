@@ -29,6 +29,7 @@
  * npm-static-rewrite.ts and provenance-rewrite.ts); the checker then
  * infers every type from the emitted spellings. */
 import ts from "typescript5";
+import { builtinModules } from "node:module";
 
 const NESTED_REQUIRE_PREFILTER = /=\s*require\s*\(/;
 
@@ -161,10 +162,15 @@ function umdUnwrap(fileName: string, text: string): string | null {
  * before that statement (`const __sc_rN = require('./x');`) and the call
  * becomes the binding -- the same load, at the same statement, in the same
  * order. A require under a conditional operator, a loop/branch body, or a
- * nested function is left alone (and only RELATIVE specifiers: a builtin or package
- * require keeps the member-read forms the lowering already models), as is a statement that cannot take a
+ * nested function is left alone (and never a builtin module: its member-read forms are
+ * already modelled by the lowering), as is a statement that cannot take a
  * preceding declaration (an unbraced `if` body). */
 const INLINE_REQUIRE_PREFILTER = /\brequire\s*\(\s*['"][^'"]+['"]\s*\)/;
+
+const BUILTIN_SPECS = new Set(builtinModules);
+function isBuiltinSpec(spec: string): boolean {
+  return BUILTIN_SPECS.has(spec.startsWith("node:") ? spec.slice(5) : spec) || spec.startsWith("node:");
+}
 
 function inlineRequireEdits(fileName: string, text: string): string | null {
   if (!INLINE_REQUIRE_PREFILTER.test(text)) return null;
@@ -172,7 +178,7 @@ function inlineRequireEdits(fileName: string, text: string): string | null {
   const edits: Edit[] = [];
   const isRequireCall = (n: ts.Node): n is ts.CallExpression =>
     ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "require" &&
-    n.arguments.length === 1 && ts.isStringLiteral(n.arguments[0]!) && n.arguments[0]!.text.startsWith(".");
+    n.arguments.length === 1 && ts.isStringLiteral(n.arguments[0]!) && !isBuiltinSpec(n.arguments[0]!.text) && !n.arguments[0]!.text.endsWith(".json");
   const statementOf = (n: ts.Node): ts.Statement | null => {
     for (let p: ts.Node | undefined = n; p !== undefined; p = p.parent) {
       if (ts.isStatement(p) && (ts.isSourceFile(p.parent) || ts.isBlock(p.parent) || ts.isCaseClause(p.parent) || ts.isDefaultClause(p.parent))) return p;

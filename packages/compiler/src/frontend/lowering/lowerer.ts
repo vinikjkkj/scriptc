@@ -1621,6 +1621,8 @@ export class Lowerer {
    * prepended by lowerFileInit so the bindings are live before any
    * top-level statement runs. */
   readonly jsonInitActions = new Map<ts.SourceFile, IrStmt[]>();
+  /** The baked global of each JSON file `require`d as a value below a declaration, by file name. */
+  readonly jsonRequireGlobals = new Map<string, { id: string; name: string; type: IrType; mutable: boolean }>();
   /** The embedded npm runtime graph (collectNpmImports), attached to the
    * emitted module. Null without npm imports or without --dynamic. */
   npmEmbedded: IrModule["embedded"] | null = null;

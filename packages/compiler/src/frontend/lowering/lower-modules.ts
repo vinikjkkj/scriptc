@@ -1053,6 +1053,62 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
     }
   }
 
+/** `require("./x.json")` read as a VALUE below a declaration (iconv-lite's
+ * `table: function () { return require("./tables/cp936.json") }`, a member read
+ * `require("./x.json").k`): Node hands back the one cached parsed document, so
+ * the bake is ONE global per JSON file, assigned in the prelude of the first
+ * file that names it (ahead of every top-level statement), and each site reads
+ * that global. The declared-binding forms stay with collectJsonRequires. */
+export function collectNestedJsonRequires(L: Lowerer, parts: FileParts[]): void {
+  for (const fp of parts) {
+    const visit = (n: ts.Node): void => {
+      if (
+        ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "require" &&
+        n.arguments.length === 1 && ts.isStringLiteral(n.arguments[0]!) && n.arguments[0]!.text.endsWith(".json") &&
+        !(ts.isVariableDeclaration(n.parent) && n.parent.initializer === n && ts.isVariableDeclarationList(n.parent.parent) &&
+          ts.isVariableStatement(n.parent.parent.parent) && ts.isSourceFile(n.parent.parent.parent.parent))
+      ) {
+        const jsonSf = jsonModuleOfRequire(L, n);
+        if (jsonSf !== null && !L.jsonRequireGlobals.has(jsonSf.fileName)) {
+          try {
+            const tsType = L.typeOf(n);
+            const mapped = L.mapTypeOf(tsType);
+            if (!mapped || !L.comptimeBakeable(mapped)) L.badType(n, tsType);
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(jsonSf.text);
+            } catch (e) {
+              L.pushDiag(invalidJsonModuleDiag(jsonSf.fileName, e instanceof Error ? e.message : String(e), locOf(n)));
+              throw new PoisonError();
+            }
+            const value = L.comptimeValueToIr(parsed, mapped, "$", n);
+            const g = { id: `%g.jsonreq.${L.globalsList.length}`, name: "json", type: mapped, mutable: false };
+            L.globalsList.push(g);
+            L.jsonRequireGlobals.set(jsonSf.fileName, g);
+            const actions = L.jsonInitActions.get(fp.sf) ?? [];
+            L.jsonInitActions.set(fp.sf, actions);
+            actions.push({ kind: "assign", localId: g.id, value, loc: locOf(n) });
+          } catch (e) {
+            if (!(e instanceof PoisonError)) throw e;
+          }
+        }
+      }
+      n.forEachChild(visit);
+    };
+    visit(fp.sf);
+  }
+}
+
+/** The JSON source file a `require("<lit>.json")` call names, or null. */
+export function jsonModuleOfRequire(L: Lowerer, call: ts.CallExpression): ts.SourceFile | null {
+  const arg = call.arguments[0];
+  if (!arg || !ts.isStringLiteral(arg)) return null;
+  const t = L.typeOf(call);
+  const sym = t.getSymbol() ?? t.getAliasSymbol();
+  const sf = sym ? L.checker.declarationsOf(sym)[0]?.getSourceFile() : undefined;
+  return sf && sf.fileName.endsWith(".json") ? sf : null;
+}
+
 /** The CJS twin of collectJsonImports: `const { a, b } = require("./x.json")`
  * and `const j = require("./x.json")`. Node hands back the parsed document
  * either way, so the bake is the one the ESM default import already does — the
@@ -1063,6 +1119,7 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
  * require path cannot serve it: the value is materialised from the file text at
  * compile time or not at all. */
 export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
+  collectNestedJsonRequires(L, parts);
   for (const fp of parts) {
     for (const stmt of fp.sf.statements) {
       if (!ts.isVariableStatement(stmt)) continue;

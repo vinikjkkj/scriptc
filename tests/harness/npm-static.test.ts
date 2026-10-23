@@ -215,6 +215,8 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     ["valuesunion", "valuesunion-cli.ts"],
     // lazyrequire: lazy relative requires: bound inside methods, inline (member read, call), assigned to an outer variable
     ["lazyrequire", "lazyrequire-cli.ts"],
+    // lazyjson: a JSON document and a builtin required as values below the top level (iconv-lite tables)
+    ["lazyjson", "lazyjson-cli.ts"],
     // processmod: require('process') is the global process: typeof/in probes on its members and hrtime
     ["processmod", "processmod-cli.ts"],
     // forinoptions: for-in over an options bag that is reassigned, hasOwnProperty.call over a typed record, and a for-in cursor indexing an array

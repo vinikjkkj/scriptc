@@ -41,6 +41,7 @@ let hkdfSyncCalls = 0;
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { deferredCallThunk, timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
+import { jsonModuleOfRequire } from "./lower-modules.js";
 import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 
@@ -521,6 +522,10 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
       // it (the module edge, the builtin alias, or the fence).
       const refusal = probeNodeRequireRefusal(sf.fileName, spec);
       if (refusal !== null) return nodeThrowExpr(0, "MODULE_NOT_FOUND", refusal.message, DYN, loc);
+      // A JSON document read as a value: the one baked global of that file.
+      const jsonSf = jsonModuleOfRequire(L, call);
+      const jg = jsonSf !== null ? L.jsonRequireGlobals.get(jsonSf.fileName) : undefined;
+      if (jg !== undefined) return { kind: "varRef", localId: jg.id, type: jg.type, loc };
       return null;
     }
 
