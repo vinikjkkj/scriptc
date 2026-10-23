@@ -11348,6 +11348,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8505-js-arrow-const-read-from-a-function.js": {
+   "order": [
+    "<repo>/tests/corpus/8505-js-arrow-const-read-from-a-function.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
@@ -13885,12 +13891,6 @@
    "order": [
     "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/inner/t.cjs",
     "<repo>/tests/diagnostics/js-require-self-scope-run-time-specifier/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/js-arrow-const-read-from-a-function.js": {
-   "order": [
-    "<repo>/tests/diagnostics/js-arrow-const-read-from-a-function.js"
    ],
    "diags": []
   },
