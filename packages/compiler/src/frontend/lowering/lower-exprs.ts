@@ -1389,8 +1389,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           if (bi.module === "crypto" && bi.member === "diffieHellman") {
             return diffieHellmanFnValue(L, loc);
           }
-          // JavaScript sources: a builtin member taken as a bare VALUE is
-          // the same identity-token story as stdlib globals above (the
+          // JavaScript sources: a builtin member taken as a bare VALUE
+          // is the same identity-token story as stdlib globals above (the
           // harness adds worker_threads.Worker to its identity Set).
           if (isJsSourceFile(expr.getSourceFile())) {
             return { kind: "strLit", value: `[builtin ${bi.module}.${bi.member}]`, type: STRING, loc };
@@ -7304,6 +7304,13 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
   export function lowerCondition(L: Lowerer, expr: ts.Expression): IrExpr {
     let e: ts.Expression = expr;
     while (ts.isParenthesizedExpression(e)) e = e.expression;
+    // A feature probe of a process function the binary has: `process.emitWarning`
+    // tested for existence (pg-connection-string's `typeof process !== 'undefined'
+    // && process.emitWarning`) is a function value, always truthy. The call form
+    // lowers on its own path; only the TEST is answered here.
+    if (ts.isPropertyAccessExpression(e) && e.name.text === "emitWarning" && L.stdlibGlobalMember(e, "process") === "emitWarning") {
+      return { kind: "boolLit", value: true, type: BOOL, loc: locOf(e) };
+    }
     if (ts.isBinaryExpression(e)) {
       const op = e.operatorToken.kind;
       if (op === ts.SyntaxKind.AmpersandAmpersandToken || op === ts.SyntaxKind.BarBarToken) {
