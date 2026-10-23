@@ -1461,7 +1461,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // only take a name the table already holds, and every table entry
       // whose call form is the island's is static-lane only.
       // JavaScript sources keep the identity-token path further down.
-      if (!isJsSourceFile(expr.getSourceFile())) {
+      {
         const bfn = builtinFnValueOf(L, expr, loc);
         if (bfn) return bfn;
       }

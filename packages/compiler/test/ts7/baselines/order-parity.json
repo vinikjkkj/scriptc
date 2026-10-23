@@ -11989,6 +11989,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8512-js-library-functions-as-values-and-dynamic-parsefloat.js": {
+   "order": [
+    "<repo>/tests/corpus/8512-js-library-functions-as-values-and-dynamic-parsefloat.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"

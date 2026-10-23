@@ -5201,6 +5201,13 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         if (name === "parseFloat" && probed?.type.kind === "string") {
           return { kind: "libCall", fn: "num.parseFloat", args: [probed], type: F64, loc };
         }
+        // A checked-dynamic argument (an untyped parameter): the spec's first
+        // step IS ToString (String() semantics), then the same decimal-prefix parse.
+        if (name === "parseFloat" && probed?.type.kind === "dyn") {
+          const d = L.lowerExpr(expr.arguments[0]!);
+          const asText: IrExpr = { kind: "toString", operand: d, type: STRING, loc };
+          return { kind: "libCall", fn: "num.parseFloat", args: [asText], type: F64, loc };
+        }
         if (name === "isFinite" && probed?.type.kind === "f64") {
           return { kind: "libCall", fn: "number.isFinite", args: [probed], type: BOOL, loc };
         }
