@@ -79,6 +79,7 @@ import {
   orderedImportsOf,
   overridesDtsPath,
   npmStaticDepSf7,
+  resolveProjectImportSf7,
   requireSpecOf,
   resolveImport,
   workspacePackageOfPath,
@@ -2136,7 +2137,7 @@ export class Lowerer {
               ? null
               : isRelativeSpecifier(spec)
                 ? resolveImport(this.program, recvDecl.getSourceFile(), spec)
-                : npmStaticDepSf7(this.program, recvDecl.getSourceFile(), spec);
+                : this.bareRequireDepOf(recvDecl.getSourceFile(), spec);
           if (dep) symbol = this.cjsModuleExportSymbol(dep, ident.text);
         } else if (recvDecl && ts.isImportClause(recvDecl)) {
           // The DEFAULT-import spelling of the same binding: the dep is
@@ -2348,6 +2349,19 @@ export class Lowerer {
     return dep;
   }
 
+  /** The program file a BARE `require(spec)` names: an opted-in --npm-static
+   * package's JS entry, or a --provenance-sources package's mapped entry --
+   * which may be the DECLARATION half of a module whose `.js` twin compiled
+   * (resolveProjectImportSf7 answers a `.d.ts` only when its twin is in the
+   * program). Members read off such a binding resolve through the module's
+   * export table exactly like a relative require; the declaration's class,
+   * function and const symbols then cross to the twin in resolveValueSymbol. */
+  private bareRequireDepOf(from: ts.SourceFile, spec: string): ts.SourceFile | null {
+    return (
+      npmStaticDepSf7(this.program, from, spec) ?? resolveProjectImportSf7(this.program, from, spec)
+    );
+  }
+
   /** True when `expr` is an identifier bound by a top-level
    * `const x = require("./local")` of a RELATIVE module — the CommonJS
    * namespace binding — or of a bare specifier naming an opted-in
@@ -2374,7 +2388,7 @@ export class Lowerer {
       if (spec === null) return false;
       if (
         !isRelativeSpecifier(spec) &&
-        npmStaticDepSf7(this.program, decl.getSourceFile(), spec) === null
+        this.bareRequireDepOf(decl.getSourceFile(), spec) === null
       ) {
         return false;
       }
@@ -2614,10 +2628,18 @@ export class Lowerer {
     // alias its globals). Without the guarded %init call at this position
     // those globals stay uninitialized: the dep's module body would never
     // run.
-    const dep = isRelativeSpecifier(spec)
+    const named = isRelativeSpecifier(spec)
       ? resolveImport(this.program, node.getSourceFile(), spec)
-      : npmStaticDepSf7(this.program, node.getSourceFile(), spec);
-    if (!dep || dep.fileName.endsWith(".json")) return null;
+      : this.bareRequireDepOf(node.getSourceFile(), spec);
+    if (!named || named.fileName.endsWith(".json")) return null;
+    // A declaration file resolves for TYPES; what Node evaluates is its
+    // compiled runtime twin. Name the twin or its %init never runs and every
+    // global it assigns stays at the C zero value (a read answers 0 where
+    // Node answers the constant, and the first record dereference crashes).
+    // The trap-only island twin (no static global) keeps the declaration's
+    // own empty init, as the import header does.
+    const twin = named.isDeclarationFile ? this.declTwinSourceOf(named) : null;
+    const dep = twin !== null && this.moduleGlobalKind(twin) !== "island" ? twin : named;
     if (this.asyncInitFiles.has(dep)) {
       this.unsupported(
         "SC1090",

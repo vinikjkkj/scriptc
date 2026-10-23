@@ -71,3 +71,19 @@ describe("provenance: a class declared in a .d.ts and defined by its .js twin", 
     });
   }
 });
+
+/* The CommonJS spelling of the same boundary: a require binding whose module
+ * is a declaration with a compiled twin. Two things were missing. The binding
+ * itself (`rs.X`) was refused as a default import used as a value, and the
+ * require statement named no init for the twin, so a program that got past the
+ * first read printed `limit=0` for a constant Node reads as 7. */
+const EXPECTED_REQUIRE = "limit=7\n" + "twice=42\n" + "destructured=7 4\n";
+
+describe("provenance: a require binding of a .d.ts module with a compiled twin", () => {
+  for (const backend of BACKENDS) {
+    test(`const, function and destructured members cross, initialised (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinclassreq/main.js");
+      expect(await buildAndRun(entry, "twinclassreq", backend)).toBe(EXPECTED_REQUIRE);
+    });
+  }
+});
