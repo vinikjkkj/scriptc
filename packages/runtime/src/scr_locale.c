@@ -251,6 +251,55 @@ static void default_tag(char *buf, size_t cap) {
 #endif
 }
 
+/* JSLocale::StartsWithUnicodeLanguageId: the tag starts with a unicode_language_id (language, script, region, variants),
+ * possibly followed by an extension singleton and anything after it. */
+static int sv_alpha(const char *s, size_t n) { return is_alpha(s, n); }
+static int sv_alnum(const char *s, size_t n) { return is_alnum(s, n); }
+static int structurally_valid(const char *s, size_t n) {
+  const char *tok[MAXSUB * 2];
+  size_t len[MAXSUB * 2];
+  int nt = 0;
+  size_t i = 0;
+  while (i < n) { /* std::getline: an empty trailing token is not produced */
+    size_t j = i;
+    while (j < n && s[j] != '-') j++;
+    if (nt >= MAXSUB * 2) return 0;
+    tok[nt] = s + i; len[nt] = j - i; nt++;
+    i = j + 1;
+  }
+  if (nt == 0) return 0;
+  if (!(sv_alpha(tok[0], len[0]) && ((len[0] >= 2 && len[0] <= 3) || (len[0] >= 5 && len[0] <= 8)))) return 0;
+  if (nt == 1) return 1;
+  if (len[1] == 1 && sv_alnum(tok[1], 1)) return 1;
+  int idx = 1;
+  if (len[idx] == 4 && sv_alpha(tok[idx], 4)) { idx++; if (idx == nt) return 1; }
+  if ((len[idx] == 2 && sv_alpha(tok[idx], 2)) || (len[idx] == 3 && is_digit(tok[idx], 3))) idx++;
+  while (idx < nt) {
+    if (len[idx] == 1 && sv_alnum(tok[idx], 1)) return 1;
+    int variant = (len[idx] >= 5 && len[idx] <= 8 && sv_alnum(tok[idx], len[idx])) || (len[idx] == 4 && isdigit((unsigned char)tok[idx][0]) && sv_alnum(tok[idx], 4));
+    if (!variant) return 0;
+    idx++;
+  }
+  return 1;
+}
+
+static struct { int valid; char key[200]; } g_icu_cache[4];
+const char *scr_icu_cache_lookup(int type, const char *locales) {
+  if (strcmp(locales, "-") == 0 && g_icu_cache[type].valid && g_icu_cache[type].key[0] == 0) return "";
+  return locales;
+}
+void scr_icu_cache_store(int type, const char *locales) {
+  if (g_icu_cache[type].valid && strcmp(g_icu_cache[type].key, locales) == 0) return; /* a hit keeps its entry */
+  if (strcmp(locales, "-") == 0) return;
+  snprintf(g_icu_cache[type].key, sizeof g_icu_cache[type].key, "%s", locales);
+  g_icu_cache[type].valid = 1;
+}
+
+void scr_locale_error_message(int rc, const ScrLocRes *r, char *buf, size_t cap) {
+  if (rc == -2) snprintf(buf, cap, "Invalid language tag: %s", r->bad);
+  else snprintf(buf, cap, "Incorrect locale information provided");
+}
+
 int scr_locale_resolve(int service, const char *locales, ScrLocRes *r) {
   memset(r, 0, sizeof *r);
   char defbuf[96];
@@ -262,7 +311,13 @@ int scr_locale_resolve(int service, const char *locales, ScrLocRes *r) {
     const char *e = strchr(p, ',');
     size_t n = e ? (size_t)(e - p) : strlen(p);
     char c[200];
-    if (scr_locale_canonicalize(p, n, c, sizeof c) != 0) return -1;
+    if (!structurally_valid(p, n)) return -1;
+    if (scr_locale_canonicalize(p, n, c, sizeof c) != 0) {
+      size_t m = n < sizeof r->bad - 1 ? n : sizeof r->bad - 1;
+      for (size_t k = 0; k < m; k++) r->bad[k] = (char)tolower((unsigned char)p[k]);
+      r->bad[m] = 0;
+      return -2;
+    }
     if (!found) {
       /* strip the extensions and walk the lookup chain */
       char base[200];
