@@ -297,7 +297,7 @@ ScrStr *scr_dyn_object_to_string(const ScrDyn *d) {
   case SCR_DYN_FUNC: tag = "Function"; break;
   case SCR_DYN_PROMISE: tag = "Promise"; break;
   case SCR_DYN_BIG: tag = "BigInt"; break;
-  case SCR_DYN_MAP: tag = d->v.map.tkey[0] == 's' ? "Set" : "Map"; break;
+  case SCR_DYN_MAP: tag = scr_dyn_map_cls(d); break;
   case SCR_DYN_HANDLE:
     if (d->v.handle.tag == SCR_DYNH_DATE) tag = "Date";
     else if (d->v.handle.tag == SCR_DYNH_REGEX) tag = "RegExp";

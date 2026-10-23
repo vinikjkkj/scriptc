@@ -2926,7 +2926,12 @@ const char *scr_dyn_map_cls(const ScrDyn *d) {
   /* The typeKey's own spelling decides the word: nodes.ts renders a map
    * as "map<K,V>" and a set as "set<E>", so the first byte separates
    * them and no second field is needed. */
-  return d->v.map.tkey[0] == 's' ? "Set" : "Map";
+  switch (scr_dyn_map_flavor(d)) {
+    case 1: return "Set";
+    case 2: return "WeakMap";
+    case 3: return "WeakSet";
+    default: return "Map";
+  }
 }
 
 /* `u instanceof Map` / `u instanceof Set` on an unknown value. SCR_DYN_MAP
@@ -2938,10 +2943,10 @@ const char *scr_dyn_map_cls(const ScrDyn *d) {
  * DataView, and u8array needs the extra flavor check the kind alone
  * cannot give). Borrowed; never throws. */
 bool scr_dyn_is_map(const ScrDyn *d) {
-  return d != NULL && d->kind == SCR_DYN_MAP && d->v.map.tkey[0] != 's';
+  return d != NULL && d->kind == SCR_DYN_MAP && scr_dyn_map_flavor(d) == 0;
 }
 bool scr_dyn_is_set(const ScrDyn *d) {
-  return d != NULL && d->kind == SCR_DYN_MAP && d->v.map.tkey[0] == 's';
+  return d != NULL && d->kind == SCR_DYN_MAP && scr_dyn_map_flavor(d) == 1;
 }
 /* Is this dyn the handle box of `tag`? (dynMatch / dynArm for a Date leaf.)
  * Borrowed; never throws. */
@@ -2962,6 +2967,202 @@ bool scr_dyn_map_fence(const ScrDyn *d, const char *what) {
   scr_jb_puts(&b, " is not supported yet");
   scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
   return false;
+}
+
+/* ── DYN-FLAVORED maps and sets (untyped JavaScript's `new Map()`) ──────
+ *
+ * A Map or Set built where no static key/value type exists (every argument
+ * of the constructor's type is `any`) cannot ride a typed ScrMap, so it is a
+ * SCR_DYN_MAP box over a ScrMap whose KEYS are ScrDyn boxes (SCR_MAP_KEY_DYN:
+ * SameValueZero over the value the box carries, scr_map.c) and whose VALUES
+ * are ScrDyn boxes. Its typeKey is the compiler's own spelling of that type,
+ * "map<dyn,dyn>" / "set<dyn>", so dynMatch on `Map` / `Set` answers for it
+ * exactly as for a typed one. The methods are scr_dyn_map_invoke
+ * (scr_dyn_invoke.c); `size` is scr_dyn_map_key_get; iteration drains
+ * through scr_dyn_map_snapshot. */
+static const char scr_dynmap_tkey_map[] = "map<dyn,dyn>";
+static const char scr_dynmap_tkey_set[] = "set<dyn>";
+static const char scr_dynmap_tkey_wmap[] = "dynweakmap";
+static const char scr_dynmap_tkey_wset[] = "dynweakset";
+
+/* The class of a map box from its interned typeKey. A typed box's key is
+ * always "map<K,V>" or "set<E>"; the two weak dyn-flavored boxes spell
+ * "dynweakmap" / "dynweakset" (distinct from the typed IR's own
+ * "weakmap<..>", which never boxes into SCR_DYN_MAP). */
+int scr_dyn_map_flavor(const ScrDyn *d) {
+  const char *k = d->v.map.tkey;
+  if (k[0] == 's') return 1;
+  if (k[0] == 'd') return k[7] == 'm' ? 2 : 3;
+  return 0;
+}
+
+/* A WeakMap key / WeakSet element must be an OBJECT (or a symbol): the
+ * primitives throw at set()/add() and simply miss at get/has/delete. */
+static bool scr_dynmap_weak_key_ok(const ScrDyn *k) {
+  switch (k->kind) {
+    case SCR_DYN_UNDEF:
+    case SCR_DYN_NULL:
+    case SCR_DYN_BOOL:
+    case SCR_DYN_NUM:
+    case SCR_DYN_STR:
+    case SCR_DYN_BIG:
+      return false;
+    default:
+      return true;
+  }
+}
+
+bool scr_dynmap_weak_key_check(const ScrDyn *k, bool is_set) {
+  if (scr_dynmap_weak_key_ok(k)) return true;
+  const char *msg = is_set ? "Invalid value used in weak set" : "Invalid value used as weak map key";
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, strlen(msg));
+  return false;
+}
+
+bool scr_dyn_is_dynmap(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_MAP && d->v.map.m->key_kind == SCR_MAP_KEY_DYN;
+}
+
+/* The key a dyn-flavored map STORES for `k`: Map normalizes -0 to +0 on the
+ * way in (`[...m.keys()]` shows 0 after set(-0)). Borrowed unless the answer
+ * is `*hold`, which is then +1 and the caller's to release. */
+/* A dyn-flavored Map or Set (not a weak collection): the two that iterate. */
+bool scr_dyn_is_iterable_dynmap(const ScrDyn *d) {
+  return scr_dyn_is_dynmap(d) && scr_dyn_map_flavor(d) < 2;
+}
+
+ScrDyn *scr_dynmap_store_key(ScrDyn *k, ScrDyn **hold) {
+  *hold = NULL;
+  if (k->kind == SCR_DYN_NUM && k->v.num == 0 && signbit(k->v.num)) {
+    *hold = scr_dyn_new_num(0);
+    return *hold;
+  }
+  return k;
+}
+
+/* set(k, v) / add(k): the value is BORROWED here (a +1 is taken for the
+ * store). Sets pass v == NULL. Never throws. */
+void scr_dynmap_put(ScrMap *m, ScrDyn *k, ScrDyn *v) {
+  ScrDyn *hold;
+  ScrDyn *sk = scr_dynmap_store_key(k, &hold);
+  if (v == NULL) scr_map_set_ref_f64(m, sk, 0);
+  else scr_map_set_ref_ref(m, sk, scr_dyn_retain(v));
+  scr_dyn_release(hold);
+}
+
+ScrDyn *scr_dyn_new_dynmap(int flavor, const ScrDyn *seed) {
+  bool is_set = flavor == 1 || flavor == 3;
+  bool weak = flavor >= 2;
+  ScrMap *m = is_set ? scr_set_new_dynkey() : scr_map_new_dynkey();
+  ScrDyn *box = scr_dyn_new_map_ref(
+      m, flavor == 0 ? scr_dynmap_tkey_map : flavor == 1 ? scr_dynmap_tkey_set
+         : flavor == 2 ? scr_dynmap_tkey_wmap : scr_dynmap_tkey_wset);
+  scr_map_release(m); /* the box holds its own +1 */
+  if (seed == NULL || seed->kind == SCR_DYN_UNDEF || seed->kind == SCR_DYN_NULL) return box;
+  ScrDyn *pack = scr_dyn_iter_pack(seed, NULL);
+  if (pack == NULL) {
+    scr_dyn_release(box);
+    return NULL;
+  }
+  for (size_t i = 0; i < pack->v.arr.len; i++) {
+    ScrDyn *item = pack->v.arr.items[i];
+    if (is_set) {
+      if (weak && !scr_dynmap_weak_key_check(item, true)) {
+        scr_dyn_release(pack);
+        scr_dyn_release(box);
+        return NULL;
+      }
+      scr_dynmap_put(m, item, NULL);
+      continue;
+    }
+    if (item->kind != SCR_DYN_ARR) {
+      /* V8: "Iterator value x is not an entry object". Anything that is not
+       * an array has no [0]/[1] this tier can read, and a primitive never
+       * does in Node either. */
+      ScrJsonBuf b;
+      scr_jb_init(&b);
+      scr_jb_puts(&b, "Iterator value ");
+      ScrStr *img = scr_dyn_string_coerce(item);
+      if (img != NULL) {
+        for (size_t j = 0; j < img->len; j++) scr_jb_putc(&b, img->data[j]);
+        scr_str_release(img);
+      }
+      scr_jb_puts(&b, " is not an entry object");
+      scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+      scr_dyn_release(pack);
+      scr_dyn_release(box);
+      return NULL;
+    }
+    ScrDyn *und = scr_dyn_undefined();
+    ScrDyn *ek = item->v.arr.len > 0 ? item->v.arr.items[0] : und;
+    ScrDyn *ev = item->v.arr.len > 1 ? item->v.arr.items[1] : und;
+    if (weak && !scr_dynmap_weak_key_check(ek, false)) {
+      scr_dyn_release(pack);
+      scr_dyn_release(box);
+      return NULL;
+    }
+    scr_dynmap_put(m, ek, ev);
+  }
+  scr_dyn_release(pack);
+  return box;
+}
+
+/* The drain of a dyn-flavored map or set into a fresh ARR (+1), in
+ * insertion order: mode 0 = the default iteration (a Map's [k, v] pairs, a
+ * Set's elements), 1 = keys, 2 = values, 3 = entries. A Set's keys() and
+ * values() are its elements and its entries() are [v, v] pairs. A snapshot,
+ * which is exactly what an immediate drain observes. */
+ScrDyn *scr_dyn_map_snapshot(const ScrDyn *d, int mode) {
+  ScrMap *m = d->v.map.m;
+  bool is_set = scr_dyn_map_flavor(d) == 1;
+  ScrDyn *out = scr_dyn_new_arr();
+  if (mode == 0) mode = is_set ? 2 : 3;
+  for (double i = 0; i < scr_map_iter_count(m); i++) {
+    if (!scr_map_iter_live(m, i)) continue;
+    ScrDyn *k = (ScrDyn *)scr_map_iter_key_ref(m, i); /* +1 */
+    ScrDyn *v = is_set ? NULL : (ScrDyn *)scr_map_iter_val_ref(m, i); /* +1 */
+    if (mode == 1 || (mode == 2 && is_set)) {
+      scr_dyn_arr_push(out, k);
+      scr_dyn_release(v);
+    } else if (mode == 2) {
+      scr_dyn_arr_push(out, v);
+      scr_dyn_release(k);
+    } else {
+      ScrDyn *pair = scr_dyn_new_arr();
+      scr_dyn_arr_push(pair, scr_dyn_retain(k));
+      if (is_set) scr_dyn_arr_push(pair, k);
+      else {
+        scr_dyn_arr_push(pair, v);
+        scr_dyn_release(k);
+      }
+      scr_dyn_arr_push(out, pair);
+    }
+  }
+  return out;
+}
+
+/* The keyed READ off a map box (the emitted sc_dyn_key_get's MAP arm).
+ * `size` is a live count for EVERY map and set, typed or dyn-flavored. A
+ * member of the Map/Set prototype that is not `size` would be read as a
+ * function VALUE, which this box has no bound-method form for, and answering
+ * undefined for it would be the wrong answer for a member Node has: loud.
+ * Any other name is not a member of a Map or a Set, and reads undefined. */
+ScrDyn *scr_dyn_map_key_get(ScrDyn *d, const ScrStr *k) {
+  /* A weak collection has no `size`: the read is undefined, like Node's. */
+  if (k->len == 4 && memcmp(k->data, "size", 4) == 0 && scr_dyn_map_flavor(d) < 2) {
+    return scr_dyn_new_num(scr_map_size(d->v.map.m));
+  }
+  static const char *const members[] = {
+    "get", "set", "has", "delete", "clear", "add", "forEach", "keys", "values", "entries",
+    "constructor", "toString", "valueOf", "hasOwnProperty", "isPrototypeOf",
+    "propertyIsEnumerable", "toLocaleString", "__proto__", NULL };
+  for (size_t i = 0; members[i]; i++) {
+    if (strlen(members[i]) == k->len && memcmp(members[i], k->data, k->len) == 0) {
+      scr_dyn_map_fence(d, "reading a method as a value");
+      return NULL;
+    }
+  }
+  return scr_dyn_retain(scr_dyn_undefined());
 }
 
 /* ── bigints in the checked-dynamic tree (SCR_DYN_BIG) ────────────────
@@ -4785,8 +4986,12 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
      * String(new Map()) is "[object Map]" and String(new Set()) is
      * "[object Set]". An ANSWER, like the ArrayBuffer arm above and
      * unlike the OBJINST arm, because the shape is known and constant. */
-    return d->v.map.tkey[0] == 's' ? scr_str_new("[object Set]", 12)
-                                   : scr_str_new("[object Map]", 12);
+    {
+      const char *cls = scr_dyn_map_cls(d);
+      char tagbuf[32];
+      int tn = snprintf(tagbuf, sizeof tagbuf, "[object %s]", cls);
+      return scr_str_new(tagbuf, (size_t)tn);
+    }
   case SCR_DYN_PROMISE:
     /* Object.prototype.toString with the Promise @@toStringTag. */
     return scr_str_new("[object Promise]", 16);
