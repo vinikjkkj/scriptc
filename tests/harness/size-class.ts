@@ -2350,7 +2350,15 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
  * dyn key setter, the errno/syscall/path/dest chain in the error-to-dyn conversion, and the Buffer rendering of the
  * inspect-lite form. The Proxy operations themselves, the fs callback forms and the Buffer/loose-equality/errno reads
  * sit in gated units and are not in this figure. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 132_118 : null;
+/* RE-RECORDED 2026-10-23 (land-js: date2 + jslane + jslane2): 132,118 -> 132,406 (+288). Measured with the zig windows-gnu
+ * cross build (SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu, zig 0.16.0) over the test's own regex program: land-js
+ * 25698ae34 = 132,406 (CI 40019862062 measured the same figure); main 76bf25342 alone = 132,310 locally, i.e. date2 had
+ * already used 192 of the 256-byte tolerance and jslane/jslane2 added 96 more. The regex-free program moved 72,726 -> 72,790
+ * (+64, inside tolerance). What the bytes bought, all in always-linked units: the error expando-bag teardown hook and its
+ * two NULL-guarded drops in scr_error.c, the class-table property read/write pair (scr_cls_props_read/set) in
+ * scr_dyn_invoke.c, and the Buffer.from(dyn) / checked-Uint8Array / crypto-input helpers in scr_json.c. The URL setters and
+ * stream done-packers are in gated units and are not in this figure. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 132_406 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
