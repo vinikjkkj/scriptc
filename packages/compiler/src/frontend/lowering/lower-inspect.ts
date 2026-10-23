@@ -37,7 +37,7 @@ import * as ts from "../ts7/adapter.js";
 import type { NullProtoPatch } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile } from "../program.js";
-import { BOOL, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
@@ -1774,9 +1774,104 @@ export function lowerUtilModuleCall(
       // The one promisify target with a VALUE lowering; every other target
       // keeps the declaration-form registry and its fence.
       return lowerPromisifiedDiffieHellmanValue(L, expr, bi, loc);
+    case "deprecate":
+      return lowerDeprecateCall(L, expr, loc);
     default:
       return null;
   }
+}
+
+/** `util.deprecate(fn, msg, code?)`: a function with fn's own signature that
+ * warns on its FIRST call (process.emitWarning(msg, 'DeprecationWarning',
+ * code), once per wrapper, and once per code across wrappers), then runs fn
+ * with the arguments it was given and answers fn's result. The wrapper holds
+ * fn, the message, the code, and its own warned flag in boxed hidden locals,
+ * the bindThisClosure creation shape. Null (the caller's fence) for a rest
+ * signature, a spread argument, or a non-string message/code. */
+function lowerDeprecateCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr | null {
+  const argNodes = expr.arguments;
+  if (argNodes.length < 2 || argNodes.length > 3 || argNodes.some(ts.isSpreadElement)) return null;
+  const fn = L.lowerExpr(argNodes[0]!);
+  const ft = fn.type;
+  if (ft.kind !== "func" || ft.rest === true) return null;
+  const msg = L.lowerExpr(argNodes[1]!);
+  if (msg.type.kind !== "string") return null;
+  const code = argNodes.length === 3 ? L.lowerExpr(argNodes[2]!) : null;
+  if (code !== null && code.type.kind !== "string") return null;
+  const key = `deprecate:${typeKey(ft)}:${code !== null ? "code" : "nocode"}`;
+  const existing = L.widthHelpers.get(key);
+  const name = existing ?? `%deprecate.${L.widthHelpers.size}`;
+  if (!existing) {
+    L.widthHelpers.set(key, name);
+    const capParams = [
+      { localId: "tf.0", name: "tf", type: ft },
+      { localId: "dm.0", name: "dm", type: STRING },
+      ...(code !== null ? [{ localId: "dc.0", name: "dc", type: STRING }] : []),
+      { localId: "dw.0", name: "dw", type: BOOL },
+    ];
+    const params = ft.params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
+    const ref = (id: string, t: IrType): IrExpr => ({ kind: "varRef", localId: id, type: t, loc });
+    const dynOf = (e: IrExpr): IrExpr => ({ kind: "dynFrom", value: e, type: DYN, loc });
+    const vector: IrExpr = {
+      kind: "dynArrLit",
+      elems: [dynOf(ref("dm.0", STRING)), dynOf(str("DeprecationWarning", loc)), ...(code !== null ? [dynOf(ref("dc.0", STRING))] : [])],
+      type: DYN,
+      loc,
+    };
+    const call: IrExpr = {
+      kind: "callValue",
+      callee: ref("tf.0", ft),
+      args: params.map((p) => ref(p.localId, p.type)),
+      type: ft.ret,
+      loc,
+    };
+    L.liftedFns.push({
+      name,
+      params,
+      returnType: ft.ret,
+      captures: capParams,
+      locals: [
+        ...capParams.map((c) => ({ id: c.localId, name: c.name, type: c.type, mutable: c.localId === "dw.0", boxed: true as const })),
+        ...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+      ],
+      body: [
+        {
+          kind: "if",
+          cond: { kind: "unary", op: "!", operand: ref("dw.0", BOOL), type: BOOL, loc },
+          then: [
+            { kind: "assign", localId: "dw.0", value: boolLit(true, loc), loc },
+            { kind: "exprStmt", expr: { kind: "libCall", fn: "util.deprecationWarn", args: [vector], type: VOID, loc }, loc },
+          ],
+          else_: null,
+          loc,
+        },
+        ft.ret.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc },
+      ],
+      loc,
+    });
+  }
+  const ctx = L.ctx;
+  const inits: IrStmt[] = [];
+  const capIds: string[] = [];
+  const hold = (init: IrExpr, mutable: boolean): void => {
+    const n = ctx.localCounters.get("%deprecate") ?? 0;
+    ctx.localCounters.set("%deprecate", n + 1);
+    const id = `%deprecate.${n}`;
+    ctx.locals.push({ id, name: "%deprecate", type: init.type, mutable, boxed: true });
+    inits.push({ kind: "varDecl", localId: id, init, loc });
+    capIds.push(id);
+  };
+  hold(fn, false);
+  hold(msg, false);
+  if (code !== null) hold(code, false);
+  hold(boolLit(false, loc), true);
+  return {
+    kind: "seqExpr",
+    stmts: inits,
+    result: { kind: "closure", fnName: name, captures: capIds, type: ft, loc },
+    type: ft,
+    loc,
+  };
 }
 
 /** util.getCallSites() in a JS source: compiled binaries keep no runtime

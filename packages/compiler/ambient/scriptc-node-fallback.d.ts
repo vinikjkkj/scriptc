@@ -1873,6 +1873,9 @@ declare module "util" {
     readonly column: number;
   }
   export function getCallSites(frameCount?: number): CallSite[];
+  /* util.deprecate: the wrapper warns once on its first call (and once per
+   * code), then forwards. */
+  export function deprecate<T extends Function>(fn: T, msg: string, code?: string): T;
 }
 declare module "node:util" {
   export * from "util";

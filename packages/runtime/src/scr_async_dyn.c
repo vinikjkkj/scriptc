@@ -544,10 +544,12 @@ static void scr_warning_dispatch(ScrDyn *w) {
   }
   /* "(node:pid) [CODE] Name: message" + "\n<detail>" — Node's
    * onWarning report. */
-  const ScrDyn *en = scr_dyn_obj_get(w, "name", 4);
-  const ScrDyn *em = scr_dyn_obj_get(w, "message", 7);
-  const ScrDyn *ec = scr_dyn_obj_get(w, "code", 4);
-  const ScrDyn *ed = scr_dyn_obj_get(w, "detail", 6);
+  /* name/message live on the error encoding's prototype chain, not among
+   * its own members: the chain-aware data read finds them. */
+  const ScrDyn *en = scr_dyn_obj_data_get(w, "name", 4);
+  const ScrDyn *em = scr_dyn_obj_data_get(w, "message", 7);
+  const ScrDyn *ec = scr_dyn_obj_data_get(w, "code", 4);
+  const ScrDyn *ed = scr_dyn_obj_data_get(w, "detail", 6);
   fflush(stdout);
   fprintf(stderr, "(node:%ld) ", SCR_WARN_PID());
   if (ec && ec->kind == SCR_DYN_STR) fprintf(stderr, "[%s] ", ec->v.str->data);
@@ -560,7 +562,11 @@ static void scr_warning_dispatch(ScrDyn *w) {
   static bool hinted = false;
   if (!hinted) {
     hinted = true;
-    fputs("(Use `node --trace-warnings ...` to show where the warning was created)\n", stderr);
+    /* Node names the flag by the FIRST report's kind and prints it once. */
+    fputs((en && en->kind == SCR_DYN_STR && strcmp(en->v.str->data, "DeprecationWarning") == 0)
+              ? "(Use `node --trace-deprecation ...` to show where the warning was created)\n"
+              : "(Use `node --trace-warnings ...` to show where the warning was created)\n",
+          stderr);
   }
 }
 
@@ -650,6 +656,35 @@ void scr_process_emit_warning(ScrDyn *args) {
   }
   scr_warning_dispatch(w);
   scr_dyn_release(w);
+}
+
+/* util.deprecate's wrapper warning: the process.emitWarning argument
+ * vector [message, 'DeprecationWarning', code?]. Node keeps one
+ * codesWarned set for every wrapper: a wrapper given a code that an
+ * earlier wrapper already warned under stays silent. No code, no dedup
+ * (the wrapper's own warned flag, held by the caller, is the only gate). */
+static ScrStr **scr_deprecation_codes = NULL;
+static size_t scr_deprecation_codes_len = 0;
+static size_t scr_deprecation_codes_cap = 0;
+
+void scr_util_deprecation_warn(ScrDyn *args) {
+  size_t argc = args->kind == SCR_DYN_ARR ? args->v.arr.len : 0;
+  ScrDyn *const *items = args->kind == SCR_DYN_ARR ? args->v.arr.items : NULL;
+  if (argc >= 3 && items[2]->kind == SCR_DYN_STR) {
+    ScrStr *code = (ScrStr *)items[2]->v.str;
+    for (size_t i = 0; i < scr_deprecation_codes_len; i++) {
+      if (scr_str_eq(scr_deprecation_codes[i], code)) return;
+    }
+    if (scr_deprecation_codes_len == scr_deprecation_codes_cap) {
+      size_t ncap = scr_deprecation_codes_cap ? scr_deprecation_codes_cap * 2 : 8;
+      ScrStr **grown = (ScrStr **)realloc(scr_deprecation_codes, ncap * sizeof *grown);
+      if (grown == NULL) abort();
+      scr_deprecation_codes = grown;
+      scr_deprecation_codes_cap = ncap;
+    }
+    scr_deprecation_codes[scr_deprecation_codes_len++] = scr_str_retain(code);
+  }
+  scr_process_emit_warning(args);
 }
 
 

@@ -11965,6 +11965,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8508-util-deprecate-wrapper.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8508-util-deprecate-wrapper.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts": {
    "order": [
     "<repo>/tests/corpus/8700-explicit-undefined-is-an-own-key-and-absent-is-not.ts"

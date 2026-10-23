@@ -7259,6 +7259,7 @@ ScrDyn *scr_promise_reason_dyn(const ScrPromise *p);
 void scr_process_on_warning(ScrDyn *fn);
 void scr_process_off_warning(ScrDyn *fn);
 void scr_process_emit_warning(ScrDyn *args);
+void scr_util_deprecation_warn(ScrDyn *args);
 void scr_emit_warning(const char *name, const char *code, ScrStr *message);
 /* The promise-or-absent await's unit arm: one microtask hop, like JS's
  * await of any non-thenable (and like awaiting a settled promise). */
