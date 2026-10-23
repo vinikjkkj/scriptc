@@ -7,7 +7,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, canBoxFuncIntoDyn, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
-import { MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
+import { implicitDefaultInstance, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { protoClassArmOn, protoClassInfoFor } from "./proto-class-consume.js";
@@ -6817,6 +6817,26 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return !extraRef;
   }
 
+/** The all-dyn DEFAULT instances of a class's implicit-any methods, as the
+ * (method name, module function) pairs a dyn box of the class answers by
+ * name. Such a method owns no vtable slot and no `%C.m` function (each call
+ * site monomorphizes it), so without these an instance that crossed into a
+ * dyn value could not run `x.m()`: the box's member table would list the
+ * fields and none of the methods ("x.m is not a function"). A method whose
+ * instance poisons keeps its own diagnostic and stays off the list. */
+export function dynBoxedMethodInstances(L: Lowerer, info: ClassInfo): { name: string; fn: string }[] {
+  const out: { name: string; fn: string }[] = [];
+  for (const [mName, g] of info.genericMethods ?? []) {
+    if (g.implicitParams === undefined) continue;
+    try {
+      out.push({ name: mName, fn: implicitDefaultInstance(L, g.decl, g).name });
+    } catch (e) {
+      if (!(e instanceof PoisonError)) throw e;
+    }
+  }
+  return out;
+}
+
 export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     const out: IrFunction[] = [];
     const className = info.def.name;
@@ -6880,6 +6900,12 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     }
     for (const name of info.shadowFields ?? []) {
       if (always || L.wantBody(`%${className}.${name}`)) out.push(shadowMethodFn(L, info, name));
+    }
+    // A class the program boxes into a dyn value (the discovery pass left
+    // its marker) lists the default instances of its implicit-any methods.
+    if (info.genericMethods !== undefined && L.reachable?.has(`%${className}.%dynbox`) === true) {
+      const listed = dynBoxedMethodInstances(L, info);
+      if (listed.length > 0) info.def.dynMethods = listed;
     }
     // VTABLE THUNKS of this class — one per method whose own function is
     // not what the slot may hold: a WIDENED override (callable at the slot

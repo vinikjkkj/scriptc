@@ -142,6 +142,8 @@ export function dynMemberRows(
    * declares. */
   const implOf = (m: string): IrFunction | null => {
     for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
+      const implicit = c.def.dynMethods?.find((d) => d.name === m);
+      if (implicit !== undefined) return fnByName.get(implicit.fn) ?? null;
       if (!(c.def.methods?.includes(m) ?? false)) continue;
       if (c.def.abstractMethods?.includes(m) ?? false) return null;
       return fnByName.get(`%${c.def.name}.${m}`) ?? null;
@@ -152,6 +154,7 @@ export function dynMemberRows(
   const names: string[] = [];
   for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
     for (const m of c.def.methods ?? []) if (!names.includes(m)) names.push(m);
+    for (const d of c.def.dynMethods ?? []) if (!names.includes(d.name)) names.push(d.name);
   }
 
   for (const raw of names) {

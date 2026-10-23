@@ -111,7 +111,7 @@ import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collec
   collectJsonRequires, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
-import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
+import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports, implicitDefaultInstance } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
@@ -3530,7 +3530,7 @@ export class Lowerer {
           // re-records the diagnostic; discovery only needs the edges the
           // body fired before poisoning).
           try {
-            this.lowerGenericInstance(info, inst);
+            this.noteDynBoxEdges(this.lowerGenericInstance(info, inst));
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
           }
@@ -3562,6 +3562,28 @@ export class Lowerer {
     // seed the worklist beside the init bodies. Unknown names are inert
     // (the export-map resolution reports them as SC4002 later).
     for (const root of extraRoots ?? []) this.onEdge?.(root);
+    // The functions a body produces BESIDE itself (lifted closures, implicit-
+    // any instances lowered nested) carry dyn boxes of their own; scanning
+    // them is what lets a class that crosses into dyn only inside one of
+    // them (a monomorphized factory `new Core(x)` handed to an untyped
+    // parameter) reach noteDynBoxedClass. Noting can queue more units and
+    // more instances, so the three loops run to a joint fixpoint.
+    let scannedLifted = 0;
+    let scannedImplicit = 0;
+    const scanProduced = (): boolean => {
+      let progressed = false;
+      while (scannedLifted < this.liftedFns.length) {
+        this.noteDynBoxEdges(this.liftedFns[scannedLifted++]);
+        progressed = true;
+      }
+      while (scannedImplicit < this.implicitFns.length) {
+        this.noteDynBoxEdges(this.implicitFns[scannedImplicit++]);
+        progressed = true;
+      }
+      return progressed;
+    };
+    do {
+    drainInstances();
     while (queue.length > 0) {
       // A body-level poison outside the per-statement catches (a fenced
       // constructor/method parameter default lowered by declareParams):
@@ -3588,6 +3610,7 @@ export class Lowerer {
       drainInstances();
       lowerProfileNote("%discovery-drain", performance.now() - __drT);
     }
+    } while (scanProduced() || queue.length > 0);
     return reachable;
   }
 
@@ -3658,6 +3681,14 @@ export class Lowerer {
       for (const sh of c.shadowFields ?? []) this.noteEdge(`%${c.def.name}.${sh}`);
       for (const [mName] of this.protoClassBodies.get(c.def.name) ?? []) {
         this.noteEdge(`%${c.def.name}.${mName}`);
+      }
+      // Implicit-any methods have no `%C.m` unit: the box answers them
+      // through their default instances. Compiling them HERE is what notes
+      // the edges their bodies carry, and the marker tells the emit pass
+      // which classes to list them on (IrClassDef.dynMethods).
+      if (c.genericMethods !== undefined) {
+        this.noteEdge(`%${c.def.name}.%dynbox`);
+        dynBoxedMethodInstances(this, c);
       }
     };
     for (let a: ClassInfo | null | undefined = info; a; a = a.base) mark(a);
