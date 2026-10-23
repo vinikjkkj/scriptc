@@ -1,0 +1,6 @@
+{
+  "name": "mixinpool",
+  "version": "1.0.0",
+  "main": "index.js",
+  "exports": { ".": "./index.js", "./package.json": "./package.json", "./promise": "./promise.js", "./promise.js": "./promise.js" }
+}
