@@ -1,38 +1,25 @@
-/* ONE SLOT, TWO RULES — why a one-sided presence fix moves the error
- * instead of removing it.
+/* ONE SLOT, ONE INSTANCE MASK - why `{ a: undefined }` and `{}` now differ.
  *
  * `per-instance-keys.test.ts` pins the premise: `{ a?: T }` and
  * `{ a: T | undefined }` intern to ONE record shape, so "written undefined"
- * and "never written" have one representation and must get one answer. This
- * file pins what the CONSUMERS then do with that one slot, because they do
- * two different things and neither of them is wrong on its own:
+ * and "never written" have ONE representation in the slot. That used to
+ * force every consumer to pick a side, and they picked differently:
+ * Object.keys / `in` / Object.hasOwn guarded on the undefined arm's tag
+ * (right for the OMITTED optional, wrong for the explicit undefined), while
+ * util.inspect printed every declared field (the reverse). The test that
+ * stood here pinned that disagreement as a TRIPWIRE, because teaching
+ * inspect the tag test turned corpus 1632's explicit `undefined` red.
  *
- *   Object.keys / `in` / Object.hasOwn   guard on the undefined arm's tag —
- *     the key exists exactly when the arm is not undefined
- *     (recordKeysArrayCall, lower-calls.ts). Right for the OMITTED optional,
- *     wrong for the required `T | undefined` that JS says always exists.
- *
- *   util.inspect / console.log            walk the shape's declaredOrder and
- *     emit an entry for EVERY declared field, unconditionally
- *     (lower-inspect.ts, the `case "record"` arm). Right for the required
- *     `T | undefined`, wrong for the OMITTED optional.
- *
- * So for any one value the two surfaces disagree with each other, and each is
- * Node-exact for the spelling the other gets wrong. Measured both ways
- * (estado-lastseven.md section 2):
- *
- *   - teaching inspect the tag test turns a 61-program population generated
- *     from the Node oracle from AGREE 23 / DIFFER 38 into AGREE 50 /
- *     DIFFER 11 on BOTH backends, with zero AGREE -> DIFFER;
- *   - and it turns `tests/corpus/1632-inspect-records.ts` RED, because that
- *     fixture pins the other spelling (`a: number | undefined` written
- *     `undefined`, which Node prints).
- *
- * The only fix that is not a trade is per-field optionality inside the
- * shape's interned IDENTITY, which splits the two spellings into two shapes
- * with identical layouts and gives every surface both answers. Until then,
- * THIS TEST IS THE TRIPWIRE: change one of the two rules and it fails, and
- * the failure message is the reason.
+ * The slot is no longer the only presence signal. A shape with an
+ * undefined-armed member arms the per-instance own-key mask, every object
+ * literal ESTABLISHES it (recordLit.presence: the members the source wrote
+ * are `own`, a completion is not), a write sets the member's bit, `delete`
+ * clears it (recordSet.unset), a width copy and a spread carry the bit
+ * (`ownIf`), and every surface asks the one node (recordKeyPresent): the
+ * instance's bit when its builder wrote one, the tag test when it did not.
+ * So `util.inspect` and Object.keys agree, and both are right for both
+ * spellings. This file now pins THAT: inspect asks the same question
+ * Object.keys asks.
  */
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -117,22 +104,61 @@ test("Object.keys asks the own-key question for each optional member", () => {
   expect(mod).not.toBeNull();
   const keys = recordHelper(mod!, "%obj.keys.");
   expect(keys, "the interned Object.keys helper should exist").toBeDefined();
-  // Two optional fields, two guards (recordKeyPresent: the undefined arm's
-  // tag test on an instance no literal wrote, the mask on one that did); the
-  // required one pushes unconditionally.
+  // Two optional fields, two guards; the required one pushes unconditionally.
   expect(nodesOfKind(keys!.body, "recordKeyPresent").length).toBe(2);
 });
 
-test("util.inspect emits every declared field UNCONDITIONALLY", () => {
+test("util.inspect renders an optional member only when the SAME question says own", () => {
   const mod = lower(PROGRAM);
   expect(mod).not.toBeNull();
   const insp = recordHelper(mod!, "%util.insp.");
   expect(insp, "the interned util.inspect helper should exist").toBeDefined();
-  // Three declared fields, three `insp.entry` calls, and NOT ONE of them is
-  // under a presence guard. Flip this and 1632-inspect-records.ts goes red;
-  // leave it and every record printed with an absent optional key prints a
-  // key its own Object.keys says it does not have.
+  // Three declared fields, three `insp.entry` calls. The two optional ones
+  // sit under recordKeyPresent (the node Object.keys asks); the required
+  // one is unconditional, since no value of the shape lacks it.
   const entries = nodesOfKind(insp!.body, "libCall").filter((e) => e["fn"] === "insp.entry");
   expect(entries.length).toBe(3);
+  const guards = nodesOfKind(insp!.body, "if").filter((s) => {
+    const cond = s["cond"] as Record<string, unknown> | undefined;
+    return cond !== undefined && cond["kind"] === "recordKeyPresent";
+  });
+  expect(guards.length).toBe(2);
   expect(presenceGuards(insp!.body)).toBe(0);
+});
+
+test("a literal names the members it owns, and a completion does not", () => {
+  const mod = lower(`
+interface P { a?: number; c?: number }
+const flag = process.argv.length > 99;
+const x: P = flag ? { a: 1 } : { c: 3 };
+const y: P = { a: undefined, c: 3 };
+console.log(x, y);
+`);
+  expect(mod).not.toBeNull();
+  const lits = nodesOfKind(mod!, "recordLit").filter((l) => l["presence"] === true);
+  expect(lits.length).toBeGreaterThanOrEqual(3);
+  for (const l of lits) {
+    const fields = l["fields"] as { name: string; own?: true; value: Record<string, unknown> }[];
+    // Every field the SOURCE wrote is own; the shape's other members (the
+    // undefined arm a literal that omitted them is given) are not.
+    for (const f of fields) {
+      const isUndefinedLit = JSON.stringify(f.value).includes('"unit":"undefined"');
+      if (f.own !== true) expect(isUndefinedLit).toBe(true);
+    }
+  }
+  // `{ a: undefined, c: 3 }` owns BOTH keys, though one value is undefined.
+  const both = lits.find((l) => (l["fields"] as { own?: true }[]).every((f) => f.own === true));
+  expect(both, "the explicit-undefined literal owns every field it spells").toBeDefined();
+});
+
+test("`delete` clears the own-key bit", () => {
+  const mod = lower(`
+interface P { a?: number; c?: number }
+const p: P = { a: 1, c: 2 };
+delete p.a;
+console.log(Object.keys(p));
+`);
+  expect(mod).not.toBeNull();
+  const sets = nodesOfKind(mod!, "recordSet");
+  expect(sets.some((s) => s["unset"] === true && s["field"] === "a")).toBe(true);
 });
