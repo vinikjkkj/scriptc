@@ -9588,7 +9588,12 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         const wctxMapped = wctx ? L.mapTypeOf(wctx) : null;
         const wownMapped = L.mapTypeOf(L.typeOf(expr));
         const isMapish = (k: string | undefined): boolean => k === "weakmap" || k === "map";
-        if (!isMapish(wctxMapped?.kind) && !isMapish(wownMapped?.kind)) {
+        // ...EXCEPT an explicit any-typed context (a JSDoc `@type
+        // {WeakMap<any, any>}` or the cast the seed pin wraps around the
+        // site): the author (or the pin pass) said this container holds
+        // whatever the program stores, and a seed's inferred value type is
+        // a guess that Node does not enforce (anyContainerContext).
+        if (anyContainerContext(L, expr, symbol.name) || (!isMapish(wctxMapped?.kind) && !isMapish(wownMapped?.kind))) {
           const weakBox = dynWeakContainer(L, expr, symbol.name === "WeakMap" ? "weakmap" : "weakset", loc);
           if (weakBox !== null) return weakBox;
         }
@@ -9604,6 +9609,14 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             : null;
         let tsType = L.typeOf(expr);
         let mapped = L.mapTypeOf(tsType);
+        // An explicit any-typed context beats the seed's inferred type
+        // arguments (see anyContainerContext): `new Map([["a", 1]])` types
+        // as Map<string, number> by the seed alone, and a typed box would
+        // then reject the first store of another type that Node accepts.
+        if (symbol?.name === "Map" && anyContainerContext(L, expr, "Map")) {
+          const anyMap = dynAnyContainer(L, expr, tsType, "map", loc, true);
+          if (anyMap !== null) return anyMap;
+        }
         // JavaScript's `new Map()` has no type-argument syntax: the no-arg
         // constructor overload pins Map<any, any> whatever the JSDoc says
         // (`@type` on the declaration types the VARIABLE, not this
@@ -9793,6 +9806,10 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       if (symbol?.name === "Set" && L.isStdlibSymbol(symbol)) {
         const tsType = L.typeOf(expr);
         let mapped = L.mapTypeOf(tsType);
+        if (anyContainerContext(L, expr, "Set")) {
+          const anySet = dynAnyContainer(L, expr, tsType, "set", locOf(expr), true);
+          if (anySet !== null) return anySet;
+        }
         // `const s = new Set()` in JAVASCRIPT: no type-argument syntax, so
         // the element type never resolves past `any` and the container has
         // no static home. The binding's own uses carry it — Map's story,
@@ -11568,6 +11585,25 @@ export function isAnyDynContainer(L: Lowerer, t: ts.Type): boolean {
   }
 }
 
+/** Does an EXPLICIT any-typed context (a JSDoc `@type {Map<any, any>}`, a
+ * JSDoc cast, or the cast the seed pin wraps around a site) say this
+ * `new Map(...)` / `new Set(...)` / `new WeakMap(...)` / `new WeakSet(...)`
+ * holds whatever the program stores?
+ *
+ * The expression's OWN type comes from its seed: `new Map([["a", 1]])` is
+ * Map<string, number> whatever the declaration says, because the seed
+ * overload pins the type arguments. That inference is a guess Node does not
+ * enforce (a later `m.set("b", "x")` is legal), so a context that names
+ * `any` outranks it. JavaScript sources only (TypeScript keeps its fence). */
+function anyContainerContext(L: Lowerer, expr: ts.NewExpression, name: string): boolean {
+  if (!isJsSourceFile(expr.getSourceFile())) return false;
+  const args = expr.arguments ?? [];
+  if (args.length > 1 || args.some(ts.isSpreadElement)) return false;
+  const ctx = L.checker.getContextualType(expr);
+  if (ctx === undefined) return false;
+  return ctx.getSymbol()?.name === name && isAnyDynContainer(L, ctx);
+}
+
 /** `new Map()` / `new Map(iterable)` / `new Set()` / `new Set(iterable)` in a
  * JAVASCRIPT source whose type arguments are ALL `any`: no annotation, no
  * contextual type and no use (inferContainerTypeFromUses) fixed a static key
@@ -11585,13 +11621,19 @@ function dynAnyContainer(
   tsType: ts.Type,
   flavor: "map" | "set",
   loc: SrcLoc,
+  /** The caller already proved an explicit any-typed context
+   * (anyContainerContext), so the expression's own type arguments (the
+   * seed's inference) are not consulted. */
+  forced = false,
 ): IrExpr | null {
   if (!isJsSourceFile(expr.getSourceFile())) return null;
   const args = expr.arguments ?? [];
   if (args.length > 1 || args.some(ts.isSpreadElement)) return null;
-  const targs = L.checker.getTypeArguments(tsType as ts.TypeReference);
-  if (targs.length !== (flavor === "map" ? 2 : 1)) return null;
-  if (!targs.every((t) => (t.flags & ts.TypeFlags.Any) !== 0)) return null;
+  if (!forced) {
+    const targs = L.checker.getTypeArguments(tsType as ts.TypeReference);
+    if (targs.length !== (flavor === "map" ? 2 : 1)) return null;
+    if (!targs.every((t) => (t.flags & ts.TypeFlags.Any) !== 0)) return null;
+  }
   // SCRIPTC_MAPBOX_WHY=1 counts the sites that take the dyn-flavored form.
   if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
     process.stderr.write(`[mapbox] dyn-flavored ${flavor} at ${loc.file}:${loc.start}\n`);
