@@ -6483,16 +6483,16 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // DYN_PROTO_METHOD_NAMES fences the rest, because on a real dyn
     // array/string Node would run the METHOD, which no stored member
     // models.
-    // The iterator methods of a MAP or SET receiver, in the contexts that
-    // drain them where they are made (dynMapIterDrainContext). The runtime
-    // answers the drained snapshot for a dyn-flavored Map/Set. Only a
-    // receiver the CHECKER types as the stdlib Map/Set qualifies: a bare
-    // `any` receiver named `keys` could as well be an array, whose iterator
-    // methods this tier has no dispatch for (that refusal stays).
+    // The iterator methods keys/values/entries, in the contexts that drain
+    // them where they are made (dynMapIterDrainContext). The runtime answers
+    // the drained snapshot for every receiver kind that has them: a Map or
+    // Set (dyn-flavored or a typed one boxed across the boundary), an array,
+    // a typed array; an OBJ or class instance calls its own member, and any
+    // other kind answers Node's is-not-a-function.
     if (
       MAP_ITER_NAMES.has(access.name.text) && call.arguments.length === 0 &&
       !call.questionDotToken && !access.questionDotToken &&
-      isStdlibMapOrSetType(L, recvTs) && dynMapIterDrainContext(L, call)
+      dynMapIterDrainContext(L, call)
     ) {
       return {
         kind: "dynInvoke",
@@ -6546,17 +6546,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
 
 const MAP_ITER_NAMES: ReadonlySet<string> = new Set(["keys", "values", "entries"]);
 
-/** Is this checker type the stdlib's Map or Set (provenance, not the name:
- * a user's own `class Map` is not this)? */
-function isStdlibMapOrSetType(L: Lowerer, t: ts.Type): boolean {
-  const sym = t.getSymbol();
-  if (sym === undefined || (sym.name !== "Map" && sym.name !== "Set")) return false;
-  return L.checker
-    .declarationsOf(sym)
-    .some((d) => ts.isInterfaceDeclaration(d) && L.isStdlibFile(d.getSourceFile()));
-}
-
-/** The contexts that DRAIN a Map/Set iterator where it is made, so the
+/** The contexts that DRAIN an iterator where it is made, so the
  * snapshot the dyn dispatch answers is exactly what the live iterator would
  * have produced: the subject of a for-of, an element spread of an array
  * literal, the sole argument of `Array.from`, and the sole argument of
