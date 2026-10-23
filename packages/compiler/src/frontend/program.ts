@@ -56,6 +56,7 @@ import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackag
 import { isProvenanceSourceFile, isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { provenanceAliasRewrite, readSourceForRewrite } from "./provenance-rewrite.js";
 import { setServedSourceText } from "../source-text.js";
+import { applySeedPins, computeSeedPins, type SeedPin } from "./seed-pin.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
   ADOPTED_OPTIONS,
@@ -394,26 +395,62 @@ export function loadProgram(
   // It sits UNDER npm-static's: a package opted into --npm-static is served
   // that shadow's replacement content, and the rewriter is handed the same
   // bytes to work from rather than the disk's.
-  const fsShadow = {
-    readFile: (path: string) => {
-      const above = npmShadow?.readFile(path);
-      const rewritten = provenanceAliasRewrite(path, () => above ?? readSourceForRewrite(path));
-      if (rewritten !== null) {
-        // srcSite (the C emitter) turns a SrcLoc OFFSET into file:line:col
-        // by reading the file off disk a second time. The rewrite changes no
-        // lines but does change the offsets after each import, so the disk
-        // index would answer a later line than the offset came from. Record
-        // what was actually served.
-        setServedSourceText(path, rewritten);
-        return rewritten;
-      }
-      return above;
-    },
-    hideFile: (path: string) =>
-      (npmShadow?.hideFile(path) ?? false) || projectDtsRuntimeSibling(path) !== null,
+  const open = (
+    pins: ReadonlyMap<string, readonly SeedPin[]> | null,
+  ): { host: ts.Ts7Host; load: LoadResult & { disposeAll: () => void } } => {
+    const fsShadow = {
+      readFile: (path: string) => {
+        const above = npmShadow?.readFile(path);
+        let served: string | undefined = above;
+        const rewritten = provenanceAliasRewrite(path, () => above ?? readSourceForRewrite(path));
+        if (rewritten !== null) served = rewritten;
+        // SEED PINS (seed-pin.ts): the second load re-serves the files whose
+        // seeded containers must be dyn-flavoured, with each seed wrapped in
+        // an `any` cast. Applied on top of whatever the shadows above
+        // served, because the offsets were taken from that text.
+        const filePins = pins?.get(path.split("\\").join("/"));
+        if (filePins !== undefined) {
+          const base = served ?? readSourceForRewrite(path);
+          const pinned = base === undefined ? null : applySeedPins(base, filePins);
+          if (pinned === null) {
+            throw new Error(`seed pin: the text of ${path} changed between the two loads`);
+          }
+          served = pinned;
+        }
+        if (served !== undefined && (rewritten !== null || filePins !== undefined)) {
+          // srcSite (the C emitter) turns a SrcLoc OFFSET into file:line:col
+          // by reading the file off disk a second time. A rewrite changes no
+          // lines but does change the offsets after each edit, so the disk
+          // index would answer a later line than the offset came from. Record
+          // what was actually served.
+          setServedSourceText(path, served);
+        }
+        return served;
+      },
+      hideFile: (path: string) =>
+        (npmShadow?.hideFile(path) ?? false) || projectDtsRuntimeSibling(path) !== null,
+    };
+    const host = new ts.Ts7Host({ cwd: dirname(entryPath), fsShadow });
+    return { host, load: loadProgram7(host, entryPath) };
   };
-  const host = new ts.Ts7Host({ cwd: dirname(entryPath), fsShadow });
-  const load = loadProgram7(host, entryPath);
+  let { host, load } = open(null);
+  // THE SEED PIN (seed-pin.ts): decided on the checked program, applied by
+  // loading it a second time with the named seeds wrapped in an `any` cast.
+  // Programs with nothing to pin (every TypeScript program, most JavaScript)
+  // pay one walk over the files that mention a container constructor.
+  if (process.env["SCRIPTC_SEED_PIN"] !== "0") {
+    const pins = computeSeedPins(load.program);
+    if (pins.size > 0) {
+      if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
+        for (const [file, list] of pins) {
+          for (const pin of list) process.stderr.write(`[seedpin] ${pin.why} at ${file}:${pin.start}\n`);
+        }
+      }
+      load.disposeAll();
+      host.close();
+      ({ host, load } = open(pins));
+    }
+  }
   return {
     ...load,
     dispose: () => {
