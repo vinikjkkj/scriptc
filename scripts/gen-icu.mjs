@@ -24,16 +24,34 @@ const dataDir = path.join(src, "icu4c/source/data");
 
 // which top-level keys of each package's bundles are carried
 const KEEP = {
-  locales: (k) => k === "NumberElements" || k === "calendar" || k === "%%Parent" || k === "%%ALIAS",
+  locales: (k) => k === "NumberElements" || k === "calendar" || k === "fields" || k === "%%Parent" || k === "%%ALIAS",
   curr: () => true,
   unit: (k) => ["units", "unitsShort", "unitsNarrow", "compoundUnits", "durationUnits", "%%Parent", "%%ALIAS"].includes(k),
   zone: () => true,
+  misc: () => true,
+  region: (k) => k === "Countries" || k === "%%Parent" || k === "%%ALIAS",
 };
-const PKGS = [["loc", "locales"], ["curr", "curr"], ["unit", "unit"], ["zone", "zone"]];
+const PKGS = [["loc", "locales"], ["curr", "curr"], ["unit", "unit"], ["zone", "zone"], ["misc", "misc"], ["region", "region"]];
+// the supplemental bundles date formatting reads (era starts, calendar preference, week rules, metazones, day periods)
+const MISC_FILES = new Map([
+  ["supplementalData", (k) => ["calendarData", "calendarPreferenceData", "weekData", "weekOfPreference", "timeData"].includes(k)],
+  ["metaZones", () => true],
+  ["dayPeriods", () => true],
+  ["timezoneTypes", (k) => k === "typeAlias" || k === "typeMap"],
+]);
 
-function prune(pkgDir, node) {
+function prune(pkgDir, node, fname) {
   if (node.t !== "t") return node;
-  node.e = node.e.filter(([k]) => KEEP[pkgDir](k));
+  node.e = node.e.filter(([k]) => (pkgDir === "misc" ? MISC_FILES.get(fname)(k) : KEEP[pkgDir](k)));
+  if (pkgDir === "misc" && fname === "timezoneTypes") {
+    for (const [, v] of node.e) if (v.t === "t") v.e = v.e.filter(([k]) => k === "timezone");
+  }
+  if (pkgDir === "locales") {
+    // "fields" serves DateTimePatternGenerator's append-item names only: keep each field's display name
+    for (const [k, v] of node.e) {
+      if (k === "fields" && v.t === "t") for (const [, f] of v.e) if (f.t === "t") f.e = f.e.filter(([fk]) => fk === "dn");
+    }
+  }
   if (pkgDir === "locales") {
     // intervalFormats serve formatRange only
     for (const [k, v] of node.e) {
@@ -51,13 +69,78 @@ for (const [pkg, dir] of PKGS) {
   const d = path.join(dataDir, dir);
   keys.set(pkg, new Set());
   for (const f of fs.readdirSync(d)) {
-    if (!f.endsWith(".txt") || f === "supplementalData.txt" || f === "pool.txt" || f === "res_index.txt") continue;
+    if (!f.endsWith(".txt") || f === "pool.txt" || f === "res_index.txt") continue;
     const name = f.slice(0, -4);
+    if (dir === "misc" ? !MISC_FILES.has(name) : name === "supplementalData") continue;
     const { node } = parseIcuTxt(fs.readFileSync(path.join(d, f), "utf8"), f);
-    prune(dir, node);
+    prune(dir, node, name);
     if (!locales.has(name)) locales.set(name, {});
     locales.get(name)[pkg] = node;
   }
+}
+
+// ── zoneinfo64: the time zone rules as a misc bundle (Names, Regions, Rules and the zones' transition tables) ─────────
+function zoneinfoNode() {
+  const lines = fs.readFileSync(path.join(dataDir, "misc/zoneinfo64.txt"), "utf8").split("\n");
+  const nums = (t) => t.split(",").map((x) => x.trim()).filter((x) => x !== "").map(Number);
+  const names = [], regions = [], rules = [], zones = [];
+  let mode = "", buf = "", cur = null;
+  let version = "";
+  for (const l of lines) {
+    let m;
+    if ((m = l.match(/TZVersion \{ "([^"]*)" \}/))) version = m[1];
+    if (/^ Names \{/.test(l)) { mode = "names"; continue; }
+    if (/^ Rules \{/.test(l)) { mode = "rules"; continue; }
+    if (/^ Regions:array/.test(l)) { mode = "regions"; continue; }
+    if (/^ Zones:array/.test(l)) { mode = "zones"; continue; }
+    if (mode === "names") { buf += l.replace(/\/\/.*$/, "") + " "; if (/^ \}/.test(l)) { mode = ""; for (const x of buf.matchAll(/"([^"]*)"/g)) names.push(x[1]); } continue; }
+    if (mode === "regions") { if ((m = l.match(/^\s*"([^"]*)",?\s*\/\/Z#(\d+)/))) regions[+m[2]] = m[1]; if (/^ \}/.test(l)) mode = ""; continue; }
+    if (mode === "rules") {
+      if ((m = l.match(/^\s*(\S+):intvector \{$/))) cur = { name: m[1], v: [] };
+      else if (cur && (m = l.match(/^\s*([-0-9, ]+)$/))) cur.v = nums(m[1]);
+      else if (cur && /^\s*\} \/\/_#/.test(l)) { rules.push(cur); cur = null; }
+      if (/^ \}/.test(l)) mode = "";
+      continue;
+    }
+    if (mode === "zones") {
+      if ((m = l.match(/^\s*\/\* (\S+) \*\/ :int \{ (\d+) \}/))) { zones.push({ link: +m[2] }); continue; }
+      if (/^\s*\/\* (\S+) \*\/ :table \{/.test(l)) { cur = {}; zones.push(cur); continue; }
+      if (cur) {
+        if ((m = l.match(/^\s*(trans|transPre32|transPost32|typeOffsets):intvector \{(.*)\}/))) cur[m[1]] = nums(m[2]);
+        else if ((m = l.match(/^\s*typeMap:bin \{ "([0-9a-f]*)" \}/))) cur.typeMap = m[1].match(/../g)?.map((h) => parseInt(h, 16)) ?? [];
+        else if ((m = l.match(/^\s*finalRule \{ "([^"]*)" \}/))) cur.finalRule = m[1];
+        else if ((m = l.match(/^\s*finalRaw:int \{ (-?\d+) \}/))) cur.finalRaw = +m[1];
+        else if ((m = l.match(/^\s*finalYear:int \{ (-?\d+) \}/))) cur.finalYear = +m[1];
+        else if (/^\s*\} \/\/Z#/.test(l)) cur = null;
+      }
+      if (/^ \}/.test(l)) mode = "";
+    }
+  }
+  const S = (v) => ({ t: "s", v });
+  const IV = (v) => ({ t: "iv", v });
+  const I = (v) => ({ t: "i", v });
+  const zn = zones.map((z) => {
+    if (z.link !== undefined) return I(z.link);
+    const e = [];
+    for (const k of ["trans", "transPre32", "transPost32", "typeOffsets"]) if (z[k]) e.push([k, IV(z[k])]);
+    if (z.typeMap) e.push(["typeMap", IV(z.typeMap)]);
+    if (z.finalRule) { e.push(["finalRule", S(z.finalRule)], ["finalRaw", I(z.finalRaw)], ["finalYear", I(z.finalYear)]); }
+    return { t: "t", e };
+  });
+  return {
+    t: "t",
+    e: [
+      ["TZVersion", S(version)],
+      ["Zones", { t: "a", e: zn }],
+      ["Names", { t: "a", e: names.map(S) }],
+      ["Regions", { t: "a", e: regions.map(S) }],
+      ["Rules", { t: "t", e: rules.map((r) => [r.name, IV(r.v)]) }],
+    ],
+  };
+}
+{
+  if (!locales.has("zoneinfo64")) locales.set("zoneinfo64", {});
+  locales.get("zoneinfo64").misc = zoneinfoNode();
 }
 
 // ── binary encoding ────────────────────────────────────────────────────────────────────────────────────────────
@@ -102,6 +185,7 @@ for (const [pkg] of PKGS) {
 // ── the global records (CLDR core JSON, plus plural rules in ICU's table order) ───────────────────────────────────
 const J = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
 const core = {};
+let likelySubtags;
 {
   const sup = (f) => J(`${coreDir}/supplemental/${f}.json`).supplemental;
   const ns = sup("numberingSystems").numberingSystems;
@@ -117,6 +201,7 @@ const core = {};
   const al = sup("aliases").metadata.alias;
   for (const kind of ["languageAlias", "territoryAlias"])
     for (const k in al[kind]) if (al[kind][k]._replacement !== undefined) core[`${kind}/${k}`] = al[kind][k]._replacement;
+  likelySubtags = sup("likelySubtags").likelySubtags;
   const td = sup("timeData").timeData;
   for (const k in td) core[`timedata/${k}`] = `${td[k]._preferred}|${td[k]._allowed}`;
   // plural rules from ICU's plurals.txt: rules in the table's key order (few, many, one, two, zero)
@@ -149,10 +234,56 @@ const core = {};
     for (let i = 0; i + 1 < dst.length; i += 2) core[`dscript/${at(keys, dst[i])}`] = at(scripts, dst[i + 1]);
     for (let i = 0; i + 1 < plt.length; i += 2) core[`parentloc/${at(pstr, plt[i])}`] = at(pstr, plt[i + 1]);
   }
+  // RBNF rule sets behind the algorithmic numbering systems date patterns can name (hebr, romanlow, hanidays, jpanyear):
+  // each group is the concatenated rule text of the sets reachable from the named one
+  {
+    const rbnf = (loc) => parseIcuTxt(fs.readFileSync(path.join(dataDir, "rbnf", loc + ".txt"), "utf8"), loc + ".txt").node;
+    const group = (node, name) => {
+      const rules = node.e.find(([k]) => k === "RBNFRules")[1].e.find(([k]) => k === name)[1];
+      return rules.e.map((x) => x.v).join("");
+    };
+    const split = (text) => {
+      const sets = new Map();
+      const re = /(?:^|;)(%%?[A-Za-z0-9-]+):/g;
+      const marks = [];
+      let m;
+      while ((m = re.exec(text))) marks.push({ name: m[1], start: m.index + (m[0].startsWith(";") ? 1 : 0), after: m.index + m[0].length });
+      marks.forEach((mk, i) => sets.set(mk.name, text.slice(mk.start, i + 1 < marks.length ? marks[i + 1].start : text.length)));
+      return sets;
+    };
+    const closure = (text, roots) => {
+      const sets = split(text);
+      const seen = new Set();
+      const todo = [...roots];
+      while (todo.length) {
+        const n = todo.pop();
+        if (seen.has(n)) continue;
+        if (!sets.has(n)) throw new Error("rbnf: no rule set " + n);
+        seen.add(n);
+        for (const r of sets.get(n).matchAll(/%%?[A-Za-z0-9-]+/g)) if (r[0] !== n || true) { if (sets.has(r[0])) todo.push(r[0]); }
+      }
+      return [...sets.keys()].filter((k) => seen.has(k)).map((k) => sets.get(k)).join("");
+    };
+    core["rbnf/root/NumberingSystemRules"] = closure(group(rbnf("root"), "NumberingSystemRules"), ["%hebrew", "%roman-lower"]);
+    core["rbnf/zh/SpelloutRules"] = closure(group(rbnf("zh"), "SpelloutRules"), ["%spellout-numbering-days"]);
+    core["rbnf/ja/SpelloutRules"] = closure(group(rbnf("ja"), "SpelloutRules"), ["%spellout-numbering-year-latn"]);
+  }
   if (availFile) {
     const av = J(availFile);
     core["avail/nf"] = av.nf.join(" ");
     core["avail/dtf"] = av.dtf.join(" ");
+    // the likely-subtags expansion of each locale a DateTimeFormat can resolve to (what DateTimePatternGenerator and the
+    // calendar / hour preferences read when the tag names no region)
+    for (const tag of av.dtf) {
+      const m = tag.split("-");
+      const lang = m[0];
+      let script = "", region = "";
+      for (const p of m.slice(1)) { if (p.length === 4 && /^[A-Za-z]+$/.test(p)) script = p; else if (/^([A-Za-z]{2}|\d{3})$/.test(p)) region = p; }
+      const tries = [`${lang}-${script}-${region}`, `${lang}-${region}`, `${lang}-${script}`, lang, `und-${script}`];
+      let hit;
+      for (const t of tries) { const k = t.replace(/-+/g, "-").replace(/-$/, ""); if (likelySubtags[k] !== undefined && !(k.includes("--"))) { hit = likelySubtags[k]; break; } }
+      if (hit) core[`likely/${tag}`] = hit;
+    }
     core["avail/source"] = av.version;
   }
   core["icu/source"] = `icu4c release-78.2 ${PINNED_COMMIT}`;
