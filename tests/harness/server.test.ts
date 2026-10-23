@@ -65,11 +65,28 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<Pr
         if (m) {
           driverStarted = true;
           driverDone = new Promise<void>((res, rej) => {
-            const d = spawn("node", [driver, m[1]!], { stdio: ["ignore", "pipe", "inherit"] });
+            const d = spawn("node", [driver, m[1]!], { stdio: ["ignore", "pipe", "pipe"] });
+            let driverErr = "";
             d.stdout.on("data", (c: Buffer) => (driverStdout += c.toString("utf8")));
-            d.on("close", (code) => {
+            d.stderr.on("data", (c: Buffer) => {
+              driverErr += c.toString("utf8");
+              process.stderr.write(c);
+            });
+            d.on("close", (code, sig) => {
               if (code === 0) res();
-              else rej(new Error(`driver exited ${code}`));
+              else {
+                // A driver that died leaves the server waiting for a peer
+                // that is gone: fail NOW with the driver's own exit status
+                // and stderr, not 60 s later as a bare "server program
+                // timed out" that hides which side died.
+                const why = new Error(
+                  `driver exited ${code ?? sig}\ndriver stdout so far:\n${driverStdout}\ndriver stderr:\n${driverErr}\nserver stderr so far:\n${errText}`,
+                );
+                clearTimeout(timer);
+                child.kill("SIGKILL");
+                rej(why);
+                reject(why);
+              }
             });
           });
         }
