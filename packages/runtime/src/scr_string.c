@@ -1444,6 +1444,8 @@ static ScrStr *scr_str_empty(void) { return (ScrStr *)&scr_lit_empty; }
 static const SCR_STR_LIT(1) scr_lit_absent = {SCR_STR_IMMORTAL, 0, 0, ""};
 ScrStr *scr_str_absent(void) { return (ScrStr *)&scr_lit_absent; }
 bool scr_str_is_absent(const ScrStr *s) { return s == (const ScrStr *)&scr_lit_absent; }
+/* The same sentinel as data, for scr_arr_try_ref (no call on the hit path). */
+const void *const scr_str_absent_sentinel = &scr_lit_absent;
 
 /* Interned when the content is empty or one ASCII byte; fresh otherwise. */
 static ScrStr *scr_str_from_span(const char *bytes, size_t len) {

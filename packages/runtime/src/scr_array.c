@@ -98,6 +98,8 @@ SCR_ARR_COLD_TRAP static void scr_arr_trap_absent(size_t i, size_t len) {
  * call's, not the buffer's. */
 #define SCR_ARR_FAST_MAX 9007199254740992.0 /* 2^53 */
 
+extern const void *const scr_str_absent_sentinel;
+
 SCR_ARR_COLD static size_t scr_arr_check_index_slow(const ScrArr *a, double i, size_t limit) {
   if (!(i >= 0) || i != trunc(i) || i >= (double)limit) {
     scr_arr_trap_oob(i, a->len);
@@ -627,7 +629,9 @@ void *scr_arr_try_ref(ScrArr *a, double i) {
     int64_t n = (int64_t)i;
     if ((double)n == i && (uint64_t)n < (uint64_t)a->len) {
       void *p = scr_slot_to_ptr(a->data[n]);
-      if (p != NULL) return scr_elem_retain_p(a, p);
+      /* A string slot can hold the ABSENT string (a split capture that did not
+       * participate): Node's undefined, so a miss too. */
+      if (p != NULL && !(a->elem == SCR_ELEM_STR && p == scr_str_absent_sentinel)) return scr_elem_retain_p(a, p);
     }
   }
   return NULL;
