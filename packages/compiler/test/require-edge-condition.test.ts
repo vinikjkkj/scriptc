@@ -59,19 +59,19 @@ describe("export condition by edge kind", () => {
     w(join(nm, "node_modules", "dualpkg", "package.json"), JSON.stringify({ name: "dualpkg", exports: { ".": { import: "./esm/index.mjs", require: "./lib/index.js" } } }));
     w(join(nm, "node_modules", "dualpkg", "esm", "index.mjs"), "");
     w(join(nm, "node_modules", "dualpkg", "lib", "index.js"), "");
-    expect(createRequire(pathToFileURL(join(nm, "a.js"))).resolve("dualpkg")).toMatch(/lib\/index\.js$/);
+    expect(createRequire(pathToFileURL(join(nm, "a.js"))).resolve("dualpkg")).toMatch(/lib[\\/]index\.js$/);
   });
   test("a CommonJS file's edge answers the require target; ESM spellings keep the import target", () => {
     reg(true);
     const at = (f: string): string | null => resolveProjectImport(join(root, "dualpkg", f), "dualpkg");
-    expect(at("lib/user.js")).toMatch(/lib\/index\.js$/);
-    expect(at("lib/user.cjs")).toMatch(/lib\/index\.js$/);
-    expect(at("esm/user.mjs")).toMatch(/esm\/index\.mjs$/);
-    expect(at("esm/user.ts")).toMatch(/esm\/index\.mjs$/);
-    expect(resolveProjectImport(join(root, "esmscope", "user.js"), "dualpkg")).toMatch(/esm\/index\.mjs$/);
+    expect(at("lib/user.js")).toMatch(/lib[\\/]index\.js$/);
+    expect(at("lib/user.cjs")).toMatch(/lib[\\/]index\.js$/);
+    expect(at("esm/user.mjs")).toMatch(/esm[\\/]index\.mjs$/);
+    expect(at("esm/user.ts")).toMatch(/esm[\\/]index\.mjs$/);
+    expect(resolveProjectImport(join(root, "esmscope", "user.js"), "dualpkg")).toMatch(/esm[\\/]index\.mjs$/);
   });
   test("positive control: without the require entry the CommonJS file lands on the ESM wrapper (the defect)", () => {
     reg(false);
-    expect(resolveProjectImport(join(root, "dualpkg", "lib", "user.js"), "dualpkg")).toMatch(/esm\/index\.mjs$/);
+    expect(resolveProjectImport(join(root, "dualpkg", "lib", "user.js"), "dualpkg")).toMatch(/esm[\\/]index\.mjs$/);
   });
 });
