@@ -52,6 +52,8 @@ static ScrBytes *scr_bytes_alloc(ScrBytesElem elem, size_t len) {
   b->data = calloc(len ? len : 1, scr_bytes_elem_size(elem));
   if (!b->data) scr_bytes_oom();
   b->backing = NULL;
+  b->weakkey = 0;
+  b->abuf = NULL;
 #ifdef SCR_RC_AUDIT
   scr_live_bytes++;
 #endif
@@ -187,6 +189,9 @@ void scr_bytes_release(ScrBytes *b) {
      * only for a value that has actually been a key. */
     if (b->weakkey && scr_weak_died_hook != NULL) scr_weak_died_hook(b);
     if (b->backing) {
+      /* An ArrayBuffer window over an owner's storage clears the owner's
+       * weak cache slot as it dies (see ScrBytes.abuf). */
+      if (b->elem == SCR_BYTES_BUF && b->backing->abuf == b) b->backing->abuf = NULL;
       scr_bytes_release(b->backing); /* a view: data points into the owner */
     } else {
       free(b->data);
@@ -536,6 +541,8 @@ ScrBytes *scr_bytes_subarray(ScrBytes *b, double start, double end) {
   v->flavor = b->flavor;
   v->data = b->data + s * scr_bytes_elem_size(b->elem);
   v->backing = scr_bytes_retain(owner);
+  v->weakkey = 0;
+  v->abuf = NULL;
 #ifdef SCR_RC_AUDIT
   scr_live_bytes++;
 #endif
@@ -554,6 +561,62 @@ void scr_bytes_set_from(ScrBytes *dst, const ScrBytes *src, double offset) {
 }
 
 /* ── DataView (the ONE view kind — see the header contract) ────────────── */
+
+/* `new <Typed>Array(arrayBuffer)`: a VIEW over the buffer's storage (chain
+ * depth 1: the owner is retained, never the window), element count =
+ * byteLength / size. A byte length that is not a multiple of the element
+ * size is V8's RangeError. NULL with the exception pending on that. */
+ScrBytes *scr_typed_view_over(ScrBytes *buf, ScrBytesElem elem) {
+  ScrBytes *owner = buf->backing ? buf->backing : buf;
+  const size_t esz = scr_bytes_elem_size(elem);
+  const size_t bytes = buf->len * (buf->elem == SCR_BYTES_BUF ? 1 : scr_bytes_elem_size(buf->elem));
+  if (bytes % esz != 0) {
+    char msg[96];
+    static const char *const names[] = { "Uint8Array", "Uint32Array", "Float32Array", "Int32Array",
+                                         "Float64Array", "Int8Array", "ArrayBuffer", "Int16Array",
+                                         "Uint16Array" };
+    const int n = snprintf(msg, sizeof msg, "byte length of %s should be a multiple of %zu",
+                           names[(unsigned)elem < 9 ? (unsigned)elem : 0], esz);
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, (size_t)n);
+    return NULL;
+  }
+  ScrBytes *v = malloc(sizeof(ScrBytes));
+  if (!v) scr_bytes_oom();
+  v->rc = 1;
+  v->len = bytes / esz;
+  v->elem = elem;
+  v->flavor = SCR_BF_PLAIN;
+  v->weakkey = 0;
+  v->data = buf->data;
+  v->backing = scr_bytes_retain(owner);
+  v->abuf = NULL;
+#ifdef SCR_RC_AUDIT
+  scr_live_bytes++;
+#endif
+  return v;
+}
+
+ScrBytes *scr_bytes_array_buffer(ScrBytes *b) {
+  ScrBytes *owner = b->backing ? b->backing : b;
+  /* An owner that already IS an ArrayBuffer answers itself. */
+  if (owner->elem == SCR_BYTES_BUF) return scr_bytes_retain(owner);
+  if (owner->abuf != NULL) return scr_bytes_retain(owner->abuf);
+  ScrBytes *w = malloc(sizeof(ScrBytes));
+  if (!w) scr_bytes_oom();
+  w->rc = 1;
+  w->len = owner->len * scr_bytes_elem_size(owner->elem); /* an ArrayBuffer counts BYTES */
+  w->elem = SCR_BYTES_BUF;
+  w->flavor = SCR_BF_PLAIN;
+  w->weakkey = 0;
+  w->data = owner->data; /* the same storage: a window, not a copy */
+  w->backing = scr_bytes_retain(owner);
+  w->abuf = NULL;
+  owner->abuf = w; /* weak; cleared when w dies (scr_bytes_release) */
+#ifdef SCR_RC_AUDIT
+  scr_live_bytes++;
+#endif
+  return w;
+}
 
 double scr_bytes_byte_offset(const ScrBytes *b) {
   return b->backing ? (double)(size_t)(b->data - b->backing->data) : 0;
@@ -607,6 +670,8 @@ ScrBytes *scr_dataview_new(ScrBytes *src, double byte_off, bool has_len, double 
   v->flavor = SCR_BF_UNKNOWN;
   v->data = owner->data + (size_t)off;
   v->backing = scr_bytes_retain(owner);
+  v->weakkey = 0;
+  v->abuf = NULL;
 #ifdef SCR_RC_AUDIT
   scr_live_bytes++;
 #endif

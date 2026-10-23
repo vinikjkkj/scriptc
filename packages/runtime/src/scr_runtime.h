@@ -8506,6 +8506,13 @@ typedef struct ScrBytes {
    * views over views resolve to the owner at construction) and its `data`
    * points into backing->data — released, never freed. */
   struct ScrBytes *backing;
+  /* OWNERS only: a WEAK back-pointer to the ArrayBuffer window handed out
+   * for this storage by scr_bytes_array_buffer, so `x.buffer === x.buffer`
+   * and two views of one buffer name the same ArrayBuffer. Never retained
+   * (the window retains the owner, so a strong edge would be a cycle); the
+   * window clears it when it dies. NULL until `.buffer` is first read.
+   * APPENDED after `backing`, so no offset the LLVM lane hardcodes moves. */
+  struct ScrBytes *abuf;
 } ScrBytes;
 
 size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 2, 4, 8 */
@@ -8652,6 +8659,19 @@ ScrBytes *scr_bytes_stamp_buffer(ScrBytes *b);
 ScrBytes *scr_bytes_stamp_plain(ScrBytes *b);
 ScrBytes *scr_bytes_stamp_dataview(ScrBytes *b);
 
+/* `x.buffer` on a typed array, a Buffer or a DataView: the ArrayBuffer over
+ * the storage the value views (+1). An ArrayBuffer here is a BUF-element
+ * ScrBytes whose `len` counts bytes; one is minted over an owner's storage
+ * on first demand (it retains the owner and shares its data) and CACHED in
+ * the owner's `abuf` weak slot, so identity holds across reads and across
+ * views of the same buffer. An owner that already IS an ArrayBuffer (a
+ * bytes<buf> value) answers itself. Never throws. */
+ScrBytes *scr_bytes_array_buffer(ScrBytes *b);
+/* `new <Typed>Array(arrayBuffer)`: a view over the buffer's storage, +1;
+ * NULL with V8's RangeError pending when the byte length is not a multiple
+ * of the element size. */
+ScrBytes *scr_typed_view_over(ScrBytes *buf, ScrBytesElem elem);
+
 /* The same stamp under the LIBCALL convention — argument BORROWED, result
  * OWNED (+1) — because that is what the emitter assumes of every libFn:
  * it releases the argument temp and keeps the result. Same pointer, one
@@ -8725,6 +8745,13 @@ ScrBytes *scr_bytes_from_arr(ScrBytesElem elem, const ScrArr *arr); /* +1 */
  * ToObject-with-no-length, the empty array. Borrows d; +1, or NULL with
  * the exception pending. */
 ScrBytes *scr_bytes_from_dyn(ScrBytesElem elem, const struct ScrDyn *d);
+/* `new DataView(buffer, byteOffset?, byteLength?)` and `new
+ * Uint8Array(buffer, byteOffset?, length?)` over a CHECKED-DYNAMIC first
+ * argument (scr_json.c): the ArrayBuffer box `x.buffer` answers on an
+ * untyped `x`. +1, or NULL with Node's TypeError/RangeError pending.
+ * Borrow all three (undefined for an omitted argument). */
+ScrBytes *scr_dyn_dataview_new(const struct ScrDyn *buf, const struct ScrDyn *off, const struct ScrDyn *len);
+ScrBytes *scr_dyn_u8view_new(const struct ScrDyn *buf, const struct ScrDyn *off, const struct ScrDyn *len);
 
 static inline ScrBytes *scr_bytes_retain(ScrBytes *b) {
   if (b->rc != SIZE_MAX) b->rc++;

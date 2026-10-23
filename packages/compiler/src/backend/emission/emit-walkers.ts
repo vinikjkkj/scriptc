@@ -1689,7 +1689,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`     * standing in for one. This is the arm the typed-array`);
     d.push(`     * branch below would have gotten wrong in three ways at`);
     d.push(`     * once had the two shared a kind. */`);
-    d.push(`    return scr_dyn_arrbuf_key_get(d, k);`);
+    // byteLength / maxByteLength / resizable / detached answer here; every
+    // other name is undefined, which falls on to the intrinsic-method tail
+    // so a method NAME (slice, resize, ...) reads as a function.
+    d.push(`    ScrDyn *ar = scr_dyn_arrbuf_key_get(d, k);`);
+    d.push(`    if (ar == NULL || ar->kind != SCR_DYN_UNDEF) return ar;`);
+    d.push(`    scr_dyn_release(ar);`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_BYTES) {`);
     // ONE runtime body for both lanes (scr_json.c): length, byteLength,

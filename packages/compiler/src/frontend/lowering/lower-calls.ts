@@ -6727,6 +6727,12 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // move cells REFUSE -> MATCH: every other receiver kind answers the same
   // is-not-a-function / own-member call it answered for `map`.
   "reduce", "reduceRight", "findLast", "findLastIndex", "toReversed", "toSorted", "with",
+  // The ArrayBuffer box's own methods (the value `x.buffer` answers):
+  // slice is routed above; resize answers V8's incompatible-receiver
+  // TypeError and transfer/transferToFixedLength refuse by name. No
+  // prototype the fence lists declares them, so routing adds nothing but the
+  // accounting the dispatch test asks for.
+  "resize", "transfer", "transferToFixedLength",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
   // boxed through the checked-dynamic boundary): these names dispatch on
   // the runtime kind so a boxed IncomingMessage/ServerResponse/Socket

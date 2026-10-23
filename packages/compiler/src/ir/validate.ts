@@ -1040,6 +1040,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "buffer.isEncoding": { argTypes: [STRING], result: BOOL },
   "buffer.concatLen": { argTypes: [arrayOf(BYTES_U8), F64], result: BYTES_U8 },
   "buffer.concatDyn": { argTypes: [DYN], result: BYTES_U8 },
+  "dyn.dataViewNew": { argTypes: [DYN, DYN, DYN], result: BYTES_U8 },
+  "dyn.u8ViewNew": { argTypes: [DYN, DYN, DYN], result: BYTES_U8 },
   "buffer.concatDynLen": { argTypes: [DYN, DYN], result: BYTES_U8 },
   // The bytes FLAVOR trio (see nodes.ts): the marks answer their own
   // argument, so they wrap a fresh construction in place; isBuffer takes

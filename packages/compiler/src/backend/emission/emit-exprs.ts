@@ -6395,6 +6395,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_bytes_concat_len(${arg(0)}, ${arg(1)})`);
           case "buffer.concatDyn":
             return finish(`scr_buffer_concat_dyn(${arg(0)})`);
+          case "dyn.dataViewNew":
+            return finish(`scr_dyn_dataview_new(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.u8ViewNew":
+            return finish(`scr_dyn_u8view_new(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "buffer.concatDynLen":
             return finish(`scr_buffer_concat_dyn_len(${arg(0)}, ${arg(1)})`);
           case "buffer.byteLenStr":
