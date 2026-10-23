@@ -7451,6 +7451,15 @@ let digestInputValueDispatches = 0;
     if (member === "version") {
       return { kind: "libCall", fn: "process.version", args: [], type: STRING, loc };
     }
+
+    // process.domain: null (Node's bootstrap defines it as null; the domain
+    // module sets it only while a domain is entered). That module has no
+    // lowering (a program naming it is refused at its import), so in a
+    // compiled binary the slot is always null — the probe
+    // `if (process.domain && cb)` pg's Query runs per construction.
+    if (member === "domain") {
+      return { kind: "unitLit", unit: "null", type: NULL_T, loc };
+    }
     // process.arch: the compiled binary's OWN architecture ("arm64",
     // "x64") — the same answer Node gives for its own build on the same
     // machine.
