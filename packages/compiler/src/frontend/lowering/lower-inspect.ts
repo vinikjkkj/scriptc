@@ -37,7 +37,7 @@ import * as ts from "../ts7/adapter.js";
 import type { NullProtoPatch } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile } from "../program.js";
-import { BOOL, DYN, F64, internalSlotFields, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
@@ -207,6 +207,12 @@ function inspectSupport(L: Lowerer, t: IrType, visiting: Set<string>, out: { rec
       return null;
     }
     case "func":
+      // A function VALUE inspects through its checked-dynamic box: the box
+      // resolves the JS name from the closure's entry point (the compiler's
+      // fn-name table), so `[Function: name]` / `[Function (anonymous)]` is
+      // the program's own answer, not a guess. Only a signature the dyn
+      // boundary cannot carry keeps the fence.
+      if (canBoxFuncIntoDyn(t, (id) => L.shapes.get(id), (id) => L.unions.get(id))) return null;
       return "function values have no inspect lowering (no runtime name exists — Node prints '[Function: name]'; pass the function's declared identifier directly to util.inspect for the baked form)";
     case "object": {
       const info = L.classes.get(t.className);
@@ -304,6 +310,14 @@ function inspectExpr(
       return { kind: "libCall", fn: "insp.buffer", args: [value], type: STRING, loc };
     case "dyn":
       return { kind: "libCall", fn: "insp.dyn", args: [value, recurse, depth], type: STRING, loc };
+    case "func":
+      return {
+        kind: "libCall",
+        fn: "insp.dyn",
+        args: [{ kind: "dynFrom", value, type: DYN, loc }, recurse, depth],
+        type: STRING,
+        loc,
+      };
     case "jsval":
       return { kind: "libCall", fn: "insp.jsval", args: [value, recurse, depth], type: STRING, loc };
     case "object":

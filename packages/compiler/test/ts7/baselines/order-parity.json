@@ -11366,6 +11366,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8229-function-values-in-inspect.js": {
+   "order": [
+    "<repo>/tests/corpus/8229-function-values-in-inspect.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/830-let-uninitialized.ts": {
    "order": [
     "<repo>/tests/corpus/830-let-uninitialized.ts"
