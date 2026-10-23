@@ -724,6 +724,408 @@ function undefinedFieldEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* TYPESCRIPT-DOWNLEVELED PRIVATE MEMBERS. `tsc` below ES2022 spells a class's
+ * `#private` members as module-level state plus two helpers:
+ *
+ *     var _C_instances, _a, _C_count, _C_step;            (the state names)
+ *     class C {
+ *       constructor() { _C_instances.add(this); _C_count.set(this, 0); }
+ *       m() { __classPrivateFieldSet(this, _C_count, __classPrivateFieldGet(this, _C_count, "f") + 1, "f");
+ *             return __classPrivateFieldGet(this, _C_instances, "m", _C_step).call(this, 1); }
+ *     }
+ *     _a = C, _C_count = new WeakMap(), _C_instances = new WeakSet(),
+ *       _C_step = function _C_step(x) { ... };           (the registrations)
+ *     _C_LIMIT = { value: 10 };                            (a static private field)
+ *
+ * which is exactly the native class with `#count = 0`, `#step(x) {...}` and
+ * `static #LIMIT = 10`: the private fields are WeakMap-keyed slots that the
+ * constructor fills in field order, a read/write is a keyed get/set that
+ * throws on a non-instance, and a private method is a function the helper
+ * hands back. The native spelling is typed (a field is a slot, a private
+ * method a direct call), where the downlevel form routes every access
+ * through an untyped helper. The rewrite is exact for the shapes tsc emits
+ * and is refused (the file is left as written) for anything else: a
+ * receiver other than `this` (or the static alias), an accessor, a state
+ * name used any other way, a leading constructor run that is not purely
+ * private initializers, or an initializer that mentions `this` or a
+ * constructor parameter. Method bodies move into the class, so lines after
+ * the class shift. */
+const PRIVATE_HELPERS = /__classPrivateField(?:Get|Set)\(/;
+
+function privateMemberEdits(fileName: string, text: string): string | null {
+  if (!PRIVATE_HELPERS.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const stmts = sf.statements;
+  // 1. The helper declarations (the tsc idiom, possibly already without its `this` guard).
+  const helperDecls: ts.VariableStatement[] = [];
+  for (const st of stmts) {
+    if (!ts.isVariableStatement(st) || st.declarationList.declarations.length !== 1) continue;
+    const d = st.declarationList.declarations[0]!;
+    if (ts.isIdentifier(d.name) && (d.name.text === "__classPrivateFieldGet" || d.name.text === "__classPrivateFieldSet")) {
+      helperDecls.push(st);
+    }
+  }
+  if (helperDecls.length === 0) return null;
+  // 2. The classes and their registrations. State var lists: `var a, b, c;` with no initializers.
+  const stateNames = new Set<string>();
+  const stateDecls: ts.VariableStatement[] = [];
+  for (const st of stmts) {
+    if (!ts.isVariableStatement(st) || helperDecls.includes(st)) continue;
+    const decls = st.declarationList.declarations;
+    if (decls.every((d) => ts.isIdentifier(d.name) && d.initializer === undefined && /^_(?:[A-Za-z$]\w*_\w+|[a-z])$/.test(d.name.text))) {
+      if (!decls.some((d) => ts.isIdentifier(d.name) && /^_[A-Za-z$]\w*_\w+$/.test(d.name.text))) continue;
+      stateDecls.push(st);
+      for (const d of decls) stateNames.add((d.name as ts.Identifier).text);
+    }
+  }
+  if (stateDecls.length === 0) return null;
+  const bail = (): null => null;
+  // Registration statements: top-level expression statements that are comma chains of `NAME = expr` over state names / alias.
+  type Reg = { kind: "alias"; name: string; cls: string } | { kind: "weakmap"; name: string } | { kind: "weakset"; name: string } | { kind: "method"; name: string; fn: ts.FunctionExpression } | { kind: "static"; name: string; init: ts.Expression };
+  const regs: Reg[] = [];
+  const regStmts: ts.Statement[] = [];
+  const flattenComma = (e: ts.Expression, out: ts.Expression[]): void => {
+    if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      flattenComma(e.left, out);
+      flattenComma(e.right, out);
+    } else out.push(e);
+  };
+  const classNames = new Set<string>();
+  for (const st of stmts) if (ts.isClassDeclaration(st) && st.name) classNames.add(st.name.text);
+  for (const st of stmts) {
+    if (!ts.isExpressionStatement(st)) continue;
+    const parts: ts.Expression[] = [];
+    flattenComma(st.expression, parts);
+    const mine: Reg[] = [];
+    let ok = true;
+    for (const p of parts) {
+      if (!ts.isBinaryExpression(p) || p.operatorToken.kind !== ts.SyntaxKind.EqualsToken || !ts.isIdentifier(p.left) || !stateNames.has(p.left.text)) {
+        ok = false;
+        break;
+      }
+      const name = p.left.text;
+      const r = p.right;
+      if (ts.isIdentifier(r) && classNames.has(r.text)) mine.push({ kind: "alias", name, cls: r.text });
+      else if (ts.isNewExpression(r) && ts.isIdentifier(r.expression) && r.expression.text === "WeakMap" && (r.arguments?.length ?? 0) === 0) mine.push({ kind: "weakmap", name });
+      else if (ts.isNewExpression(r) && ts.isIdentifier(r.expression) && r.expression.text === "WeakSet" && (r.arguments?.length ?? 0) === 0) mine.push({ kind: "weakset", name });
+      else if (ts.isFunctionExpression(r) && r.name !== undefined && r.name.text === name) mine.push({ kind: "method", name, fn: r });
+      else if (
+        ts.isObjectLiteralExpression(r) && r.properties.length === 1 && ts.isPropertyAssignment(r.properties[0]!) &&
+        ts.isIdentifier(r.properties[0]!.name) && (r.properties[0]!.name as ts.Identifier).text === "value"
+      ) mine.push({ kind: "static", name, init: (r.properties[0] as ts.PropertyAssignment).initializer });
+      else {
+        ok = false;
+        break;
+      }
+    }
+    if (ok && mine.length > 0) {
+      regs.push(...mine);
+      regStmts.push(st);
+    }
+  }
+  if (regs.length === 0) return bail();
+  // Every state name is registered exactly once (aliases `_a` may repeat to different classes: not supported).
+  const regByName = new Map<string, Reg>();
+  for (const r of regs) {
+    if (regByName.has(r.name)) return bail();
+    regByName.set(r.name, r);
+  }
+  const aliasOf = new Map<string, string>(); // `_a` -> class
+  const brandSets = new Set<string>();
+  for (const r of regs) {
+    if (r.kind === "alias") aliasOf.set(r.name, r.cls);
+    if (r.kind === "weakset") brandSets.add(r.name);
+  }
+  // The class a state name belongs to: `_Cls_member`.
+  const memberOf = (state: string): { cls: string; member: string } | null => {
+    for (const c of classNames) {
+      if (state.startsWith(`_${c}_`)) return { cls: c, member: state.slice(c.length + 2) };
+    }
+    return null;
+  };
+  for (const n of stateNames) {
+    if (aliasOf.has(n)) continue;
+    if (!regByName.has(n) && !/^_[a-z]$/.test(n)) return bail();
+    if (!/^_[a-z]$/.test(n) && memberOf(n) === null) return bail();
+  }
+  // 3. Uses. Every identifier occurrence of a state name must be (a) its own registration target, (b) the declaration,
+  // (c) an argument of a recognised helper call, or (d) `X.set(this, init)` / `I.add(this)` in a constructor.
+  interface Site { node: ts.Node; start: number; end: number; render: () => string }
+  const sites: Site[] = [];
+  const classBodies = new Map<string, ts.ClassDeclaration>();
+  for (const st of stmts) if (ts.isClassDeclaration(st) && st.name) classBodies.set(st.name.text, st);
+  const ctorRemovals: { start: number; end: number }[] = [];
+  const accessorUse = new Map<string, "get" | "set">();
+  const staticMethodNames = new Set<string>();
+  const handled = new Set<ts.Node>();
+  const privName = (state: string): string => `#${memberOf(state)!.member}`;
+  const isThis = (e: ts.Expression): boolean => e.kind === ts.SyntaxKind.ThisKeyword;
+  let failed = false;
+  const sub = (n: ts.Node): string => applySites(n.getStart(sf), n.getEnd());
+  const applySites = (from: number, to: number): string => {
+    const inner = sites.filter((s) => s.start >= from && s.end <= to).sort((a, b) => a.start - b.start || b.end - a.end);
+    let out = "";
+    let at = from;
+    for (const s of inner) {
+      if (s.start < at) continue; // nested inside an already-emitted site
+      out += text.slice(at, s.start) + s.render();
+      at = s.end;
+    }
+    return out + text.slice(at, to);
+  };
+  const stateArg = (e: ts.Expression | undefined): string | null => (e !== undefined && ts.isIdentifier(e) && stateNames.has(e.text) ? e.text : null);
+  const tempAssign = new Set<ts.Node>();
+  // A static receiver: the alias identifier itself, `tmp = alias`, or a temp that some assignment `tmp = alias` binds.
+  const isAliasRecv = (recv: ts.Expression, aliasState: string): boolean => {
+    if (ts.isIdentifier(recv) && recv.text === aliasState) return true;
+    if (ts.isBinaryExpression(recv) && recv.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(recv.left) && ts.isIdentifier(recv.right) && recv.right.text === aliasState) return true;
+    if (!ts.isIdentifier(recv)) return false;
+    let bound = false;
+    const find = (x: ts.Node): void => {
+      if (bound) return;
+      if (ts.isBinaryExpression(x) && x.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(x.left) && x.left.text === recv.text && ts.isIdentifier(x.right) && x.right.text === aliasState) bound = true;
+      else x.forEachChild(find);
+    };
+    find(sf);
+    return bound;
+  };
+  const visitUses = (n: ts.Node): void => {
+    if (failed) return;
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
+      const fnName = n.expression.text;
+      if (fnName === "__classPrivateFieldGet" || fnName === "__classPrivateFieldSet") {
+        const isGet = fnName === "__classPrivateFieldGet";
+        const a = n.arguments;
+        const recv = a[0];
+        const classOfRecv = (e: ts.Expression): string | null =>
+          ts.isIdentifier(e) ? (aliasOf.get(e.text) ?? (classNames.has(e.text) ? e.text : null)) : null;
+        const st = stateArg(a[1]) ?? (a[1] !== undefined && classOfRecv(a[1]) !== null ? "<class>" : null);
+        const kindArg = a[isGet ? 2 : 3];
+        const kind = kindArg !== undefined && ts.isStringLiteral(kindArg) ? kindArg.text : null;
+        if (recv === undefined || st === null || kind === null) { failed = true; return; }
+        // Get(recv, S, "f") instance field | Get(recv, S, "f", Static) static field | Get(recv, S, "m", fn) method
+        // | Get(recv, S, "a", fn) / Set(recv, S, v, "a", fn) accessor | Set(recv, S, v, "f")
+        let target: string;
+        let staticRecv: string | null = null;
+        const accName = (fnState: string): string => privName(fnState).replace(/_(?:get|set)$/, "");
+        if (isGet && kind === "m" && a.length === 4) {
+          const mArg = stateArg(a[3]);
+          if (mArg === null || regByName.get(mArg)?.kind !== "method") { failed = true; return; }
+          if (isThis(recv) && brandSets.has(st)) target = `this.${privName(mArg)}`;
+          else if (classOfRecv(recv) !== null && a[1] !== undefined && ts.isIdentifier(a[1]) && a[1].text === (recv as ts.Identifier).text) {
+            staticRecv = (recv as ts.Identifier).text;
+            staticMethodNames.add(mArg);
+            target = `${classOfRecv(recv)!}.${privName(mArg)}`;
+          } else { failed = true; return; }
+        } else if (kind === "a" && a.length === (isGet ? 4 : 5)) {
+          const fArg = stateArg(a[isGet ? 3 : 4]);
+          if (!isThis(recv) || !brandSets.has(st) || fArg === null || regByName.get(fArg)?.kind !== "method") { failed = true; return; }
+          if (!new RegExp(`_${isGet ? "get" : "set"}$`).test(fArg)) { failed = true; return; }
+          accessorUse.set(fArg, isGet ? "get" : "set");
+          target = `this.${accName(fArg)}`;
+        } else if (kind === "f" && a.length === (isGet ? 4 : 5)) {
+          // static field: the receiver is the class alias (`_a`), or a temp bound to it in the same expression (`_b = _a`)
+          const sArg = stateArg(a[isGet ? 3 : 4]);
+          if (!aliasOf.has(st) || sArg === null || regByName.get(sArg)?.kind !== "static" || !isAliasRecv(recv, st)) { failed = true; return; }
+          target = `${aliasOf.get(st)!}.${privName(sArg)}`;
+          tempAssign.add(recv);
+        } else if (kind === "f" && a.length === (isGet ? 3 : 4)) {
+          if (!isThis(recv) || regByName.get(st)?.kind !== "weakmap") { failed = true; return; }
+          target = `this.${privName(st)}`;
+        } else { failed = true; return; }
+        // Mark the identifier uses handled.
+        for (const x of a) if (ts.isIdentifier(x) && stateNames.has(x.text)) handled.add(x);
+        if (ts.isBinaryExpression(recv) && ts.isIdentifier(recv.right) && stateNames.has(recv.right.text)) handled.add(recv.right);
+        if (isGet) {
+          // `.call(this, ...rest)` of a method read is a direct call of the private method
+          const par = n.parent;
+          if (
+            kind === "m" && par !== undefined && ts.isPropertyAccessExpression(par) && par.expression === n && par.name.text === "call" &&
+            par.parent !== undefined && ts.isCallExpression(par.parent) && par.parent.expression === par &&
+            par.parent.arguments.length >= 1 &&
+            (staticRecv === null ? isThis(par.parent.arguments[0]!) : ts.isIdentifier(par.parent.arguments[0]!) && (par.parent.arguments[0] as ts.Identifier).text === staticRecv)
+          ) {
+            const call = par.parent;
+            if (staticRecv !== null && ts.isIdentifier(call.arguments[0]!)) handled.add(call.arguments[0]!);
+            sites.push({
+              node: call, start: call.getStart(sf), end: call.getEnd(),
+              render: () => `${target}(${call.arguments.slice(1).map((x) => sub(x)).join(", ")})`,
+            });
+            for (const x of call.arguments.slice(1)) visitUses(x);
+            for (const x of a) visitUses(x);
+            return;
+          }
+          sites.push({ node: n, start: n.getStart(sf), end: n.getEnd(), render: () => target });
+        } else {
+          const v = a[2]!;
+          sites.push({ node: n, start: n.getStart(sf), end: n.getEnd(), render: () => `(${target} = ${sub(v)})` });
+        }
+        for (const x of a) visitUses(x);
+        return;
+      }
+    }
+    n.forEachChild(visitUses);
+  };
+  for (const st of stmts) {
+    if ((helperDecls as ts.Statement[]).includes(st) || (stateDecls as ts.Statement[]).includes(st)) continue;
+    visitUses(st);
+  }
+  if (failed) return bail();
+  // 4. Constructor registrations and the class edits.
+  const edits: Edit[] = [];
+  const addFields = new Map<string, string[]>(); // class -> field declarations (in order)
+  const addMethods = new Map<string, string[]>();
+  const addStatics = new Map<string, string[]>();
+  for (const [cname, cls] of classBodies) {
+    const ctor = cls.members.find((m): m is ts.ConstructorDeclaration => ts.isConstructorDeclaration(m));
+    const ctorStmts = ctor?.body?.statements ?? [];
+    const params = new Set<string>();
+    for (const p of ctor?.parameters ?? []) if (ts.isIdentifier(p.name)) params.add(p.name.text);
+    let i = 0;
+    const skipTemps = (): void => {
+      while (i < ctorStmts.length && ts.isVariableStatement(ctorStmts[i]!) && (ctorStmts[i] as ts.VariableStatement).declarationList.declarations.every((d) => d.initializer === undefined)) i++;
+    };
+    skipTemps();
+    if (ctorStmts[i] !== undefined && ts.isExpressionStatement(ctorStmts[i]!) && ts.isCallExpression((ctorStmts[i] as ts.ExpressionStatement).expression) && ((ctorStmts[i] as ts.ExpressionStatement).expression as ts.CallExpression).expression.kind === ts.SyntaxKind.SuperKeyword) i++;
+    skipTemps();
+    const fields: string[] = [];
+    let anyPrivate = false;
+    for (; i < ctorStmts.length; i++) {
+      const s = ctorStmts[i]!;
+      if (!ts.isExpressionStatement(s) || !ts.isCallExpression(s.expression) || !ts.isPropertyAccessExpression(s.expression.expression)) break;
+      const call = s.expression;
+      const callee = call.expression as ts.PropertyAccessExpression;
+      if (!ts.isIdentifier(callee.expression) || !stateNames.has(callee.expression.text)) break;
+      const st = callee.expression.text;
+      const reg = regByName.get(st);
+      const mo = memberOf(st);
+      if (reg === undefined || mo === null || mo.cls !== cname) break;
+      if (callee.name.text === "add" && reg.kind === "weakset" && call.arguments.length === 1 && isThis(call.arguments[0]!)) {
+        handled.add(callee.expression);
+        ctorRemovals.push({ start: s.getFullStart(), end: s.getEnd() });
+        anyPrivate = true;
+        continue;
+      }
+      if (callee.name.text === "set" && reg.kind === "weakmap" && call.arguments.length === 2 && isThis(call.arguments[0]!)) {
+        const init = call.arguments[1]!;
+        let bad = false;
+        const scan = (x: ts.Node): void => {
+          if (x.kind === ts.SyntaxKind.ThisKeyword || (ts.isIdentifier(x) && (params.has(x.text) || x.text === "arguments"))) bad = true;
+          x.forEachChild(scan);
+        };
+        scan(init);
+        if (bad) return bail();
+        handled.add(callee.expression);
+        const isUndef = (ts.isVoidExpression(init) && ts.isNumericLiteral(init.expression)) || (ts.isIdentifier(init) && init.text === "undefined");
+        fields.push(isUndef ? `${privName(st)};` : `${privName(st)} = ${sub(init)};`);
+        ctorRemovals.push({ start: s.getFullStart(), end: s.getEnd() });
+        anyPrivate = true;
+        continue;
+      }
+      break;
+    }
+    // Any state registration use left in the constructor body or elsewhere is unhandled (checked below).
+    void anyPrivate;
+    addFields.set(cname, fields);
+  }
+  for (const r of regs) {
+    const mo = r.kind === "alias" ? null : memberOf(r.name);
+    if (r.kind === "method") {
+      const fn = r.fn;
+      const params = fn.parameters.map((p) => sub(p)).join(", ");
+      const acc = accessorUse.get(r.name);
+      const mods = acc !== undefined ? `${acc} ` : (fn.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ? "async " : "") + (fn.asteriskToken ? "*" : "");
+      const body = sub(fn.body);
+      const arr = addMethods.get(mo!.cls) ?? [];
+      const staticKw = staticMethodNames.has(r.name) ? "static " : "";
+      const nm = acc !== undefined ? privName(r.name).replace(/_(?:get|set)$/, "") : privName(r.name);
+      arr.push(`${staticKw}${mods}${nm}(${params}) ${body}`);
+      addMethods.set(mo!.cls, arr);
+    } else if (r.kind === "static") {
+      const arr = addStatics.get(mo!.cls) ?? [];
+      arr.push(`static ${privName(r.name)} = ${sub(r.init)};`);
+      addStatics.set(mo!.cls, arr);
+    }
+  }
+  // Every remaining mention of a state name must have been handled or be a registration/declaration.
+  const regTargets = new Set<ts.Node>();
+  for (const st of regStmts) {
+    const parts: ts.Expression[] = [];
+    flattenComma((st as ts.ExpressionStatement).expression, parts);
+    for (const p of parts) {
+      if (!ts.isBinaryExpression(p)) continue;
+      regTargets.add(p.left);
+      if (ts.isFunctionExpression(p.right) && p.right.name !== undefined) regTargets.add(p.right.name);
+    }
+  }
+  const declIds = new Set<ts.Node>();
+  for (const st of stateDecls) for (const d of st.declarationList.declarations) declIds.add(d.name);
+  let stray = false;
+  const findStray = (n: ts.Node): void => {
+    if (stray) return;
+    if (ts.isIdentifier(n) && stateNames.has(n.text) && !handled.has(n) && !regTargets.has(n) && !declIds.has(n)) {
+      // identifiers inside registration RHS functions are visited too; they are covered by `handled` through visitUses.
+      stray = true;
+      return;
+    }
+    n.forEachChild(findStray);
+  };
+  findStray(sf);
+  if (stray) return bail();
+  // 5. Emit. Class insertions: fields at the start of the body, methods + statics at its end.
+  for (const [cname, cls] of classBodies) {
+    const f = addFields.get(cname) ?? [];
+    const m = addMethods.get(cname) ?? [];
+    const s = addStatics.get(cname) ?? [];
+    if (f.length === 0 && m.length === 0 && s.length === 0) continue;
+    const openBrace = cls.members.pos - 1; // position of `{`
+    if (text[openBrace] !== "{") return bail();
+    if (f.length + s.length > 0) edits.push({ start: openBrace + 1, end: openBrace + 1, text: " " + [...s, ...f].join(" ") + " " });
+    if (m.length > 0) edits.push({ start: cls.getEnd() - 1, end: cls.getEnd() - 1, text: " " + m.join("\n") + "\n" });
+  }
+  const blank = (n: ts.Node): void => {
+    edits.push({ start: n.getStart(sf), end: n.getEnd(), text: "\n".repeat((n.getText(sf).match(/\n/g) ?? []).length) });
+  };
+  for (const st of helperDecls) blank(st);
+  for (const st of stateDecls) blank(st);
+  for (const st of regStmts) blank(st);
+  for (const r of ctorRemovals) {
+    const piece = text.slice(r.start, r.end);
+    edits.push({ start: r.start, end: r.end, text: "\n".repeat((piece.match(/\n/g) ?? []).length) });
+  }
+  // Call-site rewrites inside function bodies of the class (methods other than moved ones).
+  const classRanges = [...classBodies.values()].map((c) => [c.getStart(sf), c.getEnd()] as const);
+  for (const s of sites) {
+    const inClass = classRanges.some(([a, b]) => s.start >= a && s.end <= b) || regStmts.some((rs) => s.start >= rs.getStart(sf) && s.end <= rs.getEnd());
+    if (!inClass) return bail(); // a private access outside any class body would be a SyntaxError natively
+  }
+  // Outermost sites inside classes (nested ones are rendered by their parents).
+  const outer = sites.filter((s) => !sites.some((o) => o !== s && o.start <= s.start && o.end >= s.end && (o.start < s.start || o.end > s.end)));
+  for (const s of outer) {
+    // Sites inside a moved method body or constructor-moved initializer are rendered through `sub`; skip those regions.
+    edits.push({ start: s.start, end: s.end, text: s.render() });
+  }
+  // Drop edits that fall inside a region replaced wholesale (moved bodies / removed statements).
+  const wholesale = [
+    ...regStmts.map((st) => [st.getStart(sf), st.getEnd()] as const),
+    ...ctorRemovals.map((r) => [r.start, r.end] as const),
+  ];
+  const kept = edits.filter((e) => {
+    const isWhole = wholesale.some(([a, b]) => e.start === a && e.end === b) || e.start === e.end;
+    if (isWhole) return true;
+    return !wholesale.some(([a, b]) => e.start >= a && e.end <= b);
+  });
+  kept.sort((a, b) => a.start - b.start || a.end - b.end);
+  let out = "";
+  let at = 0;
+  for (const ed of kept) {
+    if (ed.start < at) return bail();
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -733,6 +1135,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const tsCjs = tsCjsEdits(fileName, text);
     if (tsCjs !== null) return jsDesugar(fileName, tsCjs) ?? tsCjs;
+  }
+  {
+    const priv = privateMemberEdits(fileName, text);
+    if (priv !== null) return jsDesugar(fileName, priv) ?? priv;
   }
   {
     const undef = undefinedFieldEdits(fileName, text);
