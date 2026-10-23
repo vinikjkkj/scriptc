@@ -5170,6 +5170,16 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           );
         }
         if (name === "isNaN") {
+          // A checked-dynamic argument (an untyped parameter): the global's own
+          // first step IS ToNumber, the same conversion Number(x) runs.
+          const probedArg = probeLower(L, expr.arguments[0]!);
+          if (
+            probedArg?.type.kind === "dyn" &&
+            (isJsSourceFile(expr.getSourceFile()) || !L.anyOrigin(expr.arguments[0]!))
+          ) {
+            const asNum: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [L.lowerExpr(expr.arguments[0]!)], type: F64, loc };
+            return { kind: "libCall", fn: "num.isNaN", args: [asNum], type: BOOL, loc };
+          }
           const x = L.lowerExprExpecting(expr.arguments[0]!, F64);
           return { kind: "libCall", fn: "num.isNaN", args: [x], type: BOOL, loc };
         }
@@ -5206,6 +5216,17 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         }
         if (name === "isFinite" && probed?.type.kind === "f64") {
           return { kind: "libCall", fn: "number.isFinite", args: [probed], type: BOOL, loc };
+        }
+        // A checked-dynamic argument: ToNumber first (the global coerces, unlike
+        // Number.isFinite), then the finite test; reference kinds keep the loud
+        // dynCheck throw dyn.toNumber documents.
+        if (
+          name === "isFinite" &&
+          probed?.type.kind === "dyn" &&
+          (isJsSourceFile(expr.getSourceFile()) || !L.anyOrigin(expr.arguments[0]!))
+        ) {
+          const asNum: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [L.lowerExpr(expr.arguments[0]!)], type: F64, loc };
+          return { kind: "libCall", fn: "number.isFinite", args: [asNum], type: BOOL, loc };
         }
       }
       // STATIC encodeURIComponent/encodeURI/decodeURIComponent
