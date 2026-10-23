@@ -1470,6 +1470,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.onWarning": { argTypes: [DYN], result: VOID },
   "process.offWarning": { argTypes: [DYN], result: VOID },
   "process.emitWarning": { argTypes: [DYN], result: VOID },
+  "util.deprecationWarn": { argTypes: [DYN], result: VOID },
   "async.awaitDyn": { argTypes: [DYN], result: DYN },
   "async.hop": { argTypes: [], result: VOID },
   // The payload-conversion memo: argument 0 is the SOURCE promise and the

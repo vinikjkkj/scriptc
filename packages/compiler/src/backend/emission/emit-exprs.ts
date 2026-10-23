@@ -6570,6 +6570,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_process_off_warning(${arg(0)})`);
           case "process.emitWarning":
             return finish(`scr_process_emit_warning(${arg(0)})`);
+          case "util.deprecationWarn":
+            return finish(`scr_util_deprecation_warn(${arg(0)})`);
           case "process.onUnhandledRejection":
             // The completed-checkpoint report dispatches the listeners.
             E.usesTimers = true;

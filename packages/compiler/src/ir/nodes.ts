@@ -6003,6 +6003,9 @@ export type IrLibFn =
   | "process.onWarning"
   | "process.offWarning"
   | "process.emitWarning"
+  /** util.deprecate's wrapper warning: the emitWarning argument vector, once
+   * per code (Node's codesWarned set; no code, no dedup here). */
+  | "util.deprecationWarn"
   /** process.on/once('unhandledRejection', fn): registers a dyn listener
    * the checkpoint report dispatches per never-observed rejection —
    * (reason, promise) — instead of printing and exiting 1 (scr_async.c).
@@ -10173,7 +10176,7 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     "process.onUnhandledRejection", "process.offUnhandledRejection",
     "process.onUncaught", "process.offUncaught",
     "process.onRejectionHandled", "process.offRejectionHandled",
-    "process.onWarning", "process.offWarning", "process.emitWarning",
+    "process.onWarning", "process.offWarning", "process.emitWarning", "util.deprecationWarn",
     "als.new", "als.get", "als.run", "als.exitRun", "als.enterWith", "als.disable",
     "dc.chanBindStore", "dc.chanUnbindStore", "dc.chanRunStores",
   ]);
@@ -12537,6 +12540,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // emitter.emit stance).
   "process.onWarning",
   "process.emitWarning",
+  "util.deprecationWarn",
   // The chaining spelling of http2's setEncoding. Its void twin
   // (http2.streamSetEncoding) has been seeded since it landed; the
   // `-Ret` variant calls the SAME function and was missed — the
