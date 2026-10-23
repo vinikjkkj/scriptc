@@ -294,6 +294,17 @@ declare var process: {
  * values exactly; the build machine's paths are baked in, which is also
  * what Node answers when the same tree runs in place). In a file with ESM
  * syntax they fence: Node throws ReferenceError there. */
+/* The navigator global (Node 21+), the members @types/node declares and the
+ * runtime answers: the default-locale tag (language/languages), the user agent
+ * `Node.js/<major>`, Node's platform string, and the CPUs this process may use. */
+interface Navigator {
+  readonly hardwareConcurrency: number;
+  readonly language: string;
+  readonly languages: readonly string[];
+  readonly platform: string;
+  readonly userAgent: string;
+}
+declare var navigator: Navigator;
 declare var __dirname: string;
 declare var __filename: string;
 

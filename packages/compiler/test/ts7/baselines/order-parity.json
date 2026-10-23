@@ -11744,6 +11744,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8528-navigator-global.js": {
+   "order": [
+    "<repo>/tests/corpus/8528-navigator-global.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js": {
    "order": [
     "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js"
