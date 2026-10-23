@@ -3874,6 +3874,14 @@ function validateFunction(
         }
         break;
       }
+      case "dynMapNew": {
+        if (e.type.kind !== "dyn") err(`dynMapNew must be dyn-typed, got ${e.type.kind}`, e.loc);
+        if (e.seed !== undefined) {
+          checkExpr(e.seed);
+          if (e.seed.type.kind !== "dyn") err(`dynMapNew seed of kind ${e.seed.type.kind} (must be dyn)`, e.loc);
+        }
+        break;
+      }
       case "dynArrNew": {
         if (e.type.kind !== "dyn") err(`dynArrNew must be dyn-typed, got ${e.type.kind}`, e.loc);
         checkExpr(e.arg);

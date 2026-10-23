@@ -7199,6 +7199,29 @@ export type IrExpr =
    * MAY THROW: a length that is not a non-negative integer below 2^32 is
    * V8's catchable `RangeError: Invalid array length`. */
   | { kind: "dynArrNew"; arg: IrExpr; type: IrType; loc: SrcLoc }
+  /** `new Map()` / `new Set()` in untyped JavaScript, where every type
+   * argument of the constructor is `any` (no annotation, no contextual type,
+   * no use that fixes one): a SCR_DYN_MAP box over a ScrMap whose KEYS and
+   * VALUES are dyn boxes, keys hashed and compared by the value they carry
+   * (SameValueZero — scr_map.c's SCR_MAP_KEY_DYN). The methods are the
+   * runtime's (`dynInvoke` on the box reaches scr_dyn_map_invoke; `size` is
+   * the keyed read's MAP arm; iteration drains through the iter-pack), so
+   * the value rides every dyn slot the way any other dyn value does.
+   *
+   * This node REPLACES the opaque `dynObjLit` these constructors used to
+   * lower to: a plain object with no member table, on which `m.set` answered
+   * "m.set is not a function" for a method Node has and the build said
+   * nothing.
+   *
+   * The weak flavors (`new WeakMap()` / `new WeakSet()`) hold their entries
+   * strongly (no collector hook exists for a dyn key), refuse a primitive
+   * key with V8's own TypeError, and carry neither `size` nor iteration.
+   *
+   * `seed` is the constructor's one iterable argument (a dyn operand,
+   * borrowed): `new Map([[k, v]])` / `new Map(other)` / `new Set(xs)`. It is
+   * drained once, at construction, in order. MAY THROW: a Map seed entry
+   * that is not an entry object is V8's catchable TypeError. */
+  | { kind: "dynMapNew"; flavor: "map" | "set" | "weakmap" | "weakset"; seed?: IrExpr; type: IrType; loc: SrcLoc }
   /** A dyn OBJECT built member-by-member. With no `fields` it is the empty
    * object (the JS stand-in for opaque container values — `new WeakMap()`
    * in harness code: the value exists for identity; every reached METHOD

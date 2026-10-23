@@ -10619,6 +10619,18 @@ class LlEmitter {
         });
         return out;
       }
+      case "dynMapNew": {
+        // `new Map()` / `new Set()` in untyped JS: a dyn-flavored map box
+        // (scr_dyn_new_dynmap). The seed, when present, is drained once at
+        // construction; a bad entry throws, so the pending check follows.
+        this.declare(`declare ptr @scr_dyn_new_dynmap(i32, ptr)`);
+        const seed = e.seed !== undefined ? this.emitExpr(e.seed).name : "null";
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_dyn_new_dynmap(i32 ${{ map: 0, set: 1, weakmap: 2, weakset: 3 }[e.flavor]}, ptr ${seed})`);
+        const out = this.own({ name: t, type: e.type });
+        this.emitPendingCheck();
+        return out;
+      }
       case "dynArrNew": {
         // `new Array(n)` in the checked-dynamic tier. f64 operand: the
         // LENGTH (ArrayCreate). dyn operand: the undecided one-argument

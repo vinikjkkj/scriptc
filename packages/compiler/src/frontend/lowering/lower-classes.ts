@@ -1116,6 +1116,10 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       if (seen.has(a)) return true;
       seen.add(a);
       if ((a.flags & DYN_FAITHFUL_PRIMITIVES) !== 0) return true;
+      // `Map<any, any>` / `Set<any>`: the type JavaScript gives `new Map()` /
+      // `new Set()`, which lowers to a dyn-flavored container (dynMapNew)
+      // that HAS its method table, so the box loses nothing.
+      if (isAnyDynContainer(L, a)) return true;
       if ((a.flags & ts.TypeFlags.Object) === 0) return false;
       if (L.checker.isArrayType(a)) {
         const elem = L.checker.getTypeArguments(a as ts.TypeReference)[0];
@@ -1320,9 +1324,12 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
    *
    * A union is checked ARM BY ARM: one Map arm is enough, and it is the
    * same wrong answer whichever arm the value takes. */
-  function dynBoxLosesMethodTable(L: Lowerer, t: ts.Type): boolean {
+  function dynBoxLosesMethodTable(L: Lowerer, t: ts.Type, site?: ts.Node): boolean {
     const arms: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
     return arms.some((a) => {
+      // A dyn-flavored Map/Set (dynMapNew) carries its own method table --
+      // in a JAVASCRIPT source, the only place `new Map()` lowers to one.
+      if ((site === undefined || isJsSourceFile(site.getSourceFile())) && isAnyDynContainer(L, a)) return false;
       const sym = a.getSymbol();
       if (sym === undefined || !DYN_LOSES_METHODS.has(sym.name)) return false;
       // A user's own `class Map` is not this: only the standard library's
@@ -3819,7 +3826,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               // are limited to numbers and strings), which a JSDoc `@type`
               // on the field can answer.
               let type = t
-                ? (L.mapTypeOf(t) ?? (dynBoxLosesMethodTable(L, t) ? null : dynFallbackType(L, assign, t)))
+                ? (L.mapTypeOf(t) ?? (dynBoxLosesMethodTable(L, t, assign) ? null : dynFallbackType(L, assign, t)))
                 : null;
               if (!type || type.kind === "void") L.badType(assign, t ?? L.typeOf(assign));
               // A JSDoc claim the BODY contradicts (`@type {Command}`
@@ -3965,7 +3972,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // something else. Name the real blocker instead, and the
           // annotation that answers it.
           const propT = L.checker.getTypeOfSymbol(p);
-          if (dynBoxLosesMethodTable(L, propT)) {
+          if (dynBoxLosesMethodTable(L, propT, site)) {
             L.unsupported(
               "SC1090",
               site,
@@ -8481,9 +8488,22 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         (symbol?.name === "WeakMap" || symbol?.name === "WeakSet") &&
         L.isStdlibSymbol(symbol) &&
         isJsSourceFile(expr.getSourceFile()) &&
-        (expr.arguments?.length ?? 0) === 0
+        (expr.arguments?.length ?? 0) <= 1
       ) {
-        return { kind: "dynObjLit", type: DYN, loc };
+        // A type that already names a supported weak/strong map keeps the
+        // typed path below: the contextual type (a JSDoc `@type
+        // {WeakMap<object, V>}`) or the expression's OWN inferred type (a
+        // seed that fixes the type arguments, `new WeakMap([[k, v]])`) -- a
+        // binding takes its type from the checker, so a dyn box here would
+        // meet a map-typed slot.
+        const wctx = L.checker.getContextualType(expr);
+        const wctxMapped = wctx ? L.mapTypeOf(wctx) : null;
+        const wownMapped = L.mapTypeOf(L.typeOf(expr));
+        const isMapish = (k: string | undefined): boolean => k === "weakmap" || k === "map";
+        if (!isMapish(wctxMapped?.kind) && !isMapish(wownMapped?.kind)) {
+          const weakBox = dynWeakContainer(L, expr, symbol.name === "WeakMap" ? "weakmap" : "weakset", loc);
+          if (weakBox !== null) return weakBox;
+        }
       }
       if ((symbol?.name === "Map" || symbol?.name === "WeakMap") && L.isStdlibSymbol(symbol)) {
         const seedArg = (expr.arguments?.length ?? 0) === 1 ? expr.arguments![0]! : null;
@@ -8588,6 +8608,14 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           const cloned = lowerMapCloneNew(L, seedArg, mapped);
           if (cloned) return cloned;
         }
+        // JAVASCRIPT `new Map()` / `new Map(iterable)` whose type arguments
+        // never resolved past Map<any, any> (no annotation, no contextual
+        // type, no use that fixes one): the container has no static home, so
+        // it is a REAL dyn-flavored Map (dynMapNew). See dynAnyContainer.
+        if (mapped?.kind !== "map" && symbol?.name === "Map") {
+          const anyMap = dynAnyContainer(L, expr, tsType, "map", loc);
+          if (anyMap !== null) return anyMap;
+        }
         if ((expr.arguments?.length ?? 0) > 0 && !entriesLit) {
           L.noLowering(
             "new Map(entries)",
@@ -8606,53 +8634,11 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           return { kind: "mapNew", seed, type: mapped, loc };
         }
         const targs = L.checker.getTypeArguments(tsType as ts.TypeReference);
-        // JAVASCRIPT `new Map()` whose arguments never resolved past
-        // Map<any, any> (no annotation, no contextual type, no seed): the
-        // WeakMap stance below — the VALUE lowers as an opaque dyn object
-        // (identity and truthiness are real). The formatter's config-cache
-        // shape: module init constructs the caches unconditionally; the
-        // format path never touches them. TypeScript keeps the compile
-        // fence.
-        //
-        // THIS COMMENT USED TO SAY "and every reached METHOD use meets its
-        // own per-site fence at runtime", AND THAT IS NOT WHAT HAPPENS.
-        // The value is a plain SCR_DYN_OBJ with no member table entry for
-        // `set`, so `m.set("a", 1)` answers V8's own
-        // `TypeError: m.set is not a function` — the mis-answer for a
-        // method Node HAS, which is exactly what `scr_dyn_bytes_proto_name`
-        // exists to prevent one kind over ("these fence loudly instead of
-        // mis-answering Node's is-not-a-function for a method Node HAS")
-        // and what the SCR_DYN_MAP read arm calls "the OBJINST arm's silent
-        // wrong answer, one kind over". Node answers `1 1` for
-        // `const m = new Map(); m.set("a",1); console.log(m.get("a"), m.size)`;
-        // both backends exit 1 on that line. estado-ctorattr.md §4.2 (p34)
-        // recorded the symptom without diagnosing it; estado-pinned.md
-        // diagnoses it here and prices the close.
-        //
-        // WHY IT IS NOT CLOSED HERE. Boxing the value as a real
-        // SCR_DYN_MAP needs an ScrMap whose keys are dynamic values
-        // compared by SameValueZero across kinds, and ScrMapKeyKind is
-        // {F64, STR, REF} — REF is pointer identity, which answers `false`
-        // for two equal numbers. Fencing the METHOD USE at compile time is
-        // the other candidate and is WORSE: this escape hatch exists for a
-        // program that constructs the map and never touches it, and a
-        // compile fence on a branch never taken would turn a working
-        // program into a refusal (MATCH -> TRAP).
-        if (
-          isJsSourceFile(expr.getSourceFile()) &&
-          (expr.arguments?.length ?? 0) === 0 &&
-          targs.length > 0 &&
-          targs.every((t) => (t.flags & ts.TypeFlags.Any) !== 0)
-        ) {
-          // SCRIPTC_MAPBOX_WHY=1: count the escape hatch.  Every one of these
-          // is a value on which `.set`/`.get`/`.size` answers V8's own
-          // "is not a function" -- a wrong answer for a method Node HAS -- and
-          // no instrument in this project could say how many a program has.
-          if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
-            process.stderr.write(`[mapbox] ${L.checker.typeToString(tsType)} at ${loc.file}:${loc.start}\n`);
-          }
-          return { kind: "dynObjLit", type: DYN, loc };
-        }
+        // (The all-`any` JavaScript `new Map()` that used to lower here as an
+        // opaque dyn object — no member table, so `m.set` answered "m.set is
+        // not a function" for a method Node has, with a clean build — is the
+        // dynMapNew above. estado-pinned.md priced the close; the key kind
+        // it asked for is SCR_MAP_KEY_DYN.)
         // A WeakMap that does NOT ride the identity-keyed Map (types.ts's
         // stance: only a CLASS INSTANCE key does) owes the weak-collection
         // fence, not Map's key report. The Map branch claims the WeakMap
@@ -8911,6 +8897,12 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
               ` argIr=${ai ? typeKey(ai) : "null"}` +
               ` js=${isJsSourceFile(expr.getSourceFile())} at ${l.file}:${l.start}`,
           );
+        }
+        // JAVASCRIPT `new Set()` / `new Set(iterable)` with no element type
+        // anywhere: a REAL dyn-flavored Set (dynMapNew), the Map story.
+        if (mapped === null) {
+          const anySet = dynAnyContainer(L, expr, tsType, "set", loc);
+          if (anySet !== null) return anySet;
         }
         if ((expr.arguments?.length ?? 0) > 0) {
           L.noLowering(
@@ -10433,4 +10425,89 @@ export function genericFieldFnNodeOf(member: ts.PropertyDeclaration): ts.Functio
     return init;
   }
   return null;
+}
+
+/** `new WeakMap()` / `new WeakSet()` (optionally seeded by one iterable) in a
+ * JAVASCRIPT source with no annotation: the dyn-flavored weak box (dynMapNew),
+ * whose methods the runtime owns. The seed is an iterable of [key, value]
+ * pairs (WeakMap) or of objects (WeakSet). Null for a spread argument, which
+ * keeps the fences it had. */
+function dynWeakContainer(
+  L: Lowerer,
+  expr: ts.NewExpression,
+  flavor: "weakmap" | "weakset",
+  loc: SrcLoc,
+): IrExpr | null {
+  const args = expr.arguments ?? [];
+  if (args.length > 1 || args.some(ts.isSpreadElement)) return null;
+  if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
+    process.stderr.write(`[mapbox] dyn-flavored ${flavor} at ${loc.file}:${loc.start}\n`);
+  }
+  const seed = args.length === 1 ? L.lowerExprExpecting(args[0]!, DYN) : undefined;
+  return { kind: "dynMapNew", flavor, ...(seed !== undefined ? { seed } : {}), type: DYN, loc };
+}
+
+/** Is this type the `Map<any, any>` / `Set<any>` / `WeakMap<WeakKey, any>` /
+ * `WeakSet<WeakKey>` (stdlib) that JavaScript's `new Map()` / `new Set()` /
+ * `new WeakMap()` / `new WeakSet()` is typed as? Such a value
+ * is a dyn-flavored container (dynMapNew), whose box carries the Map/Set
+ * method table, so a dyn slot can hold it without losing a member. */
+function isAnyDynContainer(L: Lowerer, t: ts.Type): boolean {
+  const sym = t.getSymbol();
+  if (
+    sym === undefined ||
+    (sym.name !== "Map" && sym.name !== "Set" && sym.name !== "WeakMap" && sym.name !== "WeakSet")
+  ) {
+    return false;
+  }
+  if (
+    !L.checker
+      .declarationsOf(sym)
+      .some((d) => ts.isInterfaceDeclaration(d) && L.isStdlibFile(d.getSourceFile()))
+  ) {
+    return false;
+  }
+  const targs = L.checker.getTypeArguments(t as ts.TypeReference);
+  const isAny = (a: ts.Type): boolean => (a.flags & ts.TypeFlags.Any) !== 0;
+  // JavaScript's `new WeakMap()` / `new WeakSet()` are typed over `WeakKey`
+  // (the lib's key alias), with an `any` value for the map.
+  const isWeakKey = (a: ts.Type): boolean => L.checker.typeToString(a) === "WeakKey";
+  switch (sym.name) {
+    case "Map": return targs.length === 2 && targs.every(isAny);
+    case "Set": return targs.length === 1 && isAny(targs[0]!);
+    case "WeakMap": return targs.length === 2 && isWeakKey(targs[0]!) && isAny(targs[1]!);
+    default: return targs.length === 1 && isWeakKey(targs[0]!);
+  }
+}
+
+/** `new Map()` / `new Map(iterable)` / `new Set()` / `new Set(iterable)` in a
+ * JAVASCRIPT source whose type arguments are ALL `any`: no annotation, no
+ * contextual type and no use (inferContainerTypeFromUses) fixed a static key
+ * or value type, so a typed ScrMap cannot be built and the container is a
+ * dyn-flavored one (dynMapNew: keys and values are dyn boxes, SameValueZero
+ * on the value). The constructor's single iterable argument seeds it.
+ *
+ * Declines (null) for TypeScript sources, which keep their compile-time
+ * fence on an `any` key, and for any other argument shape, which keeps the
+ * fences it had. TypeScript spelling with an explicit `any` is refused
+ * upstream of here, where the type argument is written down. */
+function dynAnyContainer(
+  L: Lowerer,
+  expr: ts.NewExpression,
+  tsType: ts.Type,
+  flavor: "map" | "set",
+  loc: SrcLoc,
+): IrExpr | null {
+  if (!isJsSourceFile(expr.getSourceFile())) return null;
+  const args = expr.arguments ?? [];
+  if (args.length > 1 || args.some(ts.isSpreadElement)) return null;
+  const targs = L.checker.getTypeArguments(tsType as ts.TypeReference);
+  if (targs.length !== (flavor === "map" ? 2 : 1)) return null;
+  if (!targs.every((t) => (t.flags & ts.TypeFlags.Any) !== 0)) return null;
+  // SCRIPTC_MAPBOX_WHY=1 counts the sites that take the dyn-flavored form.
+  if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
+    process.stderr.write(`[mapbox] dyn-flavored ${flavor} at ${loc.file}:${loc.start}\n`);
+  }
+  const seed = args.length === 1 ? L.lowerExprExpecting(args[0]!, DYN) : undefined;
+  return { kind: "dynMapNew", flavor, ...(seed !== undefined ? { seed } : {}), type: DYN, loc };
 }

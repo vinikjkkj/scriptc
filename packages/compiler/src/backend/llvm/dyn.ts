@@ -3882,8 +3882,9 @@ export class LlDyn {
     // MAP: a Map's entries are internal slots and its size/get/has/add
     // live on a prototype the box carries no table for. The undefined tail
     // would answer undefined for every one of them — the OBJINST arm's
-    // silent wrong answer, one kind over. Loud ladder, same runtime entry
-    // point as the C emitter's arm.
+    // silent wrong answer, one kind over. scr_dyn_map_key_get answers `size`
+    // for every map, undefined for a non-member and the loud ladder for a
+    // method read as a value; same runtime entry point as the C emitter's arm.
     //
     // It must also come before any v.obj read: v.map OVERLAYS v.obj in the
     // payload union, so an unguarded load of ->v.obj.len on a MAP box
@@ -3895,9 +3896,10 @@ export class LlDyn {
       const lNext = B.newLabel("kg.n");
       B.condBr(isMp, lMp, lNext);
       B.startBlock(lMp);
-      host.declare(`declare zeroext i1 @scr_dyn_map_fence(ptr, ptr)`);
-      B.line(`call zeroext i1 @scr_dyn_map_fence(ptr %d, ptr ${host.cstr("a property read")})`);
-      B.terminate(`ret ptr null`);
+      host.declare(`declare ptr @scr_dyn_map_key_get(ptr, ptr)`);
+      const mr = B.tmp();
+      B.line(`${mr} = call ptr @scr_dyn_map_key_get(ptr %d, ptr %k)`);
+      B.terminate(`ret ptr ${mr}`);
       B.startBlock(lNext);
     }
     // HANDLE: the tag's modeled properties through the installed ops.
