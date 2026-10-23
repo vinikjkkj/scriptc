@@ -253,7 +253,7 @@ describe("frontend input tracker", () => {
           contradicts: { op: "entries-error", path: sub },
         },
         realpath: {
-          agrees: { op: "realpath", path: present, target: realpathSync(present) },
+          agrees: { op: "realpath", path: present, target: canonicalRealpathSync(present) },
           contradicts: { op: "realpath", path: present, target: join(dir, "elsewhere.txt") },
         },
       };
@@ -313,7 +313,12 @@ describe("canonicalRealpathSync follows ts.sys.realpath", () => {
   it("the real default impl agrees with fs on this host", () => {
     const dir = scratch();
     try {
-      expect(canonicalRealpathSync(dir)).toBe(realpathSync(dir));
+      // The oracle is the platform's own spelling, named independently of the
+      // implementation: win32 asks the OS (native, which expands the runner's
+      // 8.3 temp alias); elsewhere the JS walk.
+      expect(canonicalRealpathSync(dir)).toBe(
+        process.platform === "win32" ? realpathSync.native(dir) : realpathSync(dir),
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
