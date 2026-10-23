@@ -11720,6 +11720,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8524-process-domain-is-null-without-the-domain-module.js": {
+   "order": [
+    "<repo>/tests/corpus/8524-process-domain-is-null-without-the-domain-module.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js": {
    "order": [
     "<repo>/tests/corpus/8602-static-expandos-assigned-after-the-class.js"
