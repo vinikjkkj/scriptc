@@ -507,11 +507,12 @@ describe("a CJS module.exports the table cannot be read off refuses by name", ()
    * "undefined" where node says "string", at exit 0 with no diagnostic.
    * The same silence, one shape over.
    *
-   * What stops it now is Node's OWN rule as the last word: cjs-lexer.ts
-   * mirrors Node's lexer, and any name it sees that the built namespace
-   * does not carry refuses. This case is that guard's positive control —
-   * remove the lexer check and it goes green with a short namespace. */
-  test("a member export after the table refuses rather than shortening the namespace", async () => {
+   * The member export now COMPILES (module.exports members attached after
+   * the table join the table), so the namespace is complete: the case
+   * asserts the build succeeds and the run is Node's answer, key for key.
+   * The lexer guard stays the last word for shapes that still cannot be
+   * read (the `export =` case above and the __esModule case below). */
+  test("a member export after the table keeps the namespace complete", async () => {
     const dir = stage(workDir, "nsv-cjs-member", {
       ...cjsPkg("cjsmember", {
         "dist/index.js": [
@@ -527,6 +528,7 @@ describe("a CJS module.exports the table cannot be read off refuses by name", ()
         `export {};`,
         `const held = (await import("cjsmember")) as unknown as Record<string, unknown>;`,
         `console.log(typeof held["extra"]);`,
+        `console.log(Object.keys(held).join(","));`,
         ``,
       ].join("\n"),
     });
@@ -536,11 +538,12 @@ describe("a CJS module.exports the table cannot be read off refuses by name", ()
       backend: "c",
       npmStatic: ["cjsmember"],
     });
-    expect(built.ok, "a namespace short by a lexer-visible name must not build").toBe(false);
     const text = (built.diagnostics ?? []).map((d) => `${d.code} ${d.message}`).join("\n");
-    // The refusal must name the EXPORT that would have gone missing.
-    expect(text).toContain("'extra'");
-    expect(text).toContain("Node's CommonJS lexer sees");
+    expect(built.ok, `the member export must build:\n${text}`).toBe(true);
+    const got = await run(join(dir, exeName("nsvmember")), [], dir);
+    expect(got.exitCode).toBe(0);
+    // Node: typeof held.extra is "string" and the keys are default,extra,hi,module.exports.
+    expect(got.stdout).toBe("string\ndefault,extra,hi,module.exports\n");
   }, 600_000);
 
   /* THE SECOND SHAPE THE SAME GUARD CAUGHT. An `__esModule` stamp AFTER
