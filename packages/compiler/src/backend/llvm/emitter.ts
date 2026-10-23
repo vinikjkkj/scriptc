@@ -11011,7 +11011,16 @@ class LlEmitter {
         // form also reads a scalar payload (the runtime's ToBoolean).
         const d = this.emitExpr(e.value);
         let test: string;
-        if (e.test === "truthy") {
+        if (e.test === "class") {
+          // `u instanceof C` over an unknown value: the boxed instance's own
+          // preorder position inside C's interval (scr_dyn_objinst_is, the
+          // C lane's twin); false for every other kind, never throws.
+          this.declare(`declare zeroext i1 @scr_dyn_objinst_is(ptr, i64, i64)`);
+          this.dynClassDesc(e.className!);
+          const iv = this.classInterval(e.className!);
+          test = B.tmp();
+          B.line(`${test} = call zeroext i1 @scr_dyn_objinst_is(ptr ${d.name}, i64 ${iv.pre}, i64 ${iv.post})`);
+        } else if (e.test === "truthy") {
           this.declare(`declare zeroext i1 @scr_dyn_truthy(ptr)`);
           test = B.tmp();
           B.line(`${test} = call zeroext i1 @scr_dyn_truthy(ptr ${d.name})`);

@@ -3090,6 +3090,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // kind, so the calls stay unconditional); narrowing never changes
         // representation (SEMANTICS.md).
         const d = E.emitExpr(e.value);
+        // `u instanceof C` for a program class C on an unknown value: the
+        // boxed instance's OWN preorder position against C's interval (the
+        // same test the typed instanceof compiles to); false for every
+        // other kind, never throws.
+        if (e.test === "class") {
+          const meta = E.classMeta.get(e.className!);
+          if (!meta) throw new Error(`emitter bug: dynTest of unknown class ${e.className}`);
+          E.dynClassDesc(e.className!);
+          const t = `scr_dyn_objinst_is(${d.name}, ${meta.pre}, ${meta.post})`;
+          return E.newTemp(e.type, e.negated ? `!(${t})` : t);
+        }
         const test =
           e.test === "nullish"
             ? `(${d.name}->kind == SCR_DYN_UNDEF || ${d.name}->kind == SCR_DYN_NULL)`

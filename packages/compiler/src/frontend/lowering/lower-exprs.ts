@@ -18867,6 +18867,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         loc,
       };
     }
+    // A PROGRAM class on an unknown value: a boxed instance answers by its
+    // own position in the class preorder (the interval a typed instanceof
+    // compares against), so `u instanceof D1` is true for a D2 instance
+    // and false for every other value.
+    if (left.type.kind === "dyn" && !target.def.name.startsWith("%") && !target.generic) {
+      L.noteDynBoxedClass(target.def.name);
+      return { kind: "dynTest", test: "class", className: target.def.name, value: left, type: BOOL, loc };
+    }
     if (left.type.kind === "dyn") {
       L.unsupported(
         "SC1090",
