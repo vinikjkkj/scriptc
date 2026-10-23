@@ -3465,6 +3465,21 @@ function lowerOptionalDefaultArg(
       ) {
         return src;
       }
+      // `Array.from(m)` over a dyn VALUE the checker types as an iterable
+      // that spread steps exactly like Array.from does: a Map, a Set or an
+      // array. The spread walk drains them into a fresh dyn array (a Map's
+      // [k, v] pairs, a Set's elements, an array's copy). A dyn value of
+      // unknown kind keeps the fence: Array.from also takes array-likes and
+      // numbers, which a spread answers with a TypeError.
+      if (src.type.kind === "dyn" && isSpreadEquivalentIterableType(L, L.typeOf(args[0]!))) {
+        return {
+          kind: "dynArrLit",
+          elems: [src],
+          spreads: [{ at: 0, what: null }],
+          type: DYN,
+          loc,
+        };
+      }
       L.noLowering(
         "Array.from with this argument shape",
         call,
@@ -11052,3 +11067,18 @@ function dynRecvThrows(dRef: IrExpr, mRef: IrExpr, fullRef: IrExpr, loc: SrcLoc)
       loc,
     };
   }
+
+
+/** Does spreading a value of this checker type walk exactly what Array.from
+ * would? The stdlib Map, Set (and their Readonly forms) and arrays: every one
+ * of them is a real iterable whose spread and Array.from agree element for
+ * element. */
+function isSpreadEquivalentIterableType(L: Lowerer, t: ts.Type): boolean {
+  if (L.checker.isArrayType(t)) return true;
+  const sym = t.getSymbol();
+  if (sym === undefined) return false;
+  if (!["Map", "Set", "ReadonlyMap", "ReadonlySet"].includes(sym.name)) return false;
+  return L.checker
+    .declarationsOf(sym)
+    .some((d) => ts.isInterfaceDeclaration(d) && L.isStdlibFile(d.getSourceFile()));
+}
