@@ -4890,7 +4890,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // and the union `((...) => T) | undefined` that carries it): the
       // checked-dynamic slot, the same stance the bare `any` parameter of
       // a function declaration already takes.
-      if (pt === null && !ctx.dynamic && (checker.getTypeOfSymbol(p).flags & ts.TypeFlags.Any) !== 0) {
+      if (pt === null && !ctx.dynamic && (checker.getTypeOfSymbol(p).flags & ts.TypeFlags.Any) !== 0 &&
+          decl !== undefined && ts.isParameter(decl) && decl.type !== undefined &&
+          !ctx.isStdlibFile(decl.getSourceFile())) {
         pt = DYN;
       }
       // An UNTYPED parameter of authored JavaScript (no annotation, no
@@ -4991,7 +4993,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const ret =
       retT.flags & ts.TypeFlags.Never
         ? VOID
-        : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral || !ctx.dynamic) && (retT.flags & ts.TypeFlags.Any) !== 0
+        : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral || (!ctx.dynamic && spellsAnyReturn(checker.signatureDeclaration(sig)))) && (retT.flags & ts.TypeFlags.Any) !== 0
           ? DYN
           : mapType(retT, ctx);
     if (!ret) {
@@ -7976,6 +7978,16 @@ function declTwinTupleAsArray(
  * the target is dyn-checkable, a fence where it is not. What tsc would
  * have allowed silently (`const n: number = doc.x`) the lowering still
  * has to answer for, and answers with a path-carrying TypeError. */
+/** True when a function type's declaration SPELLS its return type as `any`
+ * (`(v: any) => any`): an annotation, never the checker's inferred `any` of an
+ * unannotated JavaScript function. */
+function spellsAnyReturn(decl: ts.Node | undefined): boolean {
+  if (decl === undefined || !ts.isFunctionLike(decl)) return false;
+  let tn: ts.TypeNode | undefined = decl.type;
+  while (tn !== undefined && ts.isParenthesizedTypeNode(tn)) tn = tn.type;
+  return tn !== undefined && tn.kind === ts.SyntaxKind.AnyKeyword;
+}
+
 function declSpellsAny(decls: readonly ts.Node[]): boolean {
   if (decls.length === 0) return false;
   return decls.every((d) => {
