@@ -8,6 +8,8 @@ import { dirname, resolve } from "node:path";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
+import { moduleInitAlwaysThrows, relativeRequireRefusal } from "../require-throws.js";
+import { refusalMessage } from "./lower-requirestack.js";
 import { canonicalBuiltinModule, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
@@ -521,7 +523,23 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
       // other static specifier keeps whatever the existing paths do with
       // it (the module edge, the builtin alias, or the fence).
       const refusal = probeNodeRequireRefusal(sf.fileName, spec);
-      if (refusal !== null) return nodeThrowExpr(0, "MODULE_NOT_FOUND", refusal.message, DYN, loc);
+      if (refusal !== null) return nodeThrowExpr(0, "MODULE_NOT_FOUND", refusalMessage(L, call, spec, refusal.message), DYN, loc);
+      {
+        // A relative file nothing resolves is the same throw.
+        const rel = relativeRequireRefusal(L.requireThrowCtx, call.getSourceFile(), spec);
+        if (rel !== null) return nodeThrowExpr(0, "MODULE_NOT_FOUND", refusalMessage(L, call, spec, rel.message), DYN, loc);
+        // A module whose own body always throws: the require runs that body,
+        // which throws, so the value the expression would hand back never
+        // exists. The compiled expression is the init call followed by an
+        // unreachable undefined of the checked-dynamic kind.
+        const dep = canonicalBuiltinModule(spec) === null ? L.requireDepOf(spec, call) : null;
+        if (dep !== null && moduleInitAlwaysThrows(L.requireThrowCtx, dep)) {
+          const init = L.requireInitStmt(spec, call);
+          if (init !== null) {
+            return { kind: "seqExpr", stmts: [init], result: dynUndefinedExpr(loc), type: DYN, loc };
+          }
+        }
+      }
       // A JSON document read as a value: the one baked global of that file.
       const jsonSf = jsonModuleOfRequire(L, call);
       const jg = jsonSf !== null ? L.jsonRequireGlobals.get(jsonSf.fileName) : undefined;

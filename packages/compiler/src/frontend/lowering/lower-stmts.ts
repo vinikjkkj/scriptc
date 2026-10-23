@@ -36,6 +36,8 @@ import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } fr
 import { isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
+import { deadBranchSkippable, relativeRequireRefusal, statementAlwaysThrowsOnRequire } from "../require-throws.js";
+import { refusalMessage } from "./lower-requirestack.js";
 
 /** `const X = /* @__PURE__ *\/ makeX()` at a module's top level: every
  * declarator initialized by a call (or `new`) carrying the bundler PURE
@@ -180,7 +182,7 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
           // whose `module.exports.mask = function ...` assignments follow).
           // They are not lowered, unless one declares something that hoists
           // out of the block.
-          if (i < stmts.length - 1 && statementAlwaysThrowsOnRequire(stmt) && stmts.slice(i + 1).every(deadBranchSkippable)) break;
+          if (i < stmts.length - 1 && statementAlwaysThrowsOnRequire(L.requireThrowCtx, stmt) && stmts.slice(i + 1).every(deadBranchSkippable)) break;
           // Statements after one that ALWAYS exits (a return/throw, or a branch
           // whose test folded to a constant and whose live arm exits) never run:
           // they are not lowered, so a construct this compiler has no lowering for
@@ -1081,27 +1083,11 @@ function domExceptionRooted(L: Lowerer, className: string): boolean {
  * skipping it would drop a binding the rest of the function can read; both
  * keep the branch lowered. Nested function bodies are not entered (their
  * own `var`s belong to them). */
-/** A statement whose only effect is a binding or bare `require("pkg")` of a
- * non-builtin, non-relative package that cannot be resolved: it throws
- * MODULE_NOT_FOUND every time it runs. */
-function statementAlwaysThrowsOnRequire(stmt: ts.Statement): boolean {
-  let init: ts.Expression | undefined;
-  if (ts.isVariableStatement(stmt) && stmt.declarationList.declarations.length === 1) {
-    init = stmt.declarationList.declarations[0]!.initializer;
-  } else if (ts.isExpressionStatement(stmt)) {
-    init = stmt.expression;
-  }
-  if (init === undefined) return false;
-  const spec = requireSpecOf(init);
-  if (spec === null || isRelativeSpecifier(spec) || canonicalBuiltinModule(spec) !== null) return false;
-  return probeNodeRequireRefusal(stmt.getSourceFile().fileName, spec) !== null;
-}
-
 /** True when control cannot fall out of the end of this lowered statement:
  * a return or throw, a block ending in one, or an `if` whose live arm does
  * (a constant test picks the arm; otherwise both arms must). Conservative:
  * every other kind (loops, try, switch) answers false. */
-function irAlwaysExits(s: IrStmt | readonly IrStmt[]): boolean {
+export function irAlwaysExits(s: IrStmt | readonly IrStmt[]): boolean {
   if (Array.isArray(s)) return (s as readonly IrStmt[]).some((x) => irAlwaysExits(x));
   const st = s as IrStmt;
   switch (st.kind) {
@@ -1118,25 +1104,6 @@ function irAlwaysExits(s: IrStmt | readonly IrStmt[]): boolean {
     default:
       return false;
   }
-}
-
-function deadBranchSkippable(node: ts.Node): boolean {
-  let ok = true;
-  const walk = (n: ts.Node): void => {
-    if (!ok) return;
-    if (ts.isFunctionDeclaration(n)) {
-      ok = false;
-      return;
-    }
-    if (ts.isVariableDeclarationList(n) && (n.flags & ts.NodeFlags.BlockScoped) === 0) {
-      ok = false;
-      return;
-    }
-    if (n !== node && ts.isFunctionLike(n)) return;
-    ts.forEachChild(n, walk);
-  };
-  walk(node);
-  return ok;
 }
 
 export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | null {
@@ -1369,7 +1336,8 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
         decl.initializer !== undefined &&
         requireSpecOf(decl.initializer) !== null &&
         isJsSourceFile(decl.getSourceFile()) &&
-        probeNodeRequireRefusal(decl.getSourceFile().fileName, requireSpecOf(decl.initializer)!) === null
+        probeNodeRequireRefusal(decl.getSourceFile().fileName, requireSpecOf(decl.initializer)!) === null &&
+        relativeRequireRefusal(L.requireThrowCtx, decl.getSourceFile(), requireSpecOf(decl.initializer)!) === null
       ) {
         if (ts.isSourceFile(stmt.parent)) {
           const init = L.requireInitStmt(requireSpecOf(decl.initializer)!, decl);
@@ -6873,6 +6841,14 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           const argErr = nodeRequireArgumentError(spec, locOf(expr));
           if (argErr !== null) return { kind: "exprStmt", expr: argErr, loc: locOf(expr) };
         }
+        if (isRelativeSpecifier(spec)) {
+          // A relative file nothing resolves: the same catchable throw.
+          const rel = relativeRequireRefusal(L.requireThrowCtx, expr.getSourceFile(), spec);
+          if (rel !== null) {
+            const loc = locOf(expr);
+            return { kind: "exprStmt", expr: nodeThrowExpr(0, "MODULE_NOT_FOUND", refusalMessage(L, expr, spec, rel.message), DYN, loc), loc };
+          }
+        }
         if (
           !isRelativeSpecifier(spec) &&
           canonicalBuiltinModule(spec) === null
@@ -6887,7 +6863,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
             // where the message matched and the code did not.
             return {
               kind: "exprStmt",
-              expr: nodeThrowExpr(0, "MODULE_NOT_FOUND", refusal.message, DYN, loc),
+              expr: nodeThrowExpr(0, "MODULE_NOT_FOUND", refusalMessage(L, expr, spec, refusal.message), DYN, loc),
               loc,
             };
           }

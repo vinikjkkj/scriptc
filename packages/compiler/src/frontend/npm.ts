@@ -759,6 +759,28 @@ export function probeNodeRequireRefusal(
   };
 }
 
+/** A RELATIVE `require()` edge Node's CJS resolution refuses because no
+ * file or directory module sits at the path: `require('./nope')` throws
+ * MODULE_NOT_FOUND at the call, catchably. Answers Node's message
+ * (`Cannot find module './nope'` plus the one-entry require stack), or null
+ * when something resolves, or when the specifier is not a plain relative one.
+ * Resolution is asked from where the RUNNING program keeps the requiring file
+ * (requireResolutionBase), for the reason probeNodeRequireRefusal gives. */
+export function probeRelativeRequireRefusal(
+  fromFile: string,
+  specifier: string,
+  host: Host = realHost,
+): { message: string } | null {
+  if (!isRelativeSpecifier(specifier)) return null;
+  const importer = resolve(requireResolutionBase(fromFile));
+  const target = resolve(dirname(importer), specifier);
+  // A trailing separator (or a bare `.`/`..`) names a directory only.
+  const dirOnly = /[\\/]$/.test(specifier) || specifier === "." || specifier === "..";
+  if (!dirOnly && cjsLoadAsFile(host, target)) return null;
+  if (host.isDirectory(target) && cjsLoadAsDirectory(host, target)) return null;
+  return { message: `Cannot find module '${specifier}'\nRequire stack:\n- ${nativePath(importer)}` };
+}
+
 /** Node's LOAD_AS_FILE list for a CJS require, exactly: the path
  * VERBATIM, then the three extensions require's own extension table
  * serves. `.mjs` and `.cjs` are NOT in it -- measured against Node

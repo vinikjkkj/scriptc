@@ -14,6 +14,7 @@
  */
 import { appendFileSync } from "node:fs";
 import { isRelativeSpecifier } from "../shared.js";
+import type { RequireThrowCtx } from "../require-throws.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
 import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
@@ -2624,6 +2625,29 @@ export class Lowerer {
    * program entry (the same edge preflight admitted — bundle dists require
    * their external dependencies by name). Null for everything else
    * (builtins load nothing; the rest kept its preflight fence). */
+  /** What require-throws.ts needs: the program and this lowering's own
+   * resolution of a require to a program module. */
+  get requireThrowCtx(): RequireThrowCtx {
+    return { program: this.program, depOf: (sf, spec) => this.requireDepOf(spec, sf) };
+  }
+
+  /** The program module a `require(spec)` at `node` evaluates, or null when
+   * it names none (a builtin, JSON, nothing installed). The declaration
+   * file's runtime twin stands in for it when it holds static storage. */
+  requireDepOf(spec: string, node: ts.Node): ts.SourceFile | null {
+    let dep = isRelativeSpecifier(spec)
+      ? resolveImport(this.program, node.getSourceFile(), spec)
+      : (npmStaticDepSf7(this.program, node.getSourceFile(), spec) ??
+        // a --provenance-sources package: its entry is a program module too
+        resolveProjectImportSf7(this.program, node.getSourceFile(), spec));
+    if (!dep || dep.fileName.endsWith(".json")) return null;
+    if (dep.isDeclarationFile) {
+      const twin = this.declTwinSourceOf(dep);
+      if (twin !== null && this.moduleGlobalKind(twin) !== "island") dep = twin;
+    }
+    return dep;
+  }
+
   requireInitStmt(spec: string, node: ts.Node): IrStmt | null {
     // Relative requires resolve within the program; a BARE require can be
     // a program-module edge too when it names an opted-in --npm-static
@@ -2632,19 +2656,8 @@ export class Lowerer {
     // alias its globals). Without the guarded %init call at this position
     // those globals stay uninitialized: the dep's module body would never
     // run.
-    let dep = isRelativeSpecifier(spec)
-      ? resolveImport(this.program, node.getSourceFile(), spec)
-      : (npmStaticDepSf7(this.program, node.getSourceFile(), spec) ??
-        // a --provenance-sources package: its entry is a program module too
-        resolveProjectImportSf7(this.program, node.getSourceFile(), spec));
-    if (!dep || dep.fileName.endsWith(".json")) return null;
-    // A declaration file resolves for TYPES; Node evaluates its runtime twin
-    // (see lowerFileInit's header): a twin holding static storage is the init
-    // to call, or its globals stay unassigned.
-    if (dep.isDeclarationFile) {
-      const twin = this.declTwinSourceOf(dep);
-      if (twin !== null && this.moduleGlobalKind(twin) !== "island") dep = twin;
-    }
+    const dep = this.requireDepOf(spec, node);
+    if (dep === null) return null;
     if (this.asyncInitFiles.has(dep)) {
       this.unsupported(
         "SC1090",
