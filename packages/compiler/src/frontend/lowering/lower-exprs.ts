@@ -11677,6 +11677,26 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           // decided folds): a plain read, or nothing.
           const pureSrc =
             obj.kind === "varRef" || obj.kind === "recordGet" || obj.kind === "fieldGet";
+          // PRESENCE OF A COPIED MEMBER (recordLit.presence): a member that
+          // cannot be absent is always own; an optional one is own exactly
+          // when it is own in the source (`ownIf` asks the same node every
+          // own-key surface asks, so `{...{a: undefined}}` keeps its key and
+          // `{...{}}` does not grow one). A source that is not a plain read
+          // cannot be asked twice, so such a literal keeps the undefined-arm
+          // rule for everything it copies.
+          {
+            const tgtOptional = targetType.kind === "union" && L.armTag(targetType.unionId, UNDEFINED_T) >= 0;
+            const ent = fields[slot]!;
+            if (!tgtOptional) {
+              ent.own = true;
+              presenceSpreads.add(prop);
+            } else if (pureSrc && obj.type.kind === "record") {
+              ent.ownIf = { kind: "recordKeyPresent", obj, shapeId: srcType.shapeId, field: f.name, type: BOOL, loc: locOf(prop) };
+              presenceSpreads.add(prop);
+            } else {
+              presenceOk = false;
+            }
+          }
           if (pureSrc && obj.type.kind === "record" && targetType.kind === "union") {
             const tUndef = L.armTag(targetType.unionId, UNDEFINED_T);
             const tUnion = targetType;
