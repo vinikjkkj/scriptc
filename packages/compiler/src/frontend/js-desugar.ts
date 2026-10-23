@@ -30,6 +30,9 @@
  * infers every type from the emitted spellings. */
 import ts from "typescript5";
 import { builtinModules } from "node:module";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 
 const NESTED_REQUIRE_PREFILTER = /=\s*require\s*\(/;
 
@@ -249,11 +252,223 @@ function inlineRequireEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* TYPESCRIPT-EMITTED COMMONJS. `tsc --module commonjs` spells a module's
+ * export surface with four idioms the export-table lowering does not model
+ * as written but models exactly in their plain spelling:
+ *
+ *   exports.a = exports.b = void 0;                   (the hoisted prologue)
+ *   Object.defineProperty(exports, "n", { enumerable: true, get: function () { return B.m; } });
+ *                                                      (`export { m as n } from`)
+ *   __exportStar(require("./x"), exports);             (`export * from`)
+ *   var __createBinding = (this && this.__createBinding) || ...;  (its helpers)
+ *
+ * The prologue is the same statements one per name, in the order the chain
+ * evaluates them (right to left). The re-export getter is `exports.n = B.m`
+ * (the member read the getter performs, bound at the require the getter's
+ * target already loaded). `__exportStar` copies, for every name the target
+ * module exports that is not already an own export here, the same binding;
+ * the names are the target's Node-lexer-visible export set, which for a
+ * module tsc emitted is all of them. The helper declarations are then dead
+ * and are removed only when nothing else reads them. Newlines are kept so no
+ * line moves. Top-level statements only. */
+const TS_CJS_PREFILTER = /Object\.defineProperty\(\s*exports|__exportStar|=\s*exports\.\w+\s*=|exports\.\w+\s*=\s*exports\.\w+\s*=/;
+
+function isExportsMember(n: ts.Node): n is ts.PropertyAccessExpression {
+  return ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "exports" && ts.isIdentifier(n.name);
+}
+
+function resolveRelativeJs(fromFile: string, spec: string): string | null {
+  const base = join(dirname(fromFile), spec);
+  for (const c of [base, `${base}.js`, `${base}.cjs`, join(base, "index.js")]) {
+    try {
+      if (existsSync(c) && statSync(c).isFile()) return c;
+    } catch {
+      /* unreadable candidate */
+    }
+  }
+  return null;
+}
+
+function tsCjsEdits(fileName: string, text: string): string | null {
+  if (!TS_CJS_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const nlOf = (n: ts.Node): string => "\n".repeat((n.getText(sf).match(/\n/g) ?? []).length);
+  // Top-level `const|var|let B = require("lit")` bindings.
+  const requireBindings = new Set<string>();
+  for (const stmt of sf.statements) {
+    if (!ts.isVariableStatement(stmt)) continue;
+    for (const d of stmt.declarationList.declarations) {
+      const init = d.initializer;
+      if (
+        ts.isIdentifier(d.name) && init !== undefined && ts.isCallExpression(init) && ts.isIdentifier(init.expression) &&
+        init.expression.text === "require" && init.arguments.length === 1 && ts.isStringLiteral(init.arguments[0]!)
+      ) {
+        requireBindings.add(d.name.text);
+      }
+    }
+  }
+  const ownBefore = new Set<string>();
+  const noteOwn = (stmt: ts.Statement): void => {
+    if (!ts.isExpressionStatement(stmt)) return;
+    for (let e: ts.Expression = stmt.expression; ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken; e = e.right) {
+      if (isExportsMember(e.left)) ownBefore.add(e.left.name.text);
+    }
+  };
+  const starUses: ts.Statement[] = [];
+  for (const stmt of sf.statements) {
+    if (!ts.isExpressionStatement(stmt)) continue;
+    const e = stmt.expression;
+    // (a) the chained prologue
+    if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken && isExportsMember(e.left)) {
+      const names: string[] = [];
+      let cur: ts.Expression = e;
+      while (ts.isBinaryExpression(cur) && cur.operatorToken.kind === ts.SyntaxKind.EqualsToken && isExportsMember(cur.left)) {
+        names.push(cur.left.name.text);
+        cur = cur.right;
+      }
+      if (names.length > 1 && ts.isVoidExpression(cur) && ts.isNumericLiteral(cur.expression) && cur.expression.text === "0") {
+        edits.push({
+          start: stmt.getStart(sf),
+          end: stmt.getEnd(),
+          text: names.reverse().map((n) => `exports.${n} = void 0;`).join(" ") + nlOf(stmt),
+        });
+        for (const n of names) ownBefore.add(n);
+        continue;
+      }
+    }
+    // (b) the re-export getter
+    if (
+      ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression) && ts.isIdentifier(e.expression.expression) &&
+      e.expression.expression.text === "Object" && e.expression.name.text === "defineProperty" && e.arguments.length === 3 &&
+      ts.isIdentifier(e.arguments[0]!) && (e.arguments[0] as ts.Identifier).text === "exports" && ts.isStringLiteral(e.arguments[1]!) &&
+      ts.isObjectLiteralExpression(e.arguments[2]!)
+    ) {
+      const name = (e.arguments[1] as ts.StringLiteral).text;
+      const props = (e.arguments[2] as ts.ObjectLiteralExpression).properties;
+      let enumerable = false;
+      let getter: ts.Expression | null = null;
+      let other = false;
+      for (const p of props) {
+        const key = p.name !== undefined && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) ? p.name.text : null;
+        if (key === "enumerable" && ts.isPropertyAssignment(p) && p.initializer.kind === ts.SyntaxKind.TrueKeyword) enumerable = true;
+        else if (key === "get" && ts.isPropertyAssignment(p)) getter = p.initializer;
+        else if (key === "get" && ts.isMethodDeclaration(p)) getter = p as unknown as ts.Expression;
+        else other = true;
+      }
+      if (enumerable && !other && getter !== null && /^[A-Za-z_$][\w$]*$/.test(name)) {
+        const fn = getter as unknown as ts.FunctionExpression | ts.MethodDeclaration;
+        const body = ts.isFunctionExpression(fn) || ts.isMethodDeclaration(fn) ? fn.body : undefined;
+        if (
+          body !== undefined && ts.isBlock(body) && body.statements.length === 1 && ts.isReturnStatement(body.statements[0]!) &&
+          fn.parameters.length === 0
+        ) {
+          const ret = (body.statements[0] as ts.ReturnStatement).expression;
+          if (
+            ret !== undefined && ts.isPropertyAccessExpression(ret) && ts.isIdentifier(ret.expression) &&
+            requireBindings.has(ret.expression.text)
+          ) {
+            edits.push({ start: stmt.getStart(sf), end: stmt.getEnd(), text: `exports.${name} = ${ret.getText(sf)};${nlOf(stmt)}` });
+            ownBefore.add(name);
+            continue;
+          }
+        }
+      }
+    }
+    // (c) export *
+    if (
+      ts.isCallExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "__exportStar" && e.arguments.length === 2 &&
+      ts.isCallExpression(e.arguments[0]!) && ts.isIdentifier((e.arguments[0] as ts.CallExpression).expression) &&
+      ((e.arguments[0] as ts.CallExpression).expression as ts.Identifier).text === "require" &&
+      (e.arguments[0] as ts.CallExpression).arguments.length === 1 &&
+      ts.isStringLiteral((e.arguments[0] as ts.CallExpression).arguments[0]!) && ts.isIdentifier(e.arguments[1]!) &&
+      (e.arguments[1] as ts.Identifier).text === "exports"
+    ) {
+      const spec = ((e.arguments[0] as ts.CallExpression).arguments[0] as ts.StringLiteral).text;
+      if (spec.startsWith(".")) {
+        const target = resolveRelativeJs(fileName, spec);
+        if (target !== null) {
+          let names: string[] | null = null;
+          try {
+            const memo = new Map<string, Set<string>>();
+            const visible = cjsLexerVisibleNames(
+              target,
+              (f) => readFileSync(f, "utf8"),
+              (from, sp) => (sp.startsWith(".") ? resolveRelativeJs(from, sp) : null),
+              memo,
+            );
+            names = [...visible].filter((n) => n !== "default" && n !== "__esModule" && /^[A-Za-z_$][\w$]*$/.test(n));
+          } catch {
+            names = null;
+          }
+          if (names !== null) {
+            const tmp = `__sc_es${stmt.getStart(sf)}`;
+            const own = new Set(ownBefore);
+            const copies = names.filter((n) => !own.has(n)).map((n) => `exports.${n} = ${tmp}.${n};`);
+            edits.push({
+              start: stmt.getStart(sf),
+              end: stmt.getEnd(),
+              text: `const ${tmp} = require(${JSON.stringify(spec)}); ${copies.join(" ")}${nlOf(stmt)}`,
+            });
+            for (const n of names) ownBefore.add(n);
+            starUses.push(stmt);
+            continue;
+          }
+        }
+      }
+    }
+    noteOwn(stmt);
+  }
+  if (edits.length === 0) return null;
+  // Dead helpers: `var __createBinding|__exportStar = (this && this.__X) || ...;`
+  if (starUses.length > 0) {
+    const handled = new Set<ts.Node>(starUses);
+    const stray = (name: string): boolean => {
+      let found = false;
+      const visit = (n: ts.Node): void => {
+        if (found) return;
+        if (ts.isIdentifier(n) && n.text === name) {
+          for (let p: ts.Node | undefined = n; p !== undefined; p = p.parent) {
+            if (handled.has(p)) return;
+            if (ts.isVariableStatement(p) && p.declarationList.declarations.some((d) => ts.isIdentifier(d.name) && (d.name.text === "__createBinding" || d.name.text === "__exportStar") && ts.isSourceFile(p.parent))) return;
+          }
+          found = true;
+          return;
+        }
+        n.forEachChild(visit);
+      };
+      visit(sf);
+      return found;
+    };
+    if (!stray("__exportStar") && !stray("__createBinding")) {
+      for (const stmt of sf.statements) {
+        if (!ts.isVariableStatement(stmt) || stmt.declarationList.declarations.length !== 1) continue;
+        const d = stmt.declarationList.declarations[0]!;
+        if (!ts.isIdentifier(d.name) || (d.name.text !== "__createBinding" && d.name.text !== "__exportStar")) continue;
+        if (d.initializer === undefined || !d.initializer.getText(sf).startsWith(`(this && this.${d.name.text})`)) continue;
+        edits.push({ start: stmt.getStart(sf), end: stmt.getEnd(), text: nlOf(stmt) });
+      }
+    }
+  }
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
     const unwrapped = umdUnwrap(fileName, text);
     if (unwrapped !== null) return jsDesugar(fileName, unwrapped) ?? unwrapped;
+  }
+  {
+    const tsCjs = tsCjsEdits(fileName, text);
+    if (tsCjs !== null) return jsDesugar(fileName, tsCjs) ?? tsCjs;
   }
   {
     const inlined = inlineRequireEdits(fileName, text);
