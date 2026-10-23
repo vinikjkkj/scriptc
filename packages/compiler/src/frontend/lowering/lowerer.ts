@@ -134,6 +134,7 @@ import { recordKeyResultOk, narrowBridgeDyn, FieldTarget, lowerDynObjectLiteral,
 import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type ExpandoMember } from "./lower-expando.js";
 import { lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
+import { dtsWitnessClassOf } from "./lower-twin-witness.js";
 
 /** Entry function name. '%' cannot appear in a TS identifier, so a user
  * function can never collide with it (mangling is injective per prefix). */
@@ -2041,6 +2042,7 @@ export class Lowerer {
       // lowering, long after the constructor completes.
       isProgramFile: (sf) => this.fileTag.has(sf),
       declFileHasCompiledImpl: (sf) => this.declTwinCompiled(sf),
+      dtsWitnessClass: (t) => dtsWitnessClassOf(this, t),
       accessorProducerProp: (sym) => this.accessorProducerProp(sym),
       nullPayloadPromiseProp: (sym) => this.nullPayloadPromiseProp(sym),
       unconstrainedTpArms: (tpDecl) => this.unconstrainedTpArms(tpDecl),

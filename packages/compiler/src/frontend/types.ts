@@ -1577,6 +1577,9 @@ export interface TypeMapperCtx {
    * the body was picked up too, the declaration is a trustworthy face for
    * values that DO exist in the binary. */
   declFileHasCompiledImpl?: (sf: ts.SourceFile) => boolean;
+  /** The program class a declaration-file type's values are instances of
+   * (lower-twin-witness.ts), or null. */
+  dtsWitnessClass?: (t: ts.Type) => ts.ClassDeclaration | null;
 }
 
 
@@ -2313,6 +2316,12 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       }
       return hasStr ? STRING : F64;
     }
+  }
+  // A declaration-file type whose values are instances of a class the
+  // build COMPILES (the code half of the same module): it IS that class.
+  {
+    const witness = ctx.dtsWitnessClass?.(widened);
+    if (witness !== undefined && witness !== null) return { kind: "object", className: classNamer(witness) };
   }
   // Types DECLARED by a shipped .d.ts — an npm package's, or a LOCAL
   // declaration file describing sibling JS the program loads dynamically
