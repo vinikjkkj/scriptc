@@ -504,6 +504,8 @@ char *scr_dtf_format(const char *locales, const DtfKV *kv, int nkv, int kind, do
         free(pattern);
         pattern = pattern_from_cache(gen, &loc, s2, dtfHc);
         free(s2);
+        /* a formatter rebuilt from a pattern carries none of the style pattern's number overrides */
+        free(dateOvr); free(timeOvr); dateOvr = timeOvr = NULL;
       }
       free(sk);
     }
