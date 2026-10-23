@@ -8890,6 +8890,22 @@ export class Lowerer {
     const fromT: IrType = { kind: "record", shapeId: fromId };
     const toT: IrType = { kind: "record", shapeId: toId };
     const r: IrExpr = { kind: "varRef", localId: "r.0", type: fromT, loc };
+    // THE COPY CARRIES PRESENCE. The destination's own-key mask (when it
+    // arms) says each member is own exactly when it is own in the source -
+    // `ownIf` asks the same node every own-key surface asks. A member the
+    // source does not have (the `absent` completion) keeps a clear bit. A
+    // plan with a run-time-keyed or dyn arm cannot say, and leaves the mask
+    // unestablished (the undefined-arm rule, as before).
+    const carriesPresence = !from.tuple && !to.tuple && to.fields.every((f) => {
+      const l = plan.get(f.name)!;
+      return !("absentDyn" in l) && !("keyRead" in l);
+    });
+    const ownIfOf = (fname: string, lift: unknown): { ownIf: IrExpr } | Record<string, never> => {
+      if (!carriesPresence || "absent" in (lift as object)) return {};
+      return {
+        ownIf: { kind: "recordKeyPresent", obj: r, shapeId: fromId, field: fname, type: BOOL, loc },
+      };
+    };
     this.liftedFns.push({
       name,
       params: [{ localId: "r.0", name: "r", type: fromT }],
@@ -8900,6 +8916,7 @@ export class Lowerer {
           kind: "return",
           value: {
             kind: "recordLit",
+            ...(carriesPresence ? { presence: true as const } : {}),
             fields: to.fields.map((f) => {
               const lift = plan.get(f.name)!;
               if ("absentDyn" in lift) {
@@ -8943,7 +8960,7 @@ export class Lowerer {
                 };
               }
               const get: IrExpr = { kind: "recordGet", obj: r, shapeId: fromId, field: f.name, type: lift.src, loc };
-              return { name: f.name, value: this.applyWidthLift(lift.lift, get, f.type, loc) };
+              return { name: f.name, value: this.applyWidthLift(lift.lift, get, f.type, loc), ...ownIfOf(f.name, lift) };
             }),
             type: toT,
             loc,
