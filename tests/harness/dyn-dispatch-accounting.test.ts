@@ -67,6 +67,25 @@ const NOT_ROUTED: ReadonlyMap<string, string> = new Map([
   // from the encoding-aware path.
   ["toString", "claimed by the dedicated dyn.toString / dyn.toStringRange lowerings"],
   ["flatMap", "claimed by lowerDynArrayFlatMapCall before the dispatch set"],
+  // The Map / Set / WeakMap / WeakSet surface of the dyn container box
+  // (scr_dyn_map_invoke). No dyn-representable prototype DECLARES these
+  // names (they are not in DYN_PROTO_METHOD_NAMES), so the generic
+  // own-member arm of lowerDynReceiverMethodCall already emits the dynInvoke
+  // for them: there is no fence to carve out, and routing them would only
+  // add the optional-chain bypass that arm deliberately declines.
+  ...(["add", "clear", "delete", "get", "has", "set"] as const).map(
+    (n) => [n, "not a prototype name any fence lists: the generic own-member arm already emits dynInvoke"] as const,
+  ),
+  // keys / values / entries are answered for ARR, BYTES and map boxes, but
+  // ONLY where the iterator is drained where it is made (a for-of subject,
+  // an array spread element, the sole argument of Array.from / new Map /
+  // new Set): dynMapIterDrainContext routes exactly those calls to
+  // dynInvoke. A stored iterator, `.next()` or any other use needs a real
+  // iterator object, which the dispatch's snapshot is not, so the name must
+  // keep its build-time fence everywhere else and must not be a routed name.
+  ...(["keys", "values", "entries"] as const).map(
+    (n) => [n, "routed only in the immediate-drain contexts (dynMapIterDrainContext); fenced by name elsewhere"] as const,
+  ),
   // `fill` and `copyWithin` USED to sit here, classified "no
   // implementation — the ARR arm's unimplemented list keeps the
   // compile-time fence". They are implemented and routed now, so they are
