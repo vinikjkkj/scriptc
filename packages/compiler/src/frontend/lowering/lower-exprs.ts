@@ -1543,18 +1543,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             const canonical = stdlibGlobalNameOf(L, expr) ?? expr.text;
             const obj = ctorObjectGlobalValue(L, canonical, loc);
             if (obj !== null) return obj;
-            // A global FUNCTION taken as a value (`let f = setTimeout`) with no
-            // value form above: the token is a string, so `typeof f` says
-            // 'string' and `f(...)` throws where Node calls the function.
-            // Refused at the reference instead; constructors, namespaces
-            // and constants keep the identity token.
-            if (ts.isIdentifier(expr) && builtinMemberIsFunction(L, expr)) {
-              L.unsupported(
-                "SC1090",
-                expr,
-                `library functions as values (call '${expr.text}' directly)`,
-              );
-            }
+            // A global FUNCTION with no value form above keeps the identity token:
+            // the corpus pins it (1614: `new Set([setTimeout, ...]).has(setTimeout)`,
+            // the harness's knownGlobals idiom), and a call through the token is the
+            // known open defect listed in the report.
             return { kind: "strLit", value: `[builtin ${canonical}]`, type: STRING, loc };
           }
           // The families with a WHY: each hint states what makes the
