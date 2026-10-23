@@ -175,6 +175,28 @@ function isBuiltinSpec(spec: string): boolean {
 function inlineRequireEdits(fileName: string, text: string): string | null {
   if (!INLINE_REQUIRE_PREFILTER.test(text)) return null;
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  // A file that declares its own `require` (a parameter, a variable, a
+  // function, a destructured name) calls a LOCAL function at some of these
+  // sites, and a hoisted `const x = require('lit')` would be read as the
+  // module global. Syntax alone cannot say which sites are which, so such a
+  // file is left untouched.
+  {
+    let shadowed = false;
+    const find = (n: ts.Node): void => {
+      if (shadowed) return;
+      if (
+        (ts.isParameter(n) || ts.isVariableDeclaration(n) || ts.isBindingElement(n) ||
+          ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) &&
+        n.name !== undefined && ts.isIdentifier(n.name) && n.name.text === "require"
+      ) {
+        shadowed = true;
+        return;
+      }
+      n.forEachChild(find);
+    };
+    find(sf);
+    if (shadowed) return null;
+  }
   const edits: Edit[] = [];
   const isRequireCall = (n: ts.Node): n is ts.CallExpression =>
     ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "require" &&
