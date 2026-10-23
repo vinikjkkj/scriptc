@@ -24,6 +24,10 @@ const TS5_ISLANDS = [
   // provenance.ts's prescan about what a module specifier IS, which is the
   // second reason it is the same parser.
   "packages/compiler/src/frontend/provenance-rewrite.ts",
+  // The nested require-destructuring flattening: text in, text out inside
+  // the host read hook, before the 7.0.2 program reads the file (the same
+  // shape as npm-static-rewrite.ts).
+  "packages/compiler/src/frontend/js-desugar.ts",
 ];
 
 const ts5Fence = {
