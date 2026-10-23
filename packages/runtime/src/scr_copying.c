@@ -292,7 +292,7 @@ ScrStr *scr_dyn_object_to_string(const ScrDyn *d) {
   case SCR_DYN_NUM: tag = "Number"; break;
   case SCR_DYN_STR: tag = "String"; break;
   case SCR_DYN_ARR: tag = "Array"; break;
-  case SCR_DYN_BYTES: tag = "Uint8Array"; break;
+  case SCR_DYN_BYTES: tag = d->v.bytes->flavor == SCR_BF_DATAVIEW ? "DataView" : "Uint8Array"; break;
   case SCR_DYN_ARRBUF: tag = "ArrayBuffer"; break;
   case SCR_DYN_FUNC: tag = "Function"; break;
   case SCR_DYN_PROMISE: tag = "Promise"; break;

@@ -5360,6 +5360,13 @@ ScrDyn *scr_dyn_uint8array_of(void);
  * answer (`new b.constructor(0)` is protobufjs's Reader.prototype.raw).
  * Borrows; +1, or NULL with the refusal pending. */
 ScrDyn *scr_dyn_bytes_constructor(const ScrDyn *d);
+/* Property reads off a BYTES box (length / byteLength / byteOffset /
+ * BYTES_PER_ELEMENT / constructor / canonical index; a DataView answers
+ * byteLength and byteOffset only). +1 on a hit; NULL with an exception
+ * pending when the read threw; NULL with nothing pending when the name is
+ * not a data property, which leaves the caller's intrinsic-method tail to
+ * answer. Both backends' keyed-read helpers call this one body. */
+ScrDyn *scr_dyn_bytes_key_get(const ScrDyn *d, const ScrStr *k);
 /* ToIntegerOrInfinity over an OPTIONAL index argument of a dynamic
  * method call (missing/undefined -> dflt, a NUM truncates toward zero,
  * any other kind throws the loud fence). Shared by scr_dyn_invoke.c and
@@ -6610,8 +6617,19 @@ typedef struct ScrDynBigOps {
   ScrStr *(*to_str)(const ScrBigInt *b, double radix); /* +1, never throws at radix 10 */
   bool (*eq_f64)(const ScrBigInt *b, double n);        /* 1n == 1, exact, never throws */
   bool (*eq_str)(const ScrBigInt *b, const ScrStr *s); /* 1n == "1" via StringToBigInt */
+  uint64_t (*low_u64)(const ScrBigInt *b);             /* the value modulo 2^64 (ToBigUint64's bits) */
 } ScrDynBigOps;
 
+/* Boxes 64 raw bits as the bigint they spell (signed: two's complement
+ * read; unsigned otherwise). NULL until scr_big_dyn_install() runs, which
+ * the emitted main() does exactly when scr_bigint.c is linked: the
+ * always-linked dyn core and the optional dispatch unit cannot name the
+ * gated bigint unit directly (an undefined symbol in every bigint-free
+ * binary), so the one entry they need is reached through this pointer.
+ * DataView.prototype.getBigInt64/getBigUint64 on a dynamic receiver is
+ * the caller. */
+extern ScrDyn *(*scr_dyn_big_from_bits_fn)(uint64_t bits, bool is_signed);
+void scr_big_dyn_install(void);
 /* The boxing constructor, DEFINED IN THE GATED UNIT (scr_bigint.c): it
  * installs the ops and hands the allocation below the retained digits.
  * The emitted converters call this one. */
@@ -8661,6 +8679,11 @@ ScrBytes *scr_dataview_new(ScrBytes *src, double byte_off, bool has_len, double 
 typedef enum ScrDataViewGet {
   SCR_DV_U8, SCR_DV_I8, SCR_DV_U16, SCR_DV_I16, SCR_DV_U32, SCR_DV_I32,
   SCR_DV_F32, SCR_DV_F64, SCR_DV_BIGU64, SCR_DV_BIGI64,
+  /* APPENDED: the LLVM lane spells these tags as ordinals. getFloat16 /
+   * setFloat16 (ES2025; Node v24 has them) reach the runtime only through
+   * a dynamic receiver's dispatch (scr_dyn_invoke.c); the static lowering
+   * has no Float16 spelling. */
+  SCR_DV_F16,
 } ScrDataViewGet;
 double scr_dataview_get(const ScrBytes *b, double byte_off, ScrDataViewGet kind, bool le);
 
@@ -8671,6 +8694,11 @@ double scr_dataview_get(const ScrBytes *b, double byte_off, ScrDataViewGet kind,
  * F32 by double→float round-to-nearest-even. Offsets go through ToIndex
  * with the getters' one RangeError. */
 void scr_dataview_set(ScrBytes *b, double byte_off, double value, ScrDataViewGet kind, bool le);
+/* The eight-byte accessors as RAW BITS (scr_bytes.c), for the BigInt
+ * members of a DYNAMIC DataView receiver: same ToIndex, same constant
+ * RangeError; false with the exception pending on a bad offset. */
+bool scr_dataview_get_bits64(const ScrBytes *b, double byte_off, bool le, uint64_t *out);
+bool scr_dataview_set_bits64(ScrBytes *b, double byte_off, uint64_t bits, bool le);
 /* setBigUint64/setBigInt64: the same eight-byte scatter over a BigInt
  * value taken modulo 2^64 (both spellings store the same bits). Throws
  * the getters' constant RangeError on a bad offset. */

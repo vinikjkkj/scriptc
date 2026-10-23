@@ -613,6 +613,52 @@ ScrBytes *scr_dataview_new(ScrBytes *src, double byte_off, bool has_len, double 
   return v;
 }
 
+/* IEEE 754 binary16 <-> double, for DataView.prototype.getFloat16 /
+ * setFloat16 (ES2025; shipped in V8 13.x, so Node v24 has them).
+ *
+ * The narrowing rounds the DOUBLE straight to half, to nearest with ties
+ * to even. Going through a float first would round twice and answer
+ * wrong at the halfway points, which is exactly where a test would look.
+ * NaN canonicalizes to 0x7e00; the sign of zero and of the infinities is
+ * kept; |v| >= 65520 (the halfway point above the largest finite half)
+ * rounds to infinity because the mantissa carry propagates into the
+ * exponent field. */
+static uint16_t scr_f64_to_f16_bits(double v) {
+  uint64_t b;
+  memcpy(&b, &v, 8);
+  const uint16_t sign = (uint16_t)((b >> 48) & 0x8000u);
+  const int exp = (int)((b >> 52) & 0x7ff);
+  const uint64_t mant = b & 0xfffffffffffffULL;
+  if (exp == 0x7ff) return (uint16_t)(sign | (mant ? 0x7e00u : 0x7c00u));
+  if (exp == 0) return sign; /* zero and the double subnormals: below half's range */
+  const int e = exp - 1023;
+  if (e > 15) return (uint16_t)(sign | 0x7c00u);
+  if (e >= -14) {
+    uint32_t h = (uint32_t)(((e + 15) << 10) | (int)(mant >> 42));
+    const uint64_t rem = mant & ((1ULL << 42) - 1);
+    const uint64_t halfway = 1ULL << 41;
+    if (rem > halfway || (rem == halfway && (h & 1u))) h++;
+    return (uint16_t)(sign | h);
+  }
+  if (e < -25) return sign;
+  const int shift = 28 - e; /* 43..53 */
+  const uint64_t sig = (1ULL << 52) | mant;
+  uint64_t q = sig >> shift;
+  const uint64_t rem = sig & ((1ULL << shift) - 1);
+  const uint64_t halfway = 1ULL << (shift - 1);
+  if (rem > halfway || (rem == halfway && (q & 1u))) q++;
+  return (uint16_t)(sign | (uint16_t)q);
+}
+
+static double scr_f16_bits_to_f64(uint16_t h) {
+  const int sign = (h & 0x8000u) ? -1 : 1;
+  const int exp = (h >> 10) & 0x1f;
+  const int mant = h & 0x3ff;
+  if (exp == 0x1f) return mant ? (double)NAN : sign * (double)INFINITY;
+  if (exp == 0) return sign * ldexp((double)mant, -24);
+  return sign * ldexp((double)(mant | 0x400), exp - 25);
+}
+
 static size_t scr_dataview_get_size(ScrDataViewGet kind) {
   switch (kind) {
     case SCR_DV_U8:
@@ -620,6 +666,7 @@ static size_t scr_dataview_get_size(ScrDataViewGet kind) {
       return 1;
     case SCR_DV_U16:
     case SCR_DV_I16:
+    case SCR_DV_F16:
       return 2;
     case SCR_DV_U32:
     case SCR_DV_I32:
@@ -657,6 +704,8 @@ double scr_dataview_get(const ScrBytes *b, double byte_off, ScrDataViewGet kind,
       return (double)(int16_t)u;
     case SCR_DV_I32:
       return (double)(int32_t)u;
+    case SCR_DV_F16:
+      return scr_f16_bits_to_f64((uint16_t)u);
     case SCR_DV_F32: {
       uint32_t bits = (uint32_t)u;
       float f;
@@ -701,6 +750,9 @@ void scr_dataview_set(ScrBytes *b, double byte_off, double value, ScrDataViewGet
     case SCR_DV_I32:
       u = (uint64_t)scr_bytes_to_u32(value);
       break;
+    case SCR_DV_F16:
+      u = scr_f64_to_f16_bits(value);
+      break;
     case SCR_DV_F32: {
       float f = (float)value;
       uint32_t bits;
@@ -719,6 +771,39 @@ void scr_dataview_set(ScrBytes *b, double byte_off, double value, ScrDataViewGet
   for (size_t i = 0; i < width; i++) {
     p[le ? i : width - 1 - i] = (uint8_t)(u >> (8 * i));
   }
+}
+
+/* The eight-byte forms, as RAW BITS, for the BigInt members of a dynamic
+ * DataView receiver (scr_dyn_invoke.c). The static getBigInt64 spelling
+ * answers a double (Number(view.getBigInt64(...))) and so loses the low
+ * bits past 2^53; these answer the 64 bits themselves, and the caller
+ * boxes them as the bigint they are. Same ToIndex and the same ONE
+ * constant RangeError as every other DataView accessor. Return false with
+ * the exception pending when the offset is invalid. */
+bool scr_dataview_get_bits64(const ScrBytes *b, double byte_off, bool le, uint64_t *out) {
+  double off = (byte_off != byte_off) ? 0 : trunc(byte_off);
+  if (!(off >= 0) || off > 9007199254740991.0 || off + 8.0 > (double)b->len) {
+    static const char msg[] = "Offset is outside the bounds of the DataView";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return false;
+  }
+  const uint8_t *p = b->data + (size_t)off;
+  uint64_t u = 0;
+  for (size_t i = 0; i < 8; i++) u |= (uint64_t)p[le ? i : 7 - i] << (8 * i);
+  *out = u;
+  return true;
+}
+
+bool scr_dataview_set_bits64(ScrBytes *b, double byte_off, uint64_t bits, bool le) {
+  double off = (byte_off != byte_off) ? 0 : trunc(byte_off);
+  if (!(off >= 0) || off > 9007199254740991.0 || off + 8.0 > (double)b->len) {
+    static const char msg[] = "Offset is outside the bounds of the DataView";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return false;
+  }
+  uint8_t *p = b->data + (size_t)off;
+  for (size_t i = 0; i < 8; i++) p[le ? i : 7 - i] = (uint8_t)(bits >> (8 * i));
+  return true;
 }
 
 /* ── encodings (u8 only — the compiler routes only u8 receivers here) ──── */

@@ -705,22 +705,16 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       `    break;`,
       `  }`,
       `  case SCR_DYN_BYTES: {`,
-      `    /* Buffer-flavored values (stream chunks) coerce utf8 (Node's`,
-      `     * Buffer.toString); plain Uint8Array joins its elements. */`,
-      `    if (d->buffer) {`,
-      `      ScrStr *enc = scr_str_new("utf8", 4);`,
-      `      ScrStr *txt = scr_bytes_to_str(d->v.bytes, enc);`,
-      `      scr_str_release(enc);`,
-      `      for (size_t i = 0; i < txt->len; i++) scr_jb_putc(b, txt->data[i]);`,
-      `      scr_str_release(txt);`,
-      `      break;`,
-      `    }`,
-      `    for (size_t i = 0; i < d->v.bytes->len; i++) {`,
-      `      if (i > 0) scr_jb_putc(b, ',');`,
-      `      char n[16];`,
-      `      snprintf(n, sizeof n, "%u", (unsigned)d->v.bytes->data[i]);`,
-      `      scr_jb_puts(b, n);`,
-      `    }`,
+      `    /* Buffer-flavored values coerce utf8, a plain Uint8Array joins its`,
+      `     * elements, and a DataView is Object.prototype.toString's`,
+      `     * "[object DataView]". All three live in scr_dyn_to_string, so`,
+      `     * this arm DELEGATES like the OBJ arm: this walker is a`,
+      `     * per-program COPY of the runtime ToString table, and the copy`,
+      `     * that open-coded the join answered String(dataView) with its`,
+      `     * bytes while the runtime's own answered the tag. */`,
+      `    ScrStr *s = scr_dyn_to_string(d, NULL);`,
+      `    for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);`,
+      `    scr_str_release(s);`,
       `    break;`,
       `  }`,
       `  case SCR_DYN_FUNC: {`,
@@ -1689,27 +1683,16 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    return scr_dyn_arrbuf_key_get(d, k);`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_BYTES) {`);
-    d.push(`    /* Buffer-shaped dyn (a stream's 'data' chunk in the JS lane):`);
-    d.push(`     * .length and canonical-index byte reads answer like Node. */`);
-    d.push(`    if (k->len == 6 && memcmp(k->data, "length", 6) == 0) {`);
-    d.push(`      return scr_dyn_new_num((double)d->v.bytes->len);`);
-    d.push(`    }`);
-    // `b.constructor` — the %Uint8Array% singleton, which is what makes
-    // protobufjs's `new this.buf.constructor(0)` (Reader.prototype.raw)
-    // build a typed array instead of throwing on undefined. A Buffer or
-    // a non-u8 element kind refuses by name there rather than answering
-    // the wrong constructor. The LLVM lane calls the same function.
-    d.push(`    if (k->len == 11 && memcmp(k->data, "constructor", 11) == 0) {`);
-    d.push(`      return scr_dyn_bytes_constructor(d);`);
-    d.push(`    }`);
-    d.push(`    if (k->len > 0 && !(k->len > 1 && k->data[0] == '0')) {`);
-    d.push(`      size_t idx = 0; bool digits = true;`);
-    d.push(`      for (size_t i = 0; i < k->len; i++) {`);
-    d.push(`        if (k->data[i] < '0' || k->data[i] > '9' || idx > (SIZE_MAX - 9) / 10) { digits = false; break; }`);
-    d.push(`        idx = idx * 10 + (size_t)(k->data[i] - '0');`);
-    d.push(`      }`);
-    d.push(`      if (digits && idx < d->v.bytes->len) return scr_dyn_new_num((double)d->v.bytes->data[idx]);`);
-    d.push(`    }`);
+    // ONE runtime body for both lanes (scr_json.c): length, byteLength,
+    // byteOffset, BYTES_PER_ELEMENT, `constructor` (the %Uint8Array%
+    // singleton, which is what makes protobufjs's `new
+    // this.buf.constructor(0)` build a typed array; a Buffer, a DataView
+    // or a non-u8 element kind refuses by name there) and the canonical
+    // index reads -- and, for a DataView, byteLength/byteOffset ONLY,
+    // because `length` and the indices are undefined on one in Node. A
+    // miss (NULL, nothing pending) falls to the intrinsic-method tail.
+    d.push(`    ScrDyn *bk = scr_dyn_bytes_key_get(d, k);`);
+    d.push(`    if (bk != NULL || scr_exc_pending()) return bk;`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_BIG) {`);
     d.push(`    /* A primitive with a real prototype: (5n).toString is a`);
