@@ -107,7 +107,7 @@ export type OwnKeyPatch =
       kind: "guardStmt";
       slot: StmtSlot;
       inner: IrStmt;
-      outer: { unionId: string; tag: number; value: IrExpr } | null;
+      outer: { unionId: string; tag: number; value: IrExpr; negated?: boolean } | null;
       loc: SrcLoc;
     }
   /** Set the `value` of a `return` statement to `present` — the hasOwn
@@ -152,7 +152,7 @@ export function applyOwnKey(p: OwnKeyPatch, present: IrExpr): void {
                 kind: "unionIsTag",
                 unionId: p.outer.unionId,
                 tag: p.outer.tag,
-                negated: true,
+                negated: p.outer.negated ?? true,
                 value: p.outer.value,
                 type: BOOL,
                 loc: p.loc,
