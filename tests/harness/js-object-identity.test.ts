@@ -574,7 +574,9 @@ describe.each(["c", "llvm"] as const)("the rows the rule must not move (%s backe
  * does not re-derive them, each with the fence it meets today (all on both
  * backends, all against Node v25.9.0):
  *
- *   const m = new Map(); m.set("k", a)   `TypeError: m.set is not a function`
+ *   (`const m = new Map(); m.set("k", a)` answered `TypeError: m.set is not a
+ *   function` here until the untyped Map became a real dyn-flavored container:
+ *   corpus 8710-8713 pin it.)
  *   delete x.a  over a dyn binding       a BUILD error, not a run-time fence
  *   module.exports read back as a value  SC1090 "the reference to 'module'"
  *   for (const k in x)                   SC2001 on the loop's binding type
