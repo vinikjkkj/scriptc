@@ -79,6 +79,7 @@ import {
   orderedImportsOf,
   overridesDtsPath,
   npmStaticDepSf7,
+  resolveProjectImportSf7,
   requireSpecOf,
   resolveImport,
   workspacePackageOfPath,
@@ -2388,7 +2389,10 @@ export class Lowerer {
       if (spec === null) return false;
       if (
         !isRelativeSpecifier(spec) &&
-        npmStaticDepSf7(this.program, decl.getSourceFile(), spec) === null
+        npmStaticDepSf7(this.program, decl.getSourceFile(), spec) === null &&
+        // a --provenance-sources package is a program module too: its
+        // CommonJS entry binds a require() the same way
+        resolveProjectImportSf7(this.program, decl.getSourceFile(), spec) === null
       ) {
         return false;
       }
@@ -2628,10 +2632,19 @@ export class Lowerer {
     // alias its globals). Without the guarded %init call at this position
     // those globals stay uninitialized: the dep's module body would never
     // run.
-    const dep = isRelativeSpecifier(spec)
+    let dep = isRelativeSpecifier(spec)
       ? resolveImport(this.program, node.getSourceFile(), spec)
-      : npmStaticDepSf7(this.program, node.getSourceFile(), spec);
+      : (npmStaticDepSf7(this.program, node.getSourceFile(), spec) ??
+        // a --provenance-sources package: its entry is a program module too
+        resolveProjectImportSf7(this.program, node.getSourceFile(), spec));
     if (!dep || dep.fileName.endsWith(".json")) return null;
+    // A declaration file resolves for TYPES; Node evaluates its runtime twin
+    // (see lowerFileInit's header): a twin holding static storage is the init
+    // to call, or its globals stay unassigned.
+    if (dep.isDeclarationFile) {
+      const twin = this.declTwinSourceOf(dep);
+      if (twin !== null && this.moduleGlobalKind(twin) !== "island") dep = twin;
+    }
     if (this.asyncInitFiles.has(dep)) {
       this.unsupported(
         "SC1090",

@@ -3178,6 +3178,15 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
         const sym = L.resolveValueSymbol(el.name);
         const decls = sym === null ? [] : L.checker.declarationsOf(sym);
         if (decls.length > 0 && decls.every((d) => d.getSourceFile() === twin)) return "static";
+        // ...or a VALUE the declaration file spells (`export function parse`
+        // beside a twin that assigns `exports.parse = function ...`): the call
+        // resolves to the twin's storage though its declaration stays in the
+        // .d.ts. It is read, it is a value (a type-only name is elided by the
+        // transpiler and never loads the module), and the twin holds static
+        // storage, so Node evaluated the twin and so must the header.
+        const isValueDecl = (d: ts.Node): boolean =>
+          ts.isFunctionDeclaration(d) || ts.isVariableDeclaration(d) || ts.isClassDeclaration(d);
+        if (decls.some(isValueDecl) && L.moduleGlobalKind(twin) !== "island") return "static";
       }
     }
     return "clause";

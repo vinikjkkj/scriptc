@@ -1,0 +1,14 @@
+{
+  "packages": {
+    "reqarr": {
+      "dir": "./attested-src/reqarr",
+      "commit": "6666666666666666666666666666666666666666",
+      "repo": "https://github.com/example/reqarr"
+    },
+    "reqcons": {
+      "dir": "./attested-src/reqcons",
+      "commit": "7777777777777777777777777777777777777777",
+      "repo": "https://github.com/example/reqcons"
+    }
+  }
+}
