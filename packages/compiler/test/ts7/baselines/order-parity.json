@@ -12020,6 +12020,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8530-process-env-indexed-by-an-untyped-key.js": {
+   "order": [
+    "<repo>/tests/corpus/8530-process-env-indexed-by-an-untyped-key.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
