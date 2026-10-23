@@ -1269,6 +1269,9 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
         // entries a hand-written table spells inline. Node binds the
         // VALUE here, not a live view of a binding — there is none.
         value = dynLiteralExprOf(prop.initializer, loc);
+        // An EXPRESSION-valued entry (`greet: (n) => ...`) owns the export global
+        // collectGlobals registered for it: the snapshot reads that storage.
+        if (value === null && propSym !== undefined) value = exportDynValue(L, exportName, propSym, loc);
       }
       if (value === null) {
         L.unsupported(
