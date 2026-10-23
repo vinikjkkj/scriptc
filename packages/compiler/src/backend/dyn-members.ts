@@ -23,6 +23,7 @@
  * anything else.
  */
 import {
+  parseOwnShadowField,
   canConvertToDyn,
   canDynCheckTo,
   RUNTIME_EMITTER_CLASS,
@@ -57,7 +58,15 @@ export type DynMemberRow =
    * parameter types and calls it with the instance as the receiver. NOT
    * enumerable — a class method is non-enumerable in JS, which is why
    * `Object.keys(new Box(7))` is ["v"] and not ["v","get"]. */
-  | { kind: "method"; name: string; fn: IrFunction };
+  | { kind: "method"; name: string; fn: IrFunction }
+  /** An OWN property that shadows the method `name` with the method `target`
+   * of the same class (ir/nodes.ts OwnShadow): enumerable and present while the
+   * private boolean `flag` is set, its value the function `target`. The row
+   * sits where the property was created among the own keys, which is BEFORE
+   * the method rows, so a read by name must never find it: the runtime skips
+   * these rows (enumerable 3) when it looks a member up and answers the
+   * method, whose body forwards to `target` while the flag is set. */
+  | { kind: "shadow"; name: string; target: string; flag: string; flagType: IrType };
 
 /**
  * The member table rows for one class, FLATTENED over its base chain with
@@ -117,6 +126,21 @@ export function dynMemberRows(
   // chain's fields as an identical prefix (that is what makes an upcast a
   // reinterpret), so one GEP through the derived struct reaches a base
   // field and `def.fields` is already the whole list.
+  const shadows = cls.def.fields.flatMap((f) => {
+    const sh = parseOwnShadowField(f.name);
+    return sh === null ? [] : [{ f, sh }];
+  });
+  const pushed = new Set<string>();
+  const pushShadows = (after: string | null): void => {
+    for (const { f, sh } of shadows) {
+      if (pushed.has(f.name) || (after !== null && sh.after !== after) || seen.has(sh.method)) continue;
+      pushed.add(f.name);
+      // The row is the property's; the name is not marked seen, because the
+      // method row of the same name must still be emitted after it.
+      rows.push({ kind: "shadow", name: sh.method, target: sh.target, flag: f.name, flagType: f.type });
+    }
+  };
+  pushShadows("");
   for (const f of cls.def.fields) {
     // The internal '%'-prefixed slots (%props and its family): no program
     // can spell one, so answering for it would invent a key Node does not
@@ -134,7 +158,11 @@ export function dynMemberRows(
     if (!canConvertToDyn(f.type, getRecord, getUnion)) continue;
     seen.add(f.name);
     rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true });
+    pushShadows(f.name);
   }
+  // A property whose predecessor field has no dyn row still exists; it goes
+  // after the last field row.
+  pushShadows(null);
 
   /** The implementation of `m` for THIS class: the nearest declarer at or
    * above it carrying an emitted function. Null for an abstract slot, for

@@ -4660,7 +4660,7 @@ typedef struct ScrDynClassMember {
    * for-in walk report, in declaration order. False for methods: a class
    * method is non-enumerable in JS, which is why `Object.keys(new Box(7))`
    * is ["v"] and not ["v","get"]. */
-  unsigned char enumerable; /* 0 no, 1 yes, 2 yes UNLESS the value is undefined (a field whose undefined arm means "not assigned yet") */
+  unsigned char enumerable; /* 0 no, 1 yes, 2 yes UNLESS the value is undefined (a field whose undefined arm means "not assigned yet"), 3 as 2 and ALSO skipped by a lookup by name (an own property shadowing a method: the method row answers the name) */
 } ScrDynClassMember;
 /* True when an enumerating walk must skip this member of `obj`: not
  * enumerable, a method, or an absent-until-assigned field still undefined. */
@@ -6594,6 +6594,8 @@ bool scr_dyn_objinst_enumerable(const ScrDyn *d);
  * answers NULL past the end. */
 size_t scr_dyn_objinst_member_count(const ScrDyn *d);
 const ScrDynClassMember *scr_dyn_objinst_member_at(const ScrDyn *d, size_t i);
+/* The function box of an own property shadowing a method (enumerable 3 rows). */
+ScrDyn *scr_dyn_shadow_method(const char *name);
 /* The keyed READ of an instance member (the emitted sc_dyn_key_get's
  * OBJINST arm): a data member's value, or a METHOD as a BOUND function
  * box minted over the very dispatch a CALL takes. +1, or NULL with

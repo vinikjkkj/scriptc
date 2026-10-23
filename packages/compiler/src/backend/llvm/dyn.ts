@@ -4954,6 +4954,38 @@ export class LlDyn {
       const sym = `sc_dclm_${this.classMemberFns++}`;
       const nameLit = host.cstr(row.name);
       const nameLen = Buffer.byteLength(row.name, "utf8");
+      if (row.kind === "shadow") {
+        // The C twin's rule (emit-walkers.ts): the function `target` while the
+        // private flag is set, undefined otherwise; enumerable 3.
+        const B = new BlockBuilder();
+        const idx = host.classFieldGep(className, row.flag);
+        const p = B.tmp();
+        B.line(`${p} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${idx} ; .${row.flag}`);
+        const raw = B.tmp();
+        B.line(`${raw} = load i8, ptr ${p}`);
+        const on = B.tmp();
+        B.line(`${on} = trunc i8 ${raw} to i1`);
+        const lOn = B.newLabel("dclm.on");
+        const lOff = B.newLabel("dclm.off");
+        B.condBr(on, lOn, lOff);
+        B.startBlock(lOn);
+        this.host.declare(`declare ptr @scr_dyn_shadow_method(ptr)`);
+        const fnBox = B.tmp();
+        B.line(`${fnBox} = call ptr @scr_dyn_shadow_method(ptr ${host.cstr(row.target)})`);
+        B.terminate(`ret ptr ${fnBox}`);
+        B.startBlock(lOff);
+        const u = this.undef(B);
+        const r = this.retainDyn(B, u);
+        B.terminate(`ret ptr ${r}`);
+        this.defs.push(
+          `define internal ptr @${sym}(ptr %o) ${FN_ATTRS} { ; member get ${className}.${row.name} (own method shadow)`,
+          B.render(),
+          `}`,
+          ``,
+        );
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3 }`);
+        continue;
+      }
       if (row.kind === "field") {
         const B = new BlockBuilder();
         const idx = host.classFieldGep(className, row.name);

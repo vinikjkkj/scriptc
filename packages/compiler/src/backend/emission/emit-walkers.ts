@@ -147,6 +147,25 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
 
     for (const row of rows) {
       const sym = `sc_dclm_${E.dynClassMemberFns++}`;
+      if (row.kind === "shadow") {
+        // An own property that shadows a method with a sibling method: present
+        // (as the function `target`) while the private flag is set, absent
+        // (undefined) otherwise. enumerable 3 = hidden while undefined AND
+        // invisible to a lookup by name (the method row answers that).
+        E.walkerProtos.push(`${E.link}ScrDyn *${sym}(void *o); /* member get ${className}.${row.name} (own method shadow) */`);
+        defs.push(
+          `${E.link}ScrDyn *${sym}(void *o) { /* member get ${className}.${row.name} (own method shadow) */`,
+          `  if (((${struct} *)o)->${mangleField(row.flag)}) return scr_dyn_shadow_method(${cStringLiteral(Buffer.from(row.target, "utf8"))});`,
+          `  return scr_dyn_retain(scr_dyn_undefined());`,
+          `}`,
+          ``,
+        );
+        entries.push(
+          `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
+            `&${sym}, NULL, 3 },`,
+        );
+        continue;
+      }
       if (row.kind === "field") {
         E.walkerProtos.push(`${E.link}ScrDyn *${sym}(void *o); /* member get ${className}.${row.name} */`);
         defs.push(

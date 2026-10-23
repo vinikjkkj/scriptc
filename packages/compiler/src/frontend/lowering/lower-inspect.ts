@@ -37,7 +37,7 @@ import * as ts from "../ts7/adapter.js";
 import type { NullProtoPatch } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile } from "../program.js";
-import { BOOL, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
@@ -1017,11 +1017,44 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         },
         loc,
       });
-      if (visible.length === 0 && !propsTable) {
+      // OWN PROPERTIES THAT SHADOW A METHOD (ir/nodes.ts OwnShadow): present
+      // while their private flag is set, printed as `name: [Function: target]`
+      // in the position the property was created.
+      const shadows = info.def.fields.flatMap((f) => {
+        const sh = parseOwnShadowField(f.name);
+        return sh === null ? [] : [{ f, sh }];
+      });
+      const shadowFlag = (f: { name: string }): IrExpr => get(f.name, BOOL);
+      const shadowStmt = (x: { f: { name: string }; sh: { method: string; target: string } }): IrStmt => ({
+        kind: "if",
+        cond: shadowFlag(x.f),
+        then: [
+          entry(
+            concatAll([str(`${inspectKey(x.sh.method)}: `, loc), str(`[Function: ${x.sh.target}]`, loc)], loc),
+            boolLit(false, loc),
+          ),
+        ],
+        else_: null,
+        loc,
+      });
+      if (visible.length === 0 && !propsTable && shadows.length === 0) {
         body = [ret(str(`${display} {}`, loc))];
         break;
       }
       body = [];
+      if (visible.length === 0 && !propsTable) {
+        // Only own method shadows can make a key: no key at all while every flag is clear.
+        const anyOn = shadows
+          .map((x) => shadowFlag(x.f))
+          .reduce((a, b): IrExpr => ({ kind: "logical", op: "||", left: a, right: b, type: BOOL, loc }));
+        body.push({
+          kind: "if",
+          cond: { kind: "unary", op: "!", operand: anyOn, type: BOOL, loc },
+          then: [ret(str(`${display} {}`, loc))],
+          else_: null,
+          loc,
+        });
+      }
       if (visible.length === 0) {
         // Every key this class can have is a RUN-TIME one, so "is it
         // empty" is a runtime question — and it has to be asked BEFORE
@@ -1050,8 +1083,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         visible.length > 0 && !propsTable &&
         visible.every((f) => presentTest(f.name, f.type) !== null);
       if (allTracked) {
-        const anyPresent = visible
-          .map((f) => presentTest(f.name, f.type)!)
+        const anyPresent = [...visible.map((f) => presentTest(f.name, f.type)!), ...shadows.map((x) => shadowFlag(x.f))]
           .reduce((a, b): IrExpr => ({ kind: "logical", op: "||", left: a, right: b, type: BOOL, loc }));
         body.push({
           kind: "if",
@@ -1075,12 +1107,23 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         ...visible.filter((f) => !symNames.has(f.name)),
         ...visible.filter((f) => symNames.has(f.name)),
       ];
+      const placed = new Set<string>();
+      const placeShadows = (after: string | null): void => {
+        for (const x of shadows) {
+          if (placed.has(x.f.name) || (after !== null && x.sh.after !== after)) continue;
+          placed.add(x.f.name);
+          body.push(shadowStmt(x));
+        }
+      };
+      placeShadows("");
       for (const f of ordered) {
         const key = symNames.has(f.name) ? f.name : inspectKey(f.name);
         const one = entry(concatAll([str(`${key}: `, loc), child(f.type, get(f.name, f.type))], loc), boolLit(false, loc));
         const present = presentTest(f.name, f.type);
         body.push(present === null ? one : { kind: "if", cond: present, then: [one], else_: null, loc });
+        placeShadows(f.name);
       }
+      placeShadows(null);
       // The run-time table's entries come AFTER the declared fields, and
       // that IS Node's order: the table can only be filled once the
       // constructor has run, so every key in it was inserted later than

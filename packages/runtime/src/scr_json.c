@@ -3139,6 +3139,10 @@ const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, 
    * class with no members, and reading through a NULL pointer to prove
    * it would be the same bug the SCR_DYN_KIND_COUNT note above records. */
   for (size_t i = 0; i < c->nmembers; i++) {
+    /* enumerable 3 is an OWN property that shadows a method of the same name:
+     * it is listed by the enumerating walks, and a read or call by name
+     * belongs to the method row that follows it. */
+    if (c->members[i].enumerable == 3) continue;
     if (c->members[i].len == klen && memcmp(c->members[i].name, k, klen) == 0) {
       return &c->members[i];
     }
@@ -3153,12 +3157,31 @@ size_t scr_dyn_objinst_member_count(const ScrDyn *d) {
 
 bool scr_dyn_member_hidden(const ScrDynClassMember *m, void *obj) {
   if (!m->enumerable || m->get == NULL) return true;
-  if (m->enumerable != 2) return false;
+  if (m->enumerable != 2 && m->enumerable != 3) return false;
   ScrDyn *v = m->get(obj); /* a plain slot read: no side effects */
   if (v == NULL) return false; /* threw: the caller's own read reports it */
   bool absent = v->kind == SCR_DYN_UNDEF;
   scr_dyn_release(v);
   return absent;
+}
+
+/* The function value of an own property that shadows a method with a sibling
+ * method (`this.parseRow = this._parseRowAsArray`): a function box named
+ * `name` (a static literal), which util.inspect prints as [Function: name]. A
+ * JS method read off its object is not bound, so a call through THIS value has
+ * no receiver, and the boxed method cannot run without one: the call throws
+ * the TypeError Node's method bodies throw on `this.x` of undefined. */
+static ScrDyn *scr_shadow_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  (void)args;
+  (void)argc;
+  scr_throw_error_named(scr_str_new("TypeError", 9), scr_str_new("Cannot read properties of undefined", 35));
+  return NULL;
+}
+
+ScrDyn *scr_dyn_shadow_method(const char *name) {
+  ScrClosure *clo = scr_closure_new((void *)scr_shadow_method_thunk, 0);
+  return scr_dyn_new_func(clo, scr_shadow_method_thunk, 0, "()", name);
 }
 
 const ScrDynClassMember *scr_dyn_objinst_member_at(const ScrDyn *d, size_t i) {
