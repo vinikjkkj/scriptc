@@ -6308,6 +6308,27 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // DYN_PROTO_METHOD_NAMES fences the rest, because on a real dyn
     // array/string Node would run the METHOD, which no stored member
     // models.
+    // The iterator methods of a MAP or SET receiver, in the contexts that
+    // drain them where they are made (dynMapIterDrainContext). The runtime
+    // answers the drained snapshot for a dyn-flavored Map/Set. Only a
+    // receiver the CHECKER types as the stdlib Map/Set qualifies: a bare
+    // `any` receiver named `keys` could as well be an array, whose iterator
+    // methods this tier has no dispatch for (that refusal stays).
+    if (
+      MAP_ITER_NAMES.has(access.name.text) && call.arguments.length === 0 &&
+      !call.questionDotToken && !access.questionDotToken &&
+      isStdlibMapOrSetType(L, recvTs) && dynMapIterDrainContext(L, call)
+    ) {
+      return {
+        kind: "dynInvoke",
+        recv,
+        method: access.name.text,
+        calleeName: access.getText(),
+        args: [],
+        type: DYN,
+        loc: locOf(call),
+      };
+    }
     if (DYN_PROTO_METHOD_NAMES.has(access.name.text)) { mcallWhy("byname", access, access.name.text); return null; }
     // Optional forms (`obj.cb?.()`, `obj?.cb()`) belong to the chain
     // machinery's short-circuit semantics — not modeled here yet.
@@ -6347,6 +6368,42 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       loc,
     };
   }
+
+const MAP_ITER_NAMES: ReadonlySet<string> = new Set(["keys", "values", "entries"]);
+
+/** Is this checker type the stdlib's Map or Set (provenance, not the name:
+ * a user's own `class Map` is not this)? */
+function isStdlibMapOrSetType(L: Lowerer, t: ts.Type): boolean {
+  const sym = t.getSymbol();
+  if (sym === undefined || (sym.name !== "Map" && sym.name !== "Set")) return false;
+  return L.checker
+    .declarationsOf(sym)
+    .some((d) => ts.isInterfaceDeclaration(d) && L.isStdlibFile(d.getSourceFile()));
+}
+
+/** The contexts that DRAIN a Map/Set iterator where it is made, so the
+ * snapshot the dyn dispatch answers is exactly what the live iterator would
+ * have produced: the subject of a for-of, an element spread of an array
+ * literal, the sole argument of `Array.from`, and the sole argument of
+ * `new Map(...)` / `new Set(...)`. Every other context (a stored iterator,
+ * `.next()`, passing it along) needs a real iterator value and keeps the
+ * fence. The typed lowering draws the same line (lowerMapIterDrainCall). */
+function dynMapIterDrainContext(L: Lowerer, call: ts.CallExpression): boolean {
+  const parent = call.parent;
+  if (ts.isForOfStatement(parent) && parent.expression === call) return true;
+  if (ts.isSpreadElement(parent) && ts.isArrayLiteralExpression(parent.parent)) return true;
+  if (
+    ts.isCallExpression(parent) && parent.arguments.length === 1 && parent.arguments[0] === call &&
+    ts.isPropertyAccessExpression(parent.expression) && parent.expression.name.text === "from" &&
+    L.isStdlibGlobal(parent.expression.expression, "Array")
+  ) {
+    return true;
+  }
+  if (ts.isNewExpression(parent) && parent.arguments?.length === 1 && parent.arguments[0] === call) {
+    return ts.isIdentifier(parent.expression) && (parent.expression.text === "Map" || parent.expression.text === "Set");
+  }
+  return false;
+}
 
 /** SCRIPTC_MCALL_WHY probe: which arm declined a dyn-receiver method call,
  * and where. The two arms that matter are `byname` (the receiver IS a dyn

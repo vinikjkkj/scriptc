@@ -3434,6 +3434,16 @@ function lowerOptionalDefaultArg(
           type: arrayOf(src.type.elem), loc,
         };
       }
+      // A dyn-flavored Map/Set iterator (`Array.from(m.values())` over an
+      // untyped Map): the dyn dispatch already drained it into a fresh dyn
+      // array where it was made (dynInvoke keys/values/entries), which is
+      // exactly the array `Array.from` would build.
+      if (
+        src.kind === "dynInvoke" && src.type.kind === "dyn" && src.args.length === 0 &&
+        (src.method === "keys" || src.method === "values" || src.method === "entries")
+      ) {
+        return src;
+      }
       L.noLowering(
         "Array.from with this argument shape",
         call,
