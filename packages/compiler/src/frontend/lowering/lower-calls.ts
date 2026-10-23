@@ -6803,6 +6803,9 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // prototype the fence lists declares them, so routing adds nothing but the
   // accounting the dispatch test asks for.
   "resize", "transfer", "transferToFixedLength",
+  // Number.prototype.toFixed: the same runtime formatter the typed spelling
+  // calls; every non-number kind meets the not-a-function ladder.
+  "toFixed",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
   // boxed through the checked-dynamic boundary): these names dispatch on
   // the runtime kind so a boxed IncomingMessage/ServerResponse/Socket

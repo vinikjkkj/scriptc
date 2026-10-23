@@ -1151,8 +1151,10 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
         return dyn_name_in(m, impl) || dyn_objproto_knows(m);
       }
     case SCR_DYN_NUM:
-    case SCR_DYN_BOOL:
       return dyn_name_is(m, "toString") || dyn_num_proto_unimpl(m) || dyn_objproto_knows(m);
+    case SCR_DYN_BOOL:
+      /* toFixed and its siblings are Number.prototype's: a boolean has none. */
+      return dyn_name_is(m, "toString") || dyn_objproto_knows(m);
     case SCR_DYN_FUNC: {
       /* `bind` and `toString` fence loudly; apply/call run. A FUNC box's
        * OWN properties are answered by the read's own scr_dyn_fn_get arm
@@ -2716,6 +2718,30 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_str_release(rs);
       return d;
     }
+    /* Number.prototype.toFixed: the
+     * SAME runtime formatters the static spelling calls (num.toFixed0 /
+     * num.toFixed), so a dyn receiver and a typed one
+     * answer alike. toFixed's digits argument is ToIntegerOrInfinity'd and
+     * range-checked inside scr_num_to_fixed (V8's RangeError text). A BOOLEAN
+     * has none of these names (they are Number's), so it meets the
+     * not-a-function ladder below like any other missing member. */
+    if (recv->kind == SCR_DYN_NUM && dyn_name_is(method, "toFixed")) {
+      ScrStr *rs;
+      if (argc == 0 || args[0]->kind == SCR_DYN_UNDEF) {
+        rs = scr_num_to_fixed0(recv->v.num);
+      } else {
+        double digits = dyn_index_arg(args, argc, 0, 0, what);
+        if (scr_exc_pending()) return NULL;
+        rs = scr_num_to_fixed(recv->v.num, digits);
+      }
+      if (scr_exc_pending()) {
+        if (rs) scr_str_release(rs);
+        return NULL;
+      }
+      ScrDyn *d = scr_dyn_new_str(rs);
+      scr_str_release(rs);
+      return d;
+    }
     /* valueOf falls through to dyn_object_proto_method with every other
      * kind's -- one body, one answer. */
     if ((recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BIG) && dyn_name_is(method, "toLocaleString") && dyn_locale_answerable(args, argc)) {
@@ -2725,8 +2751,8 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_str_release(s);
       return d;
     }
-    if (dyn_num_proto_unimpl(method)) {
-      dyn_throw_unsupported(recv->kind == SCR_DYN_NUM ? "Number" : "Boolean", method);
+    if (recv->kind == SCR_DYN_NUM && dyn_num_proto_unimpl(method)) {
+      dyn_throw_unsupported("Number", method);
       return NULL;
     }
     return dyn_object_proto_method(recv, method, args, argc, what);

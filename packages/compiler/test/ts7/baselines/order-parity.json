@@ -12050,6 +12050,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8537-tofixed-on-a-dynamic-number.js": {
+   "order": [
+    "<repo>/tests/corpus/8537-tofixed-on-a-dynamic-number.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
