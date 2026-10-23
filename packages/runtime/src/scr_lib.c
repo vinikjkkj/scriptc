@@ -5041,6 +5041,11 @@ ScrStr *scr_num_to_fixed0(double x) {
   if (isnan(x)) return scr_str_new("NaN", 3);
   if (fabs(x) >= 1e21) return scr_f64_to_scrstr(x);
   double a = fabs(x);
+  /* From 2^53 up every double is an integer and its SHORTEST round-trip
+   * digits are not its value ((1000000000000000128).toFixed() is
+   * "1000000000000000128", where ToString prints ...100): the exact-binary
+   * formatter below answers those. */
+  if (a >= 9007199254740992.0) return scr_num_to_fixed(x, 0);
   double fl = floor(a);
   double n = (a - fl >= 0.5) ? fl + 1 : fl; /* exact: a < 2^70, and below
                                              * 2^52 the fraction is exact;
