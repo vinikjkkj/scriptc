@@ -52,7 +52,7 @@ const found = nums.indexOf(2, 1);
 const joined = nums.join();
 nums.forEach((x) => console.log(x), { unused: true }); // thisArg lowers now (corpus 8509)
 const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
-const rev = JSON.parse("1", (_k, v) => v);
+const rev = JSON.parse("1", (_k, v) => v); // the reviver form lowers now (corpus 8835)
 // (stringify with a null replacer + LITERAL space now lowers — the pretty
 // battery lives in the corpus; function replacers and non-literal spaces
 // stay fenced.)
