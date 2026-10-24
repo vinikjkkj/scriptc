@@ -16946,6 +16946,16 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // JS `any`-origin operands (the checked-dynamic declaration story):
       // each operator runs its OWN specified conversion on the dyn side —
       // ToNumber for arithmetic and the bitwise six, ToPrimitive plus the
+        }
+        // dyn vs a FUNCTION value (`rec.parse === parseInt`, `handlers[0] === fn`):
+        // the closure boxes by reference and the runtime compares a function box
+        // by the CLOSURE it carries (scr_dyn_strict_eq), so one function is one
+        // value on either side of the boundary.
+        if (
+          dynSide.type.kind === "dyn" && scalarSide.type.kind === "func" &&
+          canBoxFuncIntoDyn(scalarSide.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+        ) {
+          scalarSide = { kind: "dynFrom", value: scalarSide, type: DYN, loc: scalarSide.loc };
       // string test for `+` and for ordering — instead of a checked cast
       // to number. The cast was a guess everywhere except when the value
       // already WAS a number: `'3' - 1`, `x | 0` over an unset field,
