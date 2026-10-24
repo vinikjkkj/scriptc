@@ -7638,7 +7638,10 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               if (cjsMemberOnlyInFunctions(L, memberSym)) {
                 const loc = locOf(expr);
                 const bag = cjsExportsBagOf(L, cjsSf);
-                const value = L.lowerExprExpecting(expr.right, DYN);
+                // The bag holds dyn values: a closure or a primitive is boxed
+                // at the store (iconv-lite's `encodeStream = function ...`).
+                const lowered = L.lowerExprExpecting(expr.right, DYN);
+                const value = lowered.type.kind === "dyn" ? lowered : L.coerceInto(expr.right, lowered, DYN);
                 if (value.type.kind === "dyn") {
                   const bagRef = (): IrExpr => ({ kind: "varRef", localId: bag, type: DYN, loc });
                   return {
