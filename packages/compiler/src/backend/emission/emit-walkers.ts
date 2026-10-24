@@ -12,7 +12,7 @@ import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorCla
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
-import { dynClassDisplayName, dynMemberRows } from "../dyn-members.js";
+import { dynClassDisplayName, dynMemberRows, dynMemberTable } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -90,6 +90,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     // carries `NULL, 0` and behaves exactly as it did before the table
     // existed.
     const members = dynClassMembers(E, className, meta);
+    const opaque = dynMemberTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id)).opaque;
     // A static const with internal linkage, beside the walker prototypes:
     // emitStructDefs has already declared the `_v` thunks by then, and the
     // converters that take its address are emitted after.
@@ -99,7 +100,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${meta.pre}, ${meta.post}, ${meta.hierarchy ? "true" : "false"}, ` +
         `&${rc.retain}, &${rc.release}, ` +
         `${members === null ? "NULL, 0" : `${members.sym}, ${members.count}`}, ` +
-        `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? "true" : "false"} }; ` +
+        `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? "true" : "false"}, ${opaque ? "true" : "false"} }; ` +
         `/* dyn box: class ${className} */`,
     );
     // A base-typed box can hold a DERIVED instance, and the registry resolves
@@ -1825,8 +1826,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     // shape that behaves exactly as it did.
     d.push(`    { ScrDyn *cm = scr_dyn_objinst_member_get(d, k);`);
     d.push(`      if (cm != NULL || scr_exc_pending()) return cm; }`);
-    d.push(`    scr_dyn_objinst_fence(d, "a property read");`);
-    d.push(`    return NULL;`);
+    d.push(`    /* The miss: an Object.prototype method, \`undefined\` for a class`);
+    d.push(`     * whose member set is fully known, the loud ladder otherwise`);
+    d.push(`     * (scr_dyn_objinst_miss). */`);
+    d.push(`    return scr_dyn_objinst_miss(d, k);`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_MAP) {`);
     d.push(`    /* A Map's entries are internal slots and its size/get/has/add`);

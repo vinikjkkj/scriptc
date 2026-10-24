@@ -1373,6 +1373,43 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
   return scr_dyn_new_func(&w->clo, objinst_method_thunk, 0, "()", cm->name);
 }
 
+/* The tail of a boxed class instance's keyed READ, after %props and the
+ * member table both missed. The instance has the members its class
+ * declares and what Object.prototype gives every object; a name in neither
+ * is a property Node reads as `undefined`, which is what this answers --
+ * the loud ladder it replaces was a throw for a read no JavaScript program
+ * considers an error (`if (x.cache)`, `x.stack || x.message`, a `missing`
+ * probe through an untyped parameter).
+ *
+ * "In neither" is only knowable when the class's member set is KNOWN, and
+ * the descriptor says when it is not: `opaque` marks a class whose table
+ * skipped a member (no dyn form for its type) or that roots in a runtime
+ * builtin whose members the table does not carry. For those the miss could
+ * be a real member, so the old fence stays -- the one answer that is never
+ * wrong. +1, or NULL with the exception pending. */
+ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
+  if (dyn_objproto_knows(key->data)) {
+    /* Object.prototype's own methods read as functions, bound over the same
+     * dispatch a call takes (the member-method rule above). */
+    ScrClosure *clo = scr_closure_new((void *)dyn_bound_intrinsic_thunk, 2);
+    clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+    scr_box_set_ref(clo->caps[0], scr_dyn_retain(d));
+    clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+    ScrDyn *nameBox = scr_dyn_new_str((ScrStr *)key);
+    scr_box_set_ref(clo->caps[1], nameBox);
+    return scr_dyn_new_func(clo, dyn_bound_intrinsic_thunk, 0, "()", "bound");
+  }
+  /* `constructor` is a member EVERY instance has (its class value), which no
+   * table lists, so a miss cannot be called absent: the class value has no
+   * dyn representation yet, and answering undefined would be the silent
+   * wrong answer. The loud ladder stays for exactly this name. */
+  if (scr_dyn_objinst_class_of(d)->opaque || (key->len == 11 && memcmp(key->data, "constructor", 11) == 0)) {
+    scr_dyn_objinst_fence(d, "a property read");
+    return NULL;
+  }
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
 /* Array.prototype.push/pop/shift/unshift run as the SPEC's generic algorithm
  * over the proxy (this = the proxy), so every [[Get]]/[[Set]]/[[Has]]/
  * [[Delete]] they make is observable through the traps, in the spec's order.

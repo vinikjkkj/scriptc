@@ -89,6 +89,26 @@ export function dynMemberRows(
   getRecord: (id: string) => IrRecordShape | undefined,
   getUnion: (id: string) => IrUnionDef | undefined,
 ): DynMemberRow[] {
+  return dynMemberTable(cls, fnByName, getRecord, getUnion).rows;
+}
+
+/** The rows, plus whether the table is the class's WHOLE member set.
+ *
+ * `opaque` is true when some member the class has is NOT a row: a field or
+ * method this table skipped (no dyn form for its type, an async or
+ * generator body, a pruned implementation), or a chain that roots in a
+ * runtime builtin whose members the table does not carry. It rides the
+ * descriptor, and it is what lets a keyed read that misses the table answer
+ * `undefined` (Node's answer for an absent property) exactly when no
+ * skipped member could be the one asked for: `opaque` classes keep the loud
+ * ladder instead. One computation for both lanes, like the rows. */
+export function dynMemberTable(
+  cls: DynMemberClass,
+  fnByName: ReadonlyMap<string, IrFunction>,
+  getRecord: (id: string) => IrRecordShape | undefined,
+  getUnion: (id: string) => IrUnionDef | undefined,
+): { rows: DynMemberRow[]; opaque: boolean } {
+  let opaque = false;
   // A class whose chain reaches a RUNTIME-PROVIDED base gets no table at
   // all, and this one is not a scruple -- it is a regression caught by a
   // probe, written down.
@@ -114,10 +134,10 @@ export function dynMemberRows(
   // PRE-EXISTING behaviour, unchanged, and a narrower gap than the one
   // this whole change closes.
   for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
-    if (c.def.runtime === true) return [];
-    if (RUNTIME_ERROR_CLASSES.has(c.def.name)) return [];
-    if (RUNTIME_STREAM_CLASSES.has(c.def.name)) return [];
-    if (c.def.name === RUNTIME_EMITTER_CLASS) return [];
+    if (c.def.runtime === true) return { rows: [], opaque: true };
+    if (RUNTIME_ERROR_CLASSES.has(c.def.name)) return { rows: [], opaque: true };
+    if (RUNTIME_STREAM_CLASSES.has(c.def.name)) return { rows: [], opaque: true };
+    if (c.def.name === RUNTIME_EMITTER_CLASS) return { rows: [], opaque: true };
   }
   const rows: DynMemberRow[] = [];
   const seen = new Set<string>();
@@ -155,7 +175,10 @@ export function dynMemberRows(
     // A field whose type has no dyn representation at all keeps the
     // fence. Fabricating `undefined` for it would be the silent wrong
     // answer the fence exists to refuse.
-    if (!canConvertToDyn(f.type, getRecord, getUnion)) continue;
+    if (!canConvertToDyn(f.type, getRecord, getUnion)) {
+      opaque = true;
+      continue;
+    }
     seen.add(f.name);
     rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true });
     pushShadows(f.name);
@@ -190,33 +213,51 @@ export function dynMemberRows(
     // own question with its own fence, and half-answering it here would
     // make a setter run for a read.
     if (raw.startsWith("set:")) continue;
+    // A #private method is no property of the instance (its name is not a
+    // string key any program can read), so it can neither be a row nor make
+    // the table incomplete.
+    if (raw.startsWith("#")) continue;
     const accessor = raw.startsWith("get:");
     const name = accessor ? raw.slice(4) : raw;
     // A field of the same name already answers (a class cannot declare
     // both, but a base field and a derived accessor can collide).
     if (seen.has(name)) continue;
     const fn = implOf(raw);
-    if (fn === null) continue;
+    if (fn === null) {
+      opaque = true;
+      continue;
+    }
     // An async or generator method answers a ScrPromise/ScrGen, which is
     // not a dyn value. Skipped rather than mis-boxed: claiming otherwise
     // is exactly the silent wrong answer this table exists to remove.
-    if (fn.async === true || fn.generator !== undefined) continue;
+    if (fn.async === true || fn.generator !== undefined) {
+      opaque = true;
+      continue;
+    }
     // No receiver parameter: not an instance method (a static rides its
     // own unit name and never reaches here, but the shape is checked
     // rather than assumed — the emitter GEPs through this).
-    if (fn.params.length === 0) continue;
-    if (fn.params[0]!.type.kind !== "object") continue;
+    if (fn.params.length === 0 || fn.params[0]!.type.kind !== "object") {
+      opaque = true;
+      continue;
+    }
     // Every parameter beyond the receiver must be reachable OUT of a dyn
     // argument, and the result must be boxable back INTO one.
     const rest = fn.params.slice(1);
-    if (rest.some((p) => p.type.kind !== "dyn" && !canDynCheckTo(p.type, getRecord, getUnion))) continue;
+    if (rest.some((p) => p.type.kind !== "dyn" && !canDynCheckTo(p.type, getRecord, getUnion))) {
+      opaque = true;
+      continue;
+    }
     const ret = fn.returnType;
-    if (ret.kind !== "void" && ret.kind !== "dyn" && !canConvertToDyn(ret, getRecord, getUnion)) continue;
+    if (ret.kind !== "void" && ret.kind !== "dyn" && !canConvertToDyn(ret, getRecord, getUnion)) {
+      opaque = true;
+      continue;
+    }
     seen.add(name);
     rows.push(accessor ? { kind: "accessor", name, fn } : { kind: "method", name, fn });
   }
 
-  return rows;
+  return { rows, opaque };
 }
 
 /** The DISPLAY NAME a `ScrDynClass` descriptor carries: the string every

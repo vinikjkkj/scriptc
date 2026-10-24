@@ -4027,9 +4027,13 @@ export class LlDyn {
         B.terminate(`ret ptr null`);
         B.startBlock(lGo);
       }
-      host.declare(`declare zeroext i1 @scr_dyn_objinst_fence(ptr, ptr)`);
-      B.line(`call zeroext i1 @scr_dyn_objinst_fence(ptr %d, ptr ${host.cstr("a property read")})`);
-      B.terminate(`ret ptr null`);
+      // The miss (scr_dyn_objinst_miss): an Object.prototype method,
+      // undefined for a class whose member set is fully known, the loud
+      // ladder for an opaque one. The C lane's arm.
+      host.declare(`declare ptr @scr_dyn_objinst_miss(ptr, ptr)`);
+      const missv = B.tmp();
+      B.line(`${missv} = call ptr @scr_dyn_objinst_miss(ptr %d, ptr %k)`);
+      B.terminate(`ret ptr ${missv}`);
       B.startBlock(lNext);
     }
     // MAP: a Map's entries are internal slots and its size/get/has/add

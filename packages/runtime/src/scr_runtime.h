@@ -4605,6 +4605,12 @@ typedef struct ScrDynClass {
    * run-time table first, then the member table, then fences, so it is
    * complete for every key. Only enumeration is not. */
   bool props;
+  /* The member table does not name EVERY member the class has (a member
+   * whose type has no dyn form was skipped, or the chain roots in a runtime
+   * builtin whose members the table does not carry). A keyed read that
+   * misses the table is `undefined` only when this is false; true keeps the
+   * loud ladder, because the miss could be a member the table cannot name. */
+  bool opaque;
 } ScrDynClass;
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
@@ -6659,6 +6665,11 @@ ScrDyn *scr_dyn_shadow_method(const char *name);
  * invoke unit beside scr_dyn_intrinsic_method_get, which the emitted
  * read already calls. */
 ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key);
+/* The keyed read's tail after %props and the table both missed: an
+ * Object.prototype method as a bound function, `undefined` for a class whose
+ * member set is fully known, the loud ladder for an `opaque` one. +1, or
+ * NULL with the exception pending. */
+ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key);
 
 /* ── maps and sets in the checked-dynamic tree (SCR_DYN_MAP) ──────────
  * The static→dyn BOUNDARY constructor: wraps the SAME ScrMap, retained
