@@ -6162,10 +6162,34 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
         "'delete' of required record fields (a monomorphic shape cannot remove its slot — only optional fields delete, becoming the undefined arm)",
       );
     }
+    // `delete this.f` / `delete inst.f` of a declared field of a class instance whose
+    // type admits undefined: the record arm's rule on the class side — a class
+    // layout cannot remove a slot, and absence IS the undefined arm, so the
+    // observable answers (the read, `in`, own-key listings of the field) match
+    // Node's post-delete ones (divergence 60: delete and `= undefined` collapse).
+    // Constant keys only; a field whose type cannot hold undefined stays refused.
+    if (obj.type.kind === "object") {
+      const fieldName = ts.isPropertyAccessExpression(target)
+        ? target.name.text
+        : ts.isStringLiteral(target.argumentExpression)
+          ? target.argumentExpression.text
+          : null;
+      const info = L.classes.get(obj.type.className);
+      const ftype = info !== undefined && fieldName !== null ? info.fields.get(fieldName) : undefined;
+      if (ftype !== undefined && fieldName !== null) {
+        const absent = L.wrappedUndefined(ftype, loc);
+        if (absent) {
+          return {
+            pre: [{ kind: "fieldSet", obj, className: obj.type.className, field: fieldName, value: absent, loc }],
+            result: yes,
+          };
+        }
+      }
+    }
     L.unsupported(
       "SC1090",
       expr,
-      `'delete' on '${L.fmt(obj.type)}' receivers (process.env keys, checked-dynamic receivers and pure Record<string, T> keys delete)`,
+      `'delete' on '${L.fmt(obj.type)}' receivers (process.env keys, checked-dynamic receivers, pure Record<string, T> keys and class fields that admit undefined delete)`,
     );
   }
 
