@@ -674,6 +674,73 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
    * explicitly-passed `undefined` wraps to — both trigger a default, JS-
    * exact); a rest param packs the surplus args (possibly zero) into one
    * array literal, evaluated in source order at the call site. */
+  /** TUPLE SPREADS (argfx4). A spread of a fixed-length TUPLE is expanded
+   * into one source per element before the arguments are completed, so a
+   * tuple spread may sit anywhere in the list and may fill fixed parameters
+   * and a rest parameter alike: JS hands the tuple's elements to positions
+   * one each. The tuple is evaluated ONCE, into a hidden local, inside the
+   * first element's read (that read runs before the others, which read the
+   * local). A tuple element past the last parameter is dropped by the caller
+   * (its effect, the store, is kept there). A dyn or island rest keeps the
+   * spread as it was: those lanes pack their own spread sources. */
+  function flattenTupleSpreads(L: Lowerer, restShape: ParamShape | undefined,
+    sources: readonly (ts.Expression | { ir: IrExpr; tupleElem?: true })[],
+  ): (ts.Expression | { ir: IrExpr; tupleElem?: true })[] {
+    if (restShape !== undefined && (restShape.mode === "dynRest" || restShape.mode === "islandRest" || restShape.type.kind === "dyn" || restShape.type.kind === "jsval")) {
+      return [...sources];
+    }
+    const out: (ts.Expression | { ir: IrExpr; tupleElem?: true })[] = [];
+    for (const s of sources) {
+      if (!("kind" in s) || !ts.isSpreadElement(s)) {
+        out.push(s);
+        continue;
+      }
+      const mt = L.mapTypeOf(L.typeOf(s.expression));
+      const declared = mt?.kind === "record" ? L.shapes.get(mt.shapeId) : undefined;
+      if (!declared?.tuple) {
+        out.push(s);
+        continue;
+      }
+      const src = L.lowerExpr(s.expression);
+      const srcShape = src.type.kind === "record" ? L.shapes.get(src.type.shapeId) : undefined;
+      if (src.type.kind !== "array" && (src.type.kind !== "record" || !srcShape?.tuple)) {
+        L.unsupported("SC1090", s, `spreading '${L.fmt(src.type)}' into a call (only an array or a tuple spreads)`);
+      }
+      if (declared.fields.length === 0) {
+        if (!isTrivialValue(src)) L.unsupported("SC1090", s, "an effectful spread of an empty tuple");
+        continue;
+      }
+      const held = L.declareHiddenLocal("%spread", src.type);
+      const heldRef: IrExpr = { kind: "varRef", localId: held.id, type: src.type, loc: locOf(s) };
+      for (let k = 0; k < declared.fields.length; k++) {
+        let value: IrExpr;
+        if (src.type.kind === "array") {
+          // A tuple-typed value that lowered as an array (a variable of a
+          // tuple type): its length is the tuple's, so element k is read.
+          value = {
+            kind: "arrayGet", arr: heldRef, index: { kind: "numLit", value: k, type: F64, loc: locOf(s) },
+            type: src.type.elem, loc: locOf(s),
+          };
+        } else {
+          const field = srcShape!.fields.find((f) => f.name === String(k));
+          if (!field) L.unsupported("SC1090", s, "this call form");
+          value = { kind: "recordGet", obj: heldRef, shapeId: src.type.shapeId, field: String(k), type: field!.type, loc: locOf(s) };
+        }
+        if (k === 0) {
+          value = {
+            kind: "seqExpr",
+            stmts: [{ kind: "varDecl", localId: held.id, init: src, loc: locOf(s) }],
+            result: value,
+            type: value.type,
+            loc: locOf(s),
+          };
+        }
+        out.push({ ir: value, tupleElem: true });
+      }
+    }
+    return out;
+  }
+
   export function completeArgs(L: Lowerer, argNodes: readonly ts.Expression[],
     shapes: readonly ParamShape[],
     loc: SrcLoc,
@@ -684,12 +751,12 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
      * coercion an ordinary argument gets (coerceInto against its shape,
      * DYN conversion in a dyn rest, element coercion in a typed rest). */
     leading?: readonly IrExpr[],): IrExpr[] {
-    type ArgSource = ts.Expression | { ir: IrExpr };
-    const isIr = (s: ArgSource | undefined): s is { ir: IrExpr } =>
+    type ArgSource = ts.Expression | { ir: IrExpr; tupleElem?: true };
+    const isIr = (s: ArgSource | undefined): s is { ir: IrExpr; tupleElem?: true } =>
       s !== undefined && !("kind" in s);
-    const sources: readonly ArgSource[] =
-      leading && leading.length > 0 ? [...leading.map((ir) => ({ ir })), ...argNodes] : argNodes;
     const restAt = shapes.findIndex((s) => s.mode === "rest" || s.mode === "dynRest" || s.mode === "islandRest");
+    const sources: readonly ArgSource[] = flattenTupleSpreads(L, restAt >= 0 ? shapes[restAt] : undefined,
+      leading && leading.length > 0 ? [...leading.map((ir) => ({ ir })), ...argNodes] : argNodes);
     const positional = restAt >= 0 ? shapes.slice(0, restAt) : [...shapes];
     // SPREAD INTO FIXED PARAMETERS (`f(a, ...xs)`: the callee has no rest
     // parameter and the spread is the last argument). JS hands the spread's
@@ -915,6 +982,13 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
       const surplus: IrStmt[] = [];
       for (let i = positional.length; i < sources.length; i++) {
         const a = sources[i]!;
+        // A tuple element past the last parameter is dropped, but its read
+        // may carry the spread's hidden-local store (the first element does):
+        // that store is kept as an effect.
+        if (isIr(a) && a.tupleElem === true) {
+          if (!isTrivialValue(a.ir)) surplus.push({ kind: "exprStmt", expr: a.ir, loc: a.ir.loc });
+          continue;
+        }
         if (isIr(a)) continue; // pre-lowered leading values are effect-free
         if (ts.isSpreadElement(a)) {
           L.unsupported(
