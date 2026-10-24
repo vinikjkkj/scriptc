@@ -21,10 +21,12 @@
  * proves no other type can reach it:
  *   - it is an annotated container (any contextual type: JSDoc, typed
  *     parameter, typed return) -- the author's own claim, kept as before;
- *   - its element types are not all scalars (string, number, boolean). A
- *     record or an array crosses into a dyn box by COPY, so a dyn box would
- *     lose the identity the typed box keeps; that is a worse wrong answer
- *     than the one being fixed, and it is reported as open, not hidden;
+ *   - its KEY type is not scalar (a record key has no value identity). VALUE
+ *     types may be objects: a literal-initialised binding handed to a dyn
+ *     container becomes the dyn value itself (mapany's identity aliasing),
+ *     and a record that cannot be aliased is refused, not copied. ARRAY values
+ *     stay typed: an array bound to a name and used as a seed entry is copied
+ *     into a dyn box (OPEN);
  *   - it is `const NAME = new Map(seed)` and EVERY reference to NAME is a
  *     member operation whose arguments have exactly the inferred types, a
  *     for-of subject, a spread, a typeof, an equality, a call to a stdlib
@@ -55,7 +57,7 @@ const FLAVORS = new Set(["Map", "Set", "WeakMap", "WeakSet"]);
 const MAP_READ = new Set(["get", "has", "delete"]);
 const ITER_MEMBERS = new Set(["keys", "values", "entries", "clear"]);
 
-type Scalar = "s" | "n" | "b";
+type Scalar = string;
 
 function scalarKinds(t: ts.Type): Set<Scalar> | null {
   const out = new Set<Scalar>();
@@ -63,6 +65,30 @@ function scalarKinds(t: ts.Type): Set<Scalar> | null {
     if ((c.flags & ts.TypeFlags.StringLike) !== 0) out.add("s");
     else if ((c.flags & ts.TypeFlags.NumberLike) !== 0) out.add("n");
     else if ((c.flags & ts.TypeFlags.BooleanLike) !== 0) out.add("b");
+    else return null;
+  }
+  return out.size === 0 ? null : out;
+}
+
+/** Kinds of a VALUE slot: the scalars, plus each object type (record, array,
+ * class instance) under its printed name. An object value stays identical
+ * across a dyn box now that a literal-initialised binding handed to a
+ * container becomes the dyn value itself (mapany's identity aliasing), and a
+ * record that cannot be aliased is refused rather than copied. */
+function valueKinds(t: ts.Type, c: Ctx): Set<Scalar> | null {
+  const out = new Set<Scalar>();
+  for (const part of t.isUnionType() ? ts.constituentTypes(t) : [t]) {
+    if ((part.flags & ts.TypeFlags.StringLike) !== 0) out.add("s");
+    else if ((part.flags & ts.TypeFlags.NumberLike) !== 0) out.add("n");
+    else if ((part.flags & ts.TypeFlags.BooleanLike) !== 0) out.add("b");
+    else if ((part.flags & ts.TypeFlags.Object) !== 0) {
+      // ARRAYS stay out: an array bound to a name and used as a SEED entry is
+      // copied into the dyn box (aliasing covers set/add arguments, not seed
+      // entries), where the typed box keeps the reference.
+      const name = part.getSymbol()?.name;
+      if (name === "Array" || name === "ReadonlyArray") return null;
+      out.add(`o:${c.checker.typeToString(part)}`);
+    }
     else return null;
   }
   return out.size === 0 ? null : out;
@@ -106,7 +132,7 @@ type RefVerdict = "ok" | "typed-sink" | "escape";
 
 function kindsSubset(arg: ts.Expression, allowed: Set<Scalar>, c: Ctx): boolean {
   const t = c.checker.getBaseTypeOfLiteralType(c.checker.getTypeAtLocation(arg));
-  const k = scalarKinds(t);
+  const k = valueKinds(t, c);
   if (k === null) return false;
   for (const x of k) if (!allowed.has(x)) return false;
   return true;
@@ -367,19 +393,19 @@ function decide(site: ts.NewExpression, c: Ctx): SeedPin | null {
     const annotated = target !== undefined && c.checker.declarationsOf(target).some(hasTypeJsdocOnOwner);
     if (annotated) return null;
   }
-  // Scalar element types only (see the header: a record or array crosses a
-  // dyn box by copy).
+  // Keys are scalar (a record key has no value identity to hash); values may
+  // be objects (valueKinds).
   let keyKinds: Set<Scalar> | null = null;
   let valKinds: Set<Scalar> | null = null;
   if (name === "Map") {
     keyKinds = scalarKinds(targs[0]!);
-    valKinds = scalarKinds(targs[1]!);
+    valKinds = valueKinds(targs[1]!, c);
     if (keyKinds === null || valKinds === null) return null;
   } else if (name === "Set") {
-    valKinds = scalarKinds(targs[0]!);
+    valKinds = valueKinds(targs[0]!, c);
     if (valKinds === null) return null;
   } else if (name === "WeakMap") {
-    valKinds = scalarKinds(targs[1]!);
+    valKinds = valueKinds(targs[1]!, c);
     if (valKinds === null) return null;
   }
   // A weak container keys by object identity. Only a CLASS INSTANCE key keeps
