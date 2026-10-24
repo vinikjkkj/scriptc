@@ -691,6 +691,71 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
       leading && leading.length > 0 ? [...leading.map((ir) => ({ ir })), ...argNodes] : argNodes;
     const restAt = shapes.findIndex((s) => s.mode === "rest" || s.mode === "dynRest" || s.mode === "islandRest");
     const positional = restAt >= 0 ? shapes.slice(0, restAt) : [...shapes];
+    // SPREAD INTO FIXED PARAMETERS (`f(a, ...xs)`: the callee has no rest
+    // parameter and the spread is the last argument). JS hands the spread's
+    // elements to the positions one each: position k takes element k when
+    // there is one and undefined otherwise, and the elements past the last
+    // position are evaluated (the spread is) and dropped. The spread source
+    // is evaluated ONCE, into a hidden local, inside the first spread-derived
+    // argument, which is the argument that follows the positional ones; the
+    // call is parked (possibly with no effects) so bindCallEffects binds every
+    // operand in source order before the call runs.
+    const spreadAt = sources.findIndex((s) => !isIr(s) && ts.isSpreadElement(s));
+    if (restAt < 0 && spreadAt >= 0) {
+      if (spreadAt !== sources.length - 1) {
+        L.unsupported("SC1090", blame, "a spread that is not the last argument into fixed parameter positions");
+      }
+      const spread = sources[spreadAt] as ts.SpreadElement;
+      const head: IrExpr[] = [];
+      for (let i = 0; i < Math.min(spreadAt, positional.length); i++) {
+        const src = sources[i]!;
+        head.push(isIr(src) ? L.coerceInto(blame, src.ir, positional[i]!.type) : L.lowerArgExpecting(src as ts.Expression, positional[i]!.type));
+      }
+      const effects: IrStmt[] = [];
+      for (let i = positional.length; i < spreadAt; i++) {
+        const a = sources[i]!;
+        if (isIr(a)) continue;
+        const effect = lowerSurplusArg(L, a as ts.Expression);
+        if (effect !== null) effects.push(effect);
+      }
+      const filled = positional.slice(spreadAt);
+      const src = L.lowerExpr(spread.expression);
+      if (filled.length === 0) {
+        // Every parameter is already filled: the spread only evaluates.
+        if (!isTrivialValue(src)) effects.push({ kind: "exprStmt", expr: src, loc: locOf(spread) });
+        L.surplusEffects.set(blame, effects);
+        return head;
+      }
+      const tupleShape = src.type.kind === "record" ? L.shapes.get(src.type.shapeId) : undefined;
+      if (src.type.kind !== "array" && !(tupleShape?.tuple)) {
+        L.unsupported("SC1090", spread, `spreading '${L.fmt(src.type)}' into fixed parameter positions (only an array or a tuple spreads)`);
+      }
+      const held = L.declareHiddenLocal("%spread", src.type);
+      const heldRef: IrExpr = { kind: "varRef", localId: held.id, type: src.type, loc: locOf(spread) };
+      const tail = filled.map((shape, k): IrExpr => {
+        let value: IrExpr;
+        if (src.type.kind === "array") {
+          const elem: IrExpr = { kind: "arrayGet", arr: heldRef, index: { kind: "numLit", value: k, type: F64, loc: locOf(spread) }, type: src.type.elem, loc: locOf(spread) };
+          const present: IrExpr = {
+            kind: "bin", op: ">",
+            left: { kind: "arrIntrinsic", method: "length", receiver: heldRef, args: [], type: F64, loc: locOf(spread) },
+            right: { kind: "numLit", value: k, type: F64, loc: locOf(spread) }, type: BOOL, loc: locOf(spread),
+          };
+          value = { kind: "ternary", cond: present, then: L.coerceInto(blame, elem, shape.type), else_: L.undefinedArgFor(shape.type, locOf(spread), blame), type: shape.type, loc: locOf(spread) };
+        } else {
+          const field = tupleShape!.fields.find((f) => f.name === String(k));
+          value = field
+            ? L.coerceInto(blame, { kind: "recordGet", obj: heldRef, shapeId: src.type.kind === "record" ? src.type.shapeId : "", field: String(k), type: field.type, loc: locOf(spread) }, shape.type)
+            : L.undefinedArgFor(shape.type, locOf(spread), blame);
+        }
+        if (k === 0) {
+          value = { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: held.id, init: src, loc: locOf(spread) }], result: value, type: value.type, loc: locOf(spread) };
+        }
+        return value;
+      });
+      L.surplusEffects.set(blame, effects);
+      return [...head, ...tail];
+    }
     const out: IrExpr[] = positional.map((shape, i) => {
       const src = sources[i];
       if (isIr(src)) return L.coerceInto(blame, src.ir, shape.type);
@@ -892,11 +957,15 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
    * plain read, a closure: dropping those is unobservable). */
   export function lowerSurplusArg(L: Lowerer, a: ts.Expression): IrStmt | null {
     const v = L.lowerExpr(a);
-    if (
-      v.kind === "unitLit" || v.kind === "numLit" || v.kind === "strLit" ||
-      v.kind === "boolLit" || v.kind === "varRef" || v.kind === "closure"
-    ) return null;
+    if (isTrivialValue(v)) return null;
     return { kind: "exprStmt", expr: v, loc: locOf(a) };
+  }
+
+  /** A lowered value whose evaluation has no effect: dropping it is
+   * unobservable (the surplus-argument drop list). */
+  function isTrivialValue(v: IrExpr): boolean {
+    return v.kind === "unitLit" || v.kind === "numLit" || v.kind === "strLit" ||
+      v.kind === "boolLit" || v.kind === "varRef" || v.kind === "closure";
   }
 
 /** SURPLUS EFFECTS. JS evaluates every argument left to right before the
