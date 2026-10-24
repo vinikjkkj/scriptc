@@ -15,7 +15,7 @@
 import * as ts from "./ts7/adapter.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "./shared.js";
 import { probeNodeRequireRefusal, probeRelativeRequireRefusal } from "./npm.js";
-import { isCjsJsFile, isJsSourceFile, requireSpecOf, resolveImport } from "./program.js";
+import { isCjsJsFile, isJsSourceFile, isNodeEsmFile, requireSpecOf, resolveImport } from "./program.js";
 
 /** What the analysis needs from its caller: the program, and how a require
  * written in `sf` resolves to a program module (null for a builtin, JSON, or
@@ -139,10 +139,16 @@ export function statementAlwaysThrowsOnRequire(ctx: RequireThrowCtx, stmt: ts.St
     }
   }
   if (init === undefined) return false;
-  const spec = requireSpecOf(init);
-  if (spec === null || canonicalBuiltinModule(spec) !== null) return false;
   const sf = stmt.getSourceFile();
   if (fileDeclaresRequire(sf)) return false;
+  // An ES module has no `require` binding: the callee read throws ReferenceError
+  // before the call's arguments are evaluated, whatever the specifier is, and
+  // nothing loads. Every later top-level statement is dead.
+  if (ts.isCallExpression(init) && ts.isIdentifier(init.expression) && init.expression.text === "require" && isNodeEsmFile(sf)) {
+    return true;
+  }
+  const spec = requireSpecOf(init);
+  if (spec === null || canonicalBuiltinModule(spec) !== null) return false;
   if (!isRelativeSpecifier(spec) && probeNodeRequireRefusal(sf.fileName, spec) !== null) return true;
   if (relativeRequireRefusal(ctx, sf, spec) !== null) return true;
   const dep = ctx.depOf(sf, spec);

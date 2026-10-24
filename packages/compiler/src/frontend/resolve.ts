@@ -510,6 +510,17 @@ export function nearestPkgJsonPath(fromFile: string): string | null {
   return dir === null ? null : tsgoPath(join(dir, "package.json"));
 }
 
+/** The "type" field of the nearest package.json above `file` ("module",
+ * "commonjs", any other string), or null when there is no package.json or it
+ * names no type. Node's .js format rule reads this and nothing else (a .cjs or
+ * .mjs name overrides it). */
+export function nearestPackageTypeOf(file: string): string | null {
+  const dir = nearestPkgDir(dirname(resolve(file)));
+  if (dir === null) return null;
+  const type = (pkgJsonOf(dir) as { type?: unknown } | null)?.type;
+  return typeof type === "string" ? type : null;
+}
+
 /** True when `file` is CommonJS by Node's rule — `.cjs`, or a `.js` whose
  * package scope is not "type": "module" — so every bare edge it spells is a
  * require() and takes the "require" export condition. TypeScript sources are
