@@ -11765,15 +11765,35 @@ function dynAnyContainer(
   if (!isJsSourceFile(expr.getSourceFile())) return null;
   const args = expr.arguments ?? [];
   if (args.length > 1 || args.some(ts.isSpreadElement)) return null;
+  const targs = L.checker.getTypeArguments(tsType as ts.TypeReference);
   if (!forced) {
-    const targs = L.checker.getTypeArguments(tsType as ts.TypeReference);
     if (targs.length !== (flavor === "map" ? 2 : 1)) return null;
-    if (!targs.every((t) => (t.flags & ts.TypeFlags.Any) !== 0)) return null;
+    // `any` everywhere, or ELEMENT types that are functions (a Set of the
+    // library's global functions, `new Set([setTimeout, clearTimeout])`, is a
+    // union of unmappable function types): identity is the closure, which the
+    // dyn box compares by (scr_dyn_strict_eq).
+    const isFnType = (t: ts.Type): boolean =>
+      (t.isUnionType() ? ts.constituentTypes(t) : [t]).every((c) => L.checker.getCallSignatures(c).length > 0);
+    if (!targs.every((t) => (t.flags & ts.TypeFlags.Any) !== 0 || isFnType(t))) return null;
   }
   // SCRIPTC_MAPBOX_WHY=1 counts the sites that take the dyn-flavored form.
   if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
     process.stderr.write(`[mapbox] dyn-flavored ${flavor} at ${loc.file}:${loc.start}\n`);
   }
-  const seed = args.length === 1 ? L.lowerExprExpecting(args[0]!, DYN) : undefined;
+  let seed: IrExpr | undefined;
+  const seedNode = args.length === 1 ? args[0]! : undefined;
+  if (
+    seedNode !== undefined && ts.isArrayLiteralExpression(seedNode) && targs.some((t) => (t.flags & ts.TypeFlags.Any) === 0) &&
+    seedNode.elements.every((e) => !ts.isSpreadElement(e) && !ts.isOmittedExpression(e))
+  ) {
+    // Function-typed elements: each is boxed on its own, not routed through the
+    // array literal's merged element type (a union of different function
+    // types is ONE adapted function type there, and the adapter is a fresh
+    // closure per element: `has(setTimeout)` would compare unequal).
+    const elems = seedNode.elements.map((e) => L.lowerExprExpecting(e, DYN));
+    seed = { kind: "dynArrLit", elems, type: DYN, loc };
+  } else if (seedNode !== undefined) {
+    seed = L.lowerExprExpecting(seedNode, DYN);
+  }
   return { kind: "dynMapNew", flavor, ...(seed !== undefined ? { seed } : {}), type: DYN, loc };
 }
