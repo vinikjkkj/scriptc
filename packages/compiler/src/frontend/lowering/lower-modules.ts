@@ -2405,6 +2405,17 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               ts.isIdentifier(decl.name) && nameNode === decl.name &&
               decl.initializer !== undefined && ts.isObjectLiteralExpression(decl.initializer) &&
               decl.initializer.properties.every((p) => {
+                // A METHOD is a function-valued member like `a: function () {}`
+                // (a dispatch table: `const makeSelector = { RR() {...} }`);
+                // lowering the literal boxes it, and a `this`/`super` body
+                // fences itself there.
+                // Only where the binding is annotated `any` (the dispatch-table
+                // desugar writes that): a method-bearing literal the author left
+                // typed keeps its static record.
+                if (
+                  ts.isMethodDeclaration(p) && p.body !== undefined && !ts.isComputedPropertyName(p.name) &&
+                  (L.typeOf(nameNode).flags & ts.TypeFlags.Any) !== 0
+                ) return true;
                 if (!ts.isPropertyAssignment(p) || ts.isComputedPropertyName(p.name)) return false;
                 const mt = L.mapTypeOf(L.typeOf(p.initializer));
                 return mt === null || mt.kind === "dyn" ||
