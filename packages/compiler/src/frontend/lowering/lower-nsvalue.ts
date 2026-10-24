@@ -47,14 +47,18 @@
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { nodeThrowExpr } from "./lowerer.js";
 import type { IrExpr } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 
-/** The two modules a registered selector picks between. */
+/** The two modules a registered selector picks between. `null` names the
+ * `null` ARM (`const fs = cond ? require('fs') : null`): Node's value there
+ * is null, so every member read through the binding throws Node's
+ * TypeError at the access, exactly as the selector's false branch does. */
 export interface NamespaceConditional {
-  /** The module the TRUE arm names. */
-  trueModule: string;
-  falseModule: string;
+  /** The module the TRUE arm names (null when the true arm is the null literal). */
+  trueModule: string | null;
+  falseModule: string | null;
 }
 
 const registry = new WeakMap<Lowerer, Map<ts.Symbol, NamespaceConditional>>();
@@ -92,15 +96,21 @@ function unwrap(e: ts.Expression): ts.Expression {
 }
 
 /** `cond ? nsA : nsB` over two DIFFERENT supported builtin module
- * namespaces — the shape this file exists for. Null for everything else
- * (the ordinary ternary lowering and its per-arm fences apply). */
+ * namespaces — the shape this file exists for — or over one module and the
+ * `null` literal (`cond ? require('fs') : null`, one arm null). Null for
+ * everything else (the ordinary ternary lowering and its per-arm fences
+ * apply). */
 export function namespaceConditionalArmsOf(
   L: Lowerer, expr: ts.ConditionalExpression,
 ): NamespaceConditional | null {
-  const t = L.builtinNamespaceModuleOf(unwrap(expr.whenTrue));
-  if (t === null) return null;
-  const f = L.builtinNamespaceModuleOf(unwrap(expr.whenFalse));
-  if (f === null || f === t) return null;
+  const isNullArm = (e: ts.Expression): boolean => unwrap(e).kind === ts.SyntaxKind.NullKeyword;
+  const t = isNullArm(expr.whenTrue) ? null : L.builtinNamespaceModuleOf(unwrap(expr.whenTrue));
+  const f = isNullArm(expr.whenFalse) ? null : L.builtinNamespaceModuleOf(unwrap(expr.whenFalse));
+  if (t === null && f === null) return null;
+  // One arm must name a module; the other is a module or the null literal.
+  if (t === null && !isNullArm(expr.whenTrue)) return null;
+  if (f === null && !isNullArm(expr.whenFalse)) return null;
+  if (t !== null && f === t) return null;
   return { trueModule: t, falseModule: f };
 }
 
@@ -212,8 +222,16 @@ export function lowerNamespaceConditionalCall(
       else map.set(sym, prev);
     }
   };
-  const then = armFor(reg.trueModule);
-  const else_ = armFor(reg.falseModule);
+  // One arm names a module (armFor), the other is the null literal: its
+  // access throws, typed as the module arm so the ternary joins.
+  const modName = reg.trueModule ?? reg.falseModule;
+  if (modName === null) {
+    L.noLowering("a module-namespace conditional with no module arm", access, "both arms are the null literal");
+  }
+  const modArm = armFor(modName);
+  const nullArm = nullArmAccess(L, call, access, modArm.type);
+  const then = reg.trueModule === null ? nullArm : modArm;
+  const else_ = reg.falseModule === null ? nullArm : modArm;
   if (L.fmt(then.type) !== L.fmt(else_.type)) {
     L.noLowering(
       `'${access.name.text}' through a module-namespace conditional whose arms answer different types`,
@@ -222,4 +240,14 @@ export function lowerNamespaceConditionalCall(
     );
   }
   return { kind: "ternary", cond: sel, then, else_, type: then.type, loc };
+}
+
+/** The null ARM of a `cond ? mod : null` selector, for one member call.
+ * Node reads the member off null: a TypeError at the access, naming the
+ * member. Typed as the module arm (`armType`) so the ternary joins. */
+function nullArmAccess(
+  L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression, armType: IrExpr["type"],
+): IrExpr {
+  const message = `Cannot read properties of null (reading '${access.name.text}')`;
+  return nodeThrowExpr(1, "", message, armType, locOf(call));
 }
