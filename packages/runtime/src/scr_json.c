@@ -8544,6 +8544,13 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
       return false;
     }
     return a->v.handle.tag == b->v.handle.tag && a->v.handle.ptr == b->v.handle.ptr;
+  case SCR_DYN_ARR: {
+    /* Two crossings of ONE static array are two boxes of one JS value (a live
+     * array view, "live array views"): same origin, same array. */
+    if (a == b) return true;
+    void *oa = scr_dyn_origin_peek(a, NULL);
+    return oa != NULL && oa == scr_dyn_origin_peek(b, NULL);
+  }
   case SCR_DYN_PROMISE:
     /* And the PROMISE: one promise crossing twice is one JS value. */
     return a->v.promise == b->v.promise;

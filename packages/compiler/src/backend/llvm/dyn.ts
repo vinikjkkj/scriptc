@@ -4953,7 +4953,17 @@ export class LlDyn {
       const r = B.tmp();
       B.line(`${r} = call ${retTy} ${fn}(${callArgs})`);
       this.pendingBail(B, "dfkr", () => {}, "ptr null");
-      const out = this.toDynExpr(B, t.ret, r);
+      let out = this.toDynExpr(B, t.ret, r);
+      if (arrayTypeHasLiveView(t.ret)) {
+        // The C twin's note: a returned array stays one array with its other holders.
+        const { retain, release } = vAdapters(host, t.ret);
+        host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
+        const m = B.tmp();
+        B.line(
+          `${m} = call ptr @scr_dyn_origin_mark(ptr ${out}, ptr ${r}, ptr ${host.cstr(typeKey(t.ret))}, ptr ${retain}, ptr ${release})`,
+        );
+        out = m;
+      }
       if (isRefCounted(t.ret)) B.line(`call void ${releaseSym(host, t.ret)}(ptr ${r})`);
       B.terminate(`ret ptr ${out}`);
     }

@@ -3818,7 +3818,16 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     } else {
       d.push(`  ${cDecl(t.ret, "r")} = ${call};`);
       d.push(`  if (scr_exc_pending()) return NULL;`);
-      d.push(`  ScrDyn *out = ${toDynExprC(E, t.ret, "r")};`);
+      if (arrayTypeHasLiveView(t.ret)) {
+        // An array a boxed closure RETURNS is still the array its other holders
+        // name (`o.table()` handing back a module-level list): the dyn copy is a
+        // live view of it, as every other crossing of such an array.
+        const { retain, release } = vAdapters(t.ret);
+        const tk = cStringLiteral(Buffer.from(typeKey(t.ret), "utf8"));
+        d.push(`  ScrDyn *out = scr_dyn_origin_mark(${toDynExprC(E, t.ret, "r")}, (void *)r, ${tk}, ${retain}, ${release});`);
+      } else {
+        d.push(`  ScrDyn *out = ${toDynExprC(E, t.ret, "r")};`);
+      }
       if (isRefCounted(t.ret)) d.push(`  ${releaseCallC(t.ret, "r")};`);
       d.push(`  return out;`);
     }
