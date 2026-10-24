@@ -5221,6 +5221,7 @@ void scr_dyn_trace_v(void *o, ScrTraceVisit visit, void *ctx);
  * catchable Node-flavored SyntaxError string and returns NULL (callers are
  * compiler-emitted pending checks — json.parse is in the may-throw seed). */
 ScrDyn *scr_json_parse(ScrStr *text);
+ScrDyn *scr_json_parse_revive(ScrStr *text, ScrDyn *reviver);
 
 /* BORROWED member lookup on a SCR_DYN_OBJ; NULL when the key is absent.
  * OWN members only — the prototype chain is scr_dyn_proto_get's. */
