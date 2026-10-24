@@ -4293,3 +4293,57 @@ export function isCjsExportTableLiteral(obj: ts.ObjectLiteralExpression): boolea
   }
   return false;
 }
+
+/** `Object.defineProperty(exports, "K", { enumerable?, configurable?, get: F })`
+ * in a CommonJS module: the tsc re-export idiom, and the expansion of
+ * `exports.__defineGetter__("K", F)` (js-desugar). The export is an ACCESSOR:
+ * every read of `K` through the module calls F (Node's per-read evaluation),
+ * so the statement itself lowers to nothing and the read path lifts F
+ * (cjsExportAccessorRead). Returns the name and F, or null for any other
+ * shape: a setter, a value, computed keys, or a getter function expression
+ * whose body reads its own `this` (Node binds it to module.exports; that
+ * stays a fence). */
+export function cjsExportsGetterDefineOf(
+  e: ts.Node,
+): { name: string; getter: ts.ArrowFunction | ts.FunctionExpression } | null {
+  if (!ts.isCallExpression(e)) return null;
+  const callee = e.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.expression) ||
+    callee.expression.text !== "Object" || callee.name.text !== "defineProperty"
+  ) {
+    return null;
+  }
+  if (e.arguments.length !== 3) return null;
+  const [target, name, desc] = e.arguments as unknown as readonly [ts.Expression, ts.Expression, ts.Expression];
+  if (!ts.isIdentifier(target) || target.text !== "exports") return null;
+  if (!ts.isStringLiteral(name) || !ts.isObjectLiteralExpression(desc)) return null;
+  let getter: ts.ArrowFunction | ts.FunctionExpression | undefined;
+  for (const p of desc.properties) {
+    if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name)) return null;
+    let v: ts.Expression = p.initializer;
+    while (ts.isParenthesizedExpression(v)) v = v.expression;
+    if (p.name.text === "get") {
+      if (!ts.isArrowFunction(v) && !ts.isFunctionExpression(v)) return null;
+      getter = v;
+    } else if (p.name.text === "enumerable" || p.name.text === "configurable") {
+      if (v.kind !== ts.SyntaxKind.TrueKeyword && v.kind !== ts.SyntaxKind.FalseKeyword) return null;
+    } else {
+      return null;
+    }
+  }
+  if (getter === undefined) return null;
+  if (ts.isFunctionExpression(getter)) {
+    let usesThis = false;
+    const walk = (n: ts.Node): void => {
+      if (usesThis) return;
+      if (n.kind === ts.SyntaxKind.ThisKeyword) { usesThis = true; return; }
+      // Only arrows inherit the getter's receiver; any other function form rebinds it.
+      if (n !== getter && ts.isFunctionLike(n) && !ts.isArrowFunction(n)) return;
+      ts.forEachChild(n, walk);
+    };
+    walk(getter.body);
+    if (usesThis) return null;
+  }
+  return { name: name.text, getter };
+}

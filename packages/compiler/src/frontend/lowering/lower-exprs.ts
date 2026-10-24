@@ -17,7 +17,7 @@ import { builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGl
 import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
-import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
+import { cjsClassExprWholeExportOf, cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf, stdlibHandleObjectTypeOf, stdlibHandleTypeOfAnswersObject, stdlibHandleDeclaresMember } from "./surfaces.js";
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
@@ -18179,6 +18179,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * rare enough to keep fenced). */
   export function cjsExportAccessorRead(L: Lowerer, ident: ts.Identifier): IrExpr | null {
     const symbol = L.resolveValueSymbol(ident);
+    // `Object.defineProperty(exports, "K", { get })` declares the export
+    // through the call itself (its symbol's declaration): the read lifts the
+    // descriptor's getter, which is the same per-read call.
+    if (symbol) {
+      for (const d of L.checker.declarationsOf(symbol)) {
+        const def = ts.isCallExpression(d) ? cjsExportsGetterDefineOf(d) : null;
+        if (def !== null && isJsSourceFile(d.getSourceFile())) return cjsAccessorCall(L, def.getter, locOf(ident));
+      }
+    }
     const getter = symbol ? L.checker.declarationsOf(symbol).find(ts.isGetAccessorDeclaration) : undefined;
     if (!getter) return null;
     if (!ts.isObjectLiteralExpression(getter.parent) || !isCjsExportTableLiteral(getter.parent)) {
@@ -18188,7 +18197,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
   }
 
 /** The interned lifted-getter call both accessor-read paths share. */
-  function cjsAccessorCall(L: Lowerer, getter: ts.GetAccessorDeclaration, loc: SrcLoc): IrExpr | null {
+  function cjsAccessorCall(L: Lowerer, getter: ts.GetAccessorDeclaration | ts.ArrowFunction | ts.FunctionExpression, loc: SrcLoc): IrExpr | null {
     let fn = L.cjsAccessorFns.get(getter);
     if (!fn) {
       const closure = L.lowerLambda(getter);

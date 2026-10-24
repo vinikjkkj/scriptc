@@ -11,7 +11,7 @@ import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
-import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, resolveImport, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
+import { cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, resolveImport, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { requestInitWriteFence } from "./lower-fetch.js";
@@ -6957,6 +6957,11 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       // check. Every tsc-emitted dist file opens with it, and the generic
       // defineProperty fence would throw at module load.
       if (isEsModuleStamp(expr)) return { kind: "block", body: [], loc: locOf(expr) };
+      // An accessor export (`Object.defineProperty(exports, "K", { get })`,
+      // the tsc re-export idiom and the expansion of __defineGetter__): no
+      // storage and no code here. Every read of K lifts the getter
+      // (cjsExportAccessorRead), which is the per-read evaluation Node runs.
+      if (cjsExportsGetterDefineOf(expr) !== null) return { kind: "block", body: [], loc: locOf(expr) };
     }
     // Statement-position `delete` — the two honest receivers: process.env
     // keys (unsetenv(3) — later reads and spawned children observe the
