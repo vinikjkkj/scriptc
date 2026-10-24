@@ -27,6 +27,14 @@
 //     take the union arm, G takes the parameter, and case D takes the
 //     field, because the top-level coercion and the width-lift planner
 //     are two copies of the same rule and have drifted apart before.
+// THE PRINTED FORM IS THE PAYLOAD, NOT THE CHUNKING. The server writes "aa",
+// "bb" and "cc" ten milliseconds apart; TCP promises no segment boundaries, so
+// how many 'data' events the client sees depends on how fast it reads. Node
+// itself may coalesce them on a slow host. CI's sanitized LLVM lane failed
+// this program in 24 runs (2026-10-21..24); the logs truncate the diff, so
+// that the failures are chunk coalescing is INFERRED, not measured. Every case
+// still checks its payload; the chunk-by-chunk spelling is not a Node
+// guarantee, so it is no longer printed.
 import * as http from "node:http";
 import { Readable, Writable, pipeline } from "node:stream";
 
@@ -116,7 +124,7 @@ server.listen(0, () => {
           const parts: string[] = [];
           b2.on("data", (c: Uint8Array) => { parts.push(Buffer.from(c).toString()); });
           b2.on("end", () => {
-            console.log("B parts=" + parts.join("|") + " ended=" + String(b2.readableEnded));
+            console.log("B parts=" + parts.join("") + " ended=" + String(b2.readableEnded));
 
             // C. a 204: an empty body still ends
             get("/empty", (r3) => {
@@ -147,7 +155,7 @@ server.listen(0, () => {
                         },
                       });
                       w.on("close", () => {
-                        console.log("E piped=" + seen.join("|"));
+                        console.log("E piped=" + seen.join(""));
 
                         // F. 160 KB through the seam — backpressure
                         get("/big", (r6) => {
@@ -169,7 +177,7 @@ server.listen(0, () => {
                               });
                               pipeline(b7, w7, (err: Error | null) => {
                                 console.log("G err=" + (err ? err.message : "none") +
-                                  " out=" + out.join("|"));
+                                  " out=" + out.join(""));
 
                                 // I. `res.pipe(writable)` DIRECTLY -- the
                                 //    conversion happens under the pipe, so
@@ -205,7 +213,7 @@ function iCase(): void {
       },
     });
     w.on("close", () => {
-      console.log("I res.pipe=" + out.join("|"));
+      console.log("I res.pipe=" + out.join(""));
       jCase();
     });
     res.pipe(w);
@@ -225,7 +233,7 @@ function jCase(): void {
       },
     });
     pipeline(res as Readable, w, (err: Error | null) => {
-      console.log("J cast err=" + (err ? err.message : "none") + " out=" + out.join("|"));
+      console.log("J cast err=" + (err ? err.message : "none") + " out=" + out.join(""));
       hCase();
     });
   }).end();
