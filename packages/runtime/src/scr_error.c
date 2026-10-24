@@ -21,6 +21,11 @@ static void scr_error_oom(void) {
 
 static bool scr_error_traced = false;
 
+/* Error.stackTraceLimit — V8's default is 10. */
+static double scr_error_stack_limit = 10;
+double scr_error_stack_limit_get(void) { return scr_error_stack_limit; }
+void scr_error_stack_limit_set(double v) { scr_error_stack_limit = v; }
+
 void scr_error_set_traced(void) { scr_error_traced = true; }
 
 static const char *const scr_error_names[SCR_ERR_KINDS] = {

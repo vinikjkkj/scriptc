@@ -2694,6 +2694,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       {
         const ep = L.lowerErrorPrototypeProperty(expr);
         if (ep) return ep;
+        // `Error.stackTraceLimit` — the process-wide frame cap slot.
+        if (!L.dynamic && !expr.questionDotToken && L.stdlibGlobalMember(expr, "Error") === "stackTraceLimit") {
+          return { kind: "libCall", fn: "error.stackLimitGet", args: [], type: F64, loc: locOf(expr) };
+        }
         // `Uint8Array.prototype` — the same shape, and returned without
         // maybeNarrow for the same reason (tsc types it `Uint8Array`, and
         // a %bytes dynCheck would answer a COPY with no identity where

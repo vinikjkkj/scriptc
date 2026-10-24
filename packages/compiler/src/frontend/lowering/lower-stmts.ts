@@ -6963,6 +6963,17 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               };
             }
           }
+          // `Error.stackTraceLimit = n` — the process-wide frame cap (no frames are
+          // captured, so the slot only has to hold what the program stored).
+          if (!L.dynamic && !expr.left.questionDotToken && L.stdlibGlobalMember(expr.left, "Error") === "stackTraceLimit") {
+            const loc = locOf(expr);
+            const value = L.lowerExprExpecting(expr.right, F64);
+            return {
+              kind: "exprStmt",
+              expr: { kind: "libCall", fn: "error.stackLimitSet", args: [value], type: VOID, loc },
+              loc,
+            };
+          }
           // `process.exitCode = v` — Node's validating setter over the int32
           // slot (numbers, integer-valued numeric strings, null/undefined to
           // clear; anything else throws catchably at the assignment).

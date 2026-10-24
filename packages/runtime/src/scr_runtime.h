@@ -1116,6 +1116,10 @@ ScrStr *scr_error_to_string(ScrError *e);
 /* `e.stack` -- the header a zero-frame capture produces, MEMOISED at the
  * first read the way V8 memoises its formatted stack. +1. */
 ScrStr *scr_error_stack(ScrError *e);
+/* `Error.stackTraceLimit`: the process-wide slot (default 10, as in Node). No frames are
+ * captured, so it only has to hold what the program stored. */
+double scr_error_stack_limit_get(void);
+void scr_error_stack_limit_set(double v);
 /* Own expando properties on an error object (scr_json.c): both borrow every
  * argument. set stores a +1 copy of `value` (key "stack" with a string value
  * replaces the `.stack` memo instead); get answers +1, the dyn undefined for

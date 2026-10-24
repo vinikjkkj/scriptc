@@ -8152,6 +8152,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // `X.name` through a class value: the class object's stored
             // .name string (+1 — a no-op retain on the interned immortal).
             return finish(`scr_classobj_name(${arg(0)})`);
+          case "error.stackLimitGet":
+            return finish(`scr_error_stack_limit_get()`);
+          case "error.stackLimitSet":
+            return finish(`scr_error_stack_limit_set(${arg(0)})`);
           case "class.instanceName": {
             // `obj.constructor.name`: a hierarchy instance answers through its
             // vtable's stamped class name; a class outside every hierarchy has no

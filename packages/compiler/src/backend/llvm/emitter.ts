@@ -842,6 +842,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "error.propGet": "scr_error_prop_get",
   "class.name": "scr_classobj_name",
   "class.instanceName": "scr_object_ctor_name",
+  "error.stackLimitGet": "scr_error_stack_limit_get",
+  "error.stackLimitSet": "scr_error_stack_limit_set",
   // The dyn (ScrDyn dyn) surface (scr_json.c / scr_dyn_invoke.c):
   // json.parse throws the catchable SyntaxError; keySet/toString/
   // defineProps throw Node's TypeErrors (all in the may-throw seed set —

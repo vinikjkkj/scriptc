@@ -5200,6 +5200,12 @@ export type IrLibFn =
    * not in a hierarchy has no dynamic class to ask: the lowering folds that
    * to the class's name instead. */
   | "class.instanceName"
+  /** `Error.stackTraceLimit` (scr_error.c): the process-wide number V8 caps
+   * captured frames with. A compiled binary captures none, so the value only
+   * has to BE what the program stored — default 10, as in Node. The read answers
+   * the slot, the write replaces it; neither throws. */
+  | "error.stackLimitGet"
+  | "error.stackLimitSet"
   | "error.ctor"
   | "error.toString"
   /** `e.stack` (scr_error.c): borrowed `%Error`-rooted receiver, +1 the

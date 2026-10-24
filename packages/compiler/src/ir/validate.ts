@@ -1171,6 +1171,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // `obj.constructor.name` over a hierarchy instance (a null slot; the
   // libCall case checks the arg is a class instance).
   "class.instanceName": { argTypes: [null], result: STRING },
+  "error.stackLimitGet": { argTypes: [], result: F64 },
+  "error.stackLimitSet": { argTypes: [F64], result: VOID },
   "error.ctor": { argTypes: [null, STRING], result: VOID },
   "error.toString": { argTypes: [null], result: STRING },
   // The MEMOISING `.stack` reader. Same receiver rule as error.toString
