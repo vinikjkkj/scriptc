@@ -4679,9 +4679,21 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // the same one `u as bigint` emits, so a non-bigint arrives as the
       // usual path-annotated TypeError instead of a compile-time fence.
       // This is `long`'s fromBigInt, whose parameter JS leaves untyped.
-      const value: IrExpr = raw.type.kind === "dyn"
-        ? { kind: "dynCheck", value: raw, type: BIGINT, loc: raw.loc }
-        : raw;
+      // The value is ToBigInt'd, which is NOT the BigInt() function: a
+      // number is a TypeError ("Cannot convert 5 to a BigInt"), a string
+      // parses (SyntaxError when it is not an integer), a boolean is 0n/1n.
+      // So every non-bigint operand crosses as a dyn and big.toBigInt
+      // answers exactly (long's fromBigInt, called with a number by a
+      // dead branch, must throw Node's error, not fence the build).
+      let value: IrExpr = raw;
+      if (raw.type.kind !== "bigint") {
+        const boxed: IrExpr | null = raw.type.kind === "dyn"
+          ? raw
+          : canConvertToDyn(raw.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+            ? { kind: "dynFrom", value: raw, type: DYN, loc: raw.loc }
+            : null;
+        if (boxed !== null) value = { kind: "libCall", fn: "big.toBigInt", args: [boxed], type: BIGINT, loc: raw.loc };
+      }
       if (bits.type.kind === "f64" && value.type.kind === "bigint") {
         return {
           kind: "libCall",
