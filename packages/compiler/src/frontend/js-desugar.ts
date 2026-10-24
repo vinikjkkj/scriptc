@@ -1971,6 +1971,108 @@ function jsdocNullableParamEdits(fileName: string, text: string): string | null 
   return out + text.slice(at);
 }
 
+/* A DEFERRED `let` THAT IS ASSIGNED ONE `new` BEFORE ITS CLOSURES READ IT.
+ *
+ *     let handshakeCommand;
+ *     if (!this.config.isServer) {
+ *       handshakeCommand = new Commands.ClientHandshake(flags);
+ *       handshakeCommand.on('end', () => { ... handshakeCommand.handshake ... });
+ *     }
+ *
+ * tsc types a declaration without an initializer as `any` once a closure reads it, though every
+ * read happens after the one assignment. When the binding has exactly ONE write, that write is
+ * `v = new Callee(...)` as a statement of a block, and every other reference sits in a later
+ * statement of that same block (so each executes, or is created, after the assignment), the
+ * binding holds an instance of that class wherever it is read, and the declaration is annotated
+ * `/** @type {InstanceType<typeof Callee>} *\/` on the same line. Any other write, a read before
+ * or outside the assigning block, or a callee that is not a plain name chain leaves it alone. */
+const LET_NEW_PREFILTER = /\blet\s+[A-Za-z_$][\w$]*\s*;/;
+
+function deferredNewLetEdits(fileName: string, text: string): string | null {
+  if (!LET_NEW_PREFILTER.test(text) || !/\bnew\b/.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const chain = (e: ts.Expression): string | null => {
+    if (ts.isIdentifier(e)) return e.text;
+    if (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.name)) {
+      const l = chain(e.expression);
+      return l === null ? null : `${l}.${e.name.text}`;
+    }
+    return null;
+  };
+  const visit = (n: ts.Node): void => {
+    if (ts.isVariableStatement(n) && (n.declarationList.flags & ts.NodeFlags.Let) !== 0 && n.declarationList.declarations.length === 1) {
+      const d = n.declarationList.declarations[0]!;
+      if (ts.isIdentifier(d.name) && d.initializer === undefined && d.type === undefined && (ts.isBlock(n.parent) || ts.isSourceFile(n.parent))) {
+        const name = (d.name as ts.Identifier).text;
+        const scope = n.parent as ts.Block | ts.SourceFile;
+        // a JSDoc comment already on the statement means the author typed it
+        const lead = text.slice(Math.max(0, n.getFullStart()), n.getStart(sf));
+        if (!/\/\*\*/.test(lead)) {
+          let writes = 0;
+          let callee: string | null = null;
+          let assignStmt: ts.Statement | null = null;
+          let ok = true;
+          const refs: ts.Identifier[] = [];
+          const walk = (x: ts.Node): void => {
+            if (!ok) return;
+            if (ts.isIdentifier(x) && x.text === name && x !== d.name) {
+              const p = x.parent;
+              // a property name or shorthand with the same spelling is not a reference
+              if ((ts.isPropertyAccessExpression(p) && p.name === x) || (ts.isPropertyAssignment(p) && p.name === x) || (ts.isMethodDeclaration(p) && p.name === x)) return;
+              if (ts.isShorthandPropertyAssignment(p) || ts.isBindingElement(p)) { ok = false; return; }
+              if (ts.isBinaryExpression(p) && p.left === x && p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && p.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+                writes++;
+                const stmt = p.parent;
+                if (
+                  p.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isNewExpression(p.right) && ts.isExpressionStatement(stmt) &&
+                  ts.isBlock(stmt.parent) && stmt.expression === p
+                ) {
+                  callee = chain(p.right.expression);
+                  assignStmt = stmt;
+                } else ok = false;
+                return;
+              }
+              if (
+                (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) &&
+                (p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken)
+              ) { ok = false; return; }
+              if (ts.isForInStatement(p) || ts.isForOfStatement(p)) { if (p.initializer === x) ok = false; }
+              refs.push(x);
+              return;
+            }
+            ts.forEachChild(x, walk);
+          };
+          for (const st of scope.statements) if (st !== n) walk(st);
+          if (ok && writes === 1 && callee !== null && assignStmt !== null && !/^this\b/.test(callee)) {
+            const block = (assignStmt as ts.Statement).parent as ts.Block;
+            const after = (assignStmt as ts.Statement).end;
+            const inBlock = (r: ts.Node): boolean => {
+              for (let c: ts.Node | undefined = r; c !== undefined; c = c.parent) if (c === block) return true;
+              return false;
+            };
+            if (refs.length > 0 && refs.every((r) => r.getStart(sf) >= after && inBlock(r))) {
+              edits.push({ start: n.getStart(sf), end: n.getStart(sf), text: `/** @type {InstanceType<typeof ${callee}>} */ ` });
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    if (ed.start < at) continue;
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -1988,6 +2090,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const open = openRecordEdits(fileName, text);
     if (open !== null) return jsDesugar(fileName, open) ?? open;
+  }
+  {
+    const deferredNew = deferredNewLetEdits(fileName, text);
+    if (deferredNew !== null) return jsDesugar(fileName, deferredNew) ?? deferredNew;
   }
   {
     const nullable = jsdocNullableParamEdits(fileName, text);
