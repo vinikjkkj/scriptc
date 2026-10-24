@@ -12829,6 +12829,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/helpers.cjs",
+    "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8920-join-loop-built-string-array-under-dynamic.js": {
    "order": [
     "<repo>/tests/corpus/8920-join-loop-built-string-array-under-dynamic.js"
