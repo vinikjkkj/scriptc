@@ -436,6 +436,18 @@ export interface GenericInstance {
       }
       return { type: abi, mode: "omittable", bodyType };
     }
+    // An UNANNOTATED parameter of a JavaScript function expression whose
+    // contextual signature types it `never` (`setImmediate((a, b) => ..., x, y)`
+    // against the overload `(...args: never[]) => void`): `never` here says "any
+    // argument the caller supplies", not "uninhabited". It maps to number (the
+    // expression-level never), and every call then threw "expected number" at
+    // run time. It is the checked-dynamic slot like every implicit-any parameter.
+    if (
+      isJsSourceFile(param.getSourceFile()) && param.type === undefined && ts.isIdentifier(param.name) &&
+      (L.typeOf(param.name).flags & ts.TypeFlags.Never) !== 0
+    ) {
+      return { type: DYN, mode: param.questionToken ? "omittable" : "required" };
+    }
     const type = L.irTypeOf(param.name);
     if (param.questionToken && !L.bareUndefinedArmedUnion(type) && type.kind !== "dyn" && type.kind !== "jsval") {
       // `x?: unknown` where unknown came from an annotation: undefined is
