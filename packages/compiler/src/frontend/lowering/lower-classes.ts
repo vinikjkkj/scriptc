@@ -8839,6 +8839,20 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             L.classes.get(g.type.className);
           if (info && !info.generic) {
             L.noteEdge(`%${info.def.name}.constructor`);
+      // `new rs.C(...)` where `rs` is a require binding of a PROGRAM module and
+      // the member resolves, through the exporter's own table, to a class the
+      // program declares: the construction names the class itself, exactly as
+      // the bare name (or a destructured binding of the same member) does. It
+      // must not go through the export's class VALUE below: a class whose
+      // chain roots in a runtime-provided constructor (Error) has no class
+      // value, though it constructs by name.
+      if (!expr.expression.questionDotToken && L.cjsLocalModuleBindingOf(expr.expression.expression)) {
+        const classSym = L.resolveValueSymbol(expr.expression.name);
+        const info = classSym ? L.classBySymbol.get(classSym) : undefined;
+        if (info && !info.generic && info.classDecorators?.valueGlobalId === undefined) {
+          return lowerProgramClassNew(L, expr, info, loc);
+        }
+      }
             const below = (c: ClassInfo): void => {
               for (const s of c.subclasses) {
                 L.noteEdge(`%${s.def.name}.constructor`);
