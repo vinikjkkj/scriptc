@@ -139,6 +139,21 @@ describe("jsDesugar", () => {
     expect(run("const x = cond ? require('./a') : require('./b');\n")).toBeNull();
   });
 
+  test("a deferred let assigned one new before its readers is annotated; every other shape is left alone", () => {
+    const ok = "function f(cfg) {\n  let h;\n  if (cfg) {\n    h = new ns.Cmd(1);\n    h.on('x', () => h.v);\n  }\n}\n";
+    const out = run(ok)!;
+    expect(out).toContain("/** @type {InstanceType<typeof ns.Cmd>} */ let h;");
+    expect(out.split("\n").length).toBe(ok.split("\n").length);
+    // a second write, a read before the assignment, a read outside the assigning block, a
+    // typed declaration, and a non-name callee are not the shape
+    expect(run("function f() {\n  let h;\n  h = new A();\n  h = new A();\n  return () => h.v;\n}\n")).toBeNull();
+    expect(run("function f() {\n  let h;\n  const g = () => h.v;\n  h = new A();\n  return g;\n}\n")).toBeNull();
+    expect(run("function f(c) {\n  let h;\n  if (c) {\n    h = new A();\n  }\n  return () => h.v;\n}\n")).toBeNull();
+    expect(run("function f() {\n  /** @type {B} */\n  let h;\n  h = new A();\n  return () => h.v;\n}\n")).toBeNull();
+    expect(run("function f() {\n  let h;\n  h = new (get())();\n  return () => h.v;\n}\n")).toBeNull();
+    expect(run("function f() {\n  let h;\n  h = new A();\n  h++;\n  return () => h.v;\n}\n")).toBeNull();
+  });
+
   test("the folded Node version is the runtime's compatibility target", () => {
     const lib = readFileSync(join(import.meta.dirname, "../../runtime/src/scr_lib.c"), "utf8");
     const m = /#define SCR_NODE_COMPAT_VERSION "([^"]+)"/.exec(lib);
