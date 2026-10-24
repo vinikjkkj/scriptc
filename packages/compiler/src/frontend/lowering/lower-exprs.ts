@@ -21004,6 +21004,51 @@ function enclosingMethodMayBeUnbound(L: Lowerer, node: ts.Node): boolean {
    * `this.v = rhs` in full before it throws on the absent receiver). */
 const thisWriteGuards = new WeakMap<IrExpr, IrStmt[]>();
 
+/** Every receiver-guard node the lowering emitted, mapped to what it becomes in
+ * the METHOD'S NORMAL VARIANT: a read guard becomes its bare self, a guarded
+ * write becomes its bare right-hand side. The guarded node itself stays in
+ * the IR, so the unbound clone (`%C.unbound:m`) keeps every check. */
+export const receiverGuardReplacements = new WeakMap<object, IrExpr>();
+
+/** The receiver-guarded clone of a method, the only body an unbound thunk
+ * enters (with a NULL self). Named like the other colon-qualified module
+ * functions (`%C.static:m`, `%C.set:x`). */
+export function unboundCalleeOf(className: string, method: string): string {
+  return `%${className}.unbound:${method}`;
+}
+
+/** The method's normal variant: the same IR with every receiver guard
+ * replaced by what it guards. A normal method is entered with a present
+ * receiver, so its body carries no check and no throw, which keeps it out of
+ * the may-throw set (no pending-exception test after its calls, no stack
+ * prologue: those are what made the guarded body 1.16x slower, not a retain).
+ * Subtrees without a guard are shared, not copied. */
+export function stripReceiverGuards(fn: IrFunction): IrFunction {
+  const strip = (n: unknown): unknown => {
+    if (n === null || typeof n !== "object") return n;
+    const rep = receiverGuardReplacements.get(n);
+    if (rep !== undefined) return strip(rep);
+    if (Array.isArray(n)) {
+      let changed = false;
+      const out = n.map((x) => {
+        const y = strip(x);
+        if (y !== x) changed = true;
+        return y;
+      });
+      return changed ? out : n;
+    }
+    let changed = false;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(n)) {
+      const y = k === "type" || k === "loc" ? v : strip(v);
+      if (y !== v) changed = true;
+      out[k] = y;
+    }
+    return changed ? out : n;
+  };
+  return strip(fn) as IrFunction;
+}
+
 /** A `this.field` access inside a class method body, guarded for the one
    * way the receiver can be absent: a method value read off an instance and
    * called with no receiver (`const f = o.m; f()`, or `.call(null)`). The
@@ -21037,6 +21082,7 @@ const thisWriteGuards = new WeakMap<IrExpr, IrStmt[]>();
     };
     const guarded: IrExpr = { kind: "seqExpr", stmts: [nullGuard, undefGuard], result: self, type: self.type, loc };
     if (set) thisWriteGuards.set(guarded, [nullGuard, undefGuard]);
+    receiverGuardReplacements.set(guarded, self);
     return guarded;
   }
 
@@ -21126,6 +21172,7 @@ const thisWriteGuards = new WeakMap<IrExpr, IrStmt[]>();
     const fnT = funcOf(params, found.sig.ret);
     if (virtual) L.noteVirtualEdge(info, method);
     else L.noteEdge(`%${found.declarer.def.name}.${method}`);
+    L.noteEdge(unboundCalleeOf(found.declarer.def.name, method));
     if (!L.liftedFns.some((f) => f.name === name)) {
       const selfT: IrType = { kind: "object", className: info.def.name };
       const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
@@ -21141,7 +21188,7 @@ const thisWriteGuards = new WeakMap<IrExpr, IrStmt[]>();
           };
       const directCall: IrExpr = {
         kind: "call",
-        callee: `%${found.declarer.def.name}.${method}`,
+        callee: unboundCalleeOf(found.declarer.def.name, method),
         args: [L.upcastTo(selfRef, found.declarer.def.name), ...args],
         type: found.sig.ret,
         loc,
@@ -21225,6 +21272,7 @@ const thisWriteGuards = new WeakMap<IrExpr, IrStmt[]>();
     const params = first.params.map((p) => p.type);
     const irParams: IrParam[] = params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
     for (const d of decls) L.noteEdge(`%${d.cls.def.name}.${method}`);
+    L.noteEdge(unboundCalleeOf(decls[0]!.cls.def.name, method));
     if (!L.liftedFns.some((f) => f.name === name)) {
       const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
       const locals: IrLocal[] = irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false }));
@@ -21274,7 +21322,7 @@ const thisWriteGuards = new WeakMap<IrExpr, IrStmt[]>();
       locals.push({ id: nullId, name: "self", type: nullT, mutable: true });
       const nullCall: IrExpr = {
         kind: "call",
-        callee: `%${deep.cls.def.name}.${method}`,
+        callee: unboundCalleeOf(deep.cls.def.name, method),
         args: [{ kind: "varRef", localId: nullId, type: nullT, loc }, ...args],
         type: first.ret,
         loc,
@@ -22736,6 +22784,7 @@ const thisWriteGuards = new WeakMap<IrExpr, IrStmt[]>();
           type: vt,
           loc,
         };
+        receiverGuardReplacements.set(withGuards, value);
         return { kind: "fieldSet", obj: target.obj.result, className: target.className, field: target.field, value: withGuards, loc };
       }
       return { kind: "fieldSet", obj: target.obj, className: target.className, field: target.field, value, loc };

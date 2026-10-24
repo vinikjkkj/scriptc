@@ -22,7 +22,7 @@ import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStrea
 import { erasableSuperDelegation } from "./lower-emitter.js";
 import { emitOverrideShapeReason, emitSpecSuperForward, emitterRooted, lowerEmitterSuperCall, type EmitOverrideRec } from "./lower-emitter.js";
 import { declSymbolOf } from "./lower-modules.js";
-import { uniqueSymbolKeyOf } from "./lower-exprs.js";
+import { uniqueSymbolKeyOf, stripReceiverGuards, unboundCalleeOf } from "./lower-exprs.js";
 import { lowerHttpAgentNew, lowerHttpServerNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { bodylessMixinCalleeOf, mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
@@ -7524,6 +7524,20 @@ export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; 
   return { fns, list };
 }
 
+/** A method's module functions. The NORMAL variant (`%C.m`) is entered with a
+ * present receiver, so it is the body with every receiver guard replaced by
+ * the access it guards: no check, no throw, and so no may-throw cost at its
+ * call sites. The UNBOUND clone (`%C.unbound:m`) keeps the guards and is the
+ * only body an unbound thunk enters, with a NULL self (see unboundCalleeOf).
+ * The clone is emitted when a thunk reaches it, or for every method under
+ * `always` (demanded generic instances lower every member). */
+function receiverVariants(L: Lowerer, info: ClassInfo, mName: string, fn: IrFunction, always: boolean): IrFunction[] {
+  const normal = stripReceiverGuards(fn);
+  if (mName.startsWith("get:") || mName.startsWith("set:")) return [normal];
+  const unbound = unboundCalleeOf(info.def.name, mName);
+  return always || L.wantBody(unbound) ? [normal, { ...fn, name: unbound }] : [normal];
+}
+
 export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     const out: IrFunction[] = [];
     const className = info.def.name;
@@ -7555,7 +7569,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
       if (!always && !L.wantBody(`%${className}.${mName}`)) continue;
       try {
         const fn = L.lowerClassMethodMember(info, member);
-        if (fn) out.push(fn);
+        if (fn) out.push(...receiverVariants(L, info, mName, fn, always));
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;
         poisoned.add(mName);
@@ -7571,7 +7585,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
       if (!always && !L.wantBody(`%${className}.${mName}`)) continue;
       try {
         const fn = L.lowerProtoMethodMember(info, mName, fnExpr);
-        if (fn) out.push(fn);
+        if (fn) out.push(...receiverVariants(L, info, mName, fn, always));
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;
         poisoned.add(mName);
