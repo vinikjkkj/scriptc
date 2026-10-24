@@ -12974,6 +12974,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9105-builtin-surplus-effect-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9105-builtin-surplus-effect-order.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9106-string-position-forms.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9106-string-position-forms.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9107-array-position-forms.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9107-array-position-forms.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9108-json-stringify-runtime-space.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9108-json-stringify-runtime-space.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/911-records-index-dot-access.ts": {
    "order": [
     "<repo>/tests/corpus/911-records-index-dot-access.ts"
