@@ -981,6 +981,11 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     const effects = L.surplusEffects.get(node);
     if (effects === undefined) return call;
     L.surplusEffects.delete(node);
+    // A standard-library call bound its operands before parking (see
+    // builtinSurplusView): the value reads those locals, so it runs last.
+    if (builtinSurplusCalls.has(node)) {
+      return { kind: "seqExpr", stmts: effects, result: call, type: call.type, loc: call.loc };
+    }
     const pre: IrStmt[] = [];
     const bind = (e: IrExpr): IrExpr => {
       if (e.kind === "numLit" || e.kind === "strLit" || e.kind === "boolLit" || e.kind === "unitLit") return e;
@@ -4182,7 +4187,80 @@ export function lowerFfiCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null
     };
   }
 
+/** BUILTIN SURPLUS ARGUMENTS (argfx3). A call to a standard-library function
+   * or method with more arguments than its declared parameters: JS evaluates
+   * every argument, then drops the surplus (`Math.abs(x, tag())`). The call
+   * is lowered over a VIEW that carries only the declared arguments, so each
+   * per-name lowering sees the call it knows. When the surplus has an effect,
+   * JS order is kept by binding first: the receiver and each declared argument
+   * are evaluated (in source order) into hidden locals, then the parked
+   * surplus statements run, and the builtin reads only those locals (the
+   * PRELOWERED map hands them to the per-name lowering). Literals, closures
+   * and stdlib namespaces are not bound (no effect, or no value). Optional
+   * chains keep the old fence. Null for every other call (user callees keep
+   * the completeArgs surplus path). */
+const builtinSurplusCalls = new WeakSet<ts.Node>();
+function builtinSurplusView(L: Lowerer, expr: ts.CallExpression): ts.CallExpression | null {
+  if (expr.arguments.length === 0 || expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
+  const rsig = L.checker.getResolvedSignature(expr);
+  const decl = rsig ? L.checker.signatureDeclaration(rsig) : undefined;
+  if (decl === undefined || !ts.isFunctionLike(decl) || !L.isStdlibFile(decl.getSourceFile())) return null;
+  const params = decl.parameters.filter((p) => !(ts.isIdentifier(p.name) && p.name.text === "this"));
+  if (params.some((p) => p.dotDotDotToken !== undefined)) return null;
+  if (expr.arguments.length <= params.length) return null;
+  // An optional chain short-circuits its whole call: its operands must not run
+  // when the chain breaks, so that spelling keeps its fence.
+  for (let e: ts.Node = expr; ; ) {
+    if ((e as { questionDotToken?: unknown }).questionDotToken !== undefined) return null;
+    if (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e) || ts.isCallExpression(e) ||
+      ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e)) {
+      e = e.expression;
+    } else break;
+  }
+  const surplus: IrStmt[] = [];
+  for (const a of expr.arguments.slice(params.length)) {
+    const effect = lowerSurplusArg(L, a);
+    if (effect !== null) surplus.push(effect);
+  }
+  const declared = expr.arguments.slice(0, params.length);
+  // The view: the declared prefix only. The adapter's nodes are remote proxies
+  // with getter-only properties, so a copy cannot stand in for the call; a
+  // proxy answers every property from the real node (methods bound to it)
+  // except `arguments`.
+  const view = new Proxy(expr, {
+    get(target, prop) {
+      if (prop === "arguments") return declared;
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+  });
+  // An effect-free surplus has nothing to order: it is dropped at compile time.
+  if (surplus.length === 0) return view;
+  const binds: IrStmt[] = [];
+  const bindNode = (n: ts.Expression): void => {
+    if (ts.isFunctionExpression(n) || ts.isArrowFunction(n)) return;
+    const ir = L.lowerExpr(n);
+    if (ir.kind === "numLit" || ir.kind === "strLit" || ir.kind === "boolLit" || ir.kind === "unitLit" || ir.kind === "closure") return;
+    const slot = L.declareHiddenLocal("%argfx", ir.type);
+    binds.push({ kind: "varDecl", localId: slot.id, init: ir, loc: ir.loc });
+    L.preLowered.set(n, { kind: "varRef", localId: slot.id, type: ir.type, loc: ir.loc });
+  };
+  if (ts.isPropertyAccessExpression(expr.expression) || ts.isElementAccessExpression(expr.expression)) {
+    const recv = expr.expression.expression;
+    // A stdlib namespace (Math, JSON, Object) is a name, not a value.
+    const sym = ts.isIdentifier(recv) ? L.checker.getSymbolAtLocation(recv) : undefined;
+    const namespace = sym !== undefined && L.checker.declarationsOf(sym).every((d) => L.isStdlibFile(d.getSourceFile()));
+    if (!namespace && recv.kind !== ts.SyntaxKind.SuperKeyword) bindNode(recv);
+  }
+  for (const a of declared) bindNode(a);
+  L.surplusEffects.set(expr, [...binds, ...surplus]);
+  builtinSurplusCalls.add(expr);
+  return view;
+}
+
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
+    const surplusView = builtinSurplusView(L, expr);
+    if (surplusView !== null) return lowerCall(L, surplusView);
     const loc = locOf(expr);
 
     // crypto.diffieHellman's CALLBACK form. Claimed at the head because the
