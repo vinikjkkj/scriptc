@@ -13058,6 +13058,19 @@ export class Lowerer {
       if (ts.isArrayLiteralExpression(x) && x.elements.length === 0) {
         return this.coerceInto(node, this.lowerArrayLiteral(x, expected), expected);
       }
+      // A POPULATED literal whose natural type is another array: the slot's
+      // element type wins (each element coerces on its own, the literal is
+      // fresh, so nothing aliases). It is what an implicit-any parameter
+      // instantiated over the call's argument types asks for while the
+      // checker's CONTEXTUAL type (a declaration file's recursive value
+      // union, mysql2's ExecuteValues) would build the elements at a wider
+      // union and meet the exact-shape fence one line later.
+      if (ts.isArrayLiteralExpression(x) && x.elements.length > 0 && !x.elements.some(ts.isSpreadElement)) {
+        const own = this.mapTypeOf(this.checker.getContextualType(x) ?? this.typeOf(x));
+        if (own === null || !typeEquals(own, expected)) {
+          return this.coerceInto(node, this.lowerArrayLiteral(x, expected), expected);
+        }
+      }
     }
     // An OBJECT LITERAL against a checked-dynamic slot in a JS file (the
     // getSupportInfo options argument — a dyn-ABI param): the value's
