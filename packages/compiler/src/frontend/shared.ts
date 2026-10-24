@@ -134,21 +134,6 @@ export const SUPPORTED_BUILTIN_MODULES = ["fs", "path", "path/posix", "path/win3
  * so both spellings key the same lowering tables here. */
 const PREFIX_ONLY_BUILTIN_MODULES: ReadonlySet<string> = new Set(["test"]);
 
-/** The builtin modules whose DEFAULT import binding lowers: node:assert's
- * module object IS a callable function (`import assert from "node:assert";
- * assert(x)`), and node:events' module object IS the EventEmitter class
- * (`module.exports = EventEmitter` — `import EventEmitter from
- * "node:events"; new EventEmitter()`), so those default bindings lower —
- * for every other builtin the default-import fence stands. */
-export function builtinDefaultImportModule(spec: string): string | null {
-  const canon = canonicalBuiltinModule(spec);
-  // node:test's module object IS the test function (`import test from
-  // "node:test"; test(...)`), like assert's callable module object.
-  return canon === "assert" || canon === "assert/strict" || canon === "events" || canon === "test"
-    ? canon
-    : null;
-}
-
 /** Canonical (bare) name of a supported builtin-module specifier — "fs"
  * for both "fs" and "node:fs" — or null for everything else. The lowering
  * tables and the preflight allowlist share this one normalization. */

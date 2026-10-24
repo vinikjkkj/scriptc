@@ -64,7 +64,6 @@ import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
   ADOPTED_OPTIONS,
   ambientDtsPath,
-  builtinDefaultImportModule,
   canonicalBuiltinModule,
   clearWorkspacePackages,
   fallbackDtsPath,
@@ -3128,27 +3127,15 @@ function preflight7(load: LoadResult): {
         selfImportTdzFences7(program, sf, clause, diags);
       }
       if (clause) {
-        // Default imports of SUPPORTED builtins pass where the spelling is
-        // legal: Node's default export of a CJS builtin IS the module
-        // object, so the binding exposes exactly the namespace-import
-        // surface and the lowering keys the same tables
-        // (builtinNamespaceModuleOf's default-import twin). JS sources
-        // always (Node never asks for interop flags); TS sources when the
-        // adopted interop knobs made the checker accept the spelling
-        // (the `import os from 'os'` spelling under esModuleInterop — the
-        // program TYPECHECKED, so the form is the project's own legal
-        // dialect). A TS project without interop flags keeps the fence:
-        // the SC1012 wording beats the raw TS1259 at the same site. The
-        // callable module objects (assert, events, test) stay allowed
-        // everywhere.
-        const opts = program.getCompilerOptions() as {
-          esModuleInterop?: boolean;
-          allowSyntheticDefaultImports?: boolean;
-        };
-        const interopOn = opts.esModuleInterop === true || opts.allowSyntheticDefaultImports === true;
+        // Default imports of SUPPORTED builtins pass in JS and TS alike,
+        // whatever the module/interop settings: Node's default export of a
+        // CJS builtin IS the module object, so the binding exposes exactly
+        // the namespace-import surface and the lowering keys the same
+        // tables (builtinNamespaceModuleOf's default-import twin). Under
+        // esModuleInterop off, the zapo-js spelling `import http from
+        // 'node:http'` was the refusal that stopped the pg driver build.
         const defaultOk =
-          builtinDefaultImportModule(spec) !== null ||
-          ((isJsSourceFileName(sf.fileName) || interopOn) && canonicalBuiltinModule(spec) !== null) ||
+          canonicalBuiltinModule(spec) !== null ||
           // better-sqlite3's module object IS its Database constructor
           // (`module.exports = createDatabase(...)`), so the default
           // import is not merely legal there — it is the ONLY spelling
@@ -3821,7 +3808,6 @@ const nodeBuiltinNames: ReadonlySet<string> = new Set(builtinModules);
 
 export {
   ambientDtsPath,
-  builtinDefaultImportModule,
   canonicalBuiltinModule,
   fallbackDtsPath,
   isNodeTypesPath,
