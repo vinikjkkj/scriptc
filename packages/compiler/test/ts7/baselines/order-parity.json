@@ -12038,6 +12038,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8534-dyn-array-reduce-flat-and-change-by-copy.js": {
+   "order": [
+    "<repo>/tests/corpus/8534-dyn-array-reduce-flat-and-change-by-copy.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8535-dyn-index-arguments-coerce-primitives.js": {
    "order": [
     "<repo>/tests/corpus/8535-dyn-index-arguments-coerce-primitives.js"
@@ -12145,6 +12151,12 @@
   "<repo>/tests/corpus/8554-a-function-compared-with-a-dynamic-value.js": {
    "order": [
     "<repo>/tests/corpus/8554-a-function-compared-with-a-dynamic-value.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8555-a-method-value-is-the-function-of-its-declaring-class.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8555-a-method-value-is-the-function-of-its-declaring-class.cjs"
    ],
    "diags": []
   },
