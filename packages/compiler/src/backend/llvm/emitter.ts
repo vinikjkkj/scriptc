@@ -14163,7 +14163,17 @@ class LlEmitter {
     // that is what the old mapKey refusal was standing in for.
     const kRc = mapKeyAccess(e.type.key) === "ref" ? vAdapters(this, e.type.key) : null;
     const m = B.tmp();
-    if (kRc !== null) {
+    if (kRc !== null && e.type.key.kind === "union") {
+      // A UNION key: boxes compared by the value they carry; one class byte
+      // per arm (scr_map_new_union, the Set-with-union twin).
+      const keyUnion = this.unionsById.get(e.type.key.unionId);
+      if (!keyUnion) throw new Error("llvm emitter bug: map key union has no def");
+      const classes = this.internLiteral(unionKeyClasses(keyUnion.arms));
+      this.declare(`declare ptr @scr_map_new_union(i32, ptr, ptr, ptr, ptr, ptr, ptr)`);
+      B.line(
+        `${m} = call ptr @scr_map_new_union(i32 ${mapValKindNum(value)}, ptr ${kRc.retain}, ptr ${kRc.release}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"}, ptr ${classes})`,
+      );
+    } else if (kRc !== null) {
       this.declare(`declare ptr @scr_map_new_ref(i32, ptr, ptr, ptr, ptr, ptr)`);
       B.line(
         `${m} = call ptr @scr_map_new_ref(i32 ${mapValKindNum(value)}, ptr ${kRc.retain}, ptr ${kRc.release}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"})`,
