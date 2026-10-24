@@ -104,6 +104,7 @@ export default defineConfig({
     // Gate-cost accounting, off unless asked: the collector installs the
     // compiler's phase tap and writes one JSONL row per test.
     setupFiles: [
+      "./tests/harness/rpc-yield.ts",
       "./tests/harness/scratch-hooks.ts",
       ...(process.env["SCRIPTC_PHASE_LOG"] ? ["./tests/harness/phase-collect.ts"] : []),
     ],
