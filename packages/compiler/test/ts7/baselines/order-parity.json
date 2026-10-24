@@ -12635,6 +12635,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8806-seeded-container-keeps-the-array-it-was-built-from.js": {
+   "order": [
+    "<repo>/tests/corpus/8806-seeded-container-keeps-the-array-it-was-built-from.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
