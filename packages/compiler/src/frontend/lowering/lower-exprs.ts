@@ -33,7 +33,7 @@ import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
-import { type ParamShape, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
+import { type ParamShape, implicitDefaultInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -21022,7 +21022,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const info = L.classes.get(recvT.className) ?? null;
     if (info === null || info.builtinError) return null;
     const found = L.findMethodOn(info, expr.name.text);
-    if (found === null) return lowerUnboundSubclassMethodValue(L, expr, info);
+    if (found === null) {
+      // `C.prototype.m` where m's untyped parameters make it a monomorphized generic: the value is
+      // C's own function, whose parameters are all checked-dynamic (the default instance), run
+      // with the receiver of the call that eventually invokes it.
+      const generic = lowerUnboundGenericMethodValue(L, expr, info);
+      if (generic !== null) return generic;
+      return lowerUnboundSubclassMethodValue(L, expr, info);
+    }
     if (found.sig.abstract === true) return null;
     if (found.sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable"))) return null;
     // The receiver expression still evaluates (a plain read, no effects
@@ -21065,6 +21072,52 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       };
     }
     return chain;
+  }
+
+/** `C.prototype.m` for an implicit-any (monomorphized) method m of the program class C, as a
+   * VALUE: a zero-capture closure over an interned thunk whose receiver is the ambient `this`
+   * window checked against the declaring class, calling the method's all-dyn default instance
+   * (the one a dyn box of C answers `x.m()` with). Only through the prototype, which names the
+   * declarer's own function whatever a subclass overrides. Null for any other shape. */
+  function lowerUnboundGenericMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, info: ClassInfo): IrExpr | null {
+    if (!ts.isPropertyAccessExpression(expr.expression) || expr.expression.name.text !== "prototype") return null;
+    if (!ts.isIdentifier(expr.expression.expression)) return null;
+    const method = expr.name.text;
+    const gfound = findGenericMethodOn(L, info, method);
+    if (gfound === null || gfound.info.implicitParams === undefined) return null;
+    const loc = locOf(expr);
+    const instance = implicitDefaultInstance(L, expr, gfound.info);
+    const declName = gfound.declarer.def.name;
+    const name = `%unbound.${declName}.${method}%generic`;
+    const paramTypes = instance.params.map((p) => p.type);
+    const irParams: IrParam[] = paramTypes.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
+    const fnT = funcOf(paramTypes, instance.returnType);
+    if (!L.liftedFns.some((f) => f.name === name)) {
+      const selfT: IrType = { kind: "object", className: declName };
+      const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
+      const selfRef: IrExpr = { kind: "varRef", localId: "self.0", type: selfT, loc };
+      const call: IrExpr = { kind: "call", callee: instance.name, args: [selfRef, ...args], type: instance.returnType, loc };
+      L.liftedFns.push({
+        name,
+        params: irParams,
+        returnType: instance.returnType,
+        locals: [
+          { id: "self.0", name: "self", type: selfT, mutable: false },
+          ...irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        ],
+        body: [
+          {
+            kind: "varDecl",
+            localId: "self.0",
+            init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: selfT, loc },
+            loc,
+          },
+          instance.returnType.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc },
+        ],
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
   }
 
 /** The detached-function closure of class method `method` of `info` (see
@@ -21460,6 +21513,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       if (
         cinfo !== null && !cinfo.builtinError && cinfo.subclasses.length === 0 &&
         L.findMethodOn(cinfo, expr.name.text) === null && !cinfo.fields.has(expr.name.text) &&
+        findGenericMethodOn(L, cinfo, expr.name.text) === null &&
         L.findMethodOn(cinfo, `get:${expr.name.text}`) === null &&
         !cinfo.staticFields.some((s) => s.name === expr.name.text)
       ) {
@@ -21481,6 +21535,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       expr.questionDotToken === undefined &&
       L.classes.get(receiverIr.className) !== undefined &&
       L.findMethodOn(L.classes.get(receiverIr.className) ?? null, expr.name.text) === null &&
+      findGenericMethodOn(L, L.classes.get(receiverIr.className) ?? null, expr.name.text) === null &&
       !(L.classes.get(receiverIr.className)?.fields.has(expr.name.text) ?? false)
     ) {
       const viaField = lowerSubclassFieldRead(L, expr, L.classes.get(receiverIr.className)!);
