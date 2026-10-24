@@ -13426,6 +13426,44 @@
    ],
    "diags": []
   },
+    "<repo>/tests/corpus/9500-cjs-old-exports-debug/main.cjs": {
+      "order": [
+        "<repo>/tests/corpus/9500-cjs-old-exports-debug/common.cjs",
+        "<repo>/tests/corpus/9500-cjs-old-exports-debug/node.cjs",
+        "<repo>/tests/corpus/9500-cjs-old-exports-debug/main.cjs"
+      ],
+      "diags": []
+    },
+    "<repo>/tests/corpus/9501-cjs-old-exports-callee-writes/main.cjs": {
+      "order": [
+        "<repo>/tests/corpus/9501-cjs-old-exports-callee-writes/sink.cjs",
+        "<repo>/tests/corpus/9501-cjs-old-exports-callee-writes/node.cjs",
+        "<repo>/tests/corpus/9501-cjs-old-exports-callee-writes/main.cjs"
+      ],
+      "diags": []
+    },
+    "<repo>/tests/corpus/9502-cjs-old-exports-dead-store/main.cjs": {
+      "order": [
+        "<repo>/tests/corpus/9502-cjs-old-exports-dead-store/node.cjs",
+        "<repo>/tests/corpus/9502-cjs-old-exports-dead-store/main.cjs"
+      ],
+      "diags": []
+    },
+    "<repo>/tests/corpus/9503-cjs-old-exports-after-replacement/main.cjs": {
+      "order": [
+        "<repo>/tests/corpus/9503-cjs-old-exports-after-replacement/node.cjs",
+        "<repo>/tests/corpus/9503-cjs-old-exports-after-replacement/main.cjs"
+      ],
+      "diags": []
+    },
+    "<repo>/tests/corpus/9504-cjs-old-exports-write-after-escape/main.cjs": {
+      "order": [
+        "<repo>/tests/corpus/9504-cjs-old-exports-write-after-escape/view.cjs",
+        "<repo>/tests/corpus/9504-cjs-old-exports-write-after-escape/node.cjs",
+        "<repo>/tests/corpus/9504-cjs-old-exports-write-after-escape/main.cjs"
+      ],
+      "diags": []
+    },
   "<repo>/tests/corpus/951-modules-diamond/main.ts": {
    "order": [
     "<repo>/tests/corpus/951-modules-diamond/shared.ts",
