@@ -12842,6 +12842,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8929-rest-function-value-called-with-a-spread.ts": {
+   "order": [
+    "<repo>/tests/corpus/8929-rest-function-value-called-with-a-spread.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
