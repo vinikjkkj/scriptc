@@ -14,7 +14,7 @@ import { protoClassArmOn, protoClassInfoFor } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
-import { lowerSearchParamsNew } from "./lower-builtins.js";
+import { lowerDateNumArg, lowerSearchParamsNew } from "./lower-builtins.js";
 import { requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { lowerSqliteNew } from "./lower-sqlite.js";
 import { lowerWrtcNew } from "./lower-wrtc.js";
@@ -9826,7 +9826,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         // inverse of LocalTime is scr_date_local_to_utc (per-instant offsets
         // from the same source as the getters, the spec's gap/overlap rule).
         if (dateArgs.length <= 7 && !dateArgs.some(ts.isSpreadElement)) {
-          const parts: IrExpr[] = dateArgs.map((a) => L.lowerExprExpecting(a, F64));
+          const parts: IrExpr[] = dateArgs.map((a) => lowerDateNumArg(L, a));
           const defaults = [0, 0, 1, 0, 0, 0, 0];
           while (parts.length < 7) {
             parts.push({ kind: "numLit", value: defaults[parts.length]!, type: F64, loc });

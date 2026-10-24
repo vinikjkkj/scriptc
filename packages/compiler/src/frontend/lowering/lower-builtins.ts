@@ -9322,6 +9322,32 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * keeps the COMPOSED forms because they never materialise the Date at
    * all, which is still the cheaper lowering where it applies.
    * Null when this is neither form. */
+  /** One numeric argument of a Date constructor / Date.UTC. In a JavaScript
+   * source an argument the checker types `string` or `boolean` (a regex
+   * capture group: `new Date(year, month, matches[3])`) is converted by the
+   * function itself with ToNumber, exactly like `Number(x)`; every other
+   * argument lowers at its own number type as before. TypeScript sources keep
+   * the type error they already had. */
+  export function lowerDateNumArg(L: Lowerer, a: ts.Expression): IrExpr {
+    if (isJsSourceFile(a.getSourceFile())) {
+      const k = L.mapTypeOf(L.typeOf(a))?.kind;
+      if (k === "string") {
+        const v = L.lowerExpr(a);
+        if (v.type.kind === "string") return { kind: "libCall", fn: "num.fromString", args: [v], type: F64, loc: locOf(a) };
+        return L.coerceToExpected(v, F64);
+      }
+      if (k === "bool") {
+        const v = L.lowerExpr(a);
+        if (v.type.kind === "bool") {
+          const loc = locOf(a);
+          return { kind: "ternary", cond: v, then: { kind: "numLit", value: 1, type: F64, loc }, else_: { kind: "numLit", value: 0, type: F64, loc }, type: F64, loc };
+        }
+        return L.coerceToExpected(v, F64);
+      }
+    }
+    return L.lowerExprExpecting(a, F64);
+  }
+
   export function lowerDateCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
@@ -9347,7 +9373,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       for (let i = 0; i < 7; i++) {
         const a = call.arguments[i];
         args.push(a !== undefined
-          ? L.lowerExprExpecting(a, F64)
+          ? lowerDateNumArg(L, a)
           : { kind: "numLit", value: defaults[i]!, type: F64, loc });
       }
       return { kind: "libCall", fn: "date.utc", args, type: F64, loc };
@@ -9395,13 +9421,9 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       if (ctorArgs.length === 0) {
         return { kind: "libCall", fn: "date.now", args: [], type: F64, loc };
       }
-      if (ctorArgs.length !== 1) {
-        L.noLowering(
-          "new Date with year/month/day arguments",
-          recv,
-          "the field constructor is local-time; only new Date() and new Date(dateString) compose with .getTime()",
-        );
-      }
+      // The field constructor (year, month, ...) is local-time and builds a
+      // real Date value (date.newParts), which the ordinary member path reads.
+      if (ctorArgs.length !== 1) return null;
       const arg = L.lowerExpr(ctorArgs[0]!);
       if (arg.type.kind !== "string") {
         L.noLowering(
@@ -9432,11 +9454,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       }
       ms = arg;
     } else {
-      L.noLowering(
-        "new Date with year/month/day arguments",
-        recv,
-        "the field constructor is local-time; only new Date() and new Date(ms) compose with .toISOString()",
-      );
+      return null; // the field constructor builds a real Date; the member path reads it
     }
     return { kind: "libCall", fn: "date.toISOString", args: [ms], type: STRING, loc };
   }
