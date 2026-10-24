@@ -556,6 +556,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   }
 
   const finalLoad = load;
+  let pinnedLoad: (LoadResult & { dispose: () => void }) | null = null;
   return {
     preflight,
     entryText: () => finalLoad.entry.text,
@@ -588,10 +589,28 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
           (sf) => [sf.fileName, sf.text],
         ),
       ),
-    lower: (opts) => lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null }),
+    lower: (opts) => {
+      const first = lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null });
+      if (first.pinReload === undefined) return first;
+      // Class fields untyped code writes another type (DynPins): load the
+      // program again with those initializers cast to `any`, and lower THAT
+      // (its first pass is final: noPinReload). The first load stays the
+      // one preflight, the contract and the identity hashes read.
+      pinnedLoad?.dispose();
+      pinnedLoad = loadProgram(entryPath, { npmStatic: effective, textEdits: first.pinReload });
+      checkPreflight(pinnedLoad);
+      return lowerToIr(pinnedLoad.program, pinnedLoad.entry, pinnedLoad.moduleOrder, {
+        ...opts,
+        startupCrash: pinnedLoad.startupCrash ?? null,
+        noPinReload: true,
+      });
+    },
     npmStatic: statuses,
     npmImportSites: npmSites,
-    dispose: finalLoad.dispose,
+    dispose: () => {
+      pinnedLoad?.dispose();
+      finalLoad.dispose();
+    },
   };
 }
 

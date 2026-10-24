@@ -393,6 +393,12 @@ export function stmtUsesIsland(stmts: IrStmt | IrStmt[]): boolean {
 }
 
 export interface LowerResult {
+  /** Set INSTEAD of a lowered module when the first discovery pass found
+   * class fields untyped code writes another type (DynPins): the source
+   * edits that make those fields `any`. The caller loads the program again
+   * with them applied and lowers that; `module` is null and nothing else in
+   * this result is meaningful. */
+  pinReload?: DynPinEdits;
   /** Present iff diagnostics is empty. */
   module: IrModule | null;
   diagnostics: ScrDiagnostic[];
@@ -453,6 +459,9 @@ export interface LowerOptions {
    * imports; without this option ambient declarations keep Node's ordinary
    * ReferenceError behavior. */
   ffiImports?: readonly IrFfiImport[];
+  /** Do not answer with a pin reload (LowerResult.pinReload): this program
+   * IS the pinned reload, or the caller cannot reload. */
+  noPinReload?: boolean;
 }
 
 /** The Lowerer's pass configuration (see lowerToIr). */
@@ -479,6 +488,51 @@ export interface LowererMode {
   /** Program-validated ambient declaration symbols for each FFI name.
    * Undefined in discovery's legacy call-local validation path. */
   ffiBindingSymbols?: ReadonlyMap<string, ReadonlySet<ts.Symbol>>;
+}
+
+/** The pin test itself (see Lowerer.dynPinned). */
+export function dynPinWanted(
+  pins: DynPins,
+  className: string,
+  field: string,
+  slot: IrType,
+  armKeys: ReadonlySet<string> | null,
+): boolean {
+  if (!pins.classes.has(className) || slot.kind === "dyn") return false;
+  const written = [...(pins.byName.get(field) ?? []), ...pins.anyKey];
+  const sk = typeKey(slot);
+  // A union slot admits what its arms are; any other slot admits its own
+  // type. An untyped value ("dyn") may be anything, so it contradicts both.
+  return written.some((w) => w === "dyn" || (armKeys !== null ? !armKeys.has(w) : w !== sk));
+}
+
+/** The source edits of a pin reload: per file (the program's own spelling of
+ * its name), the spans to wrap in an `any` cast, as offsets into the text the
+ * file was served with (and so as offsets into the text the reload serves
+ * the edits on top of). `ts` says which cast spelling the file takes. */
+export type DynPinEdits = ReadonlyMap<string, { start: number; end: number; ts: boolean }[]>;
+
+/** What an unpinned discovery pass learned about untyped writes into class
+ * instances, for the pass that re-lowers with the fields it names held as
+ * checked-dynamic slots.
+ *
+ * A class field's type is INFERRED from the constructor's assignments, and
+ * code that reaches the instance through an untyped slot can store any
+ * value there. Node stores it; a `number` slot cannot, and the write threw
+ * a TypeError at run time. The slot therefore has to be a dyn box exactly
+ * where such a write can happen, and nowhere else (a dyn slot costs an
+ * allocation per write, so the typed layout stays for every field the
+ * program's untyped writes agree with). */
+export interface DynPins {
+  /** Classes a pin may apply to: every class that crossed into a dyn box,
+   * with its ancestors and descendants (a base-typed box can hold a derived
+   * instance and a derived box's writes reach the inherited fields). */
+  classes: ReadonlySet<string>;
+  /** The typeKeys of the VALUES written through an untyped receiver under a
+   * literal key, per key. "dyn" when the written value was itself untyped. */
+  byName: ReadonlyMap<string, ReadonlySet<string>>;
+  /** The same for COMPUTED keys: they may name any field. */
+  anyKey: ReadonlySet<string>;
 }
 
 /** Build lowering runs in two passes over the same ts.Program:
@@ -630,6 +684,21 @@ export function lowerToIr(
   const __t0 = performance.now();
   const reachable = discovery.discover(options.libRoots);
   lowerProfileNote("%discovery", performance.now() - __t0);
+  if (options.noPinReload !== true) {
+    const pinReload = discovery.computeDynPinEdits();
+    if (pinReload !== null) {
+      // The caller re-loads the program with the edits and lowers THAT.
+      // Nothing of this pass is kept: its discovery only answered the
+      // question.
+      return {
+        module: null,
+        diagnostics: [],
+        advisories: [],
+        stats: { statementsTotal: 0, statementsFailed: 0, statementsIsland: 0, functionsSkipped: 0 },
+        pinReload,
+      };
+    }
+  }
   const __ovfAfterDiscovery = new Set(overflowShapeKeys);
   const __ovfDeniedAfterDiscovery = new Set(overflowShapeKeysDenied);
   const emit = new Lowerer(program, entry, moduleOrder, dynamic, {
@@ -1901,6 +1970,16 @@ export class Lowerer {
    * a reference to a lowerable body reports its name here — recorded even
    * when the enclosing statement later poisons. */
   onEdge: ((name: string) => void) | null = null;
+  /** Discovery-only record of the untyped writes into class instances
+   * (see DynPins): the classes that crossed into a dyn box, and the value
+   * types written through `dyn.keySet`. */
+  readonly dynBoxedNames = new Set<string>();
+  readonly dynWriteByName = new Map<string, Set<string>>();
+  readonly dynWriteAnyKey = new Set<string>();
+  /** Every inferred, pinnable field slot the class collection met (class
+   * name -> field -> slot type): the candidates computeDynPins tests. */
+  readonly inferredFieldSlots = new Map<string, Map<string, { slot: IrType; node: ts.Node }>>();
+
 
   // Stack of function contexts (bottom = the function being declared at
   // top level, top = the innermost nested function currently lowering).
@@ -3809,6 +3888,7 @@ export class Lowerer {
    * same reason noteVirtualEdge marks both directions. */
   noteDynBoxedClass(className: string): void {
     if (!this.onEdge) return;
+    this.dynBoxedNames.add(className);
     const info = this.classes.get(className);
     if (!info) return;
     const mark = (c: ClassInfo): void => {
@@ -3870,10 +3950,81 @@ export class Lowerer {
       if (o.kind === "dynFrom" && o.value?.type !== undefined) {
         this.classesCrossingIntoDyn(o.value.type, found, seen);
       }
+      if (o.kind === "libCall" && (o as { fn?: unknown }).fn === "dyn.keySet") {
+        this.noteDynKeySet((o as unknown as { args: IrExpr[] }).args);
+      }
+      // `delete x[k]` through an untyped receiver is a write of undefined.
+      if (o.kind === "libCall" && (o as { fn?: unknown }).fn === "dyn.keyDelete") {
+        const a = (o as unknown as { args: IrExpr[] }).args;
+        if (a[1] !== undefined) this.noteDynKeySet([a[0]!, a[1], { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: a[1].loc }]);
+      }
       for (const v of Object.values(n as Record<string, unknown>)) walk(v);
     };
     walk(fn);
     for (const c of found) this.noteDynBoxedClass(c);
+  }
+
+  /** One `dyn.keySet(recv, key, value)` the lowering produced: the key's
+   * spelling (a literal, or computed) and the type of the value written. A
+   * value that was typed and boxed on the way in (a dynFrom) is recorded at
+   * its own type; any other value is untyped ("dyn"). */
+  private noteDynKeySet(args: IrExpr[]): void {
+    const key = args[1];
+    const val = args[2];
+    if (key === undefined || val === undefined) return;
+    const tk = val.kind === "dynFrom" ? typeKey(val.value.type) : val.kind === "unitLit" ? typeKey(val.type) : "dyn";
+    if (key.kind === "strLit") {
+      let s = this.dynWriteByName.get(key.value);
+      if (s === undefined) this.dynWriteByName.set(key.value, (s = new Set()));
+      s.add(tk);
+    } else {
+      this.dynWriteAnyKey.add(tk);
+    }
+  }
+
+  /** The source edits that pin this program's contradicted fields (see
+   * DynPins), or null when no inferred field is contradicted by an untyped
+   * write. Read off a finished DISCOVERY pass: it needs the class table and
+   * what the bodies wrote. */
+  computeDynPinEdits(): DynPinEdits | null {
+    if (this.dynBoxedNames.size === 0) return null;
+    if (this.dynWriteByName.size === 0 && this.dynWriteAnyKey.size === 0) return null;
+    const classes = new Set<string>();
+    const below = (c: ClassInfo): void => {
+      classes.add(c.def.name);
+      for (const s of c.subclasses) below(s);
+    };
+    for (const name of this.dynBoxedNames) {
+      const info = this.classes.get(name);
+      if (!info) continue;
+      for (let a: ClassInfo | null | undefined = info; a; a = a.base) classes.add(a.def.name);
+      below(info);
+    }
+    if (classes.size === 0) return null;
+    const pins: DynPins = { classes, byName: this.dynWriteByName, anyKey: this.dynWriteAnyKey };
+    const edits = new Map<string, { start: number; end: number; ts: boolean }[]>();
+    for (const [cls, fs] of this.inferredFieldSlots) {
+      for (const [f, c] of fs) {
+        const arms = c.slot.kind === "union" ? new Set((this.unions.get(c.slot.unionId)?.arms ?? []).map(typeKey)) : null;
+        if (!dynPinWanted(pins, cls, f, c.slot, arms)) continue;
+        const sf = c.node.getSourceFile();
+        let list = edits.get(sf.fileName);
+        if (list === undefined) edits.set(sf.fileName, (list = []));
+        const start = c.node.getStart();
+        // One spelling of the same expression is one edit (a class and its
+        // generic instantiations collect the same declaration twice).
+        if (!list.some((e) => e.start === start)) list.push({ start, end: c.node.end, ts: !isJsSourceFile(sf) });
+      }
+    }
+    return edits.size === 0 ? null : edits;
+  }
+
+  /** Class collection's report of an inferred slot (a pin candidate): the
+   * slot's type and the initializing expression a pin would wrap. */
+  noteInferredField(className: string, field: string, slot: IrType, node: ts.Node): void {
+    let m = this.inferredFieldSlots.get(className);
+    if (m === undefined) this.inferredFieldSlots.set(className, (m = new Map()));
+    m.set(field, { slot, node });
   }
 
   /** Discovery hook (see discover): fires when lowering resolves a

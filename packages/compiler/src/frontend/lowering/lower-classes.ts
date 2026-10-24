@@ -3695,6 +3695,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             slotType = ph === "null" ? L.withNullArm(baseT) : L.withUndefinedArm(baseT);
             placeholderFields.add(member.name.text);
           }
+          // An INFERRED slot (no annotation, no JSDoc claim): a candidate for
+          // the dyn pin (see DynPins) if untyped code writes it another type.
+          if (member.type === undefined && member.initializer !== undefined && !hasJsDocTypeClaim(member) &&
+              pinnableSlot(L, slotType)) {
+            L.noteInferredField(className, member.name.text, slotType, member.initializer);
+          }
           fields.set(member.name.text, slotType);
           fieldOrder.push({ name: member.name.text, type: slotType, initializer: member.initializer });
         } else if (ts.isConstructorDeclaration(member)) {
@@ -4524,6 +4530,11 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               // checked-dynamic slot, which holds any function value.
               if (isJsSourceFile(assign.getSourceFile()) && holdsStateMachineFn(L, type) && L.dynConvertible(type)) {
                 type = DYN;
+              }
+              // An INFERRED slot (no JSDoc claim): a candidate for the dyn pin
+              // (see DynPins) if untyped code writes it another type.
+              if (!hasJsDocTypeClaim(stmt) && pinnableSlot(L, type)) {
+                L.noteInferredField(className, name, type, ((stmt as ts.ExpressionStatement).expression as ts.BinaryExpression).right);
               }
               // A JSDoc claim the BODY contradicts (`@type {Command}`
               // assigned `undefined` — the lazy-init idiom): the
@@ -7123,6 +7134,39 @@ export function dynBoxedMethodInstances(L: Lowerer, info: ClassInfo): { name: st
     }
   }
   return out;
+}
+
+/** Does the node's leading comment carry a JSDoc `@type` claim? A claimed
+ * field type is the author's annotation, not an inference, so a dyn pin
+ * never overrides it. */
+function hasJsDocTypeClaim(node: ts.Node): boolean {
+  try {
+    const text = node.getSourceFile().text.slice(node.pos, node.getStart());
+    return /@type\b/.test(text);
+  } catch {
+    return true; // cannot tell: treat as claimed (the typed layout stays)
+  }
+}
+
+/** The slot types a dyn pin may replace: scalars, class instances (boxed by
+ * reference, so identity survives) and unions of those. Records, arrays and
+ * maps are COPIED across a dyn box, so they stay typed. */
+function pinnableSlot(L: Lowerer, t: IrType): boolean {
+  switch (t.kind) {
+    case "f64":
+    case "string":
+    case "bool":
+    case "bigint":
+    case "undefinedT":
+    case "nullT":
+      return true;
+    case "object":
+      return !RUNTIME_ERROR_CLASSES.has(t.className);
+    case "union":
+      return (L.unions.get(t.unionId)?.arms ?? []).every((a) => pinnableSlot(L, a));
+    default:
+      return false;
+  }
 }
 
 /** The WRITE half of a boxed class instance's member surface: one

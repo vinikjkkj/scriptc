@@ -345,6 +345,10 @@ export function loadProgram(
      * modules this load (npm-static.ts owns the doctrine). Every load
      * RESETS the module state, so flagless loads always start clean. */
     npmStatic?: Iterable<string>;
+    /** The pin reload's edits (LowerResult.pinReload): per file, spans to
+     * wrap in an `any` cast, served on top of whatever the shadows below
+     * served. Offsets are into that served text. */
+    textEdits?: ReadonlyMap<string, readonly { start: number; end: number; ts: boolean }[]>;
   },
 ): LoadResult & { dispose: () => void } {
   // Absolute from the start: tsgo's world is absolute-path-keyed (the CLI
@@ -398,6 +402,7 @@ export function loadProgram(
   // It sits UNDER npm-static's: a package opted into --npm-static is served
   // that shadow's replacement content, and the rewriter is handed the same
   // bytes to work from rather than the disk's.
+  const textEdits = opts?.textEdits;
   const open = (
     pins: ReadonlyMap<string, readonly SeedPin[]> | null,
     retypePins: ReadonlyMap<string, readonly RetypePin[]> | null = null,
@@ -437,7 +442,31 @@ export function loadProgram(
           }
           served = pinned;
         }
-        if (served !== undefined && (rewritten !== null || filePins !== undefined || fileRetype !== undefined)) {
+        // THE DYN PIN RELOAD (LowerResult.pinReload): spans the first lowering
+        // named are wrapped in an `any` cast, so the checker itself infers the
+        // field they initialize as `any`. Offsets are into the text the
+        // checker saw: the shadows' text after js-desugar (seed pins already
+        // desugared it).
+        const edits = textEdits?.get(path) ?? textEdits?.get(path.split("\\").join("/"));
+        if (edits !== undefined) {
+          let text: string;
+          if (filePins !== undefined || fileRetype !== undefined) {
+            // Both rewrites in ONE file: each took its offsets from a text the
+            // other had not edited, so composing them would splice at wrong
+            // places. Refuse by name rather than miscompile.
+            throw new Error(`dyn pin and seed/retype pin both edit ${path}: the offsets of one are not the other's`);
+          } else {
+            const raw = served ?? readSourceForRewrite(path);
+            if (raw === undefined) throw new Error(`pin reload: cannot read ${path}`);
+            text = jsDesugar(path, raw) ?? raw;
+          }
+          for (const e of [...edits].sort((x, y) => y.start - x.start)) {
+            const inner = text.slice(e.start, e.end);
+            text = text.slice(0, e.start) + (e.ts ? `(${inner} as any)` : `/** @type {any} */ (${inner})`) + text.slice(e.end);
+          }
+          served = text;
+        }
+        if (served !== undefined && (rewritten !== null || filePins !== undefined || fileRetype !== undefined || edits !== undefined)) {
           // srcSite (the C emitter) turns a SrcLoc OFFSET into file:line:col
           // by reading the file off disk a second time. A rewrite changes no
           // lines but does change the offsets after each edit, so the disk
