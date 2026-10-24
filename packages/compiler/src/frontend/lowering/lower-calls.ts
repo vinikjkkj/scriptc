@@ -927,8 +927,17 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
    * count run-time, or when the callee's own type never spelled the array
    * (an island or dyn-tier slot keeps its existing story). */
   function restPackedArgs(L: Lowerer, expr: ts.CallExpression, params: readonly IrType[],
-    loc: SrcLoc,): IrExpr[] | null {
+    loc: SrcLoc, calleeRestIn = false,): IrExpr[] | null {
     if (params.length === 0) return null;
+    // A closure whose slot is ONE dyn pack (a merged overload set that holds
+    // a rest overload, mapTypeInner's declMember branch): the closure's
+    // calling convention is the pack alone, whatever arity the checker
+    // resolved the call to. Every argument packs; the resolved overload's own
+    // positions are checked by tsc, and a dyn element is checked at the read.
+    if (calleeRestIn && params.length === 1 && params[0]!.kind === "dyn") {
+      if (expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
+      return [dynRestPack(L, expr.arguments, expr, loc)];
+    }
     const restT = params[params.length - 1]!;
     if (restT.kind !== "array" && restT.kind !== "dyn") return null;
     const sig = L.checker.getResolvedSignature(expr);
@@ -6160,7 +6169,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       return finishKeyArm({ kind: "dynCall", callee: boxed, calleeName, args, type: DYN, loc });
     }
     const params = callee.type.params;
-    const packed = restPackedArgs(L, expr, params, loc);
+    const packed = restPackedArgs(L, expr, params, loc, callee.type.restIn === true);
     if (packed) return finishKeyArm({ kind: "callValue", callee, args: packed, type: callee.type.ret, loc });
     const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
     // Optional-param func TYPES map their `x?: T` slots as `T | undefined`
@@ -12451,7 +12460,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     }
     if (callee.type.kind !== "func") L.badType(access, L.typeOf(access));
     const params = callee.type.params;
-    const packedRest = restPackedArgs(L, call, params, locOf(call));
+    const packedRest = restPackedArgs(L, call, params, locOf(call), callee.type.restIn === true);
     if (packedRest) {
       return { kind: "callValue", callee, args: packedRest, type: callee.type.ret, loc: locOf(call) };
     }
@@ -13865,7 +13874,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         const callee = read !== null && read.type.kind === "union" ? L.maybeNarrow(read, access) : read;
         if (callee?.type.kind === "func") {
           const params = callee.type.params;
-          const packedField = restPackedArgs(L, call, params, locOf(call));
+          const packedField = restPackedArgs(L, call, params, locOf(call), callee.type.restIn === true);
           if (packedField) {
             return {
               kind: "callValue", callee, args: packedField, type: callee.type.ret, loc: locOf(call),
