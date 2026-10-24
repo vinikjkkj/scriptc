@@ -12160,6 +12160,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8556-conditional-constructor-fields-list-in-assignment-order.js": {
+   "order": [
+    "<repo>/tests/corpus/8556-conditional-constructor-fields-list-in-assignment-order.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8557-a-var-bound-to-an-exported-function-is-read-above-its-declaration.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8557-a-var-bound-to-an-exported-function-is-read-above-its-declaration.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8558-a-method-read-through-an-untyped-value-is-not-bound.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8558-a-method-read-through-an-untyped-value-is-not-bound.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8559-json-parse-held-in-a-typescript-const.ts": {
+   "order": [
+    "<repo>/tests/corpus/8559-json-parse-held-in-a-typescript-const.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
