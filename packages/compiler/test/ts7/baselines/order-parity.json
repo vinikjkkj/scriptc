@@ -13051,6 +13051,31 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9355-record-identity-through-dyn.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9355-record-identity-through-dyn.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9356-record-identity-dyn-return.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9356-record-identity-dyn-return.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9357-record-identity-expando-memo.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9357-record-identity-expando-memo.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9358-resolved-table-exports.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9358-resolved-table-exports-modules/table.cjs",
+    "<repo>/tests/corpus/9358-resolved-table-exports.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/901-records-eval-order.ts": {
    "order": [
     "<repo>/tests/corpus/901-records-eval-order.ts"
