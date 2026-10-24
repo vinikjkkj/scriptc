@@ -782,23 +782,64 @@ ScrStr *scr_big_to_str(const ScrBigInt *a, double radix) {
 void *scr_big_retain_v(void *b) { return scr_big_retain((ScrBigInt *)b); }
 void scr_big_release_v(void *b) { scr_big_release((ScrBigInt *)b); }
 
+/* StringToBigInt (ECMA-262 7.1.14) behind BigInt(string): surrounding JS
+ * whitespace trimmed, the empty string is 0n, an optionally signed decimal
+ * integer, or an UNSIGNED 0x/0o/0b literal with at least one digit. Anything
+ * else (a fraction, `1n`, `1_0`, `-0x1`, a stray character) is a SyntaxError
+ * whose message is V8's: "Cannot convert <the string> to a BigInt". Borrows
+ * `s`; +1 or NULL with the exception pending. */
+ScrBigInt *scr_big_from_str(const ScrStr *s) {
+  ScrStr *t = scr_str_trim((ScrStr *)s); /* +1 */
+  const char *p = t->data;
+  size_t n = t->len;
+  bool ok = true;
+  size_t i = 0;
+  int base = 10;
+  if (n == 0) {
+    scr_str_release(t);
+    return scr_big_zero();
+  }
+  if (n > 2 && p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) { base = 16; i = 2; }
+  else if (n > 2 && p[0] == '0' && (p[1] == 'o' || p[1] == 'O')) { base = 8; i = 2; }
+  else if (n > 2 && p[0] == '0' && (p[1] == 'b' || p[1] == 'B')) { base = 2; i = 2; }
+  else if (p[0] == '+' || p[0] == '-') i = 1;
+  if (i >= n) ok = false;
+  for (size_t k = i; ok && k < n; k++) {
+    char c = p[k];
+    int d = (c >= '0' && c <= '9') ? c - '0'
+            : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+            : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : 99;
+    if (d >= base) ok = false;
+  }
+  if (!ok) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Cannot convert ");
+    scr_jb_write(&b, s->data, s->len);
+    scr_jb_puts(&b, " to a BigInt");
+    scr_str_release(t);
+    scr_throw_error(SCR_ERR_SYNTAX, scr_jb_finish(&b));
+    return NULL;
+  }
+  ScrBigInt *r = scr_big_parse(p, n);
+  scr_str_release(t);
+  return r;
+}
+
 /* ToBigInt (ECMA-262 7.1.13) over an UNTYPED operand — `BigInt(u)`.
  * Lives here rather than in scr_json.c for the gating reason the boxing
  * ops below spell out, and it may call INTO the always-linked core
  * freely: the dependency this file must not create is the other
  * direction.
  *
- * Node's four answers, measured against v25.9.0:
+ * Node's answers, measured against v25.9.0:
  *   BigInt(5)      -> 5n            BigInt(5.5) -> RangeError
  *   BigInt(true)   -> 1n            BigInt(null) -> TypeError
  *   BigInt(5n)     -> 5n            BigInt("5") -> 5n
- *
- * The STRING arm is the one this refuses, and deliberately. The only
- * digit parser in this file is scr_big_parse, which serves LITERALS —
- * the tokenizer has already validated those, so it skips any character
- * it does not recognise instead of failing. Pointing it at user text
- * would read BigInt("12abc") as 12n where Node throws SyntaxError, and a
- * silent wrong number is the one answer worse than a refusal. */
+ *   BigInt("12abc") -> SyntaxError  BigInt([7]) -> 7n (ToPrimitive, then the
+ *                                   string arm)
+ * The string arm is scr_big_from_str (the literal parser scr_big_parse skips
+ * characters it does not know, so it only ever sees text already validated). */
 ScrBigInt *scr_big_from_dyn(const ScrDyn *d) {
   if (d != NULL) {
     switch (d->kind) {
@@ -815,23 +856,12 @@ ScrBigInt *scr_big_from_dyn(const ScrDyn *d) {
        * no shared code path, because there is no static BigInt(boolean)
        * spelling for it to share with. */
       return d->v.b ? scr_big_from_f64(1) : scr_big_zero();
-    case SCR_DYN_STR: {
-      static const char m[] =
-          "BigInt() of a dynamic string is not supported yet (a Node-exact digit parser "
-          "with its SyntaxError does not exist yet; convert with Number() first)";
-      scr_throw_error_msg(SCR_ERR_ERROR, m, sizeof m - 1);
-      return NULL;
-    }
     default:
       break;
     }
   }
   /* The two units get Node MESSAGE-EXACT TypeErrors (measured:
-   * "Cannot convert null to a BigInt"). Everything else — objects,
-   * arrays, functions — reaches a BigInt only through ToPrimitive and
-   * then the same digit parse the string arm refuses, and Node reports
-   * those as SyntaxError over the value's String() rendering. Rather
-   * than half-render that, the fence names the kind. */
+   * "Cannot convert null to a BigInt"). */
   if (d == NULL || d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_NULL) {
     ScrJsonBuf b;
     scr_jb_init(&b);
@@ -841,17 +871,12 @@ ScrBigInt *scr_big_from_dyn(const ScrDyn *d) {
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return NULL;
   }
-  {
-    ScrStr *t = scr_dyn_typeof(d); /* +1 */
-    ScrJsonBuf b;
-    scr_jb_init(&b);
-    scr_jb_puts(&b, "BigInt() of a dynamic ");
-    scr_jb_write(&b, t->data, t->len);
-    scr_jb_puts(&b, " is not supported yet (ToPrimitive then a digit parse, neither modeled)");
-    scr_str_release(t);
-    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
-  }
-  return NULL;
+  /* A string, or an object/array reaching a string through ToPrimitive. */
+  ScrStr *str = d->kind == SCR_DYN_STR ? scr_str_retain(scr_dyn_str_value(d)) : scr_dyn_to_primitive_string(d);
+  if (str == NULL) return NULL;
+  ScrBigInt *r = scr_big_from_str(str);
+  scr_str_release(str);
+  return r;
 }
 
 /* ── the checked-dynamic crossing (SCR_DYN_BIG) ───────────────────────
