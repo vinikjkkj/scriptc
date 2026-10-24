@@ -6146,7 +6146,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // JS arity exactly (the thunk ignores extras). Result dyn, checked
     // per use like every any-origin value.
     if (
-      (expr.arguments.length > callee.type.params.length || callee.type.rest === true) &&
+      (expr.arguments.length > callee.type.params.length || callee.type.rest === true || callee.type.restIn === true) &&
       isJsSourceFile(expr.getSourceFile()) &&
       !expr.arguments.some((a) => ts.isSpreadElement(a)) &&
       canBoxFuncIntoDyn(callee.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
