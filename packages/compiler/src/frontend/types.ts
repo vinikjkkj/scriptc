@@ -8337,6 +8337,27 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     }
     const fields: { name: string; type: IrType }[] = [];
     const bodylessOwner = isBodylessDeclClassInstance(widened, checker, ctx);
+    // An OPTIONS-BAG interface the standard library declares (node:stream's
+    // WritableOptions: `write?: ((this: T, chunk: any, ...) => void) | undefined`).
+    // Its callable members are the library author's own signatures, so a bare
+    // `any` parameter in one is the same lazy `any` a body-less .d.ts class
+    // member carries (ctx.declMember): the checked-dynamic slot. Members
+    // declared in the standard library's interfaces only; the program's own
+    // interfaces keep their refusal.
+    const libBagMember = (p: ts.Symbol): boolean => {
+      if (ctx.dynamic) return false;
+      const ds = checker.declarationsOf(p);
+      return ds.length > 0 && ds.every(
+        (d) =>
+          (ts.isPropertySignature(d) || d.kind === ts.SyntaxKind.MethodSignature) &&
+          ts.isInterfaceDeclaration(d.parent) &&
+          d.getSourceFile().isDeclarationFile &&
+          (ctx.isStdlibFile?.(d.getSourceFile()) ?? false),
+      );
+    };
+    const hasCallablePart = (t: ts.Type): boolean =>
+      checker.getCallSignatures(t).length > 0 ||
+      (t.isUnionType() && ts.constituentTypes(t).some((c) => checker.getCallSignatures(c).length > 0));
     for (const p of props) {
       // ...or a DATA property that some literal in this program satisfies
       // with a getter. One layout has to serve both producers, so the slot
@@ -8554,7 +8575,9 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
               ...(ctx.resolveTypeParamTs !== undefined ? { resolveTypeParamTs: tagOuter(ctx.resolveTypeParamTs)! } : {}),
               ...(ctx.resolveTypeParamTsArms !== undefined ? { resolveTypeParamTsArms: tagOuter(ctx.resolveTypeParamTsArms)! } : {}),
             }
-          : ctx;
+          : ctx.declMember !== true && libBagMember(p) && hasCallablePart(fieldTs)
+            ? { ...ctx, declMember: true }
+            : ctx;
         pt = mapType(fieldTs, tryCtx);
         // A field DECLARED in a `.d.ts` whose IMPLEMENTATION twin this build
         // COMPILES: the twin is the only producer the slot can ever have, and
