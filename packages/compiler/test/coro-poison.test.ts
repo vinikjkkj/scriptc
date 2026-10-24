@@ -221,7 +221,13 @@ async function buildArm(knob: boolean, poison: string | undefined): Promise<stri
   }
 }
 
-test("opt-out C is byte-identical with the poison set and unset", { timeout: 120_000 }, async () => {
+// 300 s, not 120. Measured from the CI logs (judge9, 248 healthy runs,
+// 2026-10-21..24): median 11.8 s, max 119.9 s, so 120 s sat on the edge of the
+// legitimate cost. This is the first test in the file, so it also pays the
+// cold build cache that the knob-ON test (median 7.9 s) reuses (INFERRED). A
+// timeout here orphans its compile, whose finally then restores process.env
+// under the next test; keeping the bound off the legitimate tail avoids that.
+test("opt-out C is byte-identical with the poison set and unset", { timeout: 300_000 }, async () => {
   // THE EMBARKATION CRITERION. A debugging tool is exactly what would break
   // it without anyone noticing, so it is asserted rather than argued.
   const clean = await buildArm(false, undefined);
