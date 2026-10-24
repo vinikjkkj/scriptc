@@ -90,7 +90,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     // carries `NULL, 0` and behaves exactly as it did before the table
     // existed.
     const members = dynClassMembers(E, className, meta);
-    const opaque = dynMemberTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id)).opaque;
+    const { opaque, errorRooted } = dynMemberTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
     // A static const with internal linkage, beside the walker prototypes:
     // emitStructDefs has already declared the `_v` thunks by then, and the
     // converters that take its address are emitted after.
@@ -100,7 +100,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${meta.pre}, ${meta.post}, ${meta.hierarchy ? "true" : "false"}, ` +
         `&${rc.retain}, &${rc.release}, ` +
         `${members === null ? "NULL, 0" : `${members.sym}, ${members.count}`}, ` +
-        `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? "true" : "false"}, ${opaque ? "true" : "false"} }; ` +
+        `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? "true" : "false"}, ${opaque ? "true" : "false"}, ${errorRooted ? "true" : "false"} }; ` +
         `/* dyn box: class ${className} */`,
     );
     // A base-typed box can hold a DERIVED instance, and the registry resolves
@@ -1419,7 +1419,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           if (errKind !== null) {
             d.push(
               errKind === 0
-                ? `  return scr_dyn_is_error_encoding(d);`
+                ? `  return scr_dyn_is_error_value(d);`
                 : `  return scr_dyn_err_instanceof(d, ${errKind});`,
             );
             break;
@@ -2329,7 +2329,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               `  `,
               `class.${t.className.slice(1)}`,
               errKind === 0
-                ? `!scr_dyn_is_error_encoding(d)`
+                ? `!scr_dyn_is_error_value(d)`
                 : `!scr_dyn_err_instanceof(d, ${errKind})`,
               `NULL`,
             ),

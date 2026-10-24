@@ -818,8 +818,8 @@ export class LlDyn {
           if (errKind !== null) {
             const has = B.tmp();
             if (errKind === 0) {
-              this.host.declare(`declare zeroext i1 @scr_dyn_is_error_encoding(ptr)`);
-              B.line(`${has} = call zeroext i1 @scr_dyn_is_error_encoding(ptr %d)`);
+              this.host.declare(`declare zeroext i1 @scr_dyn_is_error_value(ptr)`);
+              B.line(`${has} = call zeroext i1 @scr_dyn_is_error_value(ptr %d)`);
             } else {
               this.host.declare(`declare zeroext i1 @scr_dyn_err_instanceof(ptr, double)`);
               B.line(`${has} = call zeroext i1 @scr_dyn_err_instanceof(ptr %d, double ${errKind}.0)`);
@@ -1318,8 +1318,8 @@ export class LlDyn {
         const errKind = dynErrorClassKind(t.className)!;
         const hasMarker = B.tmp();
         if (errKind === 0) {
-          host.declare(`declare zeroext i1 @scr_dyn_is_error_encoding(ptr)`);
-          B.line(`${hasMarker} = call zeroext i1 @scr_dyn_is_error_encoding(ptr %d)`);
+          host.declare(`declare zeroext i1 @scr_dyn_is_error_value(ptr)`);
+          B.line(`${hasMarker} = call zeroext i1 @scr_dyn_is_error_value(ptr %d)`);
         } else {
           host.declare(`declare zeroext i1 @scr_dyn_err_instanceof(ptr, double)`);
           B.line(`${hasMarker} = call zeroext i1 @scr_dyn_err_instanceof(ptr %d, double ${errKind}.0)`);

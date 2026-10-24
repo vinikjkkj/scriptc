@@ -1269,6 +1269,7 @@ bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t ke
    * even though Object.keys reports only ['v']. Before this it answered
    * FALSE, at exit 0, with no diagnostic. */
   if (recv->kind == SCR_DYN_OBJINST) {
+    if (scr_dyn_objinst_error_rooted(recv) && scr_dyn_error_member_has(recv, key, key_len)) return true;
     return scr_dyn_objinst_member(recv, key, key_len) != NULL;
   }
   (void)key_len; /* the remaining tests are on the NUL-terminated spelling */
@@ -1403,7 +1404,23 @@ ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
    * table lists, so a miss cannot be called absent: the class value has no
    * dyn representation yet, and answering undefined would be the silent
    * wrong answer. The loud ladder stays for exactly this name. */
-  if (scr_dyn_objinst_class_of(d)->opaque || (key->len == 11 && memcmp(key->data, "constructor", 11) == 0)) {
+  if (key->len == 11 && memcmp(key->data, "constructor", 11) == 0) {
+    scr_dyn_objinst_fence(d, "a property read");
+    return NULL;
+  }
+  if (scr_dyn_objinst_error_rooted(d)) {
+    if (key->len == 8 && memcmp(key->data, "toString", 8) == 0) {
+      /* Error.prototype.toString, as a function bound over the call path. */
+      ScrClosure *clo = scr_closure_new((void *)dyn_bound_intrinsic_thunk, 2);
+      clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+      scr_box_set_ref(clo->caps[0], scr_dyn_retain(d));
+      clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+      scr_box_set_ref(clo->caps[1], scr_dyn_new_str((ScrStr *)key));
+      return scr_dyn_new_func(clo, dyn_bound_intrinsic_thunk, 0, "()", "bound");
+    }
+    return scr_dyn_error_member_get(d, key);
+  }
+  if (scr_dyn_objinst_class_of(d)->opaque) {
     scr_dyn_objinst_fence(d, "a property read");
     return NULL;
   }
@@ -1877,7 +1894,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
    *
    * A class with NO table falls through exactly as before, so a program
    * whose classes carry none cannot tell this arm was added. */
-  if (recv->kind == SCR_DYN_OBJINST && scr_dyn_objinst_has_members(recv)) {
+  if (recv->kind == SCR_DYN_OBJINST && (scr_dyn_objinst_has_members(recv) || scr_dyn_objinst_error_rooted(recv))) {
     const ScrDynClassMember *cm = scr_dyn_objinst_member(recv, method, strlen(method));
     if (cm != NULL && cm->call != NULL) {
       /* The receiver binds by CONSTRUCTION here -- the emitted wrapper
@@ -1901,6 +1918,31 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
         return r;
       }
       scr_dyn_release(fv);
+      dyn_throw_not_fn(what);
+      return NULL;
+    }
+    /* An Error-rooted instance: Error.prototype.toString is the runtime's
+     * routine, and any other name is the error's own property (its bag), a
+     * function value there being called with the instance as receiver. */
+    if (scr_dyn_objinst_error_rooted(recv)) {
+      if (strcmp(method, "toString") == 0) {
+        ScrStr *s = scr_error_to_string((ScrError *)recv->v.inst.o);
+        ScrDyn *r = scr_dyn_new_str(s);
+        scr_str_release(s);
+        return r;
+      }
+      ScrStr *mk = scr_str_new(method, strlen(method));
+      ScrDyn *fv = scr_dyn_error_member_get(recv, mk);
+      scr_str_release(mk);
+      if (fv != NULL && fv->kind == SCR_DYN_FUNC) {
+        scr_dyn_this_push_dyn(recv);
+        ScrDyn *r = scr_dyn_call(fv, args, argc, what);
+        scr_dyn_this_pop();
+        scr_dyn_release(fv);
+        return r;
+      }
+      scr_dyn_release(fv);
+      if (dyn_objproto_knows(method)) return dyn_object_proto_method(recv, method, args, argc, what);
       dyn_throw_not_fn(what);
       return NULL;
     }

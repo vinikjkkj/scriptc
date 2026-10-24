@@ -2352,7 +2352,7 @@ class LlEmitter {
       // always-linked dyn core a descriptor whose `members` read runs off
       // the end of the object — measured, as an access violation on the
       // first boxed method call.
-      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8 }`,
+      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8 }`,
       // One row of a class's instance MEMBER TABLE
       // { name, len, get, call, enumerable } (ScrDynClassMember in
       // scr_runtime.h) — what `x.get()` and `x.v` read through once the
@@ -3670,12 +3670,12 @@ class LlEmitter {
     // below; nothing reads a body before emission.
     this.dynClassDescSyms.set(className, { sym, body: "" });
     const members = this.dyn.classMemberTable(className);
-    const opaque = dynMemberTable(
+    const { opaque, errorRooted } = dynMemberTable(
       meta,
       this.fnByName,
       (id: string) => this.recordsById.get(id),
       (id: string) => this.unionsById.get(id),
-    ).opaque;
+    );
     // The whole initialiser is built HERE, at the call site's interning
     // moment, not at emission time: the display-name cstr and the RC
     // declares it depends on must be registered while those pools are
@@ -3687,7 +3687,7 @@ class LlEmitter {
       `%ScrDynClass { ptr ${this.cstr(display)}, i64 ${meta.pre}, i64 ${meta.post}, ` +
       `i8 ${meta.hierarchy ? 1 : 0}, ptr ${rc.retain}, ptr ${rc.release}, ` +
       `ptr ${members === null ? "null" : `@${members.sym}`}, i64 ${members === null ? 0 : members.count}, ` +
-      `i8 ${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? 1 : 0}, i8 ${opaque ? 1 : 0} }`;
+      `i8 ${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? 1 : 0}, i8 ${opaque ? 1 : 0}, i8 ${errorRooted ? 1 : 0} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     // Subclass descriptors join the registry (see the C twin): a base-typed
     // box can hold a derived instance whose own member table must resolve.

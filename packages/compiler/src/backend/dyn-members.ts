@@ -107,8 +107,12 @@ export function dynMemberTable(
   fnByName: ReadonlyMap<string, IrFunction>,
   getRecord: (id: string) => IrRecordShape | undefined,
   getUnion: (id: string) => IrUnionDef | undefined,
-): { rows: DynMemberRow[]; opaque: boolean } {
+): { rows: DynMemberRow[]; opaque: boolean; errorRooted: boolean } {
   let opaque = false;
+  let errorRooted = false;
+  // The cells the runtime's ScrError base lays out ahead of a user Error
+  // subclass's own fields (name, message, code, stack, the expando bag).
+  const prefix = new Set<string>();
   // A class whose chain reaches a RUNTIME-PROVIDED base gets no table at
   // all, and this one is not a scruple -- it is a regression caught by a
   // probe, written down.
@@ -133,11 +137,24 @@ export function dynMemberTable(
   // EventEmitter subclass is still lost across the crossing. That is the
   // PRE-EXISTING behaviour, unchanged, and a narrower gap than the one
   // this whole change closes.
+  //
+  // THE ERROR HIERARCHY IS THE ONE EXCEPTION, and only for the surfaces that
+  // read or write ONE named member. Its prefix cells are not rows (the
+  // runtime answers message/name/code/stack and the expando bag itself,
+  // from the ScrError the box holds), so what the table carries is the
+  // user's own fields and methods, and `errorRooted` tells every ENUMERATING
+  // surface (Object.keys, JSON, inspect, assign) to keep its fence: which
+  // names Node lists for an error (name only when assigned, never message
+  // or stack) is not something the cells can say.
   for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
-    if (c.def.runtime === true) return { rows: [], opaque: true };
-    if (RUNTIME_ERROR_CLASSES.has(c.def.name)) return { rows: [], opaque: true };
-    if (RUNTIME_STREAM_CLASSES.has(c.def.name)) return { rows: [], opaque: true };
-    if (c.def.name === RUNTIME_EMITTER_CLASS) return { rows: [], opaque: true };
+    if (RUNTIME_ERROR_CLASSES.has(c.def.name)) {
+      errorRooted = true;
+      for (const f of c.def.fields) prefix.add(f.name);
+      continue;
+    }
+    if (c.def.runtime === true) return { rows: [], opaque: true, errorRooted: false };
+    if (RUNTIME_STREAM_CLASSES.has(c.def.name)) return { rows: [], opaque: true, errorRooted: false };
+    if (c.def.name === RUNTIME_EMITTER_CLASS) return { rows: [], opaque: true, errorRooted: false };
   }
   const rows: DynMemberRow[] = [];
   const seen = new Set<string>();
@@ -171,6 +188,7 @@ export function dynMemberTable(
     // privates by their spelled name, which no public identifier can
     // collide with, so the test is on the sigil exactly as the '%' one is.
     if (f.name.startsWith("#")) continue;
+    if (prefix.has(f.name)) continue;
     if (seen.has(f.name)) continue;
     // A field whose type has no dyn representation at all keeps the
     // fence. Fabricating `undefined` for it would be the silent wrong
@@ -204,7 +222,11 @@ export function dynMemberTable(
 
   const names: string[] = [];
   for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
-    for (const m of c.def.methods ?? []) if (!names.includes(m)) names.push(m);
+    // A runtime-provided base's methods (Error.prototype.toString) are the
+    // runtime's to answer, not rows.
+    if (c.def.runtime !== true) {
+      for (const m of c.def.methods ?? []) if (!names.includes(m)) names.push(m);
+    }
     for (const d of c.def.dynMethods ?? []) if (!names.includes(d.name)) names.push(d.name);
   }
 
@@ -257,7 +279,7 @@ export function dynMemberTable(
     rows.push(accessor ? { kind: "accessor", name, fn } : { kind: "method", name, fn });
   }
 
-  return { rows, opaque };
+  return { rows, opaque, errorRooted };
 }
 
 /** The DISPLAY NAME a `ScrDynClass` descriptor carries: the string every

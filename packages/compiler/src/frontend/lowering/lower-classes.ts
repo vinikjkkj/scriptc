@@ -7215,8 +7215,11 @@ export function dynSetFn(L: Lowerer, info: ClassInfo): IrFunction | null {
   const body: IrStmt[] = [];
   const seen = new Set<string>();
   const displayName = (info.def.jsName ?? "") !== "" ? info.def.jsName! : info.def.name.replace(/^%/, "");
+  const errorCells = errorPrefixCells(info);
   for (const f of info.def.fields) {
     if (f.name.startsWith("%") || f.name.startsWith("#") || seen.has(f.name)) continue;
+    // The runtime answers an Error's own cells (message, name, ...).
+    if (errorCells?.has(f.name) === true) continue;
     if (!canConvertToDyn(f.type, getRec, getUni)) continue;
     const v = into(f.type);
     if (v === null) continue;
@@ -7275,7 +7278,10 @@ export function dynSetFn(L: Lowerer, info: ClassInfo): IrFunction | null {
       loc,
     });
   }
-  if (info.hasPropsTable === true) {
+  // (An Error-rooted class's `%props` is the runtime's expando bag, a
+  // different object from the class property table: its writes are the
+  // runtime's too.)
+  if (info.hasPropsTable === true && errorCells === null) {
     const bagField = (): IrExpr => ({ kind: "fieldGet", obj: thisRef(), className, field: CLASS_PROPS_FIELD, type: DYN, loc });
     body.push(
       {

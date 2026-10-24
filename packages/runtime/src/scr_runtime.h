@@ -4611,6 +4611,11 @@ typedef struct ScrDynClass {
    * misses the table is `undefined` only when this is false; true keeps the
    * loud ladder, because the miss could be a member the table cannot name. */
   bool opaque;
+  /* The chain roots in the runtime's Error hierarchy: the instance IS a
+   * ScrError (the prefix layout), whose message/name/code/stack and expando
+   * bag the runtime answers from the box itself, and whose own-key set no
+   * table can state -- so every ENUMERATING surface keeps its fence. */
+  bool errorRooted;
 } ScrDynClass;
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
@@ -5389,6 +5394,10 @@ bool scr_dyn_is_u8array(const ScrDyn *d);
  * the marker while the marker was an own ENUMERABLE property of every
  * error Object.keys could reach. */
 bool scr_dyn_is_error_encoding(const ScrDyn *d);
+/* The error ENCODING, or a boxed instance of a class rooted in the Error
+ * hierarchy (an OBJINST whose instance IS a ScrError): what the root %Error
+ * arm of dynMatch/dynCheck asks. */
+bool scr_dyn_is_error_value(const ScrDyn *d);
 /* One own-or-inherited DATA read over that encoding (`name`, `message`,
  * `code`), BORROW only, NULL when absent - own enumerable member, own
  * hidden property, then the [[Prototype]] chain. The diagnostic and
@@ -6605,6 +6614,26 @@ const char *scr_dyn_objinst_cls(const ScrDyn *d);
  * uses. NULL for every other kind, for a position outside the
  * interval, and for a NULL box or descriptor; never throws. */
 void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls);
+/* ── a boxed instance of a class that roots in the runtime's Error hierarchy ──
+ * The instance IS a ScrError (the prefix layout), so its message, name, code
+ * and stack memo are the runtime's cells and its other own properties live in
+ * the expando bag (scr_error_prop_set) -- none of which the class's member
+ * table (the user's own fields and methods) lists. These answer the named
+ * member from the box itself. `d` must be an OBJINST box whose class is
+ * errorRooted (scr_dyn_objinst_error_rooted). */
+bool scr_dyn_objinst_error_rooted(const ScrDyn *d);
+/* message / name / code / stack / a bag key: +1, the undefined singleton when
+ * the error has no such property. */
+ScrDyn *scr_dyn_error_member_get(ScrDyn *d, const ScrStr *key);
+/* A write: a STRING message/name/code lands in its cell (and drops a bag
+ * entry that would shadow it), a string `stack` replaces the memo, anything
+ * else is an own property in the bag, which reads win over the cells. */
+void scr_dyn_error_member_set(ScrDyn *d, const ScrStr *key, const ScrDyn *value);
+/* `key in error`: the cells that exist, and the bag. */
+bool scr_dyn_error_member_has(const ScrDyn *d, const char *key, size_t key_len);
+/* `delete error[key]`: a bag key is removed (true); the four cells answer
+ * false, which keeps the caller's loud ladder (a cell has no "removed"). */
+bool scr_dyn_error_member_delete(ScrDyn *d, const ScrStr *key);
 /* The loud ladder for every operation the box has no layout to answer
  * (keyed access, calls, iteration, JSON, structuredClone, inspect,
  * String()): "<what> on a dynamic <Class> is not supported yet". Always

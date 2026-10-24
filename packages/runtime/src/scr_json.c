@@ -3226,7 +3226,74 @@ bool scr_dyn_objinst_has_props(const ScrDyn *d) {
  * disagree about which instances they can enumerate -- which is the very
  * failure the gate exists to prevent, one level up. */
 bool scr_dyn_objinst_enumerable(const ScrDyn *d) {
-  return scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_has_props(d);
+  return scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_has_props(d) &&
+         !scr_dyn_objinst_error_rooted(d);
+}
+
+bool scr_dyn_objinst_error_rooted(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST) return false;
+  return scr_dyn_objinst_class_of(d)->errorRooted;
+}
+
+static bool dyn_err_key_is(const ScrStr *k, const char *lit, size_t n) {
+  return k->len == n && memcmp(k->data, lit, n) == 0;
+}
+
+ScrDyn *scr_dyn_error_member_get(ScrDyn *d, const ScrStr *key) {
+  ScrError *e = (ScrError *)d->v.inst.o;
+  /* An own property in the bag shadows the cell it names (a message or name
+   * written with a non-string value lives there). */
+  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) {
+    ScrDyn *m = scr_dyn_obj_get(e->props, key->data, key->len);
+    if (m != NULL) return scr_dyn_retain(m);
+  }
+  if (dyn_err_key_is(key, "message", 7) || dyn_err_key_is(key, "name", 4)) {
+    bool msg = key->data[0] == 'm';
+    ScrStr *cell = msg ? e->message : e->name;
+    if (cell != NULL) return scr_dyn_new_str(cell); /* retains */
+    ScrStr *dflt = scr_str_new(msg ? "" : "Error", msg ? 0 : 5);
+    ScrDyn *r = scr_dyn_new_str(dflt);
+    scr_str_release(dflt);
+    return r;
+  }
+  return scr_error_prop_get(e, (ScrStr *)key); /* code, stack, undefined */
+}
+
+void scr_dyn_error_member_set(ScrDyn *d, const ScrStr *key, const ScrDyn *value) {
+  ScrError *e = (ScrError *)d->v.inst.o;
+  bool is_msg = dyn_err_key_is(key, "message", 7);
+  bool is_name = dyn_err_key_is(key, "name", 4);
+  bool is_code = dyn_err_key_is(key, "code", 4);
+  if ((is_msg || is_name || is_code) && value->kind == SCR_DYN_STR) {
+    ScrStr *s = scr_dyn_string_coerce((ScrDyn *)value);
+    ScrStr **cell = is_msg ? &e->message : is_name ? &e->name : &e->code;
+    ScrStr *old = *cell;
+    *cell = s;
+    scr_str_release(old);
+    if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) scr_dyn_key_delete(e->props, (ScrStr *)key);
+    return;
+  }
+  scr_error_prop_set(e, (ScrStr *)key, (ScrDyn *)value);
+}
+
+bool scr_dyn_error_member_has(const ScrDyn *d, const char *key, size_t key_len) {
+  ScrError *e = (ScrError *)d->v.inst.o;
+  if ((key_len == 7 && memcmp(key, "message", 7) == 0) || (key_len == 4 && memcmp(key, "name", 4) == 0) ||
+      (key_len == 5 && memcmp(key, "stack", 5) == 0)) {
+    return true;
+  }
+  if (key_len == 4 && memcmp(key, "code", 4) == 0 && e->code != NULL) return true;
+  return e->props != NULL && e->props->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(e->props, key, key_len);
+}
+
+bool scr_dyn_error_member_delete(ScrDyn *d, const ScrStr *key) {
+  ScrError *e = (ScrError *)d->v.inst.o;
+  if (dyn_err_key_is(key, "message", 7) || dyn_err_key_is(key, "name", 4) || dyn_err_key_is(key, "stack", 5) ||
+      dyn_err_key_is(key, "code", 4)) {
+    return false;
+  }
+  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) return scr_dyn_key_delete(e->props, (ScrStr *)key);
+  return true; /* nothing own by that name: Node answers true */
 }
 
 bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {
@@ -5036,6 +5103,8 @@ const ScrDyn *scr_dyn_err_read(const ScrDyn *d, const char *key, size_t key_len)
 }
 
 ScrError *scr_error_from_dyn(const ScrDyn *d) {
+  /* A boxed instance of an Error-rooted class IS the error: same object. */
+  if (scr_dyn_objinst_error_rooted(d)) return scr_error_retain((ScrError *)d->v.inst.o);
   ScrError *hit = scr_errdyn_err_of(d);
   if (hit) return hit;
   /* name/message/code live wherever the encoding put them: an ASSIGNED
@@ -5328,8 +5397,12 @@ bool scr_dyn_is_error_encoding(const ScrDyn *d) {
  *     `Object.create(Error.prototype, …)` is, so scr_dyn_from_error's
  *     product and a user's custom error answer through ONE test;
  *   - the engine's own answer for an island-held value. */
+bool scr_dyn_is_error_value(const ScrDyn *d) {
+  return scr_dyn_is_error_encoding(d) || scr_dyn_objinst_error_rooted(d);
+}
+
 bool scr_dyn_instanceof_error(const ScrDyn *d) {
-  if (scr_dyn_is_error_encoding(d)) return true;
+  if (scr_dyn_is_error_value(d)) return true;
   return scr_dyn_isl_is_error(d);
 }
 
@@ -5541,6 +5614,9 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
       scr_dyn_release(r);
       return s;
     }
+    /* An Error-rooted instance renders Error.prototype.toString ("name:
+     * message"), the runtime's own routine over the cells it holds. */
+    if (scr_dyn_objinst_error_rooted(d)) return scr_error_to_string((ScrError *)d->v.inst.o);
     if (scr_dyn_objinst_has_members(d)) return scr_str_new("[object Object]", 15);
     scr_dyn_objinst_fence(d, "String()");
     return scr_str_new("", 0); /* the pending throw wins */
@@ -6211,6 +6287,21 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
     scr_dyn_this_pop();
     return r; /* +1, or NULL with the getter's own exception pending */
   }
+  /* `e.stack` of an error ENCODING: the stack is an own property of every
+   * real error and the encoding stores none, so the read asks the error the
+   * identity cache holds for this value (the memoised header, the same
+   * answer the static `e.stack` gives). An alien error-shaped object the
+   * cache never saw has no stack, as in Node. */
+  if (key_len == 5 && memcmp(key, "stack", 5) == 0 && scr_dyn_is_error_encoding(recv)) {
+    ScrError *ce = scr_errdyn_err_of(recv); /* +1 or NULL */
+    if (ce != NULL) {
+      ScrStr *s = scr_error_stack(ce);
+      ScrDyn *r = scr_dyn_new_str(s);
+      scr_str_release(s);
+      scr_error_release(ce);
+      return r;
+    }
+  }
   if (key_len == 11 && memcmp(key, "constructor", 11) == 0) {
     /* %Error.prototype% first: it is REACHED from the receiver (or IS
      * it), and its reason is its own — there is no `Error` function
@@ -6877,6 +6968,7 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
       if (taken) return true;
     }
     const ScrDynClassMember *dm = scr_dyn_objinst_member(recv, key->data, key->len);
+    if (dm == NULL && scr_dyn_objinst_error_rooted(recv) && scr_dyn_error_member_delete(recv, key)) return true;
     if (dm != NULL && !dm->enumerable) return true; /* a method or an accessor: nothing own */
     if (dm == NULL) {
       if (scr_dyn_objinst_enumerable(recv)) return true;
@@ -6999,6 +7091,7 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
    * wrong answer takes, and it is the shape this closes. A class with no
    * table still answers false, exactly as it did. */
   if (v->kind == SCR_DYN_OBJINST) {
+    if (scr_dyn_objinst_error_rooted(v) && scr_dyn_error_member_has(v, key->data, key->len)) return true;
     return scr_dyn_objinst_member(v, key->data, key->len) != NULL;
   }
   return false;
@@ -7171,6 +7264,15 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
      * enumerable one and `Object.keys` DOES list it. Both were measured
      * against v25.9.0 before this arm was written; widening it to every
      * receiver would trade one wrong answer for another. */
+    /* `e.stack = "..."` on an error ENCODING: the stack is an own
+     * NON-enumerable property of a real error (Object.keys never lists it),
+     * and the encoding stores none, so the first write defines it hidden;
+     * the hidden-data arm above then keeps it hidden for every later write. */
+    if (key->len == 5 && memcmp(key->data, "stack", 5) == 0 && value->kind == SCR_DYN_STR &&
+        scr_dyn_is_error_encoding(recv)) {
+      scr_dyn_obj_define_hidden_data(recv, key->data, key->len, value, true, true);
+      return;
+    }
     if (key->len == 11 && memcmp(key->data, "constructor", 11) == 0 &&
         scr_dyn_minted_proto_has_ctor(recv)) {
       scr_dyn_obj_define_hidden_data(recv, key->data, key->len, value, true, true);
@@ -7252,6 +7354,11 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       bool taken = r->kind == SCR_DYN_BOOL && r->v.b;
       scr_dyn_release(r);
       if (taken) return;
+    }
+    /* An Error-rooted instance: the runtime's cells and expando bag. */
+    if (scr_dyn_objinst_error_rooted(recv)) {
+      scr_dyn_error_member_set(recv, key, value);
+      return;
     }
     scr_dyn_objinst_fence(recv, "a property write");
     return;
@@ -11085,6 +11192,15 @@ ScrDyn *scr_structured_clone_dyn_value(void) {
 }
 
 bool scr_dyn_err_instanceof(const ScrDyn *d, double kind) {
+  /* A boxed instance of a class rooted in the Error hierarchy IS a ScrError:
+   * its own vtable position is what `instanceof` reads, exactly as for the
+   * error encoding below. */
+  if (d->kind == SCR_DYN_OBJINST) {
+    if (!scr_dyn_objinst_error_rooted(d)) return false;
+    size_t pre = scr_dyn_objinst_pre(d);
+    int k = (int)kind;
+    return scr_error_vts[k].pre <= pre && pre <= scr_error_vts[k].post;
+  }
   /* A JSVAL node never came from a runtime ScrError, so the cache miss
    * below answers false — the documented contract ("a dyn value that
    * never came from an error answers false"). An ENGINE TypeError held
@@ -11204,6 +11320,64 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
       scr_str_release(k);
     }
     free(ord);
+    return out;
+  }
+  if (v->kind == SCR_DYN_OBJINST && scr_dyn_objinst_error_rooted(v)) {
+    /* An Error's own ENUMERABLE keys: `message` and `stack` are own
+     * NON-enumerable properties and never listed; `name` is listed only
+     * when something ASSIGNED it (otherwise it is the prototype's), which
+     * the cell shows by differing from the nearest builtin ancestor's
+     * default; `code` is listed when the cell holds one (assigned, or
+     * stamped by the throw site, which Node also makes own and
+     * enumerable); then the class's own fields and the expando bag, in
+     * that order. Order among them is the one thing the cells cannot
+     * state: Node lists them in ASSIGNMENT order. */
+    ScrError *e = (ScrError *)v->v.inst.o;
+    const size_t pre = scr_dyn_objinst_pre(v);
+    int own_kind = 0;
+    size_t own_pre = 0;
+    for (int k = 0; k < SCR_ERR_KINDS; k++) {
+      if (scr_error_vts[k].pre <= pre && pre <= scr_error_vts[k].post && scr_error_vts[k].pre >= own_pre) {
+        own_kind = k;
+        own_pre = scr_error_vts[k].pre;
+      }
+    }
+    const char *dflt = scr_error_kind_name(own_kind);
+    if (e->name != NULL && !(dflt != NULL && e->name->len == strlen(dflt) && memcmp(e->name->data, dflt, e->name->len) == 0)) {
+      ScrDyn *nv = scr_dyn_new_str(e->name);
+      scr_dyn_objwalk_push(out, mode, "name", 4, nv);
+      scr_dyn_release(nv);
+    }
+    if (e->code != NULL) {
+      ScrDyn *cv = scr_dyn_new_str(e->code);
+      scr_dyn_objwalk_push(out, mode, "code", 4, cv);
+      scr_dyn_release(cv);
+    }
+    const size_t nm = scr_dyn_objinst_member_count(v);
+    for (size_t i = 0; i < nm; i++) {
+      const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
+      if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
+      if (mode == SCR_OBJWALK_KEYS) {
+        scr_dyn_arr_push(out, scr_dyn_objwalk_key(m->name, m->len));
+        continue;
+      }
+      ScrDyn *val = m->get(v->v.inst.o);
+      if (val == NULL) {
+        scr_dyn_release(out);
+        return NULL;
+      }
+      scr_dyn_objwalk_push(out, mode, m->name, m->len, val);
+      scr_dyn_release(val);
+    }
+    if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) {
+      ScrDyn *bag = scr_dyn_objwalk(e->props, mode);
+      if (bag == NULL) {
+        scr_dyn_release(out);
+        return NULL;
+      }
+      for (size_t i = 0; i < bag->v.arr.len; i++) scr_dyn_arr_push(out, scr_dyn_retain(bag->v.arr.items[i]));
+      scr_dyn_release(bag);
+    }
     return out;
   }
   if (v->kind == SCR_DYN_OBJINST && scr_dyn_objinst_enumerable(v)) {
