@@ -1587,7 +1587,7 @@ function classDictionaryFields(cls: ts.ClassLikeDeclaration): Set<string> {
 
 function openRecordEdits(fileName: string, text: string): string | null {
   if (!text.includes("{}") && !/=\s*\{/.test(text)) return null;
-  if (!OPEN_RECORD_PREFILTER.test(text) && !/\bcaptureStackTrace\s*\(/.test(text)) return null;
+  if (!OPEN_RECORD_PREFILTER.test(text) && !/\bcaptureStackTrace\s*\(/.test(text) && !/[\w$]\[[^\]\n"'`0-9][^\]\n"'`]*\]/.test(text)) return null;
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const edits: Edit[] = [];
   const marked = new Set<ts.Node>();
@@ -1661,6 +1661,44 @@ function openRecordEdits(fileName: string, text: string): string | null {
     };
     for (const m of cls.members) walk(m);
   };
+  /* A module-scope DISPATCH TABLE: `const makeSelector = { RR() {...}, ORDER() {...} }`
+   * read as `makeSelector[name]()` / `makeSelector[name]` with a run-time key.
+   * A one-shape record cannot answer a run-time key, and the cast the function-local
+   * rule writes around the initializer does not make a module-scope binding a
+   * checked-dynamic global (that takes the annotation on the declaration), so the
+   * single-declarator statement is annotated instead. Only tables with a function-valued
+   * member: a plain data dictionary at module scope already lowers. */
+  const dispatchTables = (): void => {
+    const indexed = new Set<string>();
+    const scan = (n: ts.Node): void => {
+      if (ts.isElementAccessExpression(n) && ts.isIdentifier(n.expression)) {
+        const k = n.argumentExpression;
+        if (!(ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k) || ts.isNumericLiteral(k))) indexed.add(n.expression.text);
+      }
+      ts.forEachChild(n, scan);
+    };
+    scan(sf);
+    if (indexed.size === 0) return;
+    for (const stmt of sf.statements) {
+      if (!ts.isVariableStatement(stmt) || stmt.declarationList.declarations.length !== 1) continue;
+      const d = stmt.declarationList.declarations[0]!;
+      if (!ts.isIdentifier(d.name) || !indexed.has(d.name.text) || d.initializer === undefined || d.type !== undefined) continue;
+      let init: ts.Expression = d.initializer;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      if (!ts.isObjectLiteralExpression(init)) continue;
+      const hasFn = init.properties.some(
+        (pr) => ts.isMethodDeclaration(pr) ||
+          (ts.isPropertyAssignment(pr) && (ts.isFunctionExpression(pr.initializer) || ts.isArrowFunction(pr.initializer))),
+      );
+      if (!hasFn) continue;
+      // Already annotated by its own JSDoc: the author's claim stands.
+      let i = stmt.getStart(sf);
+      while (i > 0 && /\s/.test(text[i - 1]!)) i--;
+      if (text.slice(i - 2, i) === "*/") continue;
+      edits.push({ start: stmt.getStart(sf), end: stmt.getStart(sf), text: "/** @type {any} */ " });
+    }
+  };
+  dispatchTables();
   const visit = (n: ts.Node): void => {
     if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) castClassFields(n);
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
