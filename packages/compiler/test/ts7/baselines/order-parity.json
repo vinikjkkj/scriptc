@@ -12599,6 +12599,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8800-array-reaches-an-untyped-parameter-as-the-same-array.js": {
+   "order": [
+    "<repo>/tests/corpus/8800-array-reaches-an-untyped-parameter-as-the-same-array.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8801-array-kept-by-untyped-code-sees-later-writes.js": {
+   "order": [
+    "<repo>/tests/corpus/8801-array-kept-by-untyped-code-sees-later-writes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8802-container-that-infers-its-types-keeps-what-it-stores.js": {
+   "order": [
+    "<repo>/tests/corpus/8802-container-that-infers-its-types-keeps-what-it-stores.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8803-untyped-parameter-that-changes-the-element-type.js": {
+   "order": [
+    "<repo>/tests/corpus/8803-untyped-parameter-that-changes-the-element-type.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8804-array-through-a-ts-unknown-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/8804-array-through-a-ts-unknown-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8805-array-returned-through-an-untyped-return-is-the-same-array.js": {
+   "order": [
+    "<repo>/tests/corpus/8805-array-returned-through-an-untyped-return-is-the-same-array.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
