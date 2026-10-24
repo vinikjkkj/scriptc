@@ -3252,11 +3252,6 @@ bool scr_dyn_objinst_enumerable(const ScrDyn *d) {
          !scr_dyn_objinst_error_rooted(d);
 }
 
-bool scr_dyn_objinst_error_rooted(const ScrDyn *d) {
-  if (d == NULL || d->kind != SCR_DYN_OBJINST) return false;
-  return scr_dyn_objinst_class_of(d)->errorRooted;
-}
-
 bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {
   ScrJsonBuf b;
   scr_jb_init(&b);
@@ -11153,12 +11148,7 @@ bool scr_dyn_err_instanceof(const ScrDyn *d, double kind) {
   /* A boxed instance of a class rooted in the Error hierarchy IS a ScrError:
    * its own vtable position is what `instanceof` reads, exactly as for the
    * error encoding below. */
-  if (d->kind == SCR_DYN_OBJINST) {
-    if (!scr_dyn_objinst_error_rooted(d)) return false;
-    size_t pre = scr_dyn_objinst_pre(d);
-    int k = (int)kind;
-    return scr_error_vts[k].pre <= pre && pre <= scr_error_vts[k].post;
-  }
+  if (d->kind == SCR_DYN_OBJINST) return scr_dyn_class_ops != NULL && scr_dyn_class_ops->error_instanceof(d, (int)kind);
   /* A JSVAL node never came from a runtime ScrError, so the cache miss
    * below answers false — the documented contract ("a dyn value that
    * never came from an error answers false"). An ENGINE TypeError held

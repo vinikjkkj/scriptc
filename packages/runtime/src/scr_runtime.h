@@ -6654,11 +6654,14 @@ typedef struct ScrDynClassOps {
   bool (*set)(ScrDyn *recv, const ScrStr *key, const ScrDyn *value);
   int (*objinst_delete)(ScrDyn *recv, const ScrStr *key);
   ScrDyn *(*walk_error)(const ScrDyn *v, ScrObjWalk mode);
+  bool (*error_rooted)(const ScrDyn *d);
+  bool (*error_instanceof)(const ScrDyn *d, int kind);
 } ScrDynClassOps;
 extern const ScrDynClassOps *scr_dyn_class_ops;
 void scr_dyn_class_install(void);
 /* The registered class descriptors (scr_dyn_objinst_registry's table). */
 const ScrDynClass *const *scr_dyn_class_registry(size_t *n);
+static inline bool scr_dyn_objinst_error_rooted(const ScrDyn *d) { return scr_dyn_class_ops != NULL && scr_dyn_class_ops->error_rooted(d); }
 static inline ScrDyn *scr_dyn_class_box(const ScrDynClass *cls) { return scr_dyn_class_ops ? scr_dyn_class_ops->class_box(cls) : NULL; }
 static inline const ScrDynClass *scr_dyn_class_of_value(const ScrDyn *d) { return scr_dyn_class_ops ? scr_dyn_class_ops->class_of_value(d) : NULL; }
 static inline ScrDyn *scr_dyn_error_class_box(int kind) { return scr_dyn_class_ops ? scr_dyn_class_ops->error_class_box(kind) : NULL; }
@@ -6674,7 +6677,6 @@ static inline bool scr_dyn_error_member_delete(ScrDyn *d, const ScrStr *key) { r
  * table (the user's own fields and methods) lists. These answer the named
  * member from the box itself. `d` must be an OBJINST box whose class is
  * errorRooted (scr_dyn_objinst_error_rooted). */
-bool scr_dyn_objinst_error_rooted(const ScrDyn *d);
 /* message / name / code / stack / a bag key: +1, the undefined singleton when
  * the error has no such property. */
 /* A write: a STRING message/name/code lands in its cell (and drops a bag

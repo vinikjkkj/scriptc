@@ -500,10 +500,22 @@ static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
   }
 }
 
+static bool dyn_cls_ops_error_rooted(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST) return false;
+  return scr_dyn_objinst_class_of(d)->errorRooted;
+}
+
+static bool dyn_cls_ops_error_instanceof(const ScrDyn *d, int k) {
+  if (!dyn_cls_ops_error_rooted(d)) return false;
+  size_t pre = scr_dyn_objinst_pre(d);
+  return scr_error_vts[k].pre <= pre && pre <= scr_error_vts[k].post;
+}
+
 static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_impl_box, dyn_cls_impl_of_value, dyn_cls_impl_error_box,
   dyn_cls_impl_err_get, dyn_cls_impl_err_set, dyn_cls_impl_err_has, dyn_cls_impl_err_delete,
   dyn_cls_ops_fn_get, dyn_cls_ops_construct, dyn_cls_ops_set, dyn_cls_ops_delete, dyn_cls_ops_walk_error,
+  dyn_cls_ops_error_rooted, dyn_cls_ops_error_instanceof,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }
