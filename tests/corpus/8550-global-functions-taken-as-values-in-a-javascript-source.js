@@ -25,24 +25,27 @@ console.log(t === setTimeout, typeof t, typeof clearTimeout, typeof structuredCl
 function apply1(fn, x) { return fn(x); }
 console.log(apply1(parseInt, '99'), apply1(escape, 'q r'), apply1(atob, 'aGk='), ['a b', 'c&d'].map(encodeURIComponent));
 
-// timers through values: arguments ride along, clears work
-const order = [];
+// timers through values: arguments ride along, clears work. A timer and an
+// immediate have no guaranteed order at startup in Node (it depends on how long
+// the loop took to start), so each kind records into its own list and the lists
+// print once the last interval tick proves everything else has fired.
+const micro = [], imm = [], tos = [], ticks = [];
 const setT = setTimeout, setI = setInterval, setM = setImmediate, clrT = clearTimeout, clrI = clearInterval, clrM = clearImmediate;
-setM((a, b) => order.push('imm ' + a + b), 'x', 'y');
-const dropped = setM(() => order.push('never imm'));
+setM((a, b) => imm.push('imm ' + a + b), 'x', 'y');
+const dropped = setM(() => imm.push('never imm'));
 clrM(dropped);
-queueMicrotask(() => order.push('micro'));
-const gone = setT(() => order.push('never timeout'), 5);
+queueMicrotask(() => micro.push('micro'));
+const gone = setT(() => tos.push('never timeout'), 5);
 clrT(gone);
-setT((a, b, c) => order.push('timeout ' + a + b + c), 3, 1, 2, 3);
+setT((a, b, c) => tos.push('timeout ' + a + b + c), 3, 1, 2, 3);
 let n = 0;
 const iv = setI((tag) => {
   n++;
-  order.push('tick ' + tag + n);
+  ticks.push('tick ' + tag + n);
   if (n === 2) {
     clrI(iv);
     const copy = structuredClone({ a: [1, 2, { b: 3 }], d: 'x' });
-    console.log(order.join(' | '), JSON.stringify(copy));
+    console.log(micro.join(), '|', imm.join(), '|', tos.join(), '|', ticks.join(' '), JSON.stringify(copy));
   }
-}, 4, 'T');
+}, 12, 'T');
 console.log('sync end');
