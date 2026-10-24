@@ -12061,6 +12061,92 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8780-tsc-downleveled-private-members.js": {
+   "order": [
+    "<repo>/tests/corpus/8780-tsc-downleveled-private-members.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8781-class-fields-initialized-to-undefined.js": {
+   "order": [
+    "<repo>/tests/corpus/8781-class-fields-initialized-to-undefined.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8782-typescript-helper-declared-with-a-this-guard.js": {
+   "order": [
+    "<repo>/tests/corpus/8782-typescript-helper-declared-with-a-this-guard.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8783-bound-method-with-fixed-arguments-in-a-rest-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/8783-bound-method-with-fixed-arguments-in-a-rest-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8784-switch-over-untyped-value-with-table-case-tests.js": {
+   "order": [
+    "<repo>/tests/corpus/8784-switch-over-untyped-value-with-table-case-tests.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8785-classes-through-a-require-binding-member/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8785-classes-through-a-require-binding-member/errors.js",
+    "<repo>/tests/corpus/8785-classes-through-a-require-binding-member/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8786-node-version-probe-picks-the-implementation/main.js": {
+   "order": [
+    "<repo>/tests/corpus/8786-node-version-probe-picks-the-implementation/modern.js",
+    "<repo>/tests/corpus/8786-node-version-probe-picks-the-implementation/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8787-constructor-name-of-an-instance.js": {
+   "order": [
+    "<repo>/tests/corpus/8787-constructor-name-of-an-instance.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8788-error-stack-trace-limit.js": {
+   "order": [
+    "<repo>/tests/corpus/8788-error-stack-trace-limit.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8789-delete-of-class-fields-that-admit-undefined.js": {
+   "order": [
+    "<repo>/tests/corpus/8789-delete-of-class-fields-that-admit-undefined.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8790-error-name-getter-with-unrelated-name-writes.js": {
+   "order": [
+    "<repo>/tests/corpus/8790-error-name-getter-with-unrelated-name-writes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8791-instanceof-buffer.js": {
+   "order": [
+    "<repo>/tests/corpus/8791-instanceof-buffer.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8792-error-capture-stack-trace.js": {
+   "order": [
+    "<repo>/tests/corpus/8792-error-capture-stack-trace.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8793-module-level-untyped-containers-read-by-functions.js": {
+   "order": [
+    "<repo>/tests/corpus/8793-module-level-untyped-containers-read-by-functions.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
