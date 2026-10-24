@@ -28,7 +28,7 @@ import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-name
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { isAnyDynContainer, decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDefinitionThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
+import { isAnyDynContainer, inferContainerTypeFromUses, decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDefinitionThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
@@ -1548,6 +1548,35 @@ export function wholeExportRootRebindable(
   return rebindable;
 }
 
+/** The slot type of a file-scope `const x = new Map()` / `new Set()` / `new WeakMap()` /
+ * `new WeakSet()` in a JavaScript source whose checker type is the all-`any` container
+ * (the type JS gives the no-argument constructors): the type the initializer's own
+ * lowering will produce. For Map and Set that is the use-inferred typed container
+ * (inferContainerTypeFromUses, no seed argument, exactly the `new` expression's own
+ * rule) when the binding's uses fix its types, and the dyn-flavored container (dyn)
+ * otherwise; the weak containers are always dyn-flavored. Null for every other
+ * declaration, which keeps the rules it had. */
+function untypedContainerGlobalType(
+  L: Lowerer,
+  sf: ts.SourceFile,
+  decl: ts.VariableDeclaration,
+  nameNode: ts.Identifier,
+): IrType | null {
+  if (!isJsSourceFile(sf) || decl.name !== nameNode || decl.initializer === undefined) return null;
+  if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return null;
+  const init = decl.initializer;
+  if (!ts.isNewExpression(init) || !ts.isIdentifier(init.expression)) return null;
+  const ctorName = init.expression.text;
+  if (ctorName !== "Map" && ctorName !== "Set" && ctorName !== "WeakMap" && ctorName !== "WeakSet") return null;
+  const t = L.typeOf(nameNode);
+  if (!isAnyDynContainer(L, t)) return null;
+  const args = init.arguments ?? [];
+  if (ctorName === "WeakMap" || ctorName === "WeakSet") return args.length <= 1 ? DYN : null;
+  if (args.length > 1) return null;
+  if (args.length === 1) return DYN;
+  return inferContainerTypeFromUses(L, init, ctorName === "Map" ? "map" : "set") ?? DYN;
+}
+
 /** True when `module.exports = <root>` needs storage of its OWN — the
  * whole-export root is a module-scope VARIABLE of this file that the alias
  * path cannot carry, and nothing can rebind it after the export.
@@ -2323,8 +2352,16 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // function declaration that reads the binding needs the slot the
             // checked-dynamic fallback type (irTypeOf: func over dyn pieces)
             // gives it. Without a global the read had nothing to bind.
+            // ...and the SECOND exception: an untyped `new Map()` / `new Set()` /
+            // `new WeakMap()` / `new WeakSet()` const (the module-level cache every JS
+            // package keeps and its hoisted functions read). The slot is what the
+            // initializer's own lowering produces — the use-inferred typed container
+            // when the binding's uses fix its key and value types (the same
+            // inference the `new` expression runs), the dyn-flavored container
+            // otherwise — so a hoisted function reads the global the init assigns.
+            const containerT = untypedContainerGlobalType(L, sf, decl, nameNode);
             if (
-              isJsSourceFile(sf) && objFnValueT === null && !L.mapTypeOf(L.typeOf(nameNode)) &&
+              isJsSourceFile(sf) && objFnValueT === null && containerT === null && !L.mapTypeOf(L.typeOf(nameNode)) &&
               !jsFnLiteralSlot(L, decl, nameNode)
             ) continue;
             if (objFnValueT !== null && process.env["SCRIPTC_OBJFNVALUE_WHY"] !== undefined) {
@@ -2408,6 +2445,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                   })();
             let type =
               handleT ??
+              containerT ??
               castClassT ??
               objFnValueT ??
               keyedReadT ??

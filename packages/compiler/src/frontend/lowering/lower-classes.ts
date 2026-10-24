@@ -1966,7 +1966,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
    *    fixes ONE key kind at construction, so a mixed-kind inference
    *    would answer `size` as 1 where Node says 2. Disagreement refuses
    *    and the value keeps the escape hatch it has today. */
-  function inferContainerTypeFromUses(
+  export function inferContainerTypeFromUses(
     L: Lowerer,
     expr: ts.NewExpression,
     flavor: "map" | "set",
