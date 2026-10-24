@@ -15271,6 +15271,12 @@
     "<repo>/tests/corpus/8847-url-origin-and-tojson.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8990-require-in-a-type-module-js-throws-at-the-declaration.js": {
+   "order": [
+    "<repo>/tests/corpus/8990-require-in-a-type-module-js-throws-at-the-declaration.js"
+   ],
+   "diags": []
   }
  }
 }
