@@ -102,6 +102,17 @@ export function dynMemberRows(
  * `undefined` (Node's answer for an absent property) exactly when no
  * skipped member could be the one asked for: `opaque` classes keep the loud
  * ladder instead. One computation for both lanes, like the rows. */
+/** True when the class's chain reaches the runtime EventEmitter or a runtime stream class: the
+ * descriptor declares the class not enumerable (the flag a class with a run-time property
+ * table carries), so Object.keys, both JSON writers, util.inspect and Object.assign keep
+ * the loud or empty answer they had. */
+export function dynEnumerationFenced(cls: DynMemberClass): boolean {
+  for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
+    if (RUNTIME_STREAM_CLASSES.has(c.def.name) || c.def.name === RUNTIME_EMITTER_CLASS) return true;
+  }
+  return false;
+}
+
 export function dynMemberTable(
   cls: DynMemberClass,
   fnByName: ReadonlyMap<string, IrFunction>,
@@ -152,9 +163,17 @@ export function dynMemberTable(
       for (const f of c.def.fields) prefix.add(f.name);
       continue;
     }
+    // The EventEmitter and stream hierarchies keep a table of the program's own members (their
+    // runtime prefix is not in `def.fields`), so a METHOD CALL or field read through an untyped
+    // receiver finds its member (mysql2's PromiseConnection holds a Connection, which extends
+    // EventEmitter, in an untyped field). The table is `opaque` (a miss keeps the loud ladder:
+    // on/emit/... are the runtime's) and the descriptor is not enumerable (dynEnumerationFenced):
+    // the prefix Node lists (_events, _eventsCount, _maxListeners) is not something rows can state.
+    if (RUNTIME_STREAM_CLASSES.has(c.def.name) || c.def.name === RUNTIME_EMITTER_CLASS) {
+      opaque = true;
+      continue;
+    }
     if (c.def.runtime === true) return { rows: [], opaque: true, errorRooted: false };
-    if (RUNTIME_STREAM_CLASSES.has(c.def.name)) return { rows: [], opaque: true, errorRooted: false };
-    if (c.def.name === RUNTIME_EMITTER_CLASS) return { rows: [], opaque: true, errorRooted: false };
   }
   const rows: DynMemberRow[] = [];
   const seen = new Set<string>();
