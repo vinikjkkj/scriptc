@@ -1139,7 +1139,7 @@ function privateMemberEdits(fileName: string, text: string): string | null {
  * `startsWith`, `slice`, `parseInt`/`Number`, comparisons,
  * `&&`, `||` and `!`; anything else makes the whole test "not a probe" and the
  * source is left as written. Conditional expressions and `if` statements. */
-const NODE_COMPAT_VERSION = "24.0.0"; // mirrors SCR_NODE_COMPAT_VERSION (packages/runtime/src/scr_lib.c); a unit test pins the pair
+export const NODE_COMPAT_VERSION = "24.0.0"; // mirrors SCR_NODE_COMPAT_VERSION (packages/runtime/src/scr_lib.c); a unit test pins the pair
 const VERSION_PROBE_PREFILTER = /process\.versions?\b/;
 const NOT_A_PROBE = Symbol("not-a-probe");
 type ProbeValue = number | string | boolean | typeof NOT_A_PROBE;
