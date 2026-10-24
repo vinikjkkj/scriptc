@@ -26,7 +26,7 @@ import { lowerDateLocaleFormat, lowerNumberLocaleFormat } from "./lower-numfmt.j
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerErrorCaptureStackTraceCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
-import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
+import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
@@ -5082,6 +5082,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // twin land here.
         const utilServed = L.lowerUtilModuleCall(expr, bi, loc);
         if (utilServed) return utilServed;
+        // node:util/types' kind tests (isDate, isMap, isSet): the same
+        // answers `instanceof Date/Map/Set` gives, off the same tags.
+        const utilTypesServed = lowerUtilTypesCall(L, expr, bi, loc);
+        if (utilTypesServed) return utilTypesServed;
         // The stream spoke owns finished/pipeline (the callback forms)
         // and getDefaultHighWaterMark the same way.
         const streamServed = lowerStreamModuleCall(L, expr, bi, loc);
@@ -6957,6 +6961,48 @@ const DYN_STRING_ONLY_METHODS = new Set([
       "statically-decided Array.isArray on computed arguments (bind the value to a variable first)",
     );
   }
+
+/** node:util/types' `isDate` / `isMap` / `isSet` (named import, destructured
+ * require, or member binding of `require('util/types')`). Node answers by the
+ * object's internal slot, which is exactly what the runtime tags are, so the
+ * answer is the one `x instanceof Date|Map|Set` gives: a real tag test on a
+ * dyn value, the arm tags of a union, constant true for a plain read of the
+ * statically-typed kind, constant false for every other static kind (the
+ * operand still evaluated). A union with a dyn/jsval arm, and a computed
+ * operand of the matching kind, keep the member fence: a loud refusal beats a
+ * guessed answer. Null for any other member so the chain keeps trying. */
+function lowerUtilTypesCall(L: Lowerer, call: ts.CallExpression, bi: { module: string; member: string }, loc: SrcLoc): IrExpr | null {
+  if (bi.module !== "util/types") return null;
+  const kinds: Record<string, { test: "date" | "map" | "set"; arm: string }> = {
+    isDate: { test: "date", arm: "date" },
+    isMap: { test: "map", arm: "map" },
+    isSet: { test: "set", arm: "set" },
+  };
+  const k = kinds[bi.member];
+  if (k === undefined || call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) return null;
+  const argNode = call.arguments[0]!;
+  const arg = L.lowerExpr(argNode);
+  if (arg.type.kind === "dyn") return { kind: "dynTest", test: k.test, value: arg, type: BOOL, loc };
+  const falseE: IrExpr = { kind: "boolLit", value: false, type: BOOL, loc };
+  const free = arg.kind === "varRef" || arg.kind === "recordGet" || arg.kind === "fieldGet";
+  const dropped = (): IrExpr =>
+    pureReemittable(arg) || arg.kind === "unitLit"
+      ? falseE
+      : { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: arg, loc }], result: falseE, type: BOOL, loc };
+  if (arg.type.kind === "union") {
+    const def = L.unions.get(arg.type.unionId);
+    if (def !== undefined && !def.arms.some((a) => a.kind === "dyn" || a.kind === "jsval" || a.kind === "caught")) {
+      const tags = def.arms.flatMap((a, i) => (a.kind === k.arm ? [i] : []));
+      if (tags.length > 0) return armTagsTest(L, arg, tags, loc);
+      return dropped();
+    }
+  } else if (arg.type.kind === k.arm) {
+    if (free) return { kind: "boolLit", value: true, type: BOOL, loc };
+  } else if (arg.type.kind !== "jsval" && arg.type.kind !== "caught") {
+    return dropped();
+  }
+  L.noLowering(`util/types.${bi.member} of '${L.fmt(arg.type)}'`, call, "bind the operand to a variable of a narrower type first");
+}
 
 /** `ArrayBuffer.isView(v)` — the THIRD line of the payload-normalising
  * idiom whose first two lines already lower (`u instanceof Uint8Array`
