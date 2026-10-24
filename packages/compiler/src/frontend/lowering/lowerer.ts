@@ -3828,6 +3828,9 @@ export class Lowerer {
         this.noteEdge(`%${c.def.name}.%dynbox`);
         dynBoxedMethodInstances(this, c);
       }
+      // The write half of the box (dynSetFn): its own marker, because the
+      // implicit-any list above is only for classes with such methods.
+      this.noteEdge(`%${c.def.name}.%dynset`);
     };
     for (let a: ClassInfo | null | undefined = info; a; a = a.base) mark(a);
     const below = (c: ClassInfo): void => {

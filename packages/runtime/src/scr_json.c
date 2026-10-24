@@ -7219,9 +7219,25 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     return;
   }
   if (recv->kind == SCR_DYN_OBJINST) {
-    /* Node writes the instance's real field. The box has no member table
-     * to reach it, and a write that silently went nowhere is the one
-     * answer worse than a refusal (the static_copy stance). */
+    /* Node writes the instance's real field. The compiler lists one
+     * synthesized member, `%dynSet(key, value): boolean`, on every class a
+     * dyn box can hold (dynSetFn): it runs what the static side would have
+     * run for the same write -- the field's checked store, a setter, the
+     * run-time property table. true = taken. A class with no such member,
+     * or a key nothing can hold, keeps the loud ladder: a write that
+     * silently went nowhere is the one answer worse than a refusal (the
+     * static_copy stance). */
+    const ScrDynClassMember *ds = scr_dyn_objinst_member(recv, "%dynSet", 7);
+    if (ds != NULL && ds->call != NULL) {
+      ScrDyn *kd = scr_dyn_new_str((ScrStr *)key);
+      ScrDyn *av[2] = { kd, value };
+      ScrDyn *r = ds->call(recv->v.inst.o, av, 2, "a property write");
+      scr_dyn_release(kd);
+      if (r == NULL) return; /* the write threw */
+      bool taken = r->kind == SCR_DYN_BOOL && r->v.b;
+      scr_dyn_release(r);
+      if (taken) return;
+    }
     scr_dyn_objinst_fence(recv, "a property write");
     return;
   }

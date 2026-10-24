@@ -5,7 +5,7 @@
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, canBoxFuncIntoDyn, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { BOOL, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { implicitDefaultInstance, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
@@ -7125,6 +7125,139 @@ export function dynBoxedMethodInstances(L: Lowerer, info: ClassInfo): { name: st
   return out;
 }
 
+/** The WRITE half of a boxed class instance's member surface: one
+ * synthesized `%C.%dynSet(this, key, value): boolean`, listed in the class's
+ * dynMethods under the name `%dynSet` (no program can spell a `%` member, so
+ * it never collides and never enumerates). `x[k] = v` through an untyped
+ * slot reaches it by name through the member table, the way `x.m()` reaches
+ * a method, so BOTH backends run the same compiled body and neither emitter
+ * grows a write arm of its own.
+ *
+ * It dispatches on the key to what the STATIC side would have run for the
+ * same write: a declared field takes the value checked into its slot type
+ * (dynCheck: the same boundary a typed parameter has), a setter runs with
+ * the value checked into its parameter, a getter-only accessor throws
+ * Node's TypeError, and any other key lands in the instance's run-time
+ * property table when the class carries one (the class of an untyped JS
+ * package does; see collectClassShape). Answers true when the write was
+ * taken and false for a key nothing can hold, so the runtime keeps its loud
+ * ladder for exactly that case. */
+export function dynSetFn(L: Lowerer, info: ClassInfo): IrFunction | null {
+  const className = info.def.name;
+  const decl = info.decl;
+  if (decl === null) return null;
+  const loc = locOf(decl);
+  const thisType: IrType = { kind: "object", className };
+  const locals: IrLocal[] = [
+    { id: "this.0", name: "this", type: thisType, mutable: false },
+    { id: "key.0", name: "key", type: STRING, mutable: false },
+    { id: "val.0", name: "val", type: DYN, mutable: false },
+  ];
+  const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: l.type, loc });
+  const thisRef = (): IrExpr => ref(locals[0]!);
+  const keyRef = (): IrExpr => ref(locals[1]!);
+  const valRef = (): IrExpr => ref(locals[2]!);
+  const getRec = (id: string) => L.shapes.get(id);
+  const getUni = (id: string) => L.unions.get(id);
+  const into = (t: IrType): IrExpr | null => {
+    if (t.kind === "dyn") return valRef();
+    if (!canDynCheckTo(t, getRec, getUni)) return null;
+    return { kind: "dynCheck", value: valRef(), type: t, loc };
+  };
+  const ret = (v: boolean): IrStmt => ({ kind: "return", value: { kind: "boolLit", value: v, type: BOOL, loc }, loc });
+  const keyIs = (name: string): IrExpr => ({
+    kind: "strEq", negated: false, left: keyRef(), right: { kind: "strLit", value: name, type: STRING, loc }, type: BOOL, loc,
+  });
+  const body: IrStmt[] = [];
+  const seen = new Set<string>();
+  const displayName = (info.def.jsName ?? "") !== "" ? info.def.jsName! : info.def.name.replace(/^%/, "");
+  for (const f of info.def.fields) {
+    if (f.name.startsWith("%") || f.name.startsWith("#") || seen.has(f.name)) continue;
+    if (!canConvertToDyn(f.type, getRec, getUni)) continue;
+    const v = into(f.type);
+    if (v === null) continue;
+    seen.add(f.name);
+    body.push({
+      kind: "if",
+      cond: keyIs(f.name),
+      then: [{ kind: "fieldSet", obj: thisRef(), className, field: f.name, value: v, loc }, ret(true)],
+      else_: null,
+      loc,
+    });
+  }
+  const accessors = new Set<string>();
+  for (let c: ClassInfo | null = info; c; c = c.base) {
+    for (const m of c.methods.keys()) if (m.startsWith("get:") || m.startsWith("set:")) accessors.add(m.slice(4));
+  }
+  for (const name of accessors) {
+    if (seen.has(name)) continue;
+    const setF = L.findMethodOn(info, `set:${name}`);
+    if (setF === null) {
+      seen.add(name);
+      body.push({
+        kind: "if",
+        cond: keyIs(name),
+        then: [
+          {
+            kind: "throw",
+            value: {
+              kind: "libCall",
+              fn: "error.new",
+              args: [{ kind: "strLit", value: `Cannot set property ${name} of #<${displayName}> which has only a getter`, type: STRING, loc }],
+              type: { kind: "object", className: "%TypeError" },
+              loc,
+            },
+            loc,
+          },
+        ],
+        else_: null,
+        loc,
+      });
+      continue;
+    }
+    if (setF.sig.abstract === true || setF.sig.params.length !== 1) continue;
+    const v = into(setF.sig.params[0]!.type);
+    if (v === null) continue;
+    seen.add(name);
+    L.noteEdge(`%${setF.declarer.def.name}.set:${name}`);
+    body.push({
+      kind: "if",
+      cond: keyIs(name),
+      then: [
+        { kind: "exprStmt", expr: accessorCall(L, className, `set:${name}`, thisRef(), [v], VOID, loc), loc },
+        ret(true),
+      ],
+      else_: null,
+      loc,
+    });
+  }
+  if (info.hasPropsTable === true) {
+    const bagField = (): IrExpr => ({ kind: "fieldGet", obj: thisRef(), className, field: CLASS_PROPS_FIELD, type: DYN, loc });
+    body.push(
+      {
+        kind: "fieldSet", obj: thisRef(), className, field: CLASS_PROPS_FIELD,
+        value: { kind: "libCall", fn: "cls.propsEnsure", args: [bagField()], type: DYN, loc }, loc,
+      },
+      {
+        kind: "exprStmt",
+        expr: { kind: "libCall", fn: "cls.propsSet", args: [bagField(), keyRef(), valRef()], type: VOID, loc },
+        loc,
+      },
+      ret(true),
+    );
+  } else {
+    body.push(ret(false));
+  }
+  return {
+    name: `%${className}.%dynSet`,
+    params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+    returnType: BOOL,
+    locals,
+    body,
+    loc,
+  };
+}
+
 export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     const out: IrFunction[] = [];
     const className = info.def.name;
@@ -7194,6 +7327,19 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     if (info.genericMethods !== undefined && L.reachable?.has(`%${className}.%dynbox`) === true) {
       const listed = dynBoxedMethodInstances(L, info);
       if (listed.length > 0) info.def.dynMethods = listed;
+    }
+    // The write half of the same box (see dynSetFn): every class a dyn box
+    // can hold, for the same reason the method instances above are listed.
+    if (!info.generic && L.reachable?.has(`%${className}.%dynset`) === true) {
+      try {
+        const setFn = dynSetFn(L, info);
+        if (setFn !== null) {
+          out.push(setFn);
+          info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynSet", fn: setFn.name }];
+        }
+      } catch (e) {
+        if (!(e instanceof PoisonError)) throw e;
+      }
     }
     // VTABLE THUNKS of this class — one per method whose own function is
     // not what the slot may hold: a WIDENED override (callable at the slot
