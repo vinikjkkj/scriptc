@@ -2705,6 +2705,7 @@ export type IrArrIntrinsicMethod =
   | "copyWithin"
   | "indexOf"
   | "includes"
+  | "lastIndexOf"
   | "join"
   | "slice"
   | "shift"

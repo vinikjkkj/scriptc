@@ -13988,14 +13988,37 @@ class LlEmitter {
         // the ref variant dispatches on the array's element kind (strings
         // by content, everything else by pointer). Strict equality.
         const v = this.emitExpr(e.args[0]!);
+        if (e.args[1]) {
+          const from = this.emitExpr(e.args[1]);
+          this.declare(`declare double @scr_arr_index_of_${acc}_from(ptr, ${accArg}, double)`);
+          const t = B.tmp();
+          B.line(`${t} = call double @scr_arr_index_of_${acc}_from(ptr ${r.name}, ${accTy} ${v.name}, double ${from.name})`);
+          return { name: t, type: e.type };
+        }
         this.declare(`declare double @scr_arr_index_of_${acc}(ptr, ${accArg})`);
         const t = B.tmp();
         B.line(`${t} = call double @scr_arr_index_of_${acc}(ptr ${r.name}, ${accTy} ${v.name})`);
         return { name: t, type: e.type };
       }
+      case "lastIndexOf": {
+        // Borrowed needle, strict equality, searched backwards from args[1].
+        const v = this.emitExpr(e.args[0]!);
+        const from = this.emitExpr(e.args[1]!);
+        this.declare(`declare double @scr_arr_last_index_of_${acc}(ptr, ${accArg}, double)`);
+        const t = B.tmp();
+        B.line(`${t} = call double @scr_arr_last_index_of_${acc}(ptr ${r.name}, ${accTy} ${v.name}, double ${from.name})`);
+        return { name: t, type: e.type };
+      }
       case "includes": {
         // Borrowed needle, SameValueZero (NaN matches NaN).
         const v = this.emitExpr(e.args[0]!);
+        if (e.args[1]) {
+          const from = this.emitExpr(e.args[1]);
+          this.declare(`declare zeroext i1 @scr_arr_includes_${acc}_from(ptr, ${accArg}, double)`);
+          const t = B.tmp();
+          B.line(`${t} = call zeroext i1 @scr_arr_includes_${acc}_from(ptr ${r.name}, ${accTy} ${v.name}, double ${from.name})`);
+          return { name: t, type: e.type };
+        }
         this.declare(`declare zeroext i1 @scr_arr_includes_${acc}(ptr, ${accArg})`);
         const t = B.tmp();
         B.line(`${t} = call zeroext i1 @scr_arr_includes_${acc}(ptr ${r.name}, ${accTy} ${v.name})`);

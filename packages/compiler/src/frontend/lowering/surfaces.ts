@@ -305,6 +305,7 @@ export const ARRAY_METHODS = new Set([
   "reduceRight",
   "indexOf",
   "includes",
+  "lastIndexOf",
   "join",
   "slice",
   "unshift",

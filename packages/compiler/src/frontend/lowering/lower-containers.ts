@@ -402,7 +402,7 @@ function lowerOptionalDefaultArg(
     // included — Node returns the unchanged length); reduce/reduceRight
     // lower both declared forms (with and without an initial value).
     const arity = {
-      push: [0, Number.MAX_SAFE_INTEGER], pop: [0, 0], indexOf: [1, 1], includes: [1, 1], join: [1, 1],
+      push: [0, Number.MAX_SAFE_INTEGER], pop: [0, 0], indexOf: [1, 2], includes: [1, 2], lastIndexOf: [1, 2], join: [0, 1],
       fill: [1, 3],
       concat: [0, Number.MAX_SAFE_INTEGER],
       slice: [0, 2], shift: [0, 0], splice: [1, 2], at: [1, 1],
@@ -412,7 +412,7 @@ function lowerOptionalDefaultArg(
       every: [1, 1], flatMap: [1, 1], reduce: [1, 2], reduceRight: [1, 2],
     }[
       name as
-        | "push" | "pop" | "concat" | "indexOf" | "includes" | "join" | "slice" | "shift" | "splice" | "at" | "map" | "filter" | "fill"
+        | "push" | "pop" | "concat" | "indexOf" | "includes" | "lastIndexOf" | "join" | "slice" | "shift" | "splice" | "at" | "map" | "filter" | "fill"
         | "unshift" | "reverse" | "copyWithin"
         | "forEach" | "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every" | "flatMap" | "reduce" | "reduceRight"
     ];
@@ -432,8 +432,8 @@ function lowerOptionalDefaultArg(
           ? "the removal forms lower — splice(start, deleteCount?); to insert, build a new array with slice and push"
           : name === "join"
             ? 'pass the separator explicitly: join(",")'
-            : name === "indexOf" || name === "includes"
-              ? "the fromIndex parameter has no lowering — slice first, or loop"
+            : name === "indexOf" || name === "includes" || name === "lastIndexOf"
+              ? "the fromIndex parameter is a number (a boolean or string position has no lowering)"
               : name === "map" || name === "filter" || name === "forEach" ||
                   name === "find" || name === "some" || name === "every" || name === "flatMap"
                 ? "the thisArg parameter has no lowering — use an arrow function"
@@ -545,7 +545,7 @@ function lowerOptionalDefaultArg(
       const idx = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, F64));
       return { kind: "arrIntrinsic", method: "fill", receiver, args: [v, ...idx], type: receiver.type, loc };
     }
-    if (name === "indexOf" || name === "includes") {
+    if (name === "indexOf" || name === "includes" || name === "lastIndexOf") {
       // Union elements are fenced: the runtime compares ref elements by
       // POINTER identity (JS-exact for records/objects/arrays), but a
       // union BOX is a compiler artifact — two boxes of the same arm value
@@ -569,12 +569,23 @@ function lowerOptionalDefaultArg(
       if (!typeEquals(needle.type, elem)) {
         L.badType(call.arguments[0]!, L.typeOf(call.arguments[0]!));
       }
+      // The fromIndex position (argfx3). Absent: indexOf and includes start
+      // at 0, lastIndexOf searches back from the end (+Infinity clamps to
+      // len - 1). An explicit undefined is ToIntegerOrInfinity(undefined) = 0
+      // for an array, so it reads as 0 whichever method.
+      const fromNode = call.arguments[1];
+      const from: IrExpr =
+        fromNode === undefined
+          ? { kind: "numLit", value: name === "lastIndexOf" ? Infinity : 0, type: F64, loc }
+          : ts.isIdentifier(fromNode) && fromNode.text === "undefined"
+            ? { kind: "numLit", value: 0, type: F64, loc }
+            : L.lowerExprExpecting(fromNode, F64);
       return {
         kind: "arrIntrinsic",
         method: name,
         receiver,
-        args: [needle],
-        type: name === "indexOf" ? F64 : BOOL,
+        args: [needle, from],
+        type: name === "includes" ? BOOL : F64,
         loc,
       };
     }
@@ -705,7 +716,11 @@ function lowerOptionalDefaultArg(
         );
       }
       const receiver = L.lowerExpr(access.expression);
-      const sep = L.lowerExpr(call.arguments[0]!);
+      // join() and join(undefined) use the default "," (argfx3).
+      const sepNode = call.arguments[0];
+      const sep: IrExpr = sepNode === undefined || (ts.isIdentifier(sepNode) && sepNode.text === "undefined")
+        ? { kind: "strLit", value: ",", type: STRING, loc }
+        : L.lowerExpr(sepNode);
       return { kind: "arrIntrinsic", method: "join", receiver, args: [sep], type: STRING, loc };
     }
     if (name === "map" || name === "filter" || name === "forEach") {
