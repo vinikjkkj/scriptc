@@ -13193,7 +13193,11 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         const bridged = L.shapes.get(obj.type.shapeId);
         if (bridged?.tuple) return tupleElementRead(L, expr, obj, obj.type.shapeId, bridged);
       }
-      if (obj.type.kind === "dyn") {
+      // A checker-`any` receiver that LOWERS to a static STRING (`line.trim()[0]` over an untyped `line`:
+      // the dyn-receiver string machinery answers a string): the keyed read is the dyn one over the boxed
+      // string, which answers the one-unit string in range and undefined outside it, as JS does.
+      if (obj.type.kind === "dyn" || obj.type.kind === "string") {
+        const recvDyn: IrExpr = obj.type.kind === "dyn" ? obj : { kind: "dynFrom", value: obj, type: DYN, loc: locOf(expr.expression) };
         const rawKey = L.lowerExpr(expr.argumentExpression);
         // Number, bool, and DYN keys stringify (ToPropertyKey) — the
         // dyn-keyed read `catchWarning[warning.name]` where the property
@@ -13207,7 +13211,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         if (key) {
           const opt = chainGuardedByQuestionDot(expr.expression);
           return L.maybeNarrow(
-            { kind: "dynKeyGet", key, ...(opt ? { optional: true as const } : {}), value: obj, type: DYN, loc: locOf(expr) },
+            { kind: "dynKeyGet", key, ...(opt ? { optional: true as const } : {}), value: recvDyn, type: DYN, loc: locOf(expr) },
             expr,
           );
         }
