@@ -10,7 +10,7 @@ import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
-import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
@@ -14514,7 +14514,7 @@ function fenceObservableContainerStore(
   const name = access.name.text;
   if ((name !== "set" && name !== "add") || !isAnyDynContainer(L, recvTs)) return;
   args.forEach((a, i) => {
-    if (a.kind === "dynFrom" && dynCopyIsObservable(a.value)) {
+    if (a.kind === "dynFrom" && dynCopyIsObservable(a.value) && !dynCopyHasLiveView(a.value)) {
       L.unsupported(
         "SC1090",
         call.arguments[i] ?? call,

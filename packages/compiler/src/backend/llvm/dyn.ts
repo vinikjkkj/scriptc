@@ -31,7 +31,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
-import { bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
+import { arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
@@ -3085,7 +3085,19 @@ export class LlDyn {
             B.line(`${p} = load ptr, ptr ${pp}`);
             const r = B.tmp();
             B.line(`${r} = call ptr @${this.toDynHelper(arm)}(ptr ${p}) ; ${arm.kind}`);
-            B.terminate(`ret ptr ${r}`);
+            if (arrayTypeHasLiveView(arm)) {
+              // The array arm is the SAME array its other holders name: record
+              // the origin so the copy is a live view (the C twin's note).
+              const { retain, release } = vAdapters(host, arm);
+              host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
+              const m = B.tmp();
+              B.line(
+                `${m} = call ptr @scr_dyn_origin_mark(ptr ${r}, ptr ${p}, ptr ${host.cstr(typeKey(arm))}, ptr ${retain}, ptr ${release})`,
+              );
+              B.terminate(`ret ptr ${m}`);
+            } else {
+              B.terminate(`ret ptr ${r}`);
+            }
           }
         });
         B.startBlock(bad);

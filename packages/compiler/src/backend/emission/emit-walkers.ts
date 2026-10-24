@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { bytesAliasOnExtract, canConvertToDyn, canDynCheckTo } from "../../ir/nodes.js";
+import { arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -3577,6 +3577,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // A boxable function arm crosses through the checked-dynamic
             // function boundary (the dynFrom func special case, sans name).
             d.push(`  case ${i}: return ${dynFuncBoxHelper(E, arm)}((ScrClosure *)scr_union_peek(v), NULL, NULL);`);
+          } else if (arrayTypeHasLiveView(arm)) {
+            // An array arm is the SAME array its other holders name (a map
+            // value read out as \`T[] | undefined\`, a field): record the origin
+            // so the dyn copy is a live view of it (scr_json.c, "live array
+            // views"), exactly as the dynFrom crossing does.
+            const { retain, release } = vAdapters(arm);
+            const tk = cStringLiteral(Buffer.from(typeKey(arm), "utf8"));
+            d.push(`  case ${i}: { ${cType(arm).trim()} sc_a = (${cType(arm).trim()})scr_union_peek(v); return scr_dyn_origin_mark(${E.toDynHelper(arm)}(sc_a), (void *)sc_a, ${tk}, ${retain}, ${release}); }`);
           } else {
             d.push(`  case ${i}: return ${E.toDynHelper(arm)}((${cType(arm).trim()})scr_union_peek(v));`);
           }

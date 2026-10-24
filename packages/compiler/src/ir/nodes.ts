@@ -8116,6 +8116,32 @@ export function dynCopyIsObservable(e: IrExpr): boolean {
   }
 }
 
+/** Does the dyn copy of this ARRAY expression stay a LIVE VIEW of the array
+ * it was made from (runtime/src/scr_json.c, "live array views")?
+ *
+ * dynCopyIsObservable answers "is the caller still holding a NAME for the
+ * value", which is true for an lvalue and false for anything a conversion
+ * consumes. That is the right question for a copy nothing can keep in sync;
+ * it is the wrong one for a view, because an array a call RETURNS, or a
+ * container hands out, is usually still reachable from somewhere else
+ * (`const ys = m.get(k)`, `const l = o.items()`): the write through the
+ * dyn copy must reach that array too. So every crossing of an array whose
+ * elements the view can write back (number, boolean, string, dyn) records
+ * its origin, and only a LITERAL, which no one else can name, skips it.
+ * Arrays of arrays, records and instances keep the lvalue-only mark and the
+ * loud refusal: their elements are copies with no origin of their own. */
+export function dynCopyHasLiveView(e: IrExpr): boolean {
+  return arrayTypeHasLiveView(e.type) && e.kind !== "arrayLit" && e.kind !== "arrayNewLen";
+}
+
+/** The array types whose dyn copy can be a live view: the elements the
+ * runtime can write back without a type change. */
+export function arrayTypeHasLiveView(t: IrType): boolean {
+  if (t.kind !== "array") return false;
+  const k = t.elem.kind;
+  return k === "f64" || k === "bool" || k === "string" || k === "dyn";
+}
+
 export function isJsonSafeType(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
