@@ -52,13 +52,6 @@ maps-surface.ts:15:12 - error SC2020: '.entries() outside an immediate array spr
 
   hint: iterator objects have no lowering — drain it into an array where it is made ([...m.entries()]), or step a fresh one once (m.entries().next().value)
 
-maps-surface.ts:20:17 - error SC1090: spreading 'Map<string, number>' into a '[string, number][]' literal (only a same-element-type array spreads) is not supported yet
-
-  19 | // lowered iteration forms.
-  20 | const spread = [...m];
-     |                 ^~~~
-  21 | 
-
 maps-surface.ts:23:1 - error SC2020: 'chained Map method calls' is part of the standard library types but has no scriptc lowering yet
 
   22 | // set() is declared void (not the JS `this`), so chaining is a type error.
