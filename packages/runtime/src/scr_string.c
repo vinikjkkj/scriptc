@@ -1813,6 +1813,52 @@ bool scr_str_ends_with(ScrStr *s, ScrStr *needle) {
                 needle->len) == 0;
 }
 
+/* endsWith WITH an end position (argfx3). The position is a UTF-16 index:
+ * ToIntegerOrInfinity (NaN -> 0), clamped to [0, len16]; the lowering passes
+ * +Infinity for an absent position, which clamps to the end. The needle must
+ * lie wholly before that index. A position inside an astral pair cannot end a
+ * well-formed needle, so it answers false. */
+bool scr_str_ends_with_at(ScrStr *s, ScrStr *needle, double endPosition) {
+  double pos = scr_to_integer_or_infinity(endPosition);
+  ScrSidx *e = scr_sidx(s);
+  size_t len16 = scr_sidx_len(s, e);
+  size_t end16 = pos <= 0               ? 0
+                 : pos >= (double)len16 ? len16
+                                        : (size_t)pos;
+  if (needle->len == 0) return true;
+  bool mid = false;
+  size_t end_b = scr_u16_to_byte_c(s, e, end16, &mid);
+  if (mid || needle->len > end_b) return false;
+  return memcmp(s->data + (end_b - needle->len), needle->data, needle->len) == 0;
+}
+
+/* lastIndexOf WITH a position (argfx3). Per spec the position is ToNumber, a
+ * NaN (including an explicit undefined) meaning +Infinity, then
+ * ToIntegerOrInfinity, clamped to [0, len16]. The last occurrence whose start
+ * is at or before that index is the answer, as a UTF-16 index; -1 when none.
+ * The empty needle answers the clamped index itself. */
+double scr_str_last_index_of_from(ScrStr *s, ScrStr *needle, double from) {
+  double pos = from != from ? INFINITY : scr_to_integer_or_infinity(from);
+  ScrSidx *e = scr_sidx(s);
+  size_t len16 = scr_sidx_len(s, e);
+  size_t start16 = pos <= 0               ? 0
+                   : pos >= (double)len16 ? len16
+                                          : (size_t)pos;
+  if (needle->len == 0) return (double)start16;
+  if (needle->len > s->len) return -1.0;
+  bool mid = false;
+  size_t start_b = scr_u16_to_byte_c(s, e, start16, &mid);
+  size_t top = start_b < s->len - needle->len ? start_b : s->len - needle->len;
+  /* A well-formed needle starts on a char boundary, so a byte-wise backward
+   * scan finds only boundary matches (the one-argument form's argument). */
+  for (size_t i = top + 1; i-- > 0;) {
+    if (memcmp(s->data + i, needle->data, needle->len) == 0) {
+      return (double)scr_byte_to_u16_c(s, e, i);
+    }
+  }
+  return -1.0;
+}
+
 /* Resolve one slice() boundary: negatives are relative to the end, then
  * clamp to [0, len16]. Handles ±Infinity (already through
  * ToIntegerOrInfinity). */

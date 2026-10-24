@@ -7256,7 +7256,14 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       );
     }
     const receiver = dynReceiver ? dynReceiver() : L.lowerExpr(access.expression);
-    const args = call.arguments.slice(0, loweredArgCount).map((a) => L.lowerExpr(a));
+    const args = call.arguments.slice(0, loweredArgCount).map((a, i) =>
+      // endsWith's endPosition is a number; an explicit undefined means the
+      // end of the string (argfx3), which +Infinity clamps to.
+      entry.method === "endsWith" && i === 1
+        ? (ts.isIdentifier(a) && a.text === "undefined"
+          ? { kind: "numLit" as const, value: Infinity, type: F64, loc: locOf(a) }
+          : L.lowerExprExpecting(a, F64))
+        : L.lowerExpr(a));
     // split's separator must BE a string here (a regex argument was
     // claimed by lowerRegexMethodCall before this path) — the lib's
     // `string | RegExp` union has no lowering as a VALUE.
