@@ -12061,6 +12061,72 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8750-buffer-bytelength-isencoding-untyped.js": {
+   "order": [
+    "<repo>/tests/corpus/8750-buffer-bytelength-isencoding-untyped.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8751-error-cause-option.ts": {
+   "order": [
+    "<repo>/tests/corpus/8751-error-cause-option.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8752-error-cause-untyped-message.js": {
+   "order": [
+    "<repo>/tests/corpus/8752-error-cause-untyped-message.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8753-dyn-method-spread-args.js": {
+   "order": [
+    "<repo>/tests/corpus/8753-dyn-method-spread-args.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8754-emit-varying-arity-untyped.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8754-emit-varying-arity-untyped.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8755-buffer-runtime-encoding.js": {
+   "order": [
+    "<repo>/tests/corpus/8755-buffer-runtime-encoding.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8756-json-require-array-root-lazy/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8756-json-require-array-root-lazy/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8757-array-length-shift-assign.js": {
+   "order": [
+    "<repo>/tests/corpus/8757-array-length-shift-assign.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8758-url-destructuring.js": {
+   "order": [
+    "<repo>/tests/corpus/8758-url-destructuring.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8759-class-values-in-dyn-registry.js": {
+   "order": [
+    "<repo>/tests/corpus/8759-class-values-in-dyn-registry.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8760-instanceof-program-class-on-unknown.js": {
+   "order": [
+    "<repo>/tests/corpus/8760-instanceof-program-class-on-unknown.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8780-tsc-downleveled-private-members.js": {
    "order": [
     "<repo>/tests/corpus/8780-tsc-downleveled-private-members.js"
