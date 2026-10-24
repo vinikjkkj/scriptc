@@ -209,6 +209,16 @@ const BUILTIN_FN_VALUES: Readonly<Record<string, BuiltinFnValue | undefined>> = 
     params: [["encodedURI", STRING]],
     ret: STRING,
     body: (a, loc) => libCall("str.decodeUri", [a[0]!], STRING, loc),
+  escape: {
+    params: [["string", STRING]],
+    ret: STRING,
+    body: (a, loc) => libCall("str.escape", [a[0]!], STRING, loc),
+  },
+  unescape: {
+    params: [["string", STRING]],
+    ret: STRING,
+    body: (a, loc) => libCall("str.unescape", [a[0]!], STRING, loc),
+  },
   },
 };
 

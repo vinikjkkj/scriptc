@@ -326,6 +326,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "str.b64Missing": { argTypes: [], result: STRING },
   "str.decodeUriComponent": { argTypes: [STRING], result: STRING },
   "str.decodeUri": { argTypes: [STRING], result: STRING },
+  "str.escape": { argTypes: [STRING], result: STRING },
+  "str.unescape": { argTypes: [STRING], result: STRING },
   "str.encodeUri": { argTypes: [STRING], result: STRING },
   "str.isAbsent": { argTypes: [STRING], result: BOOL },
   "regexp.escape": { argTypes: [STRING], result: STRING },

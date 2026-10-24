@@ -5245,6 +5245,24 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           return { kind: "libCall", fn: "number.isFinite", args: [asNum], type: BOOL, loc };
         }
       }
+      // The Annex B escape / unescape over a string (str.escape / str.unescape,
+      // scr_string.c): UTF-16 units, A-Za-z0-9@*_+-./ kept, %XX / %uXXXX
+      // otherwise. Total.
+      if (
+        (expr.expression.text === "escape" || expr.expression.text === "unescape") &&
+        L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined)
+      ) {
+        const name = expr.expression.text;
+        if (expr.arguments.length !== 1) {
+          L.noLowering(
+            `${name} with ${expr.arguments.length} argument${expr.arguments.length === 1 ? "" : "s"}`,
+            expr,
+          );
+        }
+        const argNode = expr.arguments[0]!;
+        const s = L.ensureString(L.lowerExpr(argNode), argNode);
+        return { kind: "libCall", fn: name === "escape" ? "str.escape" : "str.unescape", args: [s], type: STRING, loc: locOf(expr) };
+      }
       // STATIC encodeURIComponent/encodeURI/decodeURIComponent
       // (str.encodeUriComponent / str.encodeUri / str.decodeUriComponent —
       // scr_string.c; ECMA-exact over the runtime's UTF-8 strings, Node

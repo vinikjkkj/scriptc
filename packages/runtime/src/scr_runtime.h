@@ -1454,6 +1454,10 @@ ScrStr *scr_str_encode_uri_component(ScrStr *s);
  * malformed") and returns NULL. Borrows s; result +1. */
 ScrStr *scr_str_decode_uri_component(ScrStr *s);
 ScrStr *scr_str_decode_uri(ScrStr *s);
+/* The Annex B escape / unescape globals (see the IrLibFn doc): total,
+ * borrow s, result +1. */
+ScrStr *scr_str_escape(ScrStr *s);
+ScrStr *scr_str_unescape(ScrStr *s);
 
 /* The non-throwing core of decodeURIComponent: NULL on malformed input
  * instead of the URIError — the try/catch shape node:querystring's

@@ -3559,6 +3559,13 @@ export type IrLibFn =
    * reserved characters `;/?:@&=+$,#` stays as written. Throws the same
    * URIError; borrows; result +1. */
   | "str.decodeUri"
+  /** The Annex B `escape` / `unescape` globals over UTF-16 code units:
+   * escape leaves A-Za-z0-9@*_+-./ and writes every other unit as %XX
+   * (below 256) or %uXXXX; unescape reads %XX and %uXXXX and leaves any
+   * other text, a malformed escape included, as written. Lone surrogates
+   * become U+FFFD (the string policy). Total; borrow; result +1. */
+  | "str.escape"
+  | "str.unescape"
   /** RegExp.escape (ES2025): per-code-point EncodeForRegExpEscape —
    * leading ASCII alphanumeric hex-escapes, syntax characters and '/'
    * take a backslash, other punctuators/whitespace/line terminators

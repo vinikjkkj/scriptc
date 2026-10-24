@@ -2638,3 +2638,138 @@ ScrStr *scr_str_decode_uri(ScrStr *s) {
   }
   return out;
 }
+
+/* The next UTF-8 code point of p[i..n), advancing i; a malformed byte is its
+ * own unit (the strings this runtime holds are valid UTF-8, so this is the
+ * defensive arm). */
+static uint32_t scr_esc_next_cp(const unsigned char *p, size_t n, size_t *i) {
+  unsigned char c = p[*i];
+  size_t need = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+  if (need == 0 || *i + need >= n) {
+    (*i)++;
+    return c;
+  }
+  uint32_t cp = need == 1 ? (c & 0x1Fu) : need == 2 ? (c & 0x0Fu) : (c & 0x07u);
+  for (size_t k = 1; k <= need; k++) cp = (cp << 6) | (p[*i + k] & 0x3Fu);
+  *i += need + 1;
+  return cp;
+}
+
+ScrStr *scr_str_escape(ScrStr *s) {
+  static const char hex[] = "0123456789ABCDEF";
+  const unsigned char *p = (const unsigned char *)s->data;
+  size_t n = s->len, i = 0;
+  ScrStr *out = scr_str_alloc_raw(0, n * 3 + 1);
+  size_t w = 0;
+  while (i < n) {
+    uint32_t cp = scr_esc_next_cp(p, n, &i);
+    uint32_t units[2];
+    int nu = 1;
+    if (cp >= 0x10000) {
+      cp -= 0x10000;
+      units[0] = 0xD800 + (cp >> 10);
+      units[1] = 0xDC00 + (cp & 0x3FF);
+      nu = 2;
+    } else {
+      units[0] = cp;
+    }
+    for (int k = 0; k < nu; k++) {
+      uint32_t u = units[k];
+      if ((u >= 'A' && u <= 'Z') || (u >= 'a' && u <= 'z') || (u >= '0' && u <= '9') ||
+          u == '@' || u == '*' || u == '_' || u == '+' || u == '-' || u == '.' || u == '/') {
+        out->data[w++] = (char)u;
+      } else if (u < 256) {
+        out->data[w++] = '%';
+        out->data[w++] = hex[u >> 4];
+        out->data[w++] = hex[u & 15];
+      } else {
+        out->data[w++] = '%';
+        out->data[w++] = 'u';
+        out->data[w++] = hex[(u >> 12) & 15];
+        out->data[w++] = hex[(u >> 8) & 15];
+        out->data[w++] = hex[(u >> 4) & 15];
+        out->data[w++] = hex[u & 15];
+      }
+    }
+  }
+  out->len = (uint32_t)w;
+  out->data[w] = '\0';
+  return out;
+}
+
+static int scr_esc_hexval(unsigned char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return -1;
+}
+
+ScrStr *scr_str_unescape(ScrStr *s) {
+  const unsigned char *p = (const unsigned char *)s->data;
+  size_t n = s->len, i = 0, nu = 0;
+  /* UTF-16 units: never more than one per input byte. */
+  uint16_t *u = (uint16_t *)malloc((n + 1) * sizeof(uint16_t));
+  if (!u) scr_oom();
+  while (i < n) {
+    if (p[i] == '%') {
+      if (i + 5 < n && p[i + 1] == 'u') {
+        int a = scr_esc_hexval(p[i + 2]), b = scr_esc_hexval(p[i + 3]);
+        int c = scr_esc_hexval(p[i + 4]), d = scr_esc_hexval(p[i + 5]);
+        if (a >= 0 && b >= 0 && c >= 0 && d >= 0) {
+          u[nu++] = (uint16_t)((a << 12) | (b << 8) | (c << 4) | d);
+          i += 6;
+          continue;
+        }
+      }
+      if (i + 2 < n) {
+        int a = scr_esc_hexval(p[i + 1]), b = scr_esc_hexval(p[i + 2]);
+        if (a >= 0 && b >= 0) {
+          u[nu++] = (uint16_t)((a << 4) | b);
+          i += 3;
+          continue;
+        }
+      }
+      u[nu++] = '%';
+      i++;
+      continue;
+    }
+    uint32_t cp = scr_esc_next_cp(p, n, &i);
+    if (cp >= 0x10000) {
+      cp -= 0x10000;
+      u[nu++] = (uint16_t)(0xD800 + (cp >> 10));
+      u[nu++] = (uint16_t)(0xDC00 + (cp & 0x3FF));
+    } else {
+      u[nu++] = (uint16_t)cp;
+    }
+  }
+  ScrStr *out = scr_str_alloc_raw(0, nu * 3 + 1);
+  size_t w = 0;
+  for (size_t k = 0; k < nu; k++) {
+    uint32_t cp = u[k];
+    if (cp >= 0xD800 && cp <= 0xDBFF && k + 1 < nu && u[k + 1] >= 0xDC00 && u[k + 1] <= 0xDFFF) {
+      cp = 0x10000 + ((cp - 0xD800) << 10) + (u[k + 1] - 0xDC00);
+      k++;
+    } else if (cp >= 0xD800 && cp <= 0xDFFF) {
+      cp = 0xFFFD;
+    }
+    if (cp < 0x80) {
+      out->data[w++] = (char)cp;
+    } else if (cp < 0x800) {
+      out->data[w++] = (char)(0xC0 | (cp >> 6));
+      out->data[w++] = (char)(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+      out->data[w++] = (char)(0xE0 | (cp >> 12));
+      out->data[w++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+      out->data[w++] = (char)(0x80 | (cp & 0x3F));
+    } else {
+      out->data[w++] = (char)(0xF0 | (cp >> 18));
+      out->data[w++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+      out->data[w++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+      out->data[w++] = (char)(0x80 | (cp & 0x3F));
+    }
+  }
+  free(u);
+  out->len = (uint32_t)w;
+  out->data[w] = '\0';
+  return out;
+}
