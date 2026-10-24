@@ -50,7 +50,7 @@ import {
   unsupportedDiag,
 } from "../diagnostics/diagnostic.js";
 import { provenanceDeclSiblings, provenanceRequireRoots, provenanceSpecTwinsInProgram } from "./provenance-registry.js";
-import { clearResolveCaches, isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
+import { clearResolveCaches, isNodeModulesPath, nearestPackageTypeOf, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { deadTopLevelStatements, type RequireThrowCtx } from "./require-throws.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
@@ -597,7 +597,13 @@ function requireSpecOf7(node: ts.Node): string | null {
   if (!ts.isIdentifier(node.expression) || node.expression.text !== "require") return null;
   if (node.arguments.length !== 1) return null;
   const arg = node.arguments[0]!;
-  return ts.isStringLiteral(arg) ? arg.text : null;
+  if (!ts.isStringLiteral(arg)) return null;
+  // Node defines no `require` in an ES module: the call throws ReferenceError
+  // before its specifier is looked at and loads nothing, so it is not a
+  // require edge (or alias) for the graph or the lowering.
+  const sf = node.getSourceFile();
+  if (sf !== undefined && isNodeEsmFile7(sf)) return null;
+  return arg.text;
 }
 
 /** True for statements that are CommonJS require IMPORTS at a module's top
@@ -912,6 +918,9 @@ function nestedBareRequiresOf7(sf: ts.SourceFile): ts.CallExpression[] {
 function isNodeEsmFile7(sf: ts.SourceFile): boolean {
   if (sf.fileName.endsWith(".cjs") || sf.fileName.endsWith(".cts")) return false;
   if (sf.fileName.endsWith(".mjs") || sf.fileName.endsWith(".mts")) return true;
+  // A .js under the nearest package.json "type": "module" is an ES module
+  // whatever its syntax: Node never defines require/module/exports there.
+  if (sf.fileName.endsWith(".js") && nearestPackageTypeOf(sf.fileName) === "module") return true;
   return ts.isExternalModule(sf);
 }
 
@@ -3234,12 +3243,6 @@ function preflight7(load: LoadResult): {
         if (deadStmts.has(stmt)) continue;
         for (const req of requiresOf7(stmt)) {
           const loc = { file: sf.fileName, start: req.node.getStart(sf), end: req.node.getEnd() };
-          if (isNodeEsmFile7(sf)) {
-            diags.push(
-              unsupportedDiag("SC1013", loc, "require() in an ES module (Node throws ReferenceError — use import)"),
-            );
-            continue;
-          }
           if (req.decl && ts.isArrayBindingPattern(req.decl.name)) {
             diags.push(unsupportedDiag("SC1012", loc, "array-destructuring require() bindings"));
             continue;
