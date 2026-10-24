@@ -118,8 +118,18 @@ test("a container that also flows into an ANNOTATED typed sink stays typed", () 
   ).toEqual({ before: 0, after: 0 });
 });
 
-test("a container of RECORDS is not pinned (a dyn box would copy them)", () => {
-  expect(pinsOf(`${PUT}const m = new Map([["a", { n: 1 }]]);\nput(m, "b", 2);\nconsole.log(m.size);\n`)).toEqual({ before: 0, after: 0 });
+test("a container of RECORDS receiving a foreign type is pinned", () => {
+  expect(pinsOf(`${PUT}const m = new Map([["a", { n: 1 }]]);\nput(m, "b", 2);\nconsole.log(m.size);\n`)).toEqual({ before: 1, after: 0 });
+});
+
+test("a container of RECORDS written only with that record type stays typed", () => {
+  expect(
+    pinsOf(`const m = new Map([["a", { n: 1 }]]);\nm.set("b", { n: 2 });\nconsole.log(m.size, m.get("a").n);\n`),
+  ).toEqual({ before: 0, after: 0 });
+});
+
+test("a container of ARRAYS is not pinned (a seed entry would be copied)", () => {
+  expect(pinsOf(`${PUT}const xs = [1];\nconst m = new Map([["a", xs]]);\nput(m, "b", 2);\nconsole.log(m.size);\n`)).toEqual({ before: 0, after: 0 });
 });
 
 test("a plain-object keyed WeakMap is not pinned", () => {
