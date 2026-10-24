@@ -918,6 +918,93 @@ bool scr_arr_includes_ref(ScrArr *a, void *v) {
   return scr_arr_index_of_ref(a, v) >= 0;
 }
 
+/* ── fromIndex and lastIndexOf (the position forms) ─────────────────────
+ * Array.prototype.indexOf / includes / lastIndexOf take a position. The
+ * position is ToIntegerOrInfinity (NaN -> 0, the infinities pass through).
+ * indexOf and includes start at the forward clamp: a position at or past
+ * the end finds nothing, a negative one counts back from the end and clamps
+ * at 0. lastIndexOf starts at the backward clamp: min(position, len - 1), or
+ * len + position when that is negative (nothing is searched). The equality
+ * of each family is the one the no-position forms state above. */
+static double scr_arr_to_int(double x) {
+  if (x != x) return 0;
+  return x < 0 ? ceil(x) : floor(x);
+}
+
+static size_t scr_arr_fwd_from(size_t len, double from) {
+  double n = scr_arr_to_int(from);
+  if (n >= (double)len) return len;
+  if (n >= 0) return (size_t)n;
+  double k = (double)len + n;
+  return k <= 0 ? 0 : (size_t)k;
+}
+
+static double scr_arr_last_from(size_t len, double from) {
+  if (len == 0) return -1;
+  double n = scr_arr_to_int(from);
+  double last = (double)len - 1;
+  if (n >= 0) return n < last ? n : last;
+  return (double)len + n; /* negative: the loop below searches nothing */
+}
+
+double scr_arr_index_of_f64_from(ScrArr *a, double v, double from) {
+  for (size_t i = scr_arr_fwd_from(a->len, from); i < a->len; i++) {
+    if (scr_slot_to_f64(a->data[i]) == v) return (double)i;
+  }
+  return -1;
+}
+
+double scr_arr_index_of_bool_from(ScrArr *a, bool v, double from) {
+  for (size_t i = scr_arr_fwd_from(a->len, from); i < a->len; i++) {
+    if ((a->data[i] != 0) == v) return (double)i;
+  }
+  return -1;
+}
+
+double scr_arr_index_of_ref_from(ScrArr *a, void *v, double from) {
+  for (size_t i = scr_arr_fwd_from(a->len, from); i < a->len; i++) {
+    if (scr_arr_ref_eq(a, a->data[i], v)) return (double)i;
+  }
+  return -1;
+}
+
+bool scr_arr_includes_f64_from(ScrArr *a, double v, double from) {
+  for (size_t i = scr_arr_fwd_from(a->len, from); i < a->len; i++) {
+    double x = scr_slot_to_f64(a->data[i]);
+    if (x == v || (x != x && v != v)) return true; /* SameValueZero: NaN hits */
+  }
+  return false;
+}
+
+bool scr_arr_includes_bool_from(ScrArr *a, bool v, double from) {
+  return scr_arr_index_of_bool_from(a, v, from) >= 0;
+}
+
+bool scr_arr_includes_ref_from(ScrArr *a, void *v, double from) {
+  return scr_arr_index_of_ref_from(a, v, from) >= 0;
+}
+
+double scr_arr_last_index_of_f64(ScrArr *a, double v, double from) {
+  for (double k = scr_arr_last_from(a->len, from); k >= 0; k--) {
+    if (scr_slot_to_f64(a->data[(size_t)k]) == v) return k;
+  }
+  return -1;
+}
+
+double scr_arr_last_index_of_bool(ScrArr *a, bool v, double from) {
+  for (double k = scr_arr_last_from(a->len, from); k >= 0; k--) {
+    if ((a->data[(size_t)k] != 0) == v) return k;
+  }
+  return -1;
+}
+
+double scr_arr_last_index_of_ref(ScrArr *a, void *v, double from) {
+  for (double k = scr_arr_last_from(a->len, from); k >= 0; k--) {
+    if (scr_arr_ref_eq(a, a->data[(size_t)k], v)) return k;
+  }
+  return -1;
+}
+
 /* ── join ──────────────────────────────────────────────────────────────── */
 
 #ifdef SCR_ARRCEN_ON

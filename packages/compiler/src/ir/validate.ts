@@ -2964,9 +2964,11 @@ function validateFunction(
               : e.method === "pop"
               ? { argTypes: [], result: elem }
               : e.method === "indexOf"
-                ? { argTypes: [elem], result: F64 }
+                ? { argTypes: [elem, F64], result: F64 }
                 : e.method === "includes"
-                  ? { argTypes: [elem], result: BOOL }
+                  ? { argTypes: [elem, F64], result: BOOL }
+                  : e.method === "lastIndexOf"
+                    ? { argTypes: [elem, F64], result: F64 }
                   : e.method === "join"
                     ? { argTypes: [STRING], result: STRING }
                 : e.method === "slice"

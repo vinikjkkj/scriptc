@@ -1295,12 +1295,31 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // the ref variant dispatches on the array's element kind
             // (strings by content, arrays by pointer). Strict equality.
             const v = E.emitExpr(e.args[0]!);
-            return E.newTemp(e.type, `scr_arr_index_of_${acc}(${r.name}, ${v.name})`);
+            const from = e.args[1] ? E.emitExpr(e.args[1]) : undefined;
+            return E.newTemp(
+              e.type,
+              from
+                ? `scr_arr_index_of_${acc}_from(${r.name}, ${v.name}, ${from.name})`
+                : `scr_arr_index_of_${acc}(${r.name}, ${v.name})`,
+            );
           }
           case "includes": {
             // Borrowed needle, SameValueZero (NaN matches NaN).
             const v = E.emitExpr(e.args[0]!);
-            return E.newTemp(e.type, `scr_arr_includes_${acc}(${r.name}, ${v.name})`);
+            const from = e.args[1] ? E.emitExpr(e.args[1]) : undefined;
+            return E.newTemp(
+              e.type,
+              from
+                ? `scr_arr_includes_${acc}_from(${r.name}, ${v.name}, ${from.name})`
+                : `scr_arr_includes_${acc}(${r.name}, ${v.name})`,
+            );
+          }
+          case "lastIndexOf": {
+            // Borrowed needle, strict equality, searched backwards from the
+            // position (args[1]; the lowering supplies +Infinity when absent).
+            const v = E.emitExpr(e.args[0]!);
+            const from = E.emitExpr(e.args[1]!);
+            return E.newTemp(e.type, `scr_arr_last_index_of_${acc}(${r.name}, ${v.name}, ${from.name})`);
           }
           case "join": {
             // Separator borrowed; the result is an owned (+1) string.
