@@ -1248,6 +1248,30 @@ static ScrDyn *dyn_bound_intrinsic_thunk(ScrClosure *clo, ScrDyn *const *args, s
   return r;
 }
 
+/* `m.call(x, ...)` / `m.apply(x, pack)` where `m` is a built-in method READ off a value
+ * (`[].slice`, `"".indexOf`): the read mints a closure bound to the value it came off, but the
+ * function JS hands out is the prototype's, whose receiver is the call's. Over a receiver of the
+ * same kind the call IS that method on the new receiver (`[].slice.call(arguments)`); another
+ * kind (an array-like object, null) has no body here and fences loudly rather than running the
+ * method over the captured literal. Sets *handled when `fn` is such a closure. */
+static ScrDyn *dyn_rebound_intrinsic_call(const ScrDyn *fn, const ScrDyn *thisv, ScrDyn *const *args, size_t argc,
+                                          bool *handled) {
+  *handled = false;
+  if (fn->kind != SCR_DYN_FUNC || fn->v.fn.thunk != dyn_bound_intrinsic_thunk) return NULL;
+  *handled = true;
+  ScrDyn *recv0 = (ScrDyn *)scr_box_get_ref(fn->v.fn.clo->caps[0]); /* +1 */
+  ScrDyn *name = (ScrDyn *)scr_box_get_ref(fn->v.fn.clo->caps[1]);  /* +1 */
+  ScrDyn *r = NULL;
+  if (thisv->kind == recv0->kind && (thisv->kind == SCR_DYN_ARR || thisv->kind == SCR_DYN_STR || thisv->kind == SCR_DYN_BYTES)) {
+    r = scr_dyn_invoke((ScrDyn *)thisv, name->v.str->data, args, argc, "a built-in method");
+  } else {
+    dyn_throw_unsupported("Function", "call/apply of a built-in method over a receiver of another kind");
+  }
+  scr_dyn_release(recv0);
+  scr_dyn_release(name);
+  return r;
+}
+
 /* `k in o`'s half of the same question. `in` walks the prototype chain,
  * so a name the READ now answers has to be a name `in` reports — Node
  * says true to both, and answering the read `function` while `in` still
@@ -1985,6 +2009,28 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
   }
 
   if (recv->kind == SCR_DYN_FUNC) {
+    if (dyn_name_is(method, "apply") || dyn_name_is(method, "call")) {
+      bool rebound = false;
+      const ScrDyn *thisv0 = argc >= 1 ? args[0] : scr_dyn_undefined();
+      if (dyn_name_is(method, "call")) {
+        ScrDyn *r0 = dyn_rebound_intrinsic_call(recv, thisv0, argc > 1 ? args + 1 : NULL, argc > 1 ? argc - 1 : 0, &rebound);
+        if (rebound) return r0;
+      } else {
+        const ScrDyn *list0 = argc >= 2 ? args[1] : NULL;
+        if (recv->v.fn.thunk == dyn_bound_intrinsic_thunk) {
+          if (list0 == NULL || list0->kind == SCR_DYN_UNDEF || list0->kind == SCR_DYN_NULL) {
+            ScrDyn *r0 = dyn_rebound_intrinsic_call(recv, thisv0, NULL, 0, &rebound);
+            if (rebound) return r0;
+          } else if (list0->kind == SCR_DYN_ARR) {
+            ScrDyn *r0 = dyn_rebound_intrinsic_call(recv, thisv0, list0->v.arr.items, list0->v.arr.len, &rebound);
+            if (rebound) return r0;
+          } else {
+            dyn_throw_unsupported("Function", "apply of a built-in method over an array-like pack");
+            return NULL;
+          }
+        }
+      }
+    }
     if (dyn_name_is(method, "apply")) {
       /* fn.apply(thisArg, argsArray) — thisArg binds the ambient receiver
        * for the call window (the mustCall wrapper's `fn.apply(this,
