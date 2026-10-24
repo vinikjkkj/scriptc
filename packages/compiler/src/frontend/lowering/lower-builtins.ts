@@ -10103,17 +10103,19 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * the first occurrence (replace) or every non-overlapping one (replaceAll),
    * the replacement expanded through GetSubstitution without captures. */
   export function lowerStringReplaceStrCall(L: Lowerer, call: ts.CallExpression,
-    access: ts.PropertyAccessExpression,): IrExpr | null {
+    access: ts.PropertyAccessExpression, checkedRecv?: () => IrExpr,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
     const name = access.name.text;
     if (name !== "replace" && name !== "replaceAll") return null;
     if (call.arguments.length !== 2 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
-    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "string") return null;
+    // `checkedRecv` is the untyped-receiver spelling: the receiver is a dyn
+    // value the caller validates as a string (or throws Node's TypeError).
+    if (checkedRecv === undefined && L.mapTypeOf(L.typeOf(access.expression))?.kind !== "string") return null;
     if (L.mapTypeOf(L.typeOf(call.arguments[0]!))?.kind !== "string") return null;
     if (L.mapTypeOf(L.typeOf(call.arguments[1]!))?.kind !== "string") return null;
-    if (!L.isStdlibMember(access)) return null;
+    if (checkedRecv === undefined && !L.isStdlibMember(access)) return null;
     const loc = locOf(call);
-    const receiver = L.lowerExprExpecting(access.expression, STRING);
+    const receiver = checkedRecv !== undefined ? checkedRecv() : L.lowerExprExpecting(access.expression, STRING);
     const pat = L.lowerExprExpecting(call.arguments[0]!, STRING);
     const rep = L.lowerExprExpecting(call.arguments[1]!, STRING);
     const all: IrExpr = { kind: "boolLit", value: name === "replaceAll", type: BOOL, loc };

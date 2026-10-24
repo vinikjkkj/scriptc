@@ -16937,8 +16937,8 @@ export class Lowerer {
   }
 
   lowerStringReplaceStrCall(call: ts.CallExpression,
-    access: ts.PropertyAccessExpression,): IrExpr | null {
-    return lowerStringReplaceStrCall(this, call, access);
+    access: ts.PropertyAccessExpression, checkedRecv?: () => IrExpr,): IrExpr | null {
+    return lowerStringReplaceStrCall(this, call, access, checkedRecv);
   }
 
   lowerFilterNarrowCall(call: ts.CallExpression,

@@ -6438,7 +6438,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // need a receiver-kind dispatch — they keep the fence.
     if (DYN_STRING_ONLY_METHODS.has(access.name.text)) {
       const checked = (): IrExpr => dynStringReceiver(L, recv, access);
-      return lowerRegexMethodCall(L, call, access, checked) ?? lowerStringMethodCall(L, call, access, checked);
+      return lowerRegexMethodCall(L, call, access, checked) ??
+        L.lowerStringReplaceStrCall(call, access, checked) ??
+        lowerStringMethodCall(L, call, access, checked);
     }
     // toString() is a shared prototype name with its OWN receiver-kind
     // dispatched runtime lowering (dyn.toString: Buffer-flavored bytes
