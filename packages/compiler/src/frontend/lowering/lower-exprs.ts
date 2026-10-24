@@ -17137,6 +17137,18 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             tonumWhy(expr, "add");
             return { kind: "libCall", fn: "dyn.add", args: [asDyn(left), asDyn(right)], type: DYN, loc };
           }
+          // A boolean or a UNION on the other side (`name + (n++ || '')`: number-or-string): the value
+          // crosses into the checked-dynamic kind (each arm carries its own tag) and scr_dyn_add tests
+          // the pair at run time, exactly as it does for a dyn or a number.
+          if (other.type.kind === "bool" || other.type.kind === "union") {
+            const boxed = (e: IrExpr): IrExpr => (e.type.kind === "dyn" ? e : L.coerceToExpected(e, DYN));
+            const lDyn = boxed(left);
+            const rDyn = boxed(right);
+            if (lDyn.type.kind === "dyn" && rDyn.type.kind === "dyn") {
+              tonumWhy(expr, "add");
+              return { kind: "libCall", fn: "dyn.add", args: [lDyn, rDyn], type: DYN, loc };
+            }
+          }
           if (other.type.kind === "string") {
             // String-context `+`: JS's answer is ToPrimitive with the
             // DEFAULT hint and then ToString — numbers format, arrays
