@@ -74,10 +74,6 @@ const SOURCE_EXT = /\.(ts|tsx|mts|cts|js|mjs|cjs|jsx)$/;
  * (provenance.ts NODE_BUILTINS). */
 const NODE_BUILTINS = new Set(builtinModules);
 
-function packageNameOf(specifier: string): string {
-  const parts = specifier.split("/");
-  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
-}
 
 /** Specifiers no tree alias may claim, whatever its table says, because
  * something ABOVE the alias table already answers them: a builtin, and a
@@ -89,7 +85,7 @@ function aboveTheAliasTable(specifier: string): boolean {
   return (
     specifier.startsWith("#") ||
     specifier.startsWith("node:") ||
-    NODE_BUILTINS.has(packageNameOf(specifier))
+    NODE_BUILTINS.has(specifier)
   );
 }
 

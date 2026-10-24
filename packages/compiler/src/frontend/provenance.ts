@@ -334,7 +334,9 @@ function bareImportsWalk(
         continue;
       }
       if (spec.startsWith("#") || spec.startsWith("node:")) continue;
-      if (NODE_BUILTINS.has(packageNameOf(spec))) continue;
+      // Exact match: `punycode` is a builtin, `punycode/` is the npm package
+      // (Node resolves the trailing-slash form to node_modules, not the builtin).
+      if (NODE_BUILTINS.has(spec)) continue;
       const aliased = viaAlias(spec);
       if (aliased !== null) {
         queue.push(aliased);
@@ -615,7 +617,10 @@ function publishedTargetOf(pkgJson: Record<string, unknown>, subpath: string, mo
     return resolveExports(pkgJson["exports"], subpath, mode);
   }
   if (subpath !== ".") return subpath;
-  for (const field of ["module", "main", "types"]) {
+  // Node's CommonJS resolution reads `main` and never `module` (a bundler
+  // field): a require edge answers the file Node loads.
+  const fields = mode === "require" ? ["main", "module", "types"] : ["module", "main", "types"];
+  for (const field of fields) {
     const v = pkgJson[field];
     if (typeof v === "string" && v !== "") return v;
   }
@@ -1060,28 +1065,34 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       tree.considered.add(spec);
       const parts = spec.split("/");
       const nameLen = spec.startsWith("@") ? 2 : 1;
-      const subpath = parts.length === nameLen ? "." : `./${parts.slice(nameLen).join("/")}`;
+      // `pkg/` (trailing slash, no subpath) is the package directory: Node
+      // resolves it to the package's main entry, the same as `pkg`.
+      const rest = parts.slice(nameLen).join("/");
+      const subpath = rest === "" ? "." : `./${rest}`;
       const target = publishedTargetOf(tree.installed.pkgJson, subpath);
       const source = target === null ? null : mapEntryToSource(tree.dir, target, subpath);
-      if (source === null) {
-        notes.push(
-          `${name}@${tree.installed.version}: no source mapping for '${spec}' (published target: ${target ?? "unexported"}); island path used`,
-        );
-        continue;
-      }
       /* The CommonJS edge: a require() of this specifier takes the
        * "require" condition's target, which for a package that ships an ESM
        * wrapper beside its CJS body is a DIFFERENT file (pg: esm/index.mjs
        * for import, lib/index.js for require). One answer for both made
        * pg-pool's lazy require('pg') land on pg's ESM wrapper and close a
        * CommonJS/ESM cycle through it that Node never forms. Recorded only
-       * when it differs from the import entry. */
+       * when it differs from the import entry. A package whose import target
+       * has no source twin (punycode: `module` is the ESM build) still maps
+       * through its require edge, which is the edge a `require("pkg/")` takes. */
       const reqTarget = publishedTargetOf(tree.installed.pkgJson, subpath, "require");
       const reqSource = reqTarget === null || reqTarget === target ? null : mapEntryToSource(tree.dir, reqTarget, subpath);
+      if (source === null && reqSource === null) {
+        notes.push(
+          `${name}@${tree.installed.version}: no source mapping for '${spec}' (published target: ${target ?? "unexported"}); island path used`,
+        );
+        continue;
+      }
       if (reqSource !== null && reqSource !== source && tree.requireEntries[spec] !== reqSource) {
         tree.requireEntries[spec] = reqSource;
         added.push(reqSource);
       }
+      if (source === null) continue;
       if (tree.entries[spec] === source) continue;
       tree.entries[spec] = source;
       added.push(source);
