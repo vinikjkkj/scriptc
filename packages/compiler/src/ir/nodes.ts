@@ -895,7 +895,11 @@ export function isSupportedMapKey(t: IrType): boolean {
   return (
     t.kind === "f64" || t.kind === "string" || t.kind === "object" || t.kind === "record" ||
     // a Date keys by reference identity like any object (SameValueZero on an object)
-    t.kind === "date"
+    t.kind === "date" ||
+    // A UNION key (`Map<string | number, V>`, `Map<string | Buffer, V>`): the
+    // box is hashed and compared by the value it carries, per arm, exactly as
+    // a Set element of the same union (scr_map_new_union).
+    t.kind === "union"
   );
 }
 

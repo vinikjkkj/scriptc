@@ -883,6 +883,24 @@ ScrMap *scr_map_new_ref(ScrMapValKind val_kind, void *(*key_retain)(void *),
   return m;
 }
 
+/* A Map whose KEYS are UNION boxes (`Map<string | number, V>`, `Map<string |
+ * Buffer, V>`): the box is hashed and compared by the value it carries
+ * (scr_map_hash_union / scr_map_union_eq), so "1" and 1 are different keys,
+ * NaN equals NaN, -0 equals +0, and an object arm (a Buffer, a record) is
+ * compared by identity. scr_set_new_union's twin with a real value side.
+ * `classes` is the compiler's interned per-arm class string. */
+ScrMap *scr_map_new_union(ScrMapValKind val_kind, void *(*key_retain)(void *),
+                          void (*key_release)(void *), void *(*val_retain)(void *),
+                          void (*val_release)(void *), ScrTraceFn val_trace,
+                          const ScrStr *classes) {
+  ScrMap *m = scr_map_new(SCR_MAP_KEY_UNION, val_kind, val_retain, val_release, val_trace);
+  m->key_kind = SCR_MAP_KEY_UNION;
+  m->key_retain = key_retain;
+  m->key_release = key_release;
+  m->key_classes = classes;
+  return m;
+}
+
 ScrMap *scr_set_new_ref(void *(*elem_retain)(void *), void (*elem_release)(void *)) {
   ScrMap *m = scr_map_new(SCR_MAP_KEY_REF, SCR_MAP_VAL_F64, NULL, NULL, NULL);
   m->key_retain = elem_retain;
