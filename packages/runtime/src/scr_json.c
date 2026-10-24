@@ -3136,6 +3136,221 @@ const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
   return best != NULL ? best : own;
 }
 
+/* ── class VALUES: the static side of a class as a dyn function object ─────
+ *
+ * `x.constructor`, or a class handed to untyped code, is ONE immortal FUNC
+ * box per class (minted on first use, kept in a small registry and released
+ * at exit, so `a.constructor === b.constructor` is box identity and nothing
+ * leaks). Its closure's single capture holds the class's emitted descriptor.
+ * What makes it a CLASS is the thunk: called without `new` it throws Node's
+ * "Class constructor X cannot be invoked without 'new'", and every other
+ * arm recognizes the box by that thunk's address -- `new` runs the class's
+ * synthesized `%dynNew`, a read goes to the descriptor's statics table
+ * (a data row answers its value, a method row a bound function), a write to
+ * `%dynStaticSet`. `name` is the FUNC box's own. */
+static void *dyn_cls_noop_v(void *p) { return p; }
+static void dyn_cls_noop_rel_v(void *p) { (void)p; }
+
+static const ScrDynClass *dyn_class_of_clo(ScrClosure *clo) {
+  return (const ScrDynClass *)scr_box_get_ref((ScrBox *)clo->caps[0]);
+}
+
+static ScrDyn *dyn_class_box_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)args;
+  (void)argc;
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, "Class constructor ");
+  scr_jb_puts(&b, dyn_class_of_clo(clo)->name);
+  scr_jb_puts(&b, " cannot be invoked without 'new'");
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+  return NULL;
+}
+
+const ScrDynClass *scr_dyn_class_of_value(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_FUNC || d->v.fn.thunk != dyn_class_box_thunk) return NULL;
+  return dyn_class_of_clo(d->v.fn.clo);
+}
+
+typedef struct { const ScrDynClass *cls; ScrDyn *box; } DynClsBox;
+static DynClsBox *dyn_cls_boxes = NULL;
+static size_t dyn_cls_boxes_n = 0;
+static size_t dyn_cls_boxes_cap = 0;
+
+static void dyn_cls_boxes_teardown(void) {
+  for (size_t i = 0; i < dyn_cls_boxes_n; i++) scr_dyn_release(dyn_cls_boxes[i].box);
+  free(dyn_cls_boxes);
+  dyn_cls_boxes = NULL;
+  dyn_cls_boxes_n = dyn_cls_boxes_cap = 0;
+}
+
+ScrDyn *scr_dyn_class_box(const ScrDynClass *cls) {
+  for (size_t i = 0; i < dyn_cls_boxes_n; i++) {
+    if (dyn_cls_boxes[i].cls == cls) return scr_dyn_retain(dyn_cls_boxes[i].box);
+  }
+  ScrClosure *clo = scr_closure_new((void *)dyn_class_box_thunk, 1);
+  clo->caps[0] = scr_box_new_obj(dyn_cls_noop_v, dyn_cls_noop_rel_v, NULL);
+  scr_box_set_ref((ScrBox *)clo->caps[0], (void *)cls);
+  ScrDyn *b = scr_dyn_new_func(clo, dyn_class_box_thunk, 0, "()", cls->name);
+  if (dyn_cls_boxes_cap == 0) scr_atexit(dyn_cls_boxes_teardown);
+  if (dyn_cls_boxes_n == dyn_cls_boxes_cap) {
+    dyn_cls_boxes_cap = dyn_cls_boxes_cap ? dyn_cls_boxes_cap * 2 : 8;
+    dyn_cls_boxes = realloc(dyn_cls_boxes, dyn_cls_boxes_cap * sizeof *dyn_cls_boxes);
+  }
+  dyn_cls_boxes[dyn_cls_boxes_n].cls = cls;
+  dyn_cls_boxes[dyn_cls_boxes_n].box = b; /* the registry's own +1 */
+  dyn_cls_boxes_n++;
+  return scr_dyn_retain(b);
+}
+
+ScrDyn *scr_dyn_class_value(const ScrClassObj *c) {
+  for (size_t i = 0; i < scr_cls_reg_n; i++) {
+    const ScrDynClass *k = scr_cls_reg[i];
+    if (k->pre == c->pre && k->post == c->post) return scr_dyn_class_box(k);
+  }
+  /* The emitter interns the static type's class and every descendant before
+   * it emits this call, so a class object with no descriptor is a compiler
+   * bug, not a program's. */
+  scr_trap("emitter bug: a class value with no registered descriptor");
+  return NULL;
+}
+
+/* The BUILTIN error classes' values (Error, TypeError, ...): `e.constructor`
+ * of an error ENCODING. Same shape as a program class's box -- one immortal
+ * FUNC per kind, typeof "function", `name` the kind's -- except that an
+ * Error constructor is callable WITHOUT `new` too (it constructs either
+ * way), and that no statics are modeled: every other key is the loud ladder
+ * (Error.captureStackTrace and friends are real members this box cannot
+ * answer, and undefined would be the silent wrong answer). */
+static ScrDyn *dyn_error_class_boxes[SCR_ERR_KINDS];
+static bool dyn_error_class_teardown_set = false;
+
+static void dyn_error_class_teardown(void) {
+  for (int i = 0; i < SCR_ERR_KINDS; i++) {
+    scr_dyn_release(dyn_error_class_boxes[i]);
+    dyn_error_class_boxes[i] = NULL;
+  }
+  dyn_error_class_teardown_set = false;
+}
+
+static int dyn_error_class_kind_of_clo(ScrClosure *clo) {
+  return (int)(intptr_t)scr_box_get_ref((ScrBox *)clo->caps[0]);
+}
+
+static ScrDyn *dyn_error_class_make(int kind, const ScrDyn *msg) {
+  ScrStr *m = NULL;
+  if (msg != NULL && msg->kind != SCR_DYN_UNDEF) {
+    m = scr_dyn_string_coerce((ScrDyn *)msg);
+    if (scr_exc_pending()) {
+      scr_str_release(m);
+      return NULL;
+    }
+  }
+  ScrError *e = scr_error_new(kind, m);
+  scr_str_release(m);
+  ScrDyn *r = scr_dyn_from_error(e);
+  scr_error_release(e);
+  return r;
+}
+
+static ScrDyn *dyn_error_class_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  return dyn_error_class_make(dyn_error_class_kind_of_clo(clo), argc > 0 ? args[0] : NULL);
+}
+
+static bool dyn_error_class_is(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_FUNC && d->v.fn.thunk == dyn_error_class_thunk;
+}
+
+ScrDyn *scr_dyn_error_class_box(int kind) {
+  if (kind < 0 || kind >= SCR_ERR_KINDS || kind == SCR_ERR_DOMEX) return NULL;
+  if (dyn_error_class_boxes[kind] == NULL) {
+    ScrClosure *clo = scr_closure_new((void *)dyn_error_class_thunk, 1);
+    clo->caps[0] = scr_box_new_obj(dyn_cls_noop_v, dyn_cls_noop_rel_v, NULL);
+    scr_box_set_ref((ScrBox *)clo->caps[0], (void *)(intptr_t)kind);
+    dyn_error_class_boxes[kind] = scr_dyn_new_func(clo, dyn_error_class_thunk, 1, "(string)", scr_error_kind_name(kind));
+    if (!dyn_error_class_teardown_set) {
+      dyn_error_class_teardown_set = true;
+      scr_atexit(dyn_error_class_teardown);
+    }
+  }
+  return scr_dyn_retain(dyn_error_class_boxes[kind]);
+}
+
+static const ScrDynClassMember *dyn_class_static(const ScrDynClass *cls, const char *k, size_t n) {
+  for (size_t i = 0; i < cls->nstatics; i++) {
+    const ScrDynClassMember *m = &cls->statics[i];
+    if (m->len == n && memcmp(m->name, k, n) == 0) return m;
+  }
+  return NULL;
+}
+
+static void dyn_class_fence(const ScrDynClass *cls, const char *what) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, what);
+  scr_jb_puts(&b, " on the class value ");
+  scr_jb_puts(&b, cls->name);
+  scr_jb_puts(&b, " is not supported yet");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+}
+
+/* A static method read as a VALUE (`const f = C.make`): a function over the
+ * same row a call takes. */
+static ScrDyn *dyn_class_static_call_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  const ScrDynClass *cls = dyn_class_of_clo(clo);
+  ScrDyn *nm = (ScrDyn *)scr_box_get_ref((ScrBox *)clo->caps[1]); /* +1 */
+  const ScrDynClassMember *m = dyn_class_static(cls, nm->v.str->data, nm->v.str->len);
+  scr_dyn_release(nm);
+  if (m == NULL || m->call == NULL) {
+    dyn_class_fence(cls, "a static member");
+    return NULL;
+  }
+  return m->call(NULL, args, argc, "a static method");
+}
+
+static ScrDyn *dyn_class_static_method_value(const ScrDynClass *cls, const ScrDynClassMember *m) {
+  ScrClosure *clo = scr_closure_new((void *)dyn_class_static_call_thunk, 2);
+  clo->caps[0] = scr_box_new_obj(dyn_cls_noop_v, dyn_cls_noop_rel_v, NULL);
+  scr_box_set_ref((ScrBox *)clo->caps[0], (void *)cls);
+  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  ScrStr *s = scr_str_new(m->name, m->len);
+  ScrDyn *nameBox = scr_dyn_new_str(s);
+  scr_str_release(s);
+  scr_box_set_ref((ScrBox *)clo->caps[1], nameBox); /* takes the +1 */
+  return scr_dyn_new_func(clo, dyn_class_static_call_thunk, 0, "()", "bound");
+}
+
+/* A keyed read on a class value: its statics table, then the loud ladder for
+ * the members this box cannot answer exactly. NULL with nothing pending lets
+ * the caller's function-object arms (name, ...) answer. */
+static ScrDyn *dyn_class_static_get(const ScrDynClass *cls, const char *key, size_t key_len) {
+  const ScrDynClassMember *m = dyn_class_static(cls, key, key_len);
+  if (m != NULL) return m->get != NULL ? m->get(NULL) : dyn_class_static_method_value(cls, m);
+  /* `length` is the constructor's arity and `prototype` the object its
+   * instances inherit from: neither is modeled for a class value, and the
+   * function-object defaults (0, an empty object) would be wrong answers. */
+  if ((key_len == 6 && memcmp(key, "length", 6) == 0) || (key_len == 9 && memcmp(key, "prototype", 9) == 0)) {
+    dyn_class_fence(cls, key_len == 6 ? "reading 'length'" : "reading 'prototype'");
+    return NULL;
+  }
+  if (cls->staticsOpaque && !(key_len == 4 && memcmp(key, "name", 4) == 0)) {
+    dyn_class_fence(cls, "reading a static member");
+    return NULL;
+  }
+  return NULL;
+}
+
+/* `new C(...args)` over a class value: the class's synthesized `%dynNew`. */
+static ScrDyn *dyn_class_construct(const ScrDynClass *cls, const ScrDyn *args) {
+  const ScrDynClassMember *m = dyn_class_static(cls, "%dynNew", 7);
+  if (m == NULL || m->call == NULL) {
+    dyn_class_fence(cls, "`new`");
+    return NULL;
+  }
+  ScrDyn *av[1] = { (ScrDyn *)args };
+  return m->call(NULL, av, 1, "new");
+}
+
 const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, size_t klen) {
   if (d == NULL || d->kind != SCR_DYN_OBJINST) return NULL;
   const ScrDynClass *c = scr_dyn_objinst_class_of(d);
@@ -6309,6 +6524,16 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
      * function-prototype case has one and refuses the cycle. Both are
      * loud; neither is a silent undefined. */
     if (scr_dyn_error_proto_in_chain(recv)) {
+      /* An error ENCODING the identity cache knows is a real runtime error:
+       * its constructor is its builtin kind's class value. Error.prototype
+       * itself (and an alien error-shaped object) has no such back-link. */
+      ScrError *ce = scr_errdyn_err_of(recv); /* +1 or NULL */
+      if (ce != NULL) {
+        const int k = scr_error_kind_of(ce);
+        scr_error_release(ce);
+        ScrDyn *cb = scr_dyn_error_class_box(k);
+        if (cb != NULL) return cb;
+      }
       scr_dyn_error_ctor_fence();
       return NULL;
     }
@@ -7394,6 +7619,26 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
      * island-side readers see it); the value crosses through the uniform
      * from_dyn conversion, and engine refusals bridge catchably. */
     scr_dyn_jsval_ops()->key_set(recv->v.jsval.cell, key, value);
+    return;
+  }
+  if (recv->kind == SCR_DYN_FUNC && scr_dyn_class_of_value(recv) != NULL) {
+    /* A write on a CLASS VALUE: the class's own static field or setter
+     * (%dynStaticSet), which answers false for a name it cannot hold -- an
+     * inherited static would be an OWN property of this class in JS, and a
+     * global cannot be -- and then keeps the loud ladder. */
+    const ScrDynClass *cls = scr_dyn_class_of_value(recv);
+    const ScrDynClassMember *m = dyn_class_static(cls, "%dynStaticSet", 13);
+    if (m != NULL && m->call != NULL) {
+      ScrDyn *kd = scr_dyn_new_str((ScrStr *)key);
+      ScrDyn *av[2] = { kd, value };
+      ScrDyn *r = m->call(NULL, av, 2, "a static write");
+      scr_dyn_release(kd);
+      if (r == NULL) return; /* the write threw */
+      bool taken = r->kind == SCR_DYN_BOOL && r->v.b;
+      scr_dyn_release(r);
+      if (taken) return;
+    }
+    dyn_class_fence(cls, "assigning a static member");
     return;
   }
   if (recv->kind == SCR_DYN_FUNC) {
@@ -8572,6 +8817,26 @@ bool scr_dyn_expando_set(ScrClosure *clo, const char *key, size_t key_len, ScrDy
  * the lifted-member accessors, then the function-instance built-ins
  * name/length. +1 or NULL. */
 ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
+  /* A BUILTIN ERROR CLASS value answers `name` (below) and nothing else. */
+  if (dyn_error_class_is(d) && !(key_len == 4 && memcmp(key, "name", 4) == 0)) {
+    ScrJsonBuf fb;
+    scr_jb_init(&fb);
+    scr_jb_puts(&fb, "reading '");
+    scr_jb_write(&fb, key, key_len);
+    scr_jb_puts(&fb, "' on the class value ");
+    scr_jb_puts(&fb, scr_dyn_fn_name(d));
+    scr_jb_puts(&fb, " is not supported yet");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&fb));
+    return NULL;
+  }
+  /* A CLASS VALUE answers its statics first (dyn_class_static_get). */
+  {
+    const ScrDynClass *cls = scr_dyn_class_of_value(d);
+    if (cls != NULL) {
+      ScrDyn *s = dyn_class_static_get(cls, key, key_len);
+      if (s != NULL || scr_exc_pending()) return s;
+    }
+  }
   if (d->v.fn.clo->props) {
     ScrDyn *table = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
     ScrDyn *m = table ? scr_dyn_obj_get(table, key, key_len) : NULL;
@@ -10890,6 +11155,15 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
    * its thunk's only job is the requires-'new' throw the plain call form
    * needs. Every other function keeps the ordinary path. */
   if (fn == scr_u8_ctor) return scr_u8_construct(args);
+  if (dyn_error_class_is(fn)) {
+    return dyn_error_class_make(dyn_error_class_kind_of_clo(fn->v.fn.clo),
+                                args->kind == SCR_DYN_ARR && args->v.arr.len > 0 ? args->v.arr.items[0] : NULL);
+  }
+  /* A CLASS VALUE: the class's own constructor (dyn_class_construct). */
+  {
+    const ScrDynClass *cls = scr_dyn_class_of_value(fn);
+    if (cls != NULL) return dyn_class_construct(cls, args);
+  }
   ScrDyn *proto = scr_dyn_fn_prototype((ScrDyn *)fn); /* +1 */
   ScrDyn *inst = scr_dyn_new_obj();                   /* +1 */
   /* OrdinaryCreateFromConstructor: a `prototype` that is not an OBJECT

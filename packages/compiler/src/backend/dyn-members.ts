@@ -53,12 +53,12 @@ export type DynMemberRow =
   | { kind: "field"; name: string; type: IrType; absentWhenUndefined: boolean }
   /** A GETTER (`get:prop`): the emitter calls `fn` with the instance and
    * boxes the result. NOT enumerable, matching JS. */
-  | { kind: "accessor"; name: string; fn: IrFunction }
+  | { kind: "accessor"; name: string; fn: IrFunction; isStatic?: true; enumerable?: true }
   /** A METHOD: the emitter checks the dyn arguments into `fn`'s declared
    * parameter types and calls it with the instance as the receiver. NOT
    * enumerable — a class method is non-enumerable in JS, which is why
    * `Object.keys(new Box(7))` is ["v"] and not ["v","get"]. */
-  | { kind: "method"; name: string; fn: IrFunction }
+  | { kind: "method"; name: string; fn: IrFunction; isStatic?: true }
   /** An OWN property that shadows the method `name` with the method `target`
    * of the same class (ir/nodes.ts OwnShadow): enumerable and present while the
    * private boolean `flag` is set, its value the function `target`. The row
@@ -280,6 +280,72 @@ export function dynMemberTable(
   }
 
   return { rows, opaque, errorRooted };
+}
+
+/** The rows of the STATIC side of a class (the table behind its class value:
+ * `x.constructor`, a class passed to untyped code), flattened over the base
+ * chain, derived first, from IrClassDef.dynStatics. Every row is
+ * receiver-free (`isStatic`): the emitters call the function with the dyn
+ * arguments checked into its parameters and nothing else.
+ *
+ * `opaque` has the instance table's meaning: some member of the static side
+ * was skipped (an async static, a signature with no dyn form, a pruned
+ * body), so a miss cannot be called absent. */
+export function dynStaticTable(
+  cls: DynMemberClass,
+  fnByName: ReadonlyMap<string, IrFunction>,
+  getRecord: (id: string) => IrRecordShape | undefined,
+  getUnion: (id: string) => IrUnionDef | undefined,
+): { rows: DynMemberRow[]; opaque: boolean } {
+  const rows: DynMemberRow[] = [];
+  const seen = new Set<string>();
+  let opaque = false;
+  for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
+    for (const entry of c.def.dynStatics ?? []) {
+      // The synthesized members (%dynStaticSet, %dynNew) belong to ONE class:
+      // inheriting a base's would write the base's statics and construct the
+      // base for a derived class value.
+      if (c !== cls && entry.name.startsWith("%")) continue;
+      // `get:` a static getter (non-enumerable, like a class accessor),
+      // `field:` a static field read (an own ENUMERABLE data property).
+      const isField = entry.name.startsWith("field:");
+      const accessor = isField || entry.name.startsWith("get:");
+      const name = accessor ? entry.name.slice(isField ? 6 : 4) : entry.name;
+      // A name is ONE member: the chain's first spelling of it wins.
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const fn = fnByName.get(entry.fn);
+      if (fn === undefined) {
+        opaque = true;
+        continue;
+      }
+      if (fn.async === true || fn.generator !== undefined) {
+        opaque = true;
+        continue;
+      }
+      if (fn.params.some((p) => p.type.kind !== "dyn" && !canDynCheckTo(p.type, getRecord, getUnion))) {
+        opaque = true;
+        continue;
+      }
+      const ret = fn.returnType;
+      if (ret.kind !== "void" && ret.kind !== "dyn" && !canConvertToDyn(ret, getRecord, getUnion)) {
+        opaque = true;
+        continue;
+      }
+      if (accessor && ret.kind === "void") {
+        opaque = true;
+        continue;
+      }
+      rows.push(
+        accessor
+          // An INHERITED static field is the base class object's own property,
+          // not this one's: it reads through, and no own-key surface lists it.
+          ? { kind: "accessor", name, fn, isStatic: true, ...(isField && c === cls ? { enumerable: true as const } : {}) }
+          : { kind: "method", name, fn, isStatic: true },
+      );
+    }
+  }
+  return { rows, opaque };
 }
 
 /** The DISPLAY NAME a `ScrDynClass` descriptor carries: the string every

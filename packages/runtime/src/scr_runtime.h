@@ -4616,6 +4616,19 @@ typedef struct ScrDynClass {
    * bag the runtime answers from the box itself, and whose own-key set no
    * table can state -- so every ENUMERATING surface keeps its fence. */
   bool errorRooted;
+  /* The STATIC side, as the same kind of table (ScrDynClassMember rows with
+   * no receiver: `get` / `call` take a NULL object), `nstatics` long: static
+   * methods, static getters and field reads (data rows), and the two
+   * synthesized members the class value needs, `%dynStaticSet` and
+   * `%dynNew`. FLATTENED over the base chain, derived first. NULL for a class
+   * with none. `staticsOpaque` has `opaque`'s meaning for this table. */
+  const struct ScrDynClassMember *statics;
+  size_t nstatics;
+  bool staticsOpaque;
+  /* The immediate base's display name ("Error", "Base"), NULL for a class with
+   * none: `[class B extends A]` is what util.inspect prints for the class
+   * value. */
+  const char *base;
 } ScrDynClass;
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
@@ -6686,6 +6699,25 @@ size_t scr_dyn_objinst_member_count(const ScrDyn *d);
 const ScrDynClassMember *scr_dyn_objinst_member_at(const ScrDyn *d, size_t i);
 /* The function box of an own property shadowing a method (enumerable 3 rows). */
 ScrDyn *scr_dyn_shadow_method(const char *name);
+/* ── class values in the checked-dynamic tree ─────────────────────────────
+ * A class's STATIC side as a dyn value: `x.constructor`, or a class passed to
+ * untyped code. One IMMORTAL function object per class, minted on first use
+ * and cached, so `a.constructor === b.constructor` is box identity: typeof
+ * "function", `name` the class's, calling it without `new` the TypeError
+ * Node throws, `new` running the class's synthesized `%dynNew`, and a read,
+ * write or call of a name going to the class's statics table
+ * (ScrDynClass.statics). +1 per call. */
+ScrDyn *scr_dyn_class_box(const ScrDynClass *cls);
+/* The same from a static class object (type classval:C, which may be C's
+ * or a descendant's): the class is resolved by the object's preorder
+ * position through the registry. */
+ScrDyn *scr_dyn_class_value(const ScrClassObj *c);
+/* The class value of a BUILTIN error kind (Error, TypeError, ...): what
+ * `e.constructor` of an error encoding answers. NULL for a kind with no box
+ * (DOMException). +1. */
+ScrDyn *scr_dyn_error_class_box(int kind);
+/* The class descriptor behind a class-value box, or NULL when `d` is not one. */
+const ScrDynClass *scr_dyn_class_of_value(const ScrDyn *d);
 /* The keyed READ of an instance member (the emitted sc_dyn_key_get's
  * OBJINST arm): a data member's value, or a METHOD as a BOUND function
  * box minted over the very dispatch a CALL takes. +1, or NULL with

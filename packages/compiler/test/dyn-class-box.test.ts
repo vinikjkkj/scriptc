@@ -176,9 +176,9 @@ function cDescriptors(c: string): Map<string, string> {
   // The unit is emitted with `static ` linkage normally and bare when the
   // emitter is building a single merged TU (CEmitter.link), so the storage
   // class is optional here rather than assumed.
-  // const ScrDynClass sc_dcl_0 = { "Lone", 5, 5, false, &r, &rl, sc_dclt_0, 1, false, false, false }; /* dyn box: class Lone */
+  // const ScrDynClass sc_dcl_0 = { "Lone", 5, 5, false, &r, &rl, sc_dclt_0, 1, false, false, false, NULL, 0, false, NULL }; /* dyn box: class Lone */
   const re =
-    /(?:static )?const ScrDynClass sc_dcl_\d+ = \{ "([^"]*)", (\d+), (\d+), (true|false), &(\w+), &(\w+), (NULL|\w+), (\d+), (true|false), (true|false), (true|false) \};/g;
+    /(?:static )?const ScrDynClass sc_dcl_\d+ = \{ "([^"]*)", (\d+), (\d+), (true|false), &(\w+), &(\w+), (NULL|\w+), (\d+), (true|false), (true|false), (true|false), (NULL|\w+), (\d+), (true|false), (NULL|"[^"]*") \};/g;
   for (const m of c.matchAll(re)) {
     const mem = m[7] === "NULL" ? "[]" : (tbls.get(m[7]!) ?? `<missing table ${m[7]}>`);
     const declared = Number(m[8]);
@@ -199,9 +199,9 @@ function llDescriptors(ll: string): Map<string, string> {
   const cstrs = llCstrs(ll);
   const tbls = llMemberTables(ll, cstrs);
   const out = new Map<string, string>();
-  // @sc_dcl_0 = internal constant %ScrDynClass { ptr @sc_cs_3, i64 5, i64 5, i8 0, ptr @r, ptr @rl, ptr @sc_dclt_0, i64 1, i8 0, i8 0, i8 0 }
+  // @sc_dcl_0 = internal constant %ScrDynClass { ptr @sc_cs_3, i64 5, i64 5, i8 0, ptr @r, ptr @rl, ptr @sc_dclt_0, i64 1, i8 0, i8 0, i8 0, ptr null, i64 0, i8 0, ptr null }
   const re =
-    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), i8 ([01]), i8 ([01]) \}/gm;
+    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), i8 ([01]), i8 ([01]), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), ptr (null|@sc_cs_\d+) \}/gm;
   for (const m of ll.matchAll(re)) {
     const name = cstrs.get(m[1]!);
     if (name === undefined) throw new Error(`llvm descriptor names an undefined cstr ${m[1]}`);
@@ -491,7 +491,10 @@ describe("an %Error leaf crosses nested, which is the shape the emit trampoline 
         c,
       );
     expect(cm, "no C arm walker for object:%Error — this test has gone blind").not.toBeNull();
-    expect(cm![2]).toContain(`scr_dyn_is_error_encoding(d)`);
+    // (scr_dyn_is_error_value is the encoding predicate OR a boxed instance of a
+    // class rooted in the Error hierarchy, which IS the error: still one
+    // runtime predicate, still no interval and no reserved key.)
+    expect(cm![2]).toContain(`scr_dyn_is_error_value(d)`);
     expect(cm![2]).not.toContain(`"%error"`);
     expect(cm![2]).not.toContain("scr_dyn_objinst_is");
     expect(cm![2]).toContain("*ok = false");
@@ -505,13 +508,13 @@ describe("an %Error leaf crosses nested, which is the shape the emit trampoline 
         ll,
       );
     expect(lm, "no LLVM arm walker for object:%Error — this test has gone blind").not.toBeNull();
-    expect(lm![1]).toContain("@scr_dyn_is_error_encoding");
+    expect(lm![1]).toContain("@scr_dyn_is_error_value");
     expect(lm![1]).not.toContain("scr_dyn_objinst_is");
     expect(lm![1]).toContain("store i1 false, ptr %ok");
     // And the C lane's CHECKED builder asks the identical question, in the
     // identical spelling, so a direct `u as Error` cannot disagree with an
     // arm about what an %Error is.
-    expect(c).toContain(`if (!scr_dyn_is_error_encoding(d))`);
+    expect(c).toContain(`if (!scr_dyn_is_error_value(d))`);
     // Neither lane may reach for the reserved key ANYWHERE in an emitted
     // unit: the emitted copies are what drifted from the runtime before,
     // and one grep is what keeps a fifth copy from being added.

@@ -36,7 +36,7 @@ import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestAppl
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
-import { dynMemberRows, type DynMemberClass } from "../dyn-members.js";
+import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -2480,6 +2480,20 @@ export class LlDyn {
         host.declare(`declare ptr @scr_dyn_from_error(ptr)`);
         const r = B.tmp();
         B.line(`${r} = call ptr @scr_dyn_from_error(ptr %v)`);
+        B.terminate(`ret ptr ${r}`);
+        break;
+      }
+      case "classval": {
+        // A CLASS VALUE boxes as the class's one function object
+        // (scr_dyn_class_value resolves the descriptor from the class
+        // object's preorder position). The descriptor of the static type's
+        // class -- and so of every descendant, which `classval:C` may hold --
+        // is interned HERE so the registry the lookup reads has it. The C
+        // walker's arm exactly.
+        host.dynClassDesc(t.className);
+        host.declare(`declare ptr @scr_dyn_class_value(ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_dyn_class_value(ptr %v)`);
         B.terminate(`ret ptr ${r}`);
         break;
       }
@@ -4996,15 +5010,14 @@ export class LlDyn {
    * Answers null for a class with no rows: the descriptor then carries
    * `ptr null, i64 0` and behaves exactly as it did before member tables
    * existed. */
-  classMemberTable(className: string): { sym: string; count: number } | null {
+  classMemberTable(className: string, statics = false): { sym: string; count: number } | null {
     const host = this.host;
     const meta = host.classMetaFor(className);
-    const rows = dynMemberRows(
-      meta,
-      host.fnByName,
-      (id: string) => host.recordsById.get(id),
-      (id: string) => host.unionsById.get(id),
-    );
+    const getRec = (id: string) => host.recordsById.get(id);
+    const getUni = (id: string) => host.unionsById.get(id);
+    const rows = statics
+      ? dynStaticTable(meta, host.fnByName, getRec, getUni).rows
+      : dynMemberRows(meta, host.fnByName, getRec, getUni);
     if (rows.length === 0) return null;
     const struct = mangleClassStruct(className);
     const entries: string[] = [];
@@ -5088,7 +5101,10 @@ export class LlDyn {
       }
 
       const fn = row.fn;
-      const recvT = fn.params[0]!.type as IrType & { kind: "object" };
+      // A STATIC row has no receiver (the class value's table passes a null
+      // `o` and the function takes only the checked arguments).
+      const isStatic = row.isStatic === true;
+      const recvT = isStatic ? null : (fn.params[0]!.type as IrType & { kind: "object" });
       const callee = `@${mangleFunction(fn.name)}`;
       const ret = fn.returnType;
       const retTy = ret.kind === "void" ? "void" : this.valTy(ret);
@@ -5100,10 +5116,10 @@ export class LlDyn {
       // module (emitClassShapes), and a declare beside a define is
       // "invalid redefinition" from llc rather than a link-time nicety.
       const recv = B.tmp();
-      B.line(`${recv} = call ptr @${mangleClassRetain(recvT.className)}(ptr %o)`);
+      if (recvT !== null) B.line(`${recv} = call ptr @${mangleClassRetain(recvT.className)}(ptr %o)`);
 
       if (row.kind === "accessor") {
-        const callArgs = `ptr ${recv}`;
+        const callArgs = recvT === null ? "" : `ptr ${recv}`;
         if (ret.kind === "void") {
           // A getter with no value is not a getter; dynMemberRows keeps
           // the shape reachable only through a declared accessor, so this
@@ -5124,17 +5140,17 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 0 }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.enumerable === true ? 1 : 0} }`);
         continue;
       }
 
       // Per-argument conversion, the dyn call thunk's body exactly: a
       // MISSING argument IS the undefined dyn value (JS arity), and the
       // parameter's own check decides whether that flies.
-      const rest = fn.params.slice(1);
+      const rest = fn.params.slice(isStatic ? 0 : 1);
       const argNames: string[] = [];
       const undoAll = (upto: number): void => {
-        B.line(`call void @${mangleClassRelease(recvT.className)}(ptr ${recv})`);
+        if (recvT !== null) B.line(`call void @${mangleClassRelease(recvT.className)}(ptr ${recv})`);
         rest.slice(0, upto).forEach((q, j) => {
           if (isRefCounted(q.type)) B.line(`call void ${releaseSym(host, q.type)}(ptr ${argNames[j]})`);
         });
@@ -5183,7 +5199,7 @@ export class LlDyn {
         argNames.push(a);
       });
 
-      const callArgs = [`ptr ${recv}`, ...rest.map((p, i) => `${this.valTy(p.type)} ${argNames[i]}`)].join(", ");
+      const callArgs = [...(recvT === null ? [] : [`ptr ${recv}`]), ...rest.map((p, i) => `${this.valTy(p.type)} ${argNames[i]}`)].join(", ");
       if (ret.kind === "void") {
         B.line(`call void ${callee}(${callArgs})`);
         this.pendingBail(B, "dclmr", () => {}, "ptr null");

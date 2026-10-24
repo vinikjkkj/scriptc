@@ -1081,6 +1081,57 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * spelling (SEMANTICS.md — reference-site naming). */
       const char *name = scr_dyn_fn_name(d);
       InspBuf out = {0};
+      /* A CLASS VALUE prints `[class A]` / `[class B extends A]`, followed by
+       * its own ENUMERABLE static fields in braces (the instance arm's
+       * layout: `[class A] { k: 5 }`). Static methods and getters are
+       * non-enumerable and never listed. */
+      const ScrDynClass *vcls = scr_dyn_class_of_value(d);
+      if (vcls != NULL) {
+        ib_cstr(&out, "[class ");
+        ib_cstr(&out, vcls->name);
+        if (vcls->base != NULL) {
+          ib_cstr(&out, " extends ");
+          ib_cstr(&out, vcls->base);
+        }
+        ib_char(&out, ']');
+        size_t vshown = 0;
+        for (size_t i = 0; i < vcls->nstatics; i++) if (vcls->statics[i].enumerable) vshown++;
+        if (vshown == 0) return ib_take(&out);
+        if (recurse > depth) return ib_take(&out); /* [class A] is already the depth form */
+        ScrStr *vbase = ib_take(&out);
+        scr_insp_begin(recurse + 1);
+        bool vthrew = false;
+        for (size_t i = 0; i < vcls->nstatics && !vthrew; i++) {
+          const ScrDynClassMember *m = &vcls->statics[i];
+          if (!m->enumerable) continue;
+          ScrDyn *mv = m->get(NULL); /* +1 */
+          if (mv == NULL) { /* the read threw */
+            vthrew = true;
+            break;
+          }
+          ScrStr *val = scr_insp_dyn(mv, recurse + 1, depth);
+          scr_dyn_release(mv);
+          InspBuf eb = {0};
+          insp_key_into(&eb, m->name, m->len);
+          ib_cstr(&eb, ": ");
+          ib_bytes(&eb, val->data, val->len);
+          scr_str_release(val);
+          ScrStr *entry = ib_take(&eb);
+          scr_insp_entry(entry, false);
+          scr_str_release(entry);
+        }
+        ScrStr *vb0 = scr_str_new("{", 1);
+        ScrStr *vb1 = scr_str_new("}", 1);
+        ScrStr *vout = scr_insp_end(vbase, vb0, vb1, recurse + 1, false, false);
+        scr_str_release(vbase);
+        scr_str_release(vb0);
+        scr_str_release(vb1);
+        if (vthrew) {
+          scr_str_release(vout);
+          return scr_str_new("", 0); /* the pending throw wins */
+        }
+        return vout;
+      }
       if (name && name[0]) {
         ib_cstr(&out, "[Function: ");
         ib_cstr(&out, name);

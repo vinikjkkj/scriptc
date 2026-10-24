@@ -12,7 +12,7 @@ import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorCla
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
-import { dynClassDisplayName, dynMemberRows, dynMemberTable } from "../dyn-members.js";
+import { dynClassDisplayName, dynMemberRows, dynMemberTable, dynStaticTable } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -90,6 +90,8 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     // carries `NULL, 0` and behaves exactly as it did before the table
     // existed.
     const members = dynClassMembers(E, className, meta);
+    const statics = dynClassMembers(E, className, meta, true);
+    const staticsOpaque = dynStaticTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id)).opaque;
     const { opaque, errorRooted } = dynMemberTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
     // A static const with internal linkage, beside the walker prototypes:
     // emitStructDefs has already declared the `_v` thunks by then, and the
@@ -100,7 +102,9 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${meta.pre}, ${meta.post}, ${meta.hierarchy ? "true" : "false"}, ` +
         `&${rc.retain}, &${rc.release}, ` +
         `${members === null ? "NULL, 0" : `${members.sym}, ${members.count}`}, ` +
-        `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? "true" : "false"}, ${opaque ? "true" : "false"}, ${errorRooted ? "true" : "false"} }; ` +
+        `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? "true" : "false"}, ${opaque ? "true" : "false"}, ${errorRooted ? "true" : "false"}, ` +
+        `${statics === null ? "NULL, 0" : `${statics.sym}, ${statics.count}`}, ${staticsOpaque ? "true" : "false"}, ` +
+        `${meta.base === null ? "NULL" : cStringLiteral(Buffer.from(dynClassDisplayName(meta.base.def), "utf8"))} }; ` +
         `/* dyn box: class ${className} */`,
     );
     // A base-typed box can hold a DERIVED instance, and the registry resolves
@@ -134,13 +138,12 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
  * Answers null when the class has no rows: an empty C array is not a C
  * array, and the descriptor then carries `NULL, 0` and behaves exactly as
  * it did before member tables existed. */
-  function dynClassMembers(E: CEmitter, className: string, meta: ClassMeta): { sym: string; count: number } | null {
-    const rows = dynMemberRows(
-      meta,
-      E.fnByName,
-      (id: string) => E.recordsById.get(id),
-      (id: string) => E.unionsById.get(id),
-    );
+  function dynClassMembers(E: CEmitter, className: string, meta: ClassMeta, statics = false): { sym: string; count: number } | null {
+    const getRec = (id: string) => E.recordsById.get(id);
+    const getUni = (id: string) => E.unionsById.get(id);
+    const rows = statics
+      ? dynStaticTable(meta, E.fnByName, getRec, getUni).rows
+      : dynMemberRows(meta, E.fnByName, getRec, getUni);
     if (rows.length === 0) return null;
     const struct = mangleClassStruct(className);
     const defs: string[] = [];
@@ -184,11 +187,14 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         continue;
       }
       const fn = row.fn;
-      const recvT = fn.params[0]!.type as IrType & { kind: "object" };
+      // A STATIC row has no receiver at all: the function takes only the
+      // checked arguments (the class value's table; `o` is NULL there).
+      const isStatic = row.isStatic === true;
+      const recvT = isStatic ? null : (fn.params[0]!.type as IrType & { kind: "object" });
       // The receiver is RETAINED into the call: a compiled method consumes
       // its `this` parameter exactly as a constructor does, and the box
       // still holds its own reference afterwards.
-      const recv = retainCallC(recvT, `((${mangleClassStruct(recvT.className)} *)o)`);
+      const recv = recvT === null ? "" : retainCallC(recvT, `((${mangleClassStruct(recvT.className)} *)o)`);
       const callee = mangleFunction(fn.name);
       const ret = fn.returnType;
       const d: string[] = [];
@@ -204,11 +210,11 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         defs.push(...d);
         entries.push(
           `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
-            `&${sym}, NULL, false },`,
+            `&${sym}, NULL, ${row.enumerable === true ? "1" : "false"} },`,
         );
         continue;
       }
-      const rest = fn.params.slice(1);
+      const rest = fn.params.slice(isStatic ? 0 : 1);
       E.walkerProtos.push(
         `${E.link}ScrDyn *${sym}(void *o, ScrDyn *const *args, size_t argc, const char *what); /* member call ${className}.${row.name} */`,
       );
@@ -235,7 +241,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         }
         d.push(`  }`);
       });
-      const argList = [recv, ...rest.map((_, i) => `a${i}`)].join(", ");
+      const argList = [...(isStatic ? [] : [recv]), ...rest.map((_, i) => `a${i}`)].join(", ");
       if (ret.kind === "void") {
         d.push(`  ${callee}(${argList});`);
         d.push(`  if (scr_exc_pending()) return NULL;`);
@@ -3181,6 +3187,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // carries the class's own RC pair, so the box's +1 is the
         // ordinary one and the operand stays borrowed.
         d.push(`  return scr_dyn_new_objinst(v, &${E.dynClassDesc(t.className)});`);
+        break;
+      case "classval":
+        // A CLASS VALUE boxes as the class's one function object
+        // (scr_dyn_class_value resolves the descriptor from the class
+        // object's preorder position). The descriptor of the static type's
+        // class -- and so of every descendant, which `classval:C` may hold --
+        // is interned here so the registry the lookup reads has it.
+        E.dynClassDesc(t.className);
+        d.push(`  return scr_dyn_class_value(v);`);
         break;
       case "dyn":
         // A dyn member of a converting composite (a dyn record field): the

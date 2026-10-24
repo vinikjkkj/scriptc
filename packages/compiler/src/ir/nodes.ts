@@ -1630,6 +1630,14 @@ export interface IrClassDef {
    * (first parameter the receiver). Only classes the program boxes into
    * dyn carry the list. */
   dynMethods?: { name: string; fn: string }[];
+  /** The STATIC side of a class a dyn box can hold, as module functions with
+   * no receiver: static methods (`name` -> the `%C.static:name` function),
+   * static getters and static field reads (`get:name` -> the function that
+   * answers the value), and the two synthesized members the class value
+   * needs, `%dynStaticSet(key, value): boolean` and `%dynNew(args): dyn`.
+   * OWN statics only (a subclass's table is flattened over its chain at
+   * emission, derived first). Only classes some dyn box can hold carry it. */
+  dynStatics?: { name: string; fn: string }[];
   /** Declared `abstract class` — never instantiated (tsc rejects `new` on
    * it, including through class values), so its own vtable entries for
    * abstract slots may stay empty. */

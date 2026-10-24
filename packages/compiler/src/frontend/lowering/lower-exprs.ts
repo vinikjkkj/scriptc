@@ -2954,6 +2954,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // the own-property answer, undefined. Function.prototype METHOD
       // names stay fenced (a stored-member undefined would mis-answer
       // `f.call` as a value). JS files only; TS keeps the fence.
+      // `x.constructor.<member>` on a program class instance: the class value
+      // is dyn (lowerInstanceConstructorRead), so the member reads through it
+      // like any untyped receiver, whatever the checker's `Function` says.
+      if (isInstanceConstructorRead(L, expr.expression) && expr.questionDotToken === undefined) {
+        const ctor = lowerInstanceConstructorRead(L, expr.expression);
+        if (ctor !== null) {
+          const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
+          return L.maybeNarrow({ kind: "dynKeyGet", key, value: ctor, type: DYN, loc }, expr);
+        }
+      }
       if (fnOwnRoutableKey(expr.name.text)) {
         const boxed = fnOwnPropBox(L, expr.expression, loc);
         if (boxed) {
@@ -3038,6 +3048,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       {
         const prop = funcObjectPropOf(L, expr, loc);
         if (prop) return prop;
+      }
+      // `x.constructor` on an instance of a PROGRAM class: the instance's
+      // class value, read through the dyn box exactly as an untyped receiver
+      // reads it (the descriptor of the class the instance ACTUALLY is, so a
+      // derived instance answers its own class). The checker types the read
+      // `Function`, which has no representation here; the dyn class value
+      // does (scr_dyn_class_box).
+      {
+        const ctor = lowerInstanceConstructorRead(L, expr);
+        if (ctor) return ctor;
       }
       // The lib fence's PROPERTY chokepoint: a stdlib-declared member that
       // no lowering above claimed ([1,2].entries, Math.SQRT2, Promise.all,
@@ -17774,6 +17794,34 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * exactly one constructor, so `u32.constructor === Uint32Array` is a
    * static question — a fold with no measured demand, and this site has
    * already shown what an unmeasured fold costs. It keeps the fence. */
+  /** Is `expr` `x.constructor` with `x` an instance of a PROGRAM class (no
+   * runtime-provided class in its chain)? */
+  function isInstanceConstructorRead(L: Lowerer, expr: ts.Expression): expr is ts.PropertyAccessExpression {
+    if (!ts.isPropertyAccessExpression(expr) || expr.name.text !== "constructor" || expr.questionDotToken !== undefined) return false;
+    const recvT = L.mapTypeOf(L.typeOf(expr.expression));
+    if (recvT?.kind !== "object") return false;
+    const info = L.classes.get(recvT.className);
+    // The runtime-provided hierarchies (Error, streams, the emitter) have no
+    // emitted descriptor to answer from; they keep their own fences.
+    if (info === undefined) return false;
+    for (let a: ClassInfo | null = info; a; a = a.base) if (a.def.runtime === true || a.builtinError === true) return false;
+    return true;
+  }
+
+  function lowerInstanceConstructorRead(L: Lowerer, expr: ts.Expression): IrExpr | null {
+    if (!isInstanceConstructorRead(L, expr)) return null;
+    const loc = locOf(expr);
+    const recv = L.lowerExpr(expr.expression);
+    if (recv.type.kind !== "object") return null;
+    return {
+      kind: "dynKeyGet",
+      key: { kind: "strLit", value: "constructor", type: STRING, loc },
+      value: { kind: "dynFrom", value: recv, type: DYN, loc },
+      type: DYN,
+      loc,
+    };
+  }
+
   function lowerBytesCtorTest(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr | null {
     const negated = expr.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken;
     for (const [a, b] of [

@@ -1405,8 +1405,10 @@ ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
    * dyn representation yet, and answering undefined would be the silent
    * wrong answer. The loud ladder stays for exactly this name. */
   if (key->len == 11 && memcmp(key->data, "constructor", 11) == 0) {
-    scr_dyn_objinst_fence(d, "a property read");
-    return NULL;
+    /* The instance's class value (scr_dyn_class_box): the descriptor of the
+     * class the instance ACTUALLY is, so a derived instance answers its own
+     * class and two instances of one class answer one box. */
+    return scr_dyn_class_box(scr_dyn_objinst_class_of(d));
   }
   if (scr_dyn_objinst_error_rooted(d)) {
     if (key->len == 8 && memcmp(key->data, "toString", 8) == 0) {

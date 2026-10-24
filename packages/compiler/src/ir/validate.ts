@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, DATE_T, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, canBoxClassIntoDyn, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, DATE_T, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -3868,7 +3868,10 @@ function validateFunction(
         // function type (the checked-dynamic tree's function kind — canConvertToDyn folds
         // all four in).
         const vt = e.value.type;
-        if (!canConvertToDyn(vt, (id) => records.get(id), (id) => unions.get(id))) {
+        if (
+          !canConvertToDyn(vt, (id) => records.get(id), (id) => unions.get(id)) &&
+          !(vt.kind === "classval" && canBoxClassIntoDyn(vt.className))
+        ) {
           err(`dynFrom of non-dyn-convertible type ${vt.kind}`, e.loc);
         }
         break;

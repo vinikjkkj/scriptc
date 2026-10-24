@@ -60,7 +60,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -3843,6 +3843,7 @@ export class Lowerer {
   private classesCrossingIntoDyn(t: IrType, out: Set<string>, seen: Set<string>): void {
     switch (t.kind) {
       case "object":
+      case "classval":
         out.add(t.className);
         return;
       case "array":
@@ -3911,6 +3912,15 @@ export class Lowerer {
       // The write half of the box (dynSetFn): its own marker, because the
       // implicit-any list above is only for classes with such methods.
       this.noteEdge(`%${c.def.name}.%dynset`);
+      // The STATIC side (dynStaticFns): `x.constructor` and a class value
+      // passed to untyped code reach the class's statics and its constructor
+      // by name, at run time, through the emitted statics table -- no call
+      // site the discovery pass can see, so each is a reachability root.
+      this.noteEdge(`%${c.def.name}.%dynclass`);
+      // (a runtime-provided class has no constructor body to lower)
+      if (c.decl !== null && c.def.runtime !== true) this.noteEdge(`%${c.def.name}.constructor`);
+      for (const n of c.staticMethods?.keys() ?? []) this.noteEdge(`%${c.def.name}.static:${n}`);
+      for (const n of c.staticAccessors?.keys() ?? []) this.noteEdge(`%${c.def.name}.static:${n}`);
     };
     for (let a: ClassInfo | null | undefined = info; a; a = a.base) mark(a);
     const below = (c: ClassInfo): void => {
@@ -6906,7 +6916,13 @@ export class Lowerer {
       if (expr.type.kind === "void") {
         return { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc };
       }
-      if (expr.kind === "unitLit" || this.dynConvertible(expr.type)) {
+      if (
+        expr.kind === "unitLit" ||
+        this.dynConvertible(expr.type) ||
+        // The BARE class value (see widthLiftPlan): its box is the class's one
+        // function object, which no composite carries.
+        (expr.type.kind === "classval" && canBoxClassIntoDyn(expr.type.className))
+      ) {
         this.noteKeyCrossingToDyn(expr);
         return { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc };
       }
@@ -8095,6 +8111,15 @@ export class Lowerer {
     // dynFrom, a DEEP COPY (`{ v: 5 }` into `{ v: unknown }`, `number[]`
     // into `unknown[]` — tsc's top type over the width family's copies).
     if (dst.kind === "dyn" && src.kind !== "dyn" && this.dynConvertible(src)) {
+      return { how: "dynIn" };
+    }
+    // A CLASS VALUE (the static side, `typeof C`) crossing into an untyped
+    // slot boxes as the class's one function object (scr_dyn_class_value):
+    // callable only with `new`, answering the class's name and statics. Only
+    // the BARE value crosses -- not canConvertToDyn, which would also admit
+    // it inside arrays and records, whose callbacks and round trips have no
+    // way back to a class value yet.
+    if (dst.kind === "dyn" && src.kind === "classval" && canBoxClassIntoDyn(src.className)) {
       return { how: "dynIn" };
     }
     if (dst.kind === "union") {

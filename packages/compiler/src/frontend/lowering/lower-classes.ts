@@ -7396,6 +7396,160 @@ export function dynDelFn(L: Lowerer, info: ClassInfo): IrFunction | null {
   };
 }
 
+/** The STATIC side of a class a dyn box can hold (`x.constructor`, a class
+ * value passed to untyped code): the module functions the box's statics
+ * table is built from, and the table's rows (IrClassDef.dynStatics).
+ *
+ * Static methods and getters ARE module functions already (`%C.static:m`);
+ * what is missing is a way to say "the value of static field f" and to
+ * "write it" and to "construct" by NAME and through dyn values, so three
+ * shapes are synthesized, all receiver-free:
+ *
+ *   %C.%sg:f()                      the field's value (a varRef of its global)
+ *   %C.%dynStaticSet(key, value)    a write of one of THIS class's own static
+ *                                   fields (checked into its slot) or setters;
+ *                                   an inherited static is a write JS makes an
+ *                                   OWN property of the subclass, which a
+ *                                   global cannot be, so it answers false and
+ *                                   keeps the loud ladder (the static spelling
+ *                                   fences the same case)
+ *   %C.%dynNew(args)                `new C(...args)`: each constructor
+ *                                   parameter checked out of the dyn argument
+ *                                   array (a missing one is undefined), the
+ *                                   instance boxed back by reference
+ *
+ * A class whose constructor cannot be driven that way (rest parameters, a
+ * captured binding, an inherited builtin constructor, abstract) gets no
+ * `%dynNew`, so `new` through its value keeps the loud ladder. */
+export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; list: { name: string; fn: string }[] } | null {
+  const className = info.def.name;
+  const decl = info.decl;
+  if (decl === null) return null;
+  const loc = locOf(decl);
+  const getRec = (id: string) => L.shapes.get(id);
+  const getUni = (id: string) => L.unions.get(id);
+  const fns: IrFunction[] = [];
+  const list: { name: string; fn: string }[] = [];
+  const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: l.type, loc });
+  const ret = (v: boolean): IrStmt => ({ kind: "return", value: { kind: "boolLit", value: v, type: BOOL, loc }, loc });
+
+  for (const m of info.staticMethods?.keys() ?? []) {
+    if (m.startsWith("#")) continue;
+    list.push({ name: m, fn: `%${className}.static:${m}` });
+  }
+  for (const key of info.staticAccessors?.keys() ?? []) {
+    if (key.startsWith("get:") && !key.startsWith("get:#")) list.push({ name: key, fn: `%${className}.static:${key}` });
+  }
+  const fieldNames: string[] = [];
+  for (const f of info.staticFields) {
+    if (f.name.startsWith("#") || f.lying === true || f.viaPrototype === true) continue;
+    if (!canConvertToDyn(f.type, getRec, getUni)) continue;
+    const name = `%${className}.%sg:${f.name}`;
+    fns.push({
+      name,
+      params: [],
+      returnType: f.type,
+      locals: [],
+      body: [{ kind: "return", value: { kind: "varRef", localId: f.globalId, type: f.type, loc }, loc }],
+      loc,
+    });
+    list.push({ name: `field:${f.name}`, fn: name });
+    fieldNames.push(f.name);
+  }
+
+  // %dynStaticSet(key, val)
+  {
+    const locals: IrLocal[] = [
+      { id: "key.0", name: "key", type: STRING, mutable: false },
+      { id: "val.0", name: "val", type: DYN, mutable: false },
+    ];
+    const keyIs = (name: string): IrExpr => ({
+      kind: "strEq", negated: false, left: ref(locals[0]!), right: { kind: "strLit", value: name, type: STRING, loc }, type: BOOL, loc,
+    });
+    const into = (t: IrType): IrExpr | null =>
+      t.kind === "dyn" ? ref(locals[1]!) : canDynCheckTo(t, getRec, getUni) ? { kind: "dynCheck", value: ref(locals[1]!), type: t, loc } : null;
+    const body: IrStmt[] = [];
+    for (const f of info.staticFields) {
+      if (!fieldNames.includes(f.name) || f.readonly) continue;
+      const v = into(f.type);
+      if (v === null) continue;
+      body.push({
+        kind: "if",
+        cond: keyIs(f.name),
+        then: [{ kind: "assign", localId: f.globalId, value: v, loc }, ret(true)],
+        else_: null,
+        loc,
+      });
+    }
+    for (const key of info.staticAccessors?.keys() ?? []) {
+      if (!key.startsWith("set:") || key.startsWith("set:#")) continue;
+      const sig = info.staticAccessors!.get(key)!;
+      if (sig.params.length !== 1) continue;
+      const v = into(sig.params[0]!.type);
+      if (v === null) continue;
+      body.push({
+        kind: "if",
+        cond: keyIs(key.slice(4)),
+        then: [
+          { kind: "exprStmt", expr: { kind: "call", callee: `%${className}.static:${key}`, args: [v], type: VOID, loc }, loc },
+          ret(true),
+        ],
+        else_: null,
+        loc,
+      });
+    }
+    body.push(ret(false));
+    const name = `%${className}.%dynStaticSet`;
+    fns.push({ name, params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })), returnType: BOOL, locals, body, loc });
+    list.push({ name: "%dynStaticSet", fn: name });
+  }
+
+  // %dynNew(args)
+  const drivable =
+    info.def.abstract !== true &&
+    info.captures === undefined &&
+    !info.generic &&
+    !L.inheritsBuiltinErrorCtor(info) &&
+    !L.inheritsBuiltinEmitterCtor(info) &&
+    !inheritsBuiltinStreamCtor(L, info) &&
+    info.ctorParams.every((p) => p.mode === "required" || p.mode === "omittable");
+  if (drivable) {
+    const locals: IrLocal[] = [{ id: "args.0", name: "args", type: DYN, mutable: false }];
+    const args: IrExpr[] = [];
+    let ok = true;
+    info.ctorParams.forEach((p, i) => {
+      const got: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: String(i), type: STRING, loc }, value: ref(locals[0]!), type: DYN, loc };
+      if (p.type.kind === "dyn") args.push(got);
+      else if (canDynCheckTo(p.type, getRec, getUni)) args.push({ kind: "dynCheck", value: got, type: p.type, loc });
+      else ok = false;
+    });
+    if (ok) {
+      const name = `%${className}.%dynNew`;
+      fns.push({
+        name,
+        params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+        returnType: DYN,
+        locals,
+        body: [
+          {
+            kind: "return",
+            value: {
+              kind: "dynFrom",
+              value: { kind: "new", className, args, type: { kind: "object", className }, loc },
+              type: DYN,
+              loc,
+            },
+            loc,
+          },
+        ],
+        loc,
+      });
+      list.push({ name: "%dynNew", fn: name });
+    }
+  }
+  return { fns, list };
+}
+
 export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     const out: IrFunction[] = [];
     const className = info.def.name;
@@ -7479,6 +7633,12 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         if (delFn !== null) {
           out.push(delFn);
           info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynDel", fn: delFn.name }];
+        }
+        // ...and the static side (dynStaticFns): the class value's table.
+        const stat = L.reachable?.has(`%${className}.%dynclass`) === true ? dynStaticFns(L, info) : null;
+        if (stat !== null) {
+          out.push(...stat.fns);
+          info.def.dynStatics = stat.list;
         }
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;

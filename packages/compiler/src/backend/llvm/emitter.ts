@@ -75,7 +75,7 @@ import type {
   SrcLoc,
 } from "../../ir/nodes.js";
 import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn } from "../../ir/nodes.js";
-import { dynClassDisplayName, dynMemberTable } from "../dyn-members.js";
+import { dynClassDisplayName, dynMemberTable, dynStaticTable } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
 // The stackless lane's admission, read from the ONE place that owns it.
@@ -2352,7 +2352,7 @@ class LlEmitter {
       // always-linked dyn core a descriptor whose `members` read runs off
       // the end of the object — measured, as an access violation on the
       // first boxed method call.
-      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8 }`,
+      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr }`,
       // One row of a class's instance MEMBER TABLE
       // { name, len, get, call, enumerable } (ScrDynClassMember in
       // scr_runtime.h) — what `x.get()` and `x.v` read through once the
@@ -3670,6 +3670,13 @@ class LlEmitter {
     // below; nothing reads a body before emission.
     this.dynClassDescSyms.set(className, { sym, body: "" });
     const members = this.dyn.classMemberTable(className);
+    const statics = this.dyn.classMemberTable(className, true);
+    const staticsOpaque = dynStaticTable(
+      meta,
+      this.fnByName,
+      (id: string) => this.recordsById.get(id),
+      (id: string) => this.unionsById.get(id),
+    ).opaque;
     const { opaque, errorRooted } = dynMemberTable(
       meta,
       this.fnByName,
@@ -3687,7 +3694,9 @@ class LlEmitter {
       `%ScrDynClass { ptr ${this.cstr(display)}, i64 ${meta.pre}, i64 ${meta.post}, ` +
       `i8 ${meta.hierarchy ? 1 : 0}, ptr ${rc.retain}, ptr ${rc.release}, ` +
       `ptr ${members === null ? "null" : `@${members.sym}`}, i64 ${members === null ? 0 : members.count}, ` +
-      `i8 ${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? 1 : 0}, i8 ${opaque ? 1 : 0}, i8 ${errorRooted ? 1 : 0} }`;
+      `i8 ${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? 1 : 0}, i8 ${opaque ? 1 : 0}, i8 ${errorRooted ? 1 : 0}, ` +
+      `ptr ${statics === null ? "null" : `@${statics.sym}`}, i64 ${statics === null ? 0 : statics.count}, i8 ${staticsOpaque ? 1 : 0}, ` +
+      `ptr ${meta.base === null ? "null" : this.cstr(dynClassDisplayName(meta.base.def))} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     // Subclass descriptors join the registry (see the C twin): a base-typed
     // box can hold a derived instance whose own member table must resolve.
