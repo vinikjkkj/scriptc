@@ -15,6 +15,13 @@
 // exactly as it always has, and the held value must read like Node's.
 
 const order: string[] = [];
+  // Timer spacing: Node orders timers by deadline (start + delay), and the
+  // start is the live clock at registration, so a registration gap larger
+  // than the delay gap reorders them. The 2-12 ms gaps this used to have
+  // flipped under sanitized LLVM load (CI: "expected b>c>a, got b>a>c" in 8
+  // jobs, 2026-10-21..24). Node itself promises no order across timers armed
+  // at different moments; 20 ms steps keep the printed order what Node
+  // prints on any host that registers three timers within 20 ms.
 
 function nap(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -34,7 +41,7 @@ async function boom(tag: string, ms: number): Promise<void> {
 async function main(): Promise<void> {
   // (1) Held, then awaited: the payload is an array of undefineds, one per
   // entry. The slowest entry is FIRST, so the array is not settle order.
-  const pendingWrites: Promise<void>[] = [write("a", 12), write("b", 3), write("c", 7)];
+  const pendingWrites: Promise<void>[] = [write("a", 60), write("b", 20), write("c", 40)];
   const settled = Promise.all(pendingWrites);
   const results = await settled;
   console.log("1:", results.length, order.join(">"));
@@ -60,13 +67,13 @@ async function main(): Promise<void> {
   // (5) The DISCARDED await -- the shape that has always compiled. The
   // writes still happen and nothing reads a payload.
   order.length = 0;
-  const more: Promise<void>[] = [write("e", 6), write("f", 1)];
+  const more: Promise<void>[] = [write("e", 30), write("f", 10)];
   await Promise.all(more);
   console.log("5:", order.join(">"));
 
   // (6) A rejection reaches the HELD promise, and it is the first one in
   // TIME, not in position.
-  const risky: Promise<void>[] = [boom("slow", 10), boom("fast", 2)];
+  const risky: Promise<void>[] = [boom("slow", 50), boom("fast", 20)];
   const held = Promise.all(risky);
   try {
     await held;
@@ -91,7 +98,7 @@ async function main(): Promise<void> {
     const xs = await p;
     return xs.length + ":ok";
   };
-  console.log("7:", await readAll(Promise.all([write("g", 2), write("h", 4)])));
+  console.log("7:", await readAll(Promise.all([write("g", 20), write("h", 40)])));
 
   console.log("order:", order.join(">"));
 }
