@@ -522,7 +522,12 @@ static void zl_cb_fire(ScrClosure *c) {
     scr_bytes_release(out);
   } else {
     ScrCaught *caught = scr_exc_take();
-    args[0] = scr_caught_to_dyn(caught);
+    /* A zlib failure is a ScrError, whose dyn encoding is in the always-linked
+     * scr_json.c (scr_caught_to_dyn lives in the gated async unit, which a zlib
+     * program does not link). */
+    args[0] = (caught->kind == SCR_EXC_OBJ && caught->payload != NULL && scr_error_is(caught->payload))
+                  ? scr_dyn_from_error((const ScrError *)caught->payload)
+                  : scr_dyn_retain(scr_dyn_undefined());
     scr_caught_release(caught);
     args[1] = scr_dyn_retain(scr_dyn_undefined());
   }
