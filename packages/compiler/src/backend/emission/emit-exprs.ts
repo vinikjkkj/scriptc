@@ -6180,6 +6180,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(
               `(scr_throw_node_coded(${arg(0)}, ${arg(1)}, ${arg(2)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
             );
+          case "global.esmRequireThrow":
+            // An ES module's require read: the ReferenceError plus the
+            // decoration Node's uncaught report appends (borrows both strings).
+            return finish(
+              `(scr_undef_global_read_esm(${arg(0)}, ${arg(1)}), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
+            );
           case "global.undefRead":
             // A declare-d const nothing defines: Node's catchable
             // ReferenceError at the access (always throws — the typed

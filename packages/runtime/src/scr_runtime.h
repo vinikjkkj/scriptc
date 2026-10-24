@@ -1291,6 +1291,13 @@ static inline unsigned long long scr_stack_sp(void) {
 /* A read of a declare-d const nothing defines: throws Node's catchable
  * ReferenceError "<name> is not defined". Borrows name; always throws. */
 void scr_undef_global_read(ScrStr *name);
+/* An ES module's `require` read: scr_undef_global_read, plus the suffix Node's
+ * uncaught report appends to the message (borrowed; "" = none). */
+void scr_undef_global_read_esm(ScrStr *name, ScrStr *suffix);
+/* The pending exception's payload when it is an object, else NULL. */
+void *scr_exc_pending_payload(void);
+/* The decoration for a thrown object, or NULL (scr_exc_print_uncaught). */
+ScrStr *scr_error_report_suffix(const void *payload);
 /* The `code` slot (NodeJS.ErrnoException's .code): set stamps a fresh
  * string from the C literal (replacing any previous value); get answers
  * +1 or NULL when absent (the compiler's undefined arm). The _msg_code

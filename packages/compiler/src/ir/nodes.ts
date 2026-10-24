@@ -5270,6 +5270,11 @@ export type IrLibFn =
    * name; the result type is the read's declared type (a typed dummy the
    * unwind abandons — the value never exists). */
   | "global.undefRead"
+  /** An ES module's `require` read (the same ReferenceError as undefRead).
+   * args[0] is the name, args[1] the decoration Node's UNCAUGHT report adds
+   * (" in ES module scope, you can use import instead" and the package note),
+   * or "" when the report is undecorated. Caught reads never show it. */
+  | "global.esmRequireThrow"
   /** `X.name` through a class VALUE (scr_object.c): args[0] is a borrowed
    * classval; the result is the class object's stored .name string,
    * retained (+1 — the string is an interned immortal, so the retain is a
@@ -12762,6 +12767,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // A read of a declare-d const nothing defines: always throws Node's
   // catchable ReferenceError.
   "global.undefRead",
+  "global.esmRequireThrow",
   // The compiler-resolved Node-parity throw: always throws, catchably.
   "error.nodeThrow",
   // USVString coercion runs user toString/valueOf — throws propagate.

@@ -310,6 +310,10 @@ void scr_throw_ref(void *v, void *(*retain)(void *), void (*release)(void *),
   scr_exc_trace_fn = trace;
 }
 
+void *scr_exc_pending_payload(void) {
+  return scr_exc_kind == SCR_EXC_OBJ ? scr_exc_payload : NULL;
+}
+
 void scr_throw_obj(void *v, void *(*retain)(void *), void (*release)(void *),
                     ScrTraceFn trace) {
   scr_throw_ref(v, retain, release, trace);
@@ -364,6 +368,8 @@ void scr_exc_print_uncaught(void) {
       ScrStr *s = scr_error_to_string((ScrError *)scr_exc_payload);
       fwrite(s->data, 1, s->len, stderr);
       scr_str_release(s);
+      ScrStr *dec = scr_error_report_suffix(scr_exc_payload);
+      if (dec != NULL) fwrite(dec->data, 1, dec->len, stderr);
       break;
     }
     /* fall through: non-Error hierarchy objects render like other refs */

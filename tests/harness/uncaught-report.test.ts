@@ -141,6 +141,12 @@ describe("reduceNativeReport", () => {
     expect(reduceNativeReport(buf("hello from console.error\n"))).toBeNull();
   });
 
+  test("an ES-module require report carries Node's note line as part of its message", () => {
+    const note = "This file is being treated as an ES module because it has a '.js' file extension and '/p/package.json' contains \"type\": \"module\". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.";
+    const got = reduceNativeReport(buf(`before\nUncaught ReferenceError: require is not defined in ES module scope, you can use import instead\n${note}\n`));
+    expect(got).toEqual({ pre: "before", line: `ReferenceError: require is not defined in ES module scope, you can use import instead\n${note}` });
+  });
+
   test("only the LAST line is the report", () => {
     expect(reduceNativeReport(buf("Uncaught Error: first\nplain trailing line\n"))).toBeNull();
   });

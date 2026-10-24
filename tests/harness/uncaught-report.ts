@@ -32,6 +32,10 @@
  * the report header this reduction drops. */
 const NATIVE_MARKERS = ["Uncaught ", "Unhandled promise rejection: ", "Unhandled 'error' event: "];
 
+/** The first line of Node's second-line note on an ES-module `require`
+ * ReferenceError (the note names the package.json that made the file ESM). */
+const ESM_NOTE_LEAD = "This file is being treated as an ES module because it has a '.js' file extension and '";
+
 export interface UncaughtReport {
   /** Everything written to stderr BEFORE the report — the program's own output. */
   readonly pre: string;
@@ -78,10 +82,19 @@ export function reduceNativeReport(stderr: Buffer): UncaughtReport | null {
   const text = stderr.toString("utf8").replace(/\r\n/g, "\n").replace(/\n+$/, "");
   if (text === "") return null;
   const lines = text.split("\n");
-  const last = lines[lines.length - 1] ?? "";
-  const marker = NATIVE_MARKERS.find((m) => last.startsWith(m));
-  if (marker === undefined) return null;
-  return { pre: lines.slice(0, -1).join("\n"), line: last.slice(marker.length) };
+  // The report starts at the LAST line carrying a marker. Its message may run
+  // on by ONE line, and only Node's ES-module require note is such a message
+  // (see ESM_NOTE_LEAD); any other trailing line means the report is not last.
+  let at = lines.length - 1;
+  while (at >= 0 && !NATIVE_MARKERS.some((m) => lines[at]!.startsWith(m))) at--;
+  if (at < 0) return null;
+  const rest = lines.slice(at + 1);
+  if (rest.length > 1 || (rest.length === 1 && !rest[0]!.startsWith(ESM_NOTE_LEAD))) return null;
+  const marker = NATIVE_MARKERS.find((m) => lines[at]!.startsWith(m))!;
+  return {
+    pre: lines.slice(0, at).join("\n"),
+    line: [lines[at]!.slice(marker.length), ...rest].join("\n"),
+  };
 }
 
 /** Does the ORACLE's own run on this host end in an uncaught report? The
