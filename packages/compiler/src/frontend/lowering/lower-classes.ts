@@ -900,6 +900,95 @@ export function programWritesErrorName(L: Lowerer): boolean {
   return found;
 }
 
+/** The program's `.name` writes on %Error-rooted receivers that could reach an
+ * instance of the class `decl` — the class-aware form of programWritesErrorName,
+ * and the gate the `name` routing actually needs: a write is dangerous only when
+ * its receiver's static class IS `decl`, descends from it, or is one of its
+ * ancestors (an `Error`-typed receiver included — it may hold any subclass). A
+ * write on an unrelated Error subclass (`this.name = 'Foo'` in a class that only
+ * extends Error) can never reach a routed instance and no longer disables the
+ * routing for the whole program. Anything that does not RESOLVE counts as a
+ * hit, like the global scan. */
+const errorNameWriteReceivers = new WeakMap<Lowerer, { unknown: boolean; classes: ClassInfo[] }>();
+
+function scanErrorNameWrites(L: Lowerer): { unknown: boolean; classes: ClassInfo[] } {
+  const memo = errorNameWriteReceivers.get(L);
+  if (memo !== undefined) return memo;
+  const out: { unknown: boolean; classes: ClassInfo[] } = { unknown: false, classes: [] };
+  for (const sf of L.program.getSourceFiles()) {
+    if (out.unknown) break;
+    if (sf.isDeclarationFile) continue;
+    const walk = (node: ts.Node): void => {
+      if (out.unknown) return;
+      ts.forEachChild(node, walk);
+      if (out.unknown) return;
+      if (!ts.isBinaryExpression(node)) return;
+      const k = node.operatorToken.kind;
+      if (k < ts.SyntaxKind.FirstAssignment || k > ts.SyntaxKind.LastAssignment) return;
+      let lhs: ts.Expression = node.left;
+      while (ts.isParenthesizedExpression(lhs) || ts.isNonNullExpression(lhs)) lhs = lhs.expression;
+      if (!ts.isPropertyAccessExpression(lhs) || lhs.name.text !== "name") return;
+      let recv: ts.Expression = lhs.expression;
+      while (
+        ts.isParenthesizedExpression(recv) || ts.isNonNullExpression(recv) ||
+        ts.isAsExpression(recv) || ts.isTypeAssertion(recv)
+      ) recv = recv.expression;
+      let recvT: IrType | null = null;
+      try {
+        recvT = L.mapTypeOf(L.typeOf(recv));
+      } catch {
+        out.unknown = true;
+        return;
+      }
+      if (recvT === null || recvT.kind !== "object") return;
+      const info = L.classes.get(recvT.className) ?? null;
+      let errorRooted = false;
+      for (let c: ClassInfo | null = info; c; c = c.base) if (c.def.name === "%Error") errorRooted = true;
+      if (errorRooted && info !== null) out.classes.push(info);
+    };
+    walk(sf);
+  }
+  errorNameWriteReceivers.set(L, out);
+  return out;
+}
+
+/** The base CLASS declaration `cls` extends: a declaration, null for no base or a
+ * runtime-provided one (Error), "unknown" when the heritage expression does not
+ * resolve to a class. */
+function heritageClassDeclOf(L: Lowerer, cls: ts.ClassLikeDeclaration): ts.ClassLikeDeclaration | null | "unknown" {
+  const clause = cls.heritageClauses?.find((c) => c.token === ts.SyntaxKind.ExtendsKeyword);
+  const ref = clause?.types[0];
+  if (ref === undefined) return null;
+  const sym = L.checker.getTypeAtLocation(ref.expression).getSymbol();
+  if (sym === undefined) return "unknown";
+  const decls = L.checker.declarationsOf(sym);
+  const base = decls.find((d) => ts.isClassDeclaration(d) || ts.isClassExpression(d)) as ts.ClassLikeDeclaration | undefined;
+  if (base !== undefined) return base;
+  return decls.length > 0 && decls.every((d) => d.getSourceFile().isDeclarationFile) ? null : "unknown";
+}
+
+/** True when `sub` is `anc` or reaches it through `extends` links. */
+function declDescendsFrom(L: Lowerer, sub: ts.ClassLikeDeclaration, anc: ts.ClassLikeDeclaration): boolean {
+  let cur: ts.ClassLikeDeclaration | null = sub;
+  for (let hop = 0; cur !== null && hop < 64; hop++) {
+    if (cur === anc) return true;
+    const next = heritageClassDeclOf(L, cur);
+    if (next === "unknown") return true; // cannot rule the relation out
+    cur = next;
+  }
+  return false;
+}
+
+export function programWritesErrorNameOn(L: Lowerer, decl: ts.ClassLikeDeclaration): boolean {
+  const scan = scanErrorNameWrites(L);
+  if (scan.unknown) return true;
+  for (const info of scan.classes) {
+    if (info.def.name === "%Error" || info.decl === null) return true;
+    if (declDescendsFrom(L, info.decl, decl) || declDescendsFrom(L, decl, info.decl)) return true;
+  }
+  return false;
+}
+
 /** The string constant a getter body RETURNS and nothing else — `{ return
  * 'BSONError'; }`, the whole shape the `name` routing accepts. A body with
  * any other statement, or a computed return, keeps the fence: stamping a
@@ -4027,7 +4116,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             member.body !== undefined &&
             typeEquals(fields.get("name") ?? VOID, STRING) &&
             !decl.members.some((m) => ts.isSetAccessor(m) && classMemberNameOf(L, m.name) === "name") &&
-            !programWritesErrorName(L)
+            !programWritesErrorNameOn(L, decl)
           ) {
             const lit = constStringReturnOf(member.body);
             if (lit !== null) {
