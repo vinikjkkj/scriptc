@@ -967,6 +967,19 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           return { kind: "strLit", value: "function", type: STRING, loc };
         }
       }
+      // `typeof dc.tracingChannel` / `typeof dc?.tracingChannel` over a builtin module
+      // member whose call form has a lowering row: the member is a function the binary has
+      // (a module binding is never nullish, so `?.` asks the same question). mysql2's
+      // tracing.js: `typeof dc?.tracingChannel === 'function'`.
+      if (ts.isPropertyAccessExpression(expr.expression)) {
+        // The namespace is resolved directly: chainBlocked keeps `?.` out of
+        // builtinMemberOf, and a module binding is the one receiver `?.` never skips.
+        const mod = L.builtinNamespaceModuleOf(expr.expression.expression);
+        const bi = mod !== null ? { module: mod, member: expr.expression.name.text } : L.builtinMemberOf(expr.expression);
+        if (bi !== null && builtinModuleFnOf(L, bi.module, bi.member) !== null) {
+          return { kind: "strLit", value: "function", type: STRING, loc };
+        }
+      }
       if (ts.isIdentifier(expr.expression)) {
         const sym = L.checker.getSymbolAtLocation(expr.expression);
         // `typeof window` / `typeof define` — a name NOTHING in the program
