@@ -33,6 +33,7 @@ import { builtinModules } from "node:module";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
+import { functionCtorEdits } from "./fn-ctor-desugar.js";
 
 const NESTED_REQUIRE_PREFILTER = /=\s*require\s*\(/;
 
@@ -1625,6 +1626,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const unwrapped = umdUnwrap(fileName, text);
     if (unwrapped !== null) return jsDesugar(fileName, unwrapped) ?? unwrapped;
+  }
+  {
+    const staged = functionCtorEdits(fileName, text);
+    if (staged !== null) return jsDesugar(fileName, staged) ?? staged;
   }
   {
     const shadow = methodShadowEdits(fileName, text);

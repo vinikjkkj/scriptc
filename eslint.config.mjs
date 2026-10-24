@@ -28,6 +28,8 @@ const TS5_ISLANDS = [
   // the host read hook, before the 7.0.2 program reads the file (the same
   // shape as npm-static-rewrite.ts).
   "packages/compiler/src/frontend/js-desugar.ts",
+  // Function-constructor staging, called from js-desugar.ts: text in, text out.
+  "packages/compiler/src/frontend/fn-ctor-desugar.ts",
 ];
 
 const ts5Fence = {
