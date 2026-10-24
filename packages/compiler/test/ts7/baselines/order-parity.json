@@ -13020,6 +13020,37 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9350-cjs-exports-write-in-function.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9350-cjs-exports-write-in-function.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9351-cjs-exports-else-chain.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9351-cjs-exports-else-chain.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9352-static-expando-own-property.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9352-static-expando-own-property.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9353-static-expando-own-property-require.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9353-static-expando-own-property-modules/packet.cjs",
+    "<repo>/tests/corpus/9353-static-expando-own-property-require.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9354-cjs-exports-hoisted-writer.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9354-cjs-exports-hoisted-writer.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/901-records-eval-order.ts": {
    "order": [
     "<repo>/tests/corpus/901-records-eval-order.ts"
