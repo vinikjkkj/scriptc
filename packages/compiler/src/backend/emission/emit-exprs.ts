@@ -8308,10 +8308,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // re-indenter rewrites the compact text with Node's gap algorithm.
         // Compact temp stays frame-owned; the pretty string is a fresh +1.
         if (spaceTemp && e.spaceArg) {
-          return E.newTemp(
-            e.type,
-            `${e.spaceArg.type.kind === "f64" ? "scr_json_indent_num" : "scr_json_indent_str"}(${compact.name}, ${spaceTemp.name})`,
-          );
+          const fn = e.spaceArg.type.kind === "f64"
+            ? "scr_json_indent_num"
+            : e.spaceArg.type.kind === "dyn" ? "scr_json_indent_dyn" : "scr_json_indent_str";
+          return E.newTemp(e.type, `${fn}(${compact.name}, ${spaceTemp.name})`);
         }
         const indent = (e as { indent?: string }).indent;
         if (!indent) return compact;

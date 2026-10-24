@@ -5454,8 +5454,8 @@ function validateFunction(
         // and read after the value by both emitters.
         if (e.spaceArg) {
           checkExpr(e.spaceArg);
-          if (e.spaceArg.type.kind !== "f64" && e.spaceArg.type.kind !== "string") {
-            err(`jsonStringify space of type ${e.spaceArg.type.kind} (a number or a string)`, e.loc);
+          if (e.spaceArg.type.kind !== "f64" && e.spaceArg.type.kind !== "string" && e.spaceArg.type.kind !== "dyn") {
+            err(`jsonStringify space of type ${e.spaceArg.type.kind} (a number, a string, or dyn)`, e.loc);
           }
         }
         break;
