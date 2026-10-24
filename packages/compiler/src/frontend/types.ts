@@ -2445,6 +2445,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // or leaves a failing one out with a GENMEMBER trace line.
         return cs.length >= 1 && checker.getConstructSignatures(pt).length === 0;
       });
+    // The gate above refuses the whole type, and before this line it said
+    // nothing: the member that failed it was invisible under SCRIPTC_MAP_TRACE.
+    if (!dataWithOrdinaryMethods && !ctx.dynamic && npmDecls.every(
+      (d) => ts.isInterfaceDeclaration(d) || ts.isTypeLiteralNode(d) || ts.isTypeAliasDeclaration(d),
+    )) {
+      // The gate passes only when no member carries a construct signature.
+      const offender = checker.getPropertiesOfType(widened).find(
+        (p) => checker.getConstructSignatures(checker.getTypeOfSymbol(p)).length !== 0,
+      );
+      mapTrace(`DATAMETHODS ${checker.typeToString(widened).slice(0, 60)} -> member ${offender?.name ?? "?"} is neither data nor an ordinary method`);
+    }
     // A body-less .d.ts CLASS instance whose members are all slots a record
     // can carry or decline (see isBodylessDeclClassInstance). The class
     // keeps no nominal identity here: no program-built `new C()` of a
