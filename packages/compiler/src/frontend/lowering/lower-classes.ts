@@ -7341,9 +7341,6 @@ export function dynDelFn(L: Lowerer, info: ClassInfo): IrFunction | null {
   const thisRef = (): IrExpr => ref(locals[0]!);
   const keyRef = (): IrExpr => ref(locals[1]!);
   const ret = (v: boolean): IrStmt => ({ kind: "return", value: { kind: "boolLit", value: v, type: BOOL, loc }, loc });
-  const keyIs = (name: string): IrExpr => ({
-    kind: "strEq", negated: false, left: keyRef(), right: { kind: "strLit", value: name, type: STRING, loc }, type: BOOL, loc,
-  });
   const body: IrStmt[] = [];
   const errorCells = errorPrefixCells(info);
   if (info.hasPropsTable === true && errorCells === null) {
