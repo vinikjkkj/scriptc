@@ -92,4 +92,24 @@ console.log(b.n, b.s);
     expect(f.get("n")).toBe("double");
     expect(f.get("s")).toBe("ScrDyn");
   });
+
+  test("a diagnostic after a pinned edit points at the author's own text", async () => {
+    // The reload serves edited text; a refusal AFTER the edit must still land
+    // on the construct as written (offsets map back across the inserted cast).
+    const source = `class C { x = 1; y = "s" }
+function setX(o: any) { o.x = "str" }
+const c = new C()
+setX(c)
+const v = c as unknown as { x: number; y: string }
+console.log(JSON.stringify(Object.values(v)))
+`;
+    const dir = await mkdtemp(join(tmpdir(), "scriptc-dynpin-"));
+    const src = join(dir, "main.ts");
+    await writeFile(src, source, "utf8");
+    const res = await compile(src, { outPath: join(dir, "program"), outDir: dir, backend: "c", emitOnly: true });
+    expect(res.ok).toBe(false);
+    const d = res.diagnostics.find((x) => x.message.includes("Object.values"));
+    expect(d, "the Object.values refusal").toBeDefined();
+    expect(source.slice(d!.loc.start, d!.loc.end)).toBe("Object.values(v)");
+  });
 });

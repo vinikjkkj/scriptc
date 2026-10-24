@@ -599,11 +599,37 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       pinnedLoad?.dispose();
       pinnedLoad = loadProgram(entryPath, { npmStatic: effective, textEdits: first.pinReload });
       checkPreflight(pinnedLoad);
-      return lowerToIr(pinnedLoad.program, pinnedLoad.entry, pinnedLoad.moduleOrder, {
+      const second = lowerToIr(pinnedLoad.program, pinnedLoad.entry, pinnedLoad.moduleOrder, {
         ...opts,
         startupCrash: pinnedLoad.startupCrash ?? null,
         noPinReload: true,
       });
+      // The second lowering's locations are offsets into the EDITED text; a
+      // diagnostic renders its source line off the file as the author wrote
+      // it, so they map back (the edits only insert).
+      const edits = first.pinReload;
+      const back = (l: SrcLoc): SrcLoc => {
+        const es = edits.get(l.file) ?? edits.get(l.file.split("\\").join("/"));
+        if (es === undefined) return l;
+        const map = (p: number): number => {
+          let shift = 0;
+          for (const e of [...es].sort((a, b) => a.start - b.start)) {
+            const pre = e.ts ? 1 : "/** @type {any} */ (".length;
+            const post = e.ts ? " as any)".length : 1;
+            const S = e.start + shift; // where the pre text begins, edited
+            if (p < S) break;
+            if (p < S + pre) return e.start;
+            const innerEnd = S + pre + (e.end - e.start);
+            if (p < innerEnd) return p - shift - pre;
+            if (p < innerEnd + post) return e.end;
+            shift += pre + post;
+          }
+          return p - shift;
+        };
+        return { ...l, start: map(l.start), end: map(l.end) };
+      };
+      for (const d of [...second.diagnostics, ...second.advisories]) d.loc = back(d.loc);
+      return second;
     },
     npmStatic: statuses,
     npmImportSites: npmSites,
