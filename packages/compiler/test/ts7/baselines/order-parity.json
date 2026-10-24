@@ -12743,6 +12743,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8850-zlib-codecs-over-string-data.ts": {
+   "order": [
+    "<repo>/tests/corpus/8850-zlib-codecs-over-string-data.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8851-object-keys-of-an-eventemitter-subclass-lists-the-emitter-prefix.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8851-object-keys-of-an-eventemitter-subclass-lists-the-emitter-prefix.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8852-a-deferred-let-assigned-one-new-is-that-class-in-its-closures.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8852-a-deferred-let-assigned-one-new-is-that-class-in-its-closures.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8853-a-meta-event-listener-whose-nested-function-reads-arguments.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8853-a-meta-event-listener-whose-nested-function-reads-arguments.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8854-an-array-method-read-off-a-literal-runs-over-the-calls-receiver.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8854-an-array-method-read-off-a-literal-runs-over-the-calls-receiver.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8855-the-arguments-pack-through-an-array-method-of-a-literal.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8855-the-arguments-pack-through-an-array-method-of-a-literal.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8900-function-constructor-over-literal-text.js": {
    "order": [
     "<repo>/tests/corpus/8900-function-constructor-over-literal-text.js"
