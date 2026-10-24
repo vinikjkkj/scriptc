@@ -815,6 +815,38 @@ static bool dyn_arr_proto_unimpl(const char *m) {
  * read uses, so the two spellings cannot disagree about which member they
  * name. Borrows all three, returns +1, may throw. */
 ScrDyn *scr_dyn_invoke_key(ScrDyn *recv, const ScrStr *key, ScrDyn *const *args, size_t argc, const char *what) {
+  /* `fs[0](x)` over an array: the key is an INDEX, which is not a named
+   * member of the array (indices live in the item vector, never in the
+   * name tables the name-keyed dispatch consults), so it was answered
+   * "fs[0] is not a function" for an element that is one. The element is
+   * read like the keyed read reads it and called with the array as `this`,
+   * which is `o[k](...)` of the spec. */
+  if (recv->kind == SCR_DYN_ARR && key->len > 0 && key->len <= 15) {
+    size_t idx = 0;
+    bool canon = key->data[0] != '0' || key->len == 1;
+    for (size_t i = 0; canon && i < key->len; i++) {
+      char ch = key->data[i];
+      if (ch < '0' || ch > '9') canon = false;
+      else idx = idx * 10 + (size_t)(ch - '0');
+    }
+    if (canon) {
+      if (recv->static_copy) scr_dyn_view_sync_deep(recv);
+      if (idx < recv->v.arr.len) {
+        ScrDyn *fv = recv->v.arr.items[idx];
+        if (fv != NULL && (fv->kind == SCR_DYN_FUNC ||
+                           (fv->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(fv, "function")))) {
+          scr_dyn_retain(fv);
+          scr_dyn_this_push_dyn(recv);
+          ScrDyn *r = scr_dyn_call(fv, args, argc, what);
+          scr_dyn_this_pop();
+          scr_dyn_release(fv);
+          return r;
+        }
+      }
+      dyn_throw_not_fn(what);
+      return NULL;
+    }
+  }
   /* ScrStr is always NUL-terminated (scr_str_new), so ->data is a valid
    * C string for the name-keyed dispatch. */
   return scr_dyn_invoke(recv, key->data, args, argc, what);
