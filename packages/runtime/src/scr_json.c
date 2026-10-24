@@ -6861,6 +6861,21 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
      * the hasOwn arm's condition, for its reason: on a class carrying the
      * run-time property table the missing name may be a key that table
      * holds, and `true` would be a claim that nothing was there. */
+    /* The class's own `%dynDel(key): boolean` (dynDelFn) takes what a fixed
+     * layout can hold -- a field whose slot admits undefined takes the
+     * undefined arm, a run-time property table loses its key -- and
+     * answers false for the rest, which fall to the ladder below. */
+    const ScrDynClassMember *dd = scr_dyn_objinst_member(recv, "%dynDel", 7);
+    if (dd != NULL && dd->call != NULL) {
+      ScrDyn *kd = scr_dyn_new_str((ScrStr *)key);
+      ScrDyn *av[1] = { kd };
+      ScrDyn *r = dd->call(recv->v.inst.o, av, 1, "'delete'");
+      scr_dyn_release(kd);
+      if (r == NULL) return false; /* the delete threw */
+      bool taken = r->kind == SCR_DYN_BOOL && r->v.b;
+      scr_dyn_release(r);
+      if (taken) return true;
+    }
     const ScrDynClassMember *dm = scr_dyn_objinst_member(recv, key->data, key->len);
     if (dm != NULL && !dm->enumerable) return true; /* a method or an accessor: nothing own */
     if (dm == NULL) {

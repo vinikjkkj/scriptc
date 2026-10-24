@@ -7302,6 +7302,94 @@ export function dynSetFn(L: Lowerer, info: ClassInfo): IrFunction | null {
   };
 }
 
+/** The ScrError prefix cells of an Error-rooted class (name, message, code,
+ * stack, the expando bag) -- the layout the runtime owns, whose reads and
+ * writes the runtime answers from the box -- or null when the chain does not
+ * reach the runtime's Error hierarchy. */
+function errorPrefixCells(info: ClassInfo): Set<string> | null {
+  for (let a: ClassInfo | null = info; a; a = a.base) {
+    if (RUNTIME_ERROR_CLASSES.has(a.def.name)) return new Set(a.def.fields.map((f) => f.name));
+  }
+  return null;
+}
+
+/** The DELETE half of the same box: `%C.%dynDel(this, key): boolean`, listed
+ * as `%dynDel`. A class instance has a fixed layout, so the one removal it
+ * can take is a field whose slot ADMITS undefined (a checked-dynamic slot,
+ * or a union with an undefined arm): the slot takes the undefined arm, which
+ * is the undefined write the static `delete this.f` already is. A key in the
+ * run-time property table is deleted from it. Any other field has no
+ * representation for "removed" and answers false, so the runtime keeps its
+ * loud ladder for exactly that case. The key stays in `in` and Object.keys
+ * (the slot cannot tell a deleted field from one assigned undefined): the
+ * divergence the static delete has too. */
+export function dynDelFn(L: Lowerer, info: ClassInfo): IrFunction | null {
+  const className = info.def.name;
+  const decl = info.decl;
+  if (decl === null) return null;
+  const loc = locOf(decl);
+  const thisType: IrType = { kind: "object", className };
+  const locals: IrLocal[] = [
+    { id: "this.0", name: "this", type: thisType, mutable: false },
+    { id: "key.0", name: "key", type: STRING, mutable: false },
+  ];
+  const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: l.type, loc });
+  const thisRef = (): IrExpr => ref(locals[0]!);
+  const keyRef = (): IrExpr => ref(locals[1]!);
+  const ret = (v: boolean): IrStmt => ({ kind: "return", value: { kind: "boolLit", value: v, type: BOOL, loc }, loc });
+  const keyIs = (name: string): IrExpr => ({
+    kind: "strEq", negated: false, left: keyRef(), right: { kind: "strLit", value: name, type: STRING, loc }, type: BOOL, loc,
+  });
+  const body: IrStmt[] = [];
+  const seen = new Set<string>();
+  const errorCells = errorPrefixCells(info);
+  for (const f of info.def.fields) {
+    if (f.name.startsWith("%") || f.name.startsWith("#") || seen.has(f.name)) continue;
+    if (errorCells?.has(f.name) === true) continue;
+    let undef: IrExpr | null = null;
+    if (f.type.kind === "dyn") {
+      undef = dynUndefinedExpr(loc);
+    } else if (f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0) {
+      undef = L.coerceToExpected({ kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, f.type);
+    }
+    if (undef === null) continue;
+    seen.add(f.name);
+    body.push({
+      kind: "if",
+      cond: keyIs(f.name),
+      then: [{ kind: "fieldSet", obj: thisRef(), className, field: f.name, value: undef, loc }, ret(true)],
+      else_: null,
+      loc,
+    });
+  }
+  if (info.hasPropsTable === true && errorCells === null) {
+    body.push(
+      {
+        kind: "exprStmt",
+        expr: {
+          kind: "libCall",
+          fn: "dyn.keyDelete",
+          args: [{ kind: "fieldGet", obj: thisRef(), className, field: CLASS_PROPS_FIELD, type: DYN, loc }, keyRef()],
+          type: BOOL,
+          loc,
+        },
+        loc,
+      },
+      ret(true),
+    );
+  } else {
+    body.push(ret(false));
+  }
+  return {
+    name: `%${className}.%dynDel`,
+    params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+    returnType: BOOL,
+    locals,
+    body,
+    loc,
+  };
+}
+
 export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     const out: IrFunction[] = [];
     const className = info.def.name;
@@ -7380,6 +7468,11 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         if (setFn !== null) {
           out.push(setFn);
           info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynSet", fn: setFn.name }];
+        }
+        const delFn = dynDelFn(L, info);
+        if (delFn !== null) {
+          out.push(delFn);
+          info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynDel", fn: delFn.name }];
         }
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;
