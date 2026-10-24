@@ -90,7 +90,10 @@ describe("liveRuns", () => {
 
   test("a torn record is not evidence of life", () => {
     registerRun(root);
-    writeFileSync(join(root, ".runs", "4242.json"), "{half-writ");
+    // Named for a dead pid, never a fixed one: a fixed name collides with
+    // this process's own record whenever its pid happens to equal that number
+    // (CI runners start with small pids), and the torn write then erases it.
+    writeFileSync(join(root, ".runs", `${deadPid()}.json`), "{half-writ");
     const peers = liveRuns(root, NOT_ME);
     expect(peers).toHaveLength(1);
     expect(peers![0]!.pid).toBe(process.pid);
