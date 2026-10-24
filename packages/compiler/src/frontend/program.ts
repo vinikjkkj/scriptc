@@ -406,6 +406,7 @@ export function loadProgram(
   const open = (
     pins: ReadonlyMap<string, readonly SeedPin[]> | null,
     retypePins: ReadonlyMap<string, readonly RetypePin[]> | null = null,
+    applyEdits = false,
   ): { host: ts.Ts7Host; load: LoadResult & { disposeAll: () => void } } => {
     const fsShadow = {
       readFile: (path: string) => {
@@ -444,17 +445,16 @@ export function loadProgram(
         }
         // THE DYN PIN RELOAD (LowerResult.pinReload): spans the first lowering
         // named are wrapped in an `any` cast, so the checker itself infers the
-        // field they initialize as `any`. Offsets are into the text the
-        // checker saw: the shadows' text after js-desugar (seed pins already
-        // desugared it).
-        const edits = textEdits?.get(path) ?? textEdits?.get(path.split("\\").join("/"));
+        // field they initialize as `any`. Applied LAST, on the final served
+        // text: the offsets were taken from the text the first run's checker
+        // saw, which is the shadows' text after js-desugar and after the seed
+        // and retype pins (this reload re-derives and re-applies the very same
+        // pins first, from the same unedited program, so the texts agree).
+        const edits = applyEdits ? (textEdits?.get(path) ?? textEdits?.get(path.split("\\").join("/"))) : undefined;
         if (edits !== undefined) {
           let text: string;
           if (filePins !== undefined || fileRetype !== undefined) {
-            // Both rewrites in ONE file: each took its offsets from a text the
-            // other had not edited, so composing them would splice at wrong
-            // places. Refuse by name rather than miscompile.
-            throw new Error(`dyn pin and seed/retype pin both edit ${path}: the offsets of one are not the other's`);
+            text = served!; // already desugared and pinned
           } else {
             const raw = served ?? readSourceForRewrite(path);
             if (raw === undefined) throw new Error(`pin reload: cannot read ${path}`);
@@ -504,10 +504,10 @@ export function loadProgram(
         for (const pin of list) process.stderr.write(`[seedpin] ${pin.why} at ${file}:${pin.start}\n`);
       }
     }
-    if (pins.size > 0 || retypeKeyed.size > 0) {
+    if (pins.size > 0 || retypeKeyed.size > 0 || textEdits !== undefined) {
       load.disposeAll();
       host.close();
-      ({ host, load } = open(pins.size > 0 ? pins : null, retypeKeyed.size > 0 ? retypeKeyed : null));
+      ({ host, load } = open(pins.size > 0 ? pins : null, retypeKeyed.size > 0 ? retypeKeyed : null, true));
     }
   }
   return {
