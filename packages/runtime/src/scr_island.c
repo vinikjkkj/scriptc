@@ -29,7 +29,7 @@
  *   JS_ToCStringLen pairs with JS_FreeCString; JS_NewStringLen takes UTF-8
  *   (ScrStr storage is UTF-8 — direct).
  */
-#ifdef SCR_DYNAMIC
+#if defined(SCR_DYNAMIC) || defined(SCR_ENGINE)
 
 #include "scr_runtime.h"
 
@@ -10011,4 +10011,63 @@ ScrJsval *scr_jsval_from_url(ScrUrl *u) {
   return isl_cell_new(v);
 }
 
-#endif /* SCR_DYNAMIC */
+/* ── an engine function as a typed-callable dyn box ───────────────────
+ * A Function-constructor result (lower-engine-fn.ts) is a function-typed
+ * value in the static lane: its dyn form must be a SCR_DYN_FUNC box, not
+ * the by-reference SCR_DYN_JSVAL kind, because the typed unwrap of a
+ * JSVAL box has no armed route (scr_json.c: "validated extraction of
+ * engine-held values has no armed route yet"). The box's thunk calls the
+ * engine function with positional arguments, converting each dyn argument
+ * through the from_dyn rules and the result back through the dyn rules.
+ * The signature is the human-readable "()" spelling, so the unwrap takes
+ * the adapter path, which spreads the packed rest arguments into the
+ * thunk. The closure's one capture holds the engine cell (+1 owned). */
+static ScrDyn *isl_engine_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrJsval *f = (ScrJsval *)scr_box_get_ref((ScrBox *)clo->caps[0]); /* +1 */
+  ScrJsval **cells = argc > 0 ? malloc(argc * sizeof *cells) : NULL;
+  if (argc > 0 && cells == NULL) {
+    fprintf(stderr, "scriptc: out of memory\n");
+    abort();
+  }
+  for (size_t i = 0; i < argc; i++) {
+    cells[i] = scr_jsval_from_dyn(args[i]);
+    if (cells[i] == NULL) {
+      for (size_t j = 0; j < i; j++) scr_jsval_release(cells[j]);
+      free(cells);
+      scr_jsval_release(f);
+      return NULL; /* the conversion's TypeError is pending */
+    }
+  }
+  ScrJsval *r = scr_jsval_call(f, (int)argc, cells);
+  for (size_t i = 0; i < argc; i++) scr_jsval_release(cells[i]);
+  free(cells);
+  scr_jsval_release(f);
+  if (r == NULL) return NULL; /* the engine's exception is pending */
+  ScrDyn *out = scr_dyn_from_jsval(r);
+  scr_jsval_release(r);
+  return out;
+}
+
+ScrDyn *scr_jsval_fn_box(ScrJsval *cell) {
+  isl_entry();
+  ScrClosure *clo = scr_closure_new((void *)isl_engine_fn_thunk, 1);
+  ScrBox *cap = scr_box_new_obj(scr_jsval_retain_v, scr_jsval_release_v, NULL);
+  scr_box_set_ref(cap, scr_jsval_retain(cell));
+  clo->caps[0] = cap;
+  return scr_dyn_new_func(clo, isl_engine_fn_thunk, 0, "()", "anonymous");
+}
+
+#ifndef SCR_DYNAMIC
+/* SCR_ENGINE-only builds (a program whose Function constructor runs on the
+ * engine, and nothing else of the --dynamic lane): no web globals, no
+ * island timers. The engine itself, its module-free prelude, and the
+ * promise-job drain are all the island needs. The --dynamic build links
+ * scr_web.c, which provides these for real. */
+void scr_island_web_boot(void *jsctx) { (void)jsctx; }
+double scr_island_timers_deadline(void) { return 1.0 / 0.0; }
+bool scr_island_timers_due(void) { return false; }
+bool scr_island_timers_fire_due(void) { return false; }
+void scr_island_timers_teardown(void) {}
+#endif /* !SCR_DYNAMIC */
+
+#endif /* SCR_DYNAMIC || SCR_ENGINE */
