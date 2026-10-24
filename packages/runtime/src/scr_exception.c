@@ -63,6 +63,7 @@ bool scr_exc_pending(void) { return scr_exc_kind != SCR_EXC_NONE; }
 /* Release the current payload (if any) and reset to NONE. Shared by clear,
  * the uncaught printer, and every throw (replace semantics). */
 static void scr_exc_reset(void) {
+  if (scr_exc_kind == SCR_EXC_OBJ) scr_error_report_forget(scr_exc_payload);
   if (scr_exc_kind == SCR_EXC_STR) {
     scr_str_release((ScrStr *)scr_exc_payload);
   } else if (scr_exc_kind == SCR_EXC_REF || scr_exc_kind == SCR_EXC_OBJ) {
