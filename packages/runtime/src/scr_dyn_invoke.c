@@ -1318,20 +1318,59 @@ ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
  *
  * NULL with nothing pending = this class has no table, or the table has
  * no such name; the caller keeps whatever it did before. */
+/* A class method read off an instance is NOT bound to it: JS hands out the
+ * prototype's function, and the receiver is whatever the call supplies (`f.call(y)`,
+ * `y.g = f; y.g()`), or nothing (a plain call: the TypeError a method body throws on
+ * `this.x` of undefined). One immortal native function per (class table, method),
+ * so `x.m === y.m` for two instances of one class. The call dispatches the ROW the
+ * read found (the declaring method, never an override below it) on the receiver,
+ * which must be an instance of the class the read went through or a subclass. */
+typedef struct ScrObjinstMethodFn {
+  ScrClosure clo; /* first: the closure the thunk is handed */
+  const ScrDynClass *cls;
+  const ScrDynClassMember *cm;
+  struct ScrObjinstMethodFn *next;
+} ScrObjinstMethodFn;
+
+static ScrObjinstMethodFn *scr_objinst_fns = NULL;
+
+static ScrDyn *objinst_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  const ScrObjinstMethodFn *w = (const ScrObjinstMethodFn *)clo;
+  ScrDyn *recv = scr_dyn_this_get(); /* +1 */
+  ScrDyn *r = NULL;
+  if (recv->kind == SCR_DYN_OBJINST && scr_dyn_objinst_is(recv, w->cls->pre, w->cls->post)) {
+    r = w->cm->call(recv->v.inst.o, args, argc, "method");
+  } else {
+    scr_throw_error_named(scr_str_new("TypeError", 9),
+                          scr_str_new("Cannot read properties of undefined", 35));
+  }
+  scr_dyn_release(recv);
+  return r;
+}
+
 ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
   const ScrDynClassMember *cm = scr_dyn_objinst_member(d, key->data, key->len);
   if (cm == NULL) return NULL;
   if (cm->get != NULL) return cm->get(d->v.inst.o);
-  ScrClosure *clo = scr_closure_new((void *)dyn_bound_intrinsic_thunk, 2);
-  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
-  scr_box_set_ref(clo->caps[0], scr_dyn_retain(d));
-  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
-  ScrDyn *nameBox = scr_dyn_new_str((ScrStr *)key); /* retains key */
-  scr_box_set_ref(clo->caps[1], nameBox);           /* takes the +1 */
-  /* "bound" and not the method's own name for scr_dyn_intrinsic_method_get's
-   * reason: `name` is stored, not copied, and the key's bytes belong to a
-   * string this box does not own. A stated divergence, not an oversight. */
-  return scr_dyn_new_func(clo, dyn_bound_intrinsic_thunk, 0, "()", "bound");
+  const ScrDynClass *cls = scr_dyn_objinst_class_of(d);
+  ScrObjinstMethodFn *w = scr_objinst_fns;
+  while (w != NULL && !(w->cls == cls && w->cm == cm)) w = w->next;
+  if (w == NULL) {
+    w = (ScrObjinstMethodFn *)calloc(1, sizeof *w);
+    if (w == NULL) {
+      fputs("scriptc: out of memory\n", stderr);
+      abort();
+    }
+    w->clo.rc = SIZE_MAX; /* immortal, like an interned top-level function */
+    w->clo.fn = (void *)objinst_method_thunk;
+    w->cls = cls;
+    w->cm = cm;
+    w->next = scr_objinst_fns;
+    scr_objinst_fns = w;
+  }
+  /* The name is the method's own: cm->name is a static literal of the emitted
+   * table, which the box never frees. */
+  return scr_dyn_new_func(&w->clo, objinst_method_thunk, 0, "()", cm->name);
 }
 
 /* Array.prototype.push/pop/shift/unshift run as the SPEC's generic algorithm

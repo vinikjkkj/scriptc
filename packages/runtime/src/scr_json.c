@@ -3172,15 +3172,31 @@ bool scr_dyn_member_hidden(const ScrDynClassMember *m, void *obj) {
  * no receiver, and the boxed method cannot run without one: the call throws
  * the TypeError Node's method bodies throw on `this.x` of undefined. */
 static ScrDyn *scr_shadow_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
-  (void)clo;
-  (void)args;
-  (void)argc;
-  scr_throw_error_named(scr_str_new("TypeError", 9), scr_str_new("Cannot read properties of undefined", 35));
-  return NULL;
+  /* The receiver the call supplies (`f.call(x, ...)`, `f.apply(x, ...)`, a call
+   * through a property of x) is `this`: run the sibling method named in the
+   * closure on it. No receiver, or one that is not a class instance with that
+   * method: the TypeError Node's method bodies throw on `this.x` of undefined. */
+  ScrDyn *recv = scr_dyn_this_get(); /* +1 */
+  ScrDyn *nm = (ScrDyn *)scr_box_get_ref(clo->caps[0]); /* +1 */
+  const ScrDynClassMember *cm = scr_dyn_objinst_member(recv, nm->v.str->data, nm->v.str->len);
+  ScrDyn *r = NULL;
+  if (cm != NULL && cm->call != NULL) {
+    r = cm->call(recv->v.inst.o, args, argc, "method");
+  } else {
+    scr_throw_error_named(scr_str_new("TypeError", 9),
+                          scr_str_new("Cannot read properties of undefined", 35));
+  }
+  scr_dyn_release(nm);
+  scr_dyn_release(recv);
+  return r;
 }
 
 ScrDyn *scr_dyn_shadow_method(const char *name) {
-  ScrClosure *clo = scr_closure_new((void *)scr_shadow_method_thunk, 0);
+  ScrClosure *clo = scr_closure_new((void *)scr_shadow_method_thunk, 1);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  ScrStr *ns = scr_str_new(name, strlen(name));
+  scr_box_set_ref(clo->caps[0], scr_dyn_new_str(ns));
+  scr_str_release(ns);
   return scr_dyn_new_func(clo, scr_shadow_method_thunk, 0, "()", name);
 }
 
