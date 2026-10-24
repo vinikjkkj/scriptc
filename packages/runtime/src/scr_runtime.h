@@ -6916,6 +6916,7 @@ ScrDyn *scr_dyn_from_big(ScrBigInt *b);
 /* ToBigInt over an untyped operand (`BigInt(u)`) — scr_bigint.c. +1, or
  * NULL with a catchable exception pending. */
 ScrBigInt *scr_big_from_dyn(const ScrDyn *d);
+ScrBigInt *scr_big_from_str(const ScrStr *s);
 /* The allocator view the gated constructor uses (runtime-internal). */
 ScrDyn *scr_dyn_alloc_big(ScrBigInt *b, const ScrDynBigOps *ops);
 /* The installed table; traps if a BIG node exists without one. */

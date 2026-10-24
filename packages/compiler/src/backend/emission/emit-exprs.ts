@@ -7955,6 +7955,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_big_from_f64(${arg(0)})`);
           case "big.fromDyn":
             return finish(`scr_big_from_dyn(${arg(0)})`);
+          case "big.fromStr":
+            return finish(`scr_big_from_str(${arg(0)})`);
           case "big.toF64":
             return finish(`scr_big_to_f64(${arg(0)})`);
           case "big.asIntN":
