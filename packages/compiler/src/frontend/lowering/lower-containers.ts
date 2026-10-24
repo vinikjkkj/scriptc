@@ -697,6 +697,18 @@ function lowerOptionalDefaultArg(
             (a) => a.kind === "f64" || a.kind === "string" || a.kind === "bool" || isUnitType(a),
           ) ??
           false);
+      if (elem.kind === "jsval" && call.arguments.length === 1) {
+        // An 'any'-element array under --dynamic (an unannotated `[]` grown
+        // by push: the checker's element type is any, mapped to jsval). The
+        // elements are engine values, so the join IS the engine's own
+        // Array.prototype.join over the array's engine copy: join reads the
+        // elements and never writes the array, so the copy is unobservable.
+        // The result is a declared string (islandPrimitiveExit).
+        const recvJs = L.jsvalIn(L.lowerExpr(access.expression), access.expression);
+        const sepJs = L.jsvalIn(L.lowerExpr(call.arguments[0]!), call.arguments[0]!);
+        const joined: IrExpr = { kind: "jsOp", op: "callMethod", name: "join", args: [recvJs, sepJs], type: JSVAL, loc };
+        return islandPrimitiveExit(L, call, joined);
+      }
       if (elem.kind !== "f64" && elem.kind !== "string" && elem.kind !== "bool" && !joinableUnion) {
         L.unsupported(
           "SC1090",
