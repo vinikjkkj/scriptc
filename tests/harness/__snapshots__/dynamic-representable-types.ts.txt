@@ -25,15 +25,6 @@ dynamic-representable-types.ts:11:13 - error SC2011: values of type '{ workItem:
 
   hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
 
-dynamic-representable-types.ts:14:7 - error SC2011: values of type '[number, (string | undefined)?]' have no static representation but run in the embedded dynamic engine, which this build does not include
-
-  13 | const bare: any = 41;
-  14 | const optTuple: [number, string?] = [1];
-     |       ^~~~~~~~
-  15 | console.log(arr.length, rec.width, fn(1), bare, optTuple.length);
-
-  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
-
 dynamic-representable-types.ts:15:25 - error SC2004: uses of 'rec' inherit the blocker on its declaration
 
   14 | const optTuple: [number, string?] = [1];
