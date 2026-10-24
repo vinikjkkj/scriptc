@@ -2193,11 +2193,61 @@ function moduleTableMethodEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+const DEFINE_GETTER_PREFILTER = /\b__defineGetter__\s*\(/;
+
+/* EXPORTS GETTERS. `exports.__defineGetter__(name, get)` (and the
+ * `module.exports` spelling) at a module's top level defines an enumerable,
+ * configurable accessor whose getter runs on every read, exactly
+ * `Object.defineProperty(exports, name, { enumerable: true, configurable: true,
+ * get })`. The spelling is rewritten to that call, in place, with no newline
+ * moved; the defineProperty export is then lowered as an accessor
+ * (cjsExportsGetterDefineOf). Only top-level statements are rewritten, and
+ * only with a string-literal name and exactly two arguments. */
+function defineGetterEdits(fileName: string, text: string): string | null {
+  if (!DEFINE_GETTER_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const nl = (s: string): string => "\n".repeat((s.match(/\n/g) ?? []).length);
+  for (const stmt of sf.statements) {
+    if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) continue;
+    const call = stmt.expression;
+    const callee = call.expression;
+    if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== "__defineGetter__" || callee.questionDotToken) continue;
+    const recv = callee.expression;
+    const isExports = ts.isIdentifier(recv) && recv.text === "exports";
+    const isModuleExports = ts.isPropertyAccessExpression(recv) && ts.isIdentifier(recv.expression) &&
+      recv.expression.text === "module" && recv.name.text === "exports";
+    if (!isExports && !isModuleExports) continue;
+    if (call.arguments.length !== 2) continue;
+    const [name, getter] = call.arguments as unknown as [ts.Expression, ts.Expression];
+    if (!ts.isStringLiteral(name)) continue;
+    const recvText = recv.getText(sf);
+    const head = text.slice(call.getStart(sf), name.getStart(sf));
+    const gap = text.slice(name.getEnd(), getter.getStart(sf));
+    const tail = text.slice(getter.getEnd(), call.getEnd());
+    edits.push({ start: call.getStart(sf), end: name.getStart(sf), text: `Object.defineProperty(${recvText}, ` + nl(head) });
+    edits.push({ start: name.getEnd(), end: getter.getStart(sf), text: `, { enumerable: true, configurable: true, get: ` + nl(gap) });
+    edits.push({ start: getter.getEnd(), end: call.getEnd(), text: ` })` + nl(tail) });
+  }
+  if (edits.length === 0) return null;
+  let out = "";
+  let at = 0;
+  for (const e of edits) {
+    out += text.slice(at, e.start) + e.text;
+    at = e.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
     const unwrapped = umdUnwrap(fileName, text);
     if (unwrapped !== null) return jsDesugar(fileName, unwrapped) ?? unwrapped;
+  }
+  {
+    const getters = defineGetterEdits(fileName, text);
+    if (getters !== null) return jsDesugar(fileName, getters) ?? getters;
   }
   {
     const tableMethods = moduleTableMethodEdits(fileName, text);
