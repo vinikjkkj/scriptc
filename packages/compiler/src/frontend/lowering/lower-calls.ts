@@ -8417,6 +8417,47 @@ const inliningPredicates = new Set<ts.Symbol>();
 /** Is `arguments` WRITTEN THROUGH in this function's own body — `arguments =
    * v`, `arguments[i] = v`, `arguments.k = v`, `++arguments[i]`, `delete
    * arguments[i]`? Only writes matter: in SLOPPY mode a simple-parameter
+/** Is every use of `arguments` in this function's own body a plain READ of
+   * `arguments.length`? Nested plain functions and methods have their own
+   * `arguments` (skipped); arrows share the enclosing one (descended). */
+  function argumentsOnlyLengthReads(fn: { body?: ts.Node | undefined }): boolean {
+    let only = true;
+    if (fn.body === undefined) return false;
+    ts.walkPreorder(fn.body, (n) => {
+      if (!only) return "stop";
+      if (ts.isIdentifier(n) && n.text === "arguments" && !(ts.isPropertyAccessExpression(n.parent) && n.parent.name === n)) {
+        const p = n.parent;
+        const isLen =
+          p !== undefined && ts.isPropertyAccessExpression(p) && p.expression === n && p.name.text === "length" && !p.questionDotToken;
+        let write = false;
+        if (isLen) {
+          const pp: ts.Node | undefined = p.parent;
+          if (pp !== undefined) {
+            if (ts.isBinaryExpression(pp) && pp.left === p) {
+              const k = pp.operatorToken.kind;
+              write = k === ts.SyntaxKind.EqualsToken ||
+                (k >= ts.SyntaxKind.FirstCompoundAssignment && k <= ts.SyntaxKind.LastCompoundAssignment);
+            } else if (ts.isPrefixUnaryExpression(pp) || ts.isPostfixUnaryExpression(pp)) {
+              write = pp.operator === ts.SyntaxKind.PlusPlusToken || pp.operator === ts.SyntaxKind.MinusMinusToken;
+            } else if (ts.isDeleteExpression(pp)) {
+              write = true;
+            }
+          }
+        }
+        if (!isLen || write) only = false;
+        return undefined;
+      }
+      if (
+        (ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n)) &&
+        n !== fn
+      ) {
+        return "skip";
+      }
+      return undefined;
+    });
+    return only;
+  }
+
    * function's `arguments` slots are ALIASED to the parameter bindings, so a
    * write on either side is visible on the other, and the arguments-bound
    * parameter form (argumentsRebindsParams) copies rather than aliases. */
@@ -8541,6 +8582,12 @@ const inliningPredicates = new Set<ts.Symbol>();
     if (argumentsWrittenInBody(fn)) return false;
     for (const p of fn.parameters) {
       const sym = L.checker.getSymbolAtLocation(p.name);
+    // `arguments.length` is the one reading the sloppy aliasing cannot reach: a
+    // write to a parameter moves the slot's VALUE, never the call's arity. A
+    // body whose only use of `arguments` is that read (generate-function's
+    // `property(obj, name)`: `if (arguments.length === 1) { name = obj; ... }`)
+    // therefore sees the same answer from the copy and from the alias.
+    if (argumentsOnlyLengthReads(fn)) return true;
       if (!sym) return false;
       if (paramWrittenInBody(L, fn.body, sym, (p.name as ts.Identifier).text)) return false;
     }
