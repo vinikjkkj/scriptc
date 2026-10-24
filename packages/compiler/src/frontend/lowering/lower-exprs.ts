@@ -15764,11 +15764,12 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
           return lowerFieldIncDecValue(L, expr.operand, op, prefix, expr, loc);
         }
       }
-      // Array/typed-array ELEMENTS and computed receivers keep the fence:
-      // the element compound is a statement-only bargain (it re-lowers
-      // both receiver and index, which is only unobservable for a bare
-      // identifier and a repeatable index), and value position has its
-      // own reading of what an element slot's coercion yields.
+      // Array/typed-array/record ELEMENTS in value position: the statement path's read, combine and
+      // store under a seqExpr, yielding the old or new NUMBER (lowerElemValuePosition).
+      if (ts.isElementAccessExpression(expr.operand)) {
+        const served = L.lowerElemValuePosition(expr);
+        if (served !== null) return served;
+      }
       L.unsupported(
         "SC1045",
         expr,
@@ -15822,7 +15823,7 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
  * validator's straight-line set (writes and effect expressions only; the
  * C emission point is mid-expression, so no control flow, no jumps).
  * Blocks check their bodies recursively. */
-function seqExprSafeStmt(s: IrStmt): boolean {
+export function seqExprSafeStmt(s: IrStmt): boolean {
   switch (s.kind) {
     case "varDecl":
     case "assign":
@@ -16471,6 +16472,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             valPosWhy(expr.left, "compound-field");
             return lowerFieldCompoundValue(L, expr.left, compound, expr.right, loc);
           }
+        }
+      }
+      if (ts.isElementAccessExpression(expr.left)) {
+        const served = L.lowerElemValuePosition(expr);
+        if (served !== null) {
+          valPosWhy(expr.left, "elem-static");
+          return served;
         }
       }
       valPosWhy(expr.left, "fence");

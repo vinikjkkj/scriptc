@@ -30,7 +30,7 @@ import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
-import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, unionFieldReadAt, unitArmsOf } from "./lower-exprs.js";
+import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -8121,6 +8121,124 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       return L.lowerElementWrite(fake);
     } finally {
       L.preLowered.delete(key);
+    }
+  }
+
+  /** An ELEMENT write in VALUE position: `x = (o[k] = v)`, `(o[k] += v)`, `o[k]++` / `--o[k]` as an operand.
+   * The statement path already knows how to read, combine and store each element target; all value position
+   * adds is that the result is KEPT. The same bargain as lowerFieldCompoundValue: the receiver and the index
+   * are evaluated once (a repeatable receiver / index is simply lowered again by the write, anything else is
+   * hoisted into a hidden local and the write is pointed at it through Lowerer.preLowered), then the right-hand
+   * side, then the store, and the expression answers JS's value -- the right-hand side for `=`, the combined
+   * value for `op=`, the old (postfix) or new (prefix) NUMBER for `++`/`--`. Null leaves the fence to the caller. */
+  export function lowerElemValuePosition(
+    L: Lowerer,
+    node: ts.BinaryExpression | ts.PrefixUnaryExpression | ts.PostfixUnaryExpression,
+  ): IrExpr | null {
+    let target: ts.ElementAccessExpression;
+    let compound: CompoundOp | null = null;
+    let rhsNode: ts.Expression | null = null;
+    let kind: "assign" | "compound" | "incdec";
+    let prefix = false;
+    if (ts.isBinaryExpression(node)) {
+      if (!ts.isElementAccessExpression(node.left)) return null;
+      target = node.left;
+      rhsNode = node.right;
+      const opKind = node.operatorToken.kind;
+      if (opKind === ts.SyntaxKind.EqualsToken) {
+        kind = "assign";
+      } else {
+        const c = COMPOUND_ASSIGN_OPS[opKind];
+        if (c === undefined) return null;
+        compound = c;
+        kind = "compound";
+      }
+    } else {
+      if (!ts.isElementAccessExpression(node.operand)) return null;
+      target = node.operand;
+      compound = node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
+      prefix = ts.isPrefixUnaryExpression(node);
+      kind = "incdec";
+    }
+    if (target.questionDotToken !== undefined) return null;
+    if (symbolFieldInfo(L, target)) return null;
+    const loc = locOf(node);
+    const stmts: IrStmt[] = [];
+    const pinned: ts.Node[] = [];
+    try {
+      const hoist = (e: ts.Expression, name: string): void => {
+        const ir = L.lowerExpr(e);
+        if (isUnitType(ir.type)) throw new Error("unit");
+        const tmp = L.declareHiddenLocal(name, ir.type);
+        stmts.push({ kind: "varDecl", localId: tmp.id, init: ir, loc });
+        L.preLowered.set(e, { kind: "varRef", localId: tmp.id, type: ir.type, loc });
+        pinned.push(e);
+      };
+      try {
+        if (!repeatableRecvExpr(L, target.expression)) hoist(target.expression, "%elRecv");
+        if (!repeatableIndexExpr(target.argumentExpression)) hoist(target.argumentExpression, "%elIdx");
+      } catch (e) {
+        if (e instanceof Error && e.message === "unit") return null;
+        throw e;
+      }
+      let write: IrStmt;
+      let result: IrExpr;
+      if (kind === "assign") {
+        const rhs = L.lowerExpr(rhsNode!);
+        if (isUnitType(rhs.type)) return null;
+        const tmp = L.declareHiddenLocal("%setVal", rhs.type);
+        stmts.push({ kind: "varDecl", localId: tmp.id, init: rhs, loc });
+        const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type: rhs.type, loc });
+        L.preLowered.set(rhsNode!, ref());
+        pinned.push(rhsNode!);
+        write = L.lowerElementWrite(node as ts.BinaryExpression);
+        result = ref();
+      } else {
+        const read0 = L.lowerExpr(target);
+        const wide = L.recordKeyReadAtSlotWidth(read0, DYN);
+        const read = wide ?? read0;
+        const key: ts.Node = rhsNode ?? node;
+        let natural: IrExpr;
+        let toSlot: (v: IrExpr) => IrExpr;
+        let oldRef: (() => IrExpr) | null = null;
+        if (kind === "incdec") {
+          // ++/-- are ToNumeric, then +-1: the OLD value yielded by the postfix form is that number.
+          let old: IrExpr;
+          if (read.type.kind === "f64") old = read;
+          else if (read.type.kind === "dyn") old = { kind: "libCall", fn: "dyn.toNumber", args: [read], type: F64, loc };
+          else return null;
+          const oldTmp = L.declareHiddenLocal("%elOld", F64);
+          stmts.push({ kind: "varDecl", localId: oldTmp.id, init: old, loc });
+          oldRef = (): IrExpr => ({ kind: "varRef", localId: oldTmp.id, type: F64, loc });
+          const one: IrExpr = { kind: "numLit", value: 1, type: F64, loc };
+          const combined = compoundCombine(L, compound!, oldRef(), one, read.type, node, target, target, loc);
+          if (!combined) return null;
+          natural = combined.natural;
+          toSlot = combined.toSlot;
+        } else {
+          const rhs = L.lowerExpr(rhsNode!);
+          const combined = compoundCombine(L, compound!, read, rhs, read.type, node, target, rhsNode!, loc);
+          if (!combined) return null;
+          natural = combined.natural;
+          toSlot = combined.toSlot;
+        }
+        if (isUnitType(natural.type)) return null;
+        const valTmp = L.declareHiddenLocal("%cmpVal", natural.type);
+        stmts.push({ kind: "varDecl", localId: valTmp.id, init: natural, loc });
+        const valRef = (): IrExpr => ({ kind: "varRef", localId: valTmp.id, type: natural.type, loc });
+        const fake = Object.create(node, {
+          left: { value: target },
+          right: { value: key },
+        }) as ts.BinaryExpression;
+        L.preLowered.set(key, toSlot(valRef()));
+        pinned.push(key);
+        write = L.lowerElementWrite(fake);
+        result = kind === "incdec" && !prefix ? oldRef!() : valRef();
+      }
+      if (!seqExprSafeStmt(write)) return null;
+      return { kind: "seqExpr", stmts: [...stmts, write], result, type: result.type, loc };
+    } finally {
+      for (const p of pinned) L.preLowered.delete(p);
     }
   }
 
