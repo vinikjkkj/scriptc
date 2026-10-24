@@ -13464,6 +13464,14 @@
       ],
       "diags": []
     },
+    "<repo>/tests/corpus/9505-cjs-pre-write-read/main.cjs": {
+      "order": [
+        "<repo>/tests/corpus/9505-cjs-pre-write-read/view.cjs",
+        "<repo>/tests/corpus/9505-cjs-pre-write-read/node.cjs",
+        "<repo>/tests/corpus/9505-cjs-pre-write-read/main.cjs"
+      ],
+      "diags": []
+    },
   "<repo>/tests/corpus/951-modules-diamond/main.ts": {
    "order": [
     "<repo>/tests/corpus/951-modules-diamond/shared.ts",
