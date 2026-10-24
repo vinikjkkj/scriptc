@@ -12968,6 +12968,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9103-spread-tuple-into-fixed-params.ts": {
+   "order": [
+    "<repo>/tests/corpus/9103-spread-tuple-into-fixed-params.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9104-spread-js-fixed-params-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9104-spread-js-fixed-params-order.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/911-records-index-dot-access.ts": {
    "order": [
     "<repo>/tests/corpus/911-records-index-dot-access.ts"
