@@ -2443,7 +2443,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // Generic signatures are admitted here as well (the same gate as
         // recordProvenanceOk's): the member loop maps each at its constraint
         // or leaves a failing one out with a GENMEMBER trace line.
-        return cs.length >= 1 && checker.getConstructSignatures(pt).length === 0;
+        return cs.length >= 1 && checker.getConstructSignatures(pt).length === 0 &&
+          (cs.every((s) => s.getTypeParameters().length === 0) || !hasStdlibSignature(pt, checker, ctx));
       });
     // The gate above refuses the whole type, and before this line it said
     // nothing: the member that failed it was invisible under SCRIPTC_MAP_TRACE.
@@ -4868,6 +4869,15 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // callers pack the surplus arguments (restPackArity). A rest bound
         // to a TUPLE has no single element type and keeps the fence.
         let restT = mapType(checker.getTypeOfSymbol(p), ctx);
+        // The stdlib's own variable-length rest tuples keep their fence: the
+        // dyn pack would shadow the native lowering of the same member.
+        const restDeclInStdlib = (() => {
+          const d = checker.signatureDeclaration(sig);
+          return d !== undefined && ctx.isStdlibFile(d.getSourceFile());
+        })();
+        if (restT?.kind === "dyn" && checker.isTupleType(checker.getTypeOfSymbol(p)) && restDeclInStdlib) {
+          return null;
+        }
         // A rest bound to a VARIABLE-LENGTH tuple takes mapType's variable-length
         // tuple rule: the checked-dynamic pack, the slot `(...args: unknown[])` takes.
         // A `...args: any[]` rest slot of a callable the uncompiled .d.ts
@@ -5071,10 +5081,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // whose results differ keep the refusal: a merged result would hand the
   // caller a wider type than the overload it called promised.
   if (callSigs.length > 1 && ctx.declMember === true && !ctx.dynamic && checker.getConstructSignatures(widened).length === 0) {
+    const stdlibSet = hasStdlibSignature(widened, checker, ctx);
     const fns: (IrType & { kind: "func" })[] = [];
     for (const sg of callSigs) {
       const f = mapOneSig(sg, ctx);
-      if (f === null || f.kind !== "func" || f.rest === true) {
+      if (f === null || f.kind !== "func" || f.rest === true || (stdlibSet && f.restIn === true)) {
         mapTrace(`OVERLOAD ${checker.typeToString(type).slice(0, 60)} -> an overload does not map on its own`);
         return null;
       }
@@ -5085,13 +5096,16 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // checked-dynamic value). Each call site narrows the result to the type
     // of the overload tsc RESOLVED (reconcileOverloadReturn's dyn rule,
     // lower-calls.ts), so a call of one overload reads exactly its own type.
+    // A stdlib overload set with differing returns is refused, as before
+    // overload sets were admitted: its own lowering answers those calls.
+    if (stdlibSet && !fns.every((f) => typeEquals(f.ret, ret0))) return null;
     const retOut: IrType = fns.every((f) => typeEquals(f.ret, ret0)) ? ret0 : DYN;
     // A REST overload (`call(...args: [cmd: string, ...rest: T[]])`, the
     // variadic-tuple spelling of ioredis RedisCommander) cannot merge by
     // position: its surplus arguments are one trailing array. The merged
     // closure is the checked-dynamic pack, the slot each rest overload maps
     // to on its own (mapType's variable-length tuple rule).
-    if (fns.some((f) => f.restIn === true)) {
+    if (!stdlibSet && fns.some((f) => f.restIn === true)) {
       return { kind: "func" as const, params: [DYN], ret: retOut, restIn: true as const };
     }
     const width = Math.max(...fns.map((f) => f.params.length));
@@ -7482,6 +7496,18 @@ export function isGenericCallableMemberType(t: ts.Type, checker: ts.TypeChecker)
  * refusal must keep firing for a true intersection; this predicate must
  * not let it reach that rule.
  */
+/** True when one of `t`'s call signatures is declared in the standard
+ * library. Those members keep the lowering they had before overload sets
+ * were admitted: the stdlib's own routes (Object.entries, Array#filter,
+ * TextDecoder) must not be shadowed by a merged closure, so the strict rules
+ * apply to them (equal returns, no rest overloads, no generic admission). */
+export function hasStdlibSignature(t: ts.Type, checker: ts.TypeChecker, ctx: TypeMapperCtx): boolean {
+  return checker.getCallSignatures(t).some((sg) => {
+    const d = checker.signatureDeclaration(sg);
+    return d !== undefined && ctx.isStdlibFile(d.getSourceFile());
+  });
+}
+
 /** Any overload set of a callable member: two or more call signatures, with
  * no construct signature, data property or index signature of its own (the
  * same surface isNonGenericOverloadSetMember checks), GENERIC signatures
@@ -8537,8 +8563,12 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // isBodylessDeclClassInstance), so nothing can hold a value whose
       // method is missing; a program that names the member is refused at
       // that site, never later.
+      // A non-stdlib overload set is one merged closure (declMember below); a
+      // stdlib one stays on the speculative path it had before, so its native
+      // lowering is the route its calls take.
+      const admittedOverloadSet = isOverloadSetMember(fieldTs, checker) && !hasStdlibSignature(fieldTs, checker, ctx);
       const generic =
-        (isDeclinableCallableMember(fieldTs, checker) && !isOverloadSetMember(fieldTs, checker)) ||
+        (isDeclinableCallableMember(fieldTs, checker) && !admittedOverloadSet) ||
         (bodylessOwner && checker.getCallSignatures(fieldTs).length > 0);
       if (process.env["SCRIPTC_MEMBER_WHY"] !== undefined) {
         const cs = checker.getCallSignatures(fieldTs);
@@ -8628,7 +8658,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
             }
           : ctx.declMember !== true && libBagMember(p) && hasCallablePart(fieldTs)
             ? { ...ctx, declMember: true }
-            : ctx.declMember !== true && isOverloadSetMember(fieldTs, checker)
+            : ctx.declMember !== true && admittedOverloadSet
               ? { ...ctx, declMember: true }
               : ctx;
         pt = mapType(fieldTs, tryCtx);
