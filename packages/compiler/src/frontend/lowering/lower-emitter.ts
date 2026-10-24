@@ -678,7 +678,22 @@ function lowerDynListenerCall(
    * tuple is [DYN] — the adapter passes the boxed chunk through. */
   streamData: boolean,
 ): IrExpr {
-  if (META_EVENTS.has(name)) {
+  // A listener LITERAL that declares at most the event name cannot observe the
+  // second argument Node passes (the listener function), so there is nothing to
+  // convert: mysql2's inheritEvents registers `(eventName) => {...}`.
+  const metaListenerReadsOnlyName = (): boolean => {
+    let n: ts.Expression = cbNode;
+    while (ts.isParenthesizedExpression(n)) n = n.expression;
+    if (!(ts.isArrowFunction(n) || ts.isFunctionExpression(n))) return false;
+    if (n.parameters.length > 1 || n.parameters.some((p) => p.dotDotDotToken !== undefined)) return false;
+    let usesArguments = false;
+    ts.walkPreorder(n.body, (x) => {
+      if (ts.isIdentifier(x) && x.text === "arguments") usesArguments = true;
+      return undefined;
+    });
+    return !usesArguments;
+  };
+  if (META_EVENTS.has(name) && !metaListenerReadsOnlyName()) {
     L.noLowering(
       `'${member}' of '${name}' with a checked-dynamic listener`,
       cbNode,
