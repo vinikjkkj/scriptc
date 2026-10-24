@@ -41,9 +41,13 @@ export interface CjsExportRecord {
   readonly flag: string;
   /** Top-level statement index after which the record is created (after every first write). */
   readonly createAfter: number;
+  /** Bare reads that can run BEFORE the member's first write (a top-level read
+   * above it, or a read inside a function a pre-write statement can reach).
+   * They read as DYN: the record's value once it exists, `undefined` before. */
+  readonly unsafeReads: ReadonlySet<ts.Node>;
   /** Members in first-write order. `temp` is the member's own typed global,
    * assigned by every write until the record exists, then read into it. */
-  readonly members: readonly { name: string; type: IrType; temp: string }[];
+  readonly members: readonly { name: string; type: IrType; temp: string; written: string }[];
 }
 
 /** The free `exports` name (not shadowed by a local binding). */
@@ -119,6 +123,51 @@ function typeOfWrite(L: Lowerer, rhs: ts.Expression): IrType | null {
   // Widened: `exports.n = 1` and a later `exports.n = exports.n + 1` agree on `number`.
   const t = L.checker.getBaseTypeOfLiteralType(L.typeOf(rhs));
   return L.mapTypeOf(t) ?? dynFallbackType(L, rhs, t);
+}
+
+/** The function a declaration names (a function declaration, or a const bound
+ * to a function expression or arrow), or null. */
+function functionOfDecl(d: ts.Node): ts.Node | null {
+  if (ts.isFunctionDeclaration(d) || ts.isFunctionExpression(d) || ts.isArrowFunction(d)) return d;
+  if (ts.isVariableDeclaration(d) && d.initializer !== undefined) {
+    let e: ts.Expression = d.initializer;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (ts.isFunctionExpression(e) || ts.isArrowFunction(e)) return e;
+  }
+  return null;
+}
+
+/** Function-like nodes that may run while the module is still before statement
+ * `w`: every function created or referenced by a top-level statement up to and
+ * including `w`, and (transitively) everything those functions reference. */
+function preWriteFunctions(L: Lowerer, stmts: readonly ts.Statement[], w: number): Set<ts.Node> {
+  const pre = new Set<ts.Node>();
+  const work: ts.Node[] = [];
+  const mark = (n: ts.Node): void => {
+    if (!pre.has(n)) {
+      pre.add(n);
+      work.push(n);
+    }
+  };
+  const scan = (root: ts.Node): void => {
+    const visit = (n: ts.Node): void => {
+      if (ts.isFunctionLike(n)) mark(n);
+      if (ts.isIdentifier(n)) {
+        const sym = L.checker.getSymbolAtLocation(n);
+        if (sym !== undefined) {
+          for (const d of L.checker.declarationsOf(sym)) {
+            const fn = functionOfDecl(d);
+            if (fn !== null) mark(fn);
+          }
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(root);
+  };
+  for (let i = 0; i <= w; i++) scan(stmts[i]!);
+  while (work.length > 0) scan(work.pop()!);
+  return pre;
 }
 
 function computeRecord(L: Lowerer, sf: ts.SourceFile): CjsExportRecord | null {
@@ -218,10 +267,28 @@ function computeRecord(L: Lowerer, sf: ts.SourceFile): CjsExportRecord | null {
   // A member written before the replacement only through a module-spelled
   // write, and read through the bare spelling, is one record member: the
   // first-write rules above cover both spellings.
+  // A read that can run before its member's first write is DYN (undefined
+  // before the write, exactly Node's value); every other read stays static.
+  const unsafeReads = new Set<ts.Node>();
+  const preMemo = new Map<number, Set<ts.Node>>();
   for (const p of bare) {
     if (accessRole(p) !== "read") continue;
     const fw = firstWrite.get(p.name.text)!;
-    if (!inFunction(p) && p.getStart(sf) < fw.pos) return null;
+    if (!inFunction(p)) {
+      if (p.getStart(sf) < fw.pos) unsafeReads.add(p);
+      continue;
+    }
+    let pre = preMemo.get(fw.stmtIdx);
+    if (pre === undefined) {
+      pre = preWriteFunctions(L, stmts, fw.stmtIdx);
+      preMemo.set(fw.stmtIdx, pre);
+    }
+    for (let f: ts.Node | undefined = p.parent; f !== undefined && !ts.isSourceFile(f); f = f.parent) {
+      if (ts.isFunctionLike(f) && pre.has(f)) {
+        unsafeReads.add(p);
+        break;
+      }
+    }
   }
   // Escapes: top level, not shadowed, after every first write.
   let maxStmt = -1;
@@ -240,9 +307,11 @@ function computeRecord(L: Lowerer, sf: ts.SourceFile): CjsExportRecord | null {
     name,
     type: fw.type,
     temp: `${id}.t${k}`,
+    written: `${id}.w${k}`,
   }));
   for (const m of members) {
     L.globalsList.push({ id: m.temp, name: "%cjst", type: m.type, mutable: true });
+    L.globalsList.push({ id: m.written, name: "%cjsw", type: BOOL, mutable: true });
   }
   const flag = `${id}.flag`;
   L.globalsList.push({ id: flag, name: "%cjsflag", type: BOOL, mutable: true });
@@ -254,7 +323,7 @@ function computeRecord(L: Lowerer, sf: ts.SourceFile): CjsExportRecord | null {
   );
   L.globalsList.push({ id, name: "%cjsrec", type: { kind: "record", shapeId }, mutable: true });
   const createAfter = Math.max(...order.map(([, fw]) => fw.stmtIdx));
-  return { id, shapeId, flag, createAfter, members };
+  return { id, shapeId, flag, createAfter, members, unsafeReads };
 }
 
 /** The record field of a member; undefined when the record does not hold it. */
@@ -265,6 +334,34 @@ export function cjsExportRecordField(rec: CjsExportRecord, name: string): { type
 /** Value of the record (`exports` as a value). Only reached after creation (gated). */
 export function cjsExportRecordRef(rec: CjsExportRecord, loc: ReturnType<typeof locOf>): IrExpr {
   return { kind: "varRef", localId: rec.id, type: { kind: "record", shapeId: rec.shapeId }, loc };
+}
+
+/** `exports.name` read that may run before the first write (see unsafeReads):
+ * DYN, the record's value once it exists and `undefined` before. */
+export function cjsExportRecordReadDyn(rec: CjsExportRecord, name: string, node: ts.Node): IrExpr {
+  const m = rec.members.find((x) => x.name === name)!;
+  const loc = locOf(node);
+  const DYNT = { kind: "dyn" } as const;
+  return {
+    kind: "ternary",
+    cond: { kind: "varRef", localId: rec.flag, type: BOOL, loc },
+    then: {
+      kind: "dynFrom",
+      value: { kind: "recordGet", obj: cjsExportRecordRef(rec, loc), shapeId: rec.shapeId, field: name, type: m.type, loc },
+      type: DYNT,
+      loc,
+    },
+    else_: {
+      kind: "ternary",
+      cond: { kind: "varRef", localId: m.written, type: BOOL, loc },
+      then: { kind: "dynFrom", value: { kind: "varRef", localId: m.temp, type: m.type, loc }, type: DYNT, loc },
+      else_: { kind: "dynFrom", value: { kind: "unitLit", unit: "undefined", type: { kind: "undefinedT" }, loc }, type: DYNT, loc },
+      type: DYNT,
+      loc,
+    },
+    type: DYNT,
+    loc,
+  };
 }
 
 /** `exports.name` read: the record once it exists, the member's own global before. */
@@ -282,8 +379,9 @@ export function cjsExportRecordRead(rec: CjsExportRecord, name: string, node: ts
 }
 
 /** Initial state at module start: the record does not exist yet. */
-export function cjsExportRecordInit(rec: CjsExportRecord, loc: ReturnType<typeof locOf>): IrStmt {
-  return { kind: "assign", localId: rec.flag, value: { kind: "boolLit", value: false, type: BOOL, loc }, loc };
+export function cjsExportRecordInit(rec: CjsExportRecord, loc: ReturnType<typeof locOf>): IrStmt[] {
+  const off = (localId: string): IrStmt => ({ kind: "assign", localId, value: { kind: "boolLit", value: false, type: BOOL, loc }, loc });
+  return [off(rec.flag), ...rec.members.map((m) => off(m.written))];
 }
 
 /** Created right after the statement at `rec.createAfter`: the record takes
@@ -316,6 +414,7 @@ export function cjsExportRecordWrite(L: Lowerer, rec: CjsExportRecord, bin: ts.B
     kind: "block",
     body: [
       { kind: "assign", localId: m.temp, value: L.lowerExprExpecting(bin.right, m.type), loc },
+      { kind: "assign", localId: m.written, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
       {
         kind: "if",
         cond: { kind: "varRef", localId: rec.flag, type: BOOL, loc },

@@ -3817,7 +3817,7 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
         // The old export object's record (cjs-export-record.ts) exists before any
         // statement reads or writes it: created right after the run-once guard.
         const recI = cjsExportRecordOf(L, sf);
-        if (recI !== null) body.splice(header.length, 0, cjsExportRecordInit(recI, loc0));
+        if (recI !== null) body.splice(header.length, 0, ...cjsExportRecordInit(recI, loc0));
       }
       while (at < statics.length) {
         body.push(...L.lowerStaticFieldInits(statics[at]!.info));
