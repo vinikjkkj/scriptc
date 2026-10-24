@@ -1294,6 +1294,7 @@ void scr_undef_global_read(ScrStr *name);
 /* An ES module's `require` read: scr_undef_global_read, plus the suffix Node's
  * uncaught report appends to the message (borrowed; "" = none). */
 void scr_undef_global_read_esm(ScrStr *name, ScrStr *suffix);
+void scr_error_report_forget(const void *payload);
 /* The pending exception's payload when it is an object, else NULL. */
 void *scr_exc_pending_payload(void);
 /* The decoration for a thrown object, or NULL (scr_exc_print_uncaught). */

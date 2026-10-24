@@ -588,6 +588,17 @@ ScrStr *scr_error_report_suffix(const void *payload) {
   return scr_report_suffix->len == 0 ? NULL : scr_report_suffix;
 }
 
+/* The record above holds one +1 on the error and one on the suffix string.
+ * Drop both when the payload they describe is dropped (caught, or reported
+ * by the uncaught exit), so the record never outlives its exception. */
+void scr_error_report_forget(const void *payload) {
+  if (scr_report_obj == NULL || payload != scr_report_obj) return;
+  scr_error_release_v(scr_report_obj);
+  scr_report_obj = NULL;
+  if (scr_report_suffix != NULL) scr_str_release(scr_report_suffix);
+  scr_report_suffix = NULL;
+}
+
 /* ── DOMException ─────────────────────────────────────────────────────
  * The web-standard error shape (a Node global since v17): the ScrError
  * prefix plus the WebIDL slots (legacy numeric code, the options form's
