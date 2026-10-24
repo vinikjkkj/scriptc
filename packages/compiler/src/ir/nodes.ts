@@ -9259,7 +9259,12 @@ export function canDynCheckTo(
     if (x.kind === "array") return nestedOk(x.elem);
     if (x.kind === "record") {
       const shape = getRecord(x.shapeId);
-      if (!shape || shape.tuple) return false;
+      // A TUPLE is admitted like any record: both walkers already validate
+      // it positionally (a JSON array of exactly the arity, an index path in
+      // the TypeError) and recurse into every element with the generic leaf
+      // helper, so only the predicate said no -- and only for tuples with a
+      // leaf jsonSafe does not cover (a dyn element, a class, a Map).
+      if (!shape) return false;
       // ACCESSOR SLOTS, refused for the SYMMETRY this file argues for
       // three times above: canConvertToDyn refuses an accessor-carrying
       // shape IN (its `%get:x`/`%set:x` closure slots have no dyn
