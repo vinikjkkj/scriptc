@@ -7225,6 +7225,9 @@ ScrStr *scr_jb_finish(ScrJsonBuf *b); /* returns +1; frees the buffer */
  * the compact text is borrowed, the result is +1). */
 ScrStr *scr_json_indent_num(const ScrStr *compact, double space);
 ScrStr *scr_json_indent_str(const ScrStr *compact, const ScrStr *space);
+/* argfx4: a space of dyn type (any, or a union boxed to dyn): a number or a
+ * string re-indents as above, every other kind is the compact text. */
+ScrStr *scr_json_indent_dyn(const ScrStr *compact, const ScrDyn *space);
 
 void *scr_dyn_retain_v(void *d);
 void scr_dyn_release_v(void *d);
