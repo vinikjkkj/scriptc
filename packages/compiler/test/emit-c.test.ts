@@ -35,15 +35,27 @@ function asanLinks(): Promise<boolean> {
     const c = join(dir, "p.c");
     await writeFile(c, "int main(void){return 0;}\n");
     const d = resolveCc(process.env);
+    // The probe's own duration and error text are part of the warning: a
+    // probe that waits for minutes before it fails looks like a hung test
+    // (2026-10-24 Windows logs, 300 s on a 10 s file), and the error text
+    // is the only evidence of why.
+    const t0 = Date.now();
     try {
       await execFileAsync(d.argv[0]!, [
         ...d.argv.slice(1), ...d.targetArgs,
         "-fsanitize=address", "-o", join(dir, `p${EXE}`), c, ...d.linkArgs,
       ]);
       return true;
-    } catch {
+    } catch (e) {
+      const err = e as { stderr?: unknown; message?: unknown };
+      const why = String(err.stderr || err.message || e)
+        .split("\n")
+        .filter((l) => l.trim() !== "")
+        .slice(0, 3)
+        .join(" | ")
+        .slice(0, 400);
       console.warn(
-        `[emit-c] ${d.argv.join(" ")} cannot link -fsanitize=address here; building these programs ` +
+        `[emit-c] ${d.argv.join(" ")} cannot link -fsanitize=address here (probe took ${Date.now() - t0} ms: ${why}); building these programs ` +
           `UNSANITIZED with SCRIPTC_RC_AUDIT=1. Refcount leaks are still caught, memory errors are not.`,
       );
       return false;
