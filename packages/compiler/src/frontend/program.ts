@@ -920,6 +920,9 @@ function isNodeEsmFile7(sf: ts.SourceFile): boolean {
   // A .js under the nearest package.json "type": "module" is an ES module
   // whatever its syntax: Node never defines require/module/exports there.
   if (sf.fileName.endsWith(".js") && nearestPackageTypeOf(sf.fileName) === "module") return true;
+  // A CommonJS-style .ts file (module.exports, no export syntax) is CJS even
+  // when its imports make tsc call it an external module.
+  if (isCjsTsFile7(sf)) return false;
   return ts.isExternalModule(sf);
 }
 
@@ -928,7 +931,28 @@ function isNodeEsmFile7(sf: ts.SourceFile): boolean {
  * is module.exports, read through the CJS interop paths and their own
  * fences. */
 function isCjsJsFile7(sf: ts.SourceFile): boolean {
-  return isJsSourceFileName(sf.fileName) && !isNodeEsmFile7(sf);
+  return (isJsSourceFileName(sf.fileName) && !isNodeEsmFile7(sf)) || isCjsTsFile7(sf);
+}
+
+/** A TypeScript source written in CommonJS style: it assigns module.exports at
+ * the top level and declares NO ES export syntax (aws-ssl-profiles' index.ts:
+ * `import` lines plus `module.exports = profiles`). Its exports are the
+ * module.exports object, exactly as for a .js file. A file with `export`
+ * syntax stays ESM. */
+function isCjsTsFile7(sf: ts.SourceFile): boolean {
+  if (!/\.ts$/.test(sf.fileName) || sf.isDeclarationFile) return false;
+  let assigns = false;
+  for (const stmt of sf.statements) {
+    if (ts.isExportAssignment(stmt) || ts.isExportDeclaration(stmt)) return false;
+    const mods = (stmt as { modifiers?: readonly ts.Node[] }).modifiers ?? [];
+    if (mods.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return false;
+    if (
+      ts.isExpressionStatement(stmt) && ts.isBinaryExpression(stmt.expression) &&
+      stmt.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      isModuleExportsAccess(stmt.expression.left)
+    ) assigns = true;
+  }
+  return assigns;
 }
 
 /** The exported spelling of isCjsJsFile7 (the lowering's gate for
@@ -3833,7 +3857,7 @@ export {
  * types come entirely from inference (checkJs + JSDoc) and whose classes
  * declare fields by constructor assignment. */
 export function isJsSourceFile(sf: ts.SourceFile): boolean {
-  return isJsSourceFileName(sf.fileName);
+  return isJsSourceFileName(sf.fileName) || isCjsTsFile7(sf);
 }
 
 /** `import type …` declarations and named clauses whose every element is

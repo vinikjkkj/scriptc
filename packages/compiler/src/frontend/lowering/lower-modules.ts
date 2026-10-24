@@ -10,7 +10,7 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import { npmStaticDepSf7, resolveProjectImportSf7 } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
@@ -1983,6 +1983,20 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         if (cjs?.kind === "table" && !cjs.obj) {
           let rhs = cjs.expr.right;
           while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+          // `module.exports = <const literal>`: the const's expression-valued
+          // entries are exported members too. Each gets the same storage a
+          // literal table's entry gets, keyed by the const's own property
+          // symbol; the statement reads its value off the const (resolvedFieldStore).
+          if (ts.isIdentifier(rhs)) {
+            const lit = cjsExportTargetLiteral(rhs, sf);
+            if (lit !== null) {
+              for (const prop of lit.properties) {
+                if (ts.isPropertyAssignment(prop) && (ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name)) && !ts.isIdentifier(prop.initializer)) {
+                  registerExport(prop.name, prop.name.text, prop.initializer);
+                }
+              }
+            }
+          }
           // `module.exports = function (…) {…}` (ms's shape — the whole
           // export IS an anonymous function): a FUNC-typed const export
           // global keyed by the statement node, exactly the scalar
