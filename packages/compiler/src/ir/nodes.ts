@@ -7899,7 +7899,7 @@ export type IrExpr =
    * undefined arm of its union (an optional field) is DROPPED from the
    * output — Node's rule for undefined-valued properties. The value is
    * BORROWED; the result string is owned (+1). Never throws. */
-  | { kind: "jsonStringify"; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "jsonStringify"; value: IrExpr; type: IrType; loc: SrcLoc; spaceArg?: IrExpr }
   /** The dynamic-boundary check — a CHECKED cast `dynValue as T`: validate
    * the dyn value's JSON dyn against `type` (a non-dyn, JSON-representable
    * IR type) and BUILD the typed value (+1), or THROW a catchable

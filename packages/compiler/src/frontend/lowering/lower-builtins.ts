@@ -4431,6 +4431,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       return { kind: "libCall", fn: "json.parse", args: [text], type: DYN, loc };
     }
     if (member === "stringify") {
+      // null: the space is a run-time value (argfx3), lowered after the value.
       const indent = stringifySpaceIndent(L, call);
       const argNode = call.arguments[0]!;
       let value = L.lowerExpr(argNode);
@@ -4463,7 +4464,12 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       if (value.type.kind === "jsval") {
         const json: IrExpr = { kind: "jsOp", op: "globalGet", name: "JSON", args: [], type: JSVAL, loc };
         const args: IrExpr[] = [json, value];
-        if (indent !== "") {
+        if (indent === null) {
+          args.push(
+            { kind: "jsOp", op: "nullLit", args: [], type: JSVAL, loc },
+            { kind: "jsMarshal", value: runtimeSpaceArg(L, call), type: JSVAL, loc },
+          );
+        } else if (indent !== "") {
           args.push(
             { kind: "jsOp", op: "nullLit", args: [], type: JSVAL, loc },
             { kind: "jsMarshal", value: { kind: "strLit", value: indent, type: STRING, loc }, type: JSVAL, loc },
@@ -4525,8 +4531,10 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         );
       }
       L.noteKeyEnumeration(value, loc, "JSON.stringify");
-      const node: IrExpr = { kind: "jsonStringify", value, type: STRING, loc };
-      if (indent !== "") {
+      const node: IrExpr = indent === null
+        ? { kind: "jsonStringify", value, type: STRING, loc, spaceArg: runtimeSpaceArg(L, call) }
+        : { kind: "jsonStringify", value, type: STRING, loc };
+      if (indent !== null && indent !== "") {
         // The compile-time-resolved indent rides as an extra property (the
         // node shape in ir/nodes.ts is unchanged); the backend re-indents
         // the compact serializer output with Node's gap algorithm.
@@ -4544,7 +4552,24 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * replacer/space spellings compile — the replacer must be `null` (or
    * `undefined`), the space a numeric/string literal or `null`/`undefined`;
    * everything else keeps the existing fence. */
-  function stringifySpaceIndent(L: Lowerer, call: ts.CallExpression): string {
+  /** The run-time space of a `JSON.stringify(v, null, space)` whose space is
+   * not a literal (argfx3): a number or a string value, read after the value.
+   * Any other space type keeps its fence. */
+  function runtimeSpaceArg(L: Lowerer, call: ts.CallExpression): IrExpr {
+    const spaceNode = call.arguments[2]!;
+    const kind = L.mapTypeOf(L.typeOf(spaceNode))?.kind;
+    if (kind === "f64") return L.lowerExprExpecting(spaceNode, F64);
+    if (kind === "string") return L.lowerExprExpecting(spaceNode, STRING);
+    L.noLowering(
+      "JSON.stringify with a space that is neither a number nor a string",
+      call,
+      "pass a number or a string as the space",
+    );
+  }
+
+  /** The compile-time indent of a JSON.stringify space: "" (compact), a
+   * literal indent string, or null when the space is a run-time value. */
+  function stringifySpaceIndent(L: Lowerer, call: ts.CallExpression): string | null {
     const fence = (): never =>
       L.noLowering(
         "JSON.stringify with replacer/space parameters",
@@ -4576,8 +4601,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (ts.isStringLiteral(space) || ts.isNoSubstitutionTemplateLiteral(space)) {
       return space.text.slice(0, 10); // first 10 code units, like Node
     }
-    fence();
-    throw new Error("unreachable"); // fence() never returns
+    return null; // a run-time space (runtimeSpaceArg)
   }
 
 /** The module specifier when `ident` is an import binding (named,

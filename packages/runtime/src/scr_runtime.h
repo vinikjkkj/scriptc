@@ -7213,6 +7213,10 @@ void scr_dyn_isl_tostr_buf(ScrJsonBuf *b, const ScrDyn *d);
  * DROP, array slots holding undefined print null (exactly Node). */
 void scr_jb_put_dyn(ScrJsonBuf *b, const ScrDyn *d);
 ScrStr *scr_jb_finish(ScrJsonBuf *b); /* returns +1; frees the buffer */
+/* argfx3: JSON.stringify's space at run time (a re-indent of the compact text;
+ * the compact text is borrowed, the result is +1). */
+ScrStr *scr_json_indent_num(const ScrStr *compact, double space);
+ScrStr *scr_json_indent_str(const ScrStr *compact, const ScrStr *space);
 
 void *scr_dyn_retain_v(void *d);
 void scr_dyn_release_v(void *d);

@@ -9838,6 +9838,8 @@ class LlEmitter {
         // frame); the result string is owned (+1). Never throws — except
         // the dyn root below.
         const v = this.emitExpr(e.value);
+        // A run-time space (argfx3): read after the value, before serializing.
+        const spaceTemp = e.spaceArg ? this.emitExpr(e.spaceArg) : undefined;
         let compact: { name: string; type: IrType };
         if (e.value.type.kind === "dyn") {
           // A dyn root: the runtime's dyn walker (scr_dyn_format_j — the
@@ -9875,6 +9877,13 @@ class LlEmitter {
         // clamp/truncate rules); the interned re-indenter rewrites the
         // compact text with Node's gap algorithm. Compact temp stays
         // frame-owned; the pretty string is a fresh +1.
+        if (spaceTemp && e.spaceArg) {
+          const isNum = e.spaceArg.type.kind === "f64";
+          this.declare(isNum ? `declare ptr @scr_json_indent_num(ptr, double)` : `declare ptr @scr_json_indent_str(ptr, ptr)`);
+          const t3 = B.tmp();
+          B.line(`${t3} = call ptr @${isNum ? "scr_json_indent_num" : "scr_json_indent_str"}(ptr ${compact.name}, ${isNum ? "double" : "ptr"} ${spaceTemp.name})`);
+          return this.own({ name: t3, type: e.type });
+        }
         const indent = (e as { indent?: string }).indent;
         if (indent === undefined || indent === "") return compact;
         const rewriter = this.walkers.jsonIndentHelper();
