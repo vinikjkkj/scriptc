@@ -153,20 +153,22 @@ const RUNS: readonly { name: string; src: string; stdout: string; exit: number }
       "true false true\n",
     exit: 0,
   },
+  {
+    // Was a pinned SC1101 refusal ("converting typed values to 'unknown'").
+    // The class value now crosses into an untyped slot, and an ERASED
+    // ambient class must not: the read throws Node's ReferenceError at the
+    // argument, before `take` runs. Recorded from Node v24.15.0 and built
+    // and run on both lanes (exit 1, empty stdout).
+    name: "an ambient class passed where unknown is expected throws at the argument",
+    src: DECLS + "function take(c: unknown): string { return typeof c }\nconsole.log('before')\nconsole.log(take(EC))\n",
+    stdout: "before\n",
+    exit: 1,
+  },
 ];
 
 /** Shapes that must still REFUSE. Their presence is what keeps the rule
  * from being satisfied by "answer something for everything". */
 const REFUSALS: readonly { name: string; code: string; fragment: string; src: string }[] = [
-  {
-    // `unknown` conversion is a pre-existing wall unrelated to this rule;
-    // it is pinned so a future change to it is noticed here rather than
-    // read as this rule regressing.
-    name: "an ambient class passed where unknown is expected",
-    code: "SC1101",
-    fragment: "converting typed values to 'unknown'",
-    src: DECLS + "function take(c: unknown): string { return typeof c }\nconsole.log(take(EC))\n",
-  },
   {
     name: "an ambient class stringified",
     code: "SC2001",

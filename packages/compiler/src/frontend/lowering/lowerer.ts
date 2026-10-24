@@ -6741,6 +6741,13 @@ export class Lowerer {
       // like any zero-capture function; `new P(...)` through the dyn value
       // then reaches [[Construct]]'s return rule (the object result
       // replaces the fresh `this`), so the program holds a real instance.
+      // An erased ambient class (`declare class C`) read as a value is the
+      // undefRead that ALWAYS throws Node's ReferenceError. Boxing a thunk
+      // here would drop that evaluation and hand the program a class
+      // nothing defines, so the throw is kept and only its type widens.
+      if (expr.kind === "libCall" && expr.fn === "global.undefRead" && expr.type.kind === "classval") {
+        return { ...expr, type: DYN };
+      }
       if (expr.type.kind === "classval") {
         const info = this.classes.get(expr.type.className);
         if (info && !info.generic && !info.def.abstract) {
