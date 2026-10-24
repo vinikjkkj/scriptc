@@ -90,6 +90,12 @@ const step4 = (): void => {
   for (let i = 0; i < 8; i++) if (i < 2 || i >= 5) { if (target4[i] === 0xbb) outside++; }
   order.push(`size-form outside=${outside}`);
   order.push("chain done");
+  // The print is armed from the chain's LAST callback. It used to be a 30 ms
+  // timer, and Node orders that timer against threadpool completions by no
+  // guarantee: on a loaded Windows host the timer beat the fifth fill and
+  // printed a short order (2735, 2026-10-21..24). Printing here is causal.
+  order.push("chain end");
+  console.log(order.join(" | "));
 };
 const step3 = (): void => {
   let head = 0;
@@ -129,7 +135,4 @@ process.nextTick((err: Error | null, buf: Uint8Array): void => {
   order.push(`tick-two:${err === null}:${buf.length}`);
 }, null, new Uint8Array(2));
 
-setTimeout(() => {
-  order.push("late timer");
-  console.log(order.join(" | "));
-}, 30);
+
