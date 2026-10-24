@@ -355,6 +355,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "url.protocol": { argTypes: [URL_T], result: STRING },
   "url.host": { argTypes: [URL_T], result: STRING },
   "url.hostname": { argTypes: [URL_T], result: STRING },
+  "url.origin": { argTypes: [URL_T], result: STRING },
   "url.pathname": { argTypes: [URL_T], result: STRING },
   "url.href": { argTypes: [URL_T], result: STRING },
   "url.fileURLToPathUrl": { argTypes: [URL_T], result: STRING },

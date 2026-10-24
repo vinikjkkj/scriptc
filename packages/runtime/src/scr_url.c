@@ -1378,3 +1378,34 @@ void scr_url_set_part(ScrUrl *u, double part, ScrStr *value) {
       return;
   }
 }
+
+/* WHATWG origin: the tuple origin (scheme://host[:port]) of a special
+ * non-file scheme; a blob: URL answers the origin of the URL its path
+ * parses to (when that is http or https); every other scheme, file
+ * included, is the opaque origin, serialized "null". */
+ScrStr *scr_url_origin(ScrUrl *u) {
+  bool is_blob = u->scheme->len == 4 && memcmp(u->scheme->data, "blob", 4) == 0;
+  if (is_blob) {
+    ScrStr *inner_src = scr_str_retain(u->path);
+    ScrUrl *inner = scr_url_new(inner_src);
+    scr_str_release(inner_src);
+    if (inner == NULL) {
+      scr_exc_clear(); /* an unparsable blob path is the opaque origin */
+      return scr_str_new("null", 4);
+    }
+    bool web = (inner->scheme->len == 4 && memcmp(inner->scheme->data, "http", 4) == 0) ||
+               (inner->scheme->len == 5 && memcmp(inner->scheme->data, "https", 5) == 0);
+    ScrStr *r = web ? scr_url_origin(inner) : scr_str_new("null", 4);
+    scr_url_release(inner);
+    return r;
+  }
+  if (!is_special_scheme(u->scheme->data, u->scheme->len) || url_is_file(u)) return scr_str_new("null", 4);
+  UrlBuf b;
+  ub_init(&b);
+  ub_append(&b, u->scheme->data, u->scheme->len);
+  ub_append(&b, "://", 3);
+  ScrStr *h = scr_url_host(u);
+  ub_append(&b, h->data, h->len);
+  scr_str_release(h);
+  return ub_take(&b);
+}
