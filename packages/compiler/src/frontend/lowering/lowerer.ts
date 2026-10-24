@@ -68,6 +68,8 @@ import {
   canonicalBuiltinModule,
   type StartupCrash,
   cjsExportAssignmentOf,
+  cjsExportTargetLiteral,
+  isCjsJsFile,
   cjsExportDiscardReason,
   fallbackDtsPath,
   sqliteDtsPath,
@@ -1437,6 +1439,11 @@ function bangMayReadUnassigned(decl: ts.VariableDeclaration): boolean {
   for (const st of stmts) scan(st);
   return hoisted;
 }
+/** A CommonJS-style TypeScript source (isCjsJsFile, not a .js file). */
+function isCjsTsSource(sf: ts.SourceFile): boolean {
+  return isCjsJsFile(sf) && !/\.(js|mjs|cjs|jsx)$/.test(sf.fileName);
+}
+
 export class Lowerer {
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
@@ -2425,7 +2432,27 @@ export class Lowerer {
    * property symbol exists at the attachment/use sites). */
   cjsModuleExportSymbol(sf: ts.SourceFile, name: string): ts.Symbol | undefined {
     const moduleSym = this.checker.getSymbolAtLocation(sf);
-    return moduleSym?.getExports().get(name as ts.__String);
+    const found = moduleSym?.getExports().get(name as ts.__String);
+    if (found !== undefined || !isCjsTsSource(sf)) return found;
+    // A CommonJS-style TypeScript module: tsc makes no export symbols for
+    // `module.exports = <table>`, so the table's own property symbol names
+    // the member (the same identity its declaration and reads resolve to).
+    for (const stmt of sf.statements) {
+      const cjs = cjsExportAssignmentOf(stmt);
+      if (cjs?.kind !== "table") continue;
+      const lit = cjs.obj ?? cjsExportTargetLiteral(cjs.expr.right, sf);
+      if (lit === null) continue;
+      for (const prop of lit.properties) {
+        if (
+          ts.isPropertyAssignment(prop) &&
+          (ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name)) &&
+          prop.name.text === name
+        ) {
+          return this.checker.getSymbolAtLocation(prop.name);
+        }
+      }
+    }
+    return undefined;
   }
 
   /** The local VALUE symbol behind a CJS export-table property symbol —
@@ -2522,7 +2549,7 @@ export class Lowerer {
    * program). Members read off such a binding resolve through the module's
    * export table exactly like a relative require; the declaration's class,
    * function and const symbols then cross to the twin in resolveValueSymbol. */
-  private bareRequireDepOf(from: ts.SourceFile, spec: string): ts.SourceFile | null {
+  bareRequireDepOf(from: ts.SourceFile, spec: string): ts.SourceFile | null {
     return (
       npmStaticDepSf7(this.program, from, spec) ?? resolveProjectImportSf7(this.program, from, spec)
     );

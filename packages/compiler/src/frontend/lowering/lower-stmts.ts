@@ -6419,6 +6419,28 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     // spelling's key node carries no symbol of its own, and its `.text` is
     // only the property name because the recognizer's literal gate said so.
     // Callers that pass nothing keep the identifier-node fallback exactly.
+    // `module.exports = <const>` with expression-valued entries: the export
+    // global of entry `k` assigns `<const>.k` (a record field read off the
+    // identifier, evaluated after the declaration). Null when the export
+    // target is not a plain identifier or the global is absent.
+    const resolvedFieldStore = (nameNode: ts.Identifier | ts.StringLiteral, prop: ts.PropertyAssignment): IrStmt | null => {
+      if (!ts.isIdentifier(cjs.expr.right)) return null;
+      const symbol = L.checker.getSymbolAtLocation(nameNode) ?? L.cjsModuleExportSymbol(cjs.expr.getSourceFile(), nameNode.text);
+      const g = symbol ? L.globalsBySymbol.get(symbol) : undefined;
+      if (!g) return null;
+      const obj = L.lowerExpr(cjs.expr.right);
+      const loc = locOf(prop);
+      if (obj.type.kind === "record") {
+        const read: IrExpr = { kind: "recordGet", obj, shapeId: obj.type.shapeId, field: nameNode.text, type: g.type, loc };
+        return { kind: "assign", localId: g.id, value: read, loc };
+      }
+      // A dyn-held const (a CommonJS object literal's storage): the entry is a
+      // checked-dynamic key read, narrowed to the export's own type.
+      if (obj.type.kind !== "dyn") return null;
+      const dynRead: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: nameNode.text, type: STRING, loc }, optional: true, value: obj, type: DYN, loc };
+      const value = g.type.kind === "dyn" ? dynRead : L.coerceInto(prop, dynRead, g.type);
+      return { kind: "assign", localId: g.id, value, loc };
+    };
     const assignExport = (nameNode: ts.Node, value: ts.Expression, staticName?: string): IrStmt => {
       const symbol =
         L.checker.getSymbolAtLocation(nameNode) ??
@@ -6499,6 +6521,27 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           if (names.every(laterRealOf)) return { kind: "block", body: [], loc };
         }
       }
+      // A member no global holds and no symbol names (a CJS-style TypeScript
+      // file: tsc makes no expando symbol there): the file's exports bag, as
+      // for a member attached from inside a function.
+      if (cjs.text !== null) {
+        const msym = L.cjsModuleExportSymbol(cjs.expr.getSourceFile(), cjs.text);
+        if ((msym === undefined || !L.globalsBySymbol.has(msym)) && cjsMemberOnlyInFunctions(L, msym) && L.cjsMemberExportClassSymbol(cjs.expr) === null) {
+          const bagSf = cjs.expr.getSourceFile();
+          const bag = cjsExportsBagOf(L, bagSf);
+          const lowered = ts.isNumericLiteral(cjs.value) ? L.lowerExpr(cjs.value) : L.lowerExprExpecting(cjs.value, DYN);
+          const value = lowered.type.kind === "dyn" ? lowered : L.coerceInto(cjs.value, lowered, DYN);
+          const bagRef = (): IrExpr => ({ kind: "varRef", localId: bag, type: DYN, loc });
+          return {
+            kind: "block",
+            body: [
+              { kind: "assign", localId: bag, value: { kind: "libCall", fn: "cls.propsEnsure", args: [bagRef()], type: DYN, loc }, loc },
+              { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [bagRef(), { kind: "strLit", value: cjs.text, type: STRING, loc }, value], type: VOID, loc }, loc },
+            ],
+            loc,
+          };
+        }
+      }
       return assignExport(cjs.name, cjs.value, cjs.text);
     }
     let tableObj = cjs.obj;
@@ -6572,11 +6615,20 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         // A resolved-target table's expression entries were EVALUATED by
         // the const's own declaration; assigning here would re-run them.
         if (resolvedTarget) {
-          L.unsupported(
-            "SC1090",
-            prop,
-            "expression-valued entries in an exported-const table (module.exports = table — bind the value to its own const and export the name)",
-          );
+          // The const's own declaration evaluated this entry ONCE. The export
+          // global takes the value through the const's record (a field read),
+          // never by re-evaluating the initializer: identity and side effects
+          // stay those of the declaration.
+          const fieldStore = resolvedFieldStore(prop.name, prop);
+          if (fieldStore === null) {
+            L.unsupported(
+              "SC1090",
+              prop,
+              "expression-valued entries in an exported-const table (module.exports = table — bind the value to its own const and export the name)",
+            );
+          }
+          body.push(fieldStore);
+          continue;
         }
         body.push(assignExport(prop.name, prop.initializer, prop.name.text));
         continue;
@@ -6868,7 +6920,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       stmtNode !== undefined &&
       ts.isExpressionStatement(stmtNode) &&
       ts.isSourceFile(stmtNode.parent) &&
-      isJsSourceFile(stmtNode.parent);
+      (isJsSourceFile(stmtNode.parent) || isCjsJsFile(stmtNode.parent));
     if (
       requireSpecOf(expr) !== null &&
       ts.isCallExpression(expr) &&
