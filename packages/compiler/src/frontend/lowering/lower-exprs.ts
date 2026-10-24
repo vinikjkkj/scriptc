@@ -21301,21 +21301,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return { kind: "closure", fnName: name, captures: [], type: funcOf(params, first.ret), loc };
   }
 
-/** True when `module.exports.<name>` has no symbol, or every place that
-   * attaches it sits inside a function body: no top-level statement registers
-   * storage for it, so the file's bag (cjsExportsBagOf) is its home. A member
+/** True when `module.exports.<name>` has no symbol, or no top-level statement
+   * registers storage for it (it is attached from a function body or a nested
+   * block): the file's bag (cjsExportsBagOf) is its home. A member
    * that is alias plumbing (an identifier export) is NOT bag material. */
   export function cjsMemberOnlyInFunctions(L: Lowerer, sym: ts.Symbol | undefined): boolean {
     if (sym === undefined) return true;
     if (L.cjsExportValueSymbol(sym) !== null) return false;
     const decls = L.checker.declarationsOf(sym);
     if (decls.length === 0) return true;
-    return decls.every((d) => {
-      for (let p: ts.Node | undefined = d.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
-        if (ts.isFunctionLike(p)) return true;
-      }
-      return false;
-    });
+    // Every caller has ALREADY missed the member's global (a top-level
+    // statement's storage). What remains is a member no top-level statement
+    // registers: attached from inside a function body, or from a nested block
+    // that is not a top-level statement (iconv-lite's `else` arm, which
+    // assigns `module.exports.encodeStream = module.exports.decodeStream =
+    // function`). Both get the bag; reads and writes take the same predicate,
+    // so they meet in one object.
+    return true;
   }
 
 /** The module-level dyn global that holds the members a CommonJS module attaches
