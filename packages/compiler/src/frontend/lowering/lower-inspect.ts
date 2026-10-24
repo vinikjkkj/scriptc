@@ -1160,6 +1160,20 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
     );
   }
 
+  // An absent instance (`this` of an unbound method, read as a value with no
+  // receiver) is a NULL pointer typed as the class: JavaScript's undefined.
+  if (t.kind === "object") {
+    body = [
+      {
+        kind: "if",
+        cond: { kind: "varRef", localId: "v.0", type: BOOL, nullTest: true, loc },
+        then: [ret(str("undefined", loc))],
+        else_: null,
+        loc,
+      },
+      ...body,
+    ];
+  }
   L.liftedFns.push({
     name,
     params: [
