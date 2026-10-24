@@ -666,6 +666,23 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     return { kind: "dynArrLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: DYN, loc };
   }
 
+/** A call through a FUNCTION VALUE whose type declares a rest slot (`restIn`,
+   * a `(...p: T[]) => R` value, or a parameter typed so) with a spread
+   * argument: the same completion a named call gets (completeArgs packs the
+   * spread's elements into a fresh rest array). Null when the call has no
+   * spread or the callee has no declared rest slot, so every other call keeps
+   * its own lowering. */
+  export function funcValueSpreadArgs(L: Lowerer, expr: ts.CallExpression, t: IrType,
+    loc: SrcLoc): IrExpr[] | null {
+    if (t.kind !== "func" || t.restIn !== true || t.rest === true) return null;
+    if (!expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    const shapes: ParamShape[] = t.params.map((type, i): ParamShape => ({
+      type,
+      mode: i === t.params.length - 1 ? "rest" : "required",
+    }));
+    return completeArgs(L, expr.arguments, shapes, loc, expr);
+  }
+
 /** CALL-SITE COMPLETION — the frontend half of the one-signature contract
    * (enforced by ir/validate.ts): every call lowers to exactly the callee's full ABI
    * parameter list, so backends and the validator stay count-exact and no
@@ -5473,7 +5490,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (callee) {
         if (callee.type.kind !== "func") L.badType(expr.expression, L.typeOf(expr.expression));
         const params = callee.type.params;
-        const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+        const args = funcValueSpreadArgs(L, expr, callee.type, loc) ?? expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
         for (let i = args.length; i < params.length; i++) {
           const absent = omittedArgFor(L, params[i]!, loc);
           if (!absent) {
@@ -5518,7 +5535,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
         if (callee.type.kind !== "func") L.badType(expr.expression, L.typeOf(expr.expression));
         const params = callee.type.params;
-        const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+        const args = funcValueSpreadArgs(L, expr, callee.type, loc) ?? expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
         for (let i = args.length; i < params.length; i++) {
           const absent = omittedArgFor(L, params[i]!, loc);
           if (!absent) {
@@ -5578,7 +5595,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
       if (callee.type.kind !== "func") L.badType(expr.expression, L.typeOf(expr.expression));
       const params = callee.type.params;
-      const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+      const args = funcValueSpreadArgs(L, expr, callee.type, loc) ?? expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
       for (let i = args.length; i < params.length; i++) {
         const absent = omittedArgFor(L, params[i]!, loc);
         if (!absent) {
@@ -6162,7 +6179,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const params = callee.type.params;
     const packed = restPackedArgs(L, expr, params, loc);
     if (packed) return finishKeyArm({ kind: "callValue", callee, args: packed, type: callee.type.ret, loc });
-    const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+    const args = funcValueSpreadArgs(L, expr, callee.type, loc) ?? expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
     // Optional-param func TYPES map their `x?: T` slots as `T | undefined`
     // ABI unions, and tsc admits calls that omit the optional suffix —
     // complete the missing trailing args with the interned undefined arm,
