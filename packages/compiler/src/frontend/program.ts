@@ -760,7 +760,10 @@ function exportsPreambleStmt7(
     definedProps.add(name.text);
     return true;
   }
-  // exports.a = (exports.b = ...)* <void 0 | literal | hoisted fn name>
+  // exports.a = (exports.b = ...)* <void 0 | literal | hoisted fn name | closure>
+  // A closure (arrow or function expression) is STORED, never called, so its
+  // body does not run while the store executes. Whoever later calls the stored
+  // value is an ordinary statement the TDZ scan sees (storedClosuresOf7).
   const targets: string[] = [];
   while (
     ts.isBinaryExpression(e) &&
@@ -778,8 +781,35 @@ function exportsPreambleStmt7(
   return (
     (ts.isVoidExpression(e) && ts.isNumericLiteral(e.expression)) ||
     preambleLiteral7(e) ||
-    (ts.isIdentifier(e) && hoistedFns.has(e.text))
+    (ts.isIdentifier(e) && hoistedFns.has(e.text)) ||
+    ts.isArrowFunction(e) ||
+    ts.isFunctionExpression(e)
   );
+}
+
+/** The closures a preamble statement STORES on the exports object (the
+ * `exports.a = (exports.b = ...)* <closure>` shape exportsPreambleStmt7
+ * admits): name -> closure node. Empty for every other statement. */
+function storedClosuresOf7(stmt: ts.Statement): Map<string, ts.Node> {
+  const out = new Map<string, ts.Node>();
+  if (!ts.isExpressionStatement(stmt)) return out;
+  let e: ts.Expression = stmt.expression;
+  const names: string[] = [];
+  while (
+    ts.isBinaryExpression(e) &&
+    e.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    ts.isPropertyAccessExpression(e.left) &&
+    ts.isIdentifier(e.left.expression) &&
+    e.left.expression.text === "exports" &&
+    ts.isIdentifier(e.left.name)
+  ) {
+    names.push(e.left.name.text);
+    e = e.right;
+  }
+  if (ts.isArrowFunction(e) || ts.isFunctionExpression(e)) {
+    for (const n of names) out.set(n, e);
+  }
+  return out;
 }
 
 /** Can code that runs BEFORE the require statement at index `k` reach one
@@ -833,8 +863,23 @@ function requireTdzRisk7(
     }
   }
   let hit: string | null = null;
-  const scanned = new Set<ts.Statement>();
-  const work: ts.Statement[] = [];
+  const scanned = new Set<ts.Node>();
+  const work: ts.Node[] = [];
+  // Closures the skipped preamble statements STORE on exports. Their bodies do
+  // not run at the store, but a later statement may call the stored value: a
+  // reference to the stored NAME queues its body, and a reference to exports
+  // or module (any call through the object) queues every one of them.
+  const storedByName = new Map<string, ts.Node>();
+  for (let i = 0; i < k; i++) {
+    const s = stmts[i]!;
+    if (preamble.has(s)) for (const [n, fn] of storedClosuresOf7(s)) storedByName.set(n, fn);
+  }
+  const enqueue = (n: ts.Node): void => {
+    if (!scanned.has(n)) {
+      scanned.add(n);
+      work.push(n);
+    }
+  };
   const scan = (root: ts.Node): void => {
     // Iterative walk (walkPreorder): a statement's subtree can be
     // pathologically deep (the binderBinaryExpressionStress chains), and
@@ -849,10 +894,12 @@ function requireTdzRisk7(
             return "stop";
           }
           const target = hoisted.get(sym);
-          if (target && !scanned.has(target)) {
-            scanned.add(target);
-            work.push(target);
-          }
+          if (target) enqueue(target);
+        }
+        const stored = storedByName.get(n.text);
+        if (stored !== undefined) enqueue(stored);
+        if (n.text === "exports" || n.text === "module") {
+          for (const fn of storedByName.values()) enqueue(fn);
         }
       }
       return undefined;
