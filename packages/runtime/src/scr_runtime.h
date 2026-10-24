@@ -6635,6 +6635,38 @@ const char *scr_dyn_objinst_cls(const ScrDyn *d);
  * uses. NULL for every other kind, for a position outside the
  * interval, and for a NULL box or descriptor; never throws. */
 void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls);
+/* ── the class unit's ops table ────────────────────────────────────────────
+ * Everything that consumes a class's member tables beyond the read side lives
+ * in scr_dyn_class.c, compiled only into a program with a class
+ * (moduleUsesDynClass); its emitted main calls scr_dyn_class_install(). The
+ * wrappers below are the names the always-linked units call: with no unit
+ * installed no class exists to answer, so each is a no-answer. */
+typedef struct ScrDynClassOps {
+  ScrDyn *(*class_box)(const ScrDynClass *cls);
+  const ScrDynClass *(*class_of_value)(const ScrDyn *d);
+  ScrDyn *(*error_class_box)(int kind);
+  ScrDyn *(*error_get)(ScrDyn *d, const ScrStr *key);
+  void (*error_set)(ScrDyn *d, const ScrStr *key, const ScrDyn *value);
+  bool (*error_has)(const ScrDyn *d, const char *key, size_t key_len);
+  bool (*error_delete)(ScrDyn *d, const ScrStr *key);
+  ScrDyn *(*fn_get)(const ScrDyn *d, const char *key, size_t key_len);
+  ScrDyn *(*construct)(const ScrDyn *fn, const ScrDyn *args, bool *handled);
+  bool (*set)(ScrDyn *recv, const ScrStr *key, const ScrDyn *value);
+  int (*objinst_delete)(ScrDyn *recv, const ScrStr *key);
+  ScrDyn *(*walk_error)(const ScrDyn *v, ScrObjWalk mode);
+} ScrDynClassOps;
+extern const ScrDynClassOps *scr_dyn_class_ops;
+void scr_dyn_class_install(void);
+/* The registered class descriptors (scr_dyn_objinst_registry's table). */
+const ScrDynClass *const *scr_dyn_class_registry(size_t *n);
+static inline ScrDyn *scr_dyn_class_box(const ScrDynClass *cls) { return scr_dyn_class_ops ? scr_dyn_class_ops->class_box(cls) : NULL; }
+static inline const ScrDynClass *scr_dyn_class_of_value(const ScrDyn *d) { return scr_dyn_class_ops ? scr_dyn_class_ops->class_of_value(d) : NULL; }
+static inline ScrDyn *scr_dyn_error_class_box(int kind) { return scr_dyn_class_ops ? scr_dyn_class_ops->error_class_box(kind) : NULL; }
+static inline ScrDyn *scr_dyn_error_member_get(ScrDyn *d, const ScrStr *key) { return scr_dyn_class_ops ? scr_dyn_class_ops->error_get(d, key) : NULL; }
+static inline void scr_dyn_error_member_set(ScrDyn *d, const ScrStr *key, const ScrDyn *value) { if (scr_dyn_class_ops) scr_dyn_class_ops->error_set(d, key, value); }
+static inline bool scr_dyn_error_member_has(const ScrDyn *d, const char *key, size_t key_len) { return scr_dyn_class_ops && scr_dyn_class_ops->error_has(d, key, key_len); }
+static inline bool scr_dyn_error_member_delete(ScrDyn *d, const ScrStr *key) { return scr_dyn_class_ops && scr_dyn_class_ops->error_delete(d, key); }
+
 /* ── a boxed instance of a class that roots in the runtime's Error hierarchy ──
  * The instance IS a ScrError (the prefix layout), so its message, name, code
  * and stack memo are the runtime's cells and its other own properties live in
@@ -6645,16 +6677,12 @@ void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls);
 bool scr_dyn_objinst_error_rooted(const ScrDyn *d);
 /* message / name / code / stack / a bag key: +1, the undefined singleton when
  * the error has no such property. */
-ScrDyn *scr_dyn_error_member_get(ScrDyn *d, const ScrStr *key);
 /* A write: a STRING message/name/code lands in its cell (and drops a bag
  * entry that would shadow it), a string `stack` replaces the memo, anything
  * else is an own property in the bag, which reads win over the cells. */
-void scr_dyn_error_member_set(ScrDyn *d, const ScrStr *key, const ScrDyn *value);
 /* `key in error`: the cells that exist, and the bag. */
-bool scr_dyn_error_member_has(const ScrDyn *d, const char *key, size_t key_len);
 /* `delete error[key]`: a bag key is removed (true); the four cells answer
  * false, which keeps the caller's loud ladder (a cell has no "removed"). */
-bool scr_dyn_error_member_delete(ScrDyn *d, const ScrStr *key);
 /* The loud ladder for every operation the box has no layout to answer
  * (keyed access, calls, iteration, JSON, structuredClone, inspect,
  * String()): "<what> on a dynamic <Class> is not supported yet". Always
@@ -6715,7 +6743,6 @@ ScrDyn *scr_dyn_shadow_method(const char *name);
  * Node throws, `new` running the class's synthesized `%dynNew`, and a read,
  * write or call of a name going to the class's statics table
  * (ScrDynClass.statics). +1 per call. */
-ScrDyn *scr_dyn_class_box(const ScrDynClass *cls);
 /* The same from a static class object (type classval:C, which may be C's
  * or a descendant's): the class is resolved by the object's preorder
  * position through the registry. */
@@ -6723,9 +6750,7 @@ ScrDyn *scr_dyn_class_value(const ScrClassObj *c);
 /* The class value of a BUILTIN error kind (Error, TypeError, ...): what
  * `e.constructor` of an error encoding answers. NULL for a kind with no box
  * (DOMException). +1. */
-ScrDyn *scr_dyn_error_class_box(int kind);
 /* The class descriptor behind a class-value box, or NULL when `d` is not one. */
-const ScrDynClass *scr_dyn_class_of_value(const ScrDyn *d);
 /* The keyed READ of an instance member (the emitted sc_dyn_key_get's
  * OBJINST arm): a data member's value, or a METHOD as a BOUND function
  * box minted over the very dispatch a CALL takes. +1, or NULL with

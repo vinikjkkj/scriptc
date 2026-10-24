@@ -10364,6 +10364,14 @@ export function moduleUsesAssert(mod: IrModule): boolean {
  * the binary (cc.ts; the assert gating
  * precedent — dispatch-free binaries keep their exact size class). Same
  * walk shape as moduleUsesZlib. */
+/** The program declares a class a dyn box can hold: links scr_dyn_class.c (the
+ * class-instance writes, deletes, class values and Error-rooted members) and
+ * its emitted main installs it. A program with no class never reaches any of
+ * it, so the always-linked scr_json.c carries none of that code. */
+export function moduleUsesDynClass(mod: IrModule): boolean {
+  return (mod.classes ?? []).some((c) => !c.name.startsWith("%") && canBoxClassIntoDyn(c.name));
+}
+
 export function moduleUsesDynInvoke(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {

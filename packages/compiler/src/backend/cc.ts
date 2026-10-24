@@ -303,6 +303,8 @@ export interface CcOptions {
    * compiles scr_dyn_invoke.c — the assert gating precedent, so
    * dispatch-free binaries keep their exact size class. */
   dynInvoke?: boolean;
+  /** The program declares a class a dyn box can hold (moduleUsesDynClass): compiles scr_dyn_class.c. */
+  dynClass?: boolean;
   /** The program holds a libCall of the checked-dynamic extensions unit (index.ts
    * detects them on the IR): compiles scr_dyn_ext.c — the fs callback forms,
    * Buffer.concat/isBuffer over dyn, loose equality over dyn, error errno reads. */
@@ -2438,6 +2440,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.assert || regex || opts.symbol ? [rt(join(rtDir, "scr_assert.c"))] : []),
     ...(opts.inspect ? [rt(join(rtDir, "scr_inspect.c"))] : []),
     ...(opts.dynInvoke ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),
+    ...(opts.dynClass ? [rt(join(rtDir, "scr_dyn_class.c"))] : []),
     ...(opts.dynExt ? [rt(join(rtDir, "scr_dyn_ext.c"))] : []),
     ...(opts.dc ? [rt(join(rtDir, "scr_dc.c"))] : []),
     ...(opts.dynAsync || opts.dynInvoke || opts.dc ? [rt(join(rtDir, "scr_async_dyn.c"))] : []),
