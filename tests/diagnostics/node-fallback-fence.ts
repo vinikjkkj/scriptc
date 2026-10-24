@@ -30,6 +30,4 @@ accessSync("/bin/sh", constants.X_OK);
 const tmp = mkdtempSync("/tmp/scr-");
 const raw = readFileSync("/etc/hosts").toString(tty ? "hex" : "latin1"); // the read and every encoding lower, a run-time one included (corpus 8755)
 
-import { deflateSync, gzipSync } from "node:zlib";
-const packed = deflateSync("data"); // string data: the wrap-it-first hint
-const zipped = gzipSync("data"); // beyond the lowered pair: fenced
+// zlib over string data lowers now (corpus 8840): nothing here to fence.
