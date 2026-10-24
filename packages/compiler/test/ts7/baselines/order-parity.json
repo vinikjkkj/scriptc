@@ -12755,6 +12755,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js": {
+   "order": [
+    "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8840-zlib-untyped-data-options-and-callbacks.cjs": {
    "order": [
     "<repo>/tests/corpus/8840-zlib-untyped-data-options-and-callbacks.cjs"
@@ -12767,9 +12773,27 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8841-util-types-kind-tests.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8841-util-types-kind-tests.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js": {
+   "order": [
+    "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8842-instanceof-regexp-and-array-over-untyped-operands.js": {
    "order": [
     "<repo>/tests/corpus/8842-instanceof-regexp-and-array-over-untyped-operands.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts"
    ],
    "diags": []
   },
@@ -12779,9 +12803,21 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts": {
+   "order": [
+    "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8844-meta-event-listener-with-an-untyped-event-name.cjs": {
    "order": [
     "<repo>/tests/corpus/8844-meta-event-listener-with-an-untyped-event-name.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js"
    ],
    "diags": []
   },
@@ -12791,10 +12827,22 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8846-url-setters.js": {
+   "order": [
+    "<repo>/tests/corpus/8846-url-setters.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8847-safe-load-of-a-builtin-module-and-a-typeof-probe-of-its-member/main.cjs": {
    "order": [
     "<repo>/tests/corpus/8847-safe-load-of-a-builtin-module-and-a-typeof-probe-of-its-member/tracing.cjs",
     "<repo>/tests/corpus/8847-safe-load-of-a-builtin-module-and-a-typeof-probe-of-its-member/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8847-url-origin-and-tojson.js": {
+   "order": [
+    "<repo>/tests/corpus/8847-url-origin-and-tojson.js"
    ],
    "diags": []
   },
@@ -12879,6 +12927,34 @@
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9000-quoted-module-table-keys.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9000-quoted-module-table-keys-modules/charsets.cjs",
+    "<repo>/tests/corpus/9000-quoted-module-table-keys.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9001-module-table-methods.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9001-module-table-methods-modules/tbl.cjs",
+    "<repo>/tests/corpus/9001-module-table-methods.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9002-exports-getters.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9002-exports-getters-modules/acc.cjs",
+    "<repo>/tests/corpus/9002-exports-getters.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9003-prototype-tostring-radix.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9003-prototype-tostring-radix-modules/long.cjs",
+    "<repo>/tests/corpus/9003-prototype-tostring-radix.cjs"
    ],
    "diags": []
   },
@@ -15365,55 +15441,6 @@
   "<repo>/tests/fixtures/node-types/streams.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  }
-,
-  "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js": {
-   "order": [
-    "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8841-util-types-kind-tests.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8841-util-types-kind-tests.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js": {
-   "order": [
-    "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts": {
-   "order": [
-    "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts": {
-   "order": [
-    "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js": {
-   "order": [
-    "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8846-url-setters.js": {
-   "order": [
-    "<repo>/tests/corpus/8846-url-setters.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8847-url-origin-and-tojson.js": {
-   "order": [
-    "<repo>/tests/corpus/8847-url-origin-and-tojson.js"
    ],
    "diags": []
   }
