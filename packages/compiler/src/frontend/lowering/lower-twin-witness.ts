@@ -40,10 +40,17 @@ function resolveDecl(L: Lowerer, e: ts.Expression): ts.Node | null {
   while (ts.isParenthesizedExpression(x)) x = x.expression;
   if (ts.isFunctionExpression(x) || ts.isArrowFunction(x) || ts.isClassExpression(x)) return x;
   if (!ts.isIdentifier(x)) return null;
-  const sym = L.checker.getSymbolAtLocation(x);
+  let sym = L.checker.getSymbolAtLocation(x);
+  // `const PromisePool = require('./lib/promise/pool.js')`: the binding is an
+  // alias of the required module's export, and the class lives behind
+  // `module.exports = PromisePool` over there.
+  if (sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0) sym = L.checker.getAliasedSymbol(sym);
   const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
   if (d === undefined) return null;
   if (ts.isFunctionDeclaration(d) || ts.isClassDeclaration(d)) return d;
+  // `module.exports = Cls` / `export = Cls`: the class is the assigned value.
+  if (ts.isBinaryExpression(d) && d.operatorToken.kind === ts.SyntaxKind.EqualsToken && d.left !== e) return resolveDecl(L, d.right);
+  if (ts.isExportAssignment(d)) return resolveDecl(L, d.expression);
   if (ts.isVariableDeclaration(d) && d.initializer !== undefined) return resolveDecl(L, d.initializer);
   return null;
 }
