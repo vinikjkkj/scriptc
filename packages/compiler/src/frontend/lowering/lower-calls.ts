@@ -1154,7 +1154,6 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     // resolved the call to. Every argument packs; the resolved overload's own
     // positions are checked by tsc, and a dyn element is checked at the read.
     if (calleeRestIn && params.length === 1 && params[0]!.kind === "dyn") {
-      if (expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
       return [dynRestPack(L, expr.arguments, expr, loc)];
     }
     const restT = params[params.length - 1]!;
