@@ -4688,7 +4688,7 @@ typedef struct ScrDynClassMember {
    * for-in walk report, in declaration order. False for methods: a class
    * method is non-enumerable in JS, which is why `Object.keys(new Box(7))`
    * is ["v"] and not ["v","get"]. */
-  unsigned char enumerable; /* 0 no, 1 yes, 2 yes UNLESS the value is undefined (a field whose undefined arm means "not assigned yet"), 3 as 2 and ALSO skipped by a lookup by name (an own property shadowing a method: the method row answers the name) */
+  unsigned char enumerable; /* 0 no, 1 yes, 2 yes UNLESS the value is undefined (a field whose undefined arm means "not assigned yet"), 3 as 2 and ALSO skipped by a lookup by name (an own property shadowing a method: the method row answers the name), 4 yes UNLESS the dyn slot holds the absent marker (a field `delete` removed) */
 } ScrDynClassMember;
 /* True when an enumerating walk must skip this member of `obj`: not
  * enumerable, a method, or an absent-until-assigned field still undefined. */
@@ -5805,6 +5805,9 @@ ScrDyn *scr_dyn_obj_entries(const ScrDyn *v);
  * like JS). scr_dyn_undefined returns THE immortal undefined value
  * (rc == SIZE_MAX — retains/releases are no-ops). */
 ScrDyn *scr_dyn_undefined(void);
+/* The absent marker (see scr_json.c): an UNDEF-kind node that marks a
+ * DELETED field of a class instance. Immortal. */
+ScrDyn *scr_dyn_absent(void);
 ScrDyn *scr_dyn_new_null(void);
 ScrDyn *scr_dyn_new_bool(bool b);
 ScrDyn *scr_dyn_new_num(double n);

@@ -182,7 +182,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         );
         entries.push(
           `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
-            `&${sym}, NULL, ${row.absentWhenUndefined ? 2 : 1} },`,
+            `&${sym}, NULL, ${row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1} },`,
         );
         continue;
       }

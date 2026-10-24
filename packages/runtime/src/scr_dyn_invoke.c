@@ -1270,7 +1270,8 @@ bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t ke
    * FALSE, at exit 0, with no diagnostic. */
   if (recv->kind == SCR_DYN_OBJINST) {
     if (scr_dyn_objinst_error_rooted(recv) && scr_dyn_error_member_has(recv, key, key_len)) return true;
-    return scr_dyn_objinst_member(recv, key, key_len) != NULL;
+    const ScrDynClassMember *hm = scr_dyn_objinst_member(recv, key, key_len);
+    return hm != NULL && !(hm->enumerable == 4 && scr_dyn_member_hidden(hm, recv->v.inst.o));
   }
   (void)key_len; /* the remaining tests are on the NUL-terminated spelling */
   return dyn_kind_knows(recv, key);

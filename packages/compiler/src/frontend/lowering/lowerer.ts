@@ -503,7 +503,10 @@ export function dynPinWanted(
   const sk = typeKey(slot);
   // A union slot admits what its arms are; any other slot admits its own
   // type. An untyped value ("dyn") may be anything, so it contradicts both.
-  return written.some((w) => w === "dyn" || (armKeys !== null ? !armKeys.has(w) : w !== sk));
+  // A DELETE ("%absent") needs a slot that can hold the absent marker, which
+  // only a dyn slot can: every other slot type, a union with an undefined arm
+  // included, would answer the removed key's list wrong.
+  return written.some((w) => w === "dyn" || w === "%absent" || (armKeys !== null ? !armKeys.has(w) : w !== sk));
 }
 
 /** The source edits of a pin reload: per file (the program's own spelling of
@@ -3966,7 +3969,7 @@ export class Lowerer {
       // `delete x[k]` through an untyped receiver is a write of undefined.
       if (o.kind === "libCall" && (o as { fn?: unknown }).fn === "dyn.keyDelete") {
         const a = (o as unknown as { args: IrExpr[] }).args;
-        if (a[1] !== undefined) this.noteDynKeySet([a[0]!, a[1], { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: a[1].loc }]);
+        if (a[1] !== undefined) this.noteDynKeySet([a[0]!, a[1], { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: a[1].loc }], "%absent");
       }
       for (const v of Object.values(n as Record<string, unknown>)) walk(v);
     };
@@ -3978,11 +3981,11 @@ export class Lowerer {
    * spelling (a literal, or computed) and the type of the value written. A
    * value that was typed and boxed on the way in (a dynFrom) is recorded at
    * its own type; any other value is untyped ("dyn"). */
-  private noteDynKeySet(args: IrExpr[]): void {
+  private noteDynKeySet(args: IrExpr[], forceKey?: string): void {
     const key = args[1];
     const val = args[2];
     if (key === undefined || val === undefined) return;
-    const tk = val.kind === "dynFrom" ? typeKey(val.value.type) : val.kind === "unitLit" ? typeKey(val.type) : "dyn";
+    const tk = forceKey ?? (val.kind === "dynFrom" ? typeKey(val.value.type) : val.kind === "unitLit" ? typeKey(val.type) : "dyn");
     if (key.kind === "strLit") {
       let s = this.dynWriteByName.get(key.value);
       if (s === undefined) this.dynWriteByName.set(key.value, (s = new Set()));

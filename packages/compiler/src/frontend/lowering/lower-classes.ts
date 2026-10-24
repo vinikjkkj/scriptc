@@ -7347,27 +7347,7 @@ export function dynDelFn(L: Lowerer, info: ClassInfo): IrFunction | null {
     kind: "strEq", negated: false, left: keyRef(), right: { kind: "strLit", value: name, type: STRING, loc }, type: BOOL, loc,
   });
   const body: IrStmt[] = [];
-  const seen = new Set<string>();
   const errorCells = errorPrefixCells(info);
-  for (const f of info.def.fields) {
-    if (f.name.startsWith("%") || f.name.startsWith("#") || seen.has(f.name)) continue;
-    if (errorCells?.has(f.name) === true) continue;
-    let undef: IrExpr | null = null;
-    if (f.type.kind === "dyn") {
-      undef = dynUndefinedExpr(loc);
-    } else if (f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0) {
-      undef = L.coerceToExpected({ kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, f.type);
-    }
-    if (undef === null) continue;
-    seen.add(f.name);
-    body.push({
-      kind: "if",
-      cond: keyIs(f.name),
-      then: [{ kind: "fieldSet", obj: thisRef(), className, field: f.name, value: undef, loc }, ret(true)],
-      else_: null,
-      loc,
-    });
-  }
   if (info.hasPropsTable === true && errorCells === null) {
     body.push(
       {

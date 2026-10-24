@@ -1733,6 +1733,18 @@ ScrDyn *scr_dyn_undefined(void) {
   return &undef;
 }
 
+/* THE absent marker: another immortal UNDEF-kind node, distinct from
+ * `undefined` by POINTER alone. A class instance has a fixed layout, so a
+ * DELETED field is a dyn slot holding this node: every read sees the
+ * undefined kind (typeof, ===, ToString all test the kind), and only the
+ * own-key surfaces (Object.keys, `in`, hasOwn, spread, JSON) ask the
+ * pointer -- which is what lets `delete x.v` followed by Object.keys(x)
+ * answer Node's list, where a plain undefined write would still list `v`. */
+ScrDyn *scr_dyn_absent(void) {
+  static ScrDyn absent = { SIZE_MAX, SCR_DYN_UNDEF, { false } };
+  return &absent;
+}
+
 /* THE accessor SLOT: a second immortal node, distinct from `undefined`
  * by POINTER and by nothing else.
  *
@@ -3376,10 +3388,13 @@ size_t scr_dyn_objinst_member_count(const ScrDyn *d) {
 
 bool scr_dyn_member_hidden(const ScrDynClassMember *m, void *obj) {
   if (!m->enumerable || m->get == NULL) return true;
-  if (m->enumerable != 2 && m->enumerable != 3) return false;
+  if (m->enumerable < 2) return false;
   ScrDyn *v = m->get(obj); /* a plain slot read: no side effects */
   if (v == NULL) return false; /* threw: the caller's own read reports it */
-  bool absent = v->kind == SCR_DYN_UNDEF;
+  /* 2 (and 3): a field whose undefined arm means "not assigned yet". 4: a dyn slot,
+   * absent only when `delete` stored the absent marker (an explicit
+   * `x.v = undefined` is an own property and stays listed). */
+  bool absent = m->enumerable != 4 ? v->kind == SCR_DYN_UNDEF : v == scr_dyn_absent();
   scr_dyn_release(v);
   return absent;
 }
@@ -7181,6 +7196,22 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
      * layout can hold -- a field whose slot admits undefined takes the
      * undefined arm, a run-time property table loses its key -- and
      * answers false for the rest, which fall to the ladder below. */
+    /* A field held in a dyn slot is deleted by storing the ABSENT marker
+     * (scr_dyn_absent) through the class's own checked write: every read
+     * still sees undefined, and the own-key surfaces see a removed key. */
+    {
+      const ScrDynClassMember *fm = scr_dyn_objinst_member(recv, key->data, key->len);
+      const ScrDynClassMember *ds = scr_dyn_objinst_member(recv, "%dynSet", 7);
+      if (fm != NULL && fm->enumerable == 4 && ds != NULL && ds->call != NULL) {
+        ScrDyn *kd = scr_dyn_new_str((ScrStr *)key);
+        ScrDyn *av[2] = { kd, scr_dyn_absent() };
+        ScrDyn *r = ds->call(recv->v.inst.o, av, 2, "'delete'");
+        scr_dyn_release(kd);
+        if (r == NULL) return false; /* the store threw */
+        scr_dyn_release(r);
+        return true;
+      }
+    }
     const ScrDynClassMember *dd = scr_dyn_objinst_member(recv, "%dynDel", 7);
     if (dd != NULL && dd->call != NULL) {
       ScrDyn *kd = scr_dyn_new_str((ScrStr *)key);
@@ -7317,7 +7348,9 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
    * table still answers false, exactly as it did. */
   if (v->kind == SCR_DYN_OBJINST) {
     if (scr_dyn_objinst_error_rooted(v) && scr_dyn_error_member_has(v, key->data, key->len)) return true;
-    return scr_dyn_objinst_member(v, key->data, key->len) != NULL;
+    const ScrDynClassMember *hm = scr_dyn_objinst_member(v, key->data, key->len);
+    /* a field `delete` removed is not a property any more */
+    return hm != NULL && !(hm->enumerable == 4 && scr_dyn_member_hidden(hm, v->v.inst.o));
   }
   return false;
 }
@@ -7571,6 +7604,14 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
      * static_copy stance). */
     const ScrDynClassMember *ds = scr_dyn_objinst_member(recv, "%dynSet", 7);
     if (ds != NULL && ds->call != NULL) {
+      /* Writing a field `delete` removed re-creates the property at the END
+       * of the key order in JS; the layout keeps declaration order, so the
+       * list would come out wrong. Loud rather than reordered. */
+      const ScrDynClassMember *rm = scr_dyn_objinst_member(recv, key->data, key->len);
+      if (rm != NULL && rm->enumerable == 4 && value != scr_dyn_absent() && scr_dyn_member_hidden(rm, recv->v.inst.o)) {
+        scr_dyn_objinst_fence(recv, "re-adding a deleted field");
+        return;
+      }
       ScrDyn *kd = scr_dyn_new_str((ScrStr *)key);
       ScrDyn *av[2] = { kd, value };
       ScrDyn *r = ds->call(recv->v.inst.o, av, 2, "a property write");
@@ -12055,7 +12096,7 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
      * be a key that table holds, and "false" would be a confident wrong
      * answer where the fence is an honest one. */
     const ScrDynClassMember *cm = scr_dyn_objinst_member(v, key->data, key->len);
-    if (cm != NULL) return cm->enumerable;
+    if (cm != NULL) return cm->enumerable && !(cm->get != NULL && scr_dyn_member_hidden(cm, v->v.inst.o) && cm->enumerable == 4);
     if (scr_dyn_objinst_enumerable(v)) return false;
     return scr_dyn_objinst_fence(v, "Object.hasOwn");
   }

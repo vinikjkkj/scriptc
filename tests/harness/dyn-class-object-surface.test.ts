@@ -46,10 +46,11 @@
  *     display name a compiler name, and `util.inspect` print
  *     `pc32.Box { v: 7 }` where Node prints `Box { v: 7 }`.
  *
- * THE TWO ROWS THAT DO NOT ANSWER are here on purpose, pinned as named
- * gaps: a class instance has a FIXED LAYOUT, so a property ADD and a
- * property DELETE have no representation. Both refuse loudly. If one goes
- * green the layout gained a side table and this file says so out loud.
+ * THE ROW THAT DOES NOT ANSWER is here on purpose, pinned as a named gap:
+ * a class instance has a FIXED LAYOUT, so a property ADD has no
+ * representation and refuses loudly. (A property DELETE answers: the slot
+ * holds an absent marker.) If the ADD goes green the layout gained a side
+ * table and this file says so out loud.
  */
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
@@ -108,7 +109,10 @@ const SURFACES: readonly { name: string; body: string; gap: string | null }[] = 
   {
     name: "a field DELETED off the instance",
     body: "delete x.v; return JSON.stringify(Object.keys(x))",
-    gap: "a class instance has a fixed layout and no representation for a removed field",
+    // ANSWERS NOW. A deleted field is a dyn slot holding the absent marker
+    // (scr_dyn_absent): every read sees undefined, and the own-key surfaces
+    // (keys, in, hasOwn, JSON, spread) see a removed key, byte for byte.
+    gap: null,
   },
   {
     name: "an EXPANDO written onto the instance",
