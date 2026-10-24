@@ -15230,9 +15230,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8841-util-types-kind-tests.js": {
+  "<repo>/tests/corpus/8841-util-types-kind-tests.cjs": {
    "order": [
-    "<repo>/tests/corpus/8841-util-types-kind-tests.js"
+    "<repo>/tests/corpus/8841-util-types-kind-tests.cjs"
    ],
    "diags": []
   },
