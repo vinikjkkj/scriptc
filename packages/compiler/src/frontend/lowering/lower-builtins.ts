@@ -4467,7 +4467,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         if (indent === null) {
           args.push(
             { kind: "jsOp", op: "nullLit", args: [], type: JSVAL, loc },
-            { kind: "jsMarshal", value: runtimeSpaceArg(L, call), type: JSVAL, loc },
+            { kind: "jsMarshal", value: runtimeSpaceArg(L, call, false), type: JSVAL, loc },
           );
         } else if (indent !== "") {
           args.push(
@@ -4532,7 +4532,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       }
       L.noteKeyEnumeration(value, loc, "JSON.stringify");
       const node: IrExpr = indent === null
-        ? { kind: "jsonStringify", value, type: STRING, loc, spaceArg: runtimeSpaceArg(L, call) }
+        ? { kind: "jsonStringify", value, type: STRING, loc, spaceArg: runtimeSpaceArg(L, call, true) }
         : { kind: "jsonStringify", value, type: STRING, loc };
       if (indent !== null && indent !== "") {
         // The compile-time-resolved indent rides as an extra property (the
@@ -4555,11 +4555,22 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
   /** The run-time space of a `JSON.stringify(v, null, space)` whose space is
    * not a literal (argfx3): a number or a string value, read after the value.
    * Any other space type keeps its fence. */
-  function runtimeSpaceArg(L: Lowerer, call: ts.CallExpression): IrExpr {
+  function runtimeSpaceArg(L: Lowerer, call: ts.CallExpression, staticRoot: boolean): IrExpr {
     const spaceNode = call.arguments[2]!;
-    const kind = L.mapTypeOf(L.typeOf(spaceNode))?.kind;
+    const mapped = L.mapTypeOf(L.typeOf(spaceNode));
+    const kind = mapped?.kind;
     if (kind === "f64") return L.lowerExprExpecting(spaceNode, F64);
     if (kind === "string") return L.lowerExprExpecting(spaceNode, STRING);
+    // argfx4: a space of dyn type (`any`, `unknown`) or a union of number,
+    // string and undefined arms is a DYN space: the backend reads its tag at
+    // run time (number re-indents, string re-indents, anything else is
+    // compact, as Node). A union is boxed to dyn here; any is already dyn.
+    // Only the static-root form takes it: the engine-root form marshals the
+    // space itself and keeps its fence.
+    if (staticRoot && kind === "dyn") return L.lowerExprExpecting(spaceNode, DYN);
+    if (staticRoot && mapped?.kind === "union" && L.dynConvertible(mapped)) {
+      return { kind: "dynFrom", value: L.lowerExpr(spaceNode), type: DYN, loc: locOf(call) };
+    }
     L.noLowering(
       "JSON.stringify with a space that is neither a number nor a string",
       call,

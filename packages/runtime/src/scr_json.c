@@ -12184,6 +12184,12 @@ ScrStr *scr_json_indent_num(const ScrStr *compact, double space) {
   return scr_json_reindent(compact, gap, (size_t)n);
 }
 
+ScrStr *scr_json_indent_dyn(const ScrStr *compact, const ScrDyn *space) {
+  if (space->kind == SCR_DYN_NUM) return scr_json_indent_num(compact, space->v.num);
+  if (space->kind == SCR_DYN_STR) return scr_json_indent_str(compact, space->v.str);
+  return scr_json_indent_num(compact, 0);
+}
+
 ScrStr *scr_json_indent_str(const ScrStr *compact, const ScrStr *space) {
   /* The first 10 UTF-16 code units: a 4-byte (astral) character counts two.
    * An astral character that straddles the tenth unit keeps its HIGH

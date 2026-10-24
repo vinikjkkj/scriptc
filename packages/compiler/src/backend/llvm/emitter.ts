@@ -9878,9 +9878,12 @@ class LlEmitter {
         // frame-owned; the pretty string is a fresh +1.
         if (spaceTemp && e.spaceArg) {
           const isNum = e.spaceArg.type.kind === "f64";
-          this.declare(isNum ? `declare ptr @scr_json_indent_num(ptr, double)` : `declare ptr @scr_json_indent_str(ptr, ptr)`);
+          const isDyn = e.spaceArg.type.kind === "dyn";
+          const fn = isNum ? "scr_json_indent_num" : isDyn ? "scr_json_indent_dyn" : "scr_json_indent_str";
+          const argTy = isNum ? "double" : "ptr";
+          this.declare(`declare ptr @${fn}(ptr, ${argTy})`);
           const t3 = B.tmp();
-          B.line(`${t3} = call ptr @${isNum ? "scr_json_indent_num" : "scr_json_indent_str"}(ptr ${compact.name}, ${isNum ? "double" : "ptr"} ${spaceTemp.name})`);
+          B.line(`${t3} = call ptr @${fn}(ptr ${compact.name}, ${argTy} ${spaceTemp.name})`);
           return this.own({ name: t3, type: e.type });
         }
         const indent = (e as { indent?: string }).indent;
