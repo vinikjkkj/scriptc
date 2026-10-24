@@ -12061,6 +12061,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8740-annotated-any-container-beats-its-seed.js": {
+   "order": [
+    "<repo>/tests/corpus/8740-annotated-any-container-beats-its-seed.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8741-seeded-containers-take-any-type-through-untyped-code.js": {
+   "order": [
+    "<repo>/tests/corpus/8741-seeded-containers-take-any-type-through-untyped-code.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8742-seeded-containers-held-in-fields-returns-and-lets.js": {
+   "order": [
+    "<repo>/tests/corpus/8742-seeded-containers-held-in-fields-returns-and-lets.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8743-seeded-weak-containers-take-any-type.js": {
+   "order": [
+    "<repo>/tests/corpus/8743-seeded-weak-containers-take-any-type.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8744-seeded-containers-that-stay-typed.js": {
+   "order": [
+    "<repo>/tests/corpus/8744-seeded-containers-that-stay-typed.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8745-seeds-that-are-not-array-literals.js": {
+   "order": [
+    "<repo>/tests/corpus/8745-seeds-that-are-not-array-literals.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8746-seeded-container-store-reaches-only-through-untyped-code.js": {
+   "order": [
+    "<repo>/tests/corpus/8746-seeded-container-store-reaches-only-through-untyped-code.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8747-seeded-containers-of-records-take-any-type.js": {
+   "order": [
+    "<repo>/tests/corpus/8747-seeded-containers-of-records-take-any-type.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8780-tsc-downleveled-private-members.js": {
    "order": [
     "<repo>/tests/corpus/8780-tsc-downleveled-private-members.js"
