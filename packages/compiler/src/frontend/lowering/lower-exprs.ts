@@ -23,7 +23,7 @@ import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, 
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
 import { absentRead, lowerLyingPlus, lowerNullablePointerChain, nullableFieldRead, presenceComparison } from "./lower-absent.js";
-import { arrayAtOf, BYTES_CTORS, lowerBufferFlavorTest, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
+import { arrayAtOf, BYTES_CTORS, lowerBufferFlavorTest, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, mapIterDrainHelperCall, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
 import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf } from "./lower-modules.js";
@@ -8368,6 +8368,19 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
             type: arrayOf(F64),
             loc: locOf(el),
           };
+        }
+        // `[...m]` on a typed Map: the entries snapshot, exactly what
+        // `[...m.entries()]` drains (insertion order, [key, value] pairs).
+        // The literal's element must be the [K, V] tuple of this map's
+        // key and value types; anything else keeps the spread fence below.
+        if (src.type.kind === "map" && type.elem.kind === "record") {
+          const tupleShape = L.shapes.get(type.elem.shapeId);
+          const f0 = tupleShape?.fields.find((f) => f.name === "0");
+          const f1 = tupleShape?.fields.find((f) => f.name === "1");
+          if (tupleShape?.tuple && tupleShape.fields.length === 2 && f0 && f1 &&
+              typeEquals(f0.type, src.type.key) && typeEquals(f1.type, src.type.value)) {
+            src = mapIterDrainHelperCall(L, src, src.type, "entries", type.elem, type.elem, locOf(el));
+          }
         }
         // A same-family array whose ELEMENT lifts (string[] into a
         // (string | symbol)[] literal — per-element wrap/width copy):
