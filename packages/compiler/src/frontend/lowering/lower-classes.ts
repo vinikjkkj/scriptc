@@ -911,7 +911,20 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
   if (!ts.isReturnStatement(s) || s.expression === undefined) return null;
   let e: ts.Expression = s.expression;
   while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isTypeAssertion(e)) e = e.expression;
-  return ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e) ? e : null;
+  if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return e;
+  // `this.constructor.name` — the idiom that makes every subclass answer to its OWN
+  // name. It is constant per instance (the dynamic class never changes), so stamping
+  // the slot at construction is again Node's answer; the initializer reads the
+  // instance's vtable name (class.instanceName), which the most-derived class's
+  // allocation has already installed when the chain's initializers run.
+  if (
+    ts.isPropertyAccessExpression(e) && e.name.text === "name" && !e.questionDotToken &&
+    ts.isPropertyAccessExpression(e.expression) && e.expression.name.text === "constructor" &&
+    !e.expression.questionDotToken && e.expression.expression.kind === ts.SyntaxKind.ThisKeyword
+  ) {
+    return e;
+  }
+  return null;
 }
 
 /** The function-like `rhs` names, for `C.prototype.m = rhs`: a class METHOD
