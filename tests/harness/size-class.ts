@@ -2372,7 +2372,19 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
  * against the branch; CI measured 134,358). It is now its own unit, linked and installed only into a module that converts a
  * number/boolean/string/dyn-element array to dyn (moduleUsesDynView); the always-linked residue is a pointer test per reader.
  * Same build: regex .text 132,838 -> 132,870 (+32), regex-free 72,854 -> 72,854, files 215,552 -> 215,552. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 132_806 : null;
+/* 2026-10-24 (dynprop): RE-RECORDED 132_806 -> 133_526 (+720; +656 over main 965533ca1's measured 132,870; zig x86_64-windows-gnu
+ * cross build, --backend c; the regex-free program stays 72,854). What is gated: everything that needs a program CLASS (writes,
+ * deletes, class values, Error-rooted members, the class constructors) is scr_dyn_class.c, linked and installed (scr_dyn_class_install)
+ * only into a module that declares a boxable class (moduleUsesDynClass); first measured un-gated it was +784 over e9a9ab3e5's
+ * 132,838 and gating moved only part of it, because the remainder is not class code. What stays always-linked, measured per
+ * function on scr_json.c (-Os, windows-gnu): (1) behaviours a CLASS-FREE program reaches through an Error caught into an untyped
+ * slot -- `e.stack` read and write on an error encoding (scr_dyn_obj_key_get +209, scr_dyn_key_set arm), `e.constructor` of one,
+ * and the constructor option's non-enumerable `cause` (scr_dyn_from_error +89, scr_error_prop_get +48, scr_error_set_cause +107
+ * where linked); (2) the pointer tests that send an OBJINST to the class unit from the keyed readers/writers (has_key, has_own,
+ * key_delete, objwalk, to_string, fn_get, construct, instanceof: 40-100 bytes each at -Os, the call and its argument setup),
+ * plus the absent marker (13) and the registry accessor (23). An inline wrapper through the ops table was tried for the
+ * error-rooted test and saved only 39 bytes. Not gated further because (1) is the brief's own defect class for class-free code. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_526 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
