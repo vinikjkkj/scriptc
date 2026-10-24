@@ -3155,7 +3155,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                             // rides SCR_DYN_BYTES too. One runtime
                             // predicate, shared with the LLVM lane.
                             `scr_dyn_is_u8array(${d.name})`
-                          : e.test === "map" || e.test === "set" || e.test === "date"
+                          : e.test === "map" || e.test === "set" || e.test === "date" || e.test === "regex"
                             ? // `instanceof Map` / `instanceof Set` on an
                               // unknown value: SCR_DYN_MAP is shared by
                               // both, so the kind compare alone cannot
