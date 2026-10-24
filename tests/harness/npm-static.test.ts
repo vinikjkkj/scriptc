@@ -230,6 +230,8 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     ["latemissing", "latemissing-cli.ts"],
     // bindmethod: a class method taken as a bound value (this.method.bind(this)) when its parameters are untyped
     ["bindmethod", "bindmethod-cli.ts"],
+    // protogeneric: Class.prototype.m.call/.apply over methods with untyped parameters (non-virtual, on a dynamic or typed receiver), and the prototype read of such a method is a function
+    ["protogeneric", "protogeneric-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
