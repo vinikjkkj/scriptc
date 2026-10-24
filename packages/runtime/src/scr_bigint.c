@@ -840,13 +840,26 @@ ScrBigInt *scr_big_from_str(const ScrStr *s) {
  *                                   string arm)
  * The string arm is scr_big_from_str (the literal parser scr_big_parse skips
  * characters it does not know, so it only ever sees text already validated). */
-ScrBigInt *scr_big_from_dyn(const ScrDyn *d) {
+static ScrBigInt *scr_big_to_bigint_impl(const ScrDyn *d, bool strict) {
   if (d != NULL) {
     switch (d->kind) {
     case SCR_DYN_BIG:
       /* The identity, exactly as the static BigInt(bigint) spelling. */
       return scr_big_retain(scr_dyn_big_of((ScrDyn *)d));
     case SCR_DYN_NUM:
+      if (strict) {
+        /* ToBigInt (not the BigInt() function): a number has no conversion.
+         * BigInt.asIntN(32, 5) is "Cannot convert 5 to a BigInt". */
+        char num[32];
+        size_t numlen = scr_f64_to_str(d->v.num, num);
+        ScrJsonBuf b;
+        scr_jb_init(&b);
+        scr_jb_puts(&b, "Cannot convert ");
+        scr_jb_write(&b, num, numlen);
+        scr_jb_puts(&b, " to a BigInt");
+        scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+        return NULL;
+      }
       /* scr_big_from_f64 owns the integrality RangeError, so the number
        * arm and the static BigInt(number) arm are literally one code
        * path and cannot disagree. */
@@ -878,6 +891,13 @@ ScrBigInt *scr_big_from_dyn(const ScrDyn *d) {
   scr_str_release(str);
   return r;
 }
+
+ScrBigInt *scr_big_from_dyn(const ScrDyn *d) { return scr_big_to_bigint_impl(d, false); }
+
+/* ToBigInt proper (ECMA-262 7.1.13), the conversion BigInt.asIntN/asUintN
+ * apply to their value: the BigInt() function's table except that a number
+ * is a TypeError. */
+ScrBigInt *scr_big_to_bigint(const ScrDyn *d) { return scr_big_to_bigint_impl(d, true); }
 
 /* ── the checked-dynamic crossing (SCR_DYN_BIG) ───────────────────────
  *
