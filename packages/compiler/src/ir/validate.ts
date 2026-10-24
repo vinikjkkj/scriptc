@@ -171,6 +171,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "buffer.fromDynEnc": { argTypes: [DYN, DYN], result: BYTES_U8 },
   "dyn.defineProps": { argTypes: [DYN, DYN], result: DYN },
   "dyn.defineProp": { argTypes: [DYN, STRING, DYN], result: DYN },
+  "dyn.captureStack": { argTypes: [DYN], result: VOID },
   // The per-instance property table of a COMPILED class instance: the
   // `%props` field's ensure/define/has/get. `cls.propsDefine` takes the
   // table, the run-time key, the descriptor, whether the key names a

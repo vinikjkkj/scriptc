@@ -4193,3 +4193,72 @@ static const ScrDynProxyOps scr_px_ops = {
 };
 
 static void scr_dyn_proxy_install(void) { scr_dyn_proxy_ops_ptr = &scr_px_ops; }
+
+/* Error.captureStackTrace(target) over a dyn OBJECT: V8 formats the header
+ * AT THE CALL (not lazily, unlike a real Error) as ErrorUtils::ToString does
+ * over the target's `name` (absent: "Error") and `message` (absent: ""),
+ * with the object's own toString ignored, and installs `stack` as an OWN
+ * NON-ENUMERABLE writable configurable data property. A zero-frame capture
+ * is the whole of what this runtime can produce, which is the header (the
+ * frame lines are V8's and a compiled binary has none). Node's answers for
+ * the non-objects: TypeError "invalid_argument". Borrowed target; a pending
+ * catchable throw on refusal. */
+void scr_dyn_capture_stack(ScrDyn *target) {
+  scr_dyn_isl_fence(target, "Error.captureStackTrace");
+  if (scr_exc_pending()) return;
+  if (target->kind != SCR_DYN_OBJ) {
+    if (target->kind == SCR_DYN_FUNC || target->kind == SCR_DYN_ARR) {
+      scr_throw_error_msg(SCR_ERR_ERROR,
+                          "Error.captureStackTrace over a function or an array is not supported yet "
+                          "(their property tables cannot hold a non-enumerable member)",
+                          strlen("Error.captureStackTrace over a function or an array is not supported yet "
+                                 "(their property tables cannot hold a non-enumerable member)"));
+      return;
+    }
+    if (target->kind == SCR_DYN_OBJINST) {
+      scr_throw_error_msg(SCR_ERR_ERROR,
+                          "Error.captureStackTrace over a class instance held as a dynamic value is not supported yet",
+                          strlen("Error.captureStackTrace over a class instance held as a dynamic value is not supported yet"));
+      return;
+    }
+    scr_throw_error_msg(SCR_ERR_TYPE, "invalid_argument", strlen("invalid_argument"));
+    return;
+  }
+  ScrStr *name = NULL;
+  ScrStr *msg = NULL;
+  for (int pass = 0; pass < 2; pass++) {
+    const char *key = pass == 0 ? "name" : "message";
+    ScrDyn *v = scr_dyn_obj_key_get(target, key, strlen(key));
+    if (v == NULL) {
+      if (name) scr_str_release(name);
+      return;
+    }
+    ScrStr *s = NULL;
+    if (v->kind != SCR_DYN_UNDEF) {
+      s = scr_dyn_string_coerce_js(v);
+      if (s == NULL) {
+        scr_dyn_release(v);
+        if (name) scr_str_release(name);
+        return;
+      }
+    }
+    scr_dyn_release(v);
+    if (pass == 0) name = s; else msg = s;
+  }
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  if (name == NULL) scr_jb_puts(&b, "Error"); else scr_jb_write(&b, name->data, name->len);
+  size_t mlen = msg == NULL ? 0 : msg->len;
+  if (mlen > 0) {
+    if (b.len > 0) scr_jb_puts(&b, ": ");
+    scr_jb_write(&b, msg->data, msg->len);
+  }
+  ScrStr *header = scr_jb_finish(&b);
+  if (name) scr_str_release(name);
+  if (msg) scr_str_release(msg);
+  ScrDyn *value = scr_dyn_new_str(header);
+  scr_str_release(header);
+  scr_dyn_obj_drop_hidden(target, "stack", 5);
+  scr_dyn_obj_define_hidden_data(target, "stack", 5, value, true, true);
+  scr_dyn_release(value);
+}
