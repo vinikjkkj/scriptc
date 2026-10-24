@@ -5016,6 +5016,14 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (name === "Boolean") return L.lowerCondition(argNode);
       const arg = L.lowerExpr(argNode);
       if (name === "String") return L.ensureString(arg, argNode, true);
+      // Number(undefined) is NaN (ECMA-262 7.1.4). An undefined-typed operand
+      // with no value is evaluated for effect, then the answer is NaN.
+      // Number(null) is +0 (ToNumber of null), the same shape.
+      if (name === "Number" && (arg.type.kind === "undefinedT" || arg.type.kind === "nullT")) {
+        const answer: IrExpr = { kind: "numLit", value: arg.type.kind === "nullT" ? 0 : NaN, type: F64, loc };
+        if (arg.kind === "unitLit") return answer;
+        return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: arg, loc }], result: answer, type: F64, loc };
+      }
       // Number(x) at the READ's slot width, the twin of the rule
       // ensureString has always had (numberConvAtDynWidth, lower-exprs).
       // `Number(node.attrs.size)` on an absent key is NaN in Node and was
