@@ -6989,6 +6989,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "error.propGet":
             // +1 dyn value (the dyn undefined when absent).
             return finish(`scr_error_prop_get((ScrError *)${arg(0)}, ${arg(1)})`);
+          case "error.captureStack":
+            // Borrowed %Error receiver: forget the memoised stack header.
+            return finish(`scr_error_capture_stack((ScrError *)${arg(0)})`);
           case "error.stack":
             // Borrowed receiver; +1 the MEMOISED header. The receiver may be
             // a user subclass struct -- the %stack slot sits in its ScrError

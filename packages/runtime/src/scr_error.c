@@ -442,6 +442,17 @@ ScrStr *scr_error_stack(ScrError *e) {
   return scr_str_retain(e->stack);
 }
 
+/* Error.captureStackTrace(e): a new capture replaces the old one, and V8 formats the
+ * header lazily at the FIRST READ of `stack` (MEASURED: a name assigned after the call
+ * still heads the stack), so the call only forgets the memoised header — the next read
+ * formats it from the then-current name and message, as scr_error_stack does. */
+void scr_error_capture_stack(ScrError *e) {
+  if (e->stack != NULL) {
+    scr_str_release(e->stack);
+    e->stack = NULL;
+  }
+}
+
 #ifdef SCR_TRAP_TRACE
 /* Which lowering traps a run actually EXECUTES. Built only when
  * SCRIPTC_TRAP_TRACE is set at build time (cc.ts turns that into

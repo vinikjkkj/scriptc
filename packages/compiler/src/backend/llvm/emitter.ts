@@ -838,6 +838,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sym.toString": "scr_sym_to_string",
   "error.toString": "scr_error_to_string",
   "error.stack": "scr_error_stack",
+  "error.captureStack": "scr_error_capture_stack",
   "error.propSet": "scr_error_prop_set",
   "error.propGet": "scr_error_prop_get",
   "class.name": "scr_classobj_name",

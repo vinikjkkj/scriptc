@@ -1116,6 +1116,8 @@ ScrStr *scr_error_to_string(ScrError *e);
 /* `e.stack` -- the header a zero-frame capture produces, MEMOISED at the
  * first read the way V8 memoises its formatted stack. +1. */
 ScrStr *scr_error_stack(ScrError *e);
+/* Error.captureStackTrace(e): forget the memoised stack header (the next read re-formats it). */
+void scr_error_capture_stack(ScrError *e);
 /* `Error.stackTraceLimit`: the process-wide slot (default 10, as in Node). No frames are
  * captured, so it only has to hold what the program stored. */
 double scr_error_stack_limit_get(void);

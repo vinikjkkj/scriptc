@@ -5225,6 +5225,12 @@ export type IrLibFn =
    * else wrote. error.toString, beside it, IS free of this: it reads two
    * slots and writes none. */
   | "error.stack"
+  /** `Error.captureStackTrace(err)` over an %Error-rooted receiver: a new capture
+   * replaces the old one, and V8 formats the stack header lazily at the first READ
+   * of `err.stack`, so the zero-frame capture this runtime has only forgets the
+   * memoised `%stack` header (the next read formats it from the then-current name
+   * and message). Answers nothing. Borrowed `%Error` receiver. Never throws. */
+  | "error.captureStack"
   /** `err.name = v` / `err.name` over an error-hierarchy receiver for a
    * property the class does not declare (scr_json.c): the error's OWN
    * EXPANDO bag, a dyn object in its `%props` slot. propSet's args are the

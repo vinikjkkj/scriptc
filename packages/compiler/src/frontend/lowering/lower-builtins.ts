@@ -916,6 +916,44 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return null;
   }
 
+  /** `Error.captureStackTrace(target[, constructorOpt])` over an Error-rooted object: V8
+   * formats the stack header at the call, and this runtime's zero-frame capture IS that
+   * header (name: message), memoised into the `%stack` slot at the first read, and V8
+   * formats lazily at that first read too — so the call only forgets the memo
+   * (error.captureStack) and answers nothing. `constructorOpt`
+   * only trims frames, and no frames are captured, so it is not evaluated (a bare name or
+   * member path: nothing there to observe). A receiver that is not an Error-rooted class
+   * instance, a spread, or a computed constructorOpt keeps the standard-library refusal. */
+  export function lowerErrorCaptureStackTraceCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.dynamic || L.chainBlocked(call) || access.questionDotToken) return null;
+    if (L.stdlibGlobalMember(access, "Error") !== "captureStackTrace") return null;
+    const args = call.arguments;
+    if (args.length < 1 || args.length > 2 || args.some((a) => ts.isSpreadElement(a))) return null;
+    if (args[1] !== undefined) {
+      let opt: ts.Expression = args[1];
+      while (ts.isParenthesizedExpression(opt) || ts.isNonNullExpression(opt)) opt = opt.expression;
+      const plain = (e: ts.Expression): boolean =>
+        ts.isIdentifier(e) || e.kind === ts.SyntaxKind.ThisKeyword ||
+        (ts.isPropertyAccessExpression(e) && !e.questionDotToken && plain(e.expression));
+      if (!plain(opt)) return null;
+    }
+    const target = L.lowerExpr(args[0]!);
+    if (target.type.kind !== "object") return null;
+    let rooted = false;
+    for (let c = L.classes.get(target.type.className) ?? null; c; c = c.base) {
+      if (c.def.name === "%Error") rooted = true;
+    }
+    if (!rooted) return null;
+    return {
+      kind: "libCall",
+      fn: "error.captureStack",
+      args: [L.upcastTo(target, "%Error")],
+      type: VOID,
+      loc: locOf(call),
+    };
+  }
+
   /** The fs validation-ladder spoke (checked-dynamic lane, JS sources
    * only — TypeScript keeps its compile fences): implemented-namespace
    * calls whose misuse Node rejects with typed errors lower to fs.*Chk

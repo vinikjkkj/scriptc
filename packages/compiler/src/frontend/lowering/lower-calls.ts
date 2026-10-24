@@ -23,7 +23,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerDateLocaleFormat, lowerNumberLocaleFormat } from "./lower-numfmt.js";
-import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
+import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerErrorCaptureStackTraceCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
@@ -5555,6 +5555,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         L.lowerStringStaticCall(expr, expr.expression) ??
         L.lowerStringLastIndexOfCall(expr, expr.expression) ??
         L.lowerStringReplaceStrCall(expr, expr.expression) ??
+        lowerErrorCaptureStackTraceCall(L, expr, expr.expression) ??
         L.lowerPromiseMethodCall(expr, expr.expression) ??
         // Homogeneous promise-tuple literals claim BEFORE the static path
         // (whose array bound would fence them); Promise.reject follows it
