@@ -13972,6 +13972,9 @@ export class Lowerer {
    * `this` while such a method's body lowers under C. */
   readonly lateMethodAssigns = new Set<ts.Node>();
   readonly lateMethodThis = new Map<ts.Node, ts.Type>();
+  /** Effectful surplus arguments parked by completeArgs under the call node
+   * that owns them; bindCallEffects (lower-calls) binds and emits them. */
+  readonly surplusEffects = new Map<ts.Node, IrStmt[]>();
   /** `<Class>.<method name>` members of a class BODY that a late definition
    * replaced (the class's own declaration no longer lowers). */
   readonly shadowedMembers = new Set<string>();

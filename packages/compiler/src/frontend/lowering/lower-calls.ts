@@ -847,6 +847,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
       // time, JS-exact; an EFFECTFUL surplus (a call, an await, an
       // assignment) has no evaluation slot in an expression-position
       // completion, so it fences by name rather than silently not running.
+      const surplus: IrStmt[] = [];
       for (let i = positional.length; i < sources.length; i++) {
         const a = sources[i]!;
         if (isIr(a)) continue; // pre-lowered leading values are effect-free
@@ -857,20 +858,90 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
             "spread arguments into fixed parameter positions (a spread can only fill a rest parameter)",
           );
         }
-        const v = L.lowerExpr(a);
-        if (
-          v.kind !== "unitLit" && v.kind !== "numLit" && v.kind !== "strLit" &&
-          v.kind !== "boolLit" && v.kind !== "varRef" && v.kind !== "closure"
-        ) {
-          L.unsupported(
-            "SC1090",
-            a,
-            "surplus arguments with side effects (JS evaluates surplus arguments to a function without a rest parameter, then drops them; only effect-free surplus arguments compile)",
-          );
-        }
+        const effect = lowerSurplusArg(L, a);
+        if (effect !== null) surplus.push(effect);
       }
+      if (surplus.length > 0) L.surplusEffects.set(blame, surplus);
     }
     return out;
+  }
+
+/** The argument list of a JS call through a func value whose lowered
+   * signature is `params` (a rest signature is packed by its own lanes, so
+   * `rest` keeps the plain positional lowering). Arguments past the signature
+   * are evaluated in order and dropped; an effectful one parks under the call
+   * node for bindCallEffects. */
+  export function valueCallArgs(L: Lowerer, expr: ts.CallExpression, params: readonly IrType[], rest: boolean): IrExpr[] {
+    if (rest || expr.arguments.length <= params.length) {
+      return expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+    }
+    const surplus: IrStmt[] = [];
+    for (const a of expr.arguments.slice(params.length)) {
+      if (ts.isSpreadElement(a)) {
+        L.unsupported("SC1090", a, "spread arguments into fixed parameter positions (a spread can only fill a rest parameter)");
+      }
+      const effect = lowerSurplusArg(L, a);
+      if (effect !== null) surplus.push(effect);
+    }
+    if (surplus.length > 0) L.surplusEffects.set(expr, surplus);
+    return expr.arguments.slice(0, params.length).map((a, i) => L.lowerArgExpecting(a, params[i]));
+  }
+
+/** One surplus argument (JS evaluates it, then drops it): the statement that
+   * runs its effect, or null when its lowering is effect-free (a literal, a
+   * plain read, a closure: dropping those is unobservable). */
+  export function lowerSurplusArg(L: Lowerer, a: ts.Expression): IrStmt | null {
+    const v = L.lowerExpr(a);
+    if (
+      v.kind === "unitLit" || v.kind === "numLit" || v.kind === "strLit" ||
+      v.kind === "boolLit" || v.kind === "varRef" || v.kind === "closure"
+    ) return null;
+    return { kind: "exprStmt", expr: v, loc: locOf(a) };
+  }
+
+/** SURPLUS EFFECTS. JS evaluates every argument left to right before the
+   * call, including surplus ones the callee has no parameter for, and then
+   * drops the surplus. completeArgs lowers an effectful surplus argument to an
+   * expression statement and parks it under the call node (surplusEffects).
+   * This binds the callee, the receiver (args[0]) and every argument of the
+   * call to hidden locals IN SOURCE ORDER, runs the parked statements after
+   * them, and returns the call over the bound operands, inside a seqExpr (the
+   * same mid-expression region the comma operator uses). The statements never
+   * reorder: operands are read before any surplus effect runs. */
+  export function bindCallEffects(L: Lowerer, node: ts.Node, call: IrExpr): IrExpr {
+    const effects = L.surplusEffects.get(node);
+    if (effects === undefined) return call;
+    L.surplusEffects.delete(node);
+    const pre: IrStmt[] = [];
+    const bind = (e: IrExpr): IrExpr => {
+      if (e.kind === "numLit" || e.kind === "strLit" || e.kind === "boolLit" || e.kind === "unitLit") return e;
+      const slot = L.declareHiddenLocal("%argfx", e.type);
+      pre.push({ kind: "varDecl", localId: slot.id, init: e, loc: e.loc });
+      return { kind: "varRef", localId: slot.id, type: e.type, loc: e.loc };
+    };
+    let bound: IrExpr;
+    switch (call.kind) {
+      case "call":
+      case "virtualCall":
+      case "new":
+        bound = { ...call, args: call.args.map(bind) };
+        break;
+      case "callValue":
+      case "newValue":
+        bound = { ...call, callee: bind(call.callee), args: call.args.map(bind) };
+        break;
+      default:
+        L.unsupported("SC1090", node, "surplus arguments with side effects in this call form");
+    }
+    return { kind: "seqExpr", stmts: [...pre, ...effects], result: bound, type: call.type, loc: call.loc };
+  }
+
+/** The statement form of bindCallEffects: an expression statement whose call
+   * owns parked surplus effects. */
+  export function bindStmtCallEffects(L: Lowerer, node: ts.Node, stmt: IrStmt): IrStmt {
+    if (!L.surplusEffects.has(node)) return stmt;
+    if (stmt.kind !== "exprStmt") L.unsupported("SC1090", node, "surplus arguments with side effects in this statement form");
+    return { ...stmt, expr: bindCallEffects(L, node, stmt.expr) };
   }
 
 /** The undefined arm of an undefined-armed union `type`, wrapped (a
@@ -4095,7 +4166,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       }
       if (member?.type.kind === "func") {
         const fparams = member.type.params;
-        const cargs = expr.arguments.map((a, i) => L.lowerArgExpecting(a, fparams[i]));
+        const cargs = valueCallArgs(L, expr, fparams, member.type.rest === true);
         for (let i = cargs.length; i < fparams.length; i++) {
           const absent = omittedArgFor(L, fparams[i]!, loc);
           if (!absent) L.unsupported("SC1090", expr, "calls omitting a non-optional parameter of the callee's type");
@@ -5473,7 +5544,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (callee) {
         if (callee.type.kind !== "func") L.badType(expr.expression, L.typeOf(expr.expression));
         const params = callee.type.params;
-        const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+        const args = valueCallArgs(L, expr, params, callee.type.rest === true);
         for (let i = args.length; i < params.length; i++) {
           const absent = omittedArgFor(L, params[i]!, loc);
           if (!absent) {
@@ -5518,7 +5589,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
         if (callee.type.kind !== "func") L.badType(expr.expression, L.typeOf(expr.expression));
         const params = callee.type.params;
-        const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+        const args = valueCallArgs(L, expr, params, callee.type.rest === true);
         for (let i = args.length; i < params.length; i++) {
           const absent = omittedArgFor(L, params[i]!, loc);
           if (!absent) {
@@ -5578,7 +5649,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
       if (callee.type.kind !== "func") L.badType(expr.expression, L.typeOf(expr.expression));
       const params = callee.type.params;
-      const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+      const args = valueCallArgs(L, expr, params, callee.type.rest === true);
       for (let i = args.length; i < params.length; i++) {
         const absent = omittedArgFor(L, params[i]!, loc);
         if (!absent) {
@@ -6159,7 +6230,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const params = callee.type.params;
     const packed = restPackedArgs(L, expr, params, loc);
     if (packed) return finishKeyArm({ kind: "callValue", callee, args: packed, type: callee.type.ret, loc });
-    const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+    // Surplus arguments of a JS call through a value (more arguments than
+    // the lowered signature takes, no rest): JS evaluates them in order and
+    // drops them; an effectful one rides bindCallEffects, as in completeArgs.
+    const args = valueCallArgs(L, expr, params, callee.type.rest === true);
     // Optional-param func TYPES map their `x?: T` slots as `T | undefined`
     // ABI unions, and tsc admits calls that omit the optional suffix —
     // complete the missing trailing args with the interned undefined arm,
@@ -12385,7 +12459,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     if (packedRest) {
       return { kind: "callValue", callee, args: packedRest, type: callee.type.ret, loc: locOf(call) };
     }
-    const args = call.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+    const args = valueCallArgs(L, call, params, callee.type.rest === true);
     // Trailing OPTIONAL parameters the call omits complete with the
     // undefined arm, exactly as every other call-through-a-value path does
     // (`logger.child({ scope })` against `child(b, extra?)`). Without this
@@ -13795,7 +13869,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
               kind: "callValue", callee, args: packedField, type: callee.type.ret, loc: locOf(call),
             };
           }
-          const args = call.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+          const args = valueCallArgs(L, call, params, callee.type.rest === true);
           // JavaScript: a method call through a field holding a function
           // passes the receiver as `this` (mysql2's `this.next(packet)` over
           // a stored, detached class method). bindThisClosure is the real
