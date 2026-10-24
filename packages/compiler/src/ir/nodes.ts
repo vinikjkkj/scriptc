@@ -4874,6 +4874,8 @@ export type IrLibFn =
    * throws (OOM aborts); inflate of corrupt input THROWS Node's error
    * catchably. */
   | "zlib.deflateSync"
+  | "zlib.syncDyn"
+  | "zlib.cbDyn"
   | "zlib.inflateSync"
   /** The gzip-container twins over the same codec — gunzip demands the
    * gzip header, unzip auto-detects zlib vs gzip (Node's unzip), and both
@@ -13038,6 +13040,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.readFileSyncBytes",
   "fs.writeFileSyncBytes",
   "zlib.inflateSync",
+  "zlib.syncDyn",
+  "zlib.cbDyn",
   // Both decompressors reject input their header check refuses, the same
   // catchable throw inflate raises (gunzip demands gzip framing; unzip
   // accepts either and refuses the rest).

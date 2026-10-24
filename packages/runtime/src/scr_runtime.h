@@ -1304,6 +1304,7 @@ void scr_throw_errno_error(int err_no, const char *code, const char *message, si
                            const char *path, const char *dest);
 ScrStr *scr_error_code(ScrError *e);
 void scr_throw_error_msg_code(int kind, const char *message, size_t len, const char *code);
+void scr_throw_errno_error_raw(double errno_val, const char *code, const char *message, size_t len);
 /* scr_trap_fmt's catchable twin (SC9003): vsnprintf's `fmt`/varargs into a
  * stack buffer, then scr_throw_error_msg_code with the result. Built for
  * the keyed-read-miss family (emit-walkers.ts recordKeyGetHelper, llvm/
@@ -9588,6 +9589,8 @@ void scr_fs_throw(int e, const char *op, const ScrStr *path);
  * ("incorrect header check", ...). Borrow their input; results +1. */
 ScrBytes *scr_zlib_deflate(const ScrBytes *data);
 ScrBytes *scr_zlib_inflate(const ScrBytes *data);
+ScrBytes *scr_zlib_sync_dyn(double op, const ScrDyn *data, const ScrDyn *opts);
+void scr_zlib_cb_dyn(double op, const ScrDyn *data, const ScrDyn *a1, const ScrDyn *a2);
 /* The island's mode variants (0 zlib / 1 raw / 2 gzip; inflate adds
  * 3 = auto-detect) — scr_zlib_island.c bridges them into the embedded
  * engine's node:zlib shim. */

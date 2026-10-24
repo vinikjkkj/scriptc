@@ -987,6 +987,59 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     };
   }
 
+  /** `zlib.<op>Sync(data[, options])` and `zlib.<op>(data[, options], callback)`
+   * over operands the table's Buffer-only rows cannot take: an untyped or
+   * string/TypedArray `data`, or an options bag (maxOutputLength, level, ...).
+   * Both cross as checked-dynamic values and the runtime applies Node's own
+   * validation and options (scr_zlib_sync_dyn / scr_zlib_cb_dyn). The plain
+   * one-Buffer sync call keeps its direct lowering (null here). */
+  export function lowerZlibDynCall(L: Lowerer, expr: ts.CallExpression,
+    bi: { module: string; member: string },
+    loc: SrcLoc,): IrExpr | null {
+    if (bi.module !== "zlib") return null;
+    const SYNC: Record<string, number> = {
+      deflateSync: 0, inflateSync: 1, gzipSync: 2, gunzipSync: 3, unzipSync: 4, deflateRawSync: 5, inflateRawSync: 6,
+    };
+    const ASYNC: Record<string, number> = {
+      deflate: 0, inflate: 1, gzip: 2, gunzip: 3, unzip: 4, deflateRaw: 5, inflateRaw: 6,
+    };
+    const sync = Object.prototype.hasOwnProperty.call(SYNC, bi.member);
+    const async_ = Object.prototype.hasOwnProperty.call(ASYNC, bi.member);
+    if (!sync && !async_) return null;
+    const args = expr.arguments;
+    if (args.some(ts.isSpreadElement)) return null;
+    if (sync ? args.length < 1 || args.length > 2 : args.length < 1 || args.length > 3) return null;
+    if (sync && args.length === 1) {
+      const dataIr = L.mapTypeOf(L.typeOf(args[0]!));
+      if (dataIr?.kind === "bytes" && dataIr.elem === "u8") return null;
+    }
+    const asDyn = (node: ts.Expression): IrExpr | null => {
+      const v = L.lowerExpr(node);
+      if (v.type.kind === "dyn") return v;
+      if (v.kind === "unitLit" || L.dynConvertible(v.type)) return { kind: "dynFrom", value: v, type: DYN, loc: locOf(node) };
+      return null;
+    };
+    const dyns: IrExpr[] = [];
+    for (const a of args) {
+      const d = asDyn(a);
+      if (d === null) return null;
+      dyns.push(d);
+    }
+    const op: IrExpr = { kind: "numLit", value: sync ? SYNC[bi.member]! : ASYNC[bi.member]!, type: F64, loc };
+    if (sync) {
+      return {
+        kind: "libCall", fn: "zlib.syncDyn",
+        args: [op, dyns[0]!, dyns[1] ?? dynUndefinedExpr(loc)],
+        type: BYTES_U8, loc,
+      };
+    }
+    return {
+      kind: "libCall", fn: "zlib.cbDyn",
+      args: [op, dyns[0]!, dyns[1] ?? dynUndefinedExpr(loc), dyns[2] ?? dynUndefinedExpr(loc)],
+      type: VOID, loc,
+    };
+  }
+
   /** The fs validation-ladder spoke (checked-dynamic lane, JS sources
    * only — TypeScript keeps its compile fences): implemented-namespace
    * calls whose misuse Node rejects with typed errors lower to fs.*Chk
