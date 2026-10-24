@@ -2653,8 +2653,15 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               : null;
             const window = bangT !== null ? { type: bangT, tdz: false } : preDeclarationSlot(L, sf, symbol, nameNode, decl, type);
             type = window.type;
+            // `var parseLine = module.exports.parseLine = function () {}` binds a
+            // variable that shares its name with the export member's own global:
+            // two slots (the export's typed closure, this binding's window slot),
+            // so two ids.
+            const sharesExportName = decl.initializer !== undefined && initReadsExportsMember(
+              (() => { let e: ts.Expression = decl.initializer!; while (ts.isParenthesizedExpression(e)) e = e.expression; return e; })(),
+            );
             const g: IrGlobal = {
-              id: `%g.${tag}${nsPrefix}${nameNode.text}`,
+              id: `%g.${tag}${nsPrefix}${nameNode.text}${sharesExportName ? "%var" : ""}`,
               name: nameNode.text,
               type,
               mutable: isLet,
@@ -2699,6 +2706,15 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
     }
   }
 
+/** `module.exports.name` / `exports.name` read as an initializer. */
+function initReadsExportsMember(init: ts.Expression): boolean {
+  return (
+    ts.isPropertyAccessExpression(init) && !init.questionDotToken &&
+    (isModuleExportsAccess(init.expression as ts.Expression) ||
+      (ts.isIdentifier(init.expression) && init.expression.text === "exports"))
+  );
+}
+
 /** A JS file-scope binding of an arrow / function expression whose strict
  * type does not map but whose checked-dynamic fallback is a FUNC (an
  * unannotated-parameter literal): it keeps a typed global slot. */
@@ -2706,6 +2722,13 @@ function jsFnLiteralSlot(L: Lowerer, decl: ts.VariableDeclaration, nameNode: ts.
   if (!ts.isIdentifier(decl.name) || nameNode !== decl.name || decl.initializer === undefined) return false;
   let init: ts.Expression = decl.initializer;
   while (ts.isParenthesizedExpression(init)) init = init.expression;
+  // `var parseLine = module.exports.parseLine = function () {}` (desugared to the
+  // export write followed by this read): the binding holds the exported
+  // function, so it keeps a typed global slot exactly as the literal would.
+  if (initReadsExportsMember(init)) {
+    const k = dynFallbackType(L, nameNode, L.typeOf(nameNode))?.kind;
+    return k === "func";
+  }
   if (!ts.isArrowFunction(init) && !ts.isFunctionExpression(init)) return false;
   // A factory (it RETURNS a function literal: `wrap = (fn) => (a, b) => ...`)
   // keeps the dyn lane: its results are listener/callback values the typed
