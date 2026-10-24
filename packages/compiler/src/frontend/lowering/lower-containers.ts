@@ -3596,6 +3596,23 @@ function lowerOptionalDefaultArg(
           loc,
         };
       }
+      // `Array.from(m)` on a typed Map: the entries snapshot, exactly what
+      // `[...m]` takes (insertion order, [key, value] pairs; see the spread
+      // of a Map in lower-exprs). The result element must be the [K, V]
+      // tuple of this map's key and value types, else the fence below stays.
+      if (src.type.kind === "map") {
+        const resultElem = L.checker.getTypeArguments(L.typeOf(call) as ts.TypeReference)[0];
+        const mapped = resultElem ? L.mapTypeOf(resultElem) : null;
+        const shape = mapped?.kind === "record" ? L.shapes.get(mapped.shapeId) : null;
+        const f0 = shape?.fields.find((f) => f.name === "0");
+        const f1 = shape?.fields.find((f) => f.name === "1");
+        if (
+          mapped?.kind === "record" && shape?.tuple && shape.fields.length === 2 && f0 && f1 &&
+          typeEquals(f0.type, src.type.key) && typeEquals(f1.type, src.type.value)
+        ) {
+          return mapIterDrainHelperCall(L, src, src.type, "entries", mapped, mapped, loc);
+        }
+      }
       L.noLowering(
         "Array.from with this argument shape",
         call,

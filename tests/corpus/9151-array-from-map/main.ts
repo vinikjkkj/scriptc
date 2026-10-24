@@ -1,0 +1,14 @@
+const m = new Map<string, number>([["b", 2], ["a", 1]]);
+m.set("c", 3);
+m.delete("b");
+m.set("b", 4);
+const pairs = Array.from(m);
+console.log(pairs.length, pairs.map((p) => p[0] + "=" + p[1]).join(","));
+const k = new Map<number, string>();
+k.set(3, "x");
+k.set(NaN, "n");
+k.set(-0, "z");
+const kv = Array.from(k);
+console.log(kv.length, kv[0][0], kv[0][1], kv[1][1], kv[2][0], kv[2][1]);
+const empty = Array.from(new Map<string, number>());
+console.log(empty.length);
