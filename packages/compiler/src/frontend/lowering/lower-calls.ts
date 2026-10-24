@@ -7803,6 +7803,10 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
   const rsig = L.checker.getResolvedSignature(expr);
   const rdecl = rsig ? L.checker.signatureDeclaration(rsig) : undefined;
   if (!rsig || !rdecl || rdecl.kind !== ts.SyntaxKind.MethodSignature) return call;
+  // The standard library's own overloaded members keep their native routes:
+  // narrowing their DYN answer here would type a result the stdlib lowering
+  // answers untyped (Object.keys(...).join() began to refuse, SC2020).
+  if (L.isStdlibFile(rdecl.getSourceFile())) return call;
   const calleeSigs = L.checker.getCallSignatures(L.checker.getTypeAtLocation(expr.expression));
   if (calleeSigs.length < 2) return call;
   const rt = L.mapTypeOf(L.checker.getReturnTypeOfSignature(rsig));
