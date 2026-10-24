@@ -3473,9 +3473,9 @@ ScrDyn *scr_dyn_error_member_get(ScrDyn *d, const ScrStr *key) {
   ScrError *e = (ScrError *)d->v.inst.o;
   /* An own property in the bag shadows the cell it names (a message or name
    * written with a non-string value lives there). */
-  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) {
-    ScrDyn *m = scr_dyn_obj_get(e->props, key->data, key->len);
-    if (m != NULL) return scr_dyn_retain(m);
+  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ &&
+      scr_dyn_obj_key_present(e->props, key->data, key->len)) {
+    return scr_dyn_obj_key_get(e->props, key->data, key->len); /* +1, or NULL when a getter threw */
   }
   if (dyn_err_key_is(key, "message", 7) || dyn_err_key_is(key, "name", 4)) {
     bool msg = key->data[0] == 'm';
@@ -5286,6 +5286,13 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
         const ScrDynEntry *ent = &old->v.obj.entries[i];
         if (ent->value == scr_dyn_acc_slot()) continue;
         scr_dyn_obj_set(d, ent->key, ent->key_len, scr_dyn_retain(ent->value));
+      }
+      /* The constructor's own NON-ENUMERABLE `cause` lives in the bag's hidden
+       * table, which the entry walk above does not see. */
+      {
+        ScrDyn *oc = scr_dyn_obj_key_get(old, "cause", 5); /* +1; the undefined singleton when absent */
+        if (oc != NULL && oc->kind != SCR_DYN_UNDEF) scr_err_hide(d, "cause", 5, oc);
+        else scr_dyn_release(oc);
       }
       scr_dyn_release(old);
       me->props = NULL;
@@ -12353,13 +12360,27 @@ void scr_error_prop_set(ScrError *e, ScrStr *key, ScrDyn *value) {
     scr_dyn_release(e->props);
     e->props = scr_dyn_new_obj();
   }
-  scr_dyn_obj_set(e->props, key->data, key->len, scr_dyn_retain(value));
+  /* The full [[Set]] (not a bare insert): an own NON-ENUMERABLE `cause` the
+   * constructor option stored keeps its attributes when it is assigned. */
+  scr_dyn_key_set(e->props, key, value);
+}
+
+void scr_error_set_cause(ScrError *e, ScrDyn *value) {
+  scr_error_install_props_drop(&scr_error_props_drop_impl);
+  if (e->props == NULL || e->props->kind != SCR_DYN_OBJ) {
+    scr_dyn_release(e->props);
+    e->props = scr_dyn_new_obj();
+  }
+  scr_dyn_obj_define_hidden_data(e->props, "cause", 5, value, true, true);
 }
 
 ScrDyn *scr_error_prop_get(ScrError *e, ScrStr *key) {
   if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) {
-    ScrDyn *m = scr_dyn_obj_get(e->props, key->data, key->len);
-    if (m != NULL) return scr_dyn_retain(m);
+    /* own data, hidden data (the constructor's `cause`) and accessors */
+    if (scr_dyn_obj_key_present(e->props, key->data, key->len)) {
+      ScrDyn *m = scr_dyn_obj_key_get(e->props, key->data, key->len); /* +1, or NULL when a getter threw */
+      return m != NULL ? m : scr_dyn_retain(scr_dyn_undefined());
+    }
   }
   if (key->len == 4 && memcmp(key->data, "code", 4) == 0 && e->code != NULL) {
     return scr_dyn_new_str(e->code);

@@ -7326,7 +7326,8 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           // declaration names is an own EXPANDO of the error (the dyn bag in
           // its `%props` slot — error.propSet). JS files only: a TypeScript
           // program cannot name a property its type lacks.
-          if (isJsSourceFile(expr.getSourceFile()) && errorExpandoReceiver(L, expr.left, expr.left.name.text, true) !== null) {
+          if ((isJsSourceFile(expr.getSourceFile()) || expr.left.name.text === "cause") &&
+              errorExpandoReceiver(L, expr.left, expr.left.name.text, true) !== null) {
             const loc = locOf(expr);
             const recv = L.lowerExpr(expr.left.expression);
             if (recv.type.kind === "object") {

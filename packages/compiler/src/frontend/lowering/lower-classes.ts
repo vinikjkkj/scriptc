@@ -8523,8 +8523,8 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
             kind: "exprStmt",
             expr: {
               kind: "libCall",
-              fn: "error.propSet",
-              args: [L.upcastTo(selfRef, "%Error"), { kind: "strLit", value: "cause", type: STRING, loc: sloc }, causeOpts.cause],
+              fn: "error.setCause",
+              args: [L.upcastTo(selfRef, "%Error"), causeOpts.cause],
               type: VOID,
               loc: sloc,
             },
@@ -8929,8 +8929,8 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         kind: "exprStmt",
         expr: {
           kind: "libCall",
-          fn: "error.propSet",
-          args: [L.upcastTo(ref, "%Error"), { kind: "strLit", value: "cause", type: STRING, loc }, c.cause],
+          fn: "error.setCause",
+          args: [L.upcastTo(ref, "%Error"), c.cause],
           type: VOID,
           loc,
         },
@@ -9002,8 +9002,9 @@ function lowerProgramClassNew(L: Lowerer, expr: ts.NewExpression, info0: ClassIn
   // A ctor-less chain into a builtin error base inherits `new
   // C(message?)` — completed by the error rule (one plain string),
   // not the general ABI completion.
-  const args = L.inheritsBuiltinErrorCtor(info)
-    ? [L.errorMessageArg(expr.arguments ?? [], loc, expr)]
+  const inheritsErr = L.inheritsBuiltinErrorCtor(info);
+  const args = inheritsErr
+    ? [L.errorMessageArg(expr.arguments ?? [], loc, expr, true)]
     : L.completeArgs(expr.arguments ?? [], info.ctorParams, loc, expr);
   // A capturing lifted class: the captured bindings' CURRENT values ride as
   // the hidden trailing arguments (read at this site, where they are in scope).
@@ -9012,13 +9013,16 @@ function lowerProgramClassNew(L: Lowerer, expr: ts.NewExpression, info0: ClassIn
       args.push(L.lowerCapturedValue(c.sym, c.type, expr));
     }
   }
-  return {
+  const made: IrExpr = {
     kind: "new",
     className: info.def.name,
     args,
     type: { kind: "object", className: info.def.name },
     loc,
   };
+  // `new Y(m, { cause })` of a constructor-less Error subclass: the options
+  // are the inherited constructor's, stored like the builtin spelling's.
+  return inheritsErr && (expr.arguments?.length ?? 0) > 1 ? errorWithCause(L, made, expr.arguments!, expr) : made;
 }
 
 /** An expression whose SPELLING cannot have an effect — a name, `this`, a

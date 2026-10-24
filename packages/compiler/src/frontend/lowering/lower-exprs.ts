@@ -17478,7 +17478,11 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // declares it but the runtime keeps it in the memo slot, which only
     // the bag's setter reaches (the read has its own lowering).
     const stackWrite = forWrite && name === "stack" && ts.isPropertyAccessExpression(access) && L.isStdlibMember(access);
-    if (!stackWrite && L.checker.getPropertyOfType(L.typeOf(access.expression), name) !== undefined) return null;
+    // A WRITE of `cause` is the other declared member the bag takes: the lib
+    // declares `cause?: unknown`, the runtime keeps it as the error's own
+    // property (the read has its own lowering).
+    const causeWrite = forWrite && name === "cause" && ts.isPropertyAccessExpression(access) && L.isStdlibMember(access);
+    if (!stackWrite && !causeWrite && L.checker.getPropertyOfType(L.typeOf(access.expression), name) !== undefined) return null;
     return recvT;
   }
 

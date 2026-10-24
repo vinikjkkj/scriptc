@@ -7042,6 +7042,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Borrowed receiver (any error-hierarchy struct: the ScrError
             // prefix leads every subclass), key and dyn value.
             return finish(`scr_error_prop_set((ScrError *)${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "error.setCause":
+            // Borrowed receiver and dyn value: the error's own hidden `cause`.
+            return finish(`scr_error_set_cause((ScrError *)${arg(0)}, ${arg(1)})`);
           case "error.propGet":
             // +1 dyn value (the dyn undefined when absent).
             return finish(`scr_error_prop_get((ScrError *)${arg(0)}, ${arg(1)})`);

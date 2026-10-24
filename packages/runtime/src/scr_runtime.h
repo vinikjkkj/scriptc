@@ -1129,6 +1129,11 @@ void scr_error_stack_limit_set(double v);
  * memo for those two names. */
 void scr_error_install_props_drop(void (*fn)(void *obj));
 void scr_error_prop_set(ScrError *e, ScrStr *key, struct ScrDyn *value);
+/* `new Error(m, { cause })` / `super(m, { cause })`: the error's own
+ * NON-ENUMERABLE `cause` (hidden data in the bag; an assigned `e.cause = v`
+ * is an ordinary enumerable property and goes through scr_error_prop_set).
+ * Borrows both; stores a +1 copy. */
+void scr_error_set_cause(ScrError *e, struct ScrDyn *value);
 struct ScrDyn *scr_error_prop_get(ScrError *e, ScrStr *key);
 
 ScrError *scr_error_retain(ScrError *e);

@@ -5319,6 +5319,13 @@ export type IrLibFn =
    * those two names. Neither throws. */
   | "error.propSet"
   | "error.propGet"
+  /** The `cause` of `new Error(msg, { cause })` / `super(msg, { cause })`
+   * (scr_json.c): borrowed %Error-rooted receiver and borrowed dyn value,
+   * stored as the error's own NON-ENUMERABLE `cause` (hidden data in the
+   * expando bag). Separate from propSet because an ASSIGNED `e.cause = v`
+   * creates an ordinary enumerable property, and only the constructor
+   * option is hidden. Never throws. */
+  | "error.setCause"
   /** `new DOMException(message?, nameOrOptions?)` (scr_error.c): both args
    * are borrowed dyn values (the lowering passes the dyn undefined for an
    * absent argument, so WebIDL's optionality lives in one place). The
