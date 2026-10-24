@@ -82,7 +82,6 @@ import {
   STRING,
   typeEquals,
   DYN,
-  UNDEFINED_T,
   VOID,
 } from "../../ir/nodes.js";
 import { type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf } from "./surfaces.js";
