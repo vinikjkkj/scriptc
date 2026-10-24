@@ -6010,6 +6010,7 @@ export type IrLibFn =
   | "big.eq"
   | "big.fromF64"
   | "big.fromDyn"
+  | "big.fromStr"
   | "big.toF64"
   | "big.asIntN"
   | "big.asUintN"
@@ -13128,6 +13129,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // TypeError on a kind with no conversion, and the loud fence on the
   // string arm — three ways out, so a may-throw seed.
   "big.fromDyn",
+  "big.fromStr",
   // asIntN/asUintN raise the same way on a width outside ToIndex, and on
   // the one width that would need a bigger BigInt than V8 will build.
   "big.asIntN",

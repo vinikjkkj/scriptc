@@ -4731,6 +4731,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           ? L.lowerExprExpecting(bigArgNode, DYN)
           : L.lowerExpr(bigArgNode);
       if (arg.type.kind === "bigint") return arg;
+      if (arg.type.kind === "string") {
+        return { kind: "libCall", fn: "big.fromStr", args: [arg], type: BIGINT, loc };
+      }
       if (arg.type.kind === "f64") {
         return { kind: "libCall", fn: "big.fromF64", args: [arg], type: BIGINT, loc };
       }
