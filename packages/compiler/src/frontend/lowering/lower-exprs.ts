@@ -1008,6 +1008,21 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // operands too — but primitives here are side-effect-free varRefs/
       // literals after lowering, so folding away the value is safe only
       // when the operand is trivial; otherwise keep it simple and reject).
+      // `typeof recv.method` where `method` is a METHOD of a class: no bound
+      // value is needed to answer it. store-mysql's guard asks
+      // `typeof (value as Pool).execute === 'function'` of a `Pool |
+      // PoolOptions` value, and the bound-method fence refused the read.
+      // The answer comes from the RUNTIME value, never from the cast: a
+      // class instance (or a subclass of it) has the method, a record arm
+      // that declares no such member answers "undefined", and any other
+      // shape (an undefined/null arm that would throw, a record carrying
+      // the name, an index signature) keeps the existing path. A cast that
+      // NARROWS to a subclass is not trusted either: the value may be the
+      // base. The receiver evaluates once, in order.
+      {
+        const folded = typeofMethodSniff(L, expr, loc);
+        if (folded !== null) return folded;
+      }
       let operand = L.lowerExpr(expr.expression);
       if (L.presenceResults.has(operand)) {
         return {
@@ -5906,6 +5921,80 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
     "process.versionsNode",
     "process.versionsOpenssl",
   ]);
+
+/** The answer of `typeof recv.name` when `name` is a method of the class
+ * (or classes) the receiver's RUNTIME value can be, or null when the shape is
+ * not one of the sound ones (see the call site). */
+function typeofMethodSniff(L: Lowerer, expr: ts.TypeOfExpression, loc: SrcLoc): IrExpr | null {
+  let inner: ts.Expression = expr.expression;
+  while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+  if (!ts.isPropertyAccessExpression(inner) || inner.questionDotToken !== undefined) return null;
+  const member = inner.name.text;
+  // Peel the casts, remembering the type the outermost one asserts.
+  let e0: ts.Expression = inner.expression;
+  while (ts.isParenthesizedExpression(e0) || ts.isAsExpression(e0) || ts.isNonNullExpression(e0)) e0 = e0.expression;
+  const t0 = L.mapTypeOf(L.typeOf(e0));
+  const hasMethod = (className: string): boolean | null => {
+    const info = L.classes.get(className) ?? null;
+    if (info === null || info.fields.has(member)) return null;
+    return L.findMethodOn(info, member) !== null || findGenericMethodOn(L, info, member) !== null;
+  };
+  const fn: IrExpr = { kind: "strLit", value: "function", type: STRING, loc };
+  const undef: IrExpr = { kind: "strLit", value: "undefined", type: STRING, loc };
+  const evaluated = (recv: IrExpr, build: (ref: IrExpr) => IrExpr): IrExpr => {
+    if (pureReemittable(recv)) return build(recv);
+    const slot = L.declareHiddenLocal("%typeofRecv", recv.type);
+    const ref: IrExpr = { kind: "varRef", localId: slot.id, type: recv.type, loc };
+    return { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: slot.id, init: recv, loc }], result: build(ref), type: STRING, loc };
+  };
+  if (t0 === null) return null;
+  if (t0.kind === "object") {
+    if (hasMethod(t0.className) !== true) return null;
+    // The asserted type may only be the class itself or a base of it.
+    const asserted = L.mapTypeOf(L.typeOf(inner.expression));
+    if (asserted === null || asserted.kind !== "object") return null;
+    if (asserted.className !== t0.className && !L.isSubclassOf(t0.className, asserted.className)) return null;
+    const recv = L.lowerExpr(e0);
+    return evaluated(recv, () => fn);
+  }
+  if (t0.kind === "union") {
+    const def = L.unions.get(t0.unionId);
+    if (def === undefined) return null;
+    const answers: IrExpr[] = [];
+    for (const arm of def.arms) {
+      if (arm.kind === "object") {
+        if (hasMethod(arm.className) !== true) return null;
+        answers.push(fn);
+      } else if (arm.kind === "record") {
+        const shape = L.shapes.get(arm.shapeId);
+        if (shape === undefined || shape.indexValue !== undefined || shape.tuple || shape.fields.some((f) => f.name === member)) return null;
+        answers.push(undef);
+      } else {
+        return null;
+      }
+    }
+    if (answers.every((a) => a === fn)) {
+      const recv = L.lowerExpr(e0);
+      return evaluated(recv, () => fn);
+    }
+    const recv = L.lowerExpr(e0);
+    return evaluated(recv, (ref) => {
+      let out: IrExpr = answers[answers.length - 1]!;
+      for (let k = answers.length - 2; k >= 0; k--) {
+        out = {
+          kind: "ternary",
+          cond: { kind: "unionIsTag", unionId: t0.unionId, tag: k, negated: false, value: ref, type: BOOL, loc },
+          then: answers[k]!,
+          else_: out,
+          type: STRING,
+          loc,
+        };
+      }
+      return out;
+    });
+  }
+  return null;
+}
 
 /** `{ ...maybe }` where `maybe` is `Record<K, V> | undefined` (an OPTIONAL
    * field, an optional parameter) inside an index-signature merge: JS
