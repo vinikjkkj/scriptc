@@ -6,7 +6,7 @@
  * module is not supported yet"), because the provenance prescan took the package
  * name of `punycode/` to be the builtin `punycode` and skipped it. Positive control:
  * the base refuses this fixture with that SC1010 at tr46lite/index.js:5.
- * The punycode fixture is a stand-in body (identity = name and version); the
+ * The punycode fixture is a SYNTHETIC stand-in body (identity = name and version 0.0.0-fixture); the
  * pinned behaviour is the specifier resolution. Both backends, byte-compared with Node.
  */
 import { execFile } from "node:child_process";
@@ -23,7 +23,7 @@ const entry = join(fixtureDir, "cases/punyslash/main.ts");
 const manifest = join(fixtureDir, "manifest-punyslash.json");
 const flavor = process.env["SCRIPTC_SAN"] === "1" ? "san" : "plain";
 const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance-punyslash", flavor);
-const EXPECTED = "man~ana.com\nmaana~pta\n2.3.1\n";
+const EXPECTED = "man~ana.com\nmaana~pta\n0.0.1\n";
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 
 afterEach(() => {

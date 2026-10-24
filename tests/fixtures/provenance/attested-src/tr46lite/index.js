@@ -5,4 +5,4 @@
 const punycode = require("punycode/");
 exports.toAscii = function (s) { return punycode.toASCII(s); };
 exports.fromAscii = function (s) { return punycode.decode(s); };
-exports.version = "2.3.1";
+exports.version = "0.0.1";
