@@ -384,7 +384,7 @@ export const STR_METHODS: Record<
   // the way scr_str_index_of does, so `s.startsWith(n, p)` and
   // `s.indexOf(n, p) === p` cannot disagree.
   startsWith: { method: "startsWith", result: BOOL, minArgs: 1, maxArgs: 2 },
-  endsWith: { method: "endsWith", result: BOOL, minArgs: 1, maxArgs: 1 },
+  endsWith: { method: "endsWith", result: BOOL, minArgs: 1, maxArgs: 2 },
   slice: { method: "slice", result: STRING, minArgs: 0, maxArgs: 2 },
   // substring: slice's clamp-and-swap sibling (negatives clamp to 0
   // instead of counting from the end; start > end swaps).

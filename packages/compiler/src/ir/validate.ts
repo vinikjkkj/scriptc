@@ -35,7 +35,7 @@ export const STR_INTRINSIC_SIGS: Record<
   indexOf: { argTypes: [STRING, F64], minArgs: 1, result: F64 },
   includes: { argTypes: [STRING, F64], minArgs: 1, result: BOOL },
   startsWith: { argTypes: [STRING, F64], minArgs: 1, result: BOOL },
-  endsWith: { argTypes: [STRING], minArgs: 1, result: BOOL },
+  endsWith: { argTypes: [STRING, F64], minArgs: 1, result: BOOL },
   slice: { argTypes: [F64, F64], minArgs: 0, result: STRING },
   substring: { argTypes: [F64, F64], minArgs: 1, result: STRING },
   substr: { argTypes: [F64, F64], minArgs: 1, result: STRING },
@@ -1579,6 +1579,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // form) — checked in the libCall case.
   "string.fromCharCode": { argTypes: [null], result: STRING },
   "string.lastIndexOf": { argTypes: [STRING, STRING], result: F64 },
+  "string.lastIndexOfFrom": { argTypes: [STRING, STRING, F64], result: F64 },
   "string.replaceStr": { argTypes: [STRING, STRING, STRING, BOOL], result: STRING },
   "string.raw": { argTypes: [arrayOf(STRING), arrayOf(STRING)], result: STRING },
 };

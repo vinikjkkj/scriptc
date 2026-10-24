@@ -909,6 +909,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             }
             return E.newTemp(e.type, `scr_str_starts_with(${r.name}, ${args[0]!.name})`);
           case "endsWith":
+            if (args[1]) {
+              return E.newTemp(e.type, `scr_str_ends_with_at(${r.name}, ${args[0]!.name}, ${args[1].name})`);
+            }
             return E.newTemp(e.type, `scr_str_ends_with(${r.name}, ${args[0]!.name})`);
           case "slice":
             return E.newTemp(
@@ -8230,6 +8233,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             );
           case "string.lastIndexOf":
             return finish(`scr_str_last_index_of(${arg(0)}, ${arg(1)})`);
+          case "string.lastIndexOfFrom":
+            return finish(`scr_str_last_index_of_from(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "string.replaceStr":
             // s.replace(str, str) / s.replaceAll(str, str); +1 string.
             return finish(`scr_str_replace_str(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);

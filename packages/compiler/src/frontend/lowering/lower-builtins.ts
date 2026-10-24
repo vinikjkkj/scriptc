@@ -10085,16 +10085,26 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "string") return null;
     if (!L.isStdlibMember(access)) return null;
     const loc = locOf(call);
-    if (call.arguments.length !== 1) {
+    if (call.arguments.length > 2 || call.arguments.some((a) => ts.isSpreadElement(a))) {
       L.noLowering(
-        "lastIndexOf with a fromIndex argument",
+        `lastIndexOf with ${call.arguments.length} arguments on strings`,
         call,
-        "the one-argument form lowers",
+        "the needle and an optional position lower",
       );
     }
     const receiver = L.lowerExprExpecting(access.expression, STRING);
     const needle = L.lowerExprExpecting(call.arguments[0]!, STRING);
-    return { kind: "libCall", fn: "string.lastIndexOf", args: [receiver, needle], type: F64, loc };
+    if (call.arguments.length === 1) {
+      return { kind: "libCall", fn: "string.lastIndexOf", args: [receiver, needle], type: F64, loc };
+    }
+    // The position (argfx3). ToNumber(undefined) is NaN, which the runtime
+    // reads as +Infinity (the whole string), so an explicit undefined reads
+    // as +Infinity like an absent one.
+    const posNode = call.arguments[1]!;
+    const from: IrExpr = ts.isIdentifier(posNode) && posNode.text === "undefined"
+      ? { kind: "numLit", value: Infinity, type: F64, loc }
+      : L.lowerExprExpecting(posNode, F64);
+    return { kind: "libCall", fn: "string.lastIndexOfFrom", args: [receiver, needle, from], type: F64, loc };
   }
 
 /** `s.replace(pat, rep)` / `s.replaceAll(pat, rep)` where the pattern AND the

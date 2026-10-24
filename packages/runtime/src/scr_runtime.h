@@ -1359,6 +1359,9 @@ bool scr_str_includes(ScrStr *s, ScrStr *needle);
 bool scr_str_starts_with(ScrStr *s, ScrStr *needle);
 bool scr_str_starts_with_at(ScrStr *s, ScrStr *needle, double position);
 bool scr_str_ends_with(ScrStr *s, ScrStr *needle);
+/* argfx3: endsWith(needle, endPosition) and lastIndexOf(needle, position). */
+bool scr_str_ends_with_at(ScrStr *s, ScrStr *needle, double endPosition);
+double scr_str_last_index_of_from(ScrStr *s, ScrStr *needle, double from);
 
 /* slice(start, end): UTF-16 indices, negatives count from length, clamped
  * to [0, length]; empty when start >= end. The frontend passes
