@@ -967,6 +967,25 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           return { kind: "strLit", value: "function", type: STRING, loc };
         }
       }
+      // `typeof Buffer.prototype.utf8Slice === 'function'`: mysql2's probe of Node's
+      // undocumented fast-path members (they fall back gracefully where missing). A prototype
+      // object is not a value here, so the probe is answered from the declared type of
+      // the Buffer instance: a declared callable member is a function, anything else
+      // (the internal slice/write helpers a compiled binary does not provide) is undefined,
+      // the truthful answer about the runtime being built.
+      if (
+        ts.isPropertyAccessExpression(expr.expression) && ts.isPropertyAccessExpression(expr.expression.expression) &&
+        expr.expression.expression.name.text === "prototype" && ts.isIdentifier(expr.expression.expression.expression) &&
+        L.isStdlibGlobal(expr.expression.expression.expression, "Buffer")
+      ) {
+        // `Buffer.prototype` is typed any; the instance type is the declared type of the
+        // Buffer symbol itself (the interface merged with the constructor's var).
+        const bufSym = L.resolveValueSymbol(expr.expression.expression.expression);
+        const instT = bufSym ? L.checker.getDeclaredTypeOfSymbol(bufSym) : L.typeOf(expr.expression.expression);
+        const prop = L.checker.getPropertyOfType(instT, expr.expression.name.text);
+        const callable = prop !== undefined && prop !== null && L.checker.getCallSignatures(L.checker.getTypeOfSymbol(prop)).length > 0;
+        return { kind: "strLit", value: callable ? "function" : "undefined", type: STRING, loc };
+      }
       // `typeof dc.tracingChannel` / `typeof dc?.tracingChannel` over a builtin module
       // member whose call form has a lowering row: the member is a function the binary has
       // (a module binding is never nullish, so `?.` asks the same question). mysql2's
