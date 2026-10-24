@@ -1922,6 +1922,16 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               if (ts.isIdentifier(rhs)) {
                 const vSym = L.checker.getSymbolAtLocation(rhs);
                 const vG = vSym && L.globalsBySymbol.get(vSym);
+                // The same aliasing for an IMMUTABLE source of any other type
+                // (`const fe = (f) => …; exports.fe = fe;`): a second global
+                // with the const's own id was declared and released twice
+                // (ASan heap-use-after-free in scr_closure_release, C and
+                // LLVM). One storage, one owner, as the dyn arm below states.
+                if (vG && !vG.mutable && vG.type.kind !== "dyn") {
+                  L.globalsBySymbol.set(symbol, vG);
+                  for (const d of L.checker.declarationsOf(symbol)) L.globalsByDeclNode.set(d, vG);
+                  return;
+                }
                 if (vG?.type.kind === "dyn") {
                   if (!vG.mutable) {
                     L.globalsBySymbol.set(symbol, vG);
