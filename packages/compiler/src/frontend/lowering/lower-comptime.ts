@@ -130,6 +130,13 @@ export function describeComptimeValue(v: unknown): string {
         const shape = L.shapes.get(t.shapeId);
         return !!shape && shape.fields.every((f) => L.comptimeBakeable(f.type));
       }
+      // A union whose arms are all bakeable (or the null/undefined units): a JSON
+      // table of rows mixing strings and numbers (`(string | number)[][]`).
+      // The arm a value belongs to is read off its JS kind in comptimeValueToIr.
+      case "union": {
+        const def = L.unions.get(t.unionId);
+        return !!def && def.arms.every((a) => a.kind === "undefinedT" || a.kind === "nullT" || L.comptimeBakeable(a));
+      }
       default:
         return false;
     }
@@ -265,6 +272,42 @@ export function describeComptimeValue(v: unknown): string {
           value: L.comptimeValueToIr(obj[f.name], f.type, `${path}.${f.name}`, blame),
         }));
         return { kind: "recordLit", fields, type: expected, loc };
+      }
+      case "union": {
+        const def = L.unions.get(expected.unionId)!; // bakeable-checked
+        // The arm a value belongs to: the first whose whole shape the value
+        // fits (a row of `[true, "t", 1]` fits only the array arm that admits
+        // strings, while `[null, 3]` fits both array arms and takes the first
+        // in the union's own order — the representations hold equal values).
+        const fits = (v: unknown, t: IrType, depth: number): boolean => {
+          if (depth > 64) return false;
+          switch (t.kind) {
+            case "f64": return typeof v === "number" && Number.isFinite(v);
+            case "string": return typeof v === "string";
+            case "bool": return typeof v === "boolean";
+            case "nullT": return v === null;
+            case "array": return Array.isArray(v) && (v as unknown[]).every((el) => fits(el, t.elem, depth + 1));
+            case "record": {
+              if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+              const shape = L.shapes.get(t.shapeId);
+              if (shape === undefined) return false;
+              const obj = v as Record<string, unknown>;
+              const declared = new Set(shape.fields.map((f) => f.name));
+              return Object.keys(obj).every((k) => declared.has(k)) && shape.fields.every((f) => fits(obj[f.name], f.type, depth + 1));
+            }
+            case "union": {
+              const d = L.unions.get(t.unionId);
+              return d !== undefined && d.arms.some((a) => fits(v, a, depth + 1));
+            }
+            default: return false;
+          }
+        };
+        const arm = def.arms.find((a) => fits(value, a, 0));
+        if (arm === undefined) return fail(describeComptimeValue(value));
+        const inner: IrExpr = arm.kind === "nullT"
+          ? { kind: "unitLit", unit: "null", type: arm, loc }
+          : L.comptimeValueToIr(value, arm, path, blame);
+        return L.coerceToExpected(inner, expected);
       }
       default:
         // comptimeBakeable already fenced these off.
