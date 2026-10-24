@@ -5860,12 +5860,34 @@ void *scr_dyn_origin_take(const ScrDyn *d, const char *tkey);
  * handled); view_key_set answers whether it handled the write; view_before
  * validates and brings the copy up to date (false = refused, exception
  * pending); view_after commits the mutated copy to the origin. */
-void scr_dyn_view_sync(ScrDyn *d);
-void scr_dyn_view_sync_force(ScrDyn *d);
-void scr_dyn_view_sync_deep(ScrDyn *d);
+typedef struct ScrDynViewOps {
+  void (*sync)(ScrDyn *d);
+  void (*sync_force)(ScrDyn *d);
+  void (*sync_deep)(ScrDyn *d);
+  bool (*key_set)(ScrDyn *d, ScrStr *key, ScrDyn *value);
+  bool (*live)(ScrDyn *d);
+  bool (*before)(ScrDyn *d, const char *method, ScrDyn *const *args, size_t argc);
+  void (*after)(ScrDyn *d, const char *method, size_t argc);
+} ScrDynViewOps;
+/* NULL until scr_dyn_view_install runs; the unit (scr_dyn_view.c) links only into
+ * a program that can make a live view (moduleUsesDynView), so the always-linked
+ * readers below cost a pointer test and nothing else. */
+extern const ScrDynViewOps *scr_dyn_view_ops;
+void scr_dyn_view_install(void);
 ScrDyn *scr_dyn_view_key_get(ScrDyn *d, ScrStr *k);
-bool scr_dyn_view_key_set(ScrDyn *d, ScrStr *key, ScrDyn *value);
-bool scr_dyn_view_live(ScrDyn *d);
+static inline void scr_dyn_view_sync(ScrDyn *d) { if (scr_dyn_view_ops) scr_dyn_view_ops->sync(d); }
+static inline void scr_dyn_view_sync_force(ScrDyn *d) { if (scr_dyn_view_ops) scr_dyn_view_ops->sync_force(d); }
+static inline void scr_dyn_view_sync_deep(ScrDyn *d) { if (scr_dyn_view_ops) scr_dyn_view_ops->sync_deep(d); }
+static inline bool scr_dyn_view_key_set(ScrDyn *d, ScrStr *key, ScrDyn *value) {
+  return scr_dyn_view_ops != NULL && scr_dyn_view_ops->key_set(d, key, value);
+}
+static inline bool scr_dyn_view_live(ScrDyn *d) { return scr_dyn_view_ops != NULL && scr_dyn_view_ops->live(d); }
+static inline bool scr_dyn_view_before(ScrDyn *d, const char *method, ScrDyn *const *args, size_t argc) {
+  return scr_dyn_view_ops->before(d, method, args, argc);
+}
+static inline void scr_dyn_view_after(ScrDyn *d, const char *method, size_t argc) {
+  scr_dyn_view_ops->after(d, method, argc);
+}
 /* The consumers that walk an array's items directly (JSON, inspect, string
  * conversion, spread and iteration) bring a live view up to date first, so
  * a kept copy of an array the static side has since changed reads as the
@@ -5879,8 +5901,6 @@ bool scr_dyn_view_live(ScrDyn *d);
   do {                                                                         \
     if ((d)->static_copy && (d)->kind == SCR_DYN_ARR) scr_dyn_view_sync_deep((ScrDyn *)(d)); \
   } while (0)
-bool scr_dyn_view_before(ScrDyn *d, const char *method, ScrDyn *const *args, size_t argc);
-void scr_dyn_view_after(ScrDyn *d, const char *method, size_t argc);
 /* Drops a dying copy's origin. Called from the ARR/OBJ teardown behind
  * `static_copy`; a node with no entry is a cheap miss. */
 void scr_dyn_origin_forget(ScrDyn *d);

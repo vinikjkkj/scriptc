@@ -2367,6 +2367,11 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
  * release/trace/recycle arms on dyn arrays, and the ScrDynObjExt slot they hang off. Everything else in this series is
  * gated by link: the codec section links only into a program that evaluates `new TextEncoder()`, exec on a dynamic regex
  * installs only into a program that links the dyn dispatch unit (an unconditional install measured +12,624 .text here). */
+/* 2026-10-24 (arrident): NOT re-recorded. The live array view (scr_dyn_view.c) first landed in the always-linked scr_json.c and
+ * grew the regex program's .text by 1,504 bytes (132,838 -> 134,342, zig windows-gnu cross build, --backend c, main e9a9ab3e5
+ * against the branch; CI measured 134,358). It is now its own unit, linked and installed only into a module that converts a
+ * number/boolean/string/dyn-element array to dyn (moduleUsesDynView); the always-linked residue is a pointer test per reader.
+ * Same build: regex .text 132,838 -> 132,870 (+32), regex-free 72,854 -> 72,854, files 215,552 -> 215,552. */
 export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 132_806 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.

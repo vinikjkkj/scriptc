@@ -101,6 +101,8 @@ export const DK = {
 /** What the dyn helpers need beyond the walker host: interned immortal
  * unit instances (undefined-armed dynCheck targets build them). */
 export interface DynHost extends WalkerHost {
+  /** The module links the live array view (moduleUsesDynView): the keyed read then consults it. */
+  readonly usesDynView: boolean;
   unitInstanceRef(unionId: string, tag: number): string;
   /** The two-array key table one record shape's WIDE lane projects
    * through — `@sc_kgk_<shapeId>` (the NUL-terminated key bytes) and
@@ -4288,7 +4290,7 @@ export class LlDyn {
       // other receiver kind pays for it; the `static_copy` byte (offset 14)
       // is read inline and the call behind it is the runtime's single body
       // (scr_dyn_view_key_get), which the C emitter's twin arm also calls.
-      {
+      if (host.usesDynView) {
         const lVa = B.newLabel("kg.va");
         const lVn = B.newLabel("kg.vn");
         B.condBr(isA, lVa, lVn);

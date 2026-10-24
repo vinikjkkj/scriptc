@@ -10938,6 +10938,72 @@ export function moduleUsesDateFmt(mod: IrModule): boolean {
   return dateGates(mod).fmt || dateGates(mod).dyn;
 }
 
+/** The program converts an ARRAY the runtime can keep a live view of
+ * (number[], boolean[], string[] or a dyn-element array, reached directly or
+ * through a record field, a union arm, a map value or a closure result) into a
+ * dyn value: links scr_dyn_view.c, and its emitted main installs it. A program
+ * that never lets such an array cross pays nothing for the view (its code,
+ * which is the whole of a +1,500-byte .text growth in the regex program, stays
+ * out of the link). A LINK GATE: a wrong `false` leaves the dyn copy a plain
+ * snapshot, whose in-place writes refuse loudly as before the view existed. */
+const dynViewMemo = new WeakMap<IrModule, boolean>();
+export function moduleUsesDynView(mod: IrModule): boolean {
+  const hit = dynViewMemo.get(mod);
+  if (hit !== undefined) return hit;
+  const r = dynViewScan(mod);
+  dynViewMemo.set(mod, r);
+  return r;
+}
+
+function dynViewScan(mod: IrModule): boolean {
+  const records = new Map((mod.records ?? []).map((r) => [r.id, r] as const));
+  const unions = new Map((mod.unions ?? []).map((u) => [u.id, u] as const));
+  const memo = new Map<string, boolean>();
+  const reaches = (t: IrType, depth: number): boolean => {
+    if (depth > 12) return true; // deeper than any real shape: assume yes
+    if (arrayTypeHasLiveView(t)) return true;
+    switch (t.kind) {
+      case "array":
+      case "set":
+        return reaches(t.kind === "array" ? t.elem : t.elem, depth + 1);
+      case "map":
+      case "weakmap":
+        return reaches(t.value, depth + 1);
+      case "func":
+        return reaches(t.ret, depth + 1);
+      case "record":
+      case "union": {
+        const id = t.kind === "record" ? t.shapeId : t.unionId;
+        const hit = memo.get(id);
+        if (hit !== undefined) return hit;
+        memo.set(id, false); // a cycle adds nothing the first visit did not
+        const parts = t.kind === "record" ? (records.get(id)?.fields ?? []).map((f) => f.type) : (unions.get(id)?.arms ?? []);
+        const r = parts.some((p) => reaches(p, depth + 1));
+        memo.set(id, r);
+        return r;
+      }
+      default:
+        return false;
+    }
+  };
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; value?: { type?: IrType } };
+    if (node.kind === "dynFrom" && node.value?.type !== undefined && reaches(node.value.type, 0)) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod.functions);
+  return found;
+}
+
 /** A Date and an `unknown` in one program: the checked-dynamic Date handle
  * (scr_date_dyn.c) and, through it, the formatters. */
 export function moduleUsesDateDyn(mod: IrModule): boolean {

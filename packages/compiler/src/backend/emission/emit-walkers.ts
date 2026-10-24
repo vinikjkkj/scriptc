@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo } from "../../ir/nodes.js";
+import { arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -1647,7 +1647,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const sig = `${E.link}ScrDyn *${name}(ScrDyn *d, ScrStr *k, bool opt)`;
     E.walkerProtos.push(`${sig}; /* d[k] on dyn */`);
     // The view read is the cold side of every array read: say so where the call is compiled (the header's prototype stays attribute-free for the ABI scan).
-    E.walkerProtos.push(`#if defined(__GNUC__) || defined(__clang__)\n__attribute__((cold)) ScrDyn *scr_dyn_view_key_get(ScrDyn *d, ScrStr *k);\n#endif`);
+    if (moduleUsesDynView(E.mod)) E.walkerProtos.push(`#if defined(__GNUC__) || defined(__clang__)\n__attribute__((cold)) ScrDyn *scr_dyn_view_key_get(ScrDyn *d, ScrStr *k);\n#endif`);
     const d: string[] = [`${sig} { /* d[k] on dyn */`];
     d.push(`  if (d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_NULL) {`);
     d.push(`    if (opt) return scr_dyn_retain(scr_dyn_undefined());`);
@@ -1851,6 +1851,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    if (m) return m;`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_STR) {`);
+    if (moduleUsesDynView(E.mod)) {
     d.push(`    if (d->kind == SCR_DYN_ARR && SCR_VIEW_COLD(d->static_copy)) {`);
     d.push(`      /* A LIVE ARRAY VIEW (a boundary copy of a static number[] / boolean[] /`);
     d.push(`       * string[]): an index or \`length\` read answers from the origin, so a`);
@@ -1859,6 +1860,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`      ScrDyn *vr = scr_dyn_view_key_get(d, k);`);
     d.push(`      if (vr != NULL) return vr;`);
     d.push(`    }`);
+    }
     d.push(`    if (k->len == 6 && memcmp(k->data, "length", 6) == 0) {`);
     d.push(`      return scr_dyn_new_num(d->kind == SCR_DYN_ARR ? (double)d->v.arr.len : scr_str_utf16_len(d->v.str));`);
     d.push(`    }`);

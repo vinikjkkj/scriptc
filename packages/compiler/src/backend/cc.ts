@@ -549,6 +549,8 @@ export interface CcOptions {
   icuAll?: boolean;
   /** A Date and an `unknown` meet (moduleUsesDateDyn): compiles scr_date_dyn.c. */
   dateDyn?: boolean;
+  /** A static array can cross into a dyn slot (moduleUsesDynView): compiles scr_dyn_view.c, the live array view. */
+  dynView?: boolean;
   /** The program holds a named stdlib handle, `Blob` or `PromiseConstructor`
    * (moduleUsesOpaque on the IR): compiles scr_opaque.c. Four functions over a
    * refcount-only struct plus the PromiseConstructor singleton -- a declared
@@ -2494,6 +2496,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // program that declares the shape still emits its release calls.
     ...(dateUnit ? [rt(join(rtDir, "scr_date.c"))] : []),
     ...(dateDynUnit ? [rt(join(rtDir, "scr_date_dyn.c"))] : []),
+    ...((opts.dynView ?? false) ? [rt(join(rtDir, "scr_dyn_view.c"))] : []),
     ...(dateFmtUnit ? [rt(join(rtDir, "scr_date_fmt.c")), rt(join(rtDir, "scr_date_zones.c"))] : []),
     ...(dateIntlUnit
       ? [
