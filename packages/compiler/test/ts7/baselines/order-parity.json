@@ -13377,6 +13377,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9400-timeout-record-in-map.ts": {
+   "order": [
+    "<repo>/tests/corpus/9400-timeout-record-in-map.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9401-timeout-in-waiter-array.ts": {
+   "order": [
+    "<repo>/tests/corpus/9401-timeout-in-waiter-array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9402-timeout-in-generic-queue.ts": {
+   "order": [
+    "<repo>/tests/corpus/9402-timeout-in-generic-queue.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9403-nullable-timeout-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/9403-nullable-timeout-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9404-interval-handle-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/9404-interval-handle-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9405-timeout-field-through-optional-holder.ts": {
+   "order": [
+    "<repo>/tests/corpus/9405-timeout-field-through-optional-holder.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9406-timeout-record-in-map.mjs": {
+   "order": [
+    "<repo>/tests/corpus/9406-timeout-record-in-map.mjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
