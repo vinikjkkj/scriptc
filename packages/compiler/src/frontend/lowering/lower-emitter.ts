@@ -688,6 +688,8 @@ function lowerDynListenerCall(
     if (n.parameters.length > 1 || n.parameters.some((p) => p.dotDotDotToken !== undefined)) return false;
     let usesArguments = false;
     ts.walkPreorder(n.body, (x) => {
+      // a nested non-arrow function has an `arguments` of its own
+      if (ts.isFunctionExpression(x) || ts.isFunctionDeclaration(x) || ts.isMethodDeclaration(x) || ts.isGetAccessorDeclaration(x) || ts.isSetAccessorDeclaration(x) || ts.isConstructorDeclaration(x)) return "skip";
       if (ts.isIdentifier(x) && x.text === "arguments") usesArguments = true;
       return undefined;
     });
