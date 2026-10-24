@@ -345,6 +345,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "number.isInteger": "scr_num_is_integer",
   "number.isSafeInteger": "scr_num_is_safe_integer",
   "string.lastIndexOf": "scr_str_last_index_of",
+  "string.lastIndexOfFrom": "scr_str_last_index_of_from",
   "string.replaceStr": "scr_str_replace_str",
   "string.raw": "scr_str_raw",
   "path.join": "scr_path_join",
@@ -13725,6 +13726,15 @@ class LlEmitter {
         }
         return call("scr_str_starts_with", "zeroext i1 (ptr, ptr)", `ptr ${r.name}, ptr ${args[0]!.name}`, "i1", false);
       case "endsWith":
+        if (args[1]) {
+          return call(
+            "scr_str_ends_with_at",
+            "zeroext i1 (ptr, ptr, double)",
+            `ptr ${r.name}, ptr ${args[0]!.name}, double ${args[1].name}`,
+            "i1",
+            false,
+          );
+        }
         return call("scr_str_ends_with", "zeroext i1 (ptr, ptr)", `ptr ${r.name}, ptr ${args[0]!.name}`, "i1", false);
       case "slice":
         return call(
