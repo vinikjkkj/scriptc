@@ -13596,8 +13596,12 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
           // and `arguments[0]` both answer Node's value). Only the ISLAND
           // rest ABI stays out: its tail marshals through jsval, which is
           // a different boundary from the one scr_dyn_invoke calls across.
+          // A list the call spells out (`f.call(t, a, b)`, `f.apply(t, [a, b])`) that did not
+          // meet the exact-arity arm above packs the same way: the boxed thunk pads a short list
+          // with `undefined` and drops the surplus, which is JS's own arity rule.
+          const packable = argNodes !== null || (name === "apply" && call.arguments.length === 2);
           const packWhy: string | null =
-            argNodes !== null || name !== "apply" || call.arguments.length !== 2
+            !packable
               ? null
               : fn === null || captured.length !== 0
                 ? "receiver-did-not-lower"
@@ -13631,7 +13635,9 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             let pack: IrExpr | null = null;
             try {
               thisArg = L.lowerExprExpecting(call.arguments[0]!, DYN);
-              pack = L.lowerExprExpecting(call.arguments[1]!, DYN);
+              pack = argNodes !== null
+                ? dynRestPack(L, argNodes, call, loc)
+                : L.lowerExprExpecting(call.arguments[1]!, DYN);
             } catch (e) {
               if (!(e instanceof PoisonError)) {
                 L.diagSink = savedArgs;
