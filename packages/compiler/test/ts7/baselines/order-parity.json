@@ -12147,6 +12147,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8770-console-args-evaluate-before-formatting.ts": {
+   "order": [
+    "<repo>/tests/corpus/8770-console-args-evaluate-before-formatting.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8771-dyn-check-to-tuples-with-untyped-elements.ts": {
+   "order": [
+    "<repo>/tests/corpus/8771-dyn-check-to-tuples-with-untyped-elements.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8772-typeof-of-a-class-method-answers-without-a-bound-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/8772-typeof-of-a-class-method-answers-without-a-bound-value.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
