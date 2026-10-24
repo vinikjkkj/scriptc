@@ -2440,11 +2440,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         const pt = checker.getTypeOfSymbol(p);
         const cs = checker.getCallSignatures(pt);
         if (cs.length === 0) return checker.getConstructSignatures(pt).length === 0;
-        return (
-          cs.length >= 1 &&
-          cs.every((s) => s.getTypeParameters().length === 0) &&
-          checker.getConstructSignatures(pt).length === 0
-        );
+        // Generic signatures are admitted here as well (the same gate as
+        // recordProvenanceOk's): the member loop maps each at its constraint
+        // or leaves a failing one out with a GENMEMBER trace line.
+        return cs.length >= 1 && checker.getConstructSignatures(pt).length === 0;
       });
     // A body-less .d.ts CLASS instance whose members are all slots a record
     // can carry or decline (see isBodylessDeclClassInstance). The class
@@ -6529,14 +6528,21 @@ function recordProvenanceOk(
       const pt = checker.getTypeOfSymbol(p);
       const cs = checker.getCallSignatures(pt);
       if (cs.length === 0) return checker.getConstructSignatures(pt).length === 0;
-      return cs.length >= 1 && cs.every((s) => s.getTypeParameters().length === 0) && checker.getConstructSignatures(pt).length === 0;
+      return cs.length >= 1 && checker.getConstructSignatures(pt).length === 0;
     });
-  return (
+  const admitted =
     (isInterfaceLike && isDataOnlyObjectType(t, checker)) ||
     isDataWithOrdinaryMethods ||
     isDataOnlyDeclFileClassInstance(t, checker, ctx) ||
-    isBodylessDeclClassInstance(t, checker, ctx)
-  );
+    isBodylessDeclClassInstance(t, checker, ctx);
+  // Admission is the GATE a declaration-only record must pass before the
+  // member loop ever sees its members, so a refusal here printed nothing and
+  // hid the member that caused it (ioredis's ChainableCommander: SC2011 with
+  // no MAPFAIL line). Name the member whose shape the gate rejects.
+  if (!admitted) {
+    mapTrace(`RECORDPROV ${checker.typeToString(t).slice(0, 60)} -> declaration-file admission refused`);
+  }
+  return admitted;
 }
 
 /** An INSTANCE of a `declare class` from a non-stdlib .d.ts whose
@@ -7465,6 +7471,23 @@ export function isGenericCallableMemberType(t: ts.Type, checker: ts.TypeChecker)
  * refusal must keep firing for a true intersection; this predicate must
  * not let it reach that rule.
  */
+/** Any overload set of a callable member: two or more call signatures, with
+ * no construct signature, data property or index signature of its own (the
+ * same surface isNonGenericOverloadSetMember checks), GENERIC signatures
+ * included. Such a member is one closure slot: the merged signature built
+ * by mapTypeInner's declMember overload branch, where each overload maps at
+ * its own constraint instantiation (mapOneSig). A failure is loud (the
+ * record refuses), never a speculative drop: see the member loop. */
+export function isOverloadSetMember(t: ts.Type, checker: ts.TypeChecker): boolean {
+  if ((t.flags & ts.TypeFlags.Intersection) !== 0) return false;
+  if (checker.getCallSignatures(t).length <= 1) return false;
+  return (
+    checker.getConstructSignatures(t).length === 0 &&
+    checker.getPropertiesOfType(t).length === 0 &&
+    checker.getIndexInfosOfType(t).length === 0
+  );
+}
+
 export function isNonGenericOverloadSetMember(t: ts.Type, checker: ts.TypeChecker): boolean {
   if ((t.flags & ts.TypeFlags.Intersection) !== 0) return false; // true intersection, not one symbol's own overload list
   const sigs = checker.getCallSignatures(t);
@@ -8504,7 +8527,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // method is missing; a program that names the member is refused at
       // that site, never later.
       const generic =
-        (isDeclinableCallableMember(fieldTs, checker) && !isNonGenericOverloadSetMember(fieldTs, checker)) ||
+        (isDeclinableCallableMember(fieldTs, checker) && !isOverloadSetMember(fieldTs, checker)) ||
         (bodylessOwner && checker.getCallSignatures(fieldTs).length > 0);
       if (process.env["SCRIPTC_MEMBER_WHY"] !== undefined) {
         const cs = checker.getCallSignatures(fieldTs);
@@ -8594,7 +8617,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
             }
           : ctx.declMember !== true && libBagMember(p) && hasCallablePart(fieldTs)
             ? { ...ctx, declMember: true }
-            : ctx.declMember !== true && isNonGenericOverloadSetMember(fieldTs, checker)
+            : ctx.declMember !== true && isOverloadSetMember(fieldTs, checker)
               ? { ...ctx, declMember: true }
               : ctx;
         pt = mapType(fieldTs, tryCtx);
