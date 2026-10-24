@@ -750,6 +750,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "url.protocol": "scr_url_protocol",
   "url.host": "scr_url_host",
   "url.hostname": "scr_url_hostname",
+  "url.origin": "scr_url_origin",
   "url.pathname": "scr_url_pathname",
   "url.href": "scr_url_href",
   "url.search": "scr_url_search",

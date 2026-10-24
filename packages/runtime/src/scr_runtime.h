@@ -4073,6 +4073,7 @@ void scr_url_release_v(void *p);
 ScrStr *scr_url_protocol(ScrUrl *u); /* +1 "https:" */
 ScrStr *scr_url_host(ScrUrl *u);     /* +1 "host[:port]" (defaults stripped) */
 ScrStr *scr_url_hostname(ScrUrl *u); /* +1 port-less host ("" when none) */
+ScrStr *scr_url_origin(ScrUrl *u);   /* +1 scheme://host[:port], blob: inner origin, else "null" */
 ScrStr *scr_url_pathname(ScrUrl *u); /* +1 */
 ScrStr *scr_url_href(ScrUrl *u);     /* +1; also toString() */
 ScrStr *scr_url_to_path(ScrUrl *u);      /* +1, or throws */

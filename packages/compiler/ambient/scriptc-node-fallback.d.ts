@@ -1335,8 +1335,10 @@ interface URL {
   port: string;
   username: string;
   password: string;
+  readonly origin: string;
   readonly searchParams: URLSearchParams;
   toString(): string;
+  toJSON(): string;
 }
 declare var URL: {
   new (input: string, base?: string | URL): URL;

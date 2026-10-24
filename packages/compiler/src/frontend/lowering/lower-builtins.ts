@@ -5594,7 +5594,7 @@ let digestInputValueDispatches = 0;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "url") return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
-    if (name === "toString" && call.arguments.length === 0) {
+    if ((name === "toString" || name === "toJSON") && call.arguments.length === 0) {
       const receiver = L.lowerExpr(access.expression);
       return { kind: "libCall", fn: "url.href", args: [receiver], type: STRING, loc: locOf(call) };
     }

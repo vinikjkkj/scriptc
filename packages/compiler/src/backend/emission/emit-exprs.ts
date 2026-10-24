@@ -4061,6 +4061,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_url_protocol(${arg(0)})`);
           case "url.host":
             return finish(`scr_url_host(${arg(0)})`);
+          case "url.origin":
+            return finish(`scr_url_origin(${arg(0)})`);
           case "url.hostname":
             return finish(`scr_url_hostname(${arg(0)})`);
           case "url.pathname":

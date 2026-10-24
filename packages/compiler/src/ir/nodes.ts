@@ -3669,6 +3669,9 @@ export type IrLibFn =
   | "url.protocol"
   | "url.host"
   | "url.hostname"
+  /** The URL's origin: scheme://host[:port] for a special non-file scheme,
+   * the inner URL's for blob:, "null" for the rest. +1 string. */
+  | "url.origin"
   | "url.pathname"
   | "url.href"
   | "url.fileURLToPathUrl"

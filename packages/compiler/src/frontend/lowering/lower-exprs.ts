@@ -7876,7 +7876,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       // parser rejects IPv6 hosts — documented divergence — so the getter
       // never sees one).
       if (name === "protocol" || name === "pathname" || name === "href" || name === "host" || name === "hostname" || name === "search" ||
-          name === "hash" || name === "port" || name === "username" || name === "password") {
+          name === "hash" || name === "port" || name === "username" || name === "password" || name === "origin") {
         const receiver = L.lowerExpr(expr.expression);
         const fn =
           name === "protocol"
@@ -7897,7 +7897,9 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
                           ? "url.username"
                           : name === "password"
                             ? "url.password"
-                            : "url.href";
+                            : name === "origin"
+                              ? "url.origin"
+                              : "url.href";
         return { kind: "libCall", fn, args: [receiver], type: STRING, loc: locOf(expr) };
       }
       // `u.searchParams`: the LIVE cached view (one identity per URL —
