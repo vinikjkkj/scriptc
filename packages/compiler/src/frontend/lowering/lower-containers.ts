@@ -7384,6 +7384,67 @@ function markFlavor(v: IrExpr, flavor: "buffer" | "plain" | "dataview", loc: Src
   };
 }
 
+/** The Buffer-ness question over an already-lowered operand, shared by
+ * `Buffer.isBuffer(v)` and `v instanceof Buffer` (Node defines the first as the
+ * second): a union with a bytes arm asks the tag then the value's flavor, a bytes
+ * value asks its flavor, a dyn value asks the runtime, and a value no bytes can
+ * inhabit is false after its effects. `label` names the spelling in a refusal. */
+export function lowerBufferFlavorTest(L: Lowerer, v: IrExpr, argNode: ts.Node, why: IrExpr, loc: SrcLoc, label: string): IrExpr {
+  if (v.type.kind === "union") {
+    const def = L.unions.get(v.type.unionId);
+    const tag = def ? def.arms.findIndex((a) => a.kind === "bytes" && a.elem === "u8") : -1;
+    if (tag >= 0) {
+      const isTag: IrExpr = { kind: "unionIsTag", unionId: v.type.unionId, tag, negated: false, value: v, type: BOOL, loc };
+      // The operand rides BOTH tests, so only a re-emittable read
+      // composes — the `== null` composition rule.
+      if (!pureReemittable(v)) {
+        L.noLowering(
+          `${label} of a union-typed operand that isn't a plain read`,
+          argNode,
+          "the value is tested twice (which arm, then which flavor) — bind it to a const first",
+        );
+      }
+      const payload: IrExpr = { kind: "unionNarrow", unionId: v.type.unionId, tag, value: v, type: BYTES_U8, loc };
+      const flavor: IrExpr = { kind: "libCall", fn: "bytes.isBuffer", args: [payload, why], type: BOOL, loc };
+      return { kind: "logical", op: "&&", left: isTag, right: flavor, type: BOOL, loc };
+    }
+  }
+  // A statically bytes<u8> argument was fenced here as "the answer
+  // is static". It never was: the arm holds both flavors, and only
+  // the value knows which.
+  if (v.type.kind === "bytes" && v.type.elem === "u8") {
+    return { kind: "libCall", fn: "bytes.isBuffer", args: [v, why], type: BOOL, loc };
+  }
+  if (v.type.kind === "dyn") {
+    return { kind: "libCall", fn: "dyn.isBuffer", args: [v, why], type: BOOL, loc };
+  }
+  // No bytes value can be here (a scalar, string, record, array or a
+  // union without a bytes arm): the answer is false, and the operand
+  // still evaluates for its effects.
+  {
+    const hasBytesArm =
+      v.type.kind === "union" &&
+      (L.unions.get(v.type.unionId)?.arms.some((a) => a.kind === "bytes" || a.kind === "dyn" || a.kind === "jsval") ?? true);
+    if (v.type.kind !== "jsval" && v.type.kind !== "bytes" && !hasBytesArm) {
+      if (v.kind === "unitLit" || v.kind === "numLit" || v.kind === "strLit" || v.kind === "boolLit") {
+        return { kind: "boolLit", value: false, type: BOOL, loc };
+      }
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: v, loc }],
+        result: { kind: "boolLit", value: false, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      };
+    }
+  }
+  L.noLowering(
+    `${label} of '${L.fmt(v.type)}' values`,
+    argNode,
+    "the check lowers over a bytes value, a dyn value, or a union with a bytes arm",
+  );
+}
+
 export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Uint8Array: "u8",
   Uint32Array: "u32",
@@ -8655,59 +8716,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         const v = L.lowerExpr(args[0]!);
         const line = call.getSourceFile().getLineAndCharacterOfPosition(call.getStart()).line + 1;
         const why: IrExpr = { kind: "strLit", value: `Buffer.isBuffer at ${loc.file}:${line}`, type: STRING, loc };
-        if (v.type.kind === "union") {
-          const def = L.unions.get(v.type.unionId);
-          const tag = def ? def.arms.findIndex((a) => a.kind === "bytes" && a.elem === "u8") : -1;
-          if (tag >= 0) {
-            const isTag: IrExpr = { kind: "unionIsTag", unionId: v.type.unionId, tag, negated: false, value: v, type: BOOL, loc };
-            // The operand rides BOTH tests, so only a re-emittable read
-            // composes — the `== null` composition rule.
-            if (!pureReemittable(v)) {
-              L.noLowering(
-                "Buffer.isBuffer of a union-typed operand that isn't a plain read",
-                args[0]!,
-                "the value is tested twice (which arm, then which flavor) — bind it to a const first",
-              );
-            }
-            const payload: IrExpr = { kind: "unionNarrow", unionId: v.type.unionId, tag, value: v, type: BYTES_U8, loc };
-            const flavor: IrExpr = { kind: "libCall", fn: "bytes.isBuffer", args: [payload, why], type: BOOL, loc };
-            return { kind: "logical", op: "&&", left: isTag, right: flavor, type: BOOL, loc };
-          }
-        }
-        // A statically bytes<u8> argument was fenced here as "the answer
-        // is static". It never was: the arm holds both flavors, and only
-        // the value knows which.
-        if (v.type.kind === "bytes" && v.type.elem === "u8") {
-          return { kind: "libCall", fn: "bytes.isBuffer", args: [v, why], type: BOOL, loc };
-        }
-        if (v.type.kind === "dyn") {
-          return { kind: "libCall", fn: "dyn.isBuffer", args: [v, why], type: BOOL, loc };
-        }
-        // No bytes value can be here (a scalar, string, record, array or a
-        // union without a bytes arm): the answer is false, and the operand
-        // still evaluates for its effects.
-        {
-          const hasBytesArm =
-            v.type.kind === "union" &&
-            (L.unions.get(v.type.unionId)?.arms.some((a) => a.kind === "bytes" || a.kind === "dyn" || a.kind === "jsval") ?? true);
-          if (v.type.kind !== "jsval" && v.type.kind !== "bytes" && !hasBytesArm) {
-            if (v.kind === "unitLit" || v.kind === "numLit" || v.kind === "strLit" || v.kind === "boolLit") {
-              return { kind: "boolLit", value: false, type: BOOL, loc };
-            }
-            return {
-              kind: "seqExpr",
-              stmts: [{ kind: "exprStmt", expr: v, loc }],
-              result: { kind: "boolLit", value: false, type: BOOL, loc },
-              type: BOOL,
-              loc,
-            };
-          }
-        }
-        L.noLowering(
-          `Buffer.isBuffer of '${L.fmt(v.type)}' values`,
-          args[0]!,
-          "the check lowers over a bytes value, a dyn value, or a union with a bytes arm",
-        );
+        return lowerBufferFlavorTest(L, v, args[0]!, why, loc, "Buffer.isBuffer");
       }
       L.noLowering("Buffer.isBuffer with this argument shape", call);
     }

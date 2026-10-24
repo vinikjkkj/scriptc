@@ -23,7 +23,7 @@ import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, 
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
 import { absentRead, lowerLyingPlus, lowerNullablePointerChain, nullableFieldRead, presenceComparison } from "./lower-absent.js";
-import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
+import { arrayAtOf, BYTES_CTORS, lowerBufferFlavorTest, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
 import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf } from "./lower-modules.js";
@@ -18576,6 +18576,17 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           expr,
           "statically-decided 'instanceof' on computed operands (bind the values to variables first)",
         );
+      }
+      // `x instanceof Buffer` — Node defines Buffer.isBuffer(x) as exactly this test,
+      // and the flavor machinery behind it (union arm + the value's own flavor, a
+      // bytes value's flavor, the runtime's flavor read on a checked-dynamic one) is
+      // the answer here too. Without this arm the operator had no Buffer lowering at
+      // all, typed or not: ioredis asks it of every command argument.
+      if (ts.isIdentifier(expr.right) && L.isStdlibGlobal(expr.right, "Buffer") && !L.caughtLocalOf(expr.left)) {
+        const left = L.lowerExpr(expr.left);
+        const line = expr.getSourceFile().getLineAndCharacterOfPosition(expr.getStart()).line + 1;
+        const why: IrExpr = { kind: "strLit", value: `Buffer at ${loc.file}:${line}`, type: STRING, loc };
+        return lowerBufferFlavorTest(L, left, expr.left, why, loc, "instanceof Buffer");
       }
       // `x instanceof Uint8Array` / `instanceof ArrayBuffer` -- the test
       // that DISCRIMINATES a `string | ArrayBuffer | Uint8Array` slot, and
