@@ -5750,6 +5750,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       const acc = staticAccessorRead(L, info, expr, loc, false);
       if (acc) return acc;
     }
+    {
+      const bagged = staticBagRead(L, info, expr, loc);
+      if (bagged) return bagged;
+    }
     // A GENERIC static method as a VALUE: the pinned-value rule verbatim
     // (lowerGenericFnValue) — a slot spelling one concrete signature names
     // an instance, an unpinned reference fences by name.
@@ -5764,6 +5768,108 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       return { kind: "strLit", value: info.def.jsName, type: STRING, loc };
     }
     return null;
+  }
+
+/** The dyn property table of an UNDECLARED static of a standalone program
+   * class: `C.k = v` in a JS function body where no static field, method or
+   * accessor of `k` exists anywhere in C's chain. JS stores an OWN property
+   * on the class object (mysql2's `Packet._mockBuffer`, written from a static
+   * method and read back through the class's name). One table per class,
+   * created on first demand (cls.propsEnsure); the global is the storage.
+   * Sound only for a class with no base and no subclass: a chain read or a
+   * subclass write would need the inherited own properties walked, which this
+   * table does not model, so those keep their fences. */
+  export function staticBagEligible(info: ClassInfo, name: string): boolean {
+    return info.base === null && info.subclasses.length === 0 && !info.builtinError &&
+      info.uncollectedStatics?.has(name) !== true && name !== "name" && name !== "length" &&
+      name !== "prototype" && !name.startsWith("#");
+  }
+
+  /** The table global and its one-shot init flag. A DYN global is NULL until
+   * its first assignment, and a read retains it, so the first use must be the
+   * guarded creation below, never a bare read. */
+  export function staticBagOf(L: Lowerer, info: ClassInfo): string {
+    const id = `%g.%statics.${info.def.name}`;
+    if (!L.globalsList.some((g) => g.id === id)) {
+      L.globalsList.push({ id, name: "%statics", type: DYN, mutable: true });
+      L.globalsList.push({ id: `${id}%inited`, name: "%inited", type: BOOL, mutable: true });
+    }
+    return id;
+  }
+
+  /** The class's table accessor: a lifted function that creates the table
+   * on first call (`if (!inited) { bag = cls.propsEnsure(undefined); inited =
+   * true; } return bag;`). A call, not a statement inside the expression, so
+   * the read and write sites stay straight-line; every use goes through it,
+   * so the NULL global is never read bare. */
+  function staticBagFn(L: Lowerer, info: ClassInfo, loc: SrcLoc): string {
+    const bag = staticBagOf(L, info);
+    const flag = `${bag}%inited`;
+    const fnName = `%${info.def.name}.statics:bag`;
+    if (!L.liftedFns.some((f) => f.name === fnName)) {
+      const ref = (id: string, type: IrType): IrExpr => ({ kind: "varRef", localId: id, type, loc });
+      L.liftedFns.push({
+        name: fnName,
+        params: [],
+        returnType: DYN,
+        locals: [],
+        body: [
+          {
+            kind: "if",
+            cond: ref(flag, BOOL),
+            then: [],
+            else_: [
+              { kind: "assign", localId: bag, value: { kind: "libCall", fn: "cls.propsEnsure", args: [dynUndefinedExpr(loc)], type: DYN, loc }, loc },
+              { kind: "assign", localId: flag, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+            ],
+            loc,
+          },
+          { kind: "return", value: ref(bag, DYN), loc },
+        ],
+        loc,
+      });
+    }
+    return fnName;
+  }
+
+  /** `C.k` read for an eligible class: the table's own value, undefined when
+   * absent (optional dyn key read, like the file's exports bag). */
+  function staticBagRead(L: Lowerer, info: ClassInfo, expr: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
+    if (!staticBagEligible(info, expr.name.text)) return null;
+    const fnName = staticBagFn(L, info, loc);
+    L.noteEdge(fnName);
+    return L.maybeNarrow(
+      {
+        kind: "dynKeyGet",
+        key: { kind: "strLit", value: expr.name.text, type: STRING, loc },
+        optional: true,
+        value: { kind: "call", callee: fnName, args: [], type: DYN, loc },
+        type: DYN,
+        loc,
+      },
+      expr,
+    );
+  }
+
+  /** `C.k = v` statement for an eligible class: the table's keySet. */
+  export function staticBagWrite(L: Lowerer, info: ClassInfo, expr: ts.BinaryExpression & { left: ts.PropertyAccessExpression }): IrStmt | null {
+    if (!staticBagEligible(info, expr.left.name.text)) return null;
+    const loc = locOf(expr);
+    const fnName = staticBagFn(L, info, loc);
+    L.noteEdge(fnName);
+    const lowered = L.lowerExprExpecting(expr.right, DYN);
+    const value = lowered.type.kind === "dyn" ? lowered : L.coerceInto(expr.right, lowered, DYN);
+    return {
+      kind: "exprStmt",
+      expr: {
+        kind: "libCall",
+        fn: "dyn.keySet",
+        args: [{ kind: "call", callee: fnName, args: [], type: DYN, loc }, { kind: "strLit", value: expr.left.name.text, type: STRING, loc }, value],
+        type: VOID,
+        loc,
+      },
+      loc,
+    };
   }
 
 /** `C.p` where p is a static getter: a call of `%C.static:get:p`. Null when

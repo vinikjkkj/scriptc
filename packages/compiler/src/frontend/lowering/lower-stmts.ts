@@ -23,7 +23,7 @@ import { bufferSpeciesAliasDecl, ForOfIterProjection, lowerForOfArrayIter, lower
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
-import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation } from "./lower-classes.js";
+import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation, staticBagWrite } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
@@ -7274,6 +7274,12 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               if (found === null) {
                 const setter = L.staticAccessorWrite(classInfo, expr.left, expr.right, locOf(expr), false);
                 if (setter) return { kind: "exprStmt", expr: setter, loc: locOf(expr) };
+                // An undeclared static of a standalone class: the class's own
+                // property table (see staticBagWrite).
+                if (!setter) {
+                  const bagged = staticBagWrite(L, classInfo, expr as ts.BinaryExpression & { left: ts.PropertyAccessExpression });
+                  if (bagged) return bagged;
+                }
               }
               if (found?.field !== undefined) {
                 if (found.declarer !== classInfo) {
