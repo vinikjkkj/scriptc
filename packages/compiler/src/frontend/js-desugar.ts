@@ -622,6 +622,67 @@ function envProbeBranchEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* A FEATURE PROBE FOR Object.hasOwn. iconv-lite's helper binds the function once,
+ *
+ *     var hasOwn = typeof Object.hasOwn === "undefined"
+ *       ? Function.call.bind(Object.prototype.hasOwnProperty) : Object.hasOwn
+ *
+ * and the answer to the probe is fixed for a compiled binary (Object.hasOwn exists:
+ * the runtime implements it). The binding is then the builtin as a value, which has no
+ * lowering as a value, so the single-declarator top-level statement becomes the
+ * function it denotes, `function hasOwn(o, k) { return Object.hasOwn(o, k); }` (same
+ * call, one argument pair), which every call site already lowers. */
+const HASOWN_PROBE_PREFILTER = /typeof\s+Object\.hasOwn\b/;
+
+function hasOwnProbeEdits(fileName: string, text: string): string | null {
+  if (!HASOWN_PROBE_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const isObjectHasOwn = (e: ts.Expression): boolean => {
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    return ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "Object" && e.name.text === "hasOwn";
+  };
+  const typeofHasOwn = (e: ts.Expression): boolean => {
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    return ts.isTypeOfExpression(e) && isObjectHasOwn(e.expression);
+  };
+  for (const stmt of sf.statements) {
+    if (!ts.isVariableStatement(stmt) || stmt.declarationList.declarations.length !== 1) continue;
+    const d = stmt.declarationList.declarations[0]!;
+    if (!ts.isIdentifier(d.name) || d.initializer === undefined) continue;
+    let init: ts.Expression = d.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    if (!ts.isConditionalExpression(init) || !ts.isBinaryExpression(init.condition)) continue;
+    const c = init.condition;
+    const k = c.operatorToken.kind;
+    const isEq = k === ts.SyntaxKind.EqualsEqualsEqualsToken || k === ts.SyntaxKind.EqualsEqualsToken;
+    const isNe = k === ts.SyntaxKind.ExclamationEqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsToken;
+    if (!isEq && !isNe) continue;
+    const side = (a: ts.Expression, lit: string): boolean => typeofHasOwn(a) && ts.isStringLiteral(c.right) && c.right.text === lit;
+    // `=== "undefined" ? X : Object.hasOwn` / `!== "undefined" ? Object.hasOwn : X`
+    // `=== "function" ? Object.hasOwn : X`   / `!== "function" ? X : Object.hasOwn`
+    const viaUndefined = side(c.left, "undefined") && (isEq ? isObjectHasOwn(init.whenFalse) : isObjectHasOwn(init.whenTrue));
+    const viaFunction = side(c.left, "function") && (isEq ? isObjectHasOwn(init.whenTrue) : isObjectHasOwn(init.whenFalse));
+    if (!viaUndefined && !viaFunction) continue;
+    const original = stmt.getText(sf);
+    const nl = (original.match(/\n/g) ?? []).length;
+    edits.push({
+      start: stmt.getStart(sf),
+      end: stmt.getEnd(),
+      text: `function ${d.name.text}(o, k) { return Object.hasOwn(o, k); }` + "\n".repeat(nl),
+    });
+  }
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 /* TYPESCRIPT HELPER DECLARATIONS. Every helper `tsc` emits into a CommonJS
  * file (`__classPrivateFieldGet`, `__awaiter`, `__rest`, `__extends`, ...) is
  * declared as
@@ -1902,6 +1963,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const probes = envProbeBranchEdits(fileName, text);
     if (probes !== null) return jsDesugar(fileName, probes) ?? probes;
+  }
+  {
+    const ownProbe = hasOwnProbeEdits(fileName, text);
+    if (ownProbe !== null) return jsDesugar(fileName, ownProbe) ?? ownProbe;
   }
   // AFTER the tsc prologue rules above: `exports.a = exports.b = void 0;` is the
   // compiler's own chained prologue, which tsCjsEdits answers; splitting it here
