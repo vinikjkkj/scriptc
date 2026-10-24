@@ -20,7 +20,7 @@ import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
 import { bufferSpeciesAliasDecl, ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfUnionContainer, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
-import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
+import { bindCallEffects, bindStmtCallEffects, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
 import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation } from "./lower-classes.js";
@@ -6755,7 +6755,16 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       arr.elements.every((x) => ts.isStringLiteral(x) && declared(x.text));
   }
 
+  /** An expression statement. A call whose surplus arguments carry effects
+   * binds its operands and runs them in source order (bindCallEffects). */
   export function lowerExprStatement(L: Lowerer, expr: ts.Expression): IrStmt {
+    let node: ts.Node = expr;
+    while (ts.isParenthesizedExpression(node)) node = node.expression;
+    if (L.surplusEffects.size > 0) L.surplusEffects.delete(node);
+    return bindStmtCallEffects(L, node, lowerExprStatementBody(L, expr));
+  }
+
+  function lowerExprStatementBody(L: Lowerer, expr: ts.Expression): IrStmt {
     // `C.prototype.m = fn` adopted as a late method of C: a definition, not
     // a runtime write (registerLateMethods).
     if (L.lateMethodAssigns.has(expr)) return { kind: "block", body: [], loc: locOf(expr) };
