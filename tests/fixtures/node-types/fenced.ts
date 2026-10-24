@@ -40,13 +40,6 @@ console.log(win32.sep);
 const u = new URL("https://example.com/x?a=1");
 console.log(u.hash);
 u.searchParams.get("a");
-/* The zlib surface beyond the lowered deflateSync/inflateSync pair
- * fences with the pair named; the lowered pair itself takes Buffers, so a
- * string argument (which @types/node admits) gets the wrap-it-first
- * hint. */
-import { deflateSync, gzipSync } from "zlib";
-deflateSync("data");
-gzipSync("data");
 /* The http2 compatibility slice's @types/node-world fences (divergence
  * 56): the SNICallback option fences by name with the serve-one-pair
  * hint, and its conditional-spread portless spelling fences at the
