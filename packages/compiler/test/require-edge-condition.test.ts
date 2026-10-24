@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { resolveProjectImport } from "../src/frontend/resolve.js";
-import { setProvenanceSources } from "../src/frontend/provenance-registry.js";
+import { provenanceDeclSiblings, setProvenanceSources } from "../src/frontend/provenance-registry.js";
 import { tsgoPath } from "../src/frontend/shared.js";
 
 let root = "";
@@ -73,5 +73,40 @@ describe("export condition by edge kind", () => {
   test("positive control: without the require entry the CommonJS file lands on the ESM wrapper (the defect)", () => {
     reg(false);
     expect(resolveProjectImport(join(root, "dualpkg", "lib", "user.js"), "dualpkg")).toMatch(/esm[\\/]index\.mjs$/);
+  });
+});
+
+describe("the implementation twin of a require-only declaration entry", () => {
+  /* long publishes `import: index.d.ts/index.js`, `require: umd/index.d.ts/umd/index.js`.
+   * The require edge answers the umd DECLARATION; its body must be a program
+   * root too, or the edge resolves to a declaration with no twin and the
+   * require() is fenced SC1010 (mysql2's require('long'), measured). */
+  const regTwin = (withRequire: boolean): void =>
+    setProvenanceSources({
+      packages: [{
+        name: "twinpkg",
+        version: "1.0.0",
+        repo: "https://example.invalid/twinpkg",
+        commit: "cafe",
+        dir: tsgoPath(join(root, "twinpkg")),
+        entries: { twinpkg: tsgoPath(join(root, "twinpkg", "index.d.ts")) },
+        ...(withRequire ? { requireEntries: { twinpkg: tsgoPath(join(root, "twinpkg", "umd", "index.d.ts")) } } : {}),
+      }],
+      notes: [],
+    });
+  test("the umd body is a root, and without the require entry it is not (the defect)", () => {
+    w(join(root, "twinpkg", "index.d.ts"), "export default 1;\n");
+    w(join(root, "twinpkg", "index.js"), "export default 1;\n");
+    w(join(root, "twinpkg", "umd", "index.d.ts"), "export = 1;\n");
+    w(join(root, "twinpkg", "umd", "index.js"), "module.exports = 1;\n");
+    const norm = (xs: string[]): string[] => xs.map((x) => x.replace(/\\/g, "/"));
+    regTwin(true);
+    const withReq = norm(provenanceDeclSiblings());
+    expect(withReq.some((x) => x.endsWith("twinpkg/umd/index.js"))).toBe(true);
+    expect(withReq.some((x) => x.endsWith("twinpkg/index.js"))).toBe(true);
+    regTwin(false);
+    const without = norm(provenanceDeclSiblings());
+    expect(without.some((x) => x.endsWith("twinpkg/umd/index.js"))).toBe(false);
+    expect(without.some((x) => x.endsWith("twinpkg/index.js"))).toBe(true);
   });
 });

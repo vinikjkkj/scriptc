@@ -411,7 +411,7 @@ export function provenanceDeclSiblings(): string[] {
    * entry point rather than of some file three directories down. The walk
    * above cannot reach these: it descends `spec/`, and these sit at the
    * package root. */
-  for (const entry of state.bySpecifier.values()) {
+  for (const entry of [...state.bySpecifier.values(), ...state.byRequire.values()]) {
     if (!entry.endsWith(".d.ts")) continue;
     const stem = entry.slice(0, -".d.ts".length);
     for (const ext of [".js", ".mjs", ".cjs"]) {
