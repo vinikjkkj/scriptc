@@ -164,7 +164,7 @@ function untypedParamMayPollute(
   const visit = (n: ts.Node): void => {
     if (polluted) return;
     if (ts.isIdentifier(n) && n.text === (param.name as ts.Identifier).text && L.checker.getSymbolAtLocation(n) === psym) {
-      let p: ts.Node = n.parent;
+      const p: ts.Node = n.parent;
       if (ts.isPropertyAccessExpression(p) && p.expression === n && ts.isCallExpression(p.parent) && p.parent.expression === p) {
         const call = p.parent;
         const name = p.name.text;
@@ -186,7 +186,6 @@ function untypedParamMayPollute(
         const cd = cs === undefined ? undefined : L.checker.declarationsOf(cs)[0];
         if (cd !== undefined && untypedParamMayPollute(L, cd, at, elem, depth + 1, seen)) polluted = true;
       }
-      void p;
     }
     n.forEachChild(visit);
   };
