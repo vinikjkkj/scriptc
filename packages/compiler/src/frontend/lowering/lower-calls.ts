@@ -6478,7 +6478,12 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // `+` answers a dyn; the checked receiver puts it back on the exact
       // radix lowering instead of the byte-encoding one.
       const radixArg = call.arguments[0];
-      if (radixArg !== undefined && (L.typeOf(radixArg).flags & ts.TypeFlags.NumberLike) !== 0) {
+      // The static radix path reads the RECEIVER as a number (dynCheck to
+      // f64), which is only right when the receiver is statically numeric.
+      // A checker-untyped receiver (`l.toString(10)` on a prototype-built
+      // object) may be any object: it takes the runtime dispatch below.
+      const recvNumeric = (L.typeOf(access.expression).flags & ts.TypeFlags.NumberLike) !== 0;
+      if (recvNumeric && radixArg !== undefined && (L.typeOf(radixArg).flags & ts.TypeFlags.NumberLike) !== 0) {
         const num: IrExpr = { kind: "dynCheck", value: recv, type: F64, loc: recv.loc };
         return {
           kind: "libCall", fn: "num.toStringRadix",
