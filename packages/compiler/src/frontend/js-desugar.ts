@@ -1126,6 +1126,143 @@ function privateMemberEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* NODE-VERSION PROBES. A compiled binary answers `process.version` /
+ * `process.versions.node` with the runtime's one compatibility target
+ * (divergence 60: "v" + 24.0.0, scr_lib.c's SCR_NODE_COMPAT_VERSION), so a
+ * test built only from those values and literals has ONE answer for every
+ * build. Packages that pick an implementation by the running Node's version
+ * (redis-errors: `process.version.charCodeAt(1) < 55 && process.version
+ * .charCodeAt(2) === 46 ? require('./lib/old') : require('./lib/modern')`)
+ * then name a module that is never loaded: the conditional is replaced by its
+ * taken branch, which also keeps the dead module out of the program. The
+ * evaluator knows `process.version`, `process.versions.node`, `charCodeAt`,
+ * `startsWith`, `slice`, `parseInt`/`Number`, comparisons,
+ * `&&`, `||` and `!`; anything else makes the whole test "not a probe" and the
+ * source is left as written. Conditional expressions and `if` statements. */
+const NODE_COMPAT_VERSION = "24.0.0"; // mirrors SCR_NODE_COMPAT_VERSION (packages/runtime/src/scr_lib.c); a unit test pins the pair
+const VERSION_PROBE_PREFILTER = /process\.versions?\b/;
+const NOT_A_PROBE = Symbol("not-a-probe");
+type ProbeValue = number | string | boolean | typeof NOT_A_PROBE;
+
+function evalVersionProbe(e: ts.Expression, seen: { process: boolean }): ProbeValue {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (ts.isNumericLiteral(e)) return Number(e.text);
+  if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return e.text;
+  if (e.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (e.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (ts.isPropertyAccessExpression(e)) {
+    if (ts.isIdentifier(e.expression) && e.expression.text === "process" && e.name.text === "version") {
+      seen.process = true;
+      return `v${NODE_COMPAT_VERSION}`;
+    }
+    if (
+      ts.isPropertyAccessExpression(e.expression) && ts.isIdentifier(e.expression.expression) &&
+      e.expression.expression.text === "process" && e.expression.name.text === "versions" && e.name.text === "node"
+    ) {
+      seen.process = true;
+      return NODE_COMPAT_VERSION;
+    }
+    return NOT_A_PROBE;
+  }
+  if (ts.isPrefixUnaryExpression(e) && e.operator === ts.SyntaxKind.ExclamationToken) {
+    const v = evalVersionProbe(e.operand, seen);
+    return v === NOT_A_PROBE ? v : !v;
+  }
+  if (ts.isCallExpression(e)) {
+    const args = e.arguments.map((a) => evalVersionProbe(a, seen));
+    if (args.some((a) => a === NOT_A_PROBE)) return NOT_A_PROBE;
+    if (ts.isIdentifier(e.expression) && (e.expression.text === "parseInt" || e.expression.text === "Number" || e.expression.text === "parseFloat")) {
+      const a0 = args[0];
+      if (typeof a0 !== "string" && typeof a0 !== "number") return NOT_A_PROBE;
+      if (e.expression.text === "parseInt") return args.length === 1 ? parseInt(String(a0), 10) : NOT_A_PROBE;
+      return e.expression.text === "Number" ? Number(a0) : parseFloat(String(a0));
+    }
+    if (ts.isPropertyAccessExpression(e.expression)) {
+      const recv = evalVersionProbe(e.expression.expression, seen);
+      const name = e.expression.name.text;
+      if (typeof recv === "string") {
+        if (name === "charCodeAt" && args.length === 1 && typeof args[0] === "number") return recv.charCodeAt(args[0]);
+        if (name === "startsWith" && args.length === 1 && typeof args[0] === "string") return recv.startsWith(args[0]);
+        if (name === "slice" && args.every((a) => typeof a === "number") && args.length >= 1 && args.length <= 2) {
+          return recv.slice(args[0] as number, args[1] as number | undefined);
+        }
+      }
+    }
+    return NOT_A_PROBE;
+  }
+  if (ts.isBinaryExpression(e)) {
+    const op = e.operatorToken.kind;
+    if (op === ts.SyntaxKind.AmpersandAmpersandToken || op === ts.SyntaxKind.BarBarToken) {
+      const l = evalVersionProbe(e.left, seen);
+      if (l === NOT_A_PROBE) return l;
+      if (op === ts.SyntaxKind.AmpersandAmpersandToken ? !l : !!l) return l;
+      return evalVersionProbe(e.right, seen);
+    }
+    const l = evalVersionProbe(e.left, seen);
+    const r = evalVersionProbe(e.right, seen);
+    if (l === NOT_A_PROBE || r === NOT_A_PROBE) return NOT_A_PROBE;
+    if (typeof l !== typeof r || typeof l === "boolean") return NOT_A_PROBE;
+    switch (op) {
+      case ts.SyntaxKind.LessThanToken: return l < r;
+      case ts.SyntaxKind.LessThanEqualsToken: return l <= r;
+      case ts.SyntaxKind.GreaterThanToken: return l > r;
+      case ts.SyntaxKind.GreaterThanEqualsToken: return l >= r;
+      case ts.SyntaxKind.EqualsEqualsEqualsToken:
+      case ts.SyntaxKind.EqualsEqualsToken: return l === r;
+      case ts.SyntaxKind.ExclamationEqualsEqualsToken:
+      case ts.SyntaxKind.ExclamationEqualsToken: return l !== r;
+      default: return NOT_A_PROBE;
+    }
+  }
+  return NOT_A_PROBE;
+}
+
+function versionProbeEdits(fileName: string, text: string): string | null {
+  if (!VERSION_PROBE_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const nl = (n: ts.Node): number => (n.getText(sf).match(/\n/g) ?? []).length;
+  const visit = (n: ts.Node): void => {
+    if (ts.isConditionalExpression(n)) {
+      const seen = { process: false };
+      const v = evalVersionProbe(n.condition, seen);
+      if (v !== NOT_A_PROBE && seen.process) {
+        const keep = v ? n.whenTrue : n.whenFalse;
+        const keptText = keep.getText(sf);
+        // A primary expression (identifier, call, member access, literal) needs no
+        // parentheses where the conditional stood; anything else keeps them.
+        const primary =
+          ts.isIdentifier(keep) || ts.isCallExpression(keep) || ts.isPropertyAccessExpression(keep) ||
+          ts.isElementAccessExpression(keep) || ts.isParenthesizedExpression(keep) || ts.isLiteralExpression(keep);
+        const kept = primary ? keptText : `(${keptText})`;
+        edits.push({ start: n.getStart(sf), end: n.getEnd(), text: kept + "\n".repeat(Math.max(0, nl(n) - (kept.match(/\n/g) ?? []).length)) });
+        return; // nested probes inside the kept branch are rewritten on the next pass
+      }
+    }
+    if (ts.isIfStatement(n)) {
+      const seen = { process: false };
+      const v = evalVersionProbe(n.expression, seen);
+      if (v !== NOT_A_PROBE && seen.process) {
+        const keep = v ? n.thenStatement : n.elseStatement;
+        const kept = keep === undefined ? "" : ts.isBlock(keep) ? keep.getText(sf) : `{ ${keep.getText(sf)} }`;
+        edits.push({ start: n.getStart(sf), end: n.getEnd(), text: kept + "\n".repeat(Math.max(0, nl(n) - (kept.match(/\n/g) ?? []).length)) });
+        return;
+      }
+    }
+    n.forEachChild(visit);
+  };
+  visit(sf);
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -1147,6 +1284,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const helpers = tsHelperVarEdits(fileName, text);
     if (helpers !== null) return jsDesugar(fileName, helpers) ?? helpers;
+  }
+  {
+    const versioned = versionProbeEdits(fileName, text);
+    if (versioned !== null) return jsDesugar(fileName, versioned) ?? versioned;
   }
   {
     const probes = envProbeBranchEdits(fileName, text);
