@@ -12779,6 +12779,56 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8910-arguments-length-read-beside-reassigned-parameters.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8910-arguments-length-read-beside-reassigned-parameters.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8911-util-format-over-a-run-time-argument-list.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8911-util-format-over-a-run-time-argument-list.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8912-apply-and-call-forward-an-arguments-object-to-compiled-functions.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8912-apply-and-call-forward-an-arguments-object-to-compiled-functions.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8913-element-assignment-and-increment-in-value-position.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8913-element-assignment-and-increment-in-value-position.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8914-defaulted-parameters-omitted-through-a-function-value/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8914-defaulted-parameters-omitted-through-a-function-value/helpers.cjs",
+    "<repo>/tests/corpus/8914-defaulted-parameters-omitted-through-a-function-value/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8915-string-index-read-on-untyped-receiver.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8915-string-index-read-on-untyped-receiver.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8916-string-add-with-boolean-or-union-operand.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8916-string-add-with-boolean-or-union-operand.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8917-require-binding-of-a-commonjs-module-used-as-a-value/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8917-require-binding-of-a-commonjs-module-used-as-a-value/helpers.cjs",
+    "<repo>/tests/corpus/8917-require-binding-of-a-commonjs-module-used-as-a-value/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8920-join-loop-built-string-array-under-dynamic.js": {
    "order": [
     "<repo>/tests/corpus/8920-join-loop-built-string-array-under-dynamic.js"
