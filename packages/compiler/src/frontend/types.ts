@@ -2441,8 +2441,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         const cs = checker.getCallSignatures(pt);
         if (cs.length === 0) return checker.getConstructSignatures(pt).length === 0;
         return (
-          cs.length === 1 &&
-          cs[0]!.getTypeParameters().length === 0 &&
+          cs.length >= 1 &&
+          cs.every((s) => s.getTypeParameters().length === 0) &&
           checker.getConstructSignatures(pt).length === 0
         );
       });
@@ -5063,10 +5063,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       fns.push(f);
     }
     const ret0 = fns[0]!.ret;
-    if (!fns.every((f) => typeEquals(f.ret, ret0))) {
-      mapTrace(`OVERLOAD ${checker.typeToString(type).slice(0, 60)} -> the overloads answer different types`);
-      return null;
-    }
+    // The overloads answer different types: the closure answers DYN (the
+    // checked-dynamic value). Each call site narrows the result to the type
+    // of the overload tsc RESOLVED (reconcileOverloadReturn's dyn rule,
+    // lower-calls.ts), so a call of one overload reads exactly its own type.
+    const retOut: IrType = fns.every((f) => typeEquals(f.ret, ret0)) ? ret0 : DYN;
     const width = Math.max(...fns.map((f) => f.params.length));
     const mergedParams: IrType[] = [];
     for (let i = 0; i < width; i++) {
@@ -5107,7 +5108,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       }
       mergedParams.push({ kind: "union", unionId: ctx.unions.intern(sorted) });
     }
-    return funcOf(mergedParams, ret0);
+    return funcOf(mergedParams, retOut);
   }
   // Records: object types whose members are all data properties (shorthand
   // methods in type position count — they're func-typed fields) with
@@ -6512,7 +6513,7 @@ function recordProvenanceOk(
       const pt = checker.getTypeOfSymbol(p);
       const cs = checker.getCallSignatures(pt);
       if (cs.length === 0) return checker.getConstructSignatures(pt).length === 0;
-      return cs.length === 1 && cs[0]!.getTypeParameters().length === 0 && checker.getConstructSignatures(pt).length === 0;
+      return cs.length >= 1 && cs.every((s) => s.getTypeParameters().length === 0) && checker.getConstructSignatures(pt).length === 0;
     });
   return (
     (isInterfaceLike && isDataOnlyObjectType(t, checker)) ||
@@ -8487,7 +8488,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // method is missing; a program that names the member is refused at
       // that site, never later.
       const generic =
-        isDeclinableCallableMember(fieldTs, checker) ||
+        (isDeclinableCallableMember(fieldTs, checker) && !isNonGenericOverloadSetMember(fieldTs, checker)) ||
         (bodylessOwner && checker.getCallSignatures(fieldTs).length > 0);
       if (process.env["SCRIPTC_MEMBER_WHY"] !== undefined) {
         const cs = checker.getCallSignatures(fieldTs);
@@ -8577,7 +8578,9 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
             }
           : ctx.declMember !== true && libBagMember(p) && hasCallablePart(fieldTs)
             ? { ...ctx, declMember: true }
-            : ctx;
+            : ctx.declMember !== true && isNonGenericOverloadSetMember(fieldTs, checker)
+              ? { ...ctx, declMember: true }
+              : ctx;
         pt = mapType(fieldTs, tryCtx);
         // A field DECLARED in a `.d.ts` whose IMPLEMENTATION twin this build
         // COMPILES: the twin is the only producer the slot can ever have, and
@@ -9090,7 +9093,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     // WALLB_OVERLOAD_DECLINE_MARKER: mirror mapRecordTypeInner's admission
     // (same two predicates) so the blocker DESCRIPTION agrees with what
     // the shape builder actually does.
-    if (isGenericCallableMemberType(fieldTs, checker) || isNonGenericOverloadSetMember(fieldTs, checker)) continue;
+    if (isGenericCallableMemberType(fieldTs, checker)) continue;
     let pt = mapType(fieldTs, ctx);
     if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
     // PROBE(anymember): mirror mapRecordTypeInner's bare-`any` member
