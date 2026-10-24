@@ -1635,10 +1635,6 @@ export function jsDesugar(fileName: string, text: string): string | null {
     if (open !== null) return jsDesugar(fileName, open) ?? open;
   }
   {
-    const chained = chainedPropertyAssignEdits(fileName, text);
-    if (chained !== null) return jsDesugar(fileName, chained) ?? chained;
-  }
-  {
     const tsCjs = tsCjsEdits(fileName, text);
     if (tsCjs !== null) return jsDesugar(fileName, tsCjs) ?? tsCjs;
   }
@@ -1661,6 +1657,13 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const probes = envProbeBranchEdits(fileName, text);
     if (probes !== null) return jsDesugar(fileName, probes) ?? probes;
+  }
+  // AFTER the tsc prologue rules above: `exports.a = exports.b = void 0;` is the
+  // compiler's own chained prologue, which tsCjsEdits answers; splitting it here
+  // first made a re-export module's slots read before they were written.
+  {
+    const chained = chainedPropertyAssignEdits(fileName, text);
+    if (chained !== null) return jsDesugar(fileName, chained) ?? chained;
   }
   {
     const expando = staticExpandoEdits(fileName, text);
