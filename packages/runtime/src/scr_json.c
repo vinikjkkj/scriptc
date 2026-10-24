@@ -12186,15 +12186,30 @@ ScrStr *scr_json_indent_num(const ScrStr *compact, double space) {
 
 ScrStr *scr_json_indent_str(const ScrStr *compact, const ScrStr *space) {
   /* The first 10 UTF-16 code units: a 4-byte (astral) character counts two.
-   * A character that would cross the tenth unit is left out whole. */
-  size_t take = 0, units = 0;
+   * An astral character that straddles the tenth unit keeps its HIGH
+   * surrogate, which Node emits as a lone surrogate; scriptc strings hold
+   * no lone surrogates (they print as U+FFFD, the bytes Node prints), so the
+   * high half is spelled as U+FFFD here. */
+  char gap[64];
+  size_t take = 0, units = 0, glen = 0;
+  bool lone_high = false;
   while (take < space->len) {
     unsigned char c = (unsigned char)space->data[take];
     size_t w = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
     size_t u = w == 4 ? 2 : 1;
-    if (units + u > 10) break;
+    if (units + u > 10) {
+      lone_high = (u == 2 && units == 9);
+      break;
+    }
     units += u;
     take += w;
   }
-  return scr_json_reindent(compact, space->data, take);
+  memcpy(gap, space->data, take);
+  glen = take;
+  if (lone_high) {
+    gap[glen++] = (char)0xEF;
+    gap[glen++] = (char)0xBF;
+    gap[glen++] = (char)0xBD;
+  }
+  return scr_json_reindent(compact, gap, glen);
 }
