@@ -12950,6 +12950,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9100-surplus-args-effects-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9100-surplus-args-effects-order.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9101-surplus-args-await-receiver-super.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9101-surplus-args-await-receiver-super.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9102-surplus-args-statement-member-forms.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9102-surplus-args-statement-member-forms.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/911-records-index-dot-access.ts": {
    "order": [
     "<repo>/tests/corpus/911-records-index-dot-access.ts"
