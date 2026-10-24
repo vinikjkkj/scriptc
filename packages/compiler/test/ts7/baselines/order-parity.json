@@ -12184,6 +12184,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8560-a-computed-key-call-on-an-untyped-receiver-is-a-method-call.js": {
+   "order": [
+    "<repo>/tests/corpus/8560-a-computed-key-call-on-an-untyped-receiver-is-a-method-call.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
