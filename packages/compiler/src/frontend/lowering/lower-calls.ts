@@ -7804,6 +7804,26 @@ const inliningPredicates = new Set<ts.Symbol>();
     return { kind: "boolLit", value: false, type: BOOL, loc };
   }
 
+/** A call of an OVERLOADED interface member whose closure answers DYN (the
+ * overloads answer different types; see mapTypeInner's merged overload
+ * closure, types.ts). The checker resolved the call to one overload
+ * SIGNATURE, so the result is narrowed to THAT overload's return type with the
+ * checked extraction (dynCheck): a lying value throws the catchable TypeError.
+ * Only bodyless signatures (interface / .d.ts members) qualify; an
+ * implementation's own `any` return keeps the reconcileOverloadReturn stance.
+ * Non-dyn results, void, unit and unmappable resolved returns pass through. */
+export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, call: IrExpr): IrExpr {
+  if (call.type.kind !== "dyn") return call;
+  const rsig = L.checker.getResolvedSignature(expr);
+  const rdecl = rsig ? L.checker.signatureDeclaration(rsig) : undefined;
+  if (!rsig || !rdecl || rdecl.kind !== ts.SyntaxKind.MethodSignature) return call;
+  const calleeSigs = L.checker.getCallSignatures(L.checker.getTypeAtLocation(expr.expression));
+  if (calleeSigs.length < 2) return call;
+  const rt = L.mapTypeOf(L.checker.getReturnTypeOfSignature(rsig));
+  if (!rt || rt.kind === "void" || rt.kind === "dyn" || rt.kind === "jsval" || isUnitType(rt)) return call;
+  return { kind: "dynCheck", value: call, type: rt, loc: call.loc };
+}
+
 /** Reconciles a direct call's recorded type with the checker's answer at
    * the site when the callee is OVERLOADED: tsc resolved the call against
    * one overload SIGNATURE, so every downstream lowering sees that
