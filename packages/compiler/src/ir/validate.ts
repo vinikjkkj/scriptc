@@ -1446,6 +1446,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // `bigint | boolean | number | string`, so an 'unknown' reaching it
   // has no single static arm to be coerced into first.
   "big.fromDyn": { argTypes: [DYN], result: BIGINT_T },
+  "big.toBigInt": { argTypes: [DYN], result: BIGINT_T },
   "big.fromStr": { argTypes: [STRING], result: BIGINT_T },
   "big.toF64": { argTypes: [BIGINT_T], result: F64 },
   // (bits, value) — the declared argument ORDER, which is the spec's.
