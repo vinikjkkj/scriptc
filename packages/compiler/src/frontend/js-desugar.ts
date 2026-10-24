@@ -1645,6 +1645,108 @@ function openRecordEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* A JSDOC OBJECT-TYPED PARAMETER THE BODY TESTS FOR ABSENCE ACCEPTS ABSENCE.
+ * `@param {{ stack?: string }} holder` over a body that opens with
+ * `holder && holder.stack` is the author saying "an object, or nothing":
+ * JavaScript never checks the annotation, and a caller that passes
+ * `undefined` (mysql2 hands every query callback a holder that is undefined
+ * when tracing is off) must reach the test. A record slot cannot hold
+ * undefined or null (the call threw `expected object at $, got undefined`
+ * before the body ran), so the annotation the checker sees is widened with
+ * `| null | undefined` on exactly the parameters whose own body guards them:
+ * a truthiness test, `&&` / `||` / `??` with the parameter on the left, `!p`,
+ * a nullish comparison, or `p?.`. Only inline object types are widened (the
+ * annotation is rewritten, so what the checker believes IS the widened
+ * type); a parameter the body never guards keeps its record. */
+function jsdocGuardedUse(body: ts.Node, name: string): boolean {
+  let found = false;
+  const isNullish = (e: ts.Expression): boolean =>
+    e.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(e) && e.text === "undefined") ||
+    (ts.isVoidExpression(e) && ts.isNumericLiteral(e.expression));
+  const walk = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isIdentifier(n) && n.text === name) {
+      const p = n.parent;
+      if (ts.isBinaryExpression(p)) {
+        const k = p.operatorToken.kind;
+        if (
+          (k === ts.SyntaxKind.AmpersandAmpersandToken || k === ts.SyntaxKind.BarBarToken || k === ts.SyntaxKind.QuestionQuestionToken) &&
+          p.left === n
+        ) found = true;
+        else if (
+          (k === ts.SyntaxKind.EqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsToken ||
+            k === ts.SyntaxKind.EqualsEqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsEqualsToken) &&
+          isNullish(p.left === n ? p.right : p.left)
+        ) found = true;
+      } else if (ts.isPrefixUnaryExpression(p) && p.operator === ts.SyntaxKind.ExclamationToken) found = true;
+      else if (ts.isConditionalExpression(p) && p.condition === n) found = true;
+      else if ((ts.isIfStatement(p) || ts.isWhileStatement(p) || ts.isDoStatement(p)) && p.expression === n) found = true;
+      else if (ts.isPropertyAccessExpression(p) && p.expression === n && p.questionDotToken !== undefined) found = true;
+      else if (ts.isElementAccessExpression(p) && p.expression === n && p.questionDotToken !== undefined) found = true;
+      if (found) return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(body);
+  return found;
+}
+
+function jsdocNullableParamEdits(fileName: string, text: string): string | null {
+  if (!/@param\s*\{\s*\{/.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const visit = (n: ts.Node): void => {
+    if (
+      (ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n)) &&
+      n.body !== undefined && n.parameters.length > 0
+    ) {
+      let anchor: ts.Node = n;
+      if (ts.isVariableDeclaration(n.parent) && ts.isVariableDeclarationList(n.parent.parent) && n.parent.parent.parent !== undefined) {
+        anchor = n.parent.parent.parent;
+      }
+      let i = anchor.getStart(sf);
+      while (i > 0 && /\s/.test(text[i - 1]!)) i--;
+      if (text.slice(i - 2, i) === "*/") {
+        const open = text.lastIndexOf("/**", i - 2);
+        if (open >= 0) {
+          const comment = text.slice(open, i);
+          const tag = /@param\s*\{/g;
+          for (let m = tag.exec(comment); m !== null; m = tag.exec(comment)) {
+            const typeStart = m.index + m[0].length;
+            let depth = 1;
+            let j = typeStart;
+            for (; j < comment.length && depth > 0; j++) {
+              if (comment[j] === "{") depth++;
+              else if (comment[j] === "}") depth--;
+            }
+            if (depth !== 0) continue;
+            const closeAt = j - 1;
+            const typeText = comment.slice(typeStart, closeAt);
+            const rest = /^\s*([A-Za-z_$][\w$]*)/.exec(comment.slice(j));
+            if (rest === null || !typeText.trim().startsWith("{") || /\b(?:null|undefined)\b/.test(typeText)) continue;
+            const param = n.parameters.find((p) => ts.isIdentifier(p.name) && p.name.text === rest[1] && p.initializer === undefined && p.dotDotDotToken === undefined);
+            if (param === undefined || param.questionToken !== undefined) continue;
+            if (!jsdocGuardedUse(n.body, rest[1]!)) continue;
+            edits.push({ start: open + closeAt, end: open + closeAt, text: " | null | undefined" });
+          }
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    if (ed.start < at) continue;
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -1658,6 +1760,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const open = openRecordEdits(fileName, text);
     if (open !== null) return jsDesugar(fileName, open) ?? open;
+  }
+  {
+    const nullable = jsdocNullableParamEdits(fileName, text);
+    if (nullable !== null) return jsDesugar(fileName, nullable) ?? nullable;
   }
   {
     const tsCjs = tsCjsEdits(fileName, text);
