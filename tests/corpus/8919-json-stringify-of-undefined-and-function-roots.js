@@ -31,3 +31,12 @@ function pretty(v) {
 }
 pretty(undefined);
 pretty({ x: [1, { y: "z" }] });
+
+// A record with an index signature is a non-callable object: its root always
+// serializes, so the stringify stays a string for a consumer typed string.
+function keyed(name) {
+  const key = JSON.stringify({ [name]: 1 }).slice(1, -3);
+  console.log(typeof key, key);
+}
+keyed("a");
+keyed("bb");

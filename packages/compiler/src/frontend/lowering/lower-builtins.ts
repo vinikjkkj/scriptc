@@ -4538,18 +4538,30 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       // for a dyn argument); a value that became dyn only through the
       // narrow bridge above has a `string` view, which a DYN node would
       // contradict, so it is refused here rather than validated at run time.
-      if (value.type.kind === "dyn" && L.mapTypeOf(L.typeOf(call))?.kind !== "dyn") {
-        L.unsupported(
-          "SC1090",
-          argNode,
-          `JSON.stringify of a '${L.fmt(L.mapTypeOf(L.typeOf(argNode)) ?? value.type)}' value that is read through a dynamic bridge ` +
-            `(narrow it with a type guard first; its stringify may drop to undefined)`,
-        );
+      // A bridged dyn whose consumers see `string` is only sound for a root
+      // that can never be dropped: a non-callable object (a record with an
+      // index signature, say) always serializes. Anything that may be
+      // undefined, a function or a symbol is refused here, not validated at
+      // run time.
+      const bridgedDynString =
+        value.type.kind === "dyn" && L.mapTypeOf(L.typeOf(call))?.kind !== "dyn";
+      if (bridgedDynString) {
+        const argTs = L.typeOf(argNode);
+        const neverDropped =
+          (argTs.flags & ts.TypeFlags.Object) !== 0 && L.checker.getCallSignatures(argTs).length === 0;
+        if (!neverDropped) {
+          L.unsupported(
+            "SC1090",
+            argNode,
+            `JSON.stringify of a '${L.fmt(L.mapTypeOf(argTs) ?? value.type)}' value that is read through a dynamic bridge ` +
+              `(narrow it with a type guard first; its stringify may drop to undefined)`,
+          );
+        }
       }
       const node: IrExpr = {
         kind: "jsonStringify",
         value,
-        type: value.type.kind === "dyn" ? DYN : STRING,
+        type: value.type.kind === "dyn" && !bridgedDynString ? DYN : STRING,
         loc,
       };
       if (indent !== "") {

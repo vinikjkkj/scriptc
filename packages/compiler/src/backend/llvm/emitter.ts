@@ -9838,7 +9838,7 @@ class LlEmitter {
         // the dyn root below.
         const v = this.emitExpr(e.value);
         let compact: { name: string; type: IrType };
-        if (e.value.type.kind === "dyn") {
+        if (e.value.type.kind === "dyn" && e.type.kind === "dyn") {
           // A dyn root: the runtime's dyn stringify answers a DYN (Node's
           // type is string | undefined): the text for a root that
           // serializes, the undefined VALUE for a root the stringify drops
@@ -9859,6 +9859,14 @@ class LlEmitter {
             `${t2} = call ptr @scr_dyn_json_reindent(ptr ${dynText.name}, ptr @${rewriter}, ptr ${this.cstr(dynIndent)}, i64 ${Buffer.byteLength(dynIndent, "utf8")})`,
           );
           return this.own({ name: t2, type: e.type });
+        } else if (e.value.type.kind === "dyn") {
+          // A dyn root answered as text (the bridged record a consumer
+          // types string): the runtime's text walker, as before.
+          this.declare(`declare ptr @scr_dyn_format_j(ptr)`);
+          const t = B.tmp();
+          B.line(`${t} = call ptr @scr_dyn_format_j(ptr ${v.name})`);
+          compact = this.own({ name: t, type: e.type });
+          this.emitPendingCheck();
         } else {
           const helper = this.walkers.jsonWriteHelper(e.value.type);
           this.declare(`declare void @scr_jb_init(ptr)`);

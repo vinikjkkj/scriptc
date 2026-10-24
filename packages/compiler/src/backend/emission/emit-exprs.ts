@@ -8258,7 +8258,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // function, a symbol). Fallible (a handle inside the tree throws),
         // so the pending check runs. The pretty form re-indents the string
         // text with the same gap re-indenter as the typed path.
-        if (e.value.type.kind === "dyn") {
+        if (e.value.type.kind === "dyn" && e.type.kind === "dyn") {
           const dynText = E.fallibleTemp(e.type, `scr_dyn_json_stringify(${v.name})`);
           const dynIndent = (e as { indent?: string }).indent;
           if (!dynIndent) return dynText;
@@ -8269,7 +8269,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           );
         }
         const compact =
-          (() => {
+          e.value.type.kind === "dyn"
+            ? E.fallibleTemp(e.type, `scr_dyn_format_j(${v.name})`)
+            : (() => {
                 const helper = E.jsonWriteHelper(e.value.type);
                 const buf = `sc_t${E.tempCounter++}`;
                 E.line(`ScrJsonBuf ${buf}; scr_jb_init(&${buf});${E.srcComment(e.loc)}`);
