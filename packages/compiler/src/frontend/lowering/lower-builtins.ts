@@ -9420,13 +9420,10 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       if (ctorArgs.length === 0) {
         return { kind: "libCall", fn: "date.now", args: [], type: F64, loc };
       }
-      if (ctorArgs.length !== 1) {
-        L.noLowering(
-          "new Date with year/month/day arguments",
-          recv,
-          "the field constructor is local-time; only new Date() and new Date(dateString) compose with .getTime()",
-        );
-      }
+      // The local-time FIELD constructor does not compose: the Date value is
+      // built by the general constructor lowering and read by the Date method
+      // lowering (mysql2's localTime: new Date(y, m, d, h, mi, s, ms).getTime()).
+      if (ctorArgs.length !== 1) return null;
       const arg = L.lowerExpr(ctorArgs[0]!);
       if (arg.type.kind !== "string") {
         L.noLowering(
@@ -9457,11 +9454,8 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       }
       ms = arg;
     } else {
-      L.noLowering(
-        "new Date with year/month/day arguments",
-        recv,
-        "the field constructor is local-time; only new Date() and new Date(ms) compose with .toISOString()",
-      );
+      // The field constructor is local-time and builds a Date value first.
+      return null;
     }
     return { kind: "libCall", fn: "date.toISOString", args: [ms], type: STRING, loc };
   }
