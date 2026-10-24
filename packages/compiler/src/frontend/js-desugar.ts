@@ -622,6 +622,54 @@ function envProbeBranchEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* THE SAFE LOAD OF A BUILTIN MODULE. A library that wants a Node module only when the
+ * host has it writes
+ *
+ *     const dc = (() => {
+ *       try {
+ *         return 'getBuiltinModule' in process
+ *           ? process.getBuiltinModule('node:diagnostics_channel')
+ *           : require('node:diagnostics_channel');
+ *       } catch {
+ *         return undefined;
+ *       }
+ *     })();
+ *
+ * Both arms name the same builtin, the probe `'getBuiltinModule' in process` is true of a
+ * compiled binary (the runtime implements it), and loading a builtin cannot throw, so the
+ * binding IS `const dc = require('node:diagnostics_channel')`, the form every builtin
+ * member read already lowers (mysql2's tracing.js). Only this exact shape is rewritten. */
+const SAFE_BUILTIN_PREFILTER = /getBuiltinModule['"]\s+in\s+process/;
+
+function safeBuiltinLoadEdits(fileName: string, text: string): string | null {
+  if (!SAFE_BUILTIN_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const norm = (t: string): string => t.replace(/\/\/[^\n]*/g, "").replace(/\s+/g, " ").replace(/\( /g, "(").replace(/ \)/g, ")").trim();
+  const SHAPE =
+    /^\(\(\) => \{ try \{ return 'getBuiltinModule' in process \? process\.getBuiltinModule\((['"])((?:node:)?[a-z_/]+)\1\) : require\((['"])((?:node:)?[a-z_/]+)\3\); \} catch(?: \(\w+\))? \{ return undefined; \} \}\)\(\);?$/;
+  const edits: Edit[] = [];
+  for (const stmt of sf.statements) {
+    if (!ts.isVariableStatement(stmt) || stmt.declarationList.declarations.length !== 1) continue;
+    const d = stmt.declarationList.declarations[0]!;
+    if (!ts.isIdentifier(d.name) || d.initializer === undefined || d.type !== undefined) continue;
+    const m = SHAPE.exec(norm(d.initializer.getText(sf)));
+    if (m === null || m[2] !== m[4]) continue;
+    const spec = m[2]!;
+    const bare = spec.startsWith("node:") ? spec.slice(5) : spec;
+    if (!BUILTIN_SPECS.has(bare)) continue;
+    const nl = (d.initializer.getText(sf).match(/\n/g) ?? []).length;
+    edits.push({ start: d.initializer.getStart(sf), end: d.initializer.getEnd(), text: `require(${m[1]}${spec}${m[1]})` + "\n".repeat(nl) });
+  }
+  if (edits.length === 0) return null;
+  let out = "";
+  let at = 0;
+  for (const ed of edits.sort((a, b) => a.start - b.start)) {
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 /* A FEATURE PROBE FOR Object.hasOwn. iconv-lite's helper binds the function once,
  *
  *     var hasOwn = typeof Object.hasOwn === "undefined"
@@ -1963,6 +2011,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const probes = envProbeBranchEdits(fileName, text);
     if (probes !== null) return jsDesugar(fileName, probes) ?? probes;
+  }
+  {
+    const safeLoad = safeBuiltinLoadEdits(fileName, text);
+    if (safeLoad !== null) return jsDesugar(fileName, safeLoad) ?? safeLoad;
   }
   {
     const ownProbe = hasOwnProbeEdits(fileName, text);
