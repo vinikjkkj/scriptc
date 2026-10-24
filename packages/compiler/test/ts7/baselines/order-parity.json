@@ -15321,6 +15321,13 @@
     "<repo>/tests/corpus/8917-require-binding-of-a-commonjs-module-used-as-a-value/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/helpers.cjs",
+    "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
