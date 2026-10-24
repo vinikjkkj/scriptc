@@ -3834,6 +3834,38 @@ export class LlDyn {
       B.terminate(`ret ptr ${r}`);
       B.startBlock(lNext);
     }
+    // A LIVE ARRAY VIEW (a boundary copy of a static number[] / boolean[] /
+    // string[]): an index or `length` read answers from the origin, so a
+    // mutation either side made is seen. The `static_copy` byte (offset 14)
+    // is tested inline; the call behind it is the runtime's single body
+    // (scr_dyn_view_key_get), which the C emitter's twin arm also calls.
+    {
+      const isArr = B.tmp();
+      B.line(`${isArr} = icmp eq i32 ${kd}, ${DK.ARR}`);
+      const lArr = B.newLabel("kg.va");
+      const lNext = B.newLabel("kg.n");
+      B.condBr(isArr, lArr, lNext);
+      B.startBlock(lArr);
+      const fp = B.tmp();
+      const fb = B.tmp();
+      const isc = B.tmp();
+      B.line(`${fp} = getelementptr inbounds i8, ptr %d, i64 14 ; ->static_copy`);
+      B.line(`${fb} = load i8, ptr ${fp}`);
+      B.line(`${isc} = icmp ne i8 ${fb}, 0`);
+      const lAsk = B.newLabel("kg.vq");
+      B.condBr(isc, lAsk, lNext);
+      B.startBlock(lAsk);
+      host.declare(`declare ptr @scr_dyn_view_key_get(ptr, ptr)`);
+      const vr = B.tmp();
+      B.line(`${vr} = call ptr @scr_dyn_view_key_get(ptr %d, ptr %k)`);
+      const vHit = B.tmp();
+      B.line(`${vHit} = icmp ne ptr ${vr}, null`);
+      const lVHit = B.newLabel("kg.vh");
+      B.condBr(vHit, lVHit, lNext);
+      B.startBlock(lVHit);
+      B.terminate(`ret ptr ${vr}`);
+      B.startBlock(lNext);
+    }
     // ISLAND-held receivers: o[k] reads the REAL engine property (getters
     // included, throws bridged catchably) and the result wraps back
     // scalar-normalized — the routed keyed read that retired the fence.

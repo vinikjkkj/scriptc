@@ -1663,6 +1663,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    return NULL;`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_PROXY) return scr_dyn_proxy_get(d, k); /* the get trap, or the target's answer */`);
+    d.push(`  if (d->static_copy && d->kind == SCR_DYN_ARR) {`);
+    d.push(`    /* A LIVE ARRAY VIEW (a boundary copy of a static number[] / boolean[] /`);
+    d.push(`     * string[]): an index or \`length\` read answers from the origin, so a`);
+    d.push(`     * mutation either side made is seen. The LLVM lane emits the same arm. */`);
+    d.push(`    ScrDyn *vr = scr_dyn_view_key_get(d, k);`);
+    d.push(`    if (vr != NULL) return vr;`);
+    d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_OBJ) {`);
     d.push(`    /* JS's [[Get]], whole, in ONE runtime entry point: own`);
     d.push(`     * member, own ACCESSOR (its getter called with \`this\` = d),`);

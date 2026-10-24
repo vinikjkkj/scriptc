@@ -5853,6 +5853,29 @@ ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
  * too: the same dyn value can be recovered at a different static type
  * than it crossed at, and the origin is the wrong shape there. */
 void *scr_dyn_origin_take(const ScrDyn *d, const char *tkey);
+/* LIVE ARRAY VIEWS (scr_json.c): a boundary copy of a live number[] /
+ * boolean[] / string[] / dyn-element array answers index and `length` reads
+ * from the origin, and takes in-place array methods and index writes through
+ * to it. See the section comment there. view_key_get answers +1 or NULL (not
+ * handled); view_key_set answers whether it handled the write; view_before
+ * validates and brings the copy up to date (false = refused, exception
+ * pending); view_after commits the mutated copy to the origin. */
+void scr_dyn_view_sync(ScrDyn *d);
+void scr_dyn_view_sync_force(ScrDyn *d);
+void scr_dyn_view_sync_deep(ScrDyn *d);
+ScrDyn *scr_dyn_view_key_get(ScrDyn *d, ScrStr *k);
+bool scr_dyn_view_key_set(ScrDyn *d, ScrStr *key, ScrDyn *value);
+bool scr_dyn_view_live(ScrDyn *d);
+/* The consumers that walk an array's items directly (JSON, inspect, string
+ * conversion, spread and iteration) bring a live view up to date first, so
+ * a kept copy of an array the static side has since changed reads as the
+ * array. One byte test for every other dyn. */
+#define SCR_VIEW_FRESH(d)                                                      \
+  do {                                                                         \
+    if ((d)->static_copy && (d)->kind == SCR_DYN_ARR) scr_dyn_view_sync_deep((ScrDyn *)(d)); \
+  } while (0)
+bool scr_dyn_view_before(ScrDyn *d, const char *method, ScrDyn *const *args, size_t argc);
+void scr_dyn_view_after(ScrDyn *d, const char *method, size_t argc);
 /* Drops a dying copy's origin. Called from the ARR/OBJ teardown behind
  * `static_copy`; a node with no entry is a cheap miss. */
 void scr_dyn_origin_forget(ScrDyn *d);

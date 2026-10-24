@@ -890,6 +890,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
     case SCR_DYN_STR:
       return scr_insp_str(d->v.str);
     case SCR_DYN_ARR: {
+      SCR_VIEW_FRESH(d);
       /* An array's own NAMED properties print after its elements, as `key:
        * value` entries (an exec result: `[ 'aa', index: 1, input: 'caab',
        * groups: undefined ]`). They are part of the same entry list, which

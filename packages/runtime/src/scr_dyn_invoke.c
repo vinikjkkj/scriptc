@@ -2123,19 +2123,43 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
   }
 
   if (recv->kind == SCR_DYN_ARR) {
+    /* A boundary copy of a LIVE number[] / boolean[] / string[] is a view
+     * of its origin (scr_json.c, "live array views"): bring the copy up to
+     * date before anything reads it. */
+    if (recv->static_copy) {
+      /* push and pop keep to the O(1) length check (view_before handles
+       * them); every other method pays the O(n) verification it already
+       * costs the order of. */
+      if (!dyn_name_is(method, "push") && !dyn_name_is(method, "pop")) scr_dyn_view_sync_deep(recv);
+      else scr_dyn_view_sync(recv);
+    }
     size_t len = recv->v.arr.len;
     /* An IN-PLACE array method on a copy the static→dyn boundary made of
-     * a value the caller still names: the mutation would be confined to
-     * the copy, so refuse loudly instead of dropping it (see
-     * scr_dyn_static_copy_refuse). The non-mutating methods — map, slice,
-     * join, indexOf and the rest — read the copy, which is exact, and are
-     * deliberately not listed here. */
+     * a value the caller still names. When the copy is a live view the
+     * method runs on the copy and its result is committed to the origin
+     * (the program names ONE array, so both see the write). Otherwise the
+     * mutation would be confined to the copy, so refuse loudly instead of
+     * dropping it (see scr_dyn_static_copy_refuse). The non-mutating
+     * methods — map, slice, join, indexOf and the rest — read the copy,
+     * which is exact, and are deliberately not listed here. */
     if (recv->static_copy &&
         (dyn_name_is(method, "push") || dyn_name_is(method, "pop") ||
          dyn_name_is(method, "shift") || dyn_name_is(method, "unshift") ||
          dyn_name_is(method, "splice") || dyn_name_is(method, "sort") ||
          dyn_name_is(method, "reverse") || dyn_name_is(method, "fill") ||
          dyn_name_is(method, "copyWithin"))) {
+      if (scr_dyn_view_live(recv)) {
+        if (!scr_dyn_view_before(recv, method, args, argc)) return NULL;
+        /* Run the ordinary array method on the copy with the guard lifted,
+         * then commit. The flag is the guard's whole input, and it goes back
+         * before the commit because the origin lookup is behind it. */
+        recv->static_copy = false;
+        ScrDyn *r = scr_dyn_invoke(recv, method, args, argc, what);
+        recv->static_copy = true;
+        if (scr_exc_pending()) scr_dyn_view_sync_force(recv);
+        else scr_dyn_view_after(recv, method, argc);
+        return r;
+      }
       char named[64];
       int n = snprintf(named, sizeof named, "calling '%s'", method);
       scr_dyn_static_copy_refuse(n > 0 ? named : "an in-place array method");

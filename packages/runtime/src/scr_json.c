@@ -1536,6 +1536,7 @@ static bool dyn_bytes_is_dataview(const ScrDyn *d) {
  * a function". Borrows src. */
 void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
   if (src->kind == SCR_DYN_ARR) {
+    SCR_VIEW_FRESH(src);
     for (size_t i = 0; i < src->v.arr.len; i++) {
       scr_dyn_arr_push(arr, scr_dyn_retain(src->v.arr.items[i]));
     }
@@ -2232,6 +2233,324 @@ void scr_dyn_origin_forget(ScrDyn *d) {
   }
   /* The table is whole again; now the origin may go, re-entrantly or not. */
   if (gone.release) gone.release(gone.obj);
+}
+
+/* ── LIVE ARRAY VIEWS ─────────────────────────────────────────────────
+ * A dyn ARR that is a boundary COPY of a live static array (scr_dyn_origin_mark
+ * recorded the ScrArr it was made from) is not a snapshot: the two are ONE
+ * array in JavaScript, so a write through either must land in the other.
+ * The two representations cannot share storage (a packed ScrArr against a
+ * vector of boxes), so the copy is kept as a CACHE of the origin and the
+ * origin stays the single truth:
+ *
+ *   - a mutation through the copy is applied to the copy AND committed to
+ *     the origin (push and pop in O(1), everything else by rewriting the
+ *     origin from the copy, which is O(n) like the mutation itself);
+ *   - an index or `length` read answers FROM THE ORIGIN, so a mutation the
+ *     static side made after the crossing is seen (O(1));
+ *   - every other entry resynchronises the copy first when the origin's
+ *     length moved.
+ *
+ * Only arrays whose element kind a dyn value can be written back into
+ * without a type change take this path: number[], boolean[], string[] and
+ * the dyn-element arrays. A statically typed array cannot hold a value of
+ * another type, so a write that would change an element's type (`push("x")`
+ * onto a number[]) is refused LOUDLY and leaves both sides untouched: that
+ * is the one residue of keeping the static representation, and it needs the
+ * array to be a dyn array from creation. Arrays of arrays, records and class
+ * instances keep scr_dyn_static_copy_refuse (their elements are COPIES with
+ * no origin of their own). */
+static ScrArr *dyn_view_origin(const ScrDyn *d) {
+  if (d == NULL || !d->static_copy || d->kind != SCR_DYN_ARR || d->module_ns) return NULL;
+  int is_arr = 0;
+  void *o = scr_dyn_origin_peek(d, &is_arr);
+  if (o == NULL || !is_arr) return NULL;
+  ScrArr *a = (ScrArr *)o;
+  switch (a->elem) {
+    case SCR_ELEM_F64:
+    case SCR_ELEM_BOOL:
+    case SCR_ELEM_STR:
+      return a;
+    case SCR_ELEM_REF:
+      return a->elem_retain == &scr_dyn_retain_v ? a : NULL;
+    default:
+      return NULL;
+  }
+}
+
+static const char *dyn_view_elem_name(const ScrArr *a) {
+  switch (a->elem) {
+    case SCR_ELEM_F64: return "number";
+    case SCR_ELEM_BOOL: return "boolean";
+    case SCR_ELEM_STR: return "string";
+    default: return "unknown";
+  }
+}
+
+static ScrDyn *dyn_view_box(const ScrArr *a, size_t i) {
+  switch (a->elem) {
+    case SCR_ELEM_F64: return scr_dyn_new_num(scr_arr_nochk_f64(a, (double)i));
+    case SCR_ELEM_BOOL: return scr_dyn_new_bool(scr_arr_nochk_bool(a, (double)i));
+    case SCR_ELEM_STR: return scr_dyn_new_str((ScrStr *)(uintptr_t)a->data[i]);
+    default: {
+      ScrDyn *e = (ScrDyn *)(uintptr_t)a->data[i];
+      return e != NULL ? scr_dyn_retain(e) : scr_dyn_retain(scr_dyn_undefined());
+    }
+  }
+}
+
+static bool dyn_view_fits(const ScrArr *a, const ScrDyn *v) {
+  switch (a->elem) {
+    case SCR_ELEM_F64: return v->kind == SCR_DYN_NUM;
+    case SCR_ELEM_BOOL: return v->kind == SCR_DYN_BOOL;
+    case SCR_ELEM_STR: return v->kind == SCR_DYN_STR;
+    default: return true;
+  }
+}
+
+static void dyn_view_refuse_type(const ScrArr *a, const ScrDyn *v, const char *what) {
+  const char *got = "a value";
+  switch (v->kind) {
+    case SCR_DYN_NUM: got = "a number"; break;
+    case SCR_DYN_BOOL: got = "a boolean"; break;
+    case SCR_DYN_STR: got = "a string"; break;
+    case SCR_DYN_UNDEF: got = "undefined"; break;
+    case SCR_DYN_NULL: got = "null"; break;
+    case SCR_DYN_ARR: got = "an array"; break;
+    case SCR_DYN_OBJ: got = "an object"; break;
+    default: break;
+  }
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, what);
+  scr_jb_puts(&b, " would store ");
+  scr_jb_puts(&b, got);
+  scr_jb_puts(&b, " in a ");
+  scr_jb_puts(&b, dyn_view_elem_name(a));
+  scr_jb_puts(&b, "[] that the program also holds with its static type: the array crossed into an"
+                  " untyped slot by sharing its storage, and a statically typed array keeps its"
+                  " element type, so a write that changes it cannot land on the object Node"
+                  " writes. Nothing was written");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+}
+
+/* Rebuild the copy's items from the origin. */
+static void dyn_view_pull(ScrDyn *n, const ScrArr *o) {
+  while (n->v.arr.len > 0) {
+    ScrDyn *gone = n->v.arr.items[n->v.arr.len - 1];
+    n->v.arr.len--;
+    scr_dyn_release(gone);
+  }
+  for (size_t i = 0; i < o->len; i++) scr_dyn_arr_push(n, dyn_view_box(o, i));
+}
+
+/* Resynchronise unconditionally (a mutation threw half way). */
+void scr_dyn_view_sync_force(ScrDyn *d) {
+  ScrArr *o = dyn_view_origin(d);
+  if (o != NULL) dyn_view_pull(d, o);
+}
+
+/* Does the copy's item i still say what the origin's slot i says? */
+static bool dyn_view_item_current(const ScrDyn *n, const ScrArr *o, size_t i) {
+  const ScrDyn *it = n->v.arr.items[i];
+  switch (o->elem) {
+    case SCR_ELEM_F64: {
+      double v = scr_arr_nochk_f64(o, (double)i);
+      return it->kind == SCR_DYN_NUM && memcmp(&it->v.num, &v, sizeof v) == 0;
+    }
+    case SCR_ELEM_BOOL: return it->kind == SCR_DYN_BOOL && it->v.b == scr_arr_nochk_bool(o, (double)i);
+    case SCR_ELEM_STR: return it->kind == SCR_DYN_STR && it->v.str == (ScrStr *)(uintptr_t)o->data[i];
+    default: return (const void *)it == (const void *)(uintptr_t)o->data[i];
+  }
+}
+
+/* Length-only freshness: O(1), what push and pop need (neither reads an
+ * existing element except pop's last, which view_before refreshes). */
+void scr_dyn_view_sync(ScrDyn *d) {
+  ScrArr *o = dyn_view_origin(d);
+  if (o != NULL && o->len != d->v.arr.len) dyn_view_pull(d, o);
+}
+
+/* Full freshness: the length AND every element, O(n): what every other
+ * array method already costs, so it adds no order to the call. A static
+ * `xs[0] = 9` made after the crossing keeps the length and is caught here. */
+void scr_dyn_view_sync_deep(ScrDyn *d) {
+  ScrArr *o = dyn_view_origin(d);
+  if (o == NULL) return;
+  if (o->len != d->v.arr.len) { dyn_view_pull(d, o); return; }
+  for (size_t i = 0; i < o->len; i++) {
+    if (!dyn_view_item_current(d, o, i)) { dyn_view_pull(d, o); return; }
+  }
+}
+
+/* The canonical array index a key spells, or false. */
+static bool dyn_view_index(const ScrStr *k, size_t *out) {
+  size_t idx = 0;
+  if (k->len == 0 || k->len > 15 || (k->len > 1 && k->data[0] == '0')) return false;
+  for (size_t i = 0; i < k->len; i++) {
+    if (k->data[i] < '0' || k->data[i] > '9') return false;
+    idx = idx * 10 + (size_t)(k->data[i] - '0');
+  }
+  *out = idx;
+  return true;
+}
+
+/* d[k] read straight off the origin (+1), or NULL when this is not a live
+ * view or the key is neither an index nor `length` (the caller continues
+ * with the copy's own answer). */
+ScrDyn *scr_dyn_view_key_get(ScrDyn *d, ScrStr *k) {
+  ScrArr *o = dyn_view_origin(d);
+  if (o == NULL) return NULL;
+  if (k->len == 6 && memcmp(k->data, "length", 6) == 0) return scr_dyn_new_num((double)o->len);
+  size_t idx;
+  if (!dyn_view_index(k, &idx)) return NULL;
+  if (idx >= o->len) return scr_dyn_retain(scr_dyn_undefined());
+  return dyn_view_box(o, idx);
+}
+
+/* Write the value into the origin slot (i == len appends). The caller has
+ * checked dyn_view_fits. */
+static void dyn_view_store(ScrArr *o, size_t i, ScrDyn *v) {
+  switch (o->elem) {
+    case SCR_ELEM_F64:
+      if (i == o->len) scr_arr_push_f64(o, v->v.num); else scr_arr_set_f64(o, (double)i, v->v.num);
+      break;
+    case SCR_ELEM_BOOL:
+      if (i == o->len) scr_arr_push_bool(o, v->v.b); else scr_arr_set_bool(o, (double)i, v->v.b);
+      break;
+    case SCR_ELEM_STR:
+      if (i == o->len) scr_arr_push_ref(o, scr_str_retain(v->v.str));
+      else scr_arr_set_ref(o, (double)i, scr_str_retain(v->v.str));
+      break;
+    default:
+      if (i == o->len) scr_arr_push_ref(o, scr_dyn_retain(v));
+      else scr_arr_set_ref(o, (double)i, scr_dyn_retain(v));
+      break;
+  }
+}
+
+/* Rewrite the origin from the copy. False (with the refusal pending, the
+ * copy restored from the untouched origin) when an element cannot be held. */
+static bool dyn_view_commit(ScrDyn *n, ScrArr *o, const char *what) {
+  size_t len = n->v.arr.len;
+  for (size_t i = 0; i < len; i++) {
+    if (!dyn_view_fits(o, n->v.arr.items[i])) {
+      ScrDyn *bad = n->v.arr.items[i];
+      dyn_view_pull(n, o);
+      dyn_view_refuse_type(o, bad, what);
+      return false;
+    }
+  }
+  for (size_t i = 0; i < len; i++) {
+    if (i < o->len) {
+      /* same value already there: skip the store so a sort over a big
+       * array does not retain/release every string */
+      dyn_view_store(o, i, n->v.arr.items[i]);
+    } else {
+      dyn_view_store(o, o->len, n->v.arr.items[i]);
+    }
+  }
+  if (o->len > len) scr_arr_truncate(o, (double)len);
+  return true;
+}
+
+/* Is this receiver a live view that a mutation may go through? */
+bool scr_dyn_view_live(ScrDyn *d) { return dyn_view_origin(d) != NULL; }
+
+/* An index or `length` write through a live view. Returns false when the key
+ * is neither (the caller keeps the loud refusal); true when handled, with any
+ * refusal already pending. */
+bool scr_dyn_view_key_set(ScrDyn *d, ScrStr *key, ScrDyn *value) {
+  ScrArr *o = dyn_view_origin(d);
+  if (o == NULL) return false;
+  scr_dyn_view_sync(d);
+  size_t idx;
+  if (dyn_view_index(key, &idx)) {
+    if (idx > o->len || !dyn_view_fits(o, value)) {
+      /* a hole cannot be spelled in a typed array, and a foreign type cannot
+       * be stored in one */
+      dyn_view_refuse_type(o, idx > o->len ? scr_dyn_undefined() : value, "this index write");
+      return true;
+    }
+    dyn_view_store(o, idx, value);
+    if (idx == d->v.arr.len) {
+      scr_dyn_arr_push(d, scr_dyn_retain(value));
+    } else {
+      ScrDyn *old = d->v.arr.items[idx];
+      d->v.arr.items[idx] = scr_dyn_retain(value);
+      scr_dyn_release(old);
+    }
+    return true;
+  }
+  if (key->len == 6 && memcmp(key->data, "length", 6) == 0) {
+    double nl = scr_dyn_to_number(value);
+    if (scr_exc_pending()) return true;
+    if (!(nl >= 0) || nl > 4294967295.0 || nl != (double)(unsigned long long)nl) {
+      static const char msg[] = "Invalid array length";
+      scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+      return true;
+    }
+    size_t want = (size_t)nl;
+    if (want > o->len) {
+      dyn_view_refuse_type(o, scr_dyn_undefined(), "growing the length");
+      return true;
+    }
+    scr_arr_truncate(o, (double)want);
+    while (d->v.arr.len > want) {
+      ScrDyn *gone = d->v.arr.items[d->v.arr.len - 1];
+      d->v.arr.len--;
+      scr_dyn_release(gone);
+    }
+    return true;
+  }
+  return false;
+}
+
+/* The in-place array methods through a live view. `method` names one of
+ * push / pop / shift / unshift / splice / sort / reverse / fill / copyWithin.
+ * Validate (push, unshift), then let the caller's ordinary dyn array code run
+ * on the copy, then commit: scr_dyn_view_before answers false when the call
+ * must stop (refusal pending); scr_dyn_view_after commits the copy's new
+ * state to the origin. */
+bool scr_dyn_view_before(ScrDyn *d, const char *method, ScrDyn *const *args, size_t argc) {
+  ScrArr *o = dyn_view_origin(d);
+  if (o == NULL) return false;
+  if (strcmp(method, "push") == 0) {
+    scr_dyn_view_sync(d);
+  } else if (strcmp(method, "pop") == 0) {
+    scr_dyn_view_sync(d);
+    if (d->v.arr.len > 0 && !dyn_view_item_current(d, o, d->v.arr.len - 1)) dyn_view_pull(d, o);
+  } else {
+    scr_dyn_view_sync_deep(d);
+  }
+  if (strcmp(method, "push") == 0 || strcmp(method, "unshift") == 0) {
+    for (size_t i = 0; i < argc; i++) {
+      if (!dyn_view_fits(o, args[i])) {
+        char what[48];
+        snprintf(what, sizeof what, "calling '%s'", method);
+        dyn_view_refuse_type(o, args[i], what);
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+void scr_dyn_view_after(ScrDyn *d, const char *method, size_t argc) {
+  ScrArr *o = dyn_view_origin(d);
+  if (o == NULL) return;
+  if (strcmp(method, "push") == 0) {
+    size_t len = d->v.arr.len;
+    for (size_t i = len - argc; i < len; i++) dyn_view_store(o, o->len, d->v.arr.items[i]);
+    return;
+  }
+  if (strcmp(method, "pop") == 0) {
+    if (o->len > 0) scr_arr_truncate(o, (double)(o->len - 1));
+    return;
+  }
+  char what[48];
+  snprintf(what, sizeof what, "calling '%s'", method);
+  dyn_view_commit(d, o, what);
 }
 
 ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d) {
@@ -4542,6 +4861,7 @@ ScrStr *scr_dyn_symbol_descriptive(const ScrDyn *d) {
 /* String(unknown): a Symbol answers its descriptive string (the one ToString
  * spelling that does not throw for it), everything else is `walker`'s answer. */
 ScrStr *scr_dyn_string_explicit(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn *)) {
+  SCR_VIEW_FRESH(d);
   if (scr_dyn_is_symbol(d)) return scr_dyn_symbol_descriptive(d);
   return walker(d);
 }
@@ -4549,6 +4869,7 @@ ScrStr *scr_dyn_string_explicit(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn 
 /* A template literal's ToString of an unknown span: a Symbol throws, everything
  * else is the per-program String(unknown) walker's answer. */
 ScrStr *scr_dyn_template_to_string(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn *)) {
+  SCR_VIEW_FRESH(d);
   if (scr_dyn_is_symbol(d)) {
     static const char msg[] = "Cannot convert a Symbol value to a string";
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
@@ -4593,6 +4914,7 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
   case SCR_DYN_NUM: scr_jb_put_f64(b, d->v.num); return true;
   case SCR_DYN_STR: scr_jb_put_json_str(b, d->v.str); return true;
   case SCR_DYN_ARR: {
+    SCR_VIEW_FRESH(d);
     /* SCR_JSON_REENTRANCY: the length is read ONCE, like V8's
      * SerializeJSONArray — a hook that shrinks the array mid-walk leaves
      * the remaining slots reading undefined, which is `null`. */
@@ -5580,6 +5902,7 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
     return scr_dyn_to_string(d->v.proxy.target, NULL);
   }
   case SCR_DYN_ARR: {
+    SCR_VIEW_FRESH(d);
     ScrStr *out = scr_str_new("", 0);
     for (size_t i = 0; i < d->v.arr.len; i++) {
       if (i > 0) {
@@ -6950,6 +7273,7 @@ static bool dyn_canonical_index(const ScrStr *key, size_t *out) {
  * models no Object.prototype — the pre-existing divergence
  * estado-objmodel.md §4d named, unchanged. */
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
+  SCR_VIEW_FRESH(v);
   if (v->kind == SCR_DYN_PROXY) return SCR_PX->has((ScrDyn *)v, key);
   if (v->kind == SCR_DYN_OBJ) {
     /* One walk, accessors included: an accessor IS a property, so `in`
@@ -7027,6 +7351,9 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       scr_dyn_module_ns_refuse("assigning a property");
       return;
     }
+    /* A live array view takes an index or `length` write through to its
+     * origin (see "live array views"); any other key falls to the refusal. */
+    if (recv->kind == SCR_DYN_ARR && scr_dyn_view_key_set(recv, key, value)) return;
     scr_dyn_static_copy_refuse("assigning a property");
     return;
   }
@@ -7399,6 +7726,7 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
     return;
   }
   case SCR_DYN_ARR: {
+    SCR_VIEW_FRESH(d);
     /* SCR_JSON_REENTRANCY: length read once, like V8 — as above. */
     const size_t alen = d->v.arr.len;
     scr_jb_putc(b, '[');
@@ -11102,6 +11430,7 @@ void scr_dyn_objwalk_push(ScrDyn *out, ScrObjWalk mode, const char *key,
 }
 
 ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
+  SCR_VIEW_FRESH(v);
   if (v->kind == SCR_DYN_PROXY) return SCR_PX->walk((ScrDyn *)v, (int)mode);
   if (v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) {
     static const char msg[] = "Cannot convert undefined or null to object";
@@ -11382,6 +11711,7 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
  * nothing; index-keyed sources (arrays/strings/bytes) copy their index
  * keys like Node; the remaining kinds have no own enumerable keys. */
 ScrDyn *scr_dyn_assign(ScrDyn *target, const ScrDyn *src) {
+  SCR_VIEW_FRESH(src);
   if (target->kind == SCR_DYN_UNDEF || target->kind == SCR_DYN_NULL) {
     const char *m = "Cannot convert undefined or null to object";
     scr_throw_error_msg(SCR_ERR_TYPE, m, strlen(m));
@@ -11491,6 +11821,7 @@ ScrDyn *scr_dyn_assign_all(ScrDyn *target, const ScrDyn *sources) {
 }
 
 bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
+  SCR_VIEW_FRESH(v);
   if (v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) {
     const char *m = "Cannot convert undefined or null to object";
     scr_throw_error_msg(SCR_ERR_TYPE, m, strlen(m));

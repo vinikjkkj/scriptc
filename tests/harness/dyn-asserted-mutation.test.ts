@@ -139,6 +139,28 @@ console.log(JSON.stringify((d as number[]).copyWithin(1, 0, 3)));
 console.log(JSON.stringify(d));`],
   ["array-copywithin-noop", `const d: unknown = JSON.parse('[1,2,3]');
 console.log(JSON.stringify((d as number[]).fill(7, 10)), JSON.stringify((d as number[]).copyWithin(0, 9)));`],
+  // The same in-place methods on a STATIC array the program still names: the
+  // dyn copy is a live view of it (scr_json.c, "live array views"), so the
+  // write reaches `o` and the row matches Node instead of refusing.
+  ["static-array-fill", `const o = [1, 2, 3];
+const u: unknown = o;
+(u as number[]).fill(0);
+console.log(JSON.stringify(o));`],
+  ["static-array-copywithin", `const o = [1, 2, 3, 4, 5];
+const u: unknown = o;
+(u as number[]).copyWithin(0, 3);
+console.log(JSON.stringify(o));`],
+  ["static-array-push-sort-splice", `const o = [3, 1, 2];
+const u: unknown = o;
+(u as number[]).push(0);
+(u as number[]).sort((x: number, y: number): number => x - y);
+(u as number[]).splice(1, 1);
+console.log(JSON.stringify(o), o.length);`],
+  ["static-string-array-index-write", `const o = ["a", "b"];
+const u: unknown = o;
+(u as string[])[1] = "z";
+(u as string[]).push("c");
+console.log(JSON.stringify(o));`],
   ["delete-key", `const d: unknown = JSON.parse('{"k":1,"j":2}');
 delete (d as Record<string, unknown>)["k"];
 console.log(JSON.stringify(d));`],
@@ -193,11 +215,14 @@ describe.each(["c", "llvm"] as const)("the surfaces that stay LOUD rather than s
    * If either stops refusing, an in-place write is landing on a copy of an
    * object the program still names — the silence this whole file exists
    * to prevent. */
-  test.for([["fill", "(d as number[]).fill(0)"], ["copyWithin", "(d as number[]).copyWithin(0, 1)"]] as const)(
+  test.for([["fill", "(d as number[][]).fill([0])"], ["copyWithin", "(d as number[][]).copyWithin(0, 1)"]] as const)(
     "a marked static copy refuses %s by name (the arm that could not fire)",
     { timeout: 240_000 },
     async ([name, call]) => {
-      const src = `const o = [1, 2, 3];
+      // An ARRAY OF ARRAYS: its elements are copies with no origin of their own,
+      // so no live view exists and the refusal stands. (A number[] / string[] /
+      // boolean[] copy is a live view now: see the static-array rows above.)
+      const src = `const o = [[1], [2], [3]];
 const u: unknown = o;
 ${call.replace("d as", "u as")};
 console.log(JSON.stringify(o));`;
