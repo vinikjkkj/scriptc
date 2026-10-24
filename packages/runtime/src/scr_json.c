@@ -11523,6 +11523,11 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     }
     return out;
   }
+  if (v->kind == SCR_DYN_OBJINST && !scr_dyn_objinst_enumerable(v) && scr_dyn_class_ops != NULL &&
+      scr_dyn_objinst_class_of(v)->rt_root != 0) {
+    scr_dyn_release(out); /* the class unit answers the runtime-rooted key set, or fences */
+    return scr_dyn_class_ops->walk_error(v, mode);
+  }
   if (v->kind == SCR_DYN_ARR || v->kind == SCR_DYN_BYTES) {
     size_t n = v->kind == SCR_DYN_ARR ? v->v.arr.len : v->v.bytes->len;
     for (size_t i = 0; i < n; i++) {

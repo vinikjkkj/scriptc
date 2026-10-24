@@ -437,6 +437,28 @@ static int dyn_cls_ops_delete(ScrDyn *recv, const ScrStr *key) {
 }
 
 static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
+  if (scr_dyn_objinst_class_of(v)->rt_root != 0) {
+    /* A class rooted in the runtime's EventEmitter has the own enumerable keys _events,
+     * _eventsCount and _maxListeners ahead of the program's fields. The key LIST is a fact of
+     * the class (the values are the emitter's own state, which no row states), so Object.keys
+     * answers it; values, entries and every class rooted in a stream (whose prefix is far
+     * larger) or carrying a run-time property table keep the loud fence rather than a silently
+     * short answer. */
+    if (scr_dyn_objinst_class_of(v)->rt_root != 1 || mode != SCR_OBJWALK_KEYS) {
+      scr_dyn_objinst_fence(v, mode == SCR_OBJWALK_KEYS ? "Object.keys" : mode == SCR_OBJWALK_VALUES ? "Object.values" : "Object.entries");
+      return NULL;
+    }
+    ScrDyn *keys = scr_dyn_new_arr();
+    static const char *const pre[] = {"_events", "_eventsCount", "_maxListeners"};
+    for (size_t i = 0; i < 3; i++) scr_dyn_arr_push(keys, dyn_cls_objwalk_key(pre[i], strlen(pre[i])));
+    const size_t nm = scr_dyn_objinst_member_count(v);
+    for (size_t i = 0; i < nm; i++) {
+      const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
+      if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
+      scr_dyn_arr_push(keys, dyn_cls_objwalk_key(m->name, m->len));
+    }
+    return keys;
+  }
   ScrDyn *out = scr_dyn_new_arr();
   {
     /* An Error's own ENUMERABLE keys: `message` and `stack` are own

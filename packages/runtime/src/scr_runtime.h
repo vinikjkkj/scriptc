@@ -4645,6 +4645,12 @@ typedef struct ScrDynClass {
    * none: `[class B extends A]` is what util.inspect prints for the class
    * value. */
   const char *base;
+  /* 1: the chain roots in the runtime EventEmitter and no stream class; 2: in a runtime stream
+   * class; 0 otherwise. An emitter instance has the own enumerable keys _events, _eventsCount,
+   * _maxListeners ahead of the program's fields (Node's own-key order): Object.keys lists them
+   * and every other enumerating surface keeps its fence, as a stream's (which carries a far
+   * larger prefix) all do. */
+  unsigned char rt_root;
 } ScrDynClass;
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
