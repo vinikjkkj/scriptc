@@ -1912,7 +1912,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // `this` in plain nested functions is already a tsc error under
       // noImplicitThis, so the generic scope walk here is preflight-safe.
       const local = L.resolveThis(expr);
-      if (local) return { kind: "varRef", localId: local.id, type: local.type, loc };
+      if (local) {
+        const self = { kind: "varRef" as const, localId: local.id, type: local.type, loc };
+        const access = thisPropertyAccessOf(expr);
+        if (access === null || local.type.kind !== "object" || !L.classes.has(local.type.className)) return self;
+        if (!enclosingMethodMayBeUnbound(L, expr)) return self;
+        return guardedThisRead(self, access.name, access.set, loc);
+      }
       // `this` in a plain JS FUNCTION (not a method): the AMBIENT
       // RECEIVER (libCall dyn.this — scr_dyn_this_get). Firing sites bind
       // the emitting handle around each listener call (Node calls
@@ -20942,6 +20948,98 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       e.name.text === "prototype" && ts.isIdentifier(e.expression);
   }
 
+/** The property a `this` expression is the receiver of, when it is a plain
+   * named member (`this.v`, `this.m()`). `set` is true for the target of a
+   * plain `=` (JavaScript reads the base before the right-hand side, but
+   * names the failing operation as a write). Null for every other use. */
+  function thisPropertyAccessOf(node: ts.Expression): { name: string; set: boolean } | null {
+    const p = node.parent;
+    if (p === undefined || !ts.isPropertyAccessExpression(p) || p.expression !== node) return null;
+    if (p.questionDotToken !== undefined || !ts.isIdentifier(p.name)) return null;
+    const gp = p.parent;
+    const set = gp !== undefined && ts.isBinaryExpression(gp) && gp.left === p &&
+      gp.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+    return { name: p.name.text, set };
+  }
+
+/** Method names some program source reads as a VALUE: a PropertyAccess that
+   * is not the callee of a call (`const f = o.m`, `o.m.call(x)`, `arr.map(o.m)`).
+   * Only such a method can be entered with no receiver, so only such a method
+   * body carries the receiver guards (guardedThisRead). A callee position is
+   * never entered without a receiver: the call supplies one. Names are
+   * matched across classes, which over-guards and never under-guards. */
+const valueReadMethodNames = new WeakMap<ts.Program, Set<string>>();
+function valueReadNamesOf(L: Lowerer): Set<string> {
+  let names = valueReadMethodNames.get(L.program);
+  if (names !== undefined) return names;
+  names = new Set<string>();
+  const visit = (n: ts.Node): void => {
+    if (ts.isPropertyAccessExpression(n)) {
+      const callee = n.parent !== undefined && ts.isCallExpression(n.parent) && n.parent.expression === n;
+      if (!callee) names.add(n.name.text);
+    }
+    ts.forEachChild(n, visit);
+  };
+  for (const sf of L.program.getSourceFiles()) {
+    if (!sf.isDeclarationFile) visit(sf);
+  }
+  valueReadMethodNames.set(L.program, names);
+  return names;
+}
+
+/** Whether the method whose body contains `node` (through arrows only) is
+ * one a value read can name, so the unbound thunk can enter it with no
+ * receiver. Constructors, accessors and plain functions are never entered
+ * that way (their `this` is not a method's), so they are never guarded. */
+function enclosingMethodMayBeUnbound(L: Lowerer, node: ts.Node): boolean {
+  for (let n: ts.Node | undefined = node.parent; n !== undefined; n = n.parent) {
+    if (ts.isMethodDeclaration(n)) return ts.isIdentifier(n.name) && valueReadNamesOf(L).has(n.name.text);
+    if (ts.isClassDeclaration(n) || ts.isClassExpression(n) || (ts.isFunctionLike(n) && !ts.isArrowFunction(n))) return false;
+  }
+  return false;
+}
+
+/** A `this.field` write's receiver guard, keyed by the receiver node. The
+   * assignment site moves it AFTER the right-hand side (JavaScript evaluates
+   * `this.v = rhs` in full before it throws on the absent receiver). */
+const thisWriteGuards = new WeakMap<IrExpr, IrStmt[]>();
+
+/** A `this.field` access inside a class method body, guarded for the one
+   * way the receiver can be absent: a method value read off an instance and
+   * called with no receiver (`const f = o.m; f()`, or `.call(null)`). The
+   * unbound thunk hands the body a NULL self (unboundMethodThunk), and
+   * JavaScript throws at the FIRST property access, after every effect that
+   * precedes it. The guard is that access: a NULL self raises Node's message
+   * for the receiver it was called with (null or undefined, read from the
+   * ambient receiver, which is still the call's own once the body is entered).
+   * A present self costs one pointer test. */
+  function guardedThisRead(self: IrExpr & { kind: "varRef" }, prop: string, set: boolean, loc: SrcLoc): IrExpr {
+    const verb = set ? "set" : "read";
+    const prep = set ? "setting" : "reading";
+    const selfNull: IrExpr = { kind: "varRef", localId: self.localId, type: BOOL, nullTest: true, loc };
+    const recvNull: IrExpr = { kind: "dynTest", test: "null", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: BOOL, loc };
+    const not = (e: IrExpr): IrExpr => ({ kind: "unary", op: "!", operand: e, type: BOOL, loc });
+    // Each guard is `if (ok) {} else { fence }` (validate.ts seqExpr): the
+    // cold side unwinds exactly like a throw anywhere else in an expression.
+    const nullGuard: IrStmt = {
+      kind: "if",
+      cond: not({ kind: "logical", op: "&&", left: selfNull, right: recvNull, type: BOOL, loc }),
+      then: [],
+      else_: [strandTrap(`Cannot ${verb} properties of null (${prep} '${prop}')`, loc)],
+      loc,
+    };
+    const undefGuard: IrStmt = {
+      kind: "if",
+      cond: not({ kind: "logical", op: "&&", left: selfNull, right: not(recvNull), type: BOOL, loc }),
+      then: [],
+      else_: [strandTrap(`Cannot ${verb} properties of undefined (${prep} '${prop}')`, loc)],
+      loc,
+    };
+    const guarded: IrExpr = { kind: "seqExpr", stmts: [nullGuard, undefGuard], result: self, type: self.type, loc };
+    if (set) thisWriteGuards.set(guarded, [nullGuard, undefGuard]);
+    return guarded;
+  }
+
 /** `return this.readField` / `this.next = this.start`: a class METHOD read as
    * a VALUE in a JavaScript file. JS hands out the prototype's function with
    * no receiver bound (mysql2's command state machine stores one and invokes
@@ -21041,29 +21139,52 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             type: found.sig.ret,
             loc,
           };
+      const directCall: IrExpr = {
+        kind: "call",
+        callee: `%${found.declarer.def.name}.${method}`,
+        args: [L.upcastTo(selfRef, found.declarer.def.name), ...args],
+        type: found.sig.ret,
+        loc,
+      };
       L.liftedFns.push({
         name,
         params: irParams,
         returnType: found.sig.ret,
         locals: [
-          { id: "self.0", name: "self", type: selfT, mutable: false },
+          { id: "self.0", name: "self", type: selfT, mutable: true },
           ...irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
         ],
+        // A call with NO receiver (the ambient this is undefined or null) is
+        // still a call: the body runs with a NULL self and its own first field
+        // access raises Node's TypeError (guardedThisRead). A NULL self cannot
+        // dispatch, so the direct declaration is what runs. A receiver that is
+        // present is checked against the class as before.
         body: [
+          { kind: "varDecl", localId: "self.0", init: null, loc },
           {
-            kind: "varDecl",
-            localId: "self.0",
-            init: {
-              kind: "dynCheck",
-              value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc },
-              type: selfT,
-              loc,
-            },
+            kind: "if",
+            cond: { kind: "dynTest", test: "nullish", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: BOOL, loc },
+            then: [found.sig.ret.kind === "void"
+              ? { kind: "exprStmt", expr: directCall, loc }
+              : { kind: "return", value: directCall, loc }],
+            else_: [
+              {
+                kind: "assign",
+                localId: "self.0",
+                value: {
+                  kind: "dynCheck",
+                  value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc },
+                  type: selfT,
+                  loc,
+                },
+                loc,
+              },
+              found.sig.ret.kind === "void"
+                ? { kind: "exprStmt", expr: call, loc }
+                : { kind: "return", value: call, loc },
+            ],
             loc,
           },
-          found.sig.ret.kind === "void"
-            ? { kind: "exprStmt", expr: call, loc }
-            : { kind: "return", value: call, loc },
         ],
         loc,
       });
@@ -21128,21 +21249,16 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           first.ret.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc },
         ];
       };
-      const body: IrStmt[] = [];
       const baseT: IrType = { kind: "object", className: info.def.name };
-      locals.push({ id: "base.0", name: "base", type: baseT, mutable: false });
-      body.push({
-        kind: "varDecl",
-        localId: "base.0",
-        init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: baseT, loc },
-        loc,
-      });
+      locals.push({ id: "base.0", name: "base", type: baseT, mutable: true });
+      // The receiver dispatch, for a present receiver (as before).
+      const dispatch: IrStmt[] = [];
       decls.forEach((d, i) => {
         if (i === decls.length - 1) {
-          body.push(...callOn(d, i));
+          dispatch.push(...callOn(d, i));
           return;
         }
-        body.push({
+        dispatch.push({
           kind: "if",
           cond: { kind: "instanceOf", value: { kind: "varRef", localId: "base.0", type: baseT, loc }, className: d.cls.def.name, type: BOOL, loc },
           then: callOn(d, i),
@@ -21150,6 +21266,40 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           loc,
         });
       });
+      // No receiver: the deepest declaration runs with a NULL self, and its
+      // first field access raises Node's TypeError (guardedThisRead).
+      const deep = decls[0]!;
+      const nullT: IrType = { kind: "object", className: deep.cls.def.name };
+      const nullId = "self.null";
+      locals.push({ id: nullId, name: "self", type: nullT, mutable: true });
+      const nullCall: IrExpr = {
+        kind: "call",
+        callee: `%${deep.cls.def.name}.${method}`,
+        args: [{ kind: "varRef", localId: nullId, type: nullT, loc }, ...args],
+        type: first.ret,
+        loc,
+      };
+      const body: IrStmt[] = [
+        { kind: "varDecl", localId: "base.0", init: null, loc },
+        {
+          kind: "if",
+          cond: { kind: "dynTest", test: "nullish", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: BOOL, loc },
+          then: [
+            { kind: "varDecl", localId: nullId, init: null, loc },
+            first.ret.kind === "void" ? { kind: "exprStmt", expr: nullCall, loc } : { kind: "return", value: nullCall, loc },
+          ],
+          else_: [
+            {
+              kind: "assign",
+              localId: "base.0",
+              value: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: baseT, loc },
+              loc,
+            },
+            ...dispatch,
+          ],
+          loc,
+        },
+      ];
       L.liftedFns.push({ name, params: irParams, returnType: first.ret, locals, body, loc });
     }
     return { kind: "closure", fnName: name, captures: [], type: funcOf(params, first.ret), loc };
@@ -22570,9 +22720,27 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       };
     }
     if (target.container !== "class") L.noteKeyPresenceWrite(target.obj, target.field, loc);
-    return target.container === "class"
-      ? { kind: "fieldSet", obj: target.obj, className: target.className, field: target.field, value, loc }
-      : { kind: "recordSet", obj: target.obj, shapeId: target.shapeId, field: target.field, value, loc };
+    if (target.container === "class") {
+      const guards = thisWriteGuards.get(target.obj);
+      if (guards !== undefined && target.obj.kind === "seqExpr") {
+        // The receiver guard runs once the value is in hand: the value is
+        // evaluated into a temp, the guards test the receiver, and the store
+        // reads the temp (obj is the bare self, which cannot throw).
+        const tmp = `thisrhs${loc.start}.0`;
+        const vt = value.type;
+        if (!L.ctx.locals.some((l) => l.id === tmp)) L.ctx.locals.push({ id: tmp, name: "%thisrhs", type: vt, mutable: false });
+        const withGuards: IrExpr = {
+          kind: "seqExpr",
+          stmts: [{ kind: "varDecl", localId: tmp, init: value, loc }, ...guards],
+          result: { kind: "varRef", localId: tmp, type: vt, loc },
+          type: vt,
+          loc,
+        };
+        return { kind: "fieldSet", obj: target.obj.result, className: target.className, field: target.field, value: withGuards, loc };
+      }
+      return { kind: "fieldSet", obj: target.obj, className: target.className, field: target.field, value, loc };
+    }
+    return { kind: "recordSet", obj: target.obj, shapeId: target.shapeId, field: target.field, value, loc };
   }
 
 /** `Promise.reject(reason)` on THE Promise global: a pre-rejected
