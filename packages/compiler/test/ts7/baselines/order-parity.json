@@ -15271,6 +15271,42 @@
     "<repo>/tests/corpus/8847-url-origin-and-tojson.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8920-join-loop-built-string-array-under-dynamic.js": {
+   "order": [
+    "<repo>/tests/corpus/8920-join-loop-built-string-array-under-dynamic.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8921-engine-function-text-built-in-a-loop.js": {
+   "order": [
+    "<repo>/tests/corpus/8921-engine-function-text-built-in-a-loop.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8922-engine-function-calls-host-callback.js": {
+   "order": [
+    "<repo>/tests/corpus/8922-engine-function-calls-host-callback.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8923-engine-function-plain-values-round-trip.js": {
+   "order": [
+    "<repo>/tests/corpus/8923-engine-function-plain-values-round-trip.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8924-engine-function-error-surfaces-natively.js": {
+   "order": [
+    "<repo>/tests/corpus/8924-engine-function-error-surfaces-natively.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8925-js-function-typed-value-called-with-one-argument.js": {
+   "order": [
+    "<repo>/tests/corpus/8925-js-function-typed-value-called-with-one-argument.js"
+   ],
+   "diags": []
   }
  }
 }
