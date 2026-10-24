@@ -13321,6 +13321,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9450-cjs-nullable-builtin-selector.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9450-cjs-nullable-builtin-selector.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9451-cjs-nullable-builtin-path.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9451-cjs-nullable-builtin-path.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
