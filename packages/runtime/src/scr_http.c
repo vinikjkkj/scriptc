@@ -1431,6 +1431,7 @@ typedef struct ScrHttpConn {
                              * the client's response_started — the pump
                              * runs below the client struct's definition) */
   struct ScrHttpClientReq *client; /* +1 in client mode; released at close */
+  size_t idle_epoch; /* the epoch this connection last became idle in */
 } ScrHttpConn;
 
 /* Client-mode forward declarations (implementations live with the client
@@ -1507,6 +1508,7 @@ static void scr_http_conn_response_finished(ScrHttpConn *conn, bool keep_alive) 
   /* the handler answered before consuming the whole body: the request
    * settles quietly (Node destroys unconsumed bodies on 'close') */
   scr_http_conn_drop_request(conn, fire_end && false);
+  conn->idle_epoch = scr_net_epoch_now();
   if (!keep_alive || conn->close_after) {
     scr_net_sock_end(conn->sock);
   }
@@ -2053,6 +2055,20 @@ static void scr_http_conn_free(void *ctx) {
   free(conn);
 }
 
+/* Node's closeIdleConnections() predicate: no request head is partly
+ * parsed, no request or response is in flight. A keep-alive connection that
+ * has answered its last request and is waiting for the next one is idle,
+ * except one that finished its response in the callback still running
+ * (res.end() then server.close(), as a handler does): Node keeps that socket
+ * (measured on the http-proxy-close-order fixture, where backend.close() must
+ * not take the proxy's own socket). */
+static bool scr_http_conn_idle(void *ctx) {
+  const ScrHttpConn *conn = (const ScrHttpConn *)ctx;
+  return !conn->client_mode && conn->req == NULL && conn->res == NULL &&
+         conn->state == SCR_HTTP_HEAD && conn->len == 0 &&
+         conn->idle_epoch < scr_net_epoch_now();
+}
+
 /* The server's native connection hook: one parser per accepted socket. */
 static void scr_http_on_connection(void *ctx, ScrNetSocket *sock) {
   ScrHttpSrvCtx *srv = (ScrHttpSrvCtx *)ctx;
@@ -2060,8 +2076,10 @@ static void scr_http_on_connection(void *ctx, ScrNetSocket *sock) {
   if (!conn) scr_http_oom();
   conn->sock = sock; /* borrowed — see the struct comment */
   conn->srv = scr_http_srv_ctx_retain(srv);
+  conn->idle_epoch = scr_net_epoch_now();
   scr_net_sock_set_native_reader(sock, &scr_http_conn_data, &scr_http_conn_eof,
                                   &scr_http_conn_closed, conn, &scr_http_conn_free);
+  scr_net_sock_set_native_idle(sock, &scr_http_conn_idle);
   scr_net_sock_set_native_events(sock, NULL, &scr_http_conn_err);
 }
 

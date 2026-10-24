@@ -9700,6 +9700,13 @@ bool scr_net_server_settled(ScrNetServer *s); /* 'close' already emitted */
  * event the http layer does not model (the caller fences loudly). */
 void scr_net_set_dynh_http_on(bool (*fn)(ScrNetServer *, const char *, const ScrDyn *, bool));
 void scr_net_sock_set_native_reader(ScrNetSocket *s, ScrNetNativeDataFn data, ScrNetNativeEventFn eof, ScrNetNativeEventFn closed, void *ctx, void (*ctx_free)(void *));
+/* Node's http.Server#close() destroys IDLE connections (closeIdleConnections,
+ * Node 19+). A protocol layer answers "is this connection idle?" for its
+ * own ctx; the net layer asks it when a server closes. */
+typedef bool (*ScrNetNativeIdleFn)(void *ctx);
+void scr_net_sock_set_native_idle(ScrNetSocket *s, ScrNetNativeIdleFn idle);
+size_t scr_net_epoch_now(void);
+
 /* The upgrade handover: clear the reader's fn pointers, keep the ctx. */
 void scr_net_sock_clear_native_reader(ScrNetSocket *s);
 /* The accepting server (BORROWED; NULL on client sockets) — the protocol

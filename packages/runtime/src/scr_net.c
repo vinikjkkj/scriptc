@@ -641,6 +641,7 @@ struct ScrNetSocket {
   /* protocol layer (scr_http.c): a C-level reader — counts as a consumer
    * for read-arming; its context BORROWS this socket and is freed with it */
   ScrNetNativeDataFn native_data;
+  ScrNetNativeIdleFn native_idle; /* NULL = never idle-closed (not HTTP) */
   ScrNetNativeEventFn native_eof;
   ScrNetNativeEventFn native_closed;
   ScrNetNativeEventFn native_timeout;
@@ -1705,6 +1706,33 @@ static void scr_net_server_mark_due(ScrNetServer *s) {
   }
 }
 
+/* Node's closeIdleConnections(), run by server.close(): every accepted
+ * connection that the protocol layer reports idle (no request in flight)
+ * is destroyed now. Without this an idle keep-alive peer holds the server's
+ * count above zero, so 'close' never fires and the loop never drains for as
+ * long as that peer stays connected. A connection with response bytes still
+ * queued is not idle: destroying it would cut that response short, so it is
+ * left alone and closes on its own peer's FIN or timeout.
+ * Collect first, then destroy: destroy only queues the close, and the list
+ * is walked without mutation. */
+static void scr_net_server_close_idle(ScrNetServer *s) {
+  size_t n = 0;
+  for (ScrNetSocket *x = scr_net_socks; x; x = x->next) {
+    if (x->server == s && x->conn_counted && x->fd >= 0 && x->native_idle != NULL &&
+        x->wlen == x->whead && x->native_idle(x->native_ctx)) n++;
+  }
+  if (n == 0) return;
+  ScrNetSocket **idle = malloc(n * sizeof *idle);
+  if (idle == NULL) return; /* best effort on OOM: the connection stays, as before */
+  size_t k = 0;
+  for (ScrNetSocket *x = scr_net_socks; x && k < n; x = x->next) {
+    if (x->server == s && x->conn_counted && x->fd >= 0 && x->native_idle != NULL &&
+        x->wlen == x->whead && x->native_idle(x->native_ctx)) idle[k++] = x;
+  }
+  for (size_t i = 0; i < k; i++) scr_net_sock_destroy(idle[i]);
+  free(idle);
+}
+
 /* The REAL close — what the bound `origClose` value reaches (never
  * consults the override, so the portless proxy-through idiom cannot
  * recurse). */
@@ -1727,6 +1755,7 @@ void scr_net_server_close_direct(ScrNetServer *s, ScrClosure *cb /*moves, nullab
     scr_net_ls_drop(&s->listening_cbs);
   }
   s->closing = true; /* the sweep fires 'close' once nconns drains */
+  scr_net_server_close_idle(s);
   /* Already drained: this is Node's _emitCloseIfDrained scheduling the
    * tick, so the due stamp is taken HERE and not when the sweep gets
    * round to noticing. */
@@ -2936,6 +2965,12 @@ void scr_net_sock_set_native_reader(ScrNetSocket *s, ScrNetNativeDataFn data,
   s->native_ctx_free = ctx_free;
   scr_net_sock_update_read(s);
 }
+
+void scr_net_sock_set_native_idle(ScrNetSocket *s, ScrNetNativeIdleFn idle) {
+  s->native_idle = idle;
+}
+
+size_t scr_net_epoch_now(void) { return scr_net_epoch; }
 
 /* The upgrade handover: clear the native reader's FN POINTERS but keep
  * the ctx (still freed at socket death as registered) — the protocol
