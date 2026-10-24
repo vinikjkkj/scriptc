@@ -3555,6 +3555,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // form, and the one an ACCESSOR descriptor arrives in. All
             // three borrowed, result the target (+1); throws catchably.
             return finish(`scr_dyn_define_prop(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.captureStack":
+            // Borrowed dyn target; the header is written as a hidden own `stack`.
+            return finish(`scr_dyn_capture_stack(${arg(0)})`);
           case "cls.propsEnsure":
             // The `%props` table of a compiled class instance: the field's
             // current value borrowed, the table +1 (the same node when
