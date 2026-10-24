@@ -1560,6 +1560,30 @@ function capturesStackInto(region: ts.Node, name: string): boolean {
   return found;
 }
 
+/** The names `f` such that a class body indexes `this.f` with a key that is
+ * not a string or number literal (read, write, delete, for-in is not an index
+ * and does not count): `this._nodes[id] = {...}`, `this._nodes[id] || null`.
+ * Such a field is a dictionary, whatever literal its constructor seeds it with. */
+function classDictionaryFields(cls: ts.ClassLikeDeclaration): Set<string> {
+  const names = new Set<string>();
+  const thisField = (e: ts.Expression): string | null => {
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    return ts.isPropertyAccessExpression(e) && e.expression.kind === ts.SyntaxKind.ThisKeyword && ts.isIdentifier(e.name)
+      ? e.name.text
+      : null;
+  };
+  const walk = (n: ts.Node): void => {
+    if (ts.isElementAccessExpression(n)) {
+      const f = thisField(n.expression);
+      const k = n.argumentExpression;
+      if (f !== null && !(ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k) || ts.isNumericLiteral(k))) names.add(f);
+    }
+    ts.forEachChild(n, walk);
+  };
+  for (const m of cls.members) walk(m);
+  return names;
+}
+
 function openRecordEdits(fileName: string, text: string): string | null {
   if (!text.includes("{}") && !/=\s*\{/.test(text)) return null;
   if (!OPEN_RECORD_PREFILTER.test(text) && !/\bcaptureStackTrace\s*\(/.test(text)) return null;
@@ -1605,7 +1629,39 @@ function openRecordEdits(fileName: string, text: string): string | null {
     }
     return false;
   };
+  const castClassFields = (cls: ts.ClassLikeDeclaration): void => {
+    const dict = classDictionaryFields(cls);
+    if (dict.size === 0) return;
+    const isLit = (e: ts.Expression): e is ts.ObjectLiteralExpression => {
+      while (ts.isParenthesizedExpression(e)) e = e.expression;
+      return ts.isObjectLiteralExpression(e);
+    };
+    const walk = (n: ts.Node): void => {
+      // `this.f = {...}` in any method (the constructor seeds, a reset method
+      // re-seeds: one field, one representation).
+      if (
+        ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(n.left) && n.left.expression.kind === ts.SyntaxKind.ThisKeyword &&
+        ts.isIdentifier(n.left.name) && dict.has(n.left.name.text) && isLit(n.right) && n.right === (n.right as ts.Expression)
+      ) {
+        let lit: ts.Expression = n.right;
+        while (ts.isParenthesizedExpression(lit)) lit = lit.expression;
+        cast(lit);
+      }
+      // class-field syntax: `f = {};`
+      if (
+        ts.isPropertyDeclaration(n) && ts.isIdentifier(n.name) && dict.has(n.name.text) && n.initializer !== undefined && isLit(n.initializer)
+      ) {
+        let lit: ts.Expression = n.initializer;
+        while (ts.isParenthesizedExpression(lit)) lit = lit.expression;
+        cast(lit);
+      }
+      ts.forEachChild(n, walk);
+    };
+    for (const m of cls.members) walk(m);
+  };
   const visit = (n: ts.Node): void => {
+    if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) castClassFields(n);
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
       let init: ts.Expression = n.initializer;
       while (ts.isParenthesizedExpression(init)) init = init.expression;
