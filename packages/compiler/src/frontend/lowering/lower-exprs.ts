@@ -21323,14 +21323,18 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (L.cjsExportValueSymbol(sym) !== null) return false;
     const decls = L.checker.declarationsOf(sym);
     if (decls.length === 0) return true;
-    // Every caller has ALREADY missed the member's global (a top-level
-    // statement's storage). What remains is a member no top-level statement
-    // registers: attached from inside a function body, or from a nested block
-    // that is not a top-level statement (iconv-lite's `else` arm, which
-    // assigns `module.exports.encodeStream = module.exports.decodeStream =
-    // function`). Both get the bag; reads and writes take the same predicate,
-    // so they meet in one object.
-    return true;
+    // Bag material: every attachment is an assignment statement that sits
+    // inside a function body or a nested block (not a top-level statement, so
+    // no global registers it: iconv-lite's else arm). Anything else (a class
+    // static, a top-level statement) keeps the storage it already has.
+    return decls.every((d) => {
+      for (let p: ts.Node | undefined = d.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
+        if (ts.isFunctionLike(p)) return true;
+      }
+      let n: ts.Node = d;
+      while (ts.isBinaryExpression(n.parent)) n = n.parent;
+      return ts.isExpressionStatement(n.parent) && !ts.isSourceFile(n.parent.parent) && !ts.isClassDeclaration(n.parent.parent) && !ts.isClassExpression(n.parent.parent);
+    });
   }
 
 /** The module-level dyn global that holds the members a CommonJS module attaches
