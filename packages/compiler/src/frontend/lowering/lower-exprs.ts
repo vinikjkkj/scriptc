@@ -18555,6 +18555,27 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (left.type.kind === "regex" && left.kind === "varRef" && ts.isIdentifier(expr.left)) {
           return { kind: "boolLit", value: true, type: BOOL, loc };
         }
+        // An untyped operand (`pattern instanceof RegExp`, mysql2's patternRegExp):
+        // the RegExp handle tag of the checked-dynamic value.
+        if (left.type.kind === "dyn") {
+          return { kind: "dynTest", test: "regex", value: left, type: BOOL, loc };
+        }
+      }
+      // `x instanceof Array` — Array.isArray under another spelling for every value
+      // this runtime holds (no cross-realm arrays): an untyped operand tests the
+      // checked-dynamic array kind, and a bound array-typed operand folds true.
+      if (
+        ts.isIdentifier(expr.right) &&
+        L.isStdlibGlobal(expr.right, "Array") &&
+        !L.caughtLocalOf(expr.left)
+      ) {
+        const left = L.lowerExpr(expr.left);
+        if (left.type.kind === "dyn") {
+          return { kind: "dynTest", test: "array", value: left, type: BOOL, loc };
+        }
+        if (left.type.kind === "array" && left.kind === "varRef" && ts.isIdentifier(expr.left)) {
+          return { kind: "boolLit", value: true, type: BOOL, loc };
+        }
       }
       // `x instanceof Set` over a union with a set arm — the RegExp rule
       // one constructor over, and the test that gives a SET arm a union

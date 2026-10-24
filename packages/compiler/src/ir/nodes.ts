@@ -7615,7 +7615,7 @@ export type IrExpr =
    * false. `bytes` keeps its meaning -- "this dyn holds u8 bytes", which
    * is what every narrowing extraction wants -- and the instanceof site
    * uses the flavor-aware one. */
-  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set" | "date" | "class"; className?: string; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set" | "date" | "regex" | "class"; className?: string; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An

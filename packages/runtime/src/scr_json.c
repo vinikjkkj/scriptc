@@ -3358,6 +3358,10 @@ bool scr_dyn_handle_is(const ScrDyn *d, ScrDynHandleTag tag) {
 bool scr_dyn_is_date(const ScrDyn *d) {
   return d != NULL && d->kind == SCR_DYN_HANDLE && d->v.handle.tag == SCR_DYNH_DATE;
 }
+/* `u instanceof RegExp` on an unknown value: the RegExp handle tag. */
+bool scr_dyn_is_regex(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_HANDLE && d->v.handle.tag == SCR_DYNH_REGEX;
+}
 
 bool scr_dyn_map_fence(const ScrDyn *d, const char *what) {
   ScrJsonBuf b;
