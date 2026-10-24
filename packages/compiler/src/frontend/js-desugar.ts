@@ -1535,9 +1535,34 @@ function writesDynamicKey(region: ts.Node, name: string): boolean {
   return found;
 }
 
+/** `Error.captureStackTrace(name[, fn])` anywhere in `region`: V8 installs a
+ * `stack` member on the plain object, one the literal never named, so the
+ * binding is an open object (mysql2's `const holder = {}` stack holders).
+ * Unlike a dynamic-key write this holds in a JSDoc-typed function too: the
+ * capture happens on the object before it crosses into any typed slot, and
+ * that crossing reads the member it carries. */
+function capturesStackInto(region: ts.Node, name: string): boolean {
+  let found = false;
+  const walk = (n: ts.Node): void => {
+    if (found) return;
+    if (
+      ts.isCallExpression(n) && n.arguments.length >= 1 && ts.isPropertyAccessExpression(n.expression) &&
+      n.expression.name.text === "captureStackTrace" && ts.isIdentifier(n.expression.expression) &&
+      n.expression.expression.text === "Error" && ts.isIdentifier(n.arguments[0]!) &&
+      (n.arguments[0] as ts.Identifier).text === name
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(region);
+  return found;
+}
+
 function openRecordEdits(fileName: string, text: string): string | null {
   if (!text.includes("{}") && !/=\s*\{/.test(text)) return null;
-  if (!OPEN_RECORD_PREFILTER.test(text)) return null;
+  if (!OPEN_RECORD_PREFILTER.test(text) && !/\bcaptureStackTrace\s*\(/.test(text)) return null;
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const edits: Edit[] = [];
   const marked = new Set<ts.Node>();
@@ -1589,7 +1614,7 @@ function openRecordEdits(fileName: string, text: string): string | null {
       // would replace that storage with a dynamic slot the global path
       // does not take writes through.
       const scope = scopeOf(n);
-      if (!ts.isSourceFile(scope) && ts.isObjectLiteralExpression(init) && n.initializer === init && writesDynamicKey(scope, n.name.text) && !inTypedFn(n)) cast(init);
+      if (ts.isObjectLiteralExpression(init) && n.initializer === init && ((!ts.isSourceFile(scope) && writesDynamicKey(scope, n.name.text) && !inTypedFn(n)) || capturesStackInto(scope, n.name.text))) cast(init);
     }
     if (
       ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&

@@ -6376,6 +6376,7 @@ ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs);
  * Returns the target (+1, JS's return), or NULL with a pending catchable
  * throw. Target and descriptor borrowed. */
 ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc);
+void scr_dyn_capture_stack(ScrDyn *target);
 /* `Object.create(proto, descriptors)` and `Object.create(null, descs)` —
  * ES's OrdinaryObjectCreate followed by ObjectDefineProperties, in that
  * order, over the SAME per-descriptor installer scr_dyn_define_prop

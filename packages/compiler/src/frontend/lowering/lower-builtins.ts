@@ -957,6 +957,21 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       if (!plain(opt)) return null;
     }
     const target = L.lowerExpr(args[0]!);
+    // A plain object held as a checked-dynamic value (`const holder = {}`
+    // that the capture writes): the header is formatted at the call and
+    // installed as a hidden own `stack` (scr_dyn_capture_stack).
+    if (target.type.kind === "dyn") {
+      return { kind: "libCall", fn: "dyn.captureStack", args: [target], type: VOID, loc: locOf(call) };
+    }
+    // A primitive (or any other value with a dyn form that is not an object a
+    // `stack` can live on) answers V8's TypeError at run time.
+    if (
+      target.type.kind !== "object" &&
+      (target.type.kind === "f64" || target.type.kind === "string" || target.type.kind === "bool" || target.kind === "unitLit")
+    ) {
+      const boxed: IrExpr = { kind: "dynFrom", value: target, type: DYN, loc: locOf(call) };
+      return { kind: "libCall", fn: "dyn.captureStack", args: [boxed], type: VOID, loc: locOf(call) };
+    }
     if (target.type.kind !== "object") return null;
     let rooted = false;
     for (let c = L.classes.get(target.type.className) ?? null; c; c = c.base) {
