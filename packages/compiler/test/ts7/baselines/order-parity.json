@@ -12998,9 +12998,39 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9109-json-union-space.ts": {
+   "order": [
+    "<repo>/tests/corpus/9109-json-union-space.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/911-records-index-dot-access.ts": {
    "order": [
     "<repo>/tests/corpus/911-records-index-dot-access.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9110-json-astral-space-boundary.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9110-json-astral-space-boundary.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9111-spread-tuple-fixed-params.ts": {
+   "order": [
+    "<repo>/tests/corpus/9111-spread-tuple-fixed-params.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9112-spread-tuple-effects-and-rest.ts": {
+   "order": [
+    "<repo>/tests/corpus/9112-spread-tuple-effects-and-rest.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9113-number-undefined-null-args.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9113-number-undefined-null-args.cjs"
    ],
    "diags": []
   },
