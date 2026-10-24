@@ -359,18 +359,23 @@ static double scr_uv_errno(int err_no) {
   return -(double)err_no;
 }
 
-void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char *path, const char *dest) {
+static void scr_error_set_ext_val(ScrError *e, double errno_val, const char *syscall, const char *path,
+                                  const char *dest) {
   scr_err_ext_drop(e);
   ScrErrExt *x = (ScrErrExt *)calloc(1, sizeof *x);
   if (!x) scr_trap("scriptc: out of memory\n");
   x->e = e;
-  x->errno_val = scr_uv_errno(err_no);
+  x->errno_val = errno_val;
   if (syscall) x->syscall = scr_str_new(syscall, strlen(syscall));
   if (path) x->path = scr_str_new(path, strlen(path));
   if (dest) x->dest = scr_str_new(dest, strlen(dest));
   x->next = scr_err_ext_head;
   scr_err_ext_head = x;
   scr_err_ext_count++;
+}
+
+void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char *path, const char *dest) {
+  scr_error_set_ext_val(e, scr_uv_errno(err_no), syscall, path, dest);
 }
 
 /* Borrowed views of the stamped properties; false when the error carries
@@ -398,6 +403,18 @@ void scr_throw_errno_error(int err_no, const char *code, const char *message, si
   scr_str_release(msg);
   scr_error_set_code(e, code);
   scr_error_set_ext(e, err_no, syscall, path, dest);
+  scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_traced ? &scr_error_trace : NULL);
+}
+
+/* An error whose `errno` is a value of its own library, not a C errno: zlib's
+ * Z_DATA_ERROR is -3 and Z_BUF_ERROR -5 on every host (err.errno), with no
+ * Windows translation and no syscall. */
+void scr_throw_errno_error_raw(double errno_val, const char *code, const char *message, size_t len) {
+  ScrStr *msg = scr_str_new(message, len);
+  ScrError *e = scr_error_new(SCR_ERR_ERROR, msg);
+  scr_str_release(msg);
+  scr_error_set_code(e, code);
+  scr_error_set_ext_val(e, errno_val, NULL, NULL, NULL);
   scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_traced ? &scr_error_trace : NULL);
 }
 

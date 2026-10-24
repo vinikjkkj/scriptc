@@ -5108,6 +5108,8 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // instead of meeting the table fence.
         const fsLadder = L.lowerFsLadderCall(expr, bi, loc);
         if (fsLadder) return fsLadder;
+        const zlibDyn = L.lowerZlibDynCall(expr, bi, loc);
+        if (zlibDyn) return zlibDyn;
         // The crypto introspection statics (getFips and the name lists)
         // bake at the call site — no runtime entry exists to table.
         const cryptoServed = L.lowerCryptoModuleCall(expr, bi, loc);
