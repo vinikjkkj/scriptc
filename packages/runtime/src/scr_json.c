@@ -4868,6 +4868,41 @@ ScrStr *scr_dyn_format_j(const ScrDyn *d) {
   return scr_jb_finish(&b);
 }
 
+/* JSON.stringify over a checked-dynamic root, as a DYN result (Node's type
+ * is string | undefined): a string dyn (+1) for a root that serializes, the
+ * undefined VALUE (the immortal, so no release is owed) for a root the
+ * stringify drops (undefined, a function, a symbol), or NULL with a pending
+ * exception (a runtime handle inside the tree, or a throwing toJSON). */
+ScrDyn *scr_dyn_json_stringify(const ScrDyn *d) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  bool present = scr_dyn_json_write(&b, d, "", 0);
+  if (scr_exc_pending()) {
+    scr_jb_dispose(&b);
+    return NULL;
+  }
+  if (!present) {
+    scr_jb_dispose(&b);
+    return scr_dyn_undefined();
+  }
+  ScrStr *s = scr_jb_finish(&b);
+  ScrDyn *out = scr_dyn_new_str(s);
+  scr_str_release(s);
+  return out;
+}
+
+/* The pretty-print form of scr_dyn_json_stringify: an undefined result
+ * passes through, a string result is re-indented by the emitted gap
+ * re-indenter `indent` (Node's algorithm). Borrows d; +1 result. */
+ScrDyn *scr_dyn_json_reindent(const ScrDyn *d, ScrStr *(*indent)(ScrStr *, const char *, size_t),
+                              const char *ind, size_t ilen) {
+  if (d->kind != SCR_DYN_STR) return scr_dyn_undefined();
+  ScrStr *s = indent(d->v.str, ind, ilen);
+  ScrDyn *out = scr_dyn_new_str(s);
+  scr_str_release(s);
+  return out;
+}
+
 /* An %Error instance as a dyn object ({name, message[, code]}) — the
  * checked-dynamic boundary's error shape (the exception-snapshot
  * convention emit-walkers uses). Borrows e; +1 result.

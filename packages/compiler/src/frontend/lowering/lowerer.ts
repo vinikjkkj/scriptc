@@ -5634,6 +5634,28 @@ export class Lowerer {
     );
   }
 
+  /** A JSON.stringify argument the lowering carries as a checked-dynamic
+   * value: a dyn slot, or an undefined-armed union that converts to dyn (the
+   * lowering boxes it there, see lowerJsonMethodCall). */
+  jsonStringifyDynArg(t: ts.Type): boolean {
+    const want = this.mapTypeOf(t);
+    if (want === null) return false;
+    // undefined itself (a void-typed binding) is the dropped root.
+    return want.kind === "dyn" || want.kind === "void" || (this.bareUndefinedArmedUnion(want) && this.dynConvertible(want));
+  }
+
+  /** `JSON.stringify(x)` whose argument is checked-dynamic (see typeOf). */
+  isDynJsonStringifyCall(node: ts.Node): boolean {
+    return (
+      ts.isCallExpression(node) &&
+      node.arguments.length >= 1 &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      stdlibGlobalMember(this, node.expression, "JSON") === "stringify" &&
+      (this.jsonStringifyDynArg(this.typeOf(node.arguments[0]!)) ||
+        (this.typeOf(node.arguments[0]!).flags & ts.TypeFlags.Any) !== 0)
+    );
+  }
+
   typeOf(node: ts.Node): ts.Type {
     if (this.activeThisType !== null && node.kind === ts.SyntaxKind.ThisKeyword) return this.activeThisType;
     // Inside an optional-chain body the guarded receiver is typed by its
@@ -5683,6 +5705,33 @@ export class Lowerer {
       stdlibGlobalMember(this, node, "Uint8Array") === node.name.text
     ) {
       return this.checker.getUnknownType();
+    }
+    // JSON.stringify over a checked-dynamic argument answers string |
+    // undefined in Node (the stringify DROPS an undefined, function or
+    // symbol root to the undefined value). tsc's lib types the call
+    // `string`, and a consumer that believed it would validate the dyn
+    // result as a string and throw on exactly those roots. The dyn
+    // argument is classified by the SAME mapping that types it (mapTypeOf),
+    // so the call node's IR type (DYN, see lowerJsonMethodCall) and every
+    // consumer's view agree. Static arguments keep the typed `string`.
+    if (!this.dynamic && this.isDynJsonStringifyCall(node)) {
+      return this.checker.getUnknownType();
+    }
+    // A BINDING initialized from such a call (`const s = JSON.stringify(u)`)
+    // takes the same answer, so its reads agree with the call.
+    if (!this.dynamic && ts.isIdentifier(node)) {
+      const sym = this.checker.getSymbolAtLocation(node);
+      const decls = sym === undefined ? [] : this.checker.declarationsOf(sym);
+      const decl = decls.length === 1 ? decls[0] : undefined;
+      if (
+        decl !== undefined &&
+        ts.isVariableDeclaration(decl) &&
+        ts.isIdentifier(decl.name) &&
+        decl.initializer !== undefined &&
+        this.isDynJsonStringifyCall(decl.initializer)
+      ) {
+        return this.checker.getUnknownType();
+      }
     }
     // ...and so does a BINDING initialized from it (`var P =
     // Error.prototype`, the shape a reader writes first). tsc infers the

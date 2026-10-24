@@ -5434,8 +5434,11 @@ function validateFunction(
       }
       case "jsonStringify": {
         checkExpr(e.value);
-        if (e.type.kind !== "string") {
-          err(`jsonStringify must be string, got ${e.type.kind}`, e.loc);
+        // A dyn root answers string | undefined (a DYN result); a static
+        // value answers the string its serializer writes.
+        const wantResult = e.value.type.kind === "dyn" ? "dyn" : "string";
+        if (e.type.kind !== wantResult) {
+          err(`jsonStringify must be ${wantResult}, got ${e.type.kind}`, e.loc);
         }
         // The value's STATIC type drives the emitted serializer — it must be
         // JSON-safe (the frontend rejects the rest with a specific message).

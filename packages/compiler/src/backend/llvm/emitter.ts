@@ -9839,19 +9839,26 @@ class LlEmitter {
         const v = this.emitExpr(e.value);
         let compact: { name: string; type: IrType };
         if (e.value.type.kind === "dyn") {
-          // A dyn root: the runtime's dyn walker (scr_dyn_format_j — the
-          // C backend's dispatch exactly): number/string/bool/null/array/
-          // object exact, dropped members omitted, and a dropped ROOT
-          // becomes the TEXT "undefined" (JSON.stringify(undefined) is
-          // the undefined value; printing it spells the word — Node's
-          // answer, where the nested-position writer would spell null).
-          // Fallible (a runtime handle inside the tree throws) — the
-          // pending check runs.
-          this.declare(`declare ptr @scr_dyn_format_j(ptr)`);
+          // A dyn root: the runtime's dyn stringify answers a DYN (Node's
+          // type is string | undefined): the text for a root that
+          // serializes, the undefined VALUE for a root the stringify drops
+          // (undefined, a function, a symbol). Fallible (a runtime handle
+          // inside the tree throws) — the pending check runs. The pretty
+          // form re-indents the string text with the shared re-indenter.
+          this.declare(`declare ptr @scr_dyn_json_stringify(ptr)`);
           const t = B.tmp();
-          B.line(`${t} = call ptr @scr_dyn_format_j(ptr ${v.name})`);
-          compact = this.own({ name: t, type: e.type });
+          B.line(`${t} = call ptr @scr_dyn_json_stringify(ptr ${v.name})`);
+          const dynText = this.own({ name: t, type: e.type });
           this.emitPendingCheck();
+          const dynIndent = (e as { indent?: string }).indent;
+          if (dynIndent === undefined || dynIndent === "") return dynText;
+          this.declare(`declare ptr @scr_dyn_json_reindent(ptr, ptr, ptr, i64)`);
+          const rewriter = this.walkers.jsonIndentHelper();
+          const t2 = B.tmp();
+          B.line(
+            `${t2} = call ptr @scr_dyn_json_reindent(ptr ${dynText.name}, ptr @${rewriter}, ptr ${this.cstr(dynIndent)}, i64 ${Buffer.byteLength(dynIndent, "utf8")})`,
+          );
+          return this.own({ name: t2, type: e.type });
         } else {
           const helper = this.walkers.jsonWriteHelper(e.value.type);
           this.declare(`declare void @scr_jb_init(ptr)`);

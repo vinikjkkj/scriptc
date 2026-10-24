@@ -4450,6 +4450,13 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         const under = narrowBridgeDyn(value);
         if (under !== null) value = under;
       }
+      // An undefined-armed union that converts to dyn is serialized by the
+      // dyn walker (Node's stringify of the undefined member is the undefined
+      // value, which the typed serializer cannot express): box it at the
+      // dyn slot, the same as any other dyn root.
+      if (L.bareUndefinedArmedUnion(value.type) && L.dynConvertible(value.type)) {
+        value = { kind: "dynFrom", value, type: DYN, loc: value.loc };
+      }
       // An ISLAND value (`JSON.stringify(err)` on a package handle — the
       // island error-inspection idiom): the ENGINE's own JSON.stringify
       // runs, so key order, nesting, toJSON, and getters match Node by
@@ -4525,7 +4532,26 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         );
       }
       L.noteKeyEnumeration(value, loc, "JSON.stringify");
-      const node: IrExpr = { kind: "jsonStringify", value, type: STRING, loc };
+      // A dyn root is string | undefined (Node's stringify drops undefined,
+      // a function and a symbol to the undefined VALUE): a DYN result. The
+      // consumers' view of this call is the Lowerer.typeOf hook (unknown
+      // for a dyn argument); a value that became dyn only through the
+      // narrow bridge above has a `string` view, which a DYN node would
+      // contradict, so it is refused here rather than validated at run time.
+      if (value.type.kind === "dyn" && L.mapTypeOf(L.typeOf(call))?.kind !== "dyn") {
+        L.unsupported(
+          "SC1090",
+          argNode,
+          `JSON.stringify of a '${L.fmt(L.mapTypeOf(L.typeOf(argNode)) ?? value.type)}' value that is read through a dynamic bridge ` +
+            `(narrow it with a type guard first; its stringify may drop to undefined)`,
+        );
+      }
+      const node: IrExpr = {
+        kind: "jsonStringify",
+        value,
+        type: value.type.kind === "dyn" ? DYN : STRING,
+        loc,
+      };
       if (indent !== "") {
         // The compile-time-resolved indent rides as an extra property (the
         // node shape in ir/nodes.ts is unchanged); the backend re-indents

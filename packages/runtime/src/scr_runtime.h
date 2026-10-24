@@ -7078,6 +7078,12 @@ ScrDyn *scr_dyn_new_chunk(const ScrBytes *b);
  * "undefined" when the root drops (undefined/function), or NULL with a
  * pending exception (a runtime handle inside the tree fences loudly). */
 ScrStr *scr_dyn_format_j(const ScrDyn *d);
+/* JSON.stringify over a checked-dynamic root as a DYN (string or the
+ * undefined value; +1), and its pretty-print form (borrows d; +1). NULL with
+ * a pending exception from the first. */
+ScrDyn *scr_dyn_json_stringify(const ScrDyn *d);
+ScrDyn *scr_dyn_json_reindent(const ScrDyn *d, ScrStr *(*indent)(ScrStr *, const char *, size_t),
+                              const char *ind, size_t ilen);
 /* Node's ERR_INVALID_ARG_TYPE listener gate over a dyn value — shared by
  * the emitter unit's checked-dynamic registrations and the handle
  * dispatchers' .on(...) paths (both render errors.js's
