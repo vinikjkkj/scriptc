@@ -10,6 +10,7 @@ import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
+import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExportRecordRef, isBareExportsAccess } from "./cjs-export-record.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
@@ -1904,6 +1905,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // The direction is safe by construction: every name that reaches
       // this line REFUSED a moment ago, so the only thing that changes is
       // WHICH error the site throws. A fence is never turned into a value.
+      if (ts.isIdentifier(expr) && expr.text === "exports" && isCjsJsFile(expr.getSourceFile())) {
+        const recI = cjsExportRecordOf(L, expr.getSourceFile());
+        if (recI !== null) return cjsExportRecordRef(recI, loc);
+      }
       if (isJsSourceFile(expr.getSourceFile()) && L.resolveValueSymbol(expr) === null) {
         return nsUndefRead(L, expr.text, expr, ambientUndefReadType(L, expr) ?? DYN);
       }
@@ -2674,6 +2679,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           expr.parent.left === expr &&
           expr.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
         if (!expr.questionDotToken && cjsMemberRecv && !writePos && isCjsJsFile(sf)) {
+          const recR = isBareExportsAccess(L, expr) ? cjsExportRecordOf(L, sf) : null;
+          if (recR !== null && cjsExportRecordField(recR, expr.name.text) !== undefined) {
+            return cjsExportRecordRead(recR, expr.name.text, expr);
+          }
           const sym =
             L.checker.getSymbolAtLocation(expr.name) ??
             L.cjsModuleExportSymbol(sf, expr.name.text);

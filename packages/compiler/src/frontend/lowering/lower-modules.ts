@@ -11,6 +11,7 @@ import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRe
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
 import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
+import { cjsExportRecordOf, cjsExportRecordInit, cjsExportRecordCreate } from "./cjs-export-record.js";
 import { npmStaticDepSf7, resolveProjectImportSf7 } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
@@ -3776,6 +3777,12 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
         // inits while it lowered: they land immediately before it — JS's
         // order for the supported whole-initializer positions.
         body.push(...L.pendingClassExprInits.splice(0), ...stmtIr);
+        {
+          // The old export object's record is created after the statement that
+          // makes its last first write (cjs-export-record.ts).
+          const recC = cjsExportRecordOf(L, sf);
+          if (recC !== null && recC.createAfter === si) body.push(...cjsExportRecordCreate(recC, locOf(stmt)));
+        }
         const bindTo = stmt.getEnd() + 1;
         body.push(...expandoBindStmts(L, sf, bindFrom, bindTo));
         bindFrom = bindTo;
@@ -3805,6 +3812,12 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
             loc: loc0,
           });
         }
+      }
+      {
+        // The old export object's record (cjs-export-record.ts) exists before any
+        // statement reads or writes it: created right after the run-once guard.
+        const recI = cjsExportRecordOf(L, sf);
+        if (recI !== null) body.splice(header.length, 0, cjsExportRecordInit(recI, loc0));
       }
       while (at < statics.length) {
         body.push(...L.lowerStaticFieldInits(statics[at]!.info));

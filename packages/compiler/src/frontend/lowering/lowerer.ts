@@ -15,6 +15,7 @@
 import { appendFileSync } from "node:fs";
 import { isRelativeSpecifier } from "../shared.js";
 import type { RequireThrowCtx } from "../require-throws.js";
+import type { CjsExportRecord } from "./cjs-export-record.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
 import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
@@ -1796,6 +1797,8 @@ export class Lowerer {
    * gains only from inside function bodies (no static symbol, no storage of
    * their own) -- see cjsExportsBagOf. */
   readonly cjsExportBags = new Map<ts.SourceFile, string>();
+  /** Per CommonJS module: the record of its replaced export object (see cjs-export-record.ts). */
+  readonly cjsExportRecords = new Map<ts.SourceFile, CjsExportRecord | null>();
   /** STATIC-tier dynamic-import ALIAS PLUMBING (lower-island's
    * dynImportBindingDeclOf): a binding introduced by `const { a } =
    * await import("./m.ts")` maps to the exporter's own export symbol,

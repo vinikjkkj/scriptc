@@ -12,6 +12,7 @@ import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, resolveImport, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
+import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordWrite, isBareExportsAccess } from "./cjs-export-record.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { requestInitWriteFence } from "./lower-fetch.js";
@@ -6403,6 +6404,20 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     cjs: NonNullable<ReturnType<typeof cjsExportAssignmentOf>>,
   ): IrStmt {
     const loc = locOf(cjs.expr);
+    // The old export object's members (cjs-export-record.ts): a bare
+    // `exports.f =`, or a module-spelled write Node discards, writes the
+    // record instead of a module global the importers never read.
+    if (cjs.kind === "member" && cjs.text !== null && ts.isExpressionStatement(cjs.expr.parent)) {
+      const sfR = cjs.expr.getSourceFile();
+      const left = cjs.expr.left;
+      const bareWrite = ts.isPropertyAccessExpression(left) && isBareExportsAccess(L, left);
+      if (bareWrite || cjsExportDiscardReason(cjs.expr.parent) !== null) {
+        const recW = cjsExportRecordOf(L, sfR);
+        if (recW !== null && cjsExportRecordField(recW, cjs.text) !== undefined) {
+          return cjsExportRecordWrite(L, recW, cjs.expr, cjs.text);
+        }
+      }
+    }
     // Statements Node discards (a replaced export object) fence instead of
     // shipping tsc's answer — the checker models them as live exports.
     {
@@ -7672,6 +7687,12 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
                 expr.left.expression.text === "exports" &&
                 !L.resolveLocal(expr.left.expression) &&
                 !L.globalOf(expr.left.expression));
+            if (!expr.left.questionDotToken && isBareExportsAccess(L, expr.left) && isCjsJsFile(cjsSf)) {
+              const recW = cjsExportRecordOf(L, cjsSf);
+              if (recW !== null && cjsExportRecordField(recW, expr.left.name.text) !== undefined) {
+                return cjsExportRecordWrite(L, recW, expr, expr.left.name.text);
+              }
+            }
             if (!expr.left.questionDotToken && cjsMemberRecv && isCjsJsFile(cjsSf)) {
               const memberSym =
                 L.checker.getSymbolAtLocation(expr.left.name) ??
