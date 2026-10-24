@@ -7151,7 +7151,7 @@ function hasJsDocTypeClaim(node: ts.Node): boolean {
 /** The slot types a dyn pin may replace: scalars, class instances (boxed by
  * reference, so identity survives) and unions of those. Records, arrays and
  * maps are COPIED across a dyn box, so they stay typed. */
-function pinnableSlot(L: Lowerer, t: IrType): boolean {
+export function pinnableSlot(L: Lowerer, t: IrType): boolean {
   switch (t.kind) {
     case "f64":
     case "string":
@@ -7188,9 +7188,8 @@ function pinnableSlot(L: Lowerer, t: IrType): boolean {
  * ladder for exactly that case. */
 export function dynSetFn(L: Lowerer, info: ClassInfo): IrFunction | null {
   const className = info.def.name;
-  const decl = info.decl;
-  if (decl === null) return null;
-  const loc = locOf(decl);
+  // (a pre-class constructor's synthesized class has no declaration node)
+  const loc = info.decl !== null ? locOf(info.decl) : info.def.loc;
   const thisType: IrType = { kind: "object", className };
   const locals: IrLocal[] = [
     { id: "this.0", name: "this", type: thisType, mutable: false },
@@ -7331,9 +7330,8 @@ function errorPrefixCells(info: ClassInfo): Set<string> | null {
  * divergence the static delete has too. */
 export function dynDelFn(L: Lowerer, info: ClassInfo): IrFunction | null {
   const className = info.def.name;
-  const decl = info.decl;
-  if (decl === null) return null;
-  const loc = locOf(decl);
+  // (a pre-class constructor's synthesized class has no declaration node)
+  const loc = info.decl !== null ? locOf(info.decl) : info.def.loc;
   const thisType: IrType = { kind: "object", className };
   const locals: IrLocal[] = [
     { id: "this.0", name: "this", type: thisType, mutable: false },
@@ -7403,9 +7401,8 @@ export function dynDelFn(L: Lowerer, info: ClassInfo): IrFunction | null {
  * `%dynNew`, so `new` through its value keeps the loud ladder. */
 export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; list: { name: string; fn: string }[] } | null {
   const className = info.def.name;
-  const decl = info.decl;
-  if (decl === null) return null;
-  const loc = locOf(decl);
+  // (a pre-class constructor's synthesized class has no declaration node)
+  const loc = info.decl !== null ? locOf(info.decl) : info.def.loc;
   const getRec = (id: string) => L.shapes.get(id);
   const getUni = (id: string) => L.unions.get(id);
   const fns: IrFunction[] = [];

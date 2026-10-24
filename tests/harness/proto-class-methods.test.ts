@@ -366,16 +366,16 @@ const ARMED: readonly { name: string; src: string; gap: string | null }[] = [
     gap: null,
   },
   {
-    // NAMED GAP. `delete inst.v` removes an own property in JS; a class
-    // instance's fields are struct slots and there is no representation for a
-    // removed one. Refused loudly (it used to answer the pre-delete key list
-    // at exit 0 — a silent wrong array).
+    // WAS a named gap (`delete inst.v` removes an own property in JS, and a
+    // class instance's fields are struct slots). A deleted field is now a dyn
+    // slot holding the absent marker, so the own-key surfaces answer Node's
+    // list byte for byte.
     name: "a field deleted off the instance",
     src:
       PROTO +
       "function run() { var b = new Box(7); delete b.v; return JSON.stringify(Object.keys(b)) }\n" +
       "console.log(run())\n",
-    gap: "a class instance has a fixed layout and no representation for a removed field",
+    gap: null,
   },
   {
     // NAMED GAP, the same fact from the other side: JS lets a program ADD an

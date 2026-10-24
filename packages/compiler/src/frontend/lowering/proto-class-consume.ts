@@ -47,7 +47,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { IrType } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
-import type { ClassInfo } from "./lower-classes.js";
+import { pinnableSlot, type ClassInfo } from "./lower-classes.js";
 import type { Lowerer } from "./lowerer.js";
 import type { ProtoClass, ProtoMethod } from "./proto-class.js";
 import { usableProtoClasses } from "./proto-class.js";
@@ -183,6 +183,13 @@ export function buildProtoClass(L: Lowerer, c: ProtoClass): ProtoClassBuild | nu
   }
 
   const fieldTypes: [string, IrType][] = slots.slots.map((s) => [s.name, s.type]);
+  // Each slot's constructor initializer is a dyn-pin candidate exactly like an
+  // inferred field of a declared class (see DynPins): a pre-class constructor's
+  // `this.v = v` is an UNANNOTATED inference, and untyped code may write or
+  // delete it.
+  for (const s of slots.slots) {
+    if (s.initializer !== undefined && pinnableSlot(L, s.type)) L.noteInferredField(className, s.name, s.type, s.initializer);
+  }
   const info: ClassInfo = {
     def: {
       name: className,
