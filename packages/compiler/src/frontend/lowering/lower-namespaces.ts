@@ -43,6 +43,7 @@ import type { FileParts } from "./lower-modules.js";
 import { isCjsJsFile, isNodeEsmFile, locOf, resolveImport } from "../program.js";
 import { nearestPackageTypeOf, nearestPkgJsonPath } from "../resolve.js";
 import { F64, IrExpr, IrStmt, IrType, STRING } from "../../ir/nodes.js";
+import { normalize as nativePath } from "node:path";
 
 /** True when this module declaration produces NO runtime construct at all:
  * ambient (`declare namespace/module`, `declare global`, string-named
@@ -1017,7 +1018,10 @@ function esmRequireReportSuffix(node: ts.Node): string | null {
   if (!file.endsWith(".js") || nearestPackageTypeOf(file) !== "module") return null;
   const pkg = nearestPkgJsonPath(file);
   if (pkg === null) return null;
-  return ` in ES module scope, you can use import instead\nThis file is being treated as an ES module because it has a '.js' file extension and '${pkg}' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.`;
+  // Node names the path in the platform's own form (backslashes on Windows);
+  // the compiler spells it with forward slashes everywhere.
+  const pkgNative = nativePath(pkg);
+  return ` in ES module scope, you can use import instead\nThis file is being treated as an ES module because it has a '.js' file extension and '${pkgNative}' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.`;
 }
 
 /** True when `node` executes during module INIT (top-level statement
