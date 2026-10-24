@@ -2242,6 +2242,13 @@ ScrMap *scr_map_new_ref(ScrMapValKind val_kind, void *(*key_retain)(void *),
                         void (*key_release)(void *), void *(*val_retain)(void *),
                         void (*val_release)(void *), ScrTraceFn val_trace);
 
+/* A Map whose KEYS are UNION boxes: scr_set_new_union's twin with a value
+ * side. `classes` is the per-arm class string the compiler interns. */
+ScrMap *scr_map_new_union(ScrMapValKind val_kind, void *(*key_retain)(void *),
+                          void (*key_release)(void *), void *(*val_retain)(void *),
+                          void (*val_release)(void *), ScrTraceFn val_trace,
+                          const ScrStr *classes);
+
 /* get: scalar variants fill *out and return the found flag; ref variants
  * return +1 or NULL (values are never NULL, so NULL means "absent"). The
  * compiler wraps the result into the `V | undefined` union type-directedly
