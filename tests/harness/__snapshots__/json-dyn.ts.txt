@@ -5,22 +5,6 @@ json-dyn.ts:24:41 - error SC1090: JSON.stringify of '(number) => number' values 
      |                                         ^~~~~~~~~~~~~~~~~~~~
   25 | class Point {
 
-json-dyn.ts:42:7 - error SC2007: values of type '{ (text: string, reviver?: ((this: any, key: string, value: any) => any) | undefined): any; (text: string): unknown; }' cannot be compiled: the type declares multiple call signatures (overloads), and a compiled function value is always one concrete signature
-
-  41 | const dynArray: unknown[] = []; // unknown[] IS the dyn array now — no fence (corpus 2585)
-  42 | const parseRef = JSON.parse;
-     |       ^~~~~~~~
-  43 | // BARE undefined-armed unions are not JSON on the STRINGIFY side: Node
-
-  hint: annotate the slot with the ONE signature the program actually calls (e.g. '(x: number) => string'), or wrap the overloaded function in a single-signature arrow
-
-json-dyn.ts:42:18 - error SC1090: JSON methods as values (call 'parse' directly) are not supported yet
-
-  41 | const dynArray: unknown[] = []; // unknown[] IS the dyn array now — no fence (corpus 2585)
-  42 | const parseRef = JSON.parse;
-     |                  ^~~~~~~~~~
-  43 | // BARE undefined-armed unions are not JSON on the STRINGIFY side: Node
-
 json-dyn.ts:51:39 - error SC1090: JSON.stringify of 'string | undefined' values (Node's stringify of bare undefined is not a string at all — narrow with '!== undefined' first, model absence with a null arm, or use an optional record field ('{ a?: string }'), which drops from the output like Node's) are not supported yet
 
   50 | }

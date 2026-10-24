@@ -424,6 +424,15 @@ export function builtinFnValueDeclType(L: Lowerer, decl: ts.VariableDeclaration)
   if (decl.initializer === undefined) return null;
   let inner: ts.Expression = decl.initializer;
   while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+  // `const parseRef = JSON.parse`: the overloaded declared type maps nowhere
+  // (SC2007 at the binding), while the value is the one-argument closure
+  // lowerJsonProperty mints. The slot takes that closure's own type.
+  if (
+    ts.isPropertyAccessExpression(inner) && !L.dynamic && inner.name.text === "parse" &&
+    L.stdlibGlobalMember(inner, "JSON") === "parse"
+  ) {
+    return funcOf([STRING], DYN);
+  }
   if (!ts.isIdentifier(inner)) return null;
   const want = gatedValueType(L, inner);
   if (want === null) return null;
