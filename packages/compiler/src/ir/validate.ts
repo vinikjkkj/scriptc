@@ -104,6 +104,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // checked in the libCall case, like error.new.
   "island.castFail": { argTypes: [JSVAL, STRING], result: VOID },
   "json.parse": { argTypes: [STRING], result: DYN },
+  "json.parseRevive": { argTypes: [STRING, DYN], result: DYN },
   /* better-sqlite3 (scr_sqlite.c). open's three flags are the option
    * record's readonly / fileMustExist / timeout, already folded to
    * literals by the lowering — the runtime re-validates timeout because
