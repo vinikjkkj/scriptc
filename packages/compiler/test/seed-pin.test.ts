@@ -128,8 +128,12 @@ test("a container of RECORDS written only with that record type stays typed", ()
   ).toEqual({ before: 0, after: 0 });
 });
 
-test("a container of ARRAYS is not pinned (a seed entry would be copied)", () => {
-  expect(pinsOf(`${PUT}const xs = [1];\nconst m = new Map([["a", xs]]);\nput(m, "b", 2);\nconsole.log(m.size);\n`)).toEqual({ before: 0, after: 0 });
+test("a container of SCALAR ARRAYS is pinned (the dyn copy is a live view of the array)", () => {
+  expect(pinsOf(`${PUT}const xs = [1];\nconst m = new Map([["a", xs]]);\nput(m, "b", 2);\nconsole.log(m.size);\n`)).toEqual({ before: 1, after: 0 });
+});
+
+test("a container of ARRAYS OF ARRAYS is not pinned (their elements are copies with no origin)", () => {
+  expect(pinsOf(`${PUT}const xs = [[1]];\nconst m = new Map([["a", xs]]);\nput(m, "b", 2);\nconsole.log(m.size);\n`)).toEqual({ before: 0, after: 0 });
 });
 
 test("a plain-object keyed WeakMap is not pinned", () => {

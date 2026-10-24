@@ -85,8 +85,14 @@ function valueKinds(t: ts.Type, c: Ctx): Set<Scalar> | null {
       // ARRAYS stay out: an array bound to a name and used as a SEED entry is
       // copied into the dyn box (aliasing covers set/add arguments, not seed
       // entries), where the typed box keeps the reference.
+      // A scalar-element array is admitted: its dyn copy is a live view of the
+      // array (runtime "live array views"), so the entry keeps the identity.
       const name = part.getSymbol()?.name;
-      if (name === "Array" || name === "ReadonlyArray") return null;
+      if (name === "Array" || name === "ReadonlyArray") {
+        const el = c.checker.getTypeArguments(part as ts.TypeReference)[0];
+        const scalar = el !== undefined && (el.flags & (ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike | ts.TypeFlags.BooleanLike)) !== 0;
+        if (!scalar) return null;
+      }
       out.add(`o:${c.checker.typeToString(part)}`);
     }
     else return null;
