@@ -122,7 +122,13 @@ const ANSWERING_TABLES: { fn: string; why: string; exempt: string[] }[] = [
     // Node answers 0. Its ArrayBuffer sibling had carried the payload
     // arm all along, with the same argument. This tripwire is what
     // caught the exemption, so the exemption is what moved.
-    exempt: ["SCR_DYN_ARR", "SCR_DYN_OBJ"],
+    //
+    // SCR_DYN_ARR left the list for the same reason: a dyn ARR that is a
+    // boundary copy of a static array is a live view of it, so two boxes
+    // made from ONE array are one JS value and compare equal by origin
+    // (the ARR arm). An ARR built in dyn-land still compares by node
+    // identity, which that arm's first line answers.
+    exempt: ["SCR_DYN_OBJ"],
   },
   {
     fn: "const char *scr_dyn_kind_name(const ScrDyn *d)",
