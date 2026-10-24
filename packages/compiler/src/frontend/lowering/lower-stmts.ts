@@ -11402,14 +11402,59 @@ function hasEscapingLabeledJumpOut(body: ts.Statement): boolean {
   return found;
 }
 
+/** True when no function, method, accessor or class sits anywhere inside a
+ * for statement. JS gives each iteration a fresh copy of a let head binding,
+ * and that copy is observable only through a closure that captures it, so a
+ * statement with no closure cannot tell the copies apart. */
+function forStatementHasNoClosure(stmt: ts.ForStatement): boolean {
+  let found = false;
+  const walk = (n: ts.Node): void => {
+    if (found) return;
+    if (
+      ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) ||
+      ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n) ||
+      ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n) ||
+      ts.isClassDeclaration(n) || ts.isClassExpression(n)
+    ) {
+      found = true;
+      return;
+    }
+    n.forEachChild(walk);
+  };
+  walk(stmt);
+  return !found;
+}
+
 export function lowerForStatement(L: Lowerer, stmt: ts.ForStatement): IrStmt {
     const labels = L.takeLabels();
     L.scopes.push(new Map());
     try {
       let init: IrStmt | null = null;
+      // `for (let i = 0, n = xs.length; ...)` with no closure in the
+      // statement: the declarators are sequenced before a plain loop, in a
+      // block that scopes them around it (the loop's own init stays empty).
+      const headDecls: IrStmt[] = [];
       if (stmt.initializer) {
         if (ts.isVariableDeclarationList(stmt.initializer)) {
-          init = L.lowerVarDeclList(stmt.initializer);
+          const list = stmt.initializer;
+          const multiLexical =
+            list.declarations.length > 1 &&
+            (list.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0 &&
+            (list.flags & ts.NodeFlags.Using) === 0 &&
+            list.declarations.every(
+              (d) => !ts.isArrayBindingPattern(d.name) && !ts.isObjectBindingPattern(d.name),
+            ) &&
+            forStatementHasNoClosure(stmt);
+          if (multiLexical) {
+            const isLet = (list.flags & ts.NodeFlags.Let) !== 0;
+            for (const decl of list.declarations) {
+              const lowered = L.lowerVarDecl(decl, isLet);
+              if (!lowered) throw new Error("lowerer bug: for-init declarator resolved to a global");
+              headDecls.push(lowered);
+            }
+          } else {
+            init = L.lowerVarDeclList(stmt.initializer);
+          }
         } else if (!ts.isMissingDeclaration(stmt.initializer)) {
           // (MissingDeclaration is 7's error-recovery node — a preflight-
           // clean program never carries one.)
@@ -11419,7 +11464,9 @@ export function lowerForStatement(L: Lowerer, stmt: ts.ForStatement): IrStmt {
       const cond = stmt.condition ? L.lowerCondition(stmt.condition) : null;
       const update = stmt.incrementor ? L.lowerExprStatement(stmt.incrementor) : null;
       const body = L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
-      return { kind: "for", init, cond, update, body, ...(labels && { labels }), loc: locOf(stmt) };
+      const loop: IrStmt = { kind: "for", init, cond, update, body, ...(labels && { labels }), loc: locOf(stmt) };
+      if (headDecls.length === 0) return loop;
+      return { kind: "block", body: [...headDecls, loop], loc: locOf(stmt) };
     } finally {
       L.scopes.pop();
     }
