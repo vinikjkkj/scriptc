@@ -1690,10 +1690,15 @@ function openRecordEdits(fileName: string, text: string): string | null {
           (ts.isPropertyAssignment(pr) && (ts.isFunctionExpression(pr.initializer) || ts.isArrowFunction(pr.initializer))),
       );
       if (!hasFn) continue;
-      // Already annotated by its own JSDoc: the author's claim stands.
+      // Already typed by its own JSDoc (@type): the author's claim stands. A
+      // description-only block does not type anything: the annotation goes
+      // BETWEEN it and the statement, where it is the one TypeScript reads.
       let i = stmt.getStart(sf);
       while (i > 0 && /\s/.test(text[i - 1]!)) i--;
-      if (text.slice(i - 2, i) === "*/") continue;
+      if (text.slice(i - 2, i) === "*/") {
+        const open = text.lastIndexOf("/**", i - 2);
+        if (open >= 0 && /@type\b/.test(text.slice(open, i))) continue;
+      }
       edits.push({ start: stmt.getStart(sf), end: stmt.getStart(sf), text: "/** @type {any} */ " });
     }
   };
