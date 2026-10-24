@@ -13214,7 +13214,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         // receiver, call the method. Only when the bind argument names the
         // same receiver as the method access (both `this`, or the same
         // binding), so the closure's `this` is what .bind requests.
-        if (call.arguments.length === 1 && ts.isPropertyAccessExpression(access.expression)) {
+        if (call.arguments.length >= 1 && ts.isPropertyAccessExpression(access.expression)) {
           const methodAccess = access.expression;
           const recvNode = methodAccess.expression;
           const bindArg = call.arguments[0]!;
@@ -13225,7 +13225,30 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
               L.resolveValueSymbol(recvNode) === L.resolveValueSymbol(bindArg));
           if (sameReceiver) {
             const bound = L.boundMethodValue(methodAccess, locOf(call));
-            if (bound) return bound;
+            // `this.m.bind(this, a, b)`: the bound method with leading arguments
+            // fixed is a partial application of the receiver-bound closure (the
+            // receiver is already inside it, so the wrapper drops its own).
+            if (bound && call.arguments.length > 1 && bound.type.kind === "func" &&
+                bound.type.params.length >= call.arguments.length - 1) {
+              const fnT = bound.type as { params: IrType[] };
+              const boundArgs = call.arguments
+                .slice(1)
+                .map((a, i) => L.coerceInto(a, L.lowerExpr(a), fnT.params[i]!));
+              const partial = L.bindThisClosure(bound, L.lowerExpr(bindArg), boundArgs, locOf(call), false);
+              if (partial) {
+                // The checker types a bind it cannot match to an overload `any`: a
+                // callee of that type is called through the dynamic pack ABI, so the
+                // value crosses as the boxed function the callers expect.
+                const resultT = L.mapTypeOf(L.typeOf(call));
+                if (resultT === null || resultT.kind === "dyn") {
+                  if (canBoxFuncIntoDyn(partial.type as IrType & { kind: "func" }, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+                    return { kind: "dynFrom", value: partial, type: DYN, loc: locOf(call) };
+                  }
+                }
+                return partial;
+              }
+            }
+            if (bound && call.arguments.length === 1) return bound;
             // `X.emit.bind(X)` has no method to bind — class collection
             // ERASES a pure super-delegating emit override, and the member
             // it shadows is the runtime's, monomorphized per event name. It
