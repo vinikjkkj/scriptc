@@ -147,15 +147,6 @@ stdlib-fence.ts:52:16 - error SC2020: '.join with 0 arguments' is part of the st
 
   hint: pass the separator explicitly: join(",")
 
-stdlib-fence.ts:55:13 - error SC2020: 'JSON.parse with a reviver' is part of the standard library types but has no scriptc lowering yet
-
-  54 | const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
-  55 | const rev = JSON.parse("1", (_k, v) => v);
-     |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  56 | // (stringify with a null replacer + LITERAL space now lowers — the pretty
-
-  hint: parse to `unknown` and validate with a checked cast ('as T') instead
-
 stdlib-fence.ts:60:18 - error SC2020: 'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet
 
   59 | const toStringify = { a: 1 };
