@@ -5064,7 +5064,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const fns: (IrType & { kind: "func" })[] = [];
     for (const sg of callSigs) {
       const f = mapOneSig(sg, ctx);
-      if (f === null || f.kind !== "func" || f.restIn === true || f.rest === true) {
+      if (f === null || f.kind !== "func" || f.rest === true) {
         mapTrace(`OVERLOAD ${checker.typeToString(type).slice(0, 60)} -> an overload does not map on its own`);
         return null;
       }
@@ -5076,6 +5076,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // of the overload tsc RESOLVED (reconcileOverloadReturn's dyn rule,
     // lower-calls.ts), so a call of one overload reads exactly its own type.
     const retOut: IrType = fns.every((f) => typeEquals(f.ret, ret0)) ? ret0 : DYN;
+    // A REST overload (`call(...args: [cmd: string, ...rest: T[]])`, the
+    // variadic-tuple spelling of ioredis RedisCommander) cannot merge by
+    // position: its surplus arguments are one trailing array. The merged
+    // closure is the checked-dynamic pack, the slot each rest overload maps
+    // to on its own (mapType's variable-length tuple rule).
+    if (fns.some((f) => f.restIn === true)) {
+      return { kind: "func" as const, params: [DYN], ret: retOut, restIn: true as const };
+    }
     const width = Math.max(...fns.map((f) => f.params.length));
     const mergedParams: IrType[] = [];
     for (let i = 0; i < width; i++) {
