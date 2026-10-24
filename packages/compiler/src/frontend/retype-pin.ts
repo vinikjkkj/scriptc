@@ -90,7 +90,9 @@ export function computeRetypePins(program: ts.Program): Map<string, RetypePin[]>
     // Declarations first, then assignments to them.
     const decls: ts.VariableDeclaration[] = [];
     const assigns: ts.BinaryExpression[] = [];
-    const visit = (n: ts.Node): void => {
+    // ITERATIVE (walkPreorder): a pathologically deep tree must reach the
+    // deep-nesting preflight's named refusal, not overflow this pass's stack.
+    ts.walkPreorder(sf, (n) => {
       if (
         ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined &&
         ts.isVariableDeclarationList(n.parent) && (n.parent.flags & ts.NodeFlags.Const) === 0 &&
@@ -102,9 +104,8 @@ export function computeRetypePins(program: ts.Program): Map<string, RetypePin[]>
       ) {
         assigns.push(n);
       }
-      ts.forEachChild(n, visit);
-    };
-    visit(sf);
+      return undefined;
+    });
     if (decls.length === 0 || assigns.length === 0) continue;
     const byName = new Map<string, ts.BinaryExpression[]>();
     for (const a of assigns) {
