@@ -4828,6 +4828,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ? L.paramShapes(ctor.parameters)
         : (base?.ctorParams ?? []);
 
+      // A JavaScript constructor's own properties list in the order its writes
+      // RUN, so a field written only under a condition sits between the fields
+      // written before and after it (Object.keys, util.inspect, JSON).
+      // The inferred-field scans above push conditional fields after the
+      // unconditional ones; put them where the constructor's text writes them.
+      if (isJsSourceFile(decl.getSourceFile()) && ctor !== null && ctor.body !== undefined) {
+        reorderFieldsByCtorWrites(ctor.body, fieldOrder);
+      }
+
       const info: ClassInfo = {
         def: {
           name: className,
@@ -11796,4 +11805,53 @@ function dynAnyContainer(
     seed = L.lowerExprExpecting(seedNode, DYN);
   }
   return { kind: "dynMapNew", flavor, ...(seed !== undefined ? { seed } : {}), type: DYN, loc };
+}
+
+/** Reorders the inferred fields of a JavaScript class (the entries of `order`
+ * with no initializer that the constructor body writes as `this.name = ...`)
+ * into the textual order of their first write, in the slots those entries
+ * already hold. Declared fields, parameter properties and every field the
+ * constructor does not write stay where they are.
+ *
+ * Declined (the order is left as it was) when it cannot be decided from the
+ * text: a field written at two sites with another field's first write between
+ * them (`if (c) { this.a = 1; this.b = 2 } else { this.b = 1; this.a = 2 }`
+ * lists a, b or b, a depending on `c`). */
+function reorderFieldsByCtorWrites(body: ts.Block, order: ClassInfo["fieldOrder"]): void {
+  const writes: string[] = [];
+  const walk = (n: ts.Node): void => {
+    if (ts.isFunctionLike(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n)) return;
+    if (
+      ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isPropertyAccessExpression(n.left) && n.left.expression.kind === ts.SyntaxKind.ThisKeyword &&
+      ts.isIdentifier(n.left.name)
+    ) {
+      // the right-hand side runs first
+      ts.forEachChild(n.right, walk);
+      writes.push(n.left.name.text);
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  ts.forEachChild(body, walk);
+  const first = new Map<string, number>();
+  const last = new Map<string, number>();
+  writes.forEach((name, i) => {
+    if (!first.has(name)) first.set(name, i);
+    last.set(name, i);
+  });
+  for (const [name, lo] of first) {
+    const hi = last.get(name)!;
+    for (let i = lo + 1; i < hi; i++) if (writes[i] !== name) return;
+  }
+  const slots: number[] = [];
+  order.forEach((f, i) => {
+    if (f.initializer === undefined && f.redeclared !== true && first.has(f.name)) slots.push(i);
+  });
+  if (slots.length < 2) return;
+  const entries = slots.map((i) => order[i]!);
+  const sorted = [...entries].sort((a, b) => first.get(a.name)! - first.get(b.name)!);
+  slots.forEach((slot, k) => {
+    order[slot] = sorted[k]!;
+  });
 }
