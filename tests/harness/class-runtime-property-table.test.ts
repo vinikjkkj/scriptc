@@ -198,44 +198,6 @@ const RUNS: readonly { name: string; src: string; out: string }[] = [
  * these was already the fence before [[Get]] read the table; the rows are
  * here because the table lookup runs FIRST now, and a lookup that started
  * answering its own misses would take all of them silently. */
-const READ_REFUSALS: readonly { name: string; src: string }[] = [
-  {
-    name: "a key no define ever put in the table",
-    src:
-      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
-      "const c = new C()\n" +
-      RTKEY +
-      "Object.defineProperty(c, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
-      "const r = c as unknown as Record<string, unknown>\n" +
-      "console.log('READ ' + String(r['nope']))\n",
-  },
-  {
-    // A hierarchy instance's table MISS. The old row here pinned "a class
-    // WITH A BASE fences" as a NAMED GAP; the gap is closed and the two
-    // answering rows are in RUNS. What has to stay pinned is the sharper
-    // claim, because a hierarchy arm is reached by an INTERVAL test: a
-    // whole subtree routes through it, and a miss anywhere in that subtree
-    // is still a declared member or a typo, both of which the fence names.
-    name: "a hierarchy instance's table MISS",
-    src:
-      "class B { a: number\n  constructor() { this.a = 1 } }\n" +
-      "class D extends B { b: number\n  constructor() { super(); this.b = 2 } }\n" +
-      "const d = new D()\n" +
-      RTKEY +
-      "Object.defineProperty(d, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
-      "const r = d as unknown as Record<string, unknown>\n" +
-      "console.log('READ ' + String(r['nope']))\n",
-  },
-  {
-    name: "any read on an instance of a class NO define names",
-    src:
-      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
-      "const c = new C()\n" +
-      "const r = c as unknown as Record<string, unknown>\n" +
-      RTKEY +
-      "console.log('READ ' + String(r[k]))\n",
-  },
-];
 
 /** Programs that must refuse AT RUN TIME, loudly and catchably. Node
  * answers for both: the divergence is deliberate and is exactly what a
@@ -261,6 +223,11 @@ const READ_REFUSALS: readonly { name: string; src: string }[] = [
  * The derived row also pins the REGISTRY: D's table is flattened over B,
  * and the box carries D's descriptor only because the run-time preorder
  * position resolves it. Answering 1 here is that resolution working. */
+/* THREE ROWS MOVED HERE from the loud-ladder list. A table MISS (a key no define put
+ * in the table and no member declares) read as the fence while the boxed class's member
+ * set was not known; the descriptor now says whether it is (ScrDynClass.opaque), the
+ * table and the member rows are consulted FIRST, and a miss on a class whose members
+ * are all named is `undefined` -- which is what Node answers, byte for byte. */
 const READ_ANSWERS: readonly { name: string; src: string; out: string }[] = [
   {
     name: "a DECLARED member read through the box",
@@ -284,6 +251,45 @@ const READ_ANSWERS: readonly { name: string; src: string; out: string }[] = [
       "const r = d as unknown as Record<string, unknown>\n" +
       "console.log('READ ' + String(r['a']))\n",
     out: "READ 1\n",
+  },
+  {
+    name: "a key no define ever put in the table",
+    src:
+      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
+      "const c = new C()\n" +
+      RTKEY +
+      "Object.defineProperty(c, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const r = c as unknown as Record<string, unknown>\n" +
+      "console.log('READ ' + String(r['nope']))\n",
+    out: "READ undefined\n",
+  },
+  {
+    // A hierarchy instance's table MISS. The old row here pinned "a class
+    // WITH A BASE fences" as a NAMED GAP; the gap is closed and the two
+    // answering rows are in RUNS. What has to stay pinned is the sharper
+    // claim, because a hierarchy arm is reached by an INTERVAL test: a
+    // whole subtree routes through it, and a miss anywhere in that subtree
+    // is still a declared member or a typo, both of which the fence names.
+    name: "a hierarchy instance's table MISS",
+    src:
+      "class B { a: number\n  constructor() { this.a = 1 } }\n" +
+      "class D extends B { b: number\n  constructor() { super(); this.b = 2 } }\n" +
+      "const d = new D()\n" +
+      RTKEY +
+      "Object.defineProperty(d, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const r = d as unknown as Record<string, unknown>\n" +
+      "console.log('READ ' + String(r['nope']))\n",
+    out: "READ undefined\n",
+  },
+  {
+    name: "any read on an instance of a class NO define names",
+    src:
+      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
+      "const c = new C()\n" +
+      "const r = c as unknown as Record<string, unknown>\n" +
+      RTKEY +
+      "console.log('READ ' + String(r[k]))\n",
+    out: "READ undefined\n",
   },
 ];
 
@@ -462,7 +468,6 @@ beforeAll(async () => {
     for (const p of RUNS) BUILT.set(`R:${p.name}:${backend}`, await build(p.name, p.src, backend));
     for (const p of RUNTIME_REFUSALS) BUILT.set(`T:${p.name}:${backend}`, await build(p.name, p.src, backend));
     for (const p of READ_ANSWERS) BUILT.set(`A:${p.name}:${backend}`, await build(p.name, p.src, backend));
-    for (const p of READ_REFUSALS) BUILT.set(`G:${p.name}:${backend}`, await build(p.name, p.src, backend));
     for (const p of COMPILE_REFUSALS) BUILT.set(`C:${p.name}:${backend}`, await build(p.name, p.src, backend));
     BUILT.set(`N:no-table:${backend}`, await build("no-table", NO_TABLE_SRC, backend));
     BUILT.set(`N:table:${backend}`, await build("has-table", TABLE_SRC, backend));
@@ -519,30 +524,6 @@ describe("a compiled class instance's run-time property table", () => {
       const r = run(b.binaryPath!);
       expect(r.status, `${p.name} (${backend}) exit code`).toBe(0);
       expect(r.stdout, `${p.name} (${backend}) stdout must equal Node v25.9.0's`).toBe(p.out);
-    }
-  });
-
-  test.for(READ_REFUSALS.map((p) => [p.name, p] as const))("a boxed read stays the loud ladder: %s", ([, p]) => {
-    for (const backend of LANES) {
-      const b = BUILT.get(`G:${p.name}:${backend}`)!;
-      expect(
-        b.ok,
-        `${p.name} (${backend}) did not compile: ` +
-          b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
-      ).toBe(true);
-      const r = run(b.binaryPath!);
-      // `READ` on stdout means the read ANSWERED. Node answers here and this
-      // representation must not: a table miss and a declared member are the
-      // same NULL out of scr_cls_props_get, and answering `undefined` for
-      // either makes `c.a` read `undefined` in silence.
-      expect(
-        r.stdout,
-        `${p.name} (${backend}) ANSWERED a boxed property read instead of refusing`,
-      ).not.toContain("READ");
-      expect(
-        r.status,
-        `${p.name} (${backend}) must exit non-zero on the uncaught refusal`,
-      ).not.toBe(0);
     }
   });
 

@@ -11663,7 +11663,9 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
       scr_dyn_objwalk_push(out, mode, "name", 4, nv);
       scr_dyn_release(nv);
     }
-    if (e->code != NULL) {
+    /* (a class that DECLARES `code` has it as a member row below, and it is
+     * the same slot: listed once) */
+    if (e->code != NULL && scr_dyn_objinst_member(v, "code", 4) == NULL) {
       ScrDyn *cv = scr_dyn_new_str(e->code);
       scr_dyn_objwalk_push(out, mode, "code", 4, cv);
       scr_dyn_release(cv);

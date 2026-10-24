@@ -65,14 +65,6 @@ const ROWS: readonly { name: string; src: string; forbidden: string[] }[] = [
     forbidden: ["OUT", "message", "name"],
   },
   {
-    name: "String() of a boxed Error subclass",
-    src:
-      ERR_HEAD +
-      "function use(x: any): string { return String(x) }\n" +
-      "console.log('OUT ' + use(new MyErr()))\n",
-    forbidden: ["OUT", "[object Object]"],
-  },
-  {
     name: "util.inspect of a boxed Error subclass",
     src:
       ERR_HEAD +
@@ -98,18 +90,36 @@ const ROWS: readonly { name: string; src: string; forbidden: string[] }[] = [
  * read as the truth; an empty one cannot be. */
 const KEYS_EMPTY: readonly { name: string; src: string }[] = [
   {
-    name: "Object.keys of a boxed Error subclass",
-    src:
-      ERR_HEAD +
-      "function use(x: any): string { return Object.keys(x).join(',') }\n" +
-      "console.log('KEYS[' + use(new MyErr()) + ']')\n",
-  },
-  {
     name: "Object.keys of a boxed EventEmitter subclass",
     src:
       BUS_HEAD +
       "function use(x: any): string { return Object.keys(x).join(',') }\n" +
       "console.log('KEYS[' + use(new Bus()) + ']')\n",
+  },
+];
+
+/** Rows that ANSWER, Node-exactly (checked against node v24.15.0): an Error
+ * subclass IS a ScrError, so the runtime answers its cells and its own keys
+ * from the box itself -- the refusal these two used to pin is closed. The
+ * answer is the point: `String(e)` is Error.prototype.toString and the own
+ * keys are the user's assigned `code` (`name` and `message` are not own
+ * enumerable). */
+const ANSWERS: readonly { name: string; src: string; out: string }[] = [
+  {
+    name: "String() of a boxed Error subclass",
+    src:
+      ERR_HEAD +
+      "function use(x: any): string { return String(x) }\n" +
+      "console.log('OUT ' + use(new MyErr()))\n",
+    out: "OUT Error: boom\n",
+  },
+  {
+    name: "Object.keys of a boxed Error subclass",
+    src:
+      ERR_HEAD +
+      "function use(x: any): string { return Object.keys(x).join(',') }\n" +
+      "console.log('KEYS[' + use(new MyErr()) + ']')\n",
+    out: "KEYS[code]\n",
   },
 ];
 
@@ -150,11 +160,25 @@ beforeAll(async () => {
   lab = await mkdtemp(join(tmpdir(), "scriptc-dyn-class-rtbase-"));
   for (const backend of LANES) {
     for (const p of ROWS) BUILT.set(`F:${p.name}:${backend}`, await build(p.name, p.src, backend));
+    for (const p of ANSWERS) BUILT.set(`A:${p.name}:${backend}`, await build(p.name, p.src, backend));
     for (const p of KEYS_EMPTY) BUILT.set(`K:${p.name}:${backend}`, await build(p.name, p.src, backend));
   }
 }, 1_800_000);
 
 describe("a class whose base is runtime-provided keeps the boxed fence", () => {
+  test.for(ANSWERS.map((p) => [p.name, p] as const))("answers Node-exactly: %s", ([, p]) => {
+    for (const backend of LANES) {
+      const b = BUILT.get(`A:${p.name}:${backend}`)!;
+      expect(
+        b.ok,
+        `${p.name} (${backend}) did not compile: ` + b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
+      ).toBe(true);
+      const r = run(b.binaryPath!);
+      expect(r.status, `${p.name} (${backend}) exit code`).toBe(0);
+      expect(r.stdout, `${p.name} (${backend}) stdout`).toBe(p.out);
+    }
+  });
+
   test.for(ROWS.map((p) => [p.name, p] as const))("refuses LOUDLY: %s", ([, p]) => {
     for (const backend of LANES) {
       const b = BUILT.get(`F:${p.name}:${backend}`)!;

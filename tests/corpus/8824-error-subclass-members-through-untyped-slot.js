@@ -70,3 +70,10 @@ function probePlain(e) {
 }
 probePlain(new Error("plain"));
 probePlain(new RangeError("range"));
+
+// a class that DECLARES `code` lists it once
+class Coded extends Error {
+  constructor() { super("boom"); this.code = "X"; }
+}
+function codedKeys(x) { return Object.keys(x).join(",") + "|" + String(x); }
+console.log(codedKeys(new Coded()));
