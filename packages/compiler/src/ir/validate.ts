@@ -1096,6 +1096,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.writeFileSyncBytes": { argTypes: [STRING, BYTES_U8], result: VOID },
   "fsp.readFileBytes": { argTypes: [STRING], result: { kind: "promise", inner: BYTES_U8 } },
   "zlib.deflateSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "zlib.syncDyn": { argTypes: [F64, DYN, DYN], result: BYTES_U8 },
+  "zlib.cbDyn": { argTypes: [F64, DYN, DYN, DYN], result: VOID },
   "zlib.inflateSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   // The gzip-container twins over the SAME codec: the runtime's mode
   // argument picks the header (2 = gzip, 3 = inflate's auto-detect,

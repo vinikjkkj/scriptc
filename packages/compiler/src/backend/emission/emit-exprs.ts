@@ -6538,6 +6538,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fsp_read_file_bytes(${arg(0)})`);
           // zlib (scr_zlib.c — linked only when these appear on the IR):
           // inflate throws on corrupt input (may-throw seed set).
+          case "zlib.syncDyn":
+            // op, data, options: borrowed dyn operands; +1 Buffer or a pending throw.
+            return finish(`scr_zlib_sync_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "zlib.cbDyn":
+            // op, data, options-or-callback, callback-or-undefined; schedules an immediate.
+            E.usesTimers = true; // the scheduled immediate needs the loop
+            return finish(`scr_zlib_cb_dyn(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "zlib.deflateSync":
             return finish(`scr_zlib_deflate(${arg(0)})`);
           case "zlib.inflateSync":
