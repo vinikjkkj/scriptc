@@ -12094,6 +12094,60 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8546-a-file-declaring-its-own-require-is-not-the-module-loader.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8546-a-file-declaring-its-own-require-is-not-the-module-loader.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8547-open-record-in-a-function-whose-jsdoc-types-it-keeps-its-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/8547-open-record-in-a-function-whose-jsdoc-types-it-keeps-its-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8548-a-var-assigned-another-kind-than-its-initializer-is-dynamic.js": {
+   "order": [
+    "<repo>/tests/corpus/8548-a-var-assigned-another-kind-than-its-initializer-is-dynamic.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8549-a-string-or-null-var-given-parseint-numbers-built-and-threw.js": {
+   "order": [
+    "<repo>/tests/corpus/8549-a-string-or-null-var-given-parseint-numbers-built-and-threw.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8550-global-functions-taken-as-values-in-a-javascript-source.js": {
+   "order": [
+    "<repo>/tests/corpus/8550-global-functions-taken-as-values-in-a-javascript-source.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8551-timer-callback-parameters-contextually-typed-never-are-dynamic.js": {
+   "order": [
+    "<repo>/tests/corpus/8551-timer-callback-parameters-contextually-typed-never-are-dynamic.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8552-escape-and-unescape.js": {
+   "order": [
+    "<repo>/tests/corpus/8552-escape-and-unescape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8553-set-seeded-with-function-values.js": {
+   "order": [
+    "<repo>/tests/corpus/8553-set-seeded-with-function-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8554-a-function-compared-with-a-dynamic-value.js": {
+   "order": [
+    "<repo>/tests/corpus/8554-a-function-compared-with-a-dynamic-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/main.js": {
    "order": [
     "<repo>/tests/corpus/8600-typescript-emitted-commonjs-reexports/lib/defaults.js",
