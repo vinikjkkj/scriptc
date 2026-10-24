@@ -15271,6 +15271,12 @@
     "<repo>/tests/corpus/8847-url-origin-and-tojson.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/8960-for-multi-declarator-head.js": {
+   "order": [
+    "<repo>/tests/corpus/8960-for-multi-declarator-head.js"
+   ],
+   "diags": []
   }
  }
 }
