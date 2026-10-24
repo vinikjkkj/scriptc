@@ -39,6 +39,22 @@ interface Timeout {
    * Timeout.refresh). Chaining like ref/unref. */
   refresh(): Timeout;
 }
+/* NodeJS.Timeout — the SAME handle, named the way @types/node names it.
+ * A program whose dependencies reach `NodeJS.Timeout` (zapo-js's record
+ * members: `timer: NodeJS.Timeout`) must resolve it to the stdlib handle
+ * whether or not @types/node is in the program; otherwise the qualified
+ * name resolves to no symbol, the member types as `any`, and every record
+ * or container holding it refuses (SC2009/SC2011, then the class's method
+ * calls as SC1090). Mirrors the global interface above; @types/node's own
+ * declaration merges with this one as overloads. */
+declare namespace NodeJS {
+  interface Timeout {
+    ref(): NodeJS.Timeout;
+    unref(): NodeJS.Timeout;
+    hasRef(): boolean;
+    refresh(): NodeJS.Timeout;
+  }
+}
 /* The callback is invoked with NO arguments; the second overload admits a
  * callback declared with one parameter for the sleep idiom —
  * `setTimeout(resolve, ms)` with Promise<unknown>'s resolve — where the
