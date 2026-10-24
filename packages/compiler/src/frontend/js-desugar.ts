@@ -1566,7 +1566,7 @@ function openRecordEdits(fileName: string, text: string): string | null {
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const edits: Edit[] = [];
   const marked = new Set<ts.Node>();
-  const cast = (lit: ts.ObjectLiteralExpression): void => {
+  const cast = (lit: ts.Expression): void => {
     if (marked.has(lit)) return;
     // Already typed by the author: `/** @type {...} */ ({...})`.
     const lead = text.slice(Math.max(0, lit.getFullStart() - 80), lit.getStart(sf));
@@ -1615,6 +1615,21 @@ function openRecordEdits(fileName: string, text: string): string | null {
       // does not take writes through.
       const scope = scopeOf(n);
       if (ts.isObjectLiteralExpression(init) && n.initializer === init && ((!ts.isSourceFile(scope) && writesDynamicKey(scope, n.name.text) && !inTypedFn(n)) || capturesStackInto(scope, n.name.text))) cast(init);
+      // `const row = asArray ? [] : {}` written through dynamic keys (and
+      // pushed to): the two arms are one open object, so the whole
+      // conditional is the cast (mysql2's static text parser).
+      else if (
+        ts.isConditionalExpression(init) && n.initializer === init && !ts.isSourceFile(scope) &&
+        [init.whenTrue, init.whenFalse].every((a) => {
+          while (ts.isParenthesizedExpression(a)) a = a.expression;
+          return ts.isObjectLiteralExpression(a) || (ts.isArrayLiteralExpression(a) && a.elements.length === 0);
+        }) &&
+        [init.whenTrue, init.whenFalse].some((a) => {
+          while (ts.isParenthesizedExpression(a)) a = a.expression;
+          return ts.isObjectLiteralExpression(a);
+        }) &&
+        writesDynamicKey(scope, n.name.text) && !inTypedFn(n)
+      ) cast(init);
     }
     if (
       ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
