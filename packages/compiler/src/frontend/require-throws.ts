@@ -140,15 +140,16 @@ export function statementAlwaysThrowsOnRequire(ctx: RequireThrowCtx, stmt: ts.St
   }
   if (init === undefined) return false;
   const sf = stmt.getSourceFile();
-  if (fileDeclaresRequire(sf)) return false;
   // An ES module has no `require` binding: the callee read throws ReferenceError
   // before the call's arguments are evaluated, whatever the specifier is, and
-  // nothing loads. Every later top-level statement is dead.
-  if (ts.isCallExpression(init) && ts.isIdentifier(init.expression) && init.expression.text === "require" && isNodeEsmFile(sf)) {
-    return true;
-  }
+  // nothing loads. Every later top-level statement is dead. (Checked before the
+  // specifier test; fileDeclaresRequire is a whole-file walk, so it runs only
+  // for a statement whose initializer is a require call.)
+  const isRequireCall = ts.isCallExpression(init) && ts.isIdentifier(init.expression) && init.expression.text === "require";
+  if (isRequireCall && isNodeEsmFile(sf) && !fileDeclaresRequire(sf)) return true;
   const spec = requireSpecOf(init);
   if (spec === null || canonicalBuiltinModule(spec) !== null) return false;
+  if (fileDeclaresRequire(sf)) return false;
   if (!isRelativeSpecifier(spec) && probeNodeRequireRefusal(sf.fileName, spec) !== null) return true;
   if (relativeRequireRefusal(ctx, sf, spec) !== null) return true;
   const dep = ctx.depOf(sf, spec);
