@@ -23,6 +23,7 @@
  * anything else.
  */
 import {
+  CLASS_PROPS_FIELD,
   parseOwnShadowField,
   canConvertToDyn,
   canDynCheckTo,
@@ -111,6 +112,21 @@ export function dynEnumerationFenced(cls: DynMemberClass): boolean {
     if (RUNTIME_STREAM_CLASSES.has(c.def.name) || c.def.name === RUNTIME_EMITTER_CLASS) return true;
   }
   return false;
+}
+
+/** 1 when the chain reaches the runtime EventEmitter and no runtime stream class, 2 when it
+ * reaches a runtime stream class (their own-key prefix is far larger than the emitter's three
+ * keys), else 0. */
+export function dynRuntimeRoot(cls: DynMemberClass): number {
+  let emitter = false;
+  // An Error-rooted instance has its own walk (errorRooted), whatever its property table holds.
+  for (let c: DynMemberClass | null = cls; c !== null; c = c.base) if (RUNTIME_ERROR_CLASSES.has(c.def.name)) return 0;
+  for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
+    // A run-time property table holds keys no row names: the key list is not a fact of the class.
+    if (RUNTIME_STREAM_CLASSES.has(c.def.name) || c.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) return 2;
+    if (c.def.name === RUNTIME_EMITTER_CLASS) emitter = true;
+  }
+  return emitter ? 1 : 0;
 }
 
 export function dynMemberTable(
