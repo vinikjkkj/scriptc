@@ -7410,7 +7410,7 @@ export type IrExpr =
    * loudly, and scr_jsval_from_dyn unwraps the SAME engine value back
    * (identity round trip). The operand is borrowed; the result is owned
    * (+1). Never throws. */
-  | { kind: "dynFromJsval"; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynFromJsval"; value: IrExpr; type: IrType; loc: SrcLoc; fnBox?: true }
   /** CALLING a dyn value — `fn(a, b)` where fn is checked-dynamic (an
    * implicit-any JS binding, a dyn record member, a dynKeyGet result).
    * Arguments are ALREADY dyn-typed (typed values box through dynFrom at
@@ -10593,6 +10593,28 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     const conv = node as { kind?: unknown; type?: IrType; value?: { type?: IrType } };
     const src = conv.kind === "dynFrom" ? conv.value?.type : conv.kind === "dynCheck" ? conv.type : undefined;
     if (src !== undefined && typeReachesPromise(src, getRecord, getUnion, new Set())) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** The SCR_ENGINE link switch: a non-foldable Function-constructor site
+ * lowered to the engine (lower-engine-fn.ts), i.e. a jsOp globalGet of
+ * `Function`. Every other module keeps its static link line. */
+export function moduleUsesEngineFn(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; op?: unknown; name?: unknown };
+    if (node.kind === "jsOp" && node.op === "globalGet" && node.name === "Function") {
       found = true;
       return;
     }

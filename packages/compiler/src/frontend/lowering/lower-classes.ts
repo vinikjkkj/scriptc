@@ -7,6 +7,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
+import { engineFunctionCtor } from "./lower-engine-fn.js";
 import { implicitDefaultInstance, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
@@ -10723,6 +10724,12 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         if (expr.expression.text === "Proxy") {
           const px = lowerProxyNew(L, expr, loc);
           if (px !== null) return px;
+        }
+        if (expr.expression.text === "Function") {
+          // A non-foldable Function constructor runs on the embedded engine
+          // (lower-engine-fn.ts); foldable text never reaches here.
+          const ef = engineFunctionCtor(L, expr, loc);
+          if (ef !== null) return ef;
         }
         const ctorHints: Record<string, string | undefined> = {
           RegExp: "use a regex literal (/pattern/flags) — constructed regexes have no lowering",

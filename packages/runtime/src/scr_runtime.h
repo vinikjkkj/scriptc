@@ -7950,7 +7950,7 @@ long scr_promise_live_count(void);
  * stack-overflow check so calls from ucontext fibers are safe. Not
  * reentrant from engine callbacks.
  */
-#ifdef SCR_DYNAMIC
+#if defined(SCR_DYNAMIC) || defined(SCR_ENGINE)
 /* Evaluate UTF-8 source in the island's global scope; returns
  * String(result) as a +1 ScrStr. Borrows code. An island exception is
  * bridged into the exception cell as a catchable string ("TypeError:
@@ -8168,6 +8168,9 @@ ScrJsval *scr_jsval_from_dyn(const ScrDyn *d);
  * edge). Installs the checked-dynamic tree's engine-routing ops on first use. Borrows
  * the cell (retains it into the node); +1 out; never throws. */
 ScrDyn *scr_dyn_from_jsval(ScrJsval *cell);
+/* A Function-constructor result as a typed-callable dyn box (scr_island.c,
+ * isl_engine_fn_thunk). Borrows the cell; result +1; never throws. */
+ScrDyn *scr_jsval_fn_box(ScrJsval *cell);
 
 /* Engine operations. Arithmetic yields a fresh cell (NULL = bridged);
  * comparisons yield 0/1 (-1 = bridged); truthy/not never fail. */
@@ -8359,7 +8362,7 @@ ScrJsval *scr_jsval_import_dyn(const ScrStr *key);
  * cast, instead of refusing the build. Borrows both args; the exception
  * is pending on return. */
 void scr_jsval_cast_fail(ScrJsval *v, const ScrStr *target);
-#endif /* SCR_DYNAMIC */
+#endif /* SCR_DYNAMIC || SCR_ENGINE */
 
 /* ── numbers ────────────────────────────────────────────────────────────
  * JS-exact Number-to-string (ECMA-262 §6.1.6.1.20 Number::toString, radix

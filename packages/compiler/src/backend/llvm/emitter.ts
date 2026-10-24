@@ -10641,10 +10641,13 @@ class LlEmitter {
         // Island value → dyn: the by-reference wrap (scr_dyn_from_jsval
         // retains the cell in; engine scalars normalize to native dyn
         // kinds at wrap time). Operand borrowed, result +1, never throws.
+        // fnBox: a Function-constructor result, the typed-callable box
+        // (scr_jsval_fn_box; the C emitter's twin arm).
         const v = this.emitExpr(e.value);
-        this.declare(`declare ptr @scr_dyn_from_jsval(ptr)`);
+        const fnName = e.fnBox === true ? "scr_jsval_fn_box" : "scr_dyn_from_jsval";
+        this.declare(`declare ptr @${fnName}(ptr)`);
         const t = B.tmp();
-        B.line(`${t} = call ptr @scr_dyn_from_jsval(ptr ${v.name})`);
+        B.line(`${t} = call ptr @${fnName}(ptr ${v.name})`);
         return this.own({ name: t, type: e.type });
       }
       case "caughtToDyn": {

@@ -2663,7 +2663,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // retains the cell in; engine scalars normalize to native dyn
         // kinds at wrap time). Operand borrowed, result +1, never throws.
         const v = E.emitExpr(e.value);
-        return E.newTemp(e.type, `scr_dyn_from_jsval(${v.name})`);
+        // fnBox: an engine FUNCTION that a static function type reads (a
+        // Function-constructor result): the typed-callable SCR_DYN_FUNC box.
+        return E.newTemp(e.type, `${e.fnBox ? "scr_jsval_fn_box" : "scr_dyn_from_jsval"}(${v.name})`);
       }
       case "dynCall": {
         // Calling a dyn value: args are already dyn (the lowering boxed or

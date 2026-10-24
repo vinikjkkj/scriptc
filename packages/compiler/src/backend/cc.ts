@@ -222,6 +222,11 @@ export interface CcOptions {
    * defines SCR_DYNAMIC, and links the cached libqjs.a. Off = the static
    * default, byte-identical to builds predating the flag. */
   dynamic?: boolean;
+  /** Link the embedded engine WITHOUT the --dynamic lane (SCR_ENGINE): set
+   * by the frontend when a non-foldable Function-constructor site lowers to
+   * the engine (lower-engine-fn.ts). Only scr_island.c and its engine
+   * surface compile; every other unit keeps its static build. */
+  engine?: boolean;
   /** The program contains a regex construct (index.ts detects it on the
    * IR): compiles scr_regex.c and links the vendored libregexp — as cached
    * standalone objects in static builds, from the engine archive under
@@ -2297,7 +2302,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
    * further down) because every --dynamic build links scr_island.c and
    * such a build already carries the ~620KB engine — spending a
    * conservative 16KB there costs nothing anyone measures. */
-  const url = (opts.url ?? false) || http || (opts.searchParams ?? false) || wsGlobal || fetchOn || dynamic || fetchStatic;
+  const url = (opts.url ?? false) || http || (opts.searchParams ?? false) || wsGlobal || fetchOn || dynamic || (opts.engine ?? false) || fetchStatic;
   const driver = resolveCc();
   if (driver.target !== null) {
     // See the resolveCc block: these inputs are built on and for the HOST
@@ -2335,7 +2340,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
       );
     }
   }
-  const engineArchive = dynamic ? await ensureEngineArchive(opts.sanitize ?? false, driver) : null;
+  // SCR_ENGINE: a program with a non-foldable Function site links the same
+  // vendored engine without the --dynamic lane (see the options doc).
+  const engineOnly = !dynamic && (opts.engine ?? false);
+  const engineArchive = dynamic || engineOnly ? await ensureEngineArchive(opts.sanitize ?? false, driver) : null;
   /* The WebRTC path needs the SAME vendored mbedTLS archive (DTLS 1.2,
    * ECDSA P-256, SHA-256) but NOT scr_tls.c, which is the TLS-over-TCP
    * client; crypto.publicEncrypt's RSA-OAEP lowering (scr_rsa_pubenc.c)
@@ -2367,6 +2375,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // the historical single invocation, cached-.o substitution on cache misses.
   const buildArgs = (rt: (path: string) => string): string[] => [
     "-std=c11",
+    ...(engineOnly ? ["-DSCR_ENGINE"] : []),
     ...driver.targetArgs,
     ...optAuditArgs(opts.sanitize ?? false),
     "-fno-math-errno",
@@ -2609,7 +2618,16 @@ export async function compileC(opts: CcOptions): Promise<void> {
           ...(targetPlatform(driver) === "win32" ? ["-lbcrypt", "-lcrypt32"] : []),
         ]
       : []),
-    ...(engineArchive
+    ...(engineArchive && engineOnly
+      ? [
+          "-I", vendorEngineDir(),
+          rt(join(rtDir, "scr_island.c")),
+          engineArchive,
+          ...(driver.linkArgs.includes("-lm") ? [] : ["-lm"]),
+          ...gcSectionsLinkArgs(driver),
+        ]
+      : []),
+    ...(engineArchive && dynamic
       ? [
           "-DSCR_DYNAMIC",
           "-I", vendorEngineDir(),
@@ -2834,6 +2852,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-Wno-deprecated-declarations",
     ...includeArgs,
     ...(dynamic ? ["-DSCR_DYNAMIC"] : []),
+    ...(engineOnly ? ["-DSCR_ENGINE"] : []),
     // Off the REAL command line, like the -I above and for the same reason the
     // comment there gives: a restated copy drifts invisibly. rtInputs is what
     // buildArgs actually emitted, so if scr_coro.c is in this link the define
