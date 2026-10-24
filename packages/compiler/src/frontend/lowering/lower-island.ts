@@ -1466,6 +1466,16 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     const loc = locOf(expr);
     const builder = staticDynNsBuilderOf(L, dep, loc);
     if (builder === null) return null;
+    // A CommonJS module WITHOUT `export =` has no `default` key in its
+    // namespace snapshot (esmNsFieldsOf builds the names only): its
+    // module.exports object IS the snapshot's names, so the require value
+    // is the snapshot itself. Reading `.default` off it answered undefined,
+    // which made `const { f } = helpers` a TypeError and `typeof helpers`
+    // "undefined" (Node: "object").
+    const modSym = L.checker.getSymbolAtLocation(dep);
+    if (modSym?.getExports().get("export=" as ts.__String) === undefined) {
+      return { kind: "call", callee: builder, args: [], type: DYN, loc };
+    }
     return {
       kind: "dynKeyGet",
       key: { kind: "strLit", value: "default", type: STRING, loc },
