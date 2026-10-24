@@ -1326,15 +1326,15 @@ declare module "node:os" {
  * documented in SEMANTICS.md. */
 interface URL {
   protocol: string;
-  readonly pathname: string;
-  readonly href: string;
-  readonly host: string;
-  readonly hostname: string;
-  readonly search: string;
-  readonly hash: string;
-  readonly port: string;
-  readonly username: string;
-  readonly password: string;
+  pathname: string;
+  href: string;
+  host: string;
+  hostname: string;
+  search: string;
+  hash: string;
+  port: string;
+  username: string;
+  password: string;
   readonly searchParams: URLSearchParams;
   toString(): string;
 }

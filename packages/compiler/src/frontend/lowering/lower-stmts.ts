@@ -7364,6 +7364,25 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               };
             }
           }
+          // The other URL setters (pathname, search, hash, port, hostname,
+          // host, username, password, href): one runtime entry, the member
+          // picked by a number (scr_url_set_part).
+          {
+            const partNames = ["pathname", "search", "hash", "port", "hostname", "host", "username", "password", "href"];
+            const part = partNames.indexOf(expr.left.name.text);
+            if (!expr.left.questionDotToken && part >= 0 && L.mapTypeOf(L.typeOf(expr.left.expression))?.kind === "url") {
+              const loc = locOf(expr);
+              const recv = L.lowerExpr(expr.left.expression);
+              if (recv.type.kind === "url") {
+                const value = L.lowerExprExpecting(expr.right, STRING);
+                return {
+                  kind: "exprStmt",
+                  expr: { kind: "libCall", fn: "url.setPart", args: [recv, { kind: "numLit", value: part, type: F64, loc }, value], type: VOID, loc },
+                  loc,
+                };
+              }
+            }
+          }
           // `h.onDone = cb` on a CHECKED-DYNAMIC receiver (a JS `let h =
           // {}` evolving object, an implicit-any param, a dyn member
           // chain): the dyn keyed write — the value converts INTO dyn

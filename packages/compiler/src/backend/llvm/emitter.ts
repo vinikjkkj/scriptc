@@ -758,6 +758,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "url.username": "scr_url_username",
   "url.password": "scr_url_password",
   "url.setProtocol": "scr_url_set_protocol",
+  "url.setPart": "scr_url_set_part",
   "url.searchParams": "scr_url_search_params",
   "url.fileURLToPathUrl": "scr_url_to_path",
   "url.fileURLToPathStr": "scr_url_str_to_path",

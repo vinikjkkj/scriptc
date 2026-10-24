@@ -371,12 +371,25 @@ ScrSearchParams *scr_sp_with(ScrSearchParams *sp, ScrStr *name, ScrStr *value) {
   return scr_sp_retain(sp);
 }
 
+/* The url->view direction: the owner's query changed (`u.search = ...`,
+ * `u.href = ...`), so the live view's list is re-read from it. `query` is the
+ * stored "?..." text or "". */
+static void sp_resync_from_query(ScrSearchParams *sp, const char *query, size_t len) {
+  for (size_t i = 0; i < sp->len; i++) {
+    scr_str_release(sp->names[i]);
+    scr_str_release(sp->vals[i]);
+  }
+  sp->len = 0;
+  if (len > 1) sp_parse_into(sp, query + 1, len - 1);
+}
+
 ScrSearchParams *scr_url_search_params(ScrUrl *u) {
   if (u->sp_cache) return scr_sp_retain(u->sp_cache);
   ScrSearchParams *sp = sp_alloc();
   if (u->query->len > 1) sp_parse_into(sp, u->query->data + 1, u->query->len - 1);
   sp->owner = scr_url_retain(u);
   u->sp_cache = sp;
+  u->sp_resync = sp_resync_from_query;
   return sp;
 }
 

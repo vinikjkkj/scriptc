@@ -24,6 +24,11 @@ struct ScrUrl {
    * read answers the SAME view — Node's cached-object identity — and
    * view mutations write back into `query` (sp_sync_owner). */
   struct ScrSearchParams *sp_cache;
+  /* Set with sp_cache by the link-gated URLSearchParams unit: re-reads the
+   * live view's list from a new query string (the url->view direction of
+   * the write-back above — `u.search = ...`, `u.href = ...`). NULL while no
+   * view exists, so the always-linked url unit never names the gated one. */
+  void (*sp_resync)(struct ScrSearchParams *sp, const char *query, size_t len);
 };
 
 #endif /* SCR_URL_INTERNAL_H */

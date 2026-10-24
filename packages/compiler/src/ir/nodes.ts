@@ -3708,6 +3708,10 @@ export type IrLibFn =
   | "url.username"
   | "url.password"
   | "url.setProtocol"
+  /** The other WHATWG URL setters, `part` picking the member (a numeric
+   * literal): 0 pathname 1 search 2 hash 3 port 4 hostname 5 host 6 username
+   * 7 password 8 href (href throws the constructor's TypeError). */
+  | "url.setPart"
   | "sp.get"
   | "sp.getAll"
   | "sp.append"
@@ -12920,6 +12924,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.readdirSync",
   "fs.readdirTypesSync",
   "url.new",
+  "url.setPart",
   "url.newRel",
   "url.fileURLToPathUrl",
   "url.fileURLToPathStr",
