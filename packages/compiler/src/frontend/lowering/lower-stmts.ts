@@ -1108,6 +1108,32 @@ export function irAlwaysExits(s: IrStmt | readonly IrStmt[]): boolean {
 }
 
 export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | null {
+    const out = lowerStmtInner(L, stmt);
+    assertNoOrphanEffects(L, stmt);
+    return out;
+  }
+
+  /** INVARIANT (compiler bug, loud): a surplus-argument effect parked under a
+   * call node (L.surplusEffects) is taken by that node's consumer (lowerExpr,
+   * lowerExprStatement, the super() statement) before the statement that
+   * contains it finishes. An entry still parked here names an effect the
+   * program would silently lose, so it stops the build instead of dropping it.
+   * Only entries whose node lies inside this statement are checked: an
+   * enclosing call (whose callee or arguments contain this statement, e.g. a
+   * closure) legitimately keeps its entry until its own consumer runs. */
+  function assertNoOrphanEffects(L: Lowerer, stmt: ts.Statement): void {
+    if (L.surplusEffects.size === 0) return;
+    for (const node of L.surplusEffects.keys()) {
+      if (node.pos >= stmt.pos && node.end <= stmt.end) {
+        throw new Error(
+          `internal: surplus-argument effects parked under '${node.getText()}' were never consumed ` +
+          `(a lowering path took the call without its effect consumer; the effect would be dropped)`,
+        );
+      }
+    }
+  }
+
+  function lowerStmtInner(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | null {
     if (ts.isVariableStatement(stmt)) {
       // `declare const` — ambient: no storage, no init (collectGlobals
       // skipped it; reads throw Node's ReferenceError at the access).
