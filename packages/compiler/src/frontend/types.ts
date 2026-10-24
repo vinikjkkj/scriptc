@@ -4824,7 +4824,12 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // signature's own declaration; unmappable like spelled rest.
     {
       const sigDecl = checker.signatureDeclaration(sig);
-      const declParams = sigDecl !== undefined && ts.isFunctionLike(sigDecl) ? sigDecl.parameters : undefined;
+      // A declared `this: T` pseudo-parameter is in the declaration's list but
+      // never in the signature's own (it is the receiver annotation, not an
+      // argument), so it is not the count mismatch this detector looks for.
+      const declParams = sigDecl !== undefined && ts.isFunctionLike(sigDecl)
+        ? sigDecl.parameters.filter((dp) => !(ts.isIdentifier(dp.name) && dp.name.text === "this"))
+        : undefined;
       if (declParams !== undefined && declParams.length !== sig.getParameters().length) {
         return null;
       }
