@@ -5,13 +5,6 @@ statements.ts:6:19 - error SC1052: for-in over class instances (which keys exist
     |                   ^
   7 |   console.log(key);
 
-statements.ts:9:6 - error SC1090: multi-declaration for-loop initializers are not supported yet
-
-   8 | }
-   9 | for (let i = 0, j = n; i < j; i = i + 1) {
-     |      ^~~~~~~~~~~~~~~~
-  10 |   console.log(i);
-
 statements.ts:12:1 - error SC1090: debugger statements are not supported yet
 
   11 | }
