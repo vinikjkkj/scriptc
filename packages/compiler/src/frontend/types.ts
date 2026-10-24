@@ -1914,6 +1914,9 @@ function memoUsableUnder(entry: TypeMapperCtx, ctx: TypeMapperCtx): boolean {
 const redundNote = (globalThis as { __REDUND_NOTE__?: (op: string, key?: unknown) => void })
   .__REDUND_NOTE__;
 
+/** Unions whose dyn-array probe is on the stack (see the probe in mapTypeInner's union rule). */
+const dynArrayProbing = new Set<ts.Type>();
+
 export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (mapTypeDepth >= MAP_TYPE_MAX_DEPTH) return null;
   const slots = process.env.SCRIPTC_NO_MEMO ? undefined : mapTypeMemo.get(type);
@@ -5206,9 +5209,20 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           checker.declarationsOf(s).some((d) => d.getSourceFile().isDeclarationFile && !ctx.isStdlibFile(d.getSourceFile()))
         );
       });
-    if ((ctx.declMember === true || aliasInDts()) && !ctx.dynamic) {
-      for (const part of ts.constituentTypes(widened)) {
-        if (checker.isArrayType(part) && mapType(part, ctx)?.kind === "dyn") return DYN;
+    // The probe maps each ARRAY arm on its own, which for a RECURSIVE union
+    // (`type V = string | V[] | { [k: string]: V }`, mysql2's ExecuteValues)
+    // re-enters this very union before its in-progress guard below exists:
+    // the descent repeated until the depth cap, the array arm answered null,
+    // and every member naming the union left its shape. A union already being
+    // probed is not probed again; its recursion is the guard's to answer.
+    if ((ctx.declMember === true || aliasInDts()) && !ctx.dynamic && !dynArrayProbing.has(widened)) {
+      dynArrayProbing.add(widened);
+      try {
+        for (const part of ts.constituentTypes(widened)) {
+          if (checker.isArrayType(part) && mapType(part, ctx)?.kind === "dyn") return DYN;
+        }
+      } finally {
+        dynArrayProbing.delete(widened);
       }
     }
     const knownRecursive = unions.recursiveUnionFor(widened);
