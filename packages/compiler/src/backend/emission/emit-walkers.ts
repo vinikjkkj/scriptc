@@ -12,7 +12,7 @@ import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorCla
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
-import { dynClassDisplayName, dynMemberRows, dynMemberTable, dynStaticTable } from "../dyn-members.js";
+import { dynClassDisplayName, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -102,7 +102,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${meta.pre}, ${meta.post}, ${meta.hierarchy ? "true" : "false"}, ` +
         `&${rc.retain}, &${rc.release}, ` +
         `${members === null ? "NULL, 0" : `${members.sym}, ${members.count}`}, ` +
-        `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? "true" : "false"}, ${opaque ? "true" : "false"}, ${errorRooted ? "true" : "false"}, ` +
+        `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) || dynEnumerationFenced(meta) ? "true" : "false"}, ${opaque ? "true" : "false"}, ${errorRooted ? "true" : "false"}, ` +
         `${statics === null ? "NULL, 0" : `${statics.sym}, ${statics.count}`}, ${staticsOpaque ? "true" : "false"}, ` +
         `${meta.base === null ? "NULL" : cStringLiteral(Buffer.from(dynClassDisplayName(meta.base.def), "utf8"))} }; ` +
         `/* dyn box: class ${className} */`,
