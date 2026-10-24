@@ -2624,8 +2624,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // the value lives in the engine, a real JS array carrying its true
     // length (reads, destructuring, JSON, .length all exact); static
     // builds stay unmapped and badType tells the dynamic-tier story.
+    // A static build spells the variable-length value as the checked-dynamic
+    // slot: its positional types are checked by the checker at each use and
+    // read back through the dyn checks, the way every other value the static
+    // tier cannot lay out (`unknown[]`) is read. Refusing it instead left
+    // ioredis's `cluster` callback (`[start, end, ...nodes]`) unmappable.
     if (tupleShape.elementFlags.some((f) => !(f & ts.ElementFlags.Required))) {
-      return ctx.dynamic ? JSVAL : null;
+      mapTrace(`TUPLEVAR ${checker.typeToString(widened).slice(0, 70)} -> variable-length tuple is dyn`);
+      return ctx.dynamic ? JSVAL : DYN;
     }
     // A UNIFORM readonly tuple — every position the SAME mapped element
     // type, the `as const` const-table idiom (SINGLE_BYTE_TOKENS, the
@@ -4852,6 +4858,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // callers pack the surplus arguments (restPackArity). A rest bound
         // to a TUPLE has no single element type and keeps the fence.
         let restT = mapType(checker.getTypeOfSymbol(p), ctx);
+        // A rest bound to a VARIABLE-LENGTH tuple takes mapType's variable-length
+        // tuple rule: the checked-dynamic pack, the slot `(...args: unknown[])` takes.
         // A `...args: any[]` rest slot of a callable the uncompiled .d.ts
         // spells (`listener: (...args: any[]) => void`, EventEmitter's and
         // mysql2's own listener type): the same library-author `any` the
