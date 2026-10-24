@@ -12695,6 +12695,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8900-function-constructor-over-literal-text.js": {
+   "order": [
+    "<repo>/tests/corpus/8900-function-constructor-over-literal-text.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8901-function-constructor-over-text-assembled-from-known-fragments.js": {
+   "order": [
+    "<repo>/tests/corpus/8901-function-constructor-over-text-assembled-from-known-fragments.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8902-function-constructor-text-carries-run-time-strings-as-literals.js": {
+   "order": [
+    "<repo>/tests/corpus/8902-function-constructor-text-carries-run-time-strings-as-literals.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8903-function-constructor-text-carries-run-time-values-as-literals.js": {
+   "order": [
+    "<repo>/tests/corpus/8903-function-constructor-text-carries-run-time-values-as-literals.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8904-function-constructor-parser-built-per-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/8904-function-constructor-parser-built-per-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8905-function-constructor-reader-chosen-by-flags-and-named-by-data.js": {
+   "order": [
+    "<repo>/tests/corpus/8905-function-constructor-reader-chosen-by-flags-and-named-by-data.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
