@@ -13333,6 +13333,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9452-cjs-newlistener-one-param.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9452-cjs-newlistener-one-param.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
