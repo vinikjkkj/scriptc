@@ -12695,6 +12695,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js": {
+   "order": [
+    "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8841-util-types-kind-tests.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8841-util-types-kind-tests.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js": {
+   "order": [
+    "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts": {
+   "order": [
+    "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8846-url-setters.js": {
+   "order": [
+    "<repo>/tests/corpus/8846-url-setters.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8847-url-origin-and-tojson.js": {
+   "order": [
+    "<repo>/tests/corpus/8847-url-origin-and-tojson.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8900-function-constructor-over-literal-text.js": {
    "order": [
     "<repo>/tests/corpus/8900-function-constructor-over-literal-text.js"
@@ -12728,6 +12776,48 @@
   "<repo>/tests/corpus/8905-function-constructor-reader-chosen-by-flags-and-named-by-data.js": {
    "order": [
     "<repo>/tests/corpus/8905-function-constructor-reader-chosen-by-flags-and-named-by-data.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8920-join-loop-built-string-array-under-dynamic.js": {
+   "order": [
+    "<repo>/tests/corpus/8920-join-loop-built-string-array-under-dynamic.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8921-engine-function-text-built-in-a-loop.js": {
+   "order": [
+    "<repo>/tests/corpus/8921-engine-function-text-built-in-a-loop.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8922-engine-function-calls-host-callback.js": {
+   "order": [
+    "<repo>/tests/corpus/8922-engine-function-calls-host-callback.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8923-engine-function-plain-values-round-trip.js": {
+   "order": [
+    "<repo>/tests/corpus/8923-engine-function-plain-values-round-trip.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8924-engine-function-error-surfaces-natively.js": {
+   "order": [
+    "<repo>/tests/corpus/8924-engine-function-error-surfaces-natively.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8925-js-function-typed-value-called-with-one-argument.js": {
+   "order": [
+    "<repo>/tests/corpus/8925-js-function-typed-value-called-with-one-argument.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8960-for-multi-declarator-head.js": {
+   "order": [
+    "<repo>/tests/corpus/8960-for-multi-declarator-head.js"
    ],
    "diags": []
   },
@@ -15222,61 +15312,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  }
-,
-  "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js": {
-   "order": [
-    "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8841-util-types-kind-tests.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8841-util-types-kind-tests.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js": {
-   "order": [
-    "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts": {
-   "order": [
-    "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts": {
-   "order": [
-    "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js": {
-   "order": [
-    "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8846-url-setters.js": {
-   "order": [
-    "<repo>/tests/corpus/8846-url-setters.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8847-url-origin-and-tojson.js": {
-   "order": [
-    "<repo>/tests/corpus/8847-url-origin-and-tojson.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8960-for-multi-declarator-head.js": {
-   "order": [
-    "<repo>/tests/corpus/8960-for-multi-declarator-head.js"
-   ],
-   "diags": []
   }
  }
 }
