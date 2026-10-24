@@ -46,7 +46,11 @@ beforeAll(async () => {
     join(testDir, "../src/scr_bytes.c"),
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE", "-lm"] : []),
   ]);
-}, 60_000);
+// 300 s, not 60: the beforeAll compiles ~20 C files with ASan on a shared
+// runner. Measured from 238 healthy CI runs of this file (judge9 logs,
+// 2026-10-21..24): median 11.8 s, max 59.7 s, so 60 s was the edge of work
+// that legitimately completes. The hook is still a hang detector.
+}, 300_000);
 
 test("regex runtime: matching, substitutions, split, throws, RC accounting", async () => {
   const { stderr } = await execFileAsync(bin, []);
