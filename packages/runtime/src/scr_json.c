@@ -7750,11 +7750,16 @@ void scr_dyn_check_fail(const ScrDynPath *path, const char *want, const ScrDyn *
 
 #define SCR_JSON_MAX_DEPTH 1000
 
+struct ScrJsonSrc;
 typedef struct {
   const char *s;
   size_t len;
   size_t pos;
   int depth;
+  /* Optional source recorder (JSON.parse with a reviver, whose third
+   * argument carries the source text of every primitive). NULL on the
+   * ordinary path. */
+  struct ScrJsonSrc *rec;
 } ScrJsonP;
 
 static void scr_json_throw(const char *msg) {
@@ -8188,7 +8193,21 @@ static ScrDyn *scr_json_object(ScrJsonP *p) {
   }
 }
 
+static ScrDyn *scr_json_value_inner(ScrJsonP *p);
+static void scr_json_src_add(struct ScrJsonSrc *rec, const ScrDyn *node, size_t start, size_t len);
+
 static ScrDyn *scr_json_value(ScrJsonP *p) {
+  if (p->rec == NULL) return scr_json_value_inner(p);
+  scr_json_ws(p);
+  const size_t start = p->pos;
+  ScrDyn *d = scr_json_value_inner(p);
+  if (d != NULL && d->kind != SCR_DYN_OBJ && d->kind != SCR_DYN_ARR) {
+    scr_json_src_add(p->rec, d, start, p->pos - start);
+  }
+  return d;
+}
+
+static ScrDyn *scr_json_value_inner(ScrJsonP *p) {
   scr_json_ws(p);
   if (p->pos >= p->len) {
     scr_json_throw("Unexpected end of JSON input");
@@ -8265,6 +8284,199 @@ ScrDyn *scr_json_parse(ScrStr *text) {
     return NULL;
   }
   return d;
+}
+
+/* ── JSON.parse with a reviver ────────────────────────────────────────
+ * ECMA-262 JSON.parse step 7 (InternalizeJSONProperty) plus the
+ * source-text-access proposal V8 ships (Node >= 22): the reviver is called
+ * (this = holder) with (key, value, context) bottom-up, and for a PRIMITIVE
+ * that is still the value the parse produced, context.source is the exact
+ * source text of the token ({} for arrays, objects and changed values). A
+ * reviver result of undefined deletes the member; an array element has no
+ * hole representation in the checked-dynamic tree (the project's
+ * holes-are-undefined stance), so it becomes undefined. */
+typedef struct ScrJsonSrcEnt {
+  const ScrDyn *node;
+  size_t start, len;
+} ScrJsonSrcEnt;
+typedef struct ScrJsonSrc {
+  ScrJsonSrcEnt *ents;
+  size_t n, cap;
+  size_t *table; /* open addressing over ents indices + 1 (0 = empty) */
+  size_t tcap;
+} ScrJsonSrc;
+
+static void scr_json_src_add(ScrJsonSrc *rec, const ScrDyn *node, size_t start, size_t len) {
+  if (rec->n == rec->cap) {
+    rec->cap = rec->cap ? rec->cap * 2 : 64;
+    rec->ents = (ScrJsonSrcEnt *)realloc(rec->ents, rec->cap * sizeof *rec->ents);
+    if (rec->ents == NULL) abort();
+  }
+  rec->ents[rec->n].node = node;
+  rec->ents[rec->n].start = start;
+  rec->ents[rec->n].len = len;
+  rec->n++;
+}
+
+static size_t scr_json_src_hash(const ScrDyn *node, size_t mask) {
+  return (size_t)(((uintptr_t)node >> 4) * 11400714819323198485ull >> 20) & mask;
+}
+
+static void scr_json_src_index(ScrJsonSrc *rec) {
+  size_t cap = 16;
+  while (cap < rec->n * 2) cap <<= 1;
+  rec->table = (size_t *)calloc(cap, sizeof *rec->table);
+  if (rec->table == NULL) abort();
+  rec->tcap = cap;
+  for (size_t i = 0; i < rec->n; i++) {
+    size_t h = scr_json_src_hash(rec->ents[i].node, cap - 1);
+    while (rec->table[h] != 0) h = (h + 1) & (cap - 1);
+    rec->table[h] = i + 1;
+  }
+}
+
+static const ScrJsonSrcEnt *scr_json_src_find(const ScrJsonSrc *rec, const ScrDyn *node) {
+  if (rec->tcap == 0) return NULL;
+  size_t h = scr_json_src_hash(node, rec->tcap - 1);
+  while (rec->table[h] != 0) {
+    const ScrJsonSrcEnt *e = &rec->ents[rec->table[h] - 1];
+    if (e->node == node) return e;
+    h = (h + 1) & (rec->tcap - 1);
+  }
+  return NULL;
+}
+
+typedef struct {
+  ScrDyn *reviver;
+  const ScrJsonSrc *src;
+  const char *text;
+} ScrJsonRevive;
+
+/* InternalizeJSONProperty(holder, name): +1 result or NULL with the
+ * exception pending. `name` is borrowed. */
+static ScrDyn *scr_json_internalize(ScrJsonRevive *rv, ScrDyn *holder, ScrStr *name) {
+  if (SCR_STACK_LOW()) {
+    scr_stack_exhausted();
+    return NULL;
+  }
+  ScrDyn *val;
+  if (holder->kind == SCR_DYN_ARR) {
+    val = scr_dyn_arr_at(holder, strtod(name->data, NULL));
+  } else {
+    ScrDyn *m = scr_dyn_obj_get(holder, name->data, name->len);
+    val = scr_dyn_retain(m != NULL ? m : scr_dyn_undefined());
+  }
+  ScrDyn *ctx = scr_dyn_new_obj();
+  if (val->kind == SCR_DYN_ARR) {
+    const double n = scr_dyn_arr_len(val);
+    for (double i = 0; i < n; i++) {
+      char buf[32];
+      int bl = snprintf(buf, sizeof buf, "%.0f", i);
+      ScrStr *k = scr_str_new(buf, (size_t)bl);
+      ScrDyn *ne = scr_json_internalize(rv, val, k);
+      if (ne == NULL) {
+        scr_str_release(k);
+        scr_dyn_release(ctx);
+        scr_dyn_release(val);
+        return NULL;
+      }
+      scr_dyn_key_set(val, k, ne);
+      scr_str_release(k);
+      scr_dyn_release(ne);
+      if (scr_exc_pending()) {
+        scr_dyn_release(ctx);
+        scr_dyn_release(val);
+        return NULL;
+      }
+    }
+  } else if (val->kind == SCR_DYN_OBJ) {
+    ScrDyn *keys = scr_dyn_obj_keys(val);
+    const double n = scr_dyn_arr_len(keys);
+    for (double i = 0; i < n; i++) {
+      ScrDyn *kd = scr_dyn_arr_at(keys, i);
+      ScrStr *k = kd->v.str;
+      ScrDyn *ne = scr_json_internalize(rv, val, k);
+      if (ne == NULL) {
+        scr_dyn_release(kd);
+        scr_dyn_release(keys);
+        scr_dyn_release(ctx);
+        scr_dyn_release(val);
+        return NULL;
+      }
+      if (ne->kind == SCR_DYN_UNDEF) scr_dyn_key_delete(val, k);
+      else scr_dyn_key_set(val, k, ne);
+      scr_dyn_release(ne);
+      scr_dyn_release(kd);
+      if (scr_exc_pending()) {
+        scr_dyn_release(keys);
+        scr_dyn_release(ctx);
+        scr_dyn_release(val);
+        return NULL;
+      }
+    }
+    scr_dyn_release(keys);
+  } else {
+    const ScrJsonSrcEnt *e = scr_json_src_find(rv->src, val);
+    if (e != NULL) {
+      ScrStr *srcs = scr_str_new(rv->text + e->start, e->len);
+      ScrDyn *sd = scr_dyn_new_str(srcs);
+      scr_str_release(srcs);
+      scr_dyn_obj_set(ctx, "source", 6, sd);
+    }
+  }
+  ScrDyn *args[3];
+  args[0] = scr_dyn_new_str(name);
+  args[1] = val;
+  args[2] = ctx;
+  scr_dyn_this_push_dyn(holder);
+  ScrDyn *r = scr_dyn_call(rv->reviver, args, 3, "JSON.parse reviver");
+  scr_dyn_this_pop();
+  scr_dyn_release(args[0]);
+  scr_dyn_release(val);
+  scr_dyn_release(ctx);
+  return r;
+}
+
+/* JSON.parse(text, reviver). A reviver that is not a function is ignored
+ * (the spec's IsCallable gate). Borrows both; +1 or NULL with the
+ * exception pending (the parse's own SyntaxError, or the reviver's throw). */
+ScrDyn *scr_json_parse_revive(ScrStr *text, ScrDyn *reviver) {
+  if (reviver == NULL || reviver->kind != SCR_DYN_FUNC) return scr_json_parse(text);
+  ScrJsonSrc rec = {0};
+  ScrJsonP p = { text->data, text->len, 0, 0, &rec };
+  scr_json_ws(&p);
+  ScrDyn *root = NULL;
+  if (p.pos >= p.len) {
+    scr_json_throw("Unexpected end of JSON input");
+  } else {
+    root = scr_json_value(&p);
+    if (root != NULL) {
+      scr_json_ws(&p);
+      if (p.pos < p.len) {
+        scr_dyn_release(root);
+        root = NULL;
+        char buf[96];
+        int n = snprintf(buf, sizeof buf,
+                         "Unexpected non-whitespace character after JSON at position %zu", p.pos);
+        scr_throw_error_msg(SCR_ERR_SYNTAX, buf, (size_t)n);
+      }
+    }
+  }
+  if (root == NULL) {
+    free(rec.ents);
+    return NULL;
+  }
+  scr_json_src_index(&rec);
+  ScrDyn *holder = scr_dyn_new_obj();
+  scr_dyn_obj_set(holder, "", 0, root);
+  ScrStr *empty = scr_str_new("", 0);
+  ScrJsonRevive rv = { reviver, &rec, text->data };
+  ScrDyn *out = scr_json_internalize(&rv, holder, empty);
+  scr_str_release(empty);
+  scr_dyn_release(holder);
+  free(rec.ents);
+  free(rec.table);
+  return out;
 }
 
 /* Untyped RC adapters (box/promise/exception-cell currency). */

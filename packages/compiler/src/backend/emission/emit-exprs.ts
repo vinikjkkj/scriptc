@@ -3476,6 +3476,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // and the typed dummy is a NULL promise the pending check
             // abandons (releases are NULL-tolerant).
             return finish(`(scr_jsval_cast_fail(${arg(0)}, ${arg(1)}), NULL)`);
+          case "json.parseRevive":
+            // Borrowed text and reviver; +1 result, or a pending throw.
+            return finish(`scr_json_parse_revive(${arg(0)}, ${arg(1)})`);
           case "json.parse":
             // Borrows the text; returns +1 on a fresh dyn, or throws a
             // catchable SyntaxError-shaped string (may-throw seed set).

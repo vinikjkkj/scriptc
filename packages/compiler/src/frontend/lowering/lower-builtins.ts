@@ -4434,6 +4434,16 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     const member = L.stdlibGlobalMember(access, "JSON");
     if (member === null) return null;
     const loc = locOf(call);
+    if (member === "parse" && call.arguments.length === 2 && !call.arguments.some((a) => ts.isSpreadElement(a))) {
+      // JSON.parse(text, reviver): the walk runs in the runtime
+      // (scr_json_parse_revive), calling the reviver with (key, value,
+      // context) and this = holder. The reviver crosses as a dyn function.
+      const text = L.lowerExprExpecting(call.arguments[0]!, STRING);
+      const reviver = L.lowerExprExpecting(call.arguments[1]!, DYN);
+      if (reviver.type.kind === "dyn") {
+        return { kind: "libCall", fn: "json.parseRevive", args: [text, reviver], type: DYN, loc };
+      }
+    }
     if (member === "parse" && call.arguments.length !== 1) {
       L.noLowering(
         "JSON.parse with a reviver",
