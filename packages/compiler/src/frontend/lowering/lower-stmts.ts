@@ -6568,7 +6568,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         fenceMutable(prop.initializer);
         continue;
       }
-      if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
+      if (ts.isPropertyAssignment(prop) && (ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name))) {
         // A resolved-target table's expression entries were EVALUATED by
         // the const's own declaration; assigning here would re-run them.
         if (resolvedTarget) {
@@ -6578,7 +6578,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
             "expression-valued entries in an exported-const table (module.exports = table — bind the value to its own const and export the name)",
           );
         }
-        body.push(assignExport(prop.name, prop.initializer));
+        body.push(assignExport(prop.name, prop.initializer, prop.name.text));
         continue;
       }
       // NUMERIC-keyed scalar entries (`0x01: 'TINY'`, mysql2's type and
