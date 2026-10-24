@@ -7571,7 +7571,16 @@ interface RecordShapeParts {
   fields: { name: string; type: IrType }[];
   indexValue?: IrType;
   declaredOrder?: string[];
+  /** Members whose mapping moved the context-sensitivity counters and were
+   * kept (see mapRecordTypeInner's counter restore). A recursive record
+   * refused for that reason names them. */
+  sensitiveMembers?: readonly string[];
 }
+/** Per record type: the members that made its recursive frame context-
+ * sensitive, recorded when the frame refuses to intern (the knot branch in
+ * mapRecordType). describeRecordMemberBlocker reads it: that refusal is
+ * otherwise silent. */
+const knotSensitiveMembers = new WeakMap<ts.Type, readonly string[]>();
 
 function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const { shapes } = ctx;
@@ -7611,6 +7620,10 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // (generic type parameters, mixin instantiations) cannot intern by
       // checker-type identity — fence recursive generic-open shapes.
       if (contextResolutions !== sensitivityAtEntry) {
+        if (inner.sensitiveMembers !== undefined) {
+          knotSensitiveMembers.set(widened, inner.sensitiveMembers);
+          mapTrace(`KNOT ${ctx.checker.typeToString(widened).slice(0, 60)} -> context-sensitive through ${inner.sensitiveMembers.join(", ")}`);
+        }
         // The frame refuses to cache by ts.Type identity, but `inner.fields`
         // are its REAL, fully-mapped fields and a back-reference already took
         // the placeholder. Fill it before refusing — the union frame does
@@ -8413,6 +8426,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       return DYN;
     }
     const fields: { name: string; type: IrType }[] = [];
+    const sensitiveMembers: string[] = [];
     const bodylessOwner = isBodylessDeclClassInstance(widened, checker, ctx);
     // An OPTIONS-BAG interface the standard library declares (node:stream's
     // WritableOptions: `write?: ((this: T, chunk: any, ...) => void) | undefined`).
@@ -8421,20 +8435,6 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     // member carries (ctx.declMember): the checked-dynamic slot. Members
     // declared in the standard library's interfaces only; the program's own
     // interfaces keep their refusal.
-    const libBagMember = (p: ts.Symbol): boolean => {
-      if (ctx.dynamic) return false;
-      const ds = checker.declarationsOf(p);
-      return ds.length > 0 && ds.every(
-        (d) =>
-          (ts.isPropertySignature(d) || d.kind === ts.SyntaxKind.MethodSignature) &&
-          ts.isInterfaceDeclaration(d.parent) &&
-          d.getSourceFile().isDeclarationFile &&
-          (ctx.isStdlibFile?.(d.getSourceFile()) ?? false),
-      );
-    };
-    const hasCallablePart = (t: ts.Type): boolean =>
-      checker.getCallSignatures(t).length > 0 ||
-      (t.isUnionType() && ts.constituentTypes(t).some((c) => checker.getCallSignatures(c).length > 0));
     for (const p of props) {
       // ...or a DATA property that some literal in this program satisfies
       // with a getter. One layout has to serve both producers, so the slot
@@ -8647,19 +8647,26 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
                 if (r !== null) outerResolverHit = true;
                 return r;
               };
+        // An ADMITTED overload set is tagged the same way as a generic member:
+        // its generic overloads bind their own type parameters at the
+        // constraint (resolveTypeParam), and that binding is not the enclosing
+        // frame's context (see the counter restore below).
+        const tagOuterCtx = (c: TypeMapperCtx): TypeMapperCtx => ({
+          ...c,
+          ...(ctx.resolveTypeParam !== undefined ? { resolveTypeParam: tagOuter(ctx.resolveTypeParam)! } : {}),
+          ...(ctx.resolveTypeParamTs !== undefined ? { resolveTypeParamTs: tagOuter(ctx.resolveTypeParamTs)! } : {}),
+          ...(ctx.resolveTypeParamTsArms !== undefined ? { resolveTypeParamTsArms: tagOuter(ctx.resolveTypeParamTsArms)! } : {}),
+        });
         const tryCtx: TypeMapperCtx = generic
           ? {
-              ...ctx,
+              ...tagOuterCtx(ctx),
               speculative: true,
               ...(bodylessOwner ? { declMember: true } : {}),
-              ...(ctx.resolveTypeParam !== undefined ? { resolveTypeParam: tagOuter(ctx.resolveTypeParam)! } : {}),
-              ...(ctx.resolveTypeParamTs !== undefined ? { resolveTypeParamTs: tagOuter(ctx.resolveTypeParamTs)! } : {}),
-              ...(ctx.resolveTypeParamTsArms !== undefined ? { resolveTypeParamTsArms: tagOuter(ctx.resolveTypeParamTsArms)! } : {}),
             }
-          : ctx.declMember !== true && libBagMember(p) && hasCallablePart(fieldTs)
+          : ctx.declMember !== true && libBagMember(p, ctx) && hasCallablePart(fieldTs, checker)
             ? { ...ctx, declMember: true }
-            : ctx.declMember !== true && admittedOverloadSet
-              ? { ...ctx, declMember: true }
+            : admittedOverloadSet
+              ? { ...tagOuterCtx(ctx), declMember: true }
               : ctx;
         pt = mapType(fieldTs, tryCtx);
         // A field DECLARED in a `.d.ts` whose IMPLEMENTATION twin this build
@@ -8718,10 +8725,11 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // subclass) finalized its placeholder and then refused. A failed attempt
       // already restores them; a kept one restores them too, but only when no
       // OUTER resolver answered, so nothing but the closed erasure moved them.
-      if (generic && pt !== null && !outerResolverHit) {
+      if ((generic || admittedOverloadSet) && pt !== null && !outerResolverHit) {
         contextResolutions = ctxResAtTry;
         memoSensitivity = memoSensAtTry;
       }
+      if (contextResolutions !== ctxResAtTry) sensitiveMembers.push(p.name);
       // tsgo PANICS computing `readonly []` through the symbol-type query
       // (the TupleType conversion — the facade's panic fence answers
       // `any`), which would absorb the whole shape into the dynamic tier.
@@ -8833,7 +8841,12 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     // (OrdinaryOwnPropertyKeys) — Object.keys/JSON/inspect all read it.
     const declaredOrder = esOwnKeyOrder(fields.filter((f) => accessorSlotProp(f.name) === null).map((f) => f.name));
     fields.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    return { fields, ...(indexValue ? { indexValue } : {}), declaredOrder };
+    return {
+      fields,
+      ...(indexValue ? { indexValue } : {}),
+      declaredOrder,
+      ...(sensitiveMembers.length > 0 ? { sensitiveMembers } : {}),
+    };
   }
 }
 
@@ -9143,6 +9156,26 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
   return null;
 }
 
+/** A library-interface member (`Readonly<Date>`-style bag, see
+ * mapRecordTypeInner): a property or method signature declared in the
+ * standard library's interfaces. Shared by the record walk and its blocker
+ * description so the two agree on which members are declMember closures. */
+function libBagMember(p: ts.Symbol, ctx: TypeMapperCtx): boolean {
+  if (ctx.dynamic) return false;
+  const ds = ctx.checker.declarationsOf(p);
+  return ds.length > 0 && ds.every(
+    (d) =>
+      (ts.isPropertySignature(d) || d.kind === ts.SyntaxKind.MethodSignature) &&
+      ts.isInterfaceDeclaration(d.parent) &&
+      d.getSourceFile().isDeclarationFile &&
+      (ctx.isStdlibFile?.(d.getSourceFile()) ?? false),
+  );
+}
+function hasCallablePart(t: ts.Type, checker: ts.TypeChecker): boolean {
+  return checker.getCallSignatures(t).length > 0 ||
+    (t.isUnionType() && ts.constituentTypes(t).some((c) => checker.getCallSignatures(c).length > 0));
+}
+
 /** The record-member arm of the component fence: a USER record shape
  * blocked by ONE member's type. Runs AFTER badType's stdlib/npm/index-
  * signature routing, so what reaches it is a plain data shape; a null
@@ -9173,8 +9206,21 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     // WALLB_OVERLOAD_DECLINE_MARKER: mirror mapRecordTypeInner's admission
     // (same two predicates) so the blocker DESCRIPTION agrees with what
     // the shape builder actually does.
-    if (isGenericCallableMemberType(fieldTs, checker)) continue;
-    let pt = mapType(fieldTs, ctx);
+    // Map the member the way mapRecordTypeInner's member walk maps it: a
+    // library-bag callable or an admitted overload set is a declMember there
+    // (its own signature is the closure, see tryCtx). Mapping it with the
+    // bare context refuses every ordinary method, so the first method of the
+    // interface was named as the blocker whatever the real one was.
+    const descAdmittedOverloadSet = isOverloadSetMember(fieldTs, checker) && !hasStdlibSignature(fieldTs, checker, ctx);
+    const descCtx: TypeMapperCtx =
+      ctx.declMember !== true && ((libBagMember(p, ctx) && hasCallablePart(fieldTs, checker)) || descAdmittedOverloadSet)
+        ? { ...ctx, declMember: true }
+        : ctx;
+    // A GENERIC callable member leaves the shape speculatively (its mapping
+    // is never the blocker), UNLESS it is an admitted overload set: that is
+    // one merged closure the walk maps and can refuse (ioredis's vsim).
+    if (isGenericCallableMemberType(fieldTs, checker) && !descAdmittedOverloadSet) continue;
+    let pt = mapType(fieldTs, descCtx);
     if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
     // PROBE(anymember): mirror mapRecordTypeInner's bare-`any` member
     // carve-out (same file, see its own comment, including why it is
@@ -9196,6 +9242,13 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     if (!pt || pt.kind === "void") {
       return `the record shape is supported, but its member '${p.name}' has type '${checker.typeToString(fieldTs)}', which does not compile`;
     }
+  }
+  // No member refuses on its own: the record refers back to itself through a
+  // member whose mapping depends on the enclosing context (mapRecordType's
+  // knot branch). That refusal printed nothing before; name the member.
+  const knot = knotSensitiveMembers.get(widened);
+  if (knot !== undefined && knot.length > 0) {
+    return `the record shape is supported, but its member '${knot[0]}' depends on a type parameter of the context it is used in and refers back to the record, so the recursive shape cannot be interned`;
   }
   return null;
 }
