@@ -12641,6 +12641,60 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8820-class-instance-writes-through-untyped-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/8820-class-instance-writes-through-untyped-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8821-class-instance-absent-key-reads-through-untyped-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/8821-class-instance-absent-key-reads-through-untyped-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8822-class-fields-take-any-value-written-through-untyped-code.js": {
+   "order": [
+    "<repo>/tests/corpus/8822-class-fields-take-any-value-written-through-untyped-code.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8823-delete-of-a-field-through-untyped-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/8823-delete-of-a-field-through-untyped-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8824-error-subclass-members-through-untyped-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/8824-error-subclass-members-through-untyped-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8825-constructor-of-an-instance-through-untyped-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/8825-constructor-of-an-instance-through-untyped-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8826-class-values-passed-to-untyped-code.js": {
+   "order": [
+    "<repo>/tests/corpus/8826-class-values-passed-to-untyped-code.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8827-error-message-from-an-untyped-value.js": {
+   "order": [
+    "<repo>/tests/corpus/8827-error-message-from-an-untyped-value.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8828-error-cause-is-non-enumerable.js": {
+   "order": [
+    "<repo>/tests/corpus/8828-error-cause-is-non-enumerable.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
