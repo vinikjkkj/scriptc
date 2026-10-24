@@ -9464,6 +9464,9 @@ void scr_big_release_v(void *b);
 /* The RUNTIME-arity twin for console.log(...args): space-joins the
  * checked-dynamic rest array through scr_insp_dyn_s at depth 2. */
 ScrStr *scr_insp_dyn_spread(ScrDyn *arr);
+/* util.format over a RUNTIME argument list (scr_inspect.c): Node's formatWithOptionsInternal
+ * over the checked-dynamic array. Borrows arr; +1, or NULL with a pending exception. */
+ScrStr *scr_insp_format(ScrDyn *arr);
 #ifdef SCR_DYNAMIC
 /* Island `any` (scr_inspect_island.c — linked when a --dynamic build's
  * IR carries insp.* libCalls): the scalar kinds render exactly (typeof

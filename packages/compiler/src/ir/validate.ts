@@ -1453,6 +1453,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "big.asIntN": { argTypes: [F64, BIGINT_T], result: BIGINT_T },
   "big.asUintN": { argTypes: [F64, BIGINT_T], result: BIGINT_T },
   "insp.dynSpread": { argTypes: [DYN], result: STRING },
+  "insp.format": { argTypes: [DYN], result: STRING },
   "insp.jsval": { argTypes: [JSVAL, F64, F64], result: STRING },
   "insp.begin": { argTypes: [F64], result: VOID },
   "insp.entry": { argTypes: [STRING, BOOL], result: VOID },

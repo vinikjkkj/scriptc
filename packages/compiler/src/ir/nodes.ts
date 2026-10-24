@@ -6021,6 +6021,7 @@ export type IrLibFn =
   | "big.asIntN"
   | "big.asUintN"
   | "insp.dynSpread"
+  | "insp.format"
   | "insp.jsval"
   | "insp.begin"
   | "insp.entry"
@@ -12910,6 +12911,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "insp.dyn",
   "insp.dynS",
   "insp.dynSpread",
+  // util.format over a RUNTIME argument list: a %o over a dyn array/function and a
+  // user toString under %s/%d/%i/%f leave a pending exception.
+  "insp.format",
   "dyn.defineProps",
   "dyn.defineProp",
   "cls.propsDefine",

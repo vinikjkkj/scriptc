@@ -30,7 +30,7 @@ import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemb
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
-import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
+import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
 import { declSymbolOf } from "./lower-modules.js";
@@ -643,7 +643,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
    * the walk's three kinds enough: the statically-iterable ones drain
    * into an array there, and a source that would box unwalkable refuses
    * by name rather than reaching a box the walk cannot step. */
-  function dynRestPack(L: Lowerer, sources: readonly (ts.Expression | { ir: IrExpr })[],
+  export function dynRestPack(L: Lowerer, sources: readonly (ts.Expression | { ir: IrExpr })[],
     blame: ts.Node, loc: SrcLoc,): IrExpr {
     const isIr = (s: ts.Expression | { ir: IrExpr }): s is { ir: IrExpr } => !("kind" in s);
     // WHICH TypeError text a non-iterable source throws depends on the
@@ -5615,6 +5615,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // fence's advice — "spell the call directly" — is a spelling this
         // one already knows.
         lowerStringFromCharCodeApply(L, expr, expr.expression) ??
+        // `util.format.apply(util, arguments)` -- generate-function's `line`: the
+        // argument list is a RUNTIME fact, which the runtime formatter answers.
+        lowerUtilFormatApply(L, expr, expr.expression) ??
         L.lowerNumberStaticCall(expr, expr.expression) ??
         L.lowerDateCall(expr, expr.expression) ??
         L.lowerTextCodecCall(expr, expr.expression) ??
@@ -8414,9 +8417,6 @@ const inliningPredicates = new Set<ts.Symbol>();
     return found;
   }
 
-/** Is `arguments` WRITTEN THROUGH in this function's own body — `arguments =
-   * v`, `arguments[i] = v`, `arguments.k = v`, `++arguments[i]`, `delete
-   * arguments[i]`? Only writes matter: in SLOPPY mode a simple-parameter
 /** Is every use of `arguments` in this function's own body a plain READ of
    * `arguments.length`? Nested plain functions and methods have their own
    * `arguments` (skipped); arrows share the enclosing one (descended). */
@@ -8458,6 +8458,9 @@ const inliningPredicates = new Set<ts.Symbol>();
     return only;
   }
 
+/** Is `arguments` WRITTEN THROUGH in this function's own body — `arguments =
+   * v`, `arguments[i] = v`, `arguments.k = v`, `++arguments[i]`, `delete
+   * arguments[i]`? Only writes matter: in SLOPPY mode a simple-parameter
    * function's `arguments` slots are ALIASED to the parameter bindings, so a
    * write on either side is visible on the other, and the arguments-bound
    * parameter form (argumentsRebindsParams) copies rather than aliases. */
@@ -8579,15 +8582,15 @@ const inliningPredicates = new Set<ts.Symbol>();
       if ((t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0) return false;
     }
     if (inStrictCode(fn)) return true;
-    if (argumentsWrittenInBody(fn)) return false;
-    for (const p of fn.parameters) {
-      const sym = L.checker.getSymbolAtLocation(p.name);
     // `arguments.length` is the one reading the sloppy aliasing cannot reach: a
     // write to a parameter moves the slot's VALUE, never the call's arity. A
     // body whose only use of `arguments` is that read (generate-function's
     // `property(obj, name)`: `if (arguments.length === 1) { name = obj; ... }`)
     // therefore sees the same answer from the copy and from the alias.
     if (argumentsOnlyLengthReads(fn)) return true;
+    if (argumentsWrittenInBody(fn)) return false;
+    for (const p of fn.parameters) {
+      const sym = L.checker.getSymbolAtLocation(p.name);
       if (!sym) return false;
       if (paramWrittenInBody(L, fn.body, sym, (p.name as ts.Identifier).text)) return false;
     }
