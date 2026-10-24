@@ -13065,7 +13065,7 @@ export class Lowerer {
       // checker's CONTEXTUAL type (a declaration file's recursive value
       // union, mysql2's ExecuteValues) would build the elements at a wider
       // union and meet the exact-shape fence one line later.
-      if (ts.isArrayLiteralExpression(x) && x.elements.length > 0 && !x.elements.some(ts.isSpreadElement)) {
+      if (ts.isArrayLiteralExpression(x) && x.elements.length > 0) {
         const own = this.mapTypeOf(this.checker.getContextualType(x) ?? this.typeOf(x));
         if (own === null || !typeEquals(own, expected)) {
           return this.coerceInto(node, this.lowerArrayLiteral(x, expected), expected);
