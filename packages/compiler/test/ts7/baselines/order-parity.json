@@ -13020,62 +13020,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/9350-cjs-exports-write-in-function.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9350-cjs-exports-write-in-function.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9351-cjs-exports-else-chain.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9351-cjs-exports-else-chain.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9352-static-expando-own-property.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9352-static-expando-own-property.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9353-static-expando-own-property-require.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9353-static-expando-own-property-modules/packet.cjs",
-    "<repo>/tests/corpus/9353-static-expando-own-property-require.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9354-cjs-exports-hoisted-writer.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9354-cjs-exports-hoisted-writer.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9355-record-identity-through-dyn.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9355-record-identity-through-dyn.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9356-record-identity-dyn-return.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9356-record-identity-dyn-return.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9357-record-identity-expando-memo.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9357-record-identity-expando-memo.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9358-resolved-table-exports.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9358-resolved-table-exports-modules/table.cjs",
-    "<repo>/tests/corpus/9358-resolved-table-exports.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/901-records-eval-order.ts": {
    "order": [
     "<repo>/tests/corpus/901-records-eval-order.ts"
@@ -13227,6 +13171,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9060-map-union-key-string-number/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9060-map-union-key-string-number/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9061-map-union-key-buffer-identity/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9061-map-union-key-buffer-identity/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9062-set-union-key-zero-nan/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9062-set-union-key-zero-nan/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9063-map-union-key-entries-spread/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9063-map-union-key-entries-spread/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9064-map-union-key-hot-lookup/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9064-map-union-key-hot-lookup/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/907-records-utility-generics.ts": {
    "order": [
     "<repo>/tests/corpus/907-records-utility-generics.ts"
@@ -13278,6 +13252,18 @@
   "<repo>/tests/corpus/915-unknown-tostring-eq.ts": {
    "order": [
     "<repo>/tests/corpus/915-unknown-tostring-eq.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9150-generic-overload-recursive-record/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9150-generic-overload-recursive-record/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9151-array-from-map/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9151-array-from-map/main.ts"
    ],
    "diags": []
   },
@@ -13377,6 +13363,62 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9350-cjs-exports-write-in-function.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9350-cjs-exports-write-in-function.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9351-cjs-exports-else-chain.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9351-cjs-exports-else-chain.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9352-static-expando-own-property.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9352-static-expando-own-property.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9353-static-expando-own-property-require.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9353-static-expando-own-property-modules/packet.cjs",
+    "<repo>/tests/corpus/9353-static-expando-own-property-require.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9354-cjs-exports-hoisted-writer.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9354-cjs-exports-hoisted-writer.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9355-record-identity-through-dyn.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9355-record-identity-through-dyn.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9356-record-identity-dyn-return.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9356-record-identity-dyn-return.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9357-record-identity-expando-memo.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9357-record-identity-expando-memo.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9358-resolved-table-exports.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9358-resolved-table-exports-modules/table.cjs",
+    "<repo>/tests/corpus/9358-resolved-table-exports.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/9400-timeout-record-in-map.ts": {
    "order": [
     "<repo>/tests/corpus/9400-timeout-record-in-map.ts"
@@ -13416,6 +13458,18 @@
   "<repo>/tests/corpus/9406-timeout-record-in-map.mjs": {
    "order": [
     "<repo>/tests/corpus/9406-timeout-record-in-map.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9450-cjs-nullable-builtin-selector.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9450-cjs-nullable-builtin-selector.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9451-cjs-nullable-builtin-path.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9451-cjs-nullable-builtin-path.cjs"
    ],
    "diags": []
   },
@@ -13507,6 +13561,12 @@
   "<repo>/tests/corpus/965-unions-retag.ts": {
    "order": [
     "<repo>/tests/corpus/965-unions-retag.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9650-record-identity-distinct-through-dyn.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9650-record-identity-distinct-through-dyn.cjs"
    ],
    "diags": []
   },
@@ -15797,60 +15857,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/9060-map-union-key-string-number/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/9060-map-union-key-string-number/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9061-map-union-key-buffer-identity/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/9061-map-union-key-buffer-identity/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9062-set-union-key-zero-nan/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/9062-set-union-key-zero-nan/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9063-map-union-key-entries-spread/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/9063-map-union-key-entries-spread/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9064-map-union-key-hot-lookup/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/9064-map-union-key-hot-lookup/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9150-generic-overload-recursive-record/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/9150-generic-overload-recursive-record/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9151-array-from-map/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/9151-array-from-map/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9357-record-identity-expando-memo.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9357-record-identity-expando-memo.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9650-record-identity-distinct-through-dyn.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9650-record-identity-distinct-through-dyn.cjs"
-   ],
-   "diags": []
   }
  }
 }
