@@ -2136,11 +2136,72 @@ function argumentsPackEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+const MODULE_TABLE_PREFILTER = /module\.exports\s*=\s*\{/;
+
+/* MODULE TABLE METHODS. A top-level `module.exports = { m() {...} }` entry
+ * spelled as a method (`m() {}`, `async m() {}`, `'q-name'() {}`) is the same
+ * export as `m: function () {...}`: the method's body and parameters are those
+ * of a function expression. The lowering models the `name: value`
+ * table entry and refuses the method spelling (SC1090), so the spelling is
+ * rewritten here, in place, with no newline moved. Generator methods, methods
+ * whose body names `this` or `super`, and computed names keep their refusal.
+ * Known difference, kept visible: a method is not constructible in Node and
+ * has no `prototype`; the function expression is. Purely syntactic. */
+function moduleTableMethodEdits(fileName: string, text: string): string | null {
+  if (!MODULE_TABLE_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  // `this` and `super` in the body keep the refusal: a function stored in a
+  // module table is called without its receiver (`t.m()` reads `this` as
+  // undefined), so the rewrite would trade a loud refusal for a silent one.
+  const hasSuper = (n: ts.Node): boolean => {
+    let found = false;
+    const walk = (x: ts.Node): void => {
+      if (found) return;
+      if (x.kind === ts.SyntaxKind.SuperKeyword || x.kind === ts.SyntaxKind.ThisKeyword) { found = true; return; }
+      ts.forEachChild(x, walk);
+    };
+    walk(n);
+    return found;
+  };
+  for (const stmt of sf.statements) {
+    if (!ts.isExpressionStatement(stmt)) continue;
+    const bin = stmt.expression;
+    if (!ts.isBinaryExpression(bin) || bin.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+    const lhs = bin.left;
+    if (!ts.isPropertyAccessExpression(lhs) || !ts.isIdentifier(lhs.expression) || lhs.expression.text !== "module" ||
+        lhs.name.text !== "exports") continue;
+    let rhs: ts.Expression = bin.right;
+    while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+    if (!ts.isObjectLiteralExpression(rhs)) continue;
+    for (const p of rhs.properties) {
+      if (!ts.isMethodDeclaration(p) || p.asteriskToken !== undefined) continue;
+      if (!(ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) || p.body === undefined) continue;
+      if (hasSuper(p.body)) continue;
+      const nameText = p.name.getText(sf);
+      const asyncPrefix = p.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ? "async " : "";
+      edits.push({ start: p.getStart(sf), end: p.name.getEnd(), text: `${nameText}: ${asyncPrefix}function` });
+    }
+  }
+  if (edits.length === 0) return null;
+  let out = "";
+  let at = 0;
+  for (const e of edits) {
+    out += text.slice(at, e.start) + e.text;
+    at = e.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
     const unwrapped = umdUnwrap(fileName, text);
     if (unwrapped !== null) return jsDesugar(fileName, unwrapped) ?? unwrapped;
+  }
+  {
+    const tableMethods = moduleTableMethodEdits(fileName, text);
+    if (tableMethods !== null) return jsDesugar(fileName, tableMethods) ?? tableMethods;
   }
   {
     const staged = functionCtorEdits(fileName, text);
