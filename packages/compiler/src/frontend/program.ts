@@ -56,6 +56,7 @@ import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackag
 import { isProvenanceSourceFile, isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { provenanceAliasRewrite, readSourceForRewrite } from "./provenance-rewrite.js";
 import { setServedSourceText } from "../source-text.js";
+import { jsDesugar } from "./js-desugar.js";
 import { applySeedPins, computeSeedPins, type SeedPin } from "./seed-pin.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
@@ -410,7 +411,13 @@ export function loadProgram(
         // served, because the offsets were taken from that text.
         const filePins = pins?.get(path.split("\\").join("/"));
         if (filePins !== undefined) {
-          const base = served ?? readSourceForRewrite(path);
+          // The offsets were taken from the text the CHECKER saw, which is the
+          // shadows' text AFTER js-desugar (the host desugars what this hook
+          // returns). Pin on that same text: desugar here, wrap the seeds,
+          // and let the host's own desugar find nothing left to do (it is
+          // idempotent on its output).
+          const raw = served ?? readSourceForRewrite(path);
+          const base = raw === undefined ? undefined : (jsDesugar(path, raw) ?? raw);
           const pinned = base === undefined ? null : applySeedPins(base, filePins);
           if (pinned === null) {
             throw new Error(`seed pin: the text of ${path} changed between the two loads`);

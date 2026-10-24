@@ -136,6 +136,21 @@ test("a plain-object keyed WeakMap is not pinned", () => {
   expect(pinsOf(`const k = {};\nconst w = new WeakMap([[k, 1]]);\nconsole.log(w.get(k));\n`)).toEqual({ before: 0, after: 0 });
 });
 
+/* ---- COMPOSES WITH js-desugar -------------------------------------------- */
+
+test("a pinned site after a tsc helper (`(this && this.__h) || function`) is wrapped on the DESUGARED text", () => {
+  // js-desugar rewrites the helper declaration, so the text the checker saw
+  // (where the pin offsets come from) differs from the disk text. The second
+  // load must pin that same text. Without the composition it threw
+  // "seed pin: the text of ... changed between the two loads".
+  const got = pinsOf(
+    `var __pick = (this && this.__pick) || function (m, k) { return k.map(function (x) { return m.get(x); }); };\n` +
+      `function run(keys) { return __pick(new Map([["a", 1], ["b", 2]]), keys).join("&"); }\n` +
+      `console.log(run(["a", "b"]));\n`,
+  );
+  expect(got).toEqual({ before: 1, after: 0 });
+});
+
 /* ---- THE RE-SERVE -------------------------------------------------------- */
 
 test("applySeedPins wraps exactly the seed, adds no line, and refuses a moved offset", () => {
