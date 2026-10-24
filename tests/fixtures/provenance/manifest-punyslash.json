@@ -1,0 +1,14 @@
+{
+  "packages": {
+    "tr46lite": {
+      "dir": "./attested-src/tr46lite",
+      "commit": "0000000000000000000000000000000000000000",
+      "repo": "https://github.com/example/tr46lite"
+    },
+    "punycode": {
+      "dir": "./node_modules/punycode",
+      "commit": "0000000000000000000000000000000000000000",
+      "repo": "https://github.com/mathiasbynens/punycode.js"
+    }
+  }
+}
