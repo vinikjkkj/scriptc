@@ -1646,6 +1646,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     E.dynBuilders.set(memoKey, name);
     const sig = `${E.link}ScrDyn *${name}(ScrDyn *d, ScrStr *k, bool opt)`;
     E.walkerProtos.push(`${sig}; /* d[k] on dyn */`);
+    // The view read is the cold side of every array read: say so where the call is compiled (the header's prototype stays attribute-free for the ABI scan).
+    E.walkerProtos.push(`#if defined(__GNUC__) || defined(__clang__)\n__attribute__((cold)) ScrDyn *scr_dyn_view_key_get(ScrDyn *d, ScrStr *k);\n#endif`);
     const d: string[] = [`${sig} { /* d[k] on dyn */`];
     d.push(`  if (d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_NULL) {`);
     d.push(`    if (opt) return scr_dyn_retain(scr_dyn_undefined());`);
