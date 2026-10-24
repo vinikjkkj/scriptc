@@ -5863,6 +5863,9 @@ void *scr_dyn_origin_take(const ScrDyn *d, const char *tkey);
 void scr_dyn_view_sync(ScrDyn *d);
 void scr_dyn_view_sync_force(ScrDyn *d);
 void scr_dyn_view_sync_deep(ScrDyn *d);
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((cold))
+#endif
 ScrDyn *scr_dyn_view_key_get(ScrDyn *d, ScrStr *k);
 bool scr_dyn_view_key_set(ScrDyn *d, ScrStr *key, ScrDyn *value);
 bool scr_dyn_view_live(ScrDyn *d);
@@ -5870,6 +5873,11 @@ bool scr_dyn_view_live(ScrDyn *d);
  * conversion, spread and iteration) bring a live view up to date first, so
  * a kept copy of an array the static side has since changed reads as the
  * array. One byte test for every other dyn. */
+#if defined(__GNUC__) || defined(__clang__)
+#define SCR_VIEW_COLD(x) __builtin_expect(!!(x), 0)
+#else
+#define SCR_VIEW_COLD(x) (x)
+#endif
 #define SCR_VIEW_FRESH(d)                                                      \
   do {                                                                         \
     if ((d)->static_copy && (d)->kind == SCR_DYN_ARR) scr_dyn_view_sync_deep((ScrDyn *)(d)); \

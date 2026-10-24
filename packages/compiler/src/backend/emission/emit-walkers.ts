@@ -1663,13 +1663,6 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    return NULL;`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_PROXY) return scr_dyn_proxy_get(d, k); /* the get trap, or the target's answer */`);
-    d.push(`  if (d->static_copy && d->kind == SCR_DYN_ARR) {`);
-    d.push(`    /* A LIVE ARRAY VIEW (a boundary copy of a static number[] / boolean[] /`);
-    d.push(`     * string[]): an index or \`length\` read answers from the origin, so a`);
-    d.push(`     * mutation either side made is seen. The LLVM lane emits the same arm. */`);
-    d.push(`    ScrDyn *vr = scr_dyn_view_key_get(d, k);`);
-    d.push(`    if (vr != NULL) return vr;`);
-    d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_OBJ) {`);
     d.push(`    /* JS's [[Get]], whole, in ONE runtime entry point: own`);
     d.push(`     * member, own ACCESSOR (its getter called with \`this\` = d),`);
@@ -1856,6 +1849,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    if (m) return m;`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_STR) {`);
+    d.push(`    if (d->kind == SCR_DYN_ARR && SCR_VIEW_COLD(d->static_copy)) {`);
+    d.push(`      /* A LIVE ARRAY VIEW (a boundary copy of a static number[] / boolean[] /`);
+    d.push(`       * string[]): an index or \`length\` read answers from the origin, so a`);
+    d.push(`       * mutation either side made is seen. Tested HERE, inside the array arm,`);
+    d.push(`       * so no other kind of receiver pays for it. The LLVM lane emits the same arm. */`);
+    d.push(`      ScrDyn *vr = scr_dyn_view_key_get(d, k);`);
+    d.push(`      if (vr != NULL) return vr;`);
+    d.push(`    }`);
     d.push(`    if (k->len == 6 && memcmp(k->data, "length", 6) == 0) {`);
     d.push(`      return scr_dyn_new_num(d->kind == SCR_DYN_ARR ? (double)d->v.arr.len : scr_str_utf16_len(d->v.str));`);
     d.push(`    }`);
