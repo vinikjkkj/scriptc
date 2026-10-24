@@ -6083,6 +6083,17 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         : ts.isIdentifier(expr.expression)
           ? expr.expression.text
           : "value";
+      // `x[k](args)` over a dynamic receiver is a METHOD call: `this` is x (a
+      // method read off a class instance is the class's own unbound function, so
+      // the receiver has to ride the call). A plain-read receiver re-lowers
+      // without effects.
+      if (
+        ts.isElementAccessExpression(expr.expression) && expr.expression.questionDotToken === undefined &&
+        (expr.expression.expression.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(expr.expression.expression))
+      ) {
+        const recv = L.lowerExpr(expr.expression.expression);
+        if (recv.type.kind === "dyn") return dynCallWithThis(L, recv, callee, args, calleeName, loc);
+      }
       return { kind: "dynCall", callee, calleeName, args, type: DYN, loc };
     }
     if (callee.type.kind !== "func") {
