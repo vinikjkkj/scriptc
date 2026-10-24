@@ -16660,7 +16660,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // names: `a && b` is `a` when a is falsy and `b` otherwise, `a || b`
       // is `a` when a is truthy and `b` otherwise.
       {
-        const decided = staticTruth(left);
+        // A variable read of a JS OBJECT kind (a record, class instance,
+        // array, function...) is always truthy and has no effect, so the
+        // operator is decided too: `holder && holder.stack` is the right
+        // operand. Without this the left was coerced into the checker's
+        // result union (`string | undefined`, the arms the truthy left
+        // cannot produce) and the strand trap fired on the way to the
+        // answer (mysql2's applyCapturedStack, every call).
+        const decided = left.kind === "varRef" && REF_TRUTHY_KINDS.has(left.type.kind) ? true : staticTruth(left);
         if (decided !== null) {
           const isAnd = op === ts.SyntaxKind.AmpersandAmpersandToken;
           return decided === isAnd ? L.lowerExpr(expr.right) : left;
