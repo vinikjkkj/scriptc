@@ -154,6 +154,22 @@ describe("jsDesugar", () => {
     expect(run("function f() {\n  let h;\n  h = new A();\n  h++;\n  return () => h.v;\n}\n")).toBeNull();
   });
 
+  test("the arguments pack read through five array methods of a literal or Array.prototype", () => {
+    const src = "function f() {\n  return [].slice.call(arguments, 1).concat(Array.prototype.indexOf.call(\n    arguments, 2));\n}\n";
+    const out = run(src)!;
+    expect(out).toContain("[...arguments].slice(1)");
+    expect(out).toContain("[...arguments].indexOf(");
+    expect(out).not.toContain(".call(");
+    expect(out.split("\n").length).toBe(src.split("\n").length);
+    expect(run("function f() { return [].join.call(arguments); }\n")).toContain("[...arguments].join()");
+    // another receiver, another method, a callback method, and a shadowed Array.prototype
+    // are not the shape
+    expect(run("function f(a) { return [].slice.call(a); }\n")).toBeNull();
+    expect(run("function f() { return [].map.call(arguments, g); }\n")).toBeNull();
+    expect(run("function f() { return [1].slice.call(arguments); }\n")).toBeNull();
+    expect(run("function f() { return o.slice.call(arguments); }\n")).toBeNull();
+  });
+
   test("the folded Node version is the runtime's compatibility target", () => {
     const lib = readFileSync(join(import.meta.dirname, "../../runtime/src/scr_lib.c"), "utf8");
     const m = /#define SCR_NODE_COMPAT_VERSION "([^"]+)"/.exec(lib);

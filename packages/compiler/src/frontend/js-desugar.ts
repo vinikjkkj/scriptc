@@ -2073,6 +2073,69 @@ function deferredNewLetEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* THE ARGUMENTS PACK READ THROUGH AN ARRAY METHOD. `[].slice.call(arguments)` and
+ * `Array.prototype.slice.call(arguments, 1)` are the ES5 spelling of "the arguments as an
+ * array": the method of an empty array literal (or of Array.prototype) applied to the
+ * arguments object. The lowered receiver of `.call` is the BOUND literal, so the call used to
+ * slice the empty array and answer []. Over the identifier `arguments` the answer is that of
+ * the spread `[...arguments]`, which is a fresh array of the same elements (the arguments
+ * object is never written through these five methods, none of which takes a callback that could
+ * observe the copy), so
+ *
+ *     [].slice.call(arguments, 1)   ->   [...arguments].slice(1)
+ *
+ * Only `slice`, `indexOf`, `lastIndexOf`, `join` and `includes` over the bare identifier
+ * `arguments` are rewritten; every other `.call` on an array method keeps its spelling (and its
+ * own diagnostic in the lowering). Line breaks inside the rewritten span are kept. */
+const ARGS_PACK_PREFILTER = /\.\s*(?:slice|indexOf|lastIndexOf|join|includes)\s*\.\s*call\s*\(\s*arguments\b/;
+const ARGS_PACK_METHODS: ReadonlySet<string> = new Set(["slice", "indexOf", "lastIndexOf", "join", "includes"]);
+
+function argumentsPackEdits(fileName: string, text: string): string | null {
+  if (!ARGS_PACK_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const visit = (n: ts.Node): void => {
+    if (
+      ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "call" &&
+      n.questionDotToken === undefined && n.arguments.length >= 1 && ts.isIdentifier(n.arguments[0]!) &&
+      (n.arguments[0] as ts.Identifier).text === "arguments" && !n.arguments.some((a) => ts.isSpreadElement(a))
+    ) {
+      const method = n.expression.expression;
+      if (ts.isPropertyAccessExpression(method) && ARGS_PACK_METHODS.has(method.name.text) && method.questionDotToken === undefined) {
+        const holder = method.expression;
+        const isEmptyLiteral = ts.isArrayLiteralExpression(holder) && holder.elements.length === 0;
+        const isArrayProto =
+          ts.isPropertyAccessExpression(holder) && holder.name.text === "prototype" && ts.isIdentifier(holder.expression) &&
+          holder.expression.text === "Array";
+        if (isEmptyLiteral || isArrayProto) {
+          const first = n.arguments[0]!;
+          const spanStart = holder.getStart(sf);
+          const removed = text.slice(spanStart, first.getEnd());
+          const newlines = (removed.match(/\n/g) ?? []).length;
+          edits.push({ start: spanStart, end: first.getEnd(), text: `[...arguments].${method.name.text}(` + "\n".repeat(newlines) });
+          if (n.arguments.length > 1) {
+            const second = n.arguments[1]!;
+            const gap = text.slice(first.getEnd(), second.getStart(sf));
+            edits.push({ start: first.getEnd(), end: second.getStart(sf), text: "\n".repeat((gap.match(/\n/g) ?? []).length) });
+          }
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    if (ed.start < at) continue;
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -2090,6 +2153,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const open = openRecordEdits(fileName, text);
     if (open !== null) return jsDesugar(fileName, open) ?? open;
+  }
+  {
+    const argsPack = argumentsPackEdits(fileName, text);
+    if (argsPack !== null) return jsDesugar(fileName, argsPack) ?? argsPack;
   }
   {
     const deferredNew = deferredNewLetEdits(fileName, text);
