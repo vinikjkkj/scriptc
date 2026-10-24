@@ -12878,6 +12878,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8990-require-in-a-type-module-js-throws-at-the-declaration.js": {
+   "order": [
+    "<repo>/tests/corpus/8990-require-in-a-type-module-js-throws-at-the-declaration.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
