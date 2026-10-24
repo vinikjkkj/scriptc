@@ -10369,7 +10369,9 @@ export function moduleUsesAssert(mod: IrModule): boolean {
  * its emitted main installs it. A program with no class never reaches any of
  * it, so the always-linked scr_json.c carries none of that code. */
 export function moduleUsesDynClass(mod: IrModule): boolean {
-  return (mod.classes ?? []).some((c) => !c.name.startsWith("%") && canBoxClassIntoDyn(c.name));
+  return (mod.classes ?? []).some(
+    (c) => c.name !== RUNTIME_EMITTER_CLASS && !RUNTIME_STREAM_CLASSES.has(c.name) && canBoxClassIntoDyn(c.name),
+  );
 }
 
 export function moduleUsesDynInvoke(mod: IrModule): boolean {
