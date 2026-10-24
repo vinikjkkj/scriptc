@@ -565,6 +565,29 @@ void scr_undef_global_read(ScrStr *name) {
   scr_throw_error_named(scr_str_new("ReferenceError", 14), m);
 }
 
+/* An ES module's `require` read. Node's UNCAUGHT report decorates the message
+ * (" in ES module scope, you can use import instead" plus the package note);
+ * a caught read does not. The decoration rides with the thrown object: it is
+ * registered by pointer (the object is retained, so no other error can take
+ * its address) and printed only when that very object escapes uncaught. */
+static void *scr_report_obj = NULL;
+static ScrStr *scr_report_suffix = NULL;
+
+void scr_undef_global_read_esm(ScrStr *name, ScrStr *suffix) {
+  scr_undef_global_read(name);
+  void *e = scr_exc_pending_payload();
+  if (e == NULL) return;
+  if (scr_report_obj != NULL) scr_error_release_v(scr_report_obj);
+  scr_report_obj = scr_error_retain_v(e);
+  if (scr_report_suffix != NULL) scr_str_release(scr_report_suffix);
+  scr_report_suffix = scr_str_new(suffix->data, suffix->len);
+}
+
+ScrStr *scr_error_report_suffix(const void *payload) {
+  if (scr_report_obj == NULL || payload != scr_report_obj) return NULL;
+  return scr_report_suffix->len == 0 ? NULL : scr_report_suffix;
+}
+
 /* ── DOMException ─────────────────────────────────────────────────────
  * The web-standard error shape (a Node global since v17): the ScrError
  * prefix plus the WebIDL slots (legacy numeric code, the options form's

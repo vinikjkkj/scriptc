@@ -15579,6 +15579,19 @@ class LlEmitter {
       this.emitPendingCheck();
       return r;
     }
+    if (e.fn === "global.esmRequireThrow") {
+      // An ES module's require read (see global.undefRead): the same throw,
+      // carrying the decoration the uncaught report appends.
+      const name = this.emitExpr(e.args[0]!);
+      const note = this.emitExpr(e.args[1]!);
+      this.declare(`declare void @scr_undef_global_read_esm(ptr, ptr)`);
+      B.line(`call void @scr_undef_global_read_esm(ptr ${name.name}, ptr ${note.name})`);
+      const ty = this.llType(e.type);
+      const dummy = ty === "double" ? f64Lit(0) : ty === "i1" ? "false" : "null";
+      const out = this.own({ name: dummy, type: e.type });
+      this.emitPendingCheck();
+      return out;
+    }
     if (e.fn === "global.undefRead") {
       // A declare-d const nothing defines: Node's catchable
       // ReferenceError at the access (always throws — the typed dummy is

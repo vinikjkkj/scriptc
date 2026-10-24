@@ -41,6 +41,7 @@ import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf } from "./lowerer.js";
 import type { FileParts } from "./lower-modules.js";
 import { isCjsJsFile, isNodeEsmFile, locOf, resolveImport } from "../program.js";
+import { nearestPackageTypeOf, nearestPkgJsonPath } from "../resolve.js";
 import { F64, IrExpr, IrStmt, IrType, STRING } from "../../ir/nodes.js";
 
 /** True when this module declaration produces NO runtime construct at all:
@@ -980,6 +981,19 @@ export function ambientUndefinedClassSymbolOf(L: Lowerer, ident: ts.Identifier):
  * site (it always throws; the typed dummy is abandoned by the unwind). */
 export function nsUndefRead(L: Lowerer, rootName: string, node: ts.Node, type: IrType): IrExpr {
   const loc = locOf(node);
+  const esm = rootName === "require" ? esmRequireReportSuffix(node) : null;
+  if (esm !== null) {
+    return {
+      kind: "libCall",
+      fn: "global.esmRequireThrow",
+      args: [
+        { kind: "strLit", value: rootName, type: STRING, loc },
+        { kind: "strLit", value: esm, type: STRING, loc },
+      ],
+      type,
+      loc,
+    };
+  }
   return {
     kind: "libCall",
     fn: "global.undefRead",
@@ -987,6 +1001,23 @@ export function nsUndefRead(L: Lowerer, rootName: string, node: ts.Node, type: I
     type,
     loc,
   };
+}
+
+/** The decoration Node's UNCAUGHT report adds to an ES module's `require`
+ * ReferenceError (` in ES module scope, you can use import instead`, then the
+ * note naming the package.json that made the file an ES module), or null.
+ * Node adds it only when the throw escapes module evaluation, and a throw at a
+ * module's own top level always does when it is not caught. So the decoration
+ * is given to top-level sites of a `.js` under "type": "module" (the one form
+ * whose note is known here); a require inside a function keeps the plain
+ * message (Node decorates it only when the call escapes synchronously). */
+function esmRequireReportSuffix(node: ts.Node): string | null {
+  if (!initExecutingPosition(node)) return null;
+  const file = node.getSourceFile().fileName;
+  if (!file.endsWith(".js") || nearestPackageTypeOf(file) !== "module") return null;
+  const pkg = nearestPkgJsonPath(file);
+  if (pkg === null) return null;
+  return ` in ES module scope, you can use import instead\nThis file is being treated as an ES module because it has a '.js' file extension and '${pkg}' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.`;
 }
 
 /** True when `node` executes during module INIT (top-level statement

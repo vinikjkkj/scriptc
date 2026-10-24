@@ -1183,6 +1183,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // Always throws; the result is the READ's declared type (a typed dummy
   // the unwind abandons) — the libCall case skips the result check.
   "global.undefRead": { argTypes: [STRING], result: VOID },
+  "global.esmRequireThrow": { argTypes: [STRING, STRING], result: VOID },
   // `X.name` through a class value: the arg is a program-dependent
   // classval (a null slot; the libCall case checks the kind).
   "class.name": { argTypes: [null], result: STRING },
@@ -5081,7 +5082,7 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "global.undefRead") {
+        if (e.fn === "global.undefRead" || e.fn === "global.esmRequireThrow") {
           // Always throws — the result type is whatever the declared type
           // of the undefined global mapped to (never materialized).
           break;
