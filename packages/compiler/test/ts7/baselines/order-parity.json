@@ -15277,6 +15277,84 @@
     "<repo>/tests/corpus/8960-for-multi-declarator-head.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/9030-overloads-same-return/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9030-overloads-same-return/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9031-overloads-different-return/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9031-overloads-different-return/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9032-overloads-optional-tail/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9032-overloads-optional-tail/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9033-overloads-value-taken/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9033-overloads-value-taken/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9034-overloads-inline-interface/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9034-overloads-inline-interface/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9035-overloads-value-typed-call/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9035-overloads-value-typed-call/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9036-rest-tuple-member/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9036-rest-tuple-member/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9037-rest-tuple-function-value/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9037-rest-tuple-function-value/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9038-variable-tuple-value/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9038-variable-tuple-value/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9039-overloads-rest-merged/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9039-overloads-rest-merged/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9040-generic-overload-member/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9040-generic-overload-member/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9041-generic-declfile-member/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9041-generic-declfile-member/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9250-variable-tuple-native-length-and-index/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/9250-variable-tuple-native-length-and-index/main.ts"
+   ],
+   "diags": []
   }
  }
 }
