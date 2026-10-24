@@ -2036,7 +2036,11 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           for (const prop of cjs.obj.properties) {
             if (ts.isShorthandPropertyAssignment(prop)) continue; // alias plumbing
             if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.initializer)) continue;
-            if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
+            // A quoted key (`"windows874": {...}`, `"437": "cp437"`) names
+            // the same export as its bare spelling: JS property names are
+            // strings either way (iconv-lite's sbcs table, mysql2's
+            // charset tables).
+            if (ts.isPropertyAssignment(prop) && (ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name))) {
               registerExport(prop.name, prop.name.text, prop.initializer);
             }
             // other property forms fence in the statement lowering
