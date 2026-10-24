@@ -24,21 +24,3 @@ node-fallback-fence.ts:23:16 - error SC2012: 'AbortSignal.timeout' runs in the e
   24 | const res = fetch("https://example.com", { signal });
 
   hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
-
-node-fallback-fence.ts:34:28 - error SC2020: 'deflateSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
-
-  33 | import { deflateSync, gzipSync } from "node:zlib";
-  34 | const packed = deflateSync("data"); // string data: the wrap-it-first hint
-     |                            ^~~~~~
-  35 | const zipped = gzipSync("data"); // beyond the lowered pair: fenced
-
-  hint: zlib works on Buffers: deflateSync(Buffer.from(s, "utf8"))
-
-node-fallback-fence.ts:35:25 - error SC2020: 'gzipSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
-
-  34 | const packed = deflateSync("data"); // string data: the wrap-it-first hint
-  35 | const zipped = gzipSync("data"); // beyond the lowered pair: fenced
-     |                         ^~~~~~
-  36 | 
-
-  hint: zlib works on Buffers: gzipSync(Buffer.from(s, "utf8"))
