@@ -84,10 +84,10 @@ const ROWS: readonly { name: string; src: string; forbidden: string[] }[] = [
   },
 ];
 
-/** Object.keys over these answers the EMPTY set. Node answers a non-empty
- * one for both, so the row is a divergence either way — it is pinned as
- * the divergence that is not silently PLAUSIBLE. A partial list would be
- * read as the truth; an empty one cannot be. */
+/** Object.keys of an EventEmitter subclass answers Node's key list: the emitter's own
+ * enumerable prefix (_events, _eventsCount, _maxListeners; checked against node v24.15.0), then
+ * the program's fields. The empty answer this row used to pin was a divergence. The value
+ * surfaces (JSON, inspect, values, entries) keep their loud fence. */
 const KEYS_EMPTY: readonly { name: string; src: string }[] = [
   {
     name: "Object.keys of a boxed EventEmitter subclass",
@@ -202,7 +202,7 @@ describe("a class whose base is runtime-provided keeps the boxed fence", () => {
   });
 
   test.for(KEYS_EMPTY.map((p) => [p.name, p] as const))(
-    "answers the EMPTY key set, never a partial one: %s",
+    "answers Node's key list, prefix included: %s",
     ([, p]) => {
       for (const backend of LANES) {
         const b = BUILT.get(`K:${p.name}:${backend}`)!;
@@ -213,7 +213,7 @@ describe("a class whose base is runtime-provided keeps the boxed fence", () => {
         ).toBe(true);
         const r = run(b.binaryPath!);
         expect(r.status, `${p.name} (${backend}) exit code`).toBe(0);
-        expect(r.stdout, `${p.name} (${backend}) must not list the runtime prefix`).toBe("KEYS[]\n");
+        expect(r.stdout, `${p.name} (${backend}) list the runtime prefix`).toBe("KEYS[_events,_eventsCount,_maxListeners,n]\n");
       }
     },
   );
