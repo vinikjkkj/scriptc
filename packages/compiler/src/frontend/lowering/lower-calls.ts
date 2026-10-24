@@ -30,7 +30,7 @@ import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemb
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
-import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
+import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
 import { declSymbolOf } from "./lower-modules.js";
@@ -4331,6 +4331,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           loc,
         };
       }
+      // Node evaluates every argument before formatting any: values that a
+      // later argument could mutate are bound in order first (ArgHoist).
+      const argHoist = new ArgHoist(L, expr.arguments);
       const args = expr.arguments.map((a) => {
         // `console.log(attrs.id)`, and the same read one binding later.
         // The console formatter is TOTAL over dyn kinds and renders each
@@ -4347,7 +4350,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // the word Node prints (spawnResStreamArg). Null everywhere else,
         // and the property access answers at its own width.
         const raw = spawnResStreamArg(L, a) ?? jsonStringifySpawnStreamArg(L, a) ?? L.lowerExpr(a);
-        const lowered = L.recordKeyReadAtSlotWidth(raw, DYN) ?? narrowBridgeDyn(raw) ?? raw;
+        const lowered = argHoist.take(a, L.recordKeyReadAtSlotWidth(raw, DYN) ?? narrowBridgeDyn(raw) ?? raw);
         if (lowered.type.kind === "jsval") {
           // Node prints objects with util.inspect formatting, which
           // String() cannot match — silent divergence is banned. Templates
@@ -4414,7 +4417,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // render fence honestly with the reason.
         return lowerConsoleInspectArg(L, a, lowered, surface, loc);
       });
-      return {
+      return argHoist.wrap({
         kind: "intrinsic",
         name: stdoutMember ? "console.log" : "console.error",
         args: consoleMember === "trace"
@@ -4422,7 +4425,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           : args,
         type: VOID,
         loc,
-      };
+      });
     }
 
     // `Error(msg)` / `TypeError(msg)` / `RangeError(msg)` / `SyntaxError(msg)`

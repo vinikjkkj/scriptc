@@ -64,6 +64,94 @@ function concatAll(parts: IrExpr[], loc: SrcLoc): IrExpr {
   return out;
 }
 
+/* ── argument evaluation order for the formatter family ─────────────── */
+
+/** Syntactic purity of an argument expression: evaluating it can neither
+ * run user code nor change a value another argument holds. Identifiers,
+ * literals, property reads of those, and pure unary forms. Anything else (a
+ * call, new, assignment, ++, await, yield, a literal containing one) counts
+ * as an effect. Property reads count as pure: an accessor run by an argument
+ * read is outside this rule. */
+function syntacticallyPure(n: ts.Expression): boolean {
+  if (ts.isParenthesizedExpression(n) || ts.isNonNullExpression(n) || ts.isAsExpression(n)) {
+    return syntacticallyPure(n.expression);
+  }
+  if (
+    ts.isIdentifier(n) ||
+    ts.isStringLiteralLike(n) ||
+    ts.isNumericLiteral(n) ||
+    n.kind === ts.SyntaxKind.TrueKeyword ||
+    n.kind === ts.SyntaxKind.FalseKeyword ||
+    n.kind === ts.SyntaxKind.NullKeyword ||
+    n.kind === ts.SyntaxKind.ThisKeyword ||
+    n.kind === ts.SyntaxKind.BigIntLiteral ||
+    n.kind === ts.SyntaxKind.RegularExpressionLiteral
+  ) {
+    return true;
+  }
+  if (ts.isPropertyAccessExpression(n)) return syntacticallyPure(n.expression);
+  if (ts.isElementAccessExpression(n)) return syntacticallyPure(n.expression) && syntacticallyPure(n.argumentExpression);
+  if (ts.isPrefixUnaryExpression(n)) {
+    return n.operator !== ts.SyntaxKind.PlusPlusToken && n.operator !== ts.SyntaxKind.MinusMinusToken && syntacticallyPure(n.operand);
+  }
+  if (ts.isTypeOfExpression(n)) return syntacticallyPure(n.expression);
+  if (ts.isTemplateExpression(n)) return n.templateSpans.every((sp) => syntacticallyPure(sp.expression));
+  if (ts.isArrayLiteralExpression(n)) return n.elements.every((e) => !ts.isSpreadElement(e) && syntacticallyPure(e));
+  if (ts.isObjectLiteralExpression(n)) {
+    return n.properties.every((p) => ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name) && syntacticallyPure(p.initializer));
+  }
+  return false;
+}
+
+/** Node evaluates EVERY argument of console.log / util.format and then
+ * formats them. The lowering formats an argument the moment it is lowered,
+ * so an argument that holds mutable state (an object, array, Map, dyn box,
+ * ...) followed by an argument that RUNS something would print the state
+ * before the later argument mutated it. The hoist binds such an argument's
+ * value to a hidden local, in argument order, before any formatting; the
+ * formatter then reads the local. Immutable scalars need no hoist (their
+ * value cannot change after evaluation), and neither does a call whose later
+ * arguments are all syntactically pure (no code runs between the evaluation
+ * and the formatting), so the common shapes lower exactly as before. */
+export class ArgHoist {
+  readonly stmts: IrStmt[] = [];
+  private readonly nodes: ts.Expression[];
+  private readonly lastEffect: number;
+  constructor(private readonly L: Lowerer, nodes: readonly ts.Expression[]) {
+    this.nodes = [...nodes];
+    let last = -1;
+    for (let i = 0; i < this.nodes.length; i++) if (!syntacticallyPure(this.nodes[i]!)) last = i;
+    // An effect in the FIRST argument alone orders nothing: it runs before every other.
+    this.lastEffect = last < 1 ? -1 : last;
+  }
+  /** The argument's lowered value, evaluated in argument order into a hidden
+   * local when it or a LATER argument runs code. Every non-constant argument
+   * up to the last effectful one is bound (scalars too: a variable read
+   * must happen before the later argument's effect, and the bindings run
+   * ahead of the whole formatted expression, so an unbound effectful
+   * argument would otherwise run after a bound later one). */
+  take(node: ts.Expression, value: IrExpr): IrExpr {
+    const idx = this.nodes.indexOf(node);
+    if (idx < 0 || idx > this.lastEffect) return value;
+    if (value.kind === "numLit" || value.kind === "strLit" || value.kind === "boolLit" || value.kind === "unitLit") return value;
+    const tk = value.type.kind;
+    if (tk === "jsval") return value;
+    if (tk === "void" || tk === "undefinedT" || tk === "nullT") {
+      this.stmts.push({ kind: "exprStmt", expr: value, loc: value.loc });
+      if (tk === "void") return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: value.loc };
+      return { kind: "unitLit", unit: tk === "nullT" ? "null" : "undefined", type: value.type, loc: value.loc };
+    }
+    const slot = this.L.declareHiddenLocal("%fmtArg", value.type);
+    this.stmts.push({ kind: "varDecl", localId: slot.id, init: value, loc: value.loc });
+    return { kind: "varRef", localId: slot.id, type: value.type, loc: value.loc };
+  }
+  /** The call's result, wrapped so the hoisted bindings run first. */
+  wrap(result: IrExpr): IrExpr {
+    if (this.stmts.length === 0) return result;
+    return { kind: "seqExpr", stmts: this.stmts, result, type: result.type, loc: result.loc };
+  }
+}
+
 /* ── property-name rendering (compile-time keys) ─────────────────────── */
 
 /** strEscape's quote ladder over a COMPILE-TIME string (record field
@@ -1357,8 +1445,9 @@ function lowerInspectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrE
  * always inspects. `util.format("%s", {toString(){return "U"}})` is
  * "U" and `console.log({toString(){return "U"}})` is
  * "{ toString: … }", measured on Node v25.9.0. */
-function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc, sSpec: boolean): IrExpr {
-  const value = L.lowerExpr(node);
+function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc, sSpec: boolean, hoist?: ArgHoist): IrExpr {
+  const lowered = L.lowerExpr(node);
+  const value = hoist ? hoist.take(node, lowered) : lowered;
   const t = value.type;
   if (t.kind === "string") return value;
   if (t.kind === "f64") return { kind: "libCall", fn: "insp.f64", args: [value], type: STRING, loc };
@@ -1408,8 +1497,9 @@ function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
 /** %O (depth 2) / %o (showHidden, depth 4) — inspect with the spec's
  * option deltas; %o fences over arrays (showHidden adds their hidden
  * [length] entry, which has no lowering). */
-function formatOArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc): IrExpr {
-  const value = L.lowerExpr(node);
+function formatOArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc, hoist?: ArgHoist): IrExpr {
+  const lowered = L.lowerExpr(node);
+  const value = hoist ? hoist.take(node, lowered) : lowered;
   if (value.type.kind === "bytes") {
     L.noLowering(`util.format %${depth === 4 ? "o" : "O"} of typed-array values`, node, "pass util.inspect(buf) explicitly");
   }
@@ -1432,6 +1522,11 @@ function formatOArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc)
  * consume-and-drop), with per-static-type conversions. Non-literal
  * format strings lower only in the substitution-free shapes. */
 export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc, withOptions: boolean): IrExpr {
+  const hoist = new ArgHoist(L, expr.arguments);
+  return hoist.wrap(lowerFormatCallIn(L, expr, loc, withOptions, hoist));
+}
+
+function lowerFormatCallIn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc, withOptions: boolean, hoist: ArgHoist): IrExpr {
   const argNodes = [...expr.arguments];
   if (withOptions) {
     const opts = argNodes.shift();
@@ -1449,7 +1544,7 @@ export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
 
   /** The rest-args tail: ` ` + (strings verbatim, everything else
    * inspected at the default depth). */
-  const restArg = (node: ts.Expression): IrExpr => formatSArg(L, node, 2, loc, false);
+  const restArg = (node: ts.Expression): IrExpr => formatSArg(L, node, 2, loc, false, hoist);
 
   if (!firstIsLiteral) {
     const firstT = L.mapTypeOf(L.typeOf(first));
@@ -1480,12 +1575,12 @@ export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   const convert = (spec: number, node: ts.Expression): IrExpr => {
     switch (spec) {
       case 115: // %s
-        return formatSArg(L, node, 0, loc, true);
+        return formatSArg(L, node, 0, loc, true, hoist);
       case 100: {
         // %d — Number(arg) formatted: numbers as-is, booleans 1/0,
         // strings through the runtime's ECMA-exact StringToNumber
         // (num.fromString — the same lowering Number(aString) takes).
-        const value = L.lowerExpr(node);
+        const value = hoist.take(node, L.lowerExpr(node));
         if (value.type.kind === "f64") return { kind: "libCall", fn: "insp.f64", args: [value], type: STRING, loc };
         if (value.type.kind === "string") {
           const parsed: IrExpr = { kind: "libCall", fn: "num.fromString", args: [value], type: F64, loc };
@@ -1519,7 +1614,7 @@ export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
       }
       case 105: {
         // %i — parseInt(ToString(arg)): the spec-exact composition.
-        const value = L.lowerExpr(node);
+        const value = hoist.take(node, L.lowerExpr(node));
         if (value.type.kind === "f64" || value.type.kind === "bool" || value.type.kind === "string") {
           const text: IrExpr = value.type.kind === "string" ? value : { kind: "toString", operand: value, type: STRING, loc };
           const parsed: IrExpr = { kind: "libCall", fn: "num.parseInt", args: [text, num(0, loc)], type: F64, loc };
@@ -1531,7 +1626,7 @@ export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
       case 106: {
         // %j — JSON.stringify; undefined-valued args print "undefined"
         // (Node appends the non-string result of tryStringify).
-        const value = L.lowerExpr(node);
+        const value = hoist.take(node, L.lowerExpr(node));
         if (value.type.kind === "undefinedT") return str("undefined", loc);
         // JSON.stringify(sym) is undefined in Node — %j prints the
         // "undefined" text. Folding drops the operand, so only
@@ -1560,9 +1655,9 @@ export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
         return { kind: "jsonStringify", value, type: STRING, loc };
       }
       case 79: // %O — inspect at the defaults
-        return formatOArg(L, node, 2, loc);
+        return formatOArg(L, node, 2, loc, hoist);
       case 111: // %o — showHidden semantics; depth 4
-        return formatOArg(L, node, 4, loc);
+        return formatOArg(L, node, 4, loc, hoist);
     }
     throw new Error("unreachable format spec");
   };
