@@ -14,7 +14,7 @@ import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, 
 import { npmStaticDepSf7, resolveProjectImportSf7 } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
-import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
+import { typeEquals, BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall, requireFnValueDeclType } from "./lower-builtins.js";
 import { bindingNeverReassigned, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf, hasOwnPropertyAliasDecl } from "./lower-calls.js";
@@ -109,6 +109,132 @@ function containerLowersTyped(L: Lowerer, recv: ts.Expression): boolean {
   const flavor = init.expression.text === "Map" ? "map" : init.expression.text === "Set" ? "set" : null;
   if (flavor === null || (init.arguments?.length ?? 0) !== 0) return false;
   return inferContainerTypeFromUses(L, init, flavor) !== null;
+}
+
+/** Which untyped-parameter callee writes can change an array's element type?
+ *
+ * `const b = [1, 2]; function p(arr, v) { arr.push(v) } p(b, "y")` is ONE
+ * array in JavaScript, holding a string afterwards. A static `number[]`
+ * cannot hold it: the crossing into the untyped parameter is a live view of
+ * the origin (scr_json.c, "live array views"), and that view refuses a write
+ * that changes the element type. So an array literal binding that is handed
+ * to an untyped parameter whose body can store a value of another type into
+ * it is a DYN array from creation, exactly as a Proxy target or a stored
+ * container value is (the binding becomes the dyn value itself: one
+ * identity, any element type).
+ *
+ * The test is deliberately narrow, because a dyn array has a narrower
+ * vocabulary than a static one: it fires only when the callee provably
+ * (a) takes the array in a parameter with NO static type and (b) writes into
+ * it (push, unshift, splice's inserts, fill, an indexed assignment) a value
+ * whose type is not the element type, or an `any`. Forwarding the parameter to
+ * another untyped parameter is followed (depth-limited). Anything the scan
+ * cannot see stays a static array with a live view: every write that keeps
+ * the element type lands, and the one that does not is refused loudly. */
+function untypedParamMayPollute(
+  L: Lowerer,
+  callee: ts.Node,
+  index: number,
+  elem: IrType,
+  depth: number,
+  seen: Set<ts.Node>,
+): boolean {
+  if (depth > 3 || seen.has(callee)) return false;
+  seen.add(callee);
+  let fn: ts.Node | undefined = callee;
+  if (ts.isVariableDeclaration(callee) && callee.initializer !== undefined) {
+    let init: ts.Expression = callee.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    fn = ts.isFunctionExpression(init) || ts.isArrowFunction(init) ? init : undefined;
+  }
+  if (fn === undefined || !(ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn) || ts.isFunctionExpression(fn) || ts.isArrowFunction(fn))) return false;
+  const f = fn as ts.FunctionLikeDeclaration;
+  if (f.body === undefined || L.isStdlibFile(f.getSourceFile())) return false;
+  const param = f.parameters[index];
+  if (param === undefined || param.dotDotDotToken !== undefined || !ts.isIdentifier(param.name)) return false;
+  const psym = L.checker.getSymbolAtLocation(param.name);
+  if (psym === undefined) return false;
+  const pt = L.checker.getTypeOfSymbol(psym);
+  if ((pt.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0) return false;
+  const foreign = (e: ts.Expression): boolean => {
+    const it = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.checker.getTypeAtLocation(e)));
+    return it === null || !typeEquals(it, elem);
+  };
+  let polluted = false;
+  const visit = (n: ts.Node): void => {
+    if (polluted) return;
+    if (ts.isIdentifier(n) && n.text === (param.name as ts.Identifier).text && L.checker.getSymbolAtLocation(n) === psym) {
+      let p: ts.Node = n.parent;
+      if (ts.isPropertyAccessExpression(p) && p.expression === n && ts.isCallExpression(p.parent) && p.parent.expression === p) {
+        const call = p.parent;
+        const name = p.name.text;
+        const from = name === "splice" ? 2 : 0;
+        if (name === "push" || name === "unshift" || name === "splice" || name === "fill") {
+          const args = name === "fill" ? call.arguments.slice(0, 1) : call.arguments.slice(from);
+          if (args.some((a) => ts.isSpreadElement(a) || foreign(a))) polluted = true;
+        }
+      } else if (
+        ts.isElementAccessExpression(p) && p.expression === n && ts.isBinaryExpression(p.parent) &&
+        p.parent.left === p && p.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      ) {
+        if (foreign(p.parent.right)) polluted = true;
+      } else if (ts.isCallExpression(p) && p.arguments.some((a) => a === n)) {
+        const at = p.arguments.indexOf(n as ts.Expression);
+        const cs = ts.isIdentifier(p.expression)
+          ? L.checker.getSymbolAtLocation(p.expression)
+          : ts.isPropertyAccessExpression(p.expression) ? L.checker.getSymbolAtLocation(p.expression.name) : undefined;
+        const cd = cs === undefined ? undefined : L.checker.declarationsOf(cs)[0];
+        if (cd !== undefined && untypedParamMayPollute(L, cd, at, elem, depth + 1, seen)) polluted = true;
+      }
+      void p;
+    }
+    n.forEachChild(visit);
+  };
+  visit(f.body);
+  return polluted;
+}
+
+/** Array literal bindings (never reassigned, scalar elements) that an
+ * untyped parameter can pollute: see untypedParamMayPollute. */
+function pollutedArrayBindings(L: Lowerer, sf: ts.SourceFile, syms: ts.Symbol[]): void {
+  const cand = new Map<ts.Symbol, { init: ts.ArrayLiteralExpression; elem: IrType }>();
+  ts.walkPreorder(sf, (n) => {
+    if (!ts.isVariableDeclaration(n) || !ts.isIdentifier(n.name) || n.initializer === undefined || n.type !== undefined) return undefined;
+    let init: ts.Expression = n.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    if (!ts.isArrayLiteralExpression(init) || init.elements.length === 0) return undefined;
+    const lst = n.parent;
+    if (ts.isVariableDeclarationList(lst) && ts.isVariableStatement(lst.parent) &&
+        lst.parent.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return undefined;
+    const s = L.checker.getSymbolAtLocation(n.name);
+    if (s === undefined) return undefined;
+    const t = L.mapTypeOf(L.typeOf(init));
+    if (t === null || t.kind !== "array" || (t.elem.kind !== "f64" && t.elem.kind !== "bool" && t.elem.kind !== "string")) return undefined;
+    if (!bindingNeverReassigned(L, s, n)) return undefined;
+    cand.set(s, { init, elem: t.elem });
+    return undefined;
+  });
+  if (cand.size === 0) return;
+  ts.walkPreorder(sf, (n) => {
+    if (!ts.isCallExpression(n)) return undefined;
+    n.arguments.forEach((a, i) => {
+      let t: ts.Expression = a;
+      while (ts.isParenthesizedExpression(t) || ts.isAsExpression(t) || ts.isTypeAssertion(t)) t = t.expression;
+      if (!ts.isIdentifier(t)) return;
+      const s = L.checker.getSymbolAtLocation(t);
+      const c = s === undefined ? undefined : cand.get(s);
+      if (s === undefined || c === undefined || syms.includes(s)) return;
+      const cs = ts.isIdentifier(n.expression)
+        ? L.checker.getSymbolAtLocation(n.expression)
+        : ts.isPropertyAccessExpression(n.expression) ? L.checker.getSymbolAtLocation(n.expression.name) : undefined;
+      const cd = cs === undefined ? undefined : L.checker.declarationsOf(cs)[0];
+      if (cd === undefined || !untypedParamMayPollute(L, cd, i, c.elem, 0, new Set())) return;
+      syms.push(s);
+      L.dynProxyTargetLiterals.add(c.init);
+      L.dynArrayLiterals.add(c.init);
+    });
+    return undefined;
+  });
 }
 
 function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
@@ -248,6 +374,7 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
       return undefined;
     });
   }
+  pollutedArrayBindings(L, sf, syms);
   if (syms.length === 0 && dynReturnSyms.length === 0) return;
   const names = new Set(syms.map((s) => s.name));
   const anyT = L.checker.getAnyType();
