@@ -2908,7 +2908,8 @@ const SYMBOLIC_PAIR_BUDGET = 256;
    * instantiation key. New keys lower EAGERLY (return inference — see the
    * section comment); a same-key re-demand mid-lowering pins the fallback
    * return type. */
-  export function implicitCallInstance(L: Lowerer, call: ts.CallExpression, info: GenericFnInfo): GenericInstance {
+  export function implicitCallInstance(L: Lowerer, call: ts.CallExpression, info: GenericFnInfo,
+    argNodes: readonly ts.Expression[] = call.arguments): GenericInstance {
     const shapes: ParamShape[] = [];
     const argTypes = new Map<ts.Symbol, ts.Type>();
     info.decl.parameters.forEach((param, i) => {
@@ -2918,7 +2919,7 @@ const SYMBOLIC_PAIR_BUDGET = 256;
         return;
       }
       let bound: IrType = DYN;
-      const arg = call.arguments[i];
+      const arg = argNodes[i];
       // A require() table binding passed whole travels as its checked-dynamic
       // snapshot (cjsRequireBindingValueOf), so the slot stays DYN.
       const tableArg =
@@ -13225,6 +13226,12 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     // compiled and `const c: I = { m<T>(x) {...} }` did not).
     const found = objLitGenericFnNodeOf(L, propSym) ?? objLitGenericFnViaReceiver(L, access.expression, name);
     if (!found) {
+      // `C.prototype.m.call(recv, a, b)` / `.apply(recv, [a, b])` over a method of C whose
+      // untyped parameters make it a monomorphized generic: the method has no plain function
+      // value (every call site instantiates it), but the call IS the direct, non-virtual call of
+      // the declaring class's method on `recv`, instantiated over the arguments that follow it.
+      const protoCall = lowerPrototypeGenericMethodCall(L, call, access, name);
+      if (protoCall !== null) return protoCall;
       // Function.prototype.apply/call/bind spelled through a FUNCTION
       // receiver: compiled functions are direct calls with no runtime
       // `this`/arguments object to re-route — name the working spelling
@@ -13734,6 +13741,55 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     const args = L.completeArgs(call.arguments, instance.params, loc, call);
     return { kind: "call", callee: instance.name, args, type: instance.returnType, loc };
   }
+
+/** `C.prototype.m.call(recv, ...args)` and `C.prototype.m.apply(recv, [...args])` in a JavaScript
+ * file, where `m` is an implicit-any (monomorphized) method of the program class C: the direct
+ * call of C's own method on `recv`, instantiated over the argument types. `C.prototype.m` is C's
+ * function whatever `recv`'s runtime class overrides, so the call is NON-virtual by construction.
+ * `recv` converts to C: an instance of C or a subclass passes, a dynamic value is checked against
+ * C at run time (a non-instance throws, as the method body's first `this` read would). Null for
+ * every other shape, which keeps its fence. */
+function lowerPrototypeGenericMethodCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression,
+  name: string): IrExpr | null {
+  if ((name !== "call" && name !== "apply") || !isJsSourceFile(call.getSourceFile())) return null;
+  if (call.arguments.length < 1 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+  const m = access.expression;
+  if (!ts.isPropertyAccessExpression(m) || m.questionDotToken !== undefined) return null;
+  const proto = m.expression;
+  if (!ts.isPropertyAccessExpression(proto) || proto.name.text !== "prototype" || !ts.isIdentifier(proto.expression)) return null;
+  const argNodes: readonly ts.Expression[] | null =
+    name === "call"
+      ? call.arguments.slice(1)
+      : call.arguments.length === 1
+        ? []
+        : call.arguments.length === 2 && ts.isArrayLiteralExpression(call.arguments[1]!) &&
+            !call.arguments[1]!.elements.some((e) => ts.isSpreadElement(e))
+          ? (call.arguments[1] as ts.ArrayLiteralExpression).elements
+          : null;
+  if (argNodes === null) return null;
+  const ctorT = L.mapTypeOf(L.typeOf(proto.expression));
+  const info = ctorT?.kind === "classval" ? (L.classes.get(ctorT.className) ?? null) : null;
+  if (info === null || info.builtinError) return null;
+  if (L.findMethodOn(info, m.name.text) !== null) return null;
+  const gfound = findGenericMethodOn(L, info, m.name.text);
+  if (gfound === null || gfound.info.implicitParams === undefined) return null;
+  const loc = locOf(call);
+  const instance = implicitCallInstance(L, call, gfound.info, argNodes);
+  const declName = gfound.declarer.def.name;
+  const objT: IrType = { kind: "object", className: declName };
+  let recv = L.lowerExpr(call.arguments[0]!);
+  if (recv.type.kind === "dyn") {
+    recv = { kind: "dynCheck", value: recv, type: objT, loc };
+  } else if (recv.type.kind === "object") {
+    recv = L.isSubclassOf(declName, recv.type.className)
+      ? { kind: "downcast", value: recv, type: objT, loc }
+      : L.upcastTo(recv, declName);
+  } else {
+    return null;
+  }
+  const args = L.completeArgs(argNodes, instance.params, loc, call);
+  return { kind: "call", callee: instance.name, args: [recv, ...args], type: instance.returnType, loc };
+}
 
 /** `obj.method(args)` — whole-program devirtualization decides the form:
    * a method some strict subclass of the receiver's STATIC class overrides
