@@ -1042,7 +1042,14 @@ function anyPiecedFuncType(L: Lowerer, node: ts.Node, t: ts.Type): IrType | null
   const params: IrType[] = [];
   for (const p of sig.getParameters()) {
     const pt = L.checker.getTypeOfSymbolAtLocation(p, node);
-    const mapped = L.mapTypeOf(pt) ?? (pt.flags & ts.TypeFlags.Any ? DYN : null);
+    let mapped = L.mapTypeOf(pt) ?? (pt.flags & ts.TypeFlags.Any ? DYN : null);
+    // A parameter that SPELLS `any[]` is the checked-dynamic array, exactly as
+    // the same parameter of a declared function is (dynFallbackType above):
+    // `const writeValues = function (values: any[], ...)` (pg-protocol).
+    if (mapped === null && L.checker.isArrayType(pt)) {
+      const pd = L.checker.declarationsOf(p)[0];
+      if (pd !== undefined && ts.isParameter(pd) && spelledAnyArrayDecl(pd.name)) mapped = DYN;
+    }
     if (!mapped || mapped.kind === "void") return null;
     params.push(mapped);
   }
