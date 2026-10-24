@@ -90,6 +90,27 @@ function literalMethodsReadThis(lit: ts.ObjectLiteralExpression): boolean {
   return false;
 }
 
+/** Does this receiver name a `const x = new Map()` / `new Set()` whose uses
+ * fix a static key and value type (inferContainerTypeFromUses)? Such a
+ * container lowers as a TYPED ScrMap/ScrSet even though the checker calls it
+ * `Map<any, any>`, and a typed container stores an array by sharing the
+ * ScrArr: the array must then STAY static. Pinning the stored binding to a
+ * dyn array in that case would make the store a dyn-to-static extraction,
+ * which is a COPY (the identity bug this guard closes). */
+function containerLowersTyped(L: Lowerer, recv: ts.Expression): boolean {
+  let r: ts.Expression = recv;
+  while (ts.isParenthesizedExpression(r) || ts.isAsExpression(r) || ts.isTypeAssertion(r)) r = r.expression;
+  if (!ts.isIdentifier(r)) return false;
+  const s = L.checker.getSymbolAtLocation(r);
+  const decl = s === undefined ? undefined : L.checker.declarationsOf(s)[0];
+  if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return false;
+  const init = decl.initializer;
+  if (!ts.isNewExpression(init) || !ts.isIdentifier(init.expression)) return false;
+  const flavor = init.expression.text === "Map" ? "map" : init.expression.text === "Set" ? "set" : null;
+  if (flavor === null || (init.arguments?.length ?? 0) !== 0) return false;
+  return inferContainerTypeFromUses(L, init, flavor) !== null;
+}
+
 function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
   const syms: ts.Symbol[] = [];
   const dynReturnSyms: ts.Symbol[] = [];
@@ -140,7 +161,8 @@ function markProxyBindings(L: Lowerer, sf: ts.SourceFile): void {
     if (
       ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
       (n.expression.name.text === "set" || n.expression.name.text === "add") &&
-      isAnyDynContainer(L, L.typeOf(n.expression.expression))
+      isAnyDynContainer(L, L.typeOf(n.expression.expression)) &&
+      !containerLowersTyped(L, n.expression.expression)
     ) {
       for (const a of n.arguments) {
         let t: ts.Expression = a;
