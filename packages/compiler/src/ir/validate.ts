@@ -375,6 +375,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "url.username": { argTypes: [URL_T], result: STRING },
   "url.password": { argTypes: [URL_T], result: STRING },
   "url.setProtocol": { argTypes: [URL_T, STRING], result: VOID },
+  "url.setPart": { argTypes: [URL_T, F64, STRING], result: VOID },
   // Result is the interned `string | null` union — the libCall case
   // checks the arms (the spawnRes.signal pattern).
   "sp.get": { argTypes: [SEARCH_PARAMS_T, STRING], result: VOID },

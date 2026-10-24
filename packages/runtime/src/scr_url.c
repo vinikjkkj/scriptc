@@ -535,6 +535,7 @@ ScrUrl *scr_url_new(ScrStr *input) {
   u->fragment = fragment;
   u->has_authority = has_authority;
   u->sp_cache = NULL;
+  u->sp_resync = NULL;
   return u;
 }
 
@@ -891,6 +892,7 @@ static ScrUrl *scr_url_new_file(ScrStr *host, ScrStr *encoded_path) {
   u->fragment = scr_str_new("", 0);
   u->has_authority = true;
   u->sp_cache = NULL;
+  u->sp_resync = NULL;
   return u;
 }
 
@@ -1119,5 +1121,260 @@ void scr_url_set_protocol(ScrUrl *u, ScrStr *value) {
   if (dflt != NULL && u->port->len == strlen(dflt) && memcmp(u->port->data, dflt, u->port->len) == 0) {
     scr_str_release(u->port);
     u->port = scr_str_new("", 0);
+  }
+}
+
+/* ── the remaining WHATWG setters ────────────────────────────────────────
+ *
+ * One entry point, `part` picking the member (the IR carries the number):
+ * 0 pathname, 1 search, 2 hash, 3 port, 4 hostname, 5 host, 6 username,
+ * 7 password, 8 href. Each is the URL standard's setter for that member:
+ * the value goes through the input filter (ASCII tab/newline removed), a
+ * failing parse leaves the URL untouched (only href throws, the
+ * constructor's TypeError), and the live searchParams view is re-read when
+ * the query changed. The stored host is the parser's own (ASCII, no IPv6,
+ * no IDNA), so the host setters accept exactly the hosts the constructor
+ * accepts. */
+
+/* The setter input filter: the spec strips U+0009, U+000A and U+000D. */
+static void url_filtered(const ScrStr *v, UrlBuf *out) {
+  ub_init(out);
+  for (size_t i = 0; i < v->len; i++) {
+    char c = v->data[i];
+    if (c != '\t' && c != '\n' && c != '\r') ub_push(out, c);
+  }
+}
+
+static bool url_is_file(const ScrUrl *u) {
+  return u->scheme->len == 4 && memcmp(u->scheme->data, "file", 4) == 0;
+}
+
+/* An opaque path ("mailto:x"): no authority and a path that is not rooted. */
+static bool url_opaque_path(const ScrUrl *u) {
+  return !u->has_authority && u->path->len > 0 && u->path->data[0] != '/';
+}
+
+static void url_query_changed(ScrUrl *u) {
+  if (u->sp_cache != NULL && u->sp_resync != NULL) {
+    u->sp_resync(u->sp_cache, u->query->data, u->query->len);
+  }
+}
+
+/* host[:port] validation shared with parse_authority's host half: ASCII
+ * only, lowercased for special schemes, "localhost" empty for file. */
+static bool url_parse_host(const char *hp, size_t host_len, bool special, bool is_file, ScrStr **out) {
+  UrlBuf hb;
+  ub_init(&hb);
+  for (size_t i = 0; i < host_len; i++) {
+    unsigned char c = (unsigned char)hp[i];
+    if (c >= 0x80 || c == '%' || c == '[' || c == ']' || c <= 0x20 || c == '#' || c == '/' ||
+        c == '<' || c == '>' || c == '?' || c == '@' || c == '\\' || c == '^' || c == '|' || c == ':') {
+      free(hb.data);
+      return false;
+    }
+    if (special && c >= 'A' && c <= 'Z') c = (unsigned char)(c - 'A' + 'a');
+    ub_push(&hb, (char)c);
+  }
+  if (is_file && hb.len == 9 && memcmp(hb.data, "localhost", 9) == 0) hb.len = 0;
+  *out = ub_take(&hb);
+  return true;
+}
+
+/* The port state with a state override: the leading digits are the port; no
+ * leading digit leaves it alone (false); more than 65535 fails (false). On
+ * true `*port` is the stored text ("" for the scheme's default). */
+static bool url_parse_port(const ScrUrl *u, const char *s, size_t len, ScrStr **port) {
+  size_t i = 0;
+  long value = 0;
+  while (i < len && s[i] >= '0' && s[i] <= '9') {
+    value = value * 10 + (s[i] - '0');
+    if (value > 65535) return false;
+    i++;
+  }
+  if (i == 0) return false;
+  char digits[8];
+  int dlen = snprintf(digits, sizeof digits, "%ld", value);
+  const char *dflt = default_port(u->scheme->data, u->scheme->len);
+  if (dflt != NULL && strlen(dflt) == (size_t)dlen && memcmp(dflt, digits, (size_t)dlen) == 0) {
+    *port = scr_str_new("", 0);
+  } else {
+    *port = scr_str_new(digits, (size_t)dlen);
+  }
+  return true;
+}
+
+static void url_set_field(ScrStr **slot, ScrStr *value) {
+  scr_str_release(*slot);
+  *slot = value;
+}
+
+static void url_set_userinfo_part(ScrUrl *u, const ScrStr *v, bool is_password) {
+  if (u->host->len == 0 || url_is_file(u)) return;
+  UrlBuf in;
+  url_filtered(v, &in);
+  UrlBuf enc;
+  ub_init(&enc);
+  for (size_t i = 0; i < in.len; i++) ub_push_encoded(&enc, (unsigned char)in.data[i], enc_userinfo);
+  free(in.data);
+  ScrStr *user = scr_url_username(u);
+  ScrStr *pw = scr_url_password(u);
+  UrlBuf out;
+  ub_init(&out);
+  if (is_password) {
+    ub_append(&out, user->data, user->len);
+    if (enc.len > 0) {
+      ub_push(&out, ':');
+      ub_append(&out, enc.data, enc.len);
+    }
+  } else {
+    ub_append(&out, enc.data, enc.len);
+    if (pw->len > 0) {
+      ub_push(&out, ':');
+      ub_append(&out, pw->data, pw->len);
+    }
+  }
+  free(enc.data);
+  scr_str_release(user);
+  scr_str_release(pw);
+  url_set_field(&u->userinfo, ub_take(&out));
+}
+
+void scr_url_set_part(ScrUrl *u, double part, ScrStr *value) {
+  int which = (int)part;
+  bool special = is_special_scheme(u->scheme->data, u->scheme->len);
+  switch (which) {
+    case 0: { /* pathname */
+      if (url_opaque_path(u)) return;
+      UrlBuf in;
+      url_filtered(value, &in);
+      ScrStr *p = parse_rooted_path(in.data, in.len, special);
+      free(in.data);
+      if (p->len == 0 && special) {
+        scr_str_release(p);
+        p = scr_str_new("/", 1);
+      }
+      url_set_field(&u->path, p);
+      return;
+    }
+    case 1: { /* search */
+      UrlBuf in;
+      url_filtered(value, &in);
+      if (in.len == 0) {
+        free(in.data);
+        url_set_field(&u->query, scr_str_new("", 0));
+      } else {
+        UrlBuf out;
+        ub_init(&out);
+        ub_push(&out, '?');
+        size_t i = in.data[0] == '?' ? 1 : 0;
+        for (; i < in.len; i++) {
+          unsigned char c = (unsigned char)in.data[i];
+          if (enc_query(c, special)) {
+            char hex[4];
+            snprintf(hex, sizeof hex, "%%%02X", c);
+            ub_append(&out, hex, 3);
+          } else {
+            ub_push(&out, (char)c);
+          }
+        }
+        free(in.data);
+        url_set_field(&u->query, ub_take(&out));
+      }
+      url_query_changed(u);
+      return;
+    }
+    case 2: { /* hash */
+      UrlBuf in;
+      url_filtered(value, &in);
+      if (in.len == 0) {
+        free(in.data);
+        url_set_field(&u->fragment, scr_str_new("", 0));
+        return;
+      }
+      UrlBuf out;
+      ub_init(&out);
+      ub_push(&out, '#');
+      size_t i = in.data[0] == '#' ? 1 : 0;
+      for (; i < in.len; i++) ub_push_encoded(&out, (unsigned char)in.data[i], enc_fragment);
+      free(in.data);
+      url_set_field(&u->fragment, ub_take(&out));
+      return;
+    }
+    case 3: { /* port */
+      if (u->host->len == 0 || url_is_file(u)) return;
+      UrlBuf in;
+      url_filtered(value, &in);
+      if (in.len == 0) {
+        free(in.data);
+        url_set_field(&u->port, scr_str_new("", 0));
+        return;
+      }
+      ScrStr *port = NULL;
+      bool ok = url_parse_port(u, in.data, in.len, &port);
+      free(in.data);
+      if (ok) url_set_field(&u->port, port);
+      return;
+    }
+    case 4:   /* hostname */
+    case 5: { /* host */
+      if (url_opaque_path(u)) return;
+      UrlBuf in;
+      url_filtered(value, &in);
+      size_t end = 0;
+      while (end < in.len && in.data[end] != '/' && in.data[end] != '?' && in.data[end] != '#' &&
+             !(special && in.data[end] == '\\')) end++;
+      size_t colon = end;
+      for (size_t i = 0; i < end; i++) {
+        if (in.data[i] == ':') {
+          colon = i;
+          break;
+        }
+      }
+      if (colon < end && which == 4) { /* hostname: a port is a failure */
+        free(in.data);
+        return;
+      }
+      ScrStr *host = NULL;
+      if (!url_parse_host(in.data, colon, special, url_is_file(u), &host)) {
+        free(in.data);
+        return;
+      }
+      if (host->len == 0 && (special || u->userinfo->len > 0 || u->port->len > 0)) {
+        /* a special URL needs a host; credentials or a port need one too */
+        scr_str_release(host);
+        free(in.data);
+        return;
+      }
+      ScrStr *port = NULL;
+      bool have_port = which == 5 && colon < end && url_parse_port(u, in.data + colon + 1, end - colon - 1, &port);
+      free(in.data);
+      url_set_field(&u->host, host);
+      if (have_port) url_set_field(&u->port, port);
+      u->has_authority = true;
+      return;
+    }
+    case 6:
+      url_set_userinfo_part(u, value, false);
+      return;
+    case 7:
+      url_set_userinfo_part(u, value, true);
+      return;
+    case 8: { /* href */
+      ScrUrl *n = scr_url_new(value); /* throws the constructor's TypeError */
+      if (n == NULL) return;
+      url_set_field(&u->scheme, n->scheme);
+      url_set_field(&u->userinfo, n->userinfo);
+      url_set_field(&u->host, n->host);
+      url_set_field(&u->port, n->port);
+      url_set_field(&u->path, n->path);
+      url_set_field(&u->query, n->query);
+      url_set_field(&u->fragment, n->fragment);
+      u->has_authority = n->has_authority;
+      free(n); /* its strings moved into u */
+      url_query_changed(u);
+      return;
+    }
+    default:
+      return;
   }
 }

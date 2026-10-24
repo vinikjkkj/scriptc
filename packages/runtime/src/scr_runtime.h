@@ -4121,6 +4121,7 @@ ScrStr *scr_url_port(ScrUrl *u);                   /* +1 digits or "" */
 ScrStr *scr_url_username(ScrUrl *u);               /* +1 */
 ScrStr *scr_url_password(ScrUrl *u);               /* +1 */
 void scr_url_set_protocol(ScrUrl *u, ScrStr *value); /* WHATWG protocol setter */
+void scr_url_set_part(ScrUrl *u, double part, ScrStr *value); /* the other setters: 0 pathname 1 search 2 hash 3 port 4 hostname 5 host 6 username 7 password 8 href; href throws */
 void scr_sp_append(ScrSearchParams *sp, ScrStr *name, ScrStr *value);
 void scr_sp_set(ScrSearchParams *sp, ScrStr *name, ScrStr *value);
 void scr_sp_delete(ScrSearchParams *sp, ScrStr *name);
