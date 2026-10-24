@@ -20918,7 +20918,41 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (!isPlainMethodReceiver(expr.expression)) return null;
     // `C.prototype.m` is C's own function, never an override below it.
     const viaPrototype = ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype";
-    return unboundMethodThunk(L, info, expr.name.text, found, locOf(expr), viaPrototype);
+    const loc = locOf(expr);
+    const name = expr.name.text;
+    const own = unboundMethodThunk(L, info, name, found, loc, true);
+    if (viaPrototype || !L.overrideBelow(info, name)) return own;
+    // A subclass overrides the method: `x.m` is the function of x's RUNTIME class
+    // (B.prototype.m for a B behind an A-typed receiver), so the value is picked
+    // by the receiver's class, deepest first. Each pick is the declarer's own
+    // interned closure, which is what `B.prototype.m` and `a.m` of an
+    // instance of the declaring class compare equal to.
+    const subs: { cls: ClassInfo; depth: number }[] = [];
+    const walk = (c: ClassInfo, depth: number): void => {
+      for (const s of c.subclasses) {
+        subs.push({ cls: s, depth });
+        walk(s, depth + 1);
+      }
+    };
+    walk(info, 1);
+    subs.sort((a, b) => a.depth - b.depth);
+    let chain: IrExpr = own;
+    for (const { cls } of subs) {
+      const f = L.findMethodOn(cls, name);
+      if (f === null || f.declarer === found.declarer || f.sig.abstract === true) continue;
+      const pick = unboundMethodThunk(L, cls, name, f, loc, true);
+      if (!typeEquals(pick.type, own.type)) return own;
+      const recv = L.lowerExpr(expr.expression);
+      chain = {
+        kind: "ternary",
+        cond: { kind: "instanceOf", value: recv, className: cls.def.name, type: BOOL, loc },
+        then: pick,
+        else_: chain,
+        type: own.type,
+        loc,
+      };
+    }
+    return chain;
   }
 
 /** The detached-function closure of class method `method` of `info` (see
@@ -20926,8 +20960,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * as a late method becomes inside its literal. */
   export function unboundMethodThunk(L: Lowerer, info: ClassInfo, method: string,
     found: { declarer: ClassInfo; sig: { params: ParamShape[]; ret: IrType } }, loc: SrcLoc, direct = false): IrExpr {
+    // A method nobody overrides is the declarer's own function whichever way it
+    // is reached (`a.m` and `A.prototype.m` are ONE function in JS), and so is
+    // a prototype read: one interned thunk per declarer and method.
     const virtual = !direct && L.overrideBelow(info, method);
-    const name = `%unbound.${info.def.name}.${method}${direct ? "%direct" : ""}`;
+    if (!virtual) {
+      direct = true;
+      info = found.declarer;
+    }
+    const name = `%unbound.${info.def.name}.${method}${virtual ? "" : "%direct"}`;
     const params = found.sig.params.map((p) => p.type);
     const irParams: IrParam[] = params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
     const fnT = funcOf(params, found.sig.ret);
