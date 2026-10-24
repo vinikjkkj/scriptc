@@ -13035,6 +13035,34 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9000-quoted-module-table-keys.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9000-quoted-module-table-keys-modules/charsets.cjs",
+    "<repo>/tests/corpus/9000-quoted-module-table-keys.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9001-module-table-methods.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9001-module-table-methods-modules/tbl.cjs",
+    "<repo>/tests/corpus/9001-module-table-methods.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9002-exports-getters.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9002-exports-getters-modules/acc.cjs",
+    "<repo>/tests/corpus/9002-exports-getters.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9003-prototype-tostring-radix.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9003-prototype-tostring-radix-modules/long.cjs",
+    "<repo>/tests/corpus/9003-prototype-tostring-radix.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/901-records-eval-order.ts": {
    "order": [
     "<repo>/tests/corpus/901-records-eval-order.ts"
