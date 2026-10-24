@@ -1934,6 +1934,18 @@ double scr_arr_index_of_ref(ScrArr *a, void *v);
 bool scr_arr_includes_f64(ScrArr *a, double v);
 bool scr_arr_includes_bool(ScrArr *a, bool v);
 bool scr_arr_includes_ref(ScrArr *a, void *v);
+/* The position forms (argfx3): `from` is the JS position argument, already a
+ * number (the lowering supplies +0 for an absent indexOf/includes position and
+ * +Infinity for an absent lastIndexOf one). */
+double scr_arr_index_of_f64_from(ScrArr *a, double v, double from);
+double scr_arr_index_of_bool_from(ScrArr *a, bool v, double from);
+double scr_arr_index_of_ref_from(ScrArr *a, void *v, double from);
+bool scr_arr_includes_f64_from(ScrArr *a, double v, double from);
+bool scr_arr_includes_bool_from(ScrArr *a, bool v, double from);
+bool scr_arr_includes_ref_from(ScrArr *a, void *v, double from);
+double scr_arr_last_index_of_f64(ScrArr *a, double v, double from);
+double scr_arr_last_index_of_bool(ScrArr *a, bool v, double from);
+double scr_arr_last_index_of_ref(ScrArr *a, void *v, double from);
 
 /* join(sep): elements stringified exactly like JS String(x) — numbers via
  * scr_f64_to_str (shortest roundtrip), booleans "true"/"false", strings
