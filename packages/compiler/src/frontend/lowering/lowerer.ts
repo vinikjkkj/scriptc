@@ -983,7 +983,7 @@ export function dynFallbackType(L: Lowerer, node: ts.Node, t: ts.Type): IrType |
   if (sig) {
     const params = sig.getParameters().map((p): IrType => {
       const pt = L.checker.getTypeOfSymbolAtLocation(p, node);
-      return L.mapTypeOf(pt) ?? DYN;
+      return completedParamType(L, p, L.mapTypeOf(pt) ?? DYN);
     });
     const retT = L.checker.getReturnTypeOfSignature(sig);
     const ret: IrType =
@@ -991,6 +991,22 @@ export function dynFallbackType(L: Lowerer, node: ts.Node, t: ts.Type): IrType |
     return { kind: "func", params, ret };
   }
   return DYN;
+}
+
+/** A DEFAULTED parameter's slot in a func type spelled from a checker signature: the checker's own type for
+ * `b = 2` is `number` (the default is the callee's business), but the compiled ABI of the function that owns
+ * the default is `number | undefined` -- paramShape's armed union, so a call that omits `b` completes with the
+ * undefined arm and the callee's prologue picks the default. A func type that spelled the bare type could
+ * not be called short at all ("calls omitting a non-optional parameter of the callee's type"), which is how
+ * every `const f = (a, b = 2) => ...` in an untyped file read. Dyn and island slots already hold their own
+ * undefined, so they stay as they are. */
+function completedParamType(L: Lowerer, p: ts.Symbol, mapped: IrType): IrType {
+  if (mapped.kind === "dyn" || mapped.kind === "jsval") return mapped;
+  const decl = L.checker.valueDeclarationOf(p);
+  if (decl === undefined || !ts.isParameter(decl) || decl.initializer === undefined) return mapped;
+  const body = L.stripUndefinedArm(mapped);
+  const abi = body.kind === "union" ? L.withUndefinedArmOf(body) : L.withUndefinedArm(body);
+  return abi ?? mapped;
 }
 
 /** The one call signature of a PURE function type — single signature, no
@@ -1051,7 +1067,7 @@ function anyPiecedFuncType(L: Lowerer, node: ts.Node, t: ts.Type): IrType | null
       if (pd !== undefined && ts.isParameter(pd) && spelledAnyArrayDecl(pd.name)) mapped = DYN;
     }
     if (!mapped || mapped.kind === "void") return null;
-    params.push(mapped);
+    params.push(completedParamType(L, p, mapped));
   }
   const retT = L.checker.getReturnTypeOfSignature(sig);
   const ret: IrType | null =
