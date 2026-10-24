@@ -930,6 +930,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "insp.fmtS": "scr_insp_fmt_s",
   "big.str": "scr_big_to_str",
   "big.fromDyn": "scr_big_from_dyn",
+  "big.toBigInt": "scr_big_to_bigint",
   "big.fromStr": "scr_big_from_str",
   "key.fromPkcs8": "scr_key_from_pkcs8",
   "key.fromSpki": "scr_key_from_spki",
