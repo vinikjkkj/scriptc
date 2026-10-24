@@ -13148,6 +13148,90 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9300-default-import-http.mjs": {
+   "order": [
+    "<repo>/tests/corpus/9300-default-import-http.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9301-default-import-http.ts": {
+   "order": [
+    "<repo>/tests/corpus/9301-default-import-http.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9302-default-import-https.mjs": {
+   "order": [
+    "<repo>/tests/corpus/9302-default-import-https.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9303-default-import-https.ts": {
+   "order": [
+    "<repo>/tests/corpus/9303-default-import-https.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9304-default-import-fs.mjs": {
+   "order": [
+    "<repo>/tests/corpus/9304-default-import-fs.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9305-default-import-fs.ts": {
+   "order": [
+    "<repo>/tests/corpus/9305-default-import-fs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9306-default-import-path.mjs": {
+   "order": [
+    "<repo>/tests/corpus/9306-default-import-path.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9307-default-import-path.ts": {
+   "order": [
+    "<repo>/tests/corpus/9307-default-import-path.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9308-default-import-events.mjs": {
+   "order": [
+    "<repo>/tests/corpus/9308-default-import-events.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9309-default-import-events.ts": {
+   "order": [
+    "<repo>/tests/corpus/9309-default-import-events.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9310-default-import-util.mjs": {
+   "order": [
+    "<repo>/tests/corpus/9310-default-import-util.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9311-default-import-util.ts": {
+   "order": [
+    "<repo>/tests/corpus/9311-default-import-util.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9312-default-import-crypto.mjs": {
+   "order": [
+    "<repo>/tests/corpus/9312-default-import-crypto.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9313-default-import-crypto.ts": {
+   "order": [
+    "<repo>/tests/corpus/9313-default-import-crypto.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
