@@ -1798,9 +1798,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // Object KEYS carry their own RC adapters at construction (the map
         // retains each key), so they take the ref-key constructor.
         const kRc = mapKeyAccess(e.type.key) === "ref" ? vAdapters(e.type.key) : null;
+        const keyUnion = e.type.key.kind === "union" ? E.unionsById.get(e.type.key.unionId) : undefined;
+        if (e.type.key.kind === "union" && !keyUnion) throw new Error("emitter bug: map key union has no def");
         const m = E.newTemp(
           e.type,
-          kRc
+          kRc && keyUnion
+            ? // A UNION key: the runtime compares boxes by the value they carry
+              // and needs one class byte per arm (scr_map_new_union).
+              `scr_map_new_union(${mapValKindC(value)}, &${kRc.retain}, &${kRc.release}, ` +
+              `${rc ? `&${rc.retain}` : "NULL"}, ${rc ? `&${rc.release}` : "NULL"}, ${E.traceArgC(value)}, ` +
+              `(const ScrStr *)&${E.internLiteral(unionKeyClasses(keyUnion.arms))})`
+            : kRc
             ? `scr_map_new_ref(${mapValKindC(value)}, &${kRc.retain}, &${kRc.release}, ` +
               `${rc ? `&${rc.retain}` : "NULL"}, ${rc ? `&${rc.release}` : "NULL"}, ` +
               `${E.traceArgC(value)})`

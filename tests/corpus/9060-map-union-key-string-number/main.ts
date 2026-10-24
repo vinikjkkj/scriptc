@@ -1,0 +1,14 @@
+const m = new Map<string | number, string>();
+m.set("1", "s"); m.set(1, "n"); m.set(NaN, "nan"); m.set(-0, "negzero");
+console.log(m.get("1"), m.get(1), m.size);
+console.log(m.get(NaN), m.get(0), m.has(+0), m.has(-0), m.has("0"));
+m.set(0, "zero");
+console.log(m.get(-0), m.size);
+console.log(m.delete("1"), m.has("1"), m.has(1), m.size);
+m.delete(1); m.set(1, "again");
+for (const [k, v] of m) console.log(typeof k, String(k), v);
+console.log([...m.keys()].length, [...m.values()].join(","));
+m.forEach((v, k) => console.log("fe", typeof k, String(k), v));
+const copy = new Map<string | number, string>([["a", "A"], [1, "one"], ["1", "uno"]]);
+console.log(copy.size, copy.get(1), copy.get("1"), copy.get("a"));
+console.log([...copy].map(([k, v]) => `${typeof k}:${String(k)}=${v}`).join(" "));
