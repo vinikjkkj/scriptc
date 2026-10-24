@@ -1558,3 +1558,189 @@ ScrStr *scr_insp_dyn_spread(ScrDyn *arr) {
   scr_str_release(sep);
   return out;
 }
+
+/* ── util.format over a RUNTIME argument list ────────────────────────── */
+
+/* Does the tree under `d` hold anything %o's showHidden renders beyond the
+ * default walk (an array's hidden [length] entry, a function's [length]/
+ * [name]/[prototype] rows)? Those have no rendering here, so %o over them
+ * fences loudly (the OBJINST arm's stance) instead of printing a body that
+ * differs from Node's. Bounded by %o's own depth. */
+static bool insp_has_hidden(const ScrDyn *d, int level) {
+  if (d == NULL || level > 5) return false;
+  if (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_FUNC) return true;
+  if (d->kind == SCR_DYN_OBJ) {
+    for (uint32_t i = 0; i < d->v.obj.len; i++) {
+      if (insp_has_hidden(d->v.obj.entries[i].value, level + 1)) return true;
+    }
+  }
+  return false;
+}
+
+/* The ToNumber a `%d` runs: Number(arg). Primitive kinds go through the
+ * dyn conversion; a reference kind runs ToPrimitive, which for the kinds
+ * the dyn model holds is its string form (valueOf answers the object
+ * itself), then StringToNumber. */
+static double insp_format_number(ScrDyn *d) {
+  switch (d->kind) {
+    case SCR_DYN_NULL: case SCR_DYN_BOOL: case SCR_DYN_NUM: case SCR_DYN_STR: case SCR_DYN_UNDEF:
+      return scr_dyn_to_number(d);
+    default: {
+      ScrStr *t = scr_dyn_to_string(d, NULL);
+      double n = scr_string_to_number(t);
+      scr_str_release(t);
+      return n;
+    }
+  }
+}
+
+/* util.format(...args) / util.formatWithOptions({}, ...args) where the
+ * argument list is a RUNTIME fact (a format string that is not a literal,
+ * `util.format.apply(util, arguments)`, a spread): Node's
+ * formatWithOptionsInternal ported over the checked-dynamic argument array,
+ * with the conversions the static lowering (lower-inspect.ts) gives the same
+ * specifiers. Borrows arr; +1 result, or NULL with a pending exception. */
+ScrStr *scr_insp_format(ScrDyn *arr) {
+  const double n = scr_dyn_arr_len(arr);
+  if (n == 0) return scr_str_new("", 0);
+  ScrDyn *first = scr_dyn_arr_at(arr, 0);
+  InspBuf out = {0};
+  double a = 0;
+  bool join = false;
+  bool failed = false;
+  if (first->kind == SCR_DYN_STR) {
+    const ScrStr *f = first->v.str;
+    if (n == 1) {
+      ScrStr *r = scr_str_retain(first->v.str);
+      scr_dyn_release(first);
+      return r;
+    }
+    size_t last_pos = 0;
+    for (size_t i = 0; i + 1 < f->len && !failed; i++) {
+      if (f->data[i] != '%') continue;
+      char next = f->data[++i];
+      if (a + 1 != n) {
+        ScrStr *temp = NULL;
+        bool continue_outer = false;
+        switch (next) {
+          case 's': {
+            a += 1;
+            ScrDyn *v = scr_dyn_arr_at(arr, a);
+            temp = scr_insp_fmt_s(v, 0);
+            scr_dyn_release(v);
+            break;
+          }
+          case 'j': {
+            a += 1;
+            ScrDyn *v = scr_dyn_arr_at(arr, a);
+            temp = scr_dyn_format_j(v);
+            scr_dyn_release(v);
+            break;
+          }
+          case 'd': {
+            a += 1;
+            ScrDyn *v = scr_dyn_arr_at(arr, a);
+            if (v->kind == SCR_DYN_BIG) temp = scr_insp_dyn(v, 0, 0);
+            else if (v->kind == SCR_DYN_NUM) temp = scr_insp_f64(v->v.num);
+            else temp = scr_insp_f64(insp_format_number(v));
+            scr_dyn_release(v);
+            break;
+          }
+          case 'O': {
+            a += 1;
+            ScrDyn *v = scr_dyn_arr_at(arr, a);
+            temp = scr_insp_dyn(v, 0, 2);
+            scr_dyn_release(v);
+            break;
+          }
+          case 'o': {
+            a += 1;
+            ScrDyn *v = scr_dyn_arr_at(arr, a);
+            if (insp_has_hidden(v, 0)) {
+              static const char msg[] = "util.format %o of a dynamic array or function is not supported yet";
+              scr_throw_error(SCR_ERR_ERROR, scr_str_new(msg, sizeof msg - 1));
+              temp = scr_str_new("", 0);
+            } else {
+              temp = scr_insp_dyn(v, 0, 4);
+            }
+            scr_dyn_release(v);
+            break;
+          }
+          case 'i': {
+            a += 1;
+            ScrDyn *v = scr_dyn_arr_at(arr, a);
+            if (v->kind == SCR_DYN_BIG) {
+              temp = scr_insp_dyn(v, 0, 0);
+            } else {
+              ScrStr *t = scr_dyn_to_string(v, NULL);
+              temp = scr_insp_f64(scr_parse_int(t, 0));
+              scr_str_release(t);
+            }
+            scr_dyn_release(v);
+            break;
+          }
+          case 'f': {
+            a += 1;
+            ScrDyn *v = scr_dyn_arr_at(arr, a);
+            ScrStr *t = scr_dyn_to_string(v, NULL);
+            temp = scr_insp_f64(scr_parse_float(t));
+            scr_str_release(t);
+            scr_dyn_release(v);
+            break;
+          }
+          case 'c':
+            a += 1;
+            temp = scr_str_new("", 0);
+            break;
+          case '%':
+            ib_bytes(&out, f->data + last_pos, i - last_pos);
+            last_pos = i + 1;
+            continue_outer = true;
+            break;
+          default:
+            continue_outer = true;
+            break;
+        }
+        if (continue_outer) continue;
+        if (temp == NULL || scr_exc_pending()) {
+          if (temp != NULL) scr_str_release(temp);
+          failed = true;
+          break;
+        }
+        if (last_pos != i - 1) ib_bytes(&out, f->data + last_pos, (i - 1) - last_pos);
+        ib_str(&out, temp);
+        scr_str_release(temp);
+        last_pos = i + 1;
+      } else if (next == '%') {
+        ib_bytes(&out, f->data + last_pos, i - last_pos);
+        last_pos = i + 1;
+      }
+    }
+    if (!failed && last_pos != 0) {
+      a += 1;
+      join = true;
+      if (last_pos < f->len) ib_bytes(&out, f->data + last_pos, f->len - last_pos);
+    }
+  }
+  scr_dyn_release(first);
+  while (!failed && a < n) {
+    ScrDyn *v = scr_dyn_arr_at(arr, a);
+    if (join) ib_char(&out, ' ');
+    ScrStr *s = scr_insp_dyn_s(v, 2);
+    scr_dyn_release(v);
+    if (scr_exc_pending()) {
+      scr_str_release(s);
+      failed = true;
+      break;
+    }
+    ib_str(&out, s);
+    scr_str_release(s);
+    join = true;
+    a += 1;
+  }
+  if (failed) {
+    free(out.data);
+    return NULL;
+  }
+  return ib_take(&out);
+}

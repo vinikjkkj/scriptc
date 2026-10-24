@@ -7965,6 +7965,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_big_as_n(${arg(1)}, ${arg(0)}, false)`);
           case "insp.dynSpread":
             return finish(`scr_insp_dyn_spread(${arg(0)})`);
+          case "insp.format":
+            return finish(`scr_insp_format(${arg(0)})`);
           case "insp.jsval":
             return finish(`scr_insp_jsval(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "insp.begin":

@@ -968,6 +968,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // no ScrBigInt ABI, so no call is ever emitted; the entry exists so the
   // name table stays total.
   "insp.dynSpread": "scr_insp_dyn_spread",
+  "insp.format": "scr_insp_format",
   "fs.readFileSyncDyn": "scr_fs_read_file_sync_dyn",
   // Loose generic-shaped stragglers the burn-down surfaced alongside the
   // dyn head: the x509 PEM walks and stdin raw-mode throw catchably (the

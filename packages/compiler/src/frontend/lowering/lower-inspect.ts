@@ -36,10 +36,11 @@
 import * as ts from "../ts7/adapter.js";
 import type { NullProtoPatch } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
-import { isJsSourceFile } from "../program.js";
+import { isJsSourceFile, locOf } from "../program.js";
 import { BOOL, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
+import { dynRestPack } from "./lower-calls.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
 
 /* ── IR construction shorthand ───────────────────────────────────────── */
@@ -1585,6 +1586,19 @@ function lowerFormatCallIn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc, wit
   const first = argNodes[0]!;
   const firstIsLiteral = ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first);
 
+  // A RUNTIME argument list -- a spread (`util.format(...args)`), or a first argument that
+  // may be a format string the compiler cannot read (`util.format(fmt, a, b)` with `fmt` a
+  // variable, an `any`): where the %-substitutions fall is a run-time fact, so the whole
+  // list packs into one checked-dynamic array and the runtime formatter (scr_insp_format,
+  // formatWithOptionsInternal over dyn values) answers.
+  if (!firstIsLiteral) {
+    const firstT = L.mapTypeOf(L.typeOf(first));
+    const mayFormat = firstT === null || firstT.kind === "string" || firstT.kind === "dyn" || firstT.kind === "union";
+    if (argNodes.some((a) => ts.isSpreadElement(a)) || (argNodes.length > 1 && mayFormat)) {
+      return { kind: "libCall", fn: "insp.format", args: [dynRestPack(L, argNodes, expr, loc)], type: STRING, loc };
+    }
+  }
+
   /** The rest-args tail: ` ` + (strings verbatim, everything else
    * inspected at the default depth). */
   const restArg = (node: ts.Expression): IrExpr => formatSArg(L, node, 2, loc, false, hoist);
@@ -1822,6 +1836,45 @@ export function lowerUtilModuleCall(
     default:
       return null;
   }
+}
+
+/** `util.format.apply(thisArg, argList)` / `util.format.call(thisArg, ...args)`: the same
+ * runtime formatter as a spread call. `format` reads no receiver, so only an effect-free
+ * thisArg (`util`, a binding, `this`, null, undefined) can drop honestly; the argument list is
+ * an array LITERAL (its elements pack one by one) or any value that boxes to a dyn array
+ * (the `arguments` object, a rest array). Null leaves the other lowerings the call. */
+export function lowerUtilFormatApply(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
+  if (access.questionDotToken !== undefined || call.questionDotToken !== undefined) return null;
+  const name = access.name.text;
+  if (name !== "apply" && name !== "call") return null;
+  const inner = access.expression;
+  if (!ts.isPropertyAccessExpression(inner)) return null;
+  const bi = L.builtinMemberOf(inner);
+  if (bi === null || bi.module !== "util" || bi.member !== "format") return null;
+  if (call.arguments.length === 0 || (name === "apply" && call.arguments.length > 2)) return null;
+  const thisNode = call.arguments[0]!;
+  const effectFree =
+    thisNode.kind === ts.SyntaxKind.ThisKeyword ||
+    thisNode.kind === ts.SyntaxKind.NullKeyword ||
+    ts.isIdentifier(thisNode);
+  if (!effectFree) return null;
+  const loc = locOf(call);
+  let pack: IrExpr;
+  if (name === "call") {
+    pack = dynRestPack(L, call.arguments.slice(1), call, loc);
+  } else if (call.arguments.length === 1) {
+    pack = dynRestPack(L, [], call, loc);
+  } else {
+    const list = call.arguments[1]!;
+    if (ts.isArrayLiteralExpression(list)) {
+      pack = dynRestPack(L, list.elements, call, loc);
+    } else {
+      const lowered = L.lowerExprExpecting(list, DYN);
+      if (lowered.type.kind !== "dyn") return null;
+      pack = lowered;
+    }
+  }
+  return { kind: "libCall", fn: "insp.format", args: [pack], type: STRING, loc };
 }
 
 /** `util.deprecate(fn, msg, code?)`: a function with fn's own signature that
