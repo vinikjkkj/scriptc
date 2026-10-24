@@ -5451,6 +5451,14 @@ function validateFunction(
         ) {
           err(`jsonStringify of non-JSON-safe type ${e.value.type.kind}`, e.loc);
         }
+        // A run-time space (argfx3) is a number or a string, checked once here
+        // and read after the value by both emitters.
+        if (e.spaceArg) {
+          checkExpr(e.spaceArg);
+          if (e.spaceArg.type.kind !== "f64" && e.spaceArg.type.kind !== "string") {
+            err(`jsonStringify space of type ${e.spaceArg.type.kind} (a number or a string)`, e.loc);
+          }
+        }
         break;
       }
       case "dynCheck": {

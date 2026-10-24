@@ -12103,3 +12103,98 @@ ScrBytes *scr_buffer_from_dyn(const ScrDyn *v) {
       return NULL;
   }
 }
+
+/* ── JSON.stringify's space, at run time (argfx3) ───────────────────────
+ * A pretty-print form whose space is not a literal re-indents the compact
+ * text with the gap algorithm the compile-time re-indenter (sc_ji) applies:
+ * a newline and the gap per depth on '{' '[' (an empty {} or [] stays
+ * inline), on ',' and on the closing bracket, ': ' after a key, and string
+ * contents untouched. The gap follows Node's rules: a number is clamped to
+ * 0..10 spaces (ToIntegerOrInfinity, NaN -> 0); a string keeps its first 10
+ * UTF-16 code units. An empty gap is the compact text itself. The compact
+ * text is BORROWED; every result is a fresh string (+1). */
+static void scr_ji_newline(ScrJsonBuf *b, size_t depth, const char *ind, size_t ilen) {
+  scr_jb_putc(b, '\n');
+  for (size_t td = 0; td < depth; td++) {
+    for (size_t tk = 0; tk < ilen; tk++) scr_jb_putc(b, ind[tk]);
+  }
+}
+
+static ScrStr *scr_json_reindent(const ScrStr *compact, const char *ind, size_t ilen) {
+  if (ilen == 0) return scr_str_new(compact->data, compact->len);
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  const char *s = compact->data;
+  size_t n = compact->len;
+  size_t depth = 0;
+  bool instr = false;
+  for (size_t i = 0; i < n; i++) {
+    char c = s[i];
+    if (instr) {
+      scr_jb_putc(&b, c);
+      if (c == '\\' && i + 1 < n) {
+        scr_jb_putc(&b, s[++i]);
+      } else if (c == '"') {
+        instr = false;
+      }
+      continue;
+    }
+    switch (c) {
+    case '"':
+      instr = true;
+      scr_jb_putc(&b, c);
+      break;
+    case '{':
+    case '[':
+      scr_jb_putc(&b, c);
+      if (i + 1 < n && s[i + 1] == (c == '{' ? '}' : ']')) {
+        scr_jb_putc(&b, s[++i]); /* empty {} / [] stay inline, like Node */
+        break;
+      }
+      depth++;
+      scr_ji_newline(&b, depth, ind, ilen);
+      break;
+    case '}':
+    case ']':
+      depth--;
+      scr_ji_newline(&b, depth, ind, ilen);
+      scr_jb_putc(&b, c);
+      break;
+    case ',':
+      scr_jb_putc(&b, ',');
+      scr_ji_newline(&b, depth, ind, ilen);
+      break;
+    case ':':
+      scr_jb_putc(&b, ':');
+      scr_jb_putc(&b, ' ');
+      break;
+    default:
+      scr_jb_putc(&b, c);
+    }
+  }
+  return scr_jb_finish(&b);
+}
+
+ScrStr *scr_json_indent_num(const ScrStr *compact, double space) {
+  double n = space != space ? 0 : trunc(space);
+  if (n < 1) n = 0;
+  if (n > 10) n = 10;
+  char gap[10];
+  memset(gap, ' ', sizeof gap);
+  return scr_json_reindent(compact, gap, (size_t)n);
+}
+
+ScrStr *scr_json_indent_str(const ScrStr *compact, const ScrStr *space) {
+  /* The first 10 UTF-16 code units: a 4-byte (astral) character counts two.
+   * A character that would cross the tenth unit is left out whole. */
+  size_t take = 0, units = 0;
+  while (take < space->len) {
+    unsigned char c = (unsigned char)space->data[take];
+    size_t w = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+    size_t u = w == 4 ? 2 : 1;
+    if (units + u > 10) break;
+    units += u;
+    take += w;
+  }
+  return scr_json_reindent(compact, space->data, take);
+}

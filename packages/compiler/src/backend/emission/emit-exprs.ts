@@ -8284,6 +8284,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // types (recursive records — the circular-structure TypeError) and
         // dyn roots; everything else keeps the throw-free path.
         const v = E.emitExpr(e.value);
+        // A run-time space (argfx3) is read after the value and before the
+        // serializer runs, as JS evaluates every argument before stringifying.
+        const spaceTemp = e.spaceArg ? E.emitExpr(e.spaceArg) : undefined;
         // A dyn root: the runtime's dyn walker (scr_dyn_format_j — the %j
         // serializer IS JSON.stringify over the checked-dynamic tree: number/string/bool/
         // null/array/object exact, dropped members omitted, a dropped ROOT
@@ -8310,6 +8313,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // clamp/truncate rules) riding as an extra property; the interned
         // re-indenter rewrites the compact text with Node's gap algorithm.
         // Compact temp stays frame-owned; the pretty string is a fresh +1.
+        if (spaceTemp && e.spaceArg) {
+          return E.newTemp(
+            e.type,
+            `${e.spaceArg.type.kind === "f64" ? "scr_json_indent_num" : "scr_json_indent_str"}(${compact.name}, ${spaceTemp.name})`,
+          );
+        }
         const indent = (e as { indent?: string }).indent;
         if (!indent) return compact;
         const bytes = Buffer.from(indent, "utf8");
