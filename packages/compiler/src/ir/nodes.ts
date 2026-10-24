@@ -5191,6 +5191,15 @@ export type IrLibFn =
    * no-op, kept for ownership uniformity). Never throws. A direct
    * `C.name` on the class name itself folds to a strLit instead. */
   | "class.name"
+  /** `obj.constructor.name` where obj is an instance of a vtable hierarchy
+   * class (scr_object.c): args[0] is a borrowed class-instance value; the
+   * result is the name of the instance's DYNAMIC class, +1 (an interned
+   * immortal, so the retain is a no-op). The emitters stamp every user
+   * hierarchy vtable with its class name exactly when the module has one of
+   * these (moduleUsesCtorName). Never throws. An instance of a class that is
+   * not in a hierarchy has no dynamic class to ask: the lowering folds that
+   * to the class's name instead. */
+  | "class.instanceName"
   | "error.ctor"
   | "error.toString"
   /** `e.stack` (scr_error.c): borrowed `%Error`-rooted receiver, +1 the
@@ -10563,6 +10572,29 @@ export function moduleUsesWeakMap(mod: IrModule): boolean {
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);
+  return found;
+}
+
+/** True when the module reads `obj.constructor.name` over a vtable-hierarchy
+ * instance (the class.instanceName libCall): the one reason a vtable carries
+ * its class's name. Gated so every other program's vtables and literal table
+ * stay byte-identical. Same walk shape as moduleUsesWeakMap. */
+export function moduleUsesCtorName(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "class.instanceName") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod.functions);
   return found;
 }
 

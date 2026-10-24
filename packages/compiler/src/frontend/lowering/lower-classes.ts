@@ -6405,6 +6405,32 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return { kind: "call", callee: fnName, args, type: found.method.ret, loc };
   }
 
+/** `obj.constructor.name` over a class INSTANCE: the name of the instance's
+   * DYNAMIC class (the idiom every error base class, logger and registry
+   * spells, and the way `get name() { return this.constructor.name }` makes a
+   * subclass answer to its own name). The receiver's static class says nothing
+   * about the dynamic one inside a hierarchy, so the read is a libCall the
+   * backends answer from the instance's vtable; a class in no hierarchy answers
+   * its own name there too. Only the `.constructor.name` chain is modelled — the
+   * constructor itself as a value (comparing it, constructing through it) keeps
+   * its refusal. Null for receivers that are not instances of a collected
+   * program class or of the runtime Error hierarchy. */
+  export function lowerConstructorName(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.name.text !== "name" || expr.questionDotToken) return null;
+    const inner = expr.expression;
+    if (!ts.isPropertyAccessExpression(inner) || inner.name.text !== "constructor" || inner.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
+    const recvT = L.mapTypeOf(L.typeOf(inner.expression));
+    if (recvT?.kind !== "object") return null;
+    const info = L.classes.get(recvT.className);
+    if (!info) return null;
+    if (info.builtinEmitter || info.builtinStream !== undefined) return null;
+    if (info.decl !== null && info.def.jsName === undefined) return null;
+    const recv = L.lowerExpr(inner.expression);
+    if (recv.type.kind !== "object") return null;
+    return { kind: "libCall", fn: "class.instanceName", args: [recv], type: STRING, loc: locOf(expr) };
+  }
+
 /** Static member access through a class VALUE (`X.m` where X is
    * classval-typed): devirtualized — the member resolves against the
    * static class's chain, exact when no strict descendant redeclares it
@@ -8800,6 +8826,20 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           if (t) return nsUndefRead(L, ambientRoot.text, expr, t);
         }
       }
+      // `new rs.C(...)` where `rs` is a require binding of a PROGRAM module and
+      // the member resolves, through the exporter's own table, to a class the
+      // program declares: the construction names the class itself, exactly as
+      // the bare name (or a destructured binding of the same member) does. It
+      // must not go through the export's class VALUE below: a class whose
+      // chain roots in a runtime-provided constructor (Error) has no class
+      // value, though it constructs by name.
+      if (!expr.expression.questionDotToken && L.cjsLocalModuleBindingOf(expr.expression.expression)) {
+        const classSym = L.resolveValueSymbol(expr.expression.name);
+        const info = classSym ? L.classBySymbol.get(classSym) : undefined;
+        if (info && !info.generic && info.classDecorators?.valueGlobalId === undefined) {
+          return lowerProgramClassNew(L, expr, info, loc);
+        }
+      }
       // Construction through a CJS export member tsgo types `any`
       // (expando members — `new module.exports.Sub()` / `new
       // exports.Sub()` in-file, `new C.Sub()` through the require
@@ -8839,20 +8879,6 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             L.classes.get(g.type.className);
           if (info && !info.generic) {
             L.noteEdge(`%${info.def.name}.constructor`);
-      // `new rs.C(...)` where `rs` is a require binding of a PROGRAM module and
-      // the member resolves, through the exporter's own table, to a class the
-      // program declares: the construction names the class itself, exactly as
-      // the bare name (or a destructured binding of the same member) does. It
-      // must not go through the export's class VALUE below: a class whose
-      // chain roots in a runtime-provided constructor (Error) has no class
-      // value, though it constructs by name.
-      if (!expr.expression.questionDotToken && L.cjsLocalModuleBindingOf(expr.expression.expression)) {
-        const classSym = L.resolveValueSymbol(expr.expression.name);
-        const info = classSym ? L.classBySymbol.get(classSym) : undefined;
-        if (info && !info.generic && info.classDecorators?.valueGlobalId === undefined) {
-          return lowerProgramClassNew(L, expr, info, loc);
-        }
-      }
             const below = (c: ClassInfo): void => {
               for (const s of c.subclasses) {
                 L.noteEdge(`%${s.def.name}.constructor`);

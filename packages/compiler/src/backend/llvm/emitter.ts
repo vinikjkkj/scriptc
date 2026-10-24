@@ -841,6 +841,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "error.propSet": "scr_error_prop_set",
   "error.propGet": "scr_error_prop_get",
   "class.name": "scr_classobj_name",
+  "class.instanceName": "scr_object_ctor_name",
   // The dyn (ScrDyn dyn) surface (scr_json.c / scr_dyn_invoke.c):
   // json.parse throws the catchable SyntaxError; keySet/toString/
   // defineProps throw Node's TypeErrors (all in the may-throw seed set —
@@ -2290,7 +2291,7 @@ class LlEmitter {
       // fn pointer, and the caps[] tail all address through them).
       `%ScrStr = type { i32, i32, i32 }`,
       `%ScrLogArg = type { i32, i64 }`,
-      `%ScrVt = type { i64, i64, ptr }`,
+      `%ScrVt = type { i64, i64, ptr, ptr }`,
       `%ScrUnion = type { i64, i32, ptr, ptr, ptr, i64 }`,
       // …including `implicit_proto` (field 4), the prototype object
       // scr_dyn_fn_prototype mints: the caps[] tail is addressed as one
@@ -17731,6 +17732,23 @@ class LlEmitter {
       B.startBlock(lj);
       const t = B.tmp();
       B.line(`${t} = load ptr, ptr ${slot}`);
+      return this.own({ name: t, type: e.type });
+    }
+    if (e.fn === "class.instanceName") {
+      // `obj.constructor.name`: a hierarchy instance answers through its vtable's
+      // stamped class name; a class outside every hierarchy has no vtable and no
+      // dynamic class, so its own name is the answer (the frontend cannot tell the
+      // two apart: subclasses may collect later). +1 either way — an interned
+      // immortal, so retain and release skip it.
+      const at = e.args[0]!.type;
+      const recv = this.emitExpr(e.args[0]!);
+      const cm = at.kind === "object" ? this.classMeta.get(at.className) : undefined;
+      if (cm !== undefined && !cm.hierarchy && !cm.def.runtime) {
+        return this.own({ name: this.internLiteral(cm.def.jsName ?? ""), type: e.type });
+      }
+      this.declare(`declare ptr @scr_object_ctor_name(ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_object_ctor_name(ptr ${recv.name})`);
       return this.own({ name: t, type: e.type });
     }
     const sym = LIB_FN_SYMS[e.fn];

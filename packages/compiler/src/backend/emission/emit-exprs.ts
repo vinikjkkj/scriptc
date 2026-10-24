@@ -8152,6 +8152,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // `X.name` through a class value: the class object's stored
             // .name string (+1 — a no-op retain on the interned immortal).
             return finish(`scr_classobj_name(${arg(0)})`);
+          case "class.instanceName": {
+            // `obj.constructor.name`: a hierarchy instance answers through its
+            // vtable's stamped class name; a class outside every hierarchy has no
+            // vtable and no dynamic class — its own name is the answer (the
+            // frontend cannot tell the two apart: subclasses may collect later).
+            // +1 either way — an interned immortal, so the retain is a no-op.
+            const at = e.args[0]!.type;
+            const meta = at.kind === "object" ? E.classMeta.get(at.className) : undefined;
+            if (meta !== undefined && !meta.hierarchy && !meta.def.runtime) {
+              return finish(`scr_str_retain((ScrStr *)&${E.internLiteral(meta.def.jsName ?? "")})`);
+            }
+            return finish(`scr_object_ctor_name(${arg(0)})`);
+          }
           default: {
             const _exhaustive: never = fn;
             void _exhaustive;

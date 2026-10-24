@@ -767,6 +767,11 @@ void scr_collect_cycles_idle(void);
 typedef struct ScrVt {
   size_t pre, post;
   void (*release)(void *obj);
+  /* The class's JS-observable name (an interned immortal literal), stamped by
+   * the emitter on user classes when the program reads `x.constructor.name`;
+   * NULL elsewhere (the runtime-provided hierarchies answer from their own
+   * tables — scr_object_ctor_name). */
+  const struct ScrStr *name;
 } ScrVt;
 
 /* ── strings ──────────────────────────────────────────────────────────
@@ -954,6 +959,9 @@ void *scr_classobj_retain_v(void *c);
 void scr_classobj_release_v(void *c);
 /* `X.name` (+1 — a no-op retain on the interned immortal). */
 ScrStr *scr_classobj_name(ScrClassObj *c);
+/* `obj.constructor.name` for an instance of a vtable hierarchy (+1): the
+ * vtable's stamped class name, or the runtime-provided class's own. */
+ScrStr *scr_object_ctor_name(void *obj);
 /* The keyed-write miss on a fixed-shape record: throws the catchable
  * TypeError naming the key (JS would add the property — the documented
  * monomorphic-struct divergence). scr_object.c. */

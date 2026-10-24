@@ -1168,6 +1168,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // `X.name` through a class value: the arg is a program-dependent
   // classval (a null slot; the libCall case checks the kind).
   "class.name": { argTypes: [null], result: STRING },
+  // `obj.constructor.name` over a hierarchy instance (a null slot; the
+  // libCall case checks the arg is a class instance).
+  "class.instanceName": { argTypes: [null], result: STRING },
   "error.ctor": { argTypes: [null, STRING], result: VOID },
   "error.toString": { argTypes: [null], result: STRING },
   // The MEMOISING `.stack` reader. Same receiver rule as error.toString
@@ -5081,6 +5084,15 @@ function validateFunction(
           const recv = e.args[0];
           if (!recv || recv.type.kind !== "object" || recv.type.className !== "%DOMException") {
             err(`libCall ${e.fn} receiver must be %DOMException`, e.loc);
+          }
+          break;
+        }
+        if (e.fn === "class.instanceName") {
+          if (e.args[0]?.type.kind !== "object") {
+            err(`libCall class.instanceName takes a class instance`, e.loc);
+          }
+          if (e.type.kind !== "string") {
+            err(`libCall class.instanceName must return string`, e.loc);
           }
           break;
         }

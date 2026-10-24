@@ -5,7 +5,7 @@
  * VtSlot) the emitter builds up front; emission ORDER is part of the C. */
 import type { CEmitter } from "./emitter.js";
 import type { IrBuiltinRendering, IrFunction, OwnMaskShape } from "../../ir/nodes.js";
-import { DYN, IrClassDef, IrType, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
+import { DYN, IrClassDef, IrType, moduleUsesCtorName, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
 import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
 
@@ -549,9 +549,14 @@ export interface ClassMeta {
 /** One static const vtable per hierarchy class: interval, direct
    * release, and the class's dispatch entry for every slot. */
   export function emitVtableInstances(E: CEmitter, out: string[], hierarchyClasses: ClassMeta[]): void {
+    // Class names ride the vtable only in a module that reads
+    // `obj.constructor.name` (IR class.instanceName): every other program keeps
+    // its vtable heads, and its literal table, exactly as they were.
+    const stampNames = moduleUsesCtorName(E.mod);
     for (const meta of hierarchyClasses) {
       const vtt = mangleVtStruct(meta.root.def.name);
-      const head = `{ ${meta.pre}, ${meta.post}, &${mangleClassReleaseDirect(meta.def.name)} }`;
+      const nameField = stampNames ? `, (const struct ScrStr *)&${E.internLiteral(meta.def.jsName ?? "")}` : "";
+      const head = `{ ${meta.pre}, ${meta.post}, &${mangleClassReleaseDirect(meta.def.name)}${nameField} }`;
       const entries = E.vtEntriesFor(meta).map(({ slot, impl }) =>
         impl === null
           ? `0 /* ${slot.method}: outside the declaring subtree */`

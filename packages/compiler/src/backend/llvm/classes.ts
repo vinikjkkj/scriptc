@@ -20,7 +20,7 @@
  * embed runtime registry/state slots and their surfaces are async-shaped);
  * the emitter refuses them by name before anything here runs. */
 import type { IrClassDef, IrFunction, IrModule, IrType } from "../../ir/nodes.js";
-import { isRefCounted, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
+import { isRefCounted, moduleUsesCtorName, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
 import {
   mangleClassGcFree,
   mangleClassNew,
@@ -219,6 +219,8 @@ export interface ClassHost extends ShapeHost {
   unitInstanceRef(unionId: string, tag: number): string;
   undefinedArmTag(t: IrType): number;
   cstr(text: string): string;
+  /** The interned immortal ScrStr literal for `text` (an `@`-ref). */
+  internLiteral(text: string): string;
 }
 
 /** The newFn initialization stores for fields whose type ADMITS undefined
@@ -272,6 +274,8 @@ export function emitClassShapes(
   const defs: string[] = [];
   const emitted = (mod.classes ?? []).filter((c) => !c.runtime);
   if (emitted.length === 0) return { typeDefs, defs };
+  // Class names ride the vtable only in a module that reads `obj.constructor.name`.
+  const stampNames = moduleUsesCtorName(mod);
   // The module's function names, for spotting a widened override's
   // synthesized vtable thunk (`%C.m%vt`) when the entries are filled.
   const emittedFnNames = new Set((mod.functions ?? []).map((f) => f.name));
@@ -330,7 +334,10 @@ export function emitClassShapes(
               : `%${impl.def.name}.${slot.method}`,
           )}`,
     );
-    const head = `%ScrVt { i64 ${meta.pre}, i64 ${meta.post}, ptr @${mangleClassReleaseDirect(cls.name)} }`;
+    // The class name rides the vtable only in a module that reads
+    // `obj.constructor.name` (class.instanceName); otherwise the field is null.
+    const nameSym = stampNames ? host.internLiteral(meta.def.jsName ?? "") : null;
+    const head = `%ScrVt { i64 ${meta.pre}, i64 ${meta.post}, ptr @${mangleClassReleaseDirect(cls.name)}, ptr ${nameSym ?? "null"} }`;
     defs.push(
       `@${mangleVtInstance(cls.name)} = internal constant %${mangleVtStruct(meta.root.def.name)} ` +
         `{ ${[head, ...entries].join(", ")} } ; class ${cls.name}`,

@@ -14,6 +14,23 @@ ScrStr *scr_classobj_name(ScrClassObj *c) {
   return scr_str_retain((ScrStr *)c->name);
 }
 
+/* `obj.constructor.name` where obj is an instance of a hierarchy class: every
+ * such layout is { size_t rc; const ScrVt *vt; ... }, and the class's vtable
+ * names its class. An emitted user class stamps the name; the runtime-provided
+ * hierarchies (the Error kinds) answer from their kind table, and anything
+ * else is a plain Object. */
+ScrStr *scr_object_ctor_name(void *obj) {
+  const ScrVt *vt = ((const struct { size_t rc; const ScrVt *vt; } *)obj)->vt;
+  if (vt != NULL && vt->name != NULL) return scr_str_retain((ScrStr *)vt->name);
+  if (vt != NULL && vt >= scr_error_vts && vt < scr_error_vts + SCR_ERR_KINDS) {
+    const char *n = scr_error_kind_name((int)(vt - scr_error_vts));
+    /* DOMException's `name` slot defaults to "Error"; its CONSTRUCTOR is not Error. */
+    if ((int)(vt - scr_error_vts) == SCR_ERR_DOMEX) n = "DOMException";
+    if (n != NULL) return scr_str_new(n, strlen(n));
+  }
+  return scr_str_new("Object", 6);
+}
+
 /* The keyed-write MISS on a fixed-shape (signature-free) record: JS would
  * ADD the property, which a monomorphic struct cannot — the write throws
  * the catchable TypeError naming the key instead (the documented

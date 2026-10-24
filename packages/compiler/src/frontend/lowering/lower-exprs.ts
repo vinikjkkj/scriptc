@@ -18216,10 +18216,6 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // decoration result decides at runtime.
       return nsInfo?.classDecorators?.valueGlobalId !== undefined ? undefined : nsInfo;
     })();
-    // A rebindable decorated name as the RHS: the runtime target is the
-    // decoration result — fall to the class-VALUE path below, whose
-    // instanceOfValue reads the interval off the bound class object.
-    const directRhs = rhsSymbol ? L.classBySymbol.get(rhsSymbol) : undefined;
     // `x instanceof rs.C` where `rs` is a require binding of a PROGRAM module:
     // the member resolves through the exporter's own table to the program
     // class, as the bare name does (a class rooted in a runtime-provided
@@ -18231,14 +18227,18 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const info = classSym ? L.classBySymbol.get(classSym) : undefined;
       return info?.classDecorators?.valueGlobalId !== undefined ? undefined : info;
     })();
+    // A rebindable decorated name as the RHS: the runtime target is the
+    // decoration result — fall to the class-VALUE path below, whose
+    // instanceOfValue reads the interval off the bound class object.
+    const directRhs = rhsSymbol ? L.classBySymbol.get(rhsSymbol) : undefined;
     const target =
       (directRhs?.classDecorators?.valueGlobalId !== undefined ? undefined : directRhs) ??
       rhsNsClass ??
+      rhsCjsClass ??
       L.builtinErrorInfoOf(rhsSymbol) ??
       L.builtinEmitterInfoOf(rhsSymbol) ??
       L.builtinEmitterInfoOf(rhsMemberSymbol) ??
       L.builtinStreamInfoOf(rhsSymbol) ??
-      rhsCjsClass ??
       L.builtinStreamInfoOf(rhsMemberSymbol) ??
       undefined;
     if (!target) {
