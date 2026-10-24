@@ -11960,6 +11960,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8720-dataview-members-on-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/8720-dataview-members-on-untyped-receivers.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8721-text-codecs-on-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/8721-text-codecs-on-untyped-receivers.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8722-typed-array-methods-on-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/8722-typed-array-methods-on-untyped-receivers.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8723-array-reduce-findlast-tosorted-with-on-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/8723-array-reduce-findlast-tosorted-with-on-untyped-receivers.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8724-regexp-exec-on-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/8724-regexp-exec-on-untyped-receivers.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8725-named-properties-on-untyped-arrays.js": {
+   "order": [
+    "<repo>/tests/corpus/8725-named-properties-on-untyped-arrays.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8726-array-buffer-of-untyped-typed-arrays.js": {
+   "order": [
+    "<repo>/tests/corpus/8726-array-buffer-of-untyped-typed-arrays.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8727-text-codec-round-trip-through-an-untyped-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/8727-text-codec-round-trip-through-an-untyped-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8728-array-flat-and-tospliced-on-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/8728-array-flat-and-tospliced-on-untyped-receivers.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8729-sort-comparator-type-error-text-per-kind.js": {
+   "order": [
+    "<repo>/tests/corpus/8729-sort-comparator-type-error-text-per-kind.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/900-records-basics.ts": {
    "order": [
     "<repo>/tests/corpus/900-records-basics.ts"
