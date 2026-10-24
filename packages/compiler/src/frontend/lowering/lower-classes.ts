@@ -8856,6 +8856,17 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     if (value.kind === "unitLit" && value.unit === "undefined") {
       return { kind: "strLit", value: "", type: STRING, loc };
     }
+    // The constructor's message is ToString(argument) unless the argument is
+    // undefined (no message at all, which reads ""): null is "null", a number
+    // or boolean its JS spelling, and an UNTYPED value (the usual
+    // `constructor(msg) { super(msg) }` of a JS class) whatever its own
+    // ToString says, objects included.
+    if (value.kind === "unitLit" && value.unit === "null") {
+      return { kind: "strLit", value: "null", type: STRING, loc };
+    }
+    if (value.type.kind === "f64" || value.type.kind === "bool") {
+      return { kind: "toString", operand: value, type: STRING, loc };
+    }
     L.unsupported(
       "SC1090",
       args[0]!,
