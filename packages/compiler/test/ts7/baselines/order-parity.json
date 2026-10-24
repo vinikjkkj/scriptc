@@ -12695,6 +12695,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js": {
+   "order": [
+    "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8841-util-types-kind-tests.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8841-util-types-kind-tests.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js": {
+   "order": [
+    "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts": {
+   "order": [
+    "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8846-url-setters.js": {
+   "order": [
+    "<repo>/tests/corpus/8846-url-setters.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8847-url-origin-and-tojson.js": {
+   "order": [
+    "<repo>/tests/corpus/8847-url-origin-and-tojson.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8900-function-constructor-over-literal-text.js": {
    "order": [
     "<repo>/tests/corpus/8900-function-constructor-over-literal-text.js"
@@ -12728,6 +12776,69 @@
   "<repo>/tests/corpus/8905-function-constructor-reader-chosen-by-flags-and-named-by-data.js": {
    "order": [
     "<repo>/tests/corpus/8905-function-constructor-reader-chosen-by-flags-and-named-by-data.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8910-arguments-length-read-beside-reassigned-parameters.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8910-arguments-length-read-beside-reassigned-parameters.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8911-util-format-over-a-run-time-argument-list.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8911-util-format-over-a-run-time-argument-list.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8912-apply-and-call-forward-an-arguments-object-to-compiled-functions.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8912-apply-and-call-forward-an-arguments-object-to-compiled-functions.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8913-element-assignment-and-increment-in-value-position.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8913-element-assignment-and-increment-in-value-position.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8914-defaulted-parameters-omitted-through-a-function-value/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8914-defaulted-parameters-omitted-through-a-function-value/helpers.cjs",
+    "<repo>/tests/corpus/8914-defaulted-parameters-omitted-through-a-function-value/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8915-string-index-read-on-untyped-receiver.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8915-string-index-read-on-untyped-receiver.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8916-string-add-with-boolean-or-union-operand.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8916-string-add-with-boolean-or-union-operand.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8917-require-binding-of-a-commonjs-module-used-as-a-value/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8917-require-binding-of-a-commonjs-module-used-as-a-value/helpers.cjs",
+    "<repo>/tests/corpus/8917-require-binding-of-a-commonjs-module-used-as-a-value/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/helpers.cjs",
+    "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8919-json-stringify-of-undefined-and-function-roots.js": {
+   "order": [
+    "<repo>/tests/corpus/8919-json-stringify-of-undefined-and-function-roots.js"
    ],
    "diags": []
   },
@@ -14591,84 +14702,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/fixtures/node-types/argv-env.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/argv-env.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/child-stdio.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/import-fences.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/import-fences.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC1010",
-     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
-     "loc": {
-      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
-      "start": 422,
-      "end": 461
-     },
-     "milestone": "M4",
-     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
-    }
-   ]
-  },
-  "<repo>/tests/fixtures/node-types/path-os.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/path-os.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/server-address-states.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stream-capture.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/streams.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts"
@@ -15222,110 +15255,82 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  }
-,
-  "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js": {
+  },
+  "<repo>/tests/fixtures/node-types/argv-env.ts": {
    "order": [
-    "<repo>/tests/corpus/8840-function-array-element-called-through-an-index.js"
+    "<repo>/tests/fixtures/node-types/argv-env.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8841-util-types-kind-tests.cjs": {
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
    "order": [
-    "<repo>/tests/corpus/8841-util-types-kind-tests.cjs"
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js": {
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
    "order": [
-    "<repo>/tests/corpus/8842-date-fields-from-strings-and-composed-field-constructor.js"
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts": {
+  "<repo>/tests/fixtures/node-types/fenced.ts": {
    "order": [
-    "<repo>/tests/corpus/8843-function-expression-with-an-any-array-parameter.ts"
+    "<repo>/tests/fixtures/node-types/fenced.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts": {
+  "<repo>/tests/fixtures/node-types/import-fences.ts": {
    "order": [
-    "<repo>/tests/corpus/8844-declared-this-parameter-in-a-method-type.ts"
+    "<repo>/tests/fixtures/node-types/import-fences.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1010",
+     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
+      "start": 422,
+      "end": 461
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/fixtures/node-types/path-os.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/path-os.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js": {
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
    "order": [
-    "<repo>/tests/corpus/8845-string-pattern-replace-on-an-untyped-receiver.js"
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8846-url-setters.js": {
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
    "order": [
-    "<repo>/tests/corpus/8846-url-setters.js"
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8847-url-origin-and-tojson.js": {
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
    "order": [
-    "<repo>/tests/corpus/8847-url-origin-and-tojson.js"
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8910-arguments-length-read-beside-reassigned-parameters.cjs": {
+  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
    "order": [
-    "<repo>/tests/corpus/8910-arguments-length-read-beside-reassigned-parameters.cjs"
+    "<repo>/tests/fixtures/node-types/stream-capture.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/8911-util-format-over-a-run-time-argument-list.cjs": {
+  "<repo>/tests/fixtures/node-types/streams.ts": {
    "order": [
-    "<repo>/tests/corpus/8911-util-format-over-a-run-time-argument-list.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8912-apply-and-call-forward-an-arguments-object-to-compiled-functions.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8912-apply-and-call-forward-an-arguments-object-to-compiled-functions.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8913-element-assignment-and-increment-in-value-position.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8913-element-assignment-and-increment-in-value-position.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8914-defaulted-parameters-omitted-through-a-function-value/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8914-defaulted-parameters-omitted-through-a-function-value/helpers.cjs",
-    "<repo>/tests/corpus/8914-defaulted-parameters-omitted-through-a-function-value/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8915-string-index-read-on-untyped-receiver.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8915-string-index-read-on-untyped-receiver.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8916-string-add-with-boolean-or-union-operand.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8916-string-add-with-boolean-or-union-operand.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8917-require-binding-of-a-commonjs-module-used-as-a-value/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8917-require-binding-of-a-commonjs-module-used-as-a-value/helpers.cjs",
-    "<repo>/tests/corpus/8917-require-binding-of-a-commonjs-module-used-as-a-value/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/helpers.cjs",
-    "<repo>/tests/corpus/8918-module-export-of-a-const-function-aliases-its-storage/main.cjs"
+    "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
   }
