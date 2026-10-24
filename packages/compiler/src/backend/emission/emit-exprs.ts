@@ -6587,6 +6587,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // loop must run to fire it.
             E.usesTimers = true;
             return finish(`scr_set_immediate_dyn_value()`);
+          case "timers.setTimeoutFnValue":
+            E.usesTimers = true;
+            return finish(`scr_set_timeout_dyn_value()`);
+          case "timers.setIntervalFnValue":
+            E.usesTimers = true;
+            return finish(`scr_set_interval_dyn_value()`);
+          case "dyn.structuredCloneFnValue":
+            return finish(`scr_structured_clone_dyn_value()`);
           case "timers.immediatePromise":
             E.usesTimers = true;
             return finish(`scr_immediate_promise()`);

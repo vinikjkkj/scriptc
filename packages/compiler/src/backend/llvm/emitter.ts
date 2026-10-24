@@ -1251,6 +1251,9 @@ const LIB_FN_SYMS: Record<string, string> = {
   // timers/promises immediate — all mark the loop live.
   "timers.queueMicrotaskDyn": "scr_queue_microtask_dyn",
   "timers.setImmediateFnValue": "scr_set_immediate_dyn_value",
+  "timers.setTimeoutFnValue": "scr_set_timeout_dyn_value",
+  "timers.setIntervalFnValue": "scr_set_interval_dyn_value",
+  "dyn.structuredCloneFnValue": "scr_structured_clone_dyn_value",
   "timers.immediatePromise": "scr_immediate_promise",
 };
 
@@ -1400,7 +1403,7 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "async.hop", "async.awaitDyn",
   "dc.tcTracePromise",
   "process.onUnhandledRejection", "process.onRejectionHandled", "process.onUncaught",
-  "timers.queueMicrotaskDyn", "timers.setImmediateFnValue", "timers.immediatePromise",
+  "timers.queueMicrotaskDyn", "timers.setImmediateFnValue", "timers.setTimeoutFnValue", "timers.setIntervalFnValue", "timers.immediatePromise",
 ]);
 
 /** ScrBytesElem (scr_runtime.h): U8, U32, F32, I32, F64, I8, BUF. */

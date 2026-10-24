@@ -13,7 +13,7 @@ import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
-import { builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction } from "./lower-fnvalue.js";
+import { builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf } from "./lower-fnvalue.js";
 import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
@@ -1575,10 +1575,24 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             const canonical = stdlibGlobalNameOf(L, expr) ?? expr.text;
             const obj = ctorObjectGlobalValue(L, canonical, loc);
             if (obj !== null) return obj;
-            // A global FUNCTION with no value form above keeps the identity token:
-            // the corpus pins it (1614: `new Set([setTimeout, ...]).has(setTimeout)`,
-            // the harness's knownGlobals idiom), and a call through the token is the
-            // known open defect listed in the report.
+            if (ts.isIdentifier(expr)) {
+              const gv = jsGlobalFnValueOf(L, expr, canonical, loc);
+              if (gv !== null) return gv;
+            }
+            // A global FUNCTION with no value form is refused at the reference: the
+            // token is a string, so `typeof f` answered 'string' and `f(...)` threw
+            // where Node calls the function. `eval` is the one with no possible
+            // value: a compiled program has no interpreter to hand it.
+            if (ts.isIdentifier(expr) && builtinMemberIsFunction(L, expr)) {
+              L.unsupported(
+                "SC1090",
+                expr,
+                canonical === "eval"
+                  ? "eval as a value (there is no interpreter in a compiled program: --dynamic is the only lane that evaluates code, and it is not a lane of this compiler)"
+                  : `library functions as values (call '${expr.text}' directly)`,
+              );
+            }
+            // Constructors, namespaces and constants keep the identity token.
             return { kind: "strLit", value: `[builtin ${canonical}]`, type: STRING, loc };
           }
           // The families with a WHY: each hint states what makes the
@@ -2256,7 +2270,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (ts.isElementAccessExpression(expr)) return L.lowerElementAccess(expr);
     if (ts.isConditionalExpression(expr)) return lowerTernary(L, expr);
 
-    if (ts.isPropertyAccessExpression(expr)) {
+    if (ts.isPropertyAccessExpression(expr)) {
+
       // `import.meta.dirname` / `.filename` / `.url` — the ESM spelling of
       // "where is this module". They lower to COMPILE-TIME constants of the
       // source file's own location, which is exactly the choice already
@@ -12791,6 +12806,14 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           `generic functions as values (call '${propName.text}' directly)`,
         );
       }
+      // A GLOBAL function of the library in a JavaScript source (`{ parseInt,
+      // atob }`): the same value the identifier spelling gets.
+      if (isJsSourceFile(prop.getSourceFile()) && L.isStdlibSymbol(resolved)) {
+        const bfn = builtinFnValueOf(L, propName, loc, resolved);
+        if (bfn) return bfn;
+        const gv = jsGlobalFnValueOf(L, propName, propName.text, loc, resolved);
+        if (gv) return gv;
+      }
     }
     L.rejectUnresolvedSymbol(
       symbol ? (symbol.flags & ts.SymbolFlags.Alias ? L.checker.getAliasedSymbol(symbol) : symbol) : null,
@@ -16924,6 +16947,16 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (dynSide.type.kind === "dyn" && DYN_HANDLE_KINDS.has(scalarSide.type.kind)) {
           scalarSide = { kind: "dynFrom", value: scalarSide, type: DYN, loc: scalarSide.loc };
         }
+        // dyn vs a FUNCTION value (`rec.parse === parseInt`, `handlers[0] === fn`):
+        // the closure boxes by reference and the runtime compares a function box
+        // by the CLOSURE it carries (scr_dyn_strict_eq), so one function is one
+        // value on either side of the boundary.
+        if (
+          dynSide.type.kind === "dyn" && scalarSide.type.kind === "func" &&
+          canBoxFuncIntoDyn(scalarSide.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+        ) {
+          scalarSide = { kind: "dynFrom", value: scalarSide, type: DYN, loc: scalarSide.loc };
+        }
         if (
           dynSide.type.kind === "dyn" &&
           (scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
@@ -16946,16 +16979,6 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // JS `any`-origin operands (the checked-dynamic declaration story):
       // each operator runs its OWN specified conversion on the dyn side —
       // ToNumber for arithmetic and the bitwise six, ToPrimitive plus the
-        }
-        // dyn vs a FUNCTION value (`rec.parse === parseInt`, `handlers[0] === fn`):
-        // the closure boxes by reference and the runtime compares a function box
-        // by the CLOSURE it carries (scr_dyn_strict_eq), so one function is one
-        // value on either side of the boundary.
-        if (
-          dynSide.type.kind === "dyn" && scalarSide.type.kind === "func" &&
-          canBoxFuncIntoDyn(scalarSide.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
-        ) {
-          scalarSide = { kind: "dynFrom", value: scalarSide, type: DYN, loc: scalarSide.loc };
       // string test for `+` and for ordering — instead of a checked cast
       // to number. The cast was a guess everywhere except when the value
       // already WAS a number: `'3' - 1`, `x | 0` over an unset field,

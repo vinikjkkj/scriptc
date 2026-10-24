@@ -81,8 +81,12 @@ import {
   type SrcLoc,
   STRING,
   typeEquals,
+  DYN,
+  UNDEFINED_T,
+  VOID,
 } from "../../ir/nodes.js";
 import { type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf } from "./surfaces.js";
+import { optionalTimerHandleClear } from "./lower-calls.js";
 
 
 interface BuiltinFnValue {
@@ -205,10 +209,6 @@ const BUILTIN_FN_VALUES: Readonly<Record<string, BuiltinFnValue | undefined>> = 
     ret: STRING,
     body: (a, loc) => libCall("str.decodeUriComponent", [a[0]!], STRING, loc),
   },
-  decodeURI: {
-    params: [["encodedURI", STRING]],
-    ret: STRING,
-    body: (a, loc) => libCall("str.decodeUri", [a[0]!], STRING, loc),
   escape: {
     params: [["string", STRING]],
     ret: STRING,
@@ -219,6 +219,10 @@ const BUILTIN_FN_VALUES: Readonly<Record<string, BuiltinFnValue | undefined>> = 
     ret: STRING,
     body: (a, loc) => libCall("str.unescape", [a[0]!], STRING, loc),
   },
+  decodeURI: {
+    params: [["encodedURI", STRING]],
+    ret: STRING,
+    body: (a, loc) => libCall("str.decodeUri", [a[0]!], STRING, loc),
   },
 };
 
@@ -276,7 +280,7 @@ function entryFor(L: Lowerer, name: string, mapped: IrType | null): BuiltinFnVal
  * disagree with, the value's type is this file's own contract, and
  * builtinFnValueDeclType below is the only thing that can put it in a
  * slot. */
-function gatedValueType(L: Lowerer, expr: ts.Identifier): IrType | null {
+function gatedValueType(L: Lowerer, expr: ts.Identifier, symOverride?: ts.Symbol): IrType | null {
   if (!hasBuiltinFnValue(L, expr.text)) return null;
   const entry = entryFor(L, expr.text, L.mapTypeOf(L.typeOf(expr)));
   if (entry === null) return null;
@@ -291,7 +295,7 @@ function gatedValueType(L: Lowerer, expr: ts.Identifier): IrType | null {
   // encodeURI(s) { return s + "!" }` compiled and printed the library's
   // answer for a direct call while the alias answered the user's. Every
   // declaration must be the library's.
-  const sym = L.resolveValueSymbol(expr);
+  const sym = symOverride ?? L.resolveValueSymbol(expr);
   if (!sym) return null;
   const decls = L.checker.declarationsOf(sym);
   if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return null;
@@ -308,8 +312,8 @@ function gatedValueType(L: Lowerer, expr: ts.Identifier): IrType | null {
  * closure over the memoized lift. Null for every identifier that is not
  * one of these globals, and for one that is but does not pass the gate
  * above, so the caller keeps its own fence. */
-export function builtinFnValueOf(L: Lowerer, expr: ts.Identifier, loc: SrcLoc): IrExpr | null {
-  const want = gatedValueType(L, expr);
+export function builtinFnValueOf(L: Lowerer, expr: ts.Identifier, loc: SrcLoc, symOverride?: ts.Symbol): IrExpr | null {
+  const want = gatedValueType(L, expr, symOverride);
   if (want === null) return null;
   narrowedSlotFence(L, expr, want);
   return builtinFnValueClosure(L, expr.text, want, loc);
@@ -571,4 +575,163 @@ export function builtinMemberFnValueOf(
     L.liftedFns.push(fn);
   }
   return { kind: "closure", fnName, captures: [], type: got.want, loc };
+}
+
+
+/* GLOBAL FUNCTIONS TAKEN AS VALUES IN A JAVASCRIPT SOURCE.
+ *
+ * `const f = atob`, `[setTimeout, clearTimeout]`, `{ parse: parseInt }`: in
+ * Node each is a real function, and a JS program may call it through the
+ * value. These used to be the identity token string (`typeof f` answered
+ * 'string', `f(x)` threw "f is not a function", or the slot refused the
+ * string at run time), which is a silent divergence.
+ *
+ * A row here is a lifted function whose parameters are the TYPES THE CHECKER
+ * MAPS `typeof <global>` to (never a shape written here), so the slot the
+ * binding gets is the closure's own type and no adapter is minted: the closure
+ * is interned (one per program, a zero-capture closure over a lifted
+ * function) and `f === atob` is JS identity. The body is the same lowering
+ * the direct call takes, over the parameters. A global with no row, or whose
+ * checker type has another shape, returns null and the caller refuses at the
+ * reference. */
+interface JsGlobalRow {
+  /** The function body over the parameter reads, or null when this program's
+   * mapping of the global has a shape the row does not know. */
+  readonly build: (L: Lowerer, mapped: Extract<IrType, { kind: "func" }>, args: readonly IrExpr[], loc: SrcLoc) => IrExpr | null;
+}
+
+function dynView(L: Lowerer, e: IrExpr, loc: SrcLoc): IrExpr | null {
+  if (e.type.kind === "dyn") return e;
+  if (e.kind === "unitLit" || L.dynConvertible(e.type)) return { kind: "dynFrom", value: e, type: DYN, loc };
+  return null;
+}
+
+/** The tag of the arm of kind `kind` in a union type, or -1. */
+function armTag(L: Lowerer, t: IrType, kind: string): number {
+  if (t.kind !== "union") return -1;
+  const def = L.unions.get(t.unionId);
+  if (def === undefined) return -1;
+  return def.arms.findIndex((a) => a.kind === kind);
+}
+
+const JS_GLOBAL_NATIVE: Readonly<Record<string, IrLibFn | undefined>> = {
+  setTimeout: "timers.setTimeoutFnValue",
+  setInterval: "timers.setIntervalFnValue",
+  setImmediate: "timers.setImmediateFnValue",
+  structuredClone: "dyn.structuredCloneFnValue",
+};
+
+const JS_GLOBAL_ROWS: Readonly<Record<string, JsGlobalRow | undefined>> = {
+  atob: {
+    build: (L, m, a, loc) => {
+      if (m.params.length !== 1 || m.ret.kind !== "string") return null;
+      const d = dynView(L, a[0]!, loc);
+      return d === null ? null : libCall("str.atob", [d], STRING, loc);
+    },
+  },
+  btoa: {
+    build: (L, m, a, loc) => {
+      if (m.params.length !== 1 || m.ret.kind !== "string") return null;
+      const d = dynView(L, a[0]!, loc);
+      return d === null ? null : libCall("str.btoa", [d], STRING, loc);
+    },
+  },
+  encodeURIComponent: {
+    build: (L, m, a, loc) => {
+      if (m.params.length !== 1 || m.ret.kind !== "string") return null;
+      const p = a[0]!;
+      if (p.type.kind === "string") return libCall("str.encodeUriComponent", [p], STRING, loc);
+      const d = dynView(L, p, loc);
+      if (d === null) return null;
+      const s: IrExpr = { kind: "toString", operand: d, hint: "default", type: STRING, loc };
+      return libCall("str.encodeUriComponent", [s], STRING, loc);
+    },
+  },
+  parseInt: {
+    build: (L, m, a, loc) => {
+      if (m.params.length !== 2 || m.params[0]!.kind !== "string" || m.ret.kind !== "f64") return null;
+      const radixT = m.params[1]!;
+      const radix = a[1]!;
+      let r: IrExpr;
+      if (radixT.kind === "f64") {
+        r = radix;
+      } else {
+        const numTag = armTag(L, radixT, "f64");
+        const undefTag = armTag(L, radixT, "undefinedT");
+        if (radixT.kind !== "union" || numTag < 0 || undefTag < 0) return null;
+        // An omitted radix is 0 (the direct call completes it the same way).
+        r = {
+          kind: "ternary",
+          cond: { kind: "unionIsTag", unionId: radixT.unionId, tag: numTag, negated: false, value: radix, type: BOOL, loc },
+          then: { kind: "unionNarrow", unionId: radixT.unionId, tag: numTag, value: radix, type: F64, loc },
+          else_: { kind: "numLit", value: 0, type: F64, loc },
+          type: F64,
+          loc,
+        };
+      }
+      return libCall("num.parseInt", [a[0]!, r], F64, loc);
+    },
+  },
+  queueMicrotask: {
+    build: (_L, m, a, loc) => {
+      if (m.params.length !== 1 || m.params[0]!.kind !== "func" || m.ret.kind !== "void") return null;
+      const cbT = m.params[0]!;
+      if (cbT.params.length !== 0 || cbT.rest === true || cbT.ret.kind !== "void") return null;
+      return libCall("timers.queueMicrotask", [a[0]!], VOID, loc);
+    },
+  },
+  clearTimeout: { build: (L, m, a, loc) => clearRow(L, m, a, "timers.clearTimeout", loc) },
+  clearInterval: { build: (L, m, a, loc) => clearRow(L, m, a, "timers.clearInterval", loc) },
+  clearImmediate: { build: (L, m, a, loc) => clearRow(L, m, a, "timers.clearImmediate", loc) },
+};
+
+function clearRow(L: Lowerer, m: Extract<IrType, { kind: "func" }>, a: readonly IrExpr[], fn: IrLibFn, loc: SrcLoc): IrExpr | null {
+  if (m.params.length !== 1 || m.ret.kind !== "void") return null;
+  return optionalTimerHandleClear(L, a[0]!, fn, loc);
+}
+
+/** The value of a global function in a JavaScript source: the interned
+ * closure of its row, or null (no row, a user symbol of that name, or a
+ * mapping the row does not recognise). */
+export function jsGlobalFnValueOf(L: Lowerer, expr: ts.Identifier, name: string, loc: SrcLoc, symOverride?: ts.Symbol): IrExpr | null {
+  // The globals whose signature the checker leaves unmapped (overloads, a rest
+  // of arguments, a generic): the runtime's own dyn function, one immortal
+  // closure each.
+  const native = JS_GLOBAL_NATIVE[name];
+  if (native !== undefined && Object.prototype.hasOwnProperty.call(JS_GLOBAL_NATIVE, name)) {
+    const sym = symOverride ?? L.resolveValueSymbol(expr);
+    if (!sym) return null;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return null;
+    return { kind: "libCall", fn: native, args: [], type: DYN, loc };
+  }
+  const row = ownRow(JS_GLOBAL_ROWS, name);
+  if (row === undefined) return null;
+  const mapped = L.mapTypeOf(L.typeOf(expr));
+  if (mapped === null || mapped.kind !== "func") return null;
+  // Every declaration must be the library's (a shadowing user function merges
+  // into one symbol with the ambient one).
+  const sym = symOverride ?? L.resolveValueSymbol(expr);
+  if (!sym) return null;
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return null;
+  const fnName = `%builtin.js.${name}.value`;
+  if (!L.liftedFns.some((f) => f.name === fnName)) {
+    const params = mapped.params.map((type, i) => ({ localId: `p${i}.0`, name: `p${i}`, type }));
+    const args: IrExpr[] = params.map((p) => ({ kind: "varRef", localId: p.localId, type: p.type, loc }));
+    const body = row.build(L, mapped, args, loc);
+    if (body === null) return null;
+    const fn: IrFunction = {
+      name: fnName,
+      params,
+      returnType: mapped.ret,
+      locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+      body: mapped.ret.kind === "void"
+        ? [{ kind: "exprStmt", expr: body, loc }]
+        : [{ kind: "return", value: body, loc }],
+      loc,
+    };
+    L.liftedFns.push(fn);
+  }
+  return { kind: "closure", fnName, captures: [], type: mapped, loc };
 }

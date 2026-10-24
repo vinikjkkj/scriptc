@@ -6053,6 +6053,9 @@ bool scr_dyn_err_instanceof(const ScrDyn *d, double kind);
  * ERR_MISSING_ARGS. Args borrowed (options NULL-tolerant); results +1. */
 ScrDyn *scr_structured_clone(const ScrDyn *value, const ScrDyn *options);
 ScrDyn *scr_structured_clone_missing(void);
+/* structuredClone AS a dyn VALUE: one immortal native closure; zero
+ * arguments throw the same ERR_MISSING_ARGS the static spelling does. +1. */
+ScrDyn *scr_structured_clone_dyn_value(void);
 ScrDyn *scr_structured_clone_transfer_fail(void); /* always throws DataCloneError */
 /* Validates a structuredClone options dyn value (throws on failure —
  * callers must check scr_exc_pending). Borrowed, NULL-tolerant. */
@@ -7396,11 +7399,15 @@ void scr_queue_microtask_dyn(const ScrDyn *cb);
  * boxing a closure. */
 void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
                              void (*arg_release)(void *));
-/* setImmediate AS A dyn VALUE (the traceCallback shape): a minted dyn
- * callable that schedules args[0](args[1..]) on the immediate queue and
- * answers undefined; a non-function first argument throws Node's
- * ERR_INVALID_ARG_TYPE. Result +1. */
+/* setImmediate / setTimeout / setInterval AS dyn VALUES (the traceCallback
+ * shape, `const f = setTimeout`, `[setTimeout, clearTimeout]`): a dyn callable
+ * over ONE immortal native closure per function (so the global compares equal
+ * to itself) that schedules args[0](args[2..]) (args[1..] for setImmediate) and
+ * answers the clearable numeric handle; a non-function first argument throws
+ * Node's ERR_INVALID_ARG_TYPE with its "Received" tail. Result +1. */
 struct ScrDyn *scr_set_immediate_dyn_value(void);
+struct ScrDyn *scr_set_timeout_dyn_value(void);
+struct ScrDyn *scr_set_interval_dyn_value(void);
 void scr_clear_immediate(double handle);
 void scr_immediate_unref(double handle);
 void scr_immediate_ref(double handle);

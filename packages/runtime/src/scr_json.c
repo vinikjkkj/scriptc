@@ -11005,6 +11005,18 @@ ScrDyn *scr_structured_clone_missing(void) {
   return NULL;
 }
 
+static ScrDyn *scr_sc_dyn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  if (argc == 0) return scr_structured_clone_missing();
+  return scr_structured_clone(args[0], argc > 1 ? args[1] : scr_dyn_undefined());
+}
+
+static ScrClosure scr_sc_dyn_clo = {SIZE_MAX, (void *)scr_sc_dyn_thunk, 0, NULL, NULL};
+
+ScrDyn *scr_structured_clone_dyn_value(void) {
+  return scr_dyn_new_func(&scr_sc_dyn_clo, scr_sc_dyn_thunk, 1, "(value,options)", "structuredClone");
+}
+
 bool scr_dyn_err_instanceof(const ScrDyn *d, double kind) {
   /* A JSVAL node never came from a runtime ScrError, so the cache miss
    * below answers false — the documented contract ("a dyn value that

@@ -3573,7 +3573,7 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
    * position where the frontend could spill it to a temp). Null when the
    * handle is not a union of exactly one f64 arm and unit arms — anything
    * else keeps the fence it had. */
-  function optionalTimerHandleClear(L: Lowerer, handle: IrExpr, fn: IrLibFn, loc: SrcLoc): IrExpr | null {
+  export function optionalTimerHandleClear(L: Lowerer, handle: IrExpr, fn: IrLibFn, loc: SrcLoc): IrExpr | null {
     // A checked-dynamic handle (a slot the checker calls `any`): the same
     // rule at run time -- a number is the id, anything else is not a live
     // handle and clearing it does nothing.

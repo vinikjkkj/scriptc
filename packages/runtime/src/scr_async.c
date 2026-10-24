@@ -3483,27 +3483,107 @@ static void scr_imm_dyn_fire(ScrClosure *c) {
   scr_dyn_release(args);
 }
 
-static ScrDyn *scr_imm_dyn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
-  (void)clo;
-  if (argc == 0 || args[0]->kind != SCR_DYN_FUNC) {
-    static const char msg[] = "The \"callback\" argument must be of type function.";
-    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_INVALID_ARG_TYPE");
-    return NULL;
+/* Node's ERR_INVALID_ARG_TYPE for a timer callback that is not a function,
+ * with the "Received ..." tail (determineSpecificType, the dyn kinds). */
+static void scr_timer_bad_cb(const ScrDyn *cb) {
+  const char *received = "an instance of Object";
+  char detail[96];
+  if (cb == NULL) {
+    received = "undefined";
+  } else {
+    switch (cb->kind) {
+    case SCR_DYN_NULL: received = "null"; break;
+    case SCR_DYN_UNDEF: received = "undefined"; break;
+    case SCR_DYN_ARR: received = "an instance of Array"; break;
+    case SCR_DYN_BOOL:
+      snprintf(detail, sizeof detail, "type boolean (%s)", cb->v.b ? "true" : "false");
+      received = detail;
+      break;
+    case SCR_DYN_NUM: {
+      char num[32];
+      size_t n = scr_f64_to_str(cb->v.num, num);
+      snprintf(detail, sizeof detail, "type number (%.*s)", (int)n, num);
+      received = detail;
+      break;
+    }
+    case SCR_DYN_STR:
+      snprintf(detail, sizeof detail, "type string ('%.*s')",
+               (int)(cb->v.str->len < 28 ? cb->v.str->len : 28), cb->v.str->data);
+      received = detail;
+      break;
+    default: break;
+    }
   }
+  char buf[192];
+  int n = snprintf(buf, sizeof buf, "The \"callback\" argument must be of type function. Received %s", received);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, buf, (size_t)n, "ERR_INVALID_ARG_TYPE");
+}
+
+/* The zero-argument closure of a deferred dyn call: captures the callback
+ * box and the packed trailing arguments (args[first..argc)). */
+static ScrClosure *scr_timer_dyn_closure(ScrDyn *const *args, size_t argc, size_t first) {
   ScrDyn *rest = scr_dyn_new_arr();
-  for (size_t i = 1; i < argc; i++) scr_dyn_arr_push(rest, scr_dyn_retain(args[i]));
+  for (size_t i = first; i < argc; i++) scr_dyn_arr_push(rest, scr_dyn_retain(args[i]));
   ScrClosure *c = scr_closure_new((void *)scr_imm_dyn_fire, 2);
   c->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
   scr_box_set_ref(c->caps[0], scr_dyn_retain(args[0]));
   c->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
   scr_box_set_ref(c->caps[1], rest); /* moves */
-  scr_set_immediate(c);
-  return scr_dyn_retain(scr_dyn_undefined());
+  return c;
 }
 
+static ScrDyn *scr_imm_dyn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  if (argc == 0 || args[0]->kind != SCR_DYN_FUNC) {
+    scr_timer_bad_cb(argc == 0 ? NULL : args[0]);
+    return NULL;
+  }
+  return scr_dyn_new_num(scr_set_immediate(scr_timer_dyn_closure(args, argc, 1)));
+}
+
+/* setTimeout(cb, ms, ...args) / setInterval(cb, ms, ...args) as values: the
+ * delay is ToNumber'd (an absent or NaN delay is Node's 1ms), the trailing
+ * arguments ride to every call, and the answer is the clearable handle the
+ * static surface hands out. */
+static ScrDyn *scr_timeout_dyn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  if (argc == 0 || args[0]->kind != SCR_DYN_FUNC) {
+    scr_timer_bad_cb(argc == 0 ? NULL : args[0]);
+    return NULL;
+  }
+  double ms = argc > 1 ? scr_dyn_to_number(args[1]) : 1;
+  if (scr_exc_pending()) return NULL;
+  return scr_dyn_new_num(scr_set_timeout_handle(scr_timer_dyn_closure(args, argc, 2), ms));
+}
+
+static ScrDyn *scr_interval_dyn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  if (argc == 0 || args[0]->kind != SCR_DYN_FUNC) {
+    scr_timer_bad_cb(argc == 0 ? NULL : args[0]);
+    return NULL;
+  }
+  double ms = argc > 1 ? scr_dyn_to_number(args[1]) : 1;
+  if (scr_exc_pending()) return NULL;
+  return scr_dyn_new_num(scr_set_interval(scr_timer_dyn_closure(args, argc, 2), ms));
+}
+
+/* One immortal closure per function (rc SIZE_MAX, like an interned top-level
+ * function): every evaluation of the global boxes the SAME closure, and a
+ * function box compares by its closure, so `setTimeout === setTimeout`. */
+static ScrClosure scr_imm_dyn_clo = {SIZE_MAX, (void *)scr_imm_dyn_thunk, 0, NULL, NULL};
+static ScrClosure scr_timeout_dyn_clo = {SIZE_MAX, (void *)scr_timeout_dyn_thunk, 0, NULL, NULL};
+static ScrClosure scr_interval_dyn_clo = {SIZE_MAX, (void *)scr_interval_dyn_thunk, 0, NULL, NULL};
+
 ScrDyn *scr_set_immediate_dyn_value(void) {
-  return scr_dyn_new_func(scr_closure_new((void *)scr_imm_dyn_thunk, 0), scr_imm_dyn_thunk,
-                          1, "(cb,...)", "setImmediate");
+  return scr_dyn_new_func(&scr_imm_dyn_clo, scr_imm_dyn_thunk, 1, "(callback,...args)", "setImmediate");
+}
+
+ScrDyn *scr_set_timeout_dyn_value(void) {
+  return scr_dyn_new_func(&scr_timeout_dyn_clo, scr_timeout_dyn_thunk, 2, "(callback,delay,...args)", "setTimeout");
+}
+
+ScrDyn *scr_set_interval_dyn_value(void) {
+  return scr_dyn_new_func(&scr_interval_dyn_clo, scr_interval_dyn_thunk, 2, "(callback,delay,...args)", "setInterval");
 }
 
 /* ── queueMicrotask ──────────────────────────────────────────────────

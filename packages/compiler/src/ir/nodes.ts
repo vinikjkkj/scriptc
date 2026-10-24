@@ -6101,6 +6101,16 @@ export type IrLibFn =
    * Calling it validates the callback (the dyn call machinery); minting
    * never throws. */
   | "timers.setImmediateFnValue"
+  /** setTimeout / setInterval as first-class dyn values (scr_async.c): one
+   * immortal native closure each, so the global is equal to itself; calling
+   * the value schedules args[0](args[2..]) after ToNumber(args[1]) and answers
+   * the clearable handle. Minting never throws. */
+  | "timers.setTimeoutFnValue"
+  | "timers.setIntervalFnValue"
+  /** structuredClone as a first-class dyn value (scr_json.c): zero arguments
+   * throw the ERR_MISSING_ARGS the static spelling throws. Never throws to
+   * mint. */
+  | "dyn.structuredCloneFnValue"
   /** `new Promise(setImmediate)` (the Node-suite early-exit shape): a
    * fresh promise an immediate fulfills with the undefined dyn value —
    * the executor IS setImmediate, so resolve rides the immediate queue
