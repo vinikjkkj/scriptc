@@ -3026,6 +3026,9 @@ static ScrDyn *scr_textcodec_box_impl(ScrStr *s) {
  * here needs an install hook the way handles do. */
 
 ScrDyn *scr_dyn_new_objinst(void *o, const ScrDynClass *cls) {
+  /* A NULL instance is the absent receiver of an unbound method (`this` read
+   * as a value with no receiver): JavaScript's undefined, not an instance. */
+  if (o == NULL) return scr_dyn_undefined();
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_OBJINST);
   d->v.inst.o = cls->retain(o);
   d->v.inst.cls = cls;
