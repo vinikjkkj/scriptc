@@ -4206,6 +4206,18 @@ function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): voi
       tupleT = mapped as IrType & { kind: "record" }; // narrowed by the check above
       elemT = tupleT!;
     }
+    return mapIterDrainHelperCall(L, receiver, mapT, method, elemT, tupleT, loc);
+  }
+
+  /** The drain helper call shared by `m.keys()` / `m.values()` / `m.entries()`
+   * (immediate drains) and the direct `[...m]` spread, which is the entries
+   * drain. One lifted helper per (method, key type, value type). */
+  export function mapIterDrainHelperCall(L: Lowerer, receiver: IrExpr,
+    mapT: IrType & { kind: "map" },
+    method: "keys" | "values" | "entries",
+    elemT: IrType,
+    tupleT: (IrType & { kind: "record" }) | null,
+    loc: SrcLoc): IrExpr {
     const key = `${method}:${typeKey(mapT.key)}:${typeKey(mapT.value)}`;
     let helper = L.mapHofHelpers.get(key);
     if (!helper) {
