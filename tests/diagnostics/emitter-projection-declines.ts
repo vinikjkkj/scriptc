@@ -2,12 +2,8 @@
 // its own members" (tests/corpus/3631-...). Each cast below must still be
 // refused, and each is refused for a different reason.
 //
-// 1. An Error subclass. registerBuiltinErrorClasses publishes `name`,
-//    `message` and `toString` in %Error's fields/methods maps and those are
-//    ScrError prefix storage, not plain emitted fields — so the whole-chain
-//    decline stays for the error hierarchy. Only the node:events emitter node
-//    is skipped, and only because its fields and methods maps are EMPTY.
-//
+// 1. (Moved out.) An Error subclass now projects onto its record slots
+//    (tests/corpus/9856): the cast is accepted and prints what Node prints.
 // 2. A target naming an EventEmitter SURFACE method. `on` lowers through
 //    lower-emitter.ts and never enters %EventEmitter's (empty) methods map,
 //    so `findMethodOn` cannot see it, `info.fields` has no such field, and
@@ -39,15 +35,6 @@
 //    simplification cannot quietly project a runtime stream layout.
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-
-class MyErr extends Error {
-    readonly code2: number = 3;
-    m(x: string): string {
-        return x;
-    }
-}
-const e = new MyErr("boom") as unknown as { m: (x: string) => string; code2: number };
-console.log(e.m("a"), e.code2);
 
 class Surface extends EventEmitter {
     private readonly n: number = 1;
