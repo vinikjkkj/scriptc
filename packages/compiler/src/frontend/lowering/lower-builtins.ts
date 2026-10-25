@@ -10,7 +10,8 @@ import type { Lowerer } from "./lowerer.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
 import { moduleInitAlwaysThrows, relativeRequireRefusal } from "../require-throws.js";
 import { refusalMessage } from "./lower-requirestack.js";
-import { canonicalBuiltinModule, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
+import { canonicalBuiltinModule, cjsEnumerableAccessorNames, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
+import { isRequireBindingIdent, moduleNsSourceFileOf } from "./lower-namespaces.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
@@ -4541,6 +4542,20 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (member === "stringify") {
       const indent = stringifySpaceIndent(L, call);
       const argNode = call.arguments[0]!;
+      // A require() value whose module has ENUMERABLE accessor exports: their
+      // values are getter calls, and the serializer below walks the static
+      // record, which holds no accessor slot. Refuse loudly rather than omit them.
+      if (ts.isIdentifier(argNode) && isRequireBindingIdent(L, argNode)) {
+        const depSf = moduleNsSourceFileOf(L, argNode);
+        const acc = depSf !== null ? cjsEnumerableAccessorNames(depSf) : [];
+        if (acc.length > 0) {
+          L.unsupported(
+            "SC1013",
+            call,
+            `JSON.stringify of the module value '${argNode.text}' with enumerable accessor exports (${acc.join(", ")}): each accessor's value is a getter call the serializer does not make`,
+          );
+        }
+      }
       let value = L.lowerExpr(argNode);
       // A read maybeNarrow bridged out of a dyn with a VALIDATED extraction
       // is asked for the dyn UNDERNEATH here, and only when the extracted
