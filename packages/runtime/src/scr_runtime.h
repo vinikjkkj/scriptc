@@ -6992,6 +6992,11 @@ ScrDyn *scr_dyn_new_promise_adapting(ScrPromise *src,
                                      void (*adapt)(ScrPromise *dst, ScrPromise *src));
 /* BORROWED peek at the boxed promise; NULL when d is not a promise box. */
 ScrPromise *scr_dyn_promise_of(const ScrDyn *d);
+/* Promise.resolve(v) for a checked-dynamic v, as the all combinators take
+ * their entries (dyn.adoptPromise): a boxed promise hands back ITS OWN promise
+ * (no tick, the identity Promise.resolve keeps); any other value gets a
+ * promise fulfilled with it. BORROWS d; returns +1. Never throws. */
+ScrPromise *scr_dyn_adopt_promise(ScrDyn *d);
 
 /* ── island values in the checked-dynamic tree (SCR_DYN_JSVAL) ─────────────────────────
  * Engine routing ops for JSVAL nodes, installed by the gated constructor

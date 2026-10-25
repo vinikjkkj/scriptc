@@ -3241,6 +3241,11 @@ export type IrLibFn =
    * throws. */
   | "dyn.arrLen"
   | "dyn.arrAt"
+  /** The checked-dynamic value as a promise, for the all combinators' entries
+   * (args: value dyn; result promise<dyn>, +1): a boxed promise is the promise
+   * itself, any other value a promise fulfilled with it — Promise.resolve(v).
+   * Borrows the value. Never throws. */
+  | "dyn.adoptPromise"
   /** `key in v` with a RUNTIME (string) key on a checked-dynamic
    * receiver (args: value dyn, key string; result bool): OBJ answers
    * own-member presence, ARR answers 'length'/a valid index — exactly
