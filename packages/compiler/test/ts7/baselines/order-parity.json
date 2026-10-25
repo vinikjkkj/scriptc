@@ -16056,6 +16056,36 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/10000-caught-subclass-unknown-instanceof.ts": {
+   "order": [
+    "<repo>/tests/corpus/10000-caught-subclass-unknown-instanceof.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10001-caught-subclass-dyn-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/10001-caught-subclass-dyn-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10002-rejected-subclass-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/10002-rejected-subclass-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10003-caught-subclass-identity-through-dyn.ts": {
+   "order": [
+    "<repo>/tests/corpus/10003-caught-subclass-identity-through-dyn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10004-caught-base-typed-holds-leaf.ts": {
+   "order": [
+    "<repo>/tests/corpus/10004-caught-base-typed-holds-leaf.ts"
+   ],
+   "diags": []
   }
  }
 }
