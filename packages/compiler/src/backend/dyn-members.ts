@@ -117,6 +117,16 @@ export function dynEnumerationFenced(cls: DynMemberClass): boolean {
 /** 1 when the chain reaches the runtime EventEmitter and no runtime stream class, 2 when it
  * reaches a runtime stream class (their own-key prefix is far larger than the emitter's three
  * keys), else 0. */
+/** Does this class's chain root in a runtime Error class (`class DB extends
+ * Error`)? Its instances carry the Error hierarchy's vtable prefix, and a
+ * caught or rejected one must cross as the instance itself: the error
+ * encoding would answer Error.prototype for it (the registry interns the
+ * descriptor of every such class so the runtime finds it by position). */
+export function isErrorRootedClass(cls: DynMemberClass): boolean {
+  for (let c: DynMemberClass | null = cls; c !== null; c = c.base) if (RUNTIME_ERROR_CLASSES.has(c.def.name)) return true;
+  return false;
+}
+
 export function dynRuntimeRoot(cls: DynMemberClass): number {
   let emitter = false;
   // An Error-rooted instance has its own walk (errorRooted), whatever its property table holds.

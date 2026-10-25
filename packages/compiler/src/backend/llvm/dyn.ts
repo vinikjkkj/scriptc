@@ -36,7 +36,7 @@ import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestAppl
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
-import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
+import { dynMemberRows, dynStaticTable, isErrorRootedClass, type DynMemberClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -114,6 +114,8 @@ export interface DynHost extends WalkerHost {
   recWideTable(shapeId: string, fields: readonly { name: string }[]): { keys: string; lens: string };
   /** `@`-ref of the interned SCR_DYN_OBJINST descriptor for a class. */
   dynClassDesc(className: string): string;
+  /** Interns the descriptor of every boxable Error-rooted user class. */
+  internErrorRootedDynClasses(): void;
   /** Registers one module-level constant (a boxed Map/Set's conversion
    * table, `@sc_mo_<n>`), emitted beside the other interned globals. */
   dynMapOpsGlobal(sym: string, body: string): void;
@@ -3537,6 +3539,9 @@ export class LlDyn {
     const name = "sc_cd";
     this.caughtToDynFn = name;
     const host = this.host;
+    // The C twin's registry rule: every Error-rooted user class is interned
+    // so a caught instance finds its descriptor (see emit-walkers.ts).
+    host.internErrorRootedDynClasses();
     const B = new BlockBuilder();
     const kp = B.tmp();
     const kd = B.tmp();
