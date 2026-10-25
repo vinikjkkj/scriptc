@@ -1,0 +1,5 @@
+// a PEM private key is accepted: its public part is used
+import * as crypto from "node:crypto";
+const PRIV = "-----BEGIN RSA PRIVATE KEY-----\nMIICXAIBAAKBgQCi0d0b90LLgCr+Qi3lyiWraLWWjRLUdg9Attas3wVpKp7SdBA0\ndUemQHGqlfpa3IoovjW+pYDmGpU1B+dVLAsX+R/00DbFCi0LldT2fT6SWAJecYm1\nX/NNSaGqVF88V3ig57F+7tMs0LuRa+DW3lcsQaZFD/rtMQC+ZvHhENg7JQIDAQAB\nAoGBAI8NzrRcif5cjOm6YbMs6e3xYOJ27p1nYT1dp75ZcNqWzNZhjT9Z7+rdYkEb\n5sxgSq9Dd9sadOc3YfMnD5SgztkJkUVDnDlRvZnogMKCi7sDYZS/85aVE1+wxFRu\nqMWnXOQKaOQlhaPy8h9sKJx9oS8gfIg2PzVeoegTMep9NmlhAkEAzRsyaXxnUE6O\noGoGjHnf2aGDZgp4rc0f4q2visnwWBTozgtp9UqRUcBtT5x6R/TT4IN6S+H8JAJn\num8iPhelSQJBAMs4iYZ4OYA8stMp2DmC4unguVH/r5xgsOcWq5H7Ufswrse80yIn\nBH83YarQ7fn/CbpxQ4NztylIF9SZe7LE0v0CQDU5vJBRP0JA0JRiT0a/Dc8dMcsW\nJpD7rS2W4voCQ4OoEW3+2kVUT3fGltdVBQqNRzp5BBCTGWqC0UY5NsqkOjkCQHTd\ndnjV+ns8bLnyfl3UXxmQGgKFvz92e0TpTJEOrf596IUEmYYyWeuutYO90pzJhZaq\nO+EEUnhy9QFVokUT2yECQB/qcjXNpP/kV/9wFy7MFyAg0M7zTP8IxcnyaTNwPqvz\ne/eRPIMdKgNg5JTU8BSTpkhTKGJhiUlD0L66mFvCWhM=\n-----END RSA PRIVATE KEY-----\n";
+const out = crypto.publicEncrypt({ key: PRIV }, Buffer.from('x'));
+console.log(out.length);
