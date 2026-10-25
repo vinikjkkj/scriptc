@@ -224,14 +224,15 @@ export function lowerNamespaceConditionalCall(
   };
   // One arm names a module (armFor), the other is the null literal: its
   // access throws, typed as the module arm so the ternary joins.
-  const modName = reg.trueModule ?? reg.falseModule;
-  if (modName === null) {
+  // Each arm lowers under its OWN module. A null arm is the access throw,
+  // typed as the module arm so the two join.
+  const trueArm = reg.trueModule !== null ? armFor(reg.trueModule) : null;
+  const falseArm = reg.falseModule !== null ? armFor(reg.falseModule) : null;
+  if (trueArm === null && falseArm === null) {
     L.noLowering("a module-namespace conditional with no module arm", access, "both arms are the null literal");
   }
-  const modArm = armFor(modName);
-  const nullArm = nullArmAccess(L, call, access, modArm.type);
-  const then = reg.trueModule === null ? nullArm : modArm;
-  const else_ = reg.falseModule === null ? nullArm : modArm;
+  const then = trueArm ?? nullArmAccess(L, call, access, falseArm!.type);
+  const else_ = falseArm ?? nullArmAccess(L, call, access, trueArm!.type);
   if (L.fmt(then.type) !== L.fmt(else_.type)) {
     L.noLowering(
       `'${access.name.text}' through a module-namespace conditional whose arms answer different types`,
