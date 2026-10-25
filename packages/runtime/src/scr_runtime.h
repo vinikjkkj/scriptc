@@ -3842,25 +3842,17 @@ void scr_keyobj_release_v(void *k);
 /* The scriptc-value layer (libCall targets): borrowed in, +1 out. */
 ScrKeyObject *scr_key_from_pkcs8(const ScrBytes *der);
 ScrKeyObject *scr_key_from_spki(const ScrBytes *der);
-/* ── crypto.publicEncrypt, RSA-OAEP/SHA-1 only (scr_rsa_pubenc.c) ───────
- * The one shape mysql2's caching_sha2_password/sha256_password auth
- * plugins use. NOT a KeyObject: one-shot and stateless, so the key PEM/DER
- * is parsed, used and freed inside the call — nothing persists. Compiled
- * only when the program reaches this surface (cc.ts gates it like
- * scr_asym.c/scr_regex.c), linked against the same vendored mbedTLS
- * archive the TLS client and WebRTC's DTLS identity already use.
- * `sc_site` is a "file:line:col" literal the emitter bakes per call site
- * (recordKeyGetHelper/sc_bad_key's own shape — one shared symbol, so the
- * site has to ride in as data); both of the MAY_THROW_LIB_FNS members
- * below throw a catchable Error naming it on bad/unparseable key
- * material, a non-RSA key, or an OAEP-too-long input (the RSA key here
- * is the remote peer's, never local configuration — see scr_rsa_pubenc.c's
- * header) and RETURN NULL with the exception pending, exactly like
- * recordKeyGetHelper's own miss path; the caller's emitted pending check
- * is what actually stops the NULL from flowing downstream. Borrowed
- * in, +1 out, NULL + pending on failure. */
-ScrBytes *scr_rsa_public_encrypt_oaep_sha1_str_key(ScrStr *key, ScrBytes *data, const char *sc_site);
-ScrBytes *scr_rsa_public_encrypt_oaep_sha1_bytes_key(ScrBytes *key, ScrBytes *data, const char *sc_site);
+/* ── crypto.publicEncrypt (scr_rsa_pubenc.c) ───────────────────────────
+ * One runtime entry for every object-form publicEncrypt call the compiler
+ * lowers: `key` and `data` (and `label`, NULL when oaepLabel is absent) are
+ * checked-dynamic values, so a PEM string, a Buffer, or an untyped value
+ * that holds either, all reach the same code. `padding` is Node's
+ * crypto.constants value (1 PKCS1 v1.5, 3 NO_PADDING, 4 OAEP) and `hash`
+ * the oaepHash code (1 sha1, 2 sha256, 3 sha384, 4 sha512).
+ * NOT a KeyObject: one-shot and stateless, so the key is parsed, used and
+ * freed inside the call. Borrowed in, +1 out, NULL + pending on failure;
+ * every failure is a catchable Error carrying Node's own message and code. */
+ScrBytes *scr_rsa_public_encrypt(const struct ScrDyn *key, const struct ScrDyn *data, double padding, double hash, const struct ScrDyn *label);
 /* ── the Cipher / Decipher handle (scr_cipher_value.c) ────────────────
  * OPAQUE: the struct lives in its own unit so the AES primitive beside it
  * (scr_cipher.c) stays free of every runtime type and can be compiled

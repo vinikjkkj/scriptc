@@ -499,6 +499,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   // fs Buffer pair and zlib.inflateSync ride the may-throw check.
   "buffer.fromStr": "scr_bytes_from_str",
   "buffer.fromDyn": "scr_buffer_from_dyn",
+  "rsa.publicEncrypt": "scr_rsa_public_encrypt",
+  "rsa.publicEncryptLabel": "scr_rsa_public_encrypt",
   "crypto.inputBytes": "scr_crypto_input_bytes",
   "buffer.concatDyn": "scr_buffer_concat_dyn",
   "bytes.argChk": "scr_bytes_arg_chk",
@@ -1309,6 +1311,8 @@ const LIB_FN_RET_SEXT: Record<string, string> = {
 };
 
 const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg: string }[]> = {
+  // crypto.publicEncrypt without oaepLabel: the runtime entry takes a NULL label.
+  "rsa.publicEncrypt": [{ decl: "ptr", arg: "ptr null" }],
   // scr_cipher_new_bytes / scr_cipher_new_key take `bool decrypt` last —
   // one runtime entry per key shape, the direction as a constant. The C
   // tier's four cases in emit-exprs.ts are these four rows.
@@ -17684,36 +17688,6 @@ class LlEmitter {
         `call void @scr_dgram_on_error(ptr ${sock.name}, ptr ${cb.name}, ptr @${adapter}, i1 ${once.name})`,
       );
       return { name: "", type: e.type };
-    }
-    if (e.fn === "rsa.publicEncryptOaepSha1Str" || e.fn === "rsa.publicEncryptOaepSha1Bytes") {
-      // crypto.publicEncrypt's one lowered shape (RSA-OAEP/SHA-1,
-      // scr_rsa_pubenc.c) -- NOT in LIB_FN_SYMS/LIB_FN_TAIL because the
-      // call carries a THIRD argument that varies per CALL SITE (the
-      // "file:line:col" the runtime throw names), and LIB_FN_TAIL's table
-      // is keyed by function name with one fixed `arg` text shared by
-      // every call -- it cannot express a per-site value. Same shape
-      // keyedRecordReadDirectInto's sc_bad_key call already uses
-      // (this.cstr(srcSite(loc))), just for a libCall instead of a
-      // dedicated recordKeyGet node. Bad/unparseable key material, a
-      // non-RSA key, or an OAEP-too-long input throws a catchable Error
-      // naming this site -- the RSA key is a remote peer's, not local
-      // configuration, so this is in MAY_THROW_LIB_FNS and gets the
-      // standard pending check below, exactly like the generic path two
-      // branches down.
-      const sym =
-        e.fn === "rsa.publicEncryptOaepSha1Str"
-          ? "scr_rsa_public_encrypt_oaep_sha1_str_key"
-          : "scr_rsa_public_encrypt_oaep_sha1_bytes_key";
-      const args = e.args.map((a) => this.emitExpr(a));
-      const site = this.cstr(srcSite(e.loc));
-      this.declare(`declare ptr @${sym}(ptr, ptr, ptr)`);
-      const t = B.tmp();
-      B.line(`${t} = call ptr @${sym}(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr ${site})`);
-      // The result joins its frame BEFORE the pending check so an unwind
-      // releases the NULL dummy harmlessly -- fallibleTemp's own shape.
-      const out = this.own({ name: t, type: e.type });
-      this.emitPendingCheck();
-      return out;
     }
     if (MAY_THROW_LIB_FNS.has(e.fn) && LIB_FN_SYMS[e.fn] === undefined) {
       throw new LlvmUnsupportedError(`libCall:${e.fn}`, e.loc);

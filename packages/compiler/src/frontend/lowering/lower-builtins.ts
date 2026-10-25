@@ -3032,46 +3032,61 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return value.type.kind === "f64" ? value : null;
   }
 
-/** crypto.publicEncrypt's `{ key, oaepHash?, padding? }` first argument,
-   * as the lowered RSA-OAEP/SHA-1 shape or null for anything else. `key`
-   * must be present and map to a string or Buffer/Uint8Array (a KeyObject
-   * needs the general public-key value model, which this runtime does not
-   * have — see surfaces.ts); `oaepHash`, if present, must be the literal
-   * 'sha1'; `padding`, if present, must lower to the literal
-   * crypto.constants.RSA_PKCS1_OAEP_PADDING (4) — crypto.constants bakes
-   * as literals at every access site (crypto-tables.ts), so this reads the
-   * ALREADY-LOWERED value rather than re-deriving it. Any other property
-   * name (oaepLabel included) returns null: the claim this shape makes is
-   * that the emitted call reproduces what Node's own call does, and that
-   * claim does not extend to a label this runtime's OAEP call never
-   * passes. */
-  function rsaOaepSha1PublicKeyOption(
+  /** crypto.publicEncrypt's `{ key, oaepHash?, oaepLabel?, padding? }`
+   * first argument, as the lowered shape: the key, the label and the data
+   * are boxed to the checked-dynamic value (ScrDyn), so the runtime applies
+   * Node's own ladder to whatever the program holds -- a PEM string, a
+   * Buffer, or an untyped value (scr_rsa_pubenc.c). padding and oaepHash
+   * must be literals (the runtime takes their codes); anything else, and a
+   * KeyObject-typed key (no KeyObject value model exists), returns null and
+   * stays fenced (surfaces.ts). */
+  function rsaPublicEncryptOptions(
     L: Lowerer,
     optNode: ts.Expression,
-  ): { kind: "str" | "bytes"; key: IrExpr } | null {
+  ): { key: IrExpr; padding: number; hash: number; label: IrExpr | null } | null {
     let opt: ts.Expression = optNode;
     while (ts.isParenthesizedExpression(opt)) opt = opt.expression;
     if (!ts.isObjectLiteralExpression(opt)) return null;
     let keyNode: ts.Expression | undefined;
+    let labelNode: ts.Expression | undefined;
+    let padding = 4;
+    let hash = 1;
     for (const prop of opt.properties) {
+      if (ts.isShorthandPropertyAssignment(prop)) {
+        // `{ key }` spells `{ key: key }`: the value is the identifier itself.
+        const shorthand = prop.name as ts.Identifier;
+        if (shorthand.text === "key") keyNode = shorthand;
+        else if (shorthand.text === "oaepLabel") labelNode = shorthand;
+        else return null;
+        continue;
+      }
       if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) return null;
-      if (prop.name.text === "key") {
+      const name = prop.name.text;
+      if (name === "key") {
         keyNode = prop.initializer;
-      } else if (prop.name.text === "oaepHash") {
+      } else if (name === "oaepLabel") {
+        labelNode = prop.initializer;
+      } else if (name === "oaepHash") {
         const hashT = L.typeOf(prop.initializer);
-        if (!hashT.isStringLiteralType() || hashT.value !== "sha1") return null;
-      } else if (prop.name.text === "padding") {
+        if (!hashT.isStringLiteralType()) return null;
+        const codes: Record<string, number> = { sha1: 1, sha256: 2, sha384: 3, sha512: 4 };
+        const code = codes[hashT.value];
+        if (code === undefined) return null;
+        hash = code;
+      } else if (name === "padding") {
         const paddingIr = L.lowerExpr(prop.initializer);
-        if (paddingIr.kind !== "numLit" || paddingIr.value !== 4) return null;
+        if (paddingIr.kind !== "numLit" || ![1, 3, 4].includes(paddingIr.value)) return null;
+        padding = paddingIr.value;
       } else {
         return null;
       }
     }
     if (keyNode === undefined) return null;
     const keyIr = L.mapTypeOf(L.typeOf(keyNode));
-    if (keyIr?.kind === "string") return { kind: "str", key: L.lowerExprExpecting(keyNode, STRING) };
-    if (keyIr?.kind === "bytes") return { kind: "bytes", key: L.lowerExpr(keyNode) };
-    return null;
+    if (keyIr?.kind === "keyobj") return null;
+    const key = L.lowerExprExpecting(keyNode, DYN);
+    const label = labelNode === undefined ? null : L.lowerExprExpecting(labelNode, DYN);
+    return { key, padding, hash, label };
   }
 
 /** The `{ privateKey, publicKey }` options argument of a diffieHellman
@@ -5399,28 +5414,25 @@ let digestInputValueDispatches = 0;
           "secret-key surface, which has no lowering)",
       );
     }
-    // `publicEncrypt({ key, oaepHash?, padding? }, buffer)` — ONE shape:
-    // an RSA public key (string or Buffer, never a KeyObject), PKCS#1
-    // v2.1 OAEP padding, the sha1 oaepHash. padding/oaepHash are each
-    // either absent (Node's own default for this function IS OAEP; the
-    // call that omits padding and the call that spells it out are the
-    // SAME operation) or exactly that literal value — anything else
-    // (a different padding, a different hash, an oaepLabel, a KeyObject
-    // key, a non-object first argument) returns null and falls through to
-    // the general fence (surfaces.ts's crypto.publicEncrypt entry), same
-    // as a diffieHellman shape that does not match falls through to ITS
-    // fence. scr_rsa_pubenc.c.
+    // `publicEncrypt({ key, oaepHash?, oaepLabel?, padding? }, data)` —
+    // every padding (OAEP, PKCS#1 v1.5, NO_PADDING) and every oaepHash
+    // literal, with an optional oaepLabel. The key, the data and the label
+    // are checked-dynamic values, so the runtime owns Node's ladder for
+    // them (scr_rsa_pubenc.c). A KeyObject key, a non-literal padding or
+    // oaepHash, and a non-object first argument fall through to the general
+    // fence (surfaces.ts's crypto.publicEncrypt entry).
     if (bi.member === "publicEncrypt") {
       if (expr.arguments.length !== 2 || expr.arguments.some(ts.isSpreadElement)) return null;
-      const shape = rsaOaepSha1PublicKeyOption(L, expr.arguments[0]!);
+      const shape = rsaPublicEncryptOptions(L, expr.arguments[0]!);
       if (shape === null) return null;
-      const dataNode = expr.arguments[1]!;
-      if (L.mapTypeOf(L.typeOf(dataNode))?.kind !== "bytes") return null;
-      const data = L.lowerExprExpecting(dataNode, BYTES_U8);
+      const data = L.lowerExprExpecting(expr.arguments[1]!, DYN);
+      const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+      const args: IrExpr[] = [shape.key, data, num(shape.padding), num(shape.hash)];
+      if (shape.label !== null) args.push(shape.label);
       return {
         kind: "libCall",
-        fn: shape.kind === "str" ? "rsa.publicEncryptOaepSha1Str" : "rsa.publicEncryptOaepSha1Bytes",
-        args: [shape.key, data],
+        fn: shape.label === null ? "rsa.publicEncrypt" : "rsa.publicEncryptLabel",
+        args,
         type: BYTES_U8,
         loc,
       };

@@ -1692,9 +1692,9 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // this shape was added — this message only fires for a shape outside
     // the one that lowers.
     publicEncrypt:
-      "the lowered shape is an RSA public key (a PEM string or Buffer, never a KeyObject) with " +
-      "OAEP padding and the sha1 oaepHash — every other key type, padding, oaepHash, or an " +
-      "oaepLabel has no lowering; scr_rsa_pubenc.c",
+      "the lowered shape takes a PEM string, Buffer or untyped key, with OAEP, PKCS#1 v1.5 or " +
+      "NO_PADDING and a literal oaepHash; a KeyObject key (no KeyObject value model) or a " +
+      "non-literal padding or oaepHash has no lowering; scr_rsa_pubenc.c",
     ...Object.fromEntries(
       [
         "generateKeyPair", "generateKeyPairSync", "generateKey", "generateKeySync",

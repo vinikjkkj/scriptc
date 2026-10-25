@@ -6022,8 +6022,8 @@ export type IrLibFn =
    * plaintext. Not a KeyObject input — stateless and one-shot, scr_rsa_pubenc.c.
    * Every other publicEncrypt/publicDecrypt/privateEncrypt/privateDecrypt
    * shape stays refused (surfaces.ts). */
-  | "rsa.publicEncryptOaepSha1Str"
-  | "rsa.publicEncryptOaepSha1Bytes"
+  | "rsa.publicEncrypt"
+  | "rsa.publicEncryptLabel"
   | "big.add"
   | "big.sub"
   | "big.mul"
@@ -12606,8 +12606,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // reads this same set, so no bespoke fixpoint entry is needed the way
   // recordKeyGet/unionKeyGet needed one -- those are a different IR node
   // KIND, not a libCall.
-  "rsa.publicEncryptOaepSha1Str",
-  "rsa.publicEncryptOaepSha1Bytes",
+  "rsa.publicEncrypt",
+  "rsa.publicEncryptLabel",
   // RTCDataChannel.send on a channel that is not open. Node's
   // @roamhq/wrtc throws InvalidStateError SYNCHRONOUSLY (message
   // "RTCDataChannel.readyState is not 'open'" -- captured from the
