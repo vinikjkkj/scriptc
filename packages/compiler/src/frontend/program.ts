@@ -4424,7 +4424,7 @@ export function isCjsExportTableLiteral(obj: ts.ObjectLiteralExpression): boolea
  * that stays a fence). */
 export function cjsExportsGetterDefineOf(
   e: ts.Node,
-): { name: string; getter: ts.ArrowFunction | ts.FunctionExpression; setter: ts.ArrowFunction | ts.FunctionExpression | null } | null {
+): { name: string; getter: ts.ArrowFunction | ts.FunctionExpression; setter: ts.ArrowFunction | ts.FunctionExpression | null; enumerable: boolean } | null {
   if (!ts.isCallExpression(e)) return null;
   const callee = e.expression;
   if (
@@ -4441,6 +4441,9 @@ export function cjsExportsGetterDefineOf(
   if (!ts.isStringLiteral(name) || !ts.isObjectLiteralExpression(desc)) return null;
   let getter: ts.ArrowFunction | ts.FunctionExpression | undefined;
   let setter: ts.ArrowFunction | ts.FunctionExpression | null = null;
+  // defineProperty defaults `enumerable` to FALSE: only a literal `true` makes the
+  // export a key of the module object (Object.keys, for-in, JSON).
+  let enumerable = false;
   for (const p of desc.properties) {
     if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name)) return null;
     let v: ts.Expression = p.initializer;
@@ -4453,6 +4456,7 @@ export function cjsExportsGetterDefineOf(
       setter = v;
     } else if (p.name.text === "enumerable" || p.name.text === "configurable") {
       if (v.kind !== ts.SyntaxKind.TrueKeyword && v.kind !== ts.SyntaxKind.FalseKeyword) return null;
+      if (p.name.text === "enumerable") enumerable = v.kind === ts.SyntaxKind.TrueKeyword;
     } else {
       return null;
     }
@@ -4472,8 +4476,21 @@ export function cjsExportsGetterDefineOf(
       if (usesThis) return null;
     }
   }
-  return { name: name.text, getter, setter };
+  return { name: name.text, getter, setter, enumerable };
 }
+
+/** A CommonJS accessor export defined WITHOUT `enumerable: true`
+   * (`Object.defineProperty(exports|module.exports, n, { get, set })`): defineProperty
+   * defaults the flag to false, so the name is no key of the module object. */
+export function cjsHiddenAccessorExport(dep: ts.SourceFile, name: string): boolean {
+    if (!isCjsJsFile(dep)) return false;
+    for (const stmt of dep.statements) {
+      if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) continue;
+      const def = cjsExportsGetterDefineOf(stmt.expression);
+      if (def !== null && def.name === name && !def.enumerable) return true;
+    }
+    return false;
+  }
 
 /** True when the file replaces its whole export object (`module.exports = …`
  * or `exports = …`) anywhere: a `module.exports` defineProperty target then
