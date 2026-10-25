@@ -1182,6 +1182,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/11300-dyn-emitter-on-once-off-literal.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11300-dyn-emitter-on-once-off-literal.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11301-dyn-emitter-listener-count-literal.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11301-dyn-emitter-listener-count-literal.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11302-dyn-not-emitter-type-error.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11302-dyn-not-emitter-type-error.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11303-dyn-emitter-subclass-own-members.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11303-dyn-emitter-subclass-own-members.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11304-dyn-plain-object-own-on-method.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11304-dyn-plain-object-own-on-method.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/11350-union-length-string-array-or-boolean.js": {
    "order": [
     "<repo>/tests/corpus/11350-union-length-string-array-or-boolean.js"
