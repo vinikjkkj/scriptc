@@ -55,8 +55,8 @@ export function recordViewSym(struct: string): string {
 
 /** The C expression a crossing passes as its record view: the shape's
  * descriptor, or NULL when the value is not a record that can cross. */
-export function recordViewRefC(t: IrType, recordsById: ReadonlyMap<string, unknown>): string {
-  if (t.kind !== "record" || !recordsById.has(t.shapeId)) return "NULL";
+export function recordViewRefC(t: IrType, recordsById: ReadonlyMap<string, { dynx?: true }>): string {
+  if (t.kind !== "record" || recordsById.get(t.shapeId)?.dynx !== true) return "NULL";
   return `&${recordViewSym(mangleRecordStruct(t.shapeId))}`;
 }
 
@@ -258,7 +258,7 @@ export interface ClassMeta {
         ...(rec.ownmask ? { ownmask: true as const } : {}),
         ...(rec.srcproto ? { srcproto: true as const } : {}),
         // Every record carries the overflow slot and its view (see DYNX_MEMBER).
-        dynx: true as const,
+        ...(rec.dynx ? { dynx: true as const } : {}),
         comment: `record ${rec.id} { ${rec.fields.map((f) => f.name).join("; ")}${rec.indexValue ? "; [key: string]" : ""} }`,
         meta: null,
       })),

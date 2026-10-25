@@ -83,7 +83,7 @@ export function computeTraced(mod: IrModule): { shapes: Set<string>; unions: Set
         // backend and collected on the other. emitter.ts's C twin is the
         // same list.
         ...(r.srcproto ? [{ name: "<srcproto>", type: DYN }] : []),
-        { name: "<dyn overflow>", type: DYN },
+        ...(r.dynx ? [{ name: "<dyn overflow>", type: DYN }] : []),
       ],
     })),
   ];
@@ -531,7 +531,7 @@ function rcMembers(shape: IrRecordShape): { index: number; type: IrType; name: s
     ...(shape.srcproto ? [{ index: srcProtoSlotIndex(shape), type: DYN, name: "<source prototype> slot" }] : []),
     // The hidden OVERFLOW slot (undeclared keys written through a dyn view),
     // LAST, released with the record and TRACED as a dyn edge.
-    { index: dynxSlotIndex(shape), type: DYN, name: "<dyn overflow> slot" },
+    ...(shape.dynx ? [{ index: dynxSlotIndex(shape), type: DYN, name: "<dyn overflow> slot" }] : []),
   ];
 }
 
@@ -654,7 +654,7 @@ export function dynxSlotIndex(shape: IrRecordShape): number {
 /** The dyn view descriptor's global symbol for a crossing record shape
  * (`@sc_rview_<struct>`), or `null` for a shape that cannot cross. */
 export function llRecordViewRef(shape: IrRecordShape | undefined): string {
-  return shape ? `@sc_rview_${mangleRecordStruct(shape.id)}` : "null";
+  return shape?.dynx ? `@sc_rview_${mangleRecordStruct(shape.id)}` : "null";
 }
 
 /** The module-level globals of one crossing record's dyn view (the LLVM
@@ -751,12 +751,12 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
     if (shape.tostr) fieldTys.push("ptr"); // the hidden toString slot (ScrClosure *)
     if (shape.ownmask) fieldTys.push(`[${ownMaskBytes(shape)} x i8]`); // the hidden own-key mask
     if (shape.srcproto) fieldTys.push("ptr"); // the hidden source [[Prototype]] (ScrDyn *)
-    fieldTys.push("ptr"); // the hidden overflow (ScrDyn *), after the source [[Prototype]]
+    if (shape.dynx) fieldTys.push("ptr"); // the hidden overflow (ScrDyn *), after the source [[Prototype]]
     typeDefs.push(
       `%${struct} = type { i64${fieldTys.length ? ", " + fieldTys.join(", ") : ""} } ` +
         `; record ${shape.id} { ${shape.fields.map((f) => f.name).join("; ")}${shape.indexValue ? "; [key: string]" : ""} }`,
     );
-    defs.push(...recordViewGlobalsLL(host, shape, struct));
+    if (shape.dynx) defs.push(...recordViewGlobalsLL(host, shape, struct));
   }
 
   for (const shape of records) {

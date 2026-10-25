@@ -1167,7 +1167,7 @@ export class CEmitter {
           // header or its trace would visit an edge on a node the collector
           // does not know.
           ...(r.srcproto ? [{ name: "<srcproto>", type: DYN }] : []),
-          { name: "<dyn overflow>", type: DYN },
+          ...(r.dynx ? [{ name: "<dyn overflow>", type: DYN }] : []),
         ],
       })),
     ];

@@ -60,7 +60,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { markDynViewShapes, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -3163,6 +3163,7 @@ export class Lowerer {
             entry: ENTRY_NAME,
             ...(this.ffiImports.length > 0 ? { ffiImports: [...this.ffiImports] } : {}),
           };
+    if (module !== null) markDynViewShapes(module, artifacts.records);
     return {
       module,
       diagnostics: this.diags,

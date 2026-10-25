@@ -2033,6 +2033,11 @@ export interface IrRecordShape {
    * object — and links the source's prototype behind it, so nothing is
    * lost and the common case (no such member) keeps one shared object. */
   srcproto?: true;
+  /** The record is converted into dyn somewhere in the module (a `dynFrom`
+   * of this shape), so it carries the hidden overflow slot and a dyn view
+   * (scr_json.c, "record views"). Set by markDynViewShapes, after lowering;
+   * every other record is laid out exactly as before. */
+  dynx?: true;
   builtin?: IrBuiltinRendering;
 }
 
@@ -13227,3 +13232,35 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // through one spelling and swallowed through the other.
   "url.pathToFileURL",
 ]);
+
+/** Mark every record shape the module converts into dyn: any `dynFrom` node
+ * whose value is a record of that shape (`IrRecordShape.dynx`). A generic
+ * walk over the IR graph, each object visited once, so it needs no list of
+ * IR node kinds and misses no conversion site that the emitter could turn
+ * into a boundary copy. Runs once, after lowering and before emission, so
+ * the cycle-capability decision (which the overflow slot joins) is made
+ * before any body is emitted. */
+export function markDynViewShapes(root: unknown, records: readonly IrRecordShape[]): void {
+  const byId = new Map<string, IrRecordShape>();
+  for (const r of records) byId.set(r.id, r);
+  const seen = new Set<object>();
+  const stack: unknown[] = [root];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (n === null || typeof n !== "object" || seen.has(n)) continue;
+    seen.add(n);
+    if (Array.isArray(n)) {
+      for (const x of n) stack.push(x);
+      continue;
+    }
+    const o = n as Record<string, unknown>;
+    if (o["kind"] === "dynFrom") {
+      const v = o["value"] as { type?: { kind?: string; shapeId?: string } } | undefined;
+      if (v?.type?.kind === "record" && v.type.shapeId !== undefined) {
+        const r = byId.get(v.type.shapeId);
+        if (r) r.dynx = true;
+      }
+    }
+    for (const k of Object.keys(o)) if (k !== "loc") stack.push(o[k]);
+  }
+}
