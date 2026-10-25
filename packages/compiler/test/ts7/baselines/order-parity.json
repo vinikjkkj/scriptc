@@ -16156,6 +16156,12 @@
     "<repo>/tests/corpus/10251-method-ref-identity-and-unbound-call.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/10252-detached-call-side-effects-before-this.js": {
+   "order": [
+    "<repo>/tests/corpus/10252-detached-call-side-effects-before-this.js"
+   ],
+   "diags": []
   }
  }
 }
