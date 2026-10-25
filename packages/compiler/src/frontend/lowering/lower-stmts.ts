@@ -1247,6 +1247,12 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     // lowerStmt): no runtime artifact; shapes intern on demand at use
     // sites through mapType.
     if (ts.isInterfaceDeclaration(stmt) || ts.isTypeAliasDeclaration(stmt)) return null;
+    // In a declaration file `export = x` and `export as namespace N` are
+    // type-world: they name the module's value (the class its twin's
+    // `module.exports` holds, which the twin pairing reads from the checker)
+    // and emit nothing of their own.
+    if (ts.isExportAssignment(stmt) && stmt.isExportEquals && stmt.getSourceFile().isDeclarationFile) return null;
+    if (ts.isNamespaceExportDeclaration(stmt) && stmt.getSourceFile().isDeclarationFile) return null;
     // `export = x` — the CommonJS export-assignment form (tsc only accepts
     // it in CJS-shaped modules/.d.ts): named, not the generic syntax
     // fence.
