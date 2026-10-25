@@ -1,0 +1,11 @@
+const { tracePromise, connectChannel, shouldTrace, traceCallback } = require('./tr.cjs');
+console.log('has', shouldTrace(connectChannel));
+const r = tracePromise(connectChannel, () => new Promise((res) => setTimeout(() => res(7), 5)), () => ({ a: 1 }));
+r.then((v) => console.log('value', v));
+const ch = require('./tr.cjs').connectChannel;
+ch.start.subscribe((m) => console.log('start', JSON.stringify(m)));
+ch.asyncStart.subscribe((m) => console.log('asyncStart', JSON.stringify(m)));
+ch.asyncEnd.subscribe((m) => console.log('asyncEnd', JSON.stringify(m)));
+ch.end.subscribe((m) => console.log('end', JSON.stringify(m)));
+tracePromise(connectChannel, () => Promise.resolve(3), () => ({ b: 2 })).then((v) => console.log('v2', v));
+traceCallback(connectChannel, (cb) => cb(null, 'x'), 0, () => ({ c: 3 }), null, (e, x) => console.log('cb', e, x));
