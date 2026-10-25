@@ -198,6 +198,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10800-promise-wrapper-literal-name-list.js": {
+   "order": [
+    "<repo>/tests/corpus/10800-promise-wrapper-literal-name-list.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10801-pool-wrapper-nested-iife-name-list.js": {
+   "order": [
+    "<repo>/tests/corpus/10801-pool-wrapper-nested-iife-name-list.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1011-json-unknown-typeof.ts": {
    "order": [
     "<repo>/tests/corpus/1011-json-unknown-typeof.ts"
