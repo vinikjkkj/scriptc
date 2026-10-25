@@ -17125,6 +17125,25 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         ) {
           scalarSide = { kind: "dynFrom", value: scalarSide, type: DYN, loc: scalarSide.loc };
         }
+        // dyn vs a CLASS VALUE, a CLASS INSTANCE, a MAP/SET or a BIGINT
+        // (`this._command.constructor === Commands.Query`, `x === inst`):
+        // each boxes so that the runtime's whole-dyn strict equality answers
+        // the static identity question -- a class value is one immortal
+        // function object per class (scr_dyn_class_value), an instance box
+        // carries the object pointer (SCR_DYN_OBJINST), a map box the ScrMap,
+        // a bigint compares by value. Error-rooted instances are excluded:
+        // their dyn form is an encoding, not the object itself.
+        if (
+          dynSide.type.kind === "dyn" &&
+          (scalarSide.type.kind === "classval" ||
+            scalarSide.type.kind === "map" ||
+            scalarSide.type.kind === "set" ||
+            scalarSide.type.kind === "bigint" ||
+            (scalarSide.type.kind === "union" && scalarArmsUnion(L, scalarSide.type.unionId)) ||
+            (scalarSide.type.kind === "object" && !RUNTIME_ERROR_CLASSES.has(scalarSide.type.className)))
+        ) {
+          scalarSide = { kind: "dynFrom", value: scalarSide, type: DYN, loc: scalarSide.loc };
+        }
         if (
           dynSide.type.kind === "dyn" &&
           (scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
@@ -17970,6 +17989,20 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (info === undefined) return false;
     for (let a: ClassInfo | null = info; a; a = a.base) if (a.def.runtime === true || a.builtinError === true) return false;
     return true;
+  }
+
+  /** A union whose every arm is a scalar (string, number, boolean, bigint,
+   * or a unit): its dyn form carries each value by value, so the dyn strict
+   * equality answers the static one exactly. A union with a reference arm
+   * (an array, a record, a class instance) copies on the way into the dyn
+   * tree, which would break identity, so it keeps its fence. */
+  function scalarArmsUnion(L: Lowerer, unionId: string): boolean {
+    const def = L.unions.get(unionId);
+    if (!def) return false;
+    return def.arms.every(
+      (a) => a.kind === "string" || a.kind === "f64" || a.kind === "bool" || a.kind === "bigint" ||
+        a.kind === "undefinedT" || a.kind === "nullT",
+    );
   }
 
   function lowerInstanceConstructorRead(L: Lowerer, expr: ts.Expression): IrExpr | null {
