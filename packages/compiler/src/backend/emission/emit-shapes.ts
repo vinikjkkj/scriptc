@@ -7,7 +7,7 @@ import type { CEmitter } from "./emitter.js";
 import type { IrBuiltinRendering, IrFunction, OwnMaskShape } from "../../ir/nodes.js";
 import { DYN, IrClassDef, IrType, moduleUsesCtorName, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
-import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
+import { arrayElemIsRef, boxKindC, cDecl, cStringLiteral, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
 
 /** The overflow map's C member name on index-signature record structs.
  * User fields mangle to `sc_fld_*`, so no field can collide. */
@@ -42,6 +42,41 @@ export const OWNMASK_MEMBER = "sc_own";
  * (IrRecordShape.srcproto). LAST in the struct, so no existing member's
  * offset moves. */
 export const SRCPROTO_MEMBER = "sc_srcproto";
+/** The hidden per-instance OVERFLOW slot of a crossing record (a ScrDyn *):
+ * the keys the record type does not declare, written through a dyn view of
+ * the record (runtime scr_json.c, "record views"). LAST in the struct, after
+ * the source [[Prototype]], so no existing member's offset moves. */
+export const DYNX_MEMBER = "sc_dynx";
+
+/** The C symbol of a record shape's dyn view descriptor (ScrRecView). */
+export function recordViewSym(struct: string): string {
+  return `sc_rview_${struct}`;
+}
+
+/** The C expression a crossing passes as its record view: the shape's
+ * descriptor, or NULL when the value is not a record that can cross. */
+export function recordViewRefC(t: IrType, recordsById: ReadonlyMap<string, unknown>): string {
+  if (t.kind !== "record" || !recordsById.has(t.shapeId)) return "NULL";
+  return `&${recordViewSym(mangleRecordStruct(t.shapeId))}`;
+}
+
+/** The dyn view descriptor of one record shape: its declared fields' JS
+ * names, kinds (0 f64, 1 bool, 2 string, 3 other) and byte offsets in the
+ * struct, plus the overflow slot's offset. Every array carries a trailing 0
+ * so an empty record still has a valid initialiser; the reader uses `n`. */
+export function recordViewDeclC(struct: string, fields: readonly { name: string; type: IrType }[]): string[] {
+  const sym = recordViewSym(struct);
+  const kindOf = (t: IrType): number => (t.kind === "f64" ? 0 : t.kind === "bool" ? 1 : t.kind === "string" ? 2 : 3);
+  const withPad = (xs: string[]): string => [...xs, "0"].join(", ");
+  const attr = " __attribute__((unused))";
+  return [
+    `static const char *const ${sym}_names[]${attr} = {${withPad(fields.map((f) => cStringLiteral(Buffer.from(f.name, "utf8"))))}};`,
+    `static const size_t ${sym}_lens[]${attr} = {${withPad(fields.map((f) => String(Buffer.byteLength(f.name, "utf8"))))}};`,
+    `static const uint8_t ${sym}_kinds[]${attr} = {${withPad(fields.map((f) => String(kindOf(f.type))))}};`,
+    `static const size_t ${sym}_offs[]${attr} = {${withPad(fields.map((f) => `offsetof(${struct}, ${mangleField(f.name)})`))}};`,
+    `static const ScrRecView ${sym}${attr} = {${fields.length}, ${sym}_names, ${sym}_lens, ${sym}_kinds, ${sym}_offs, offsetof(${struct}, ${DYNX_MEMBER})};`,
+  ];
+}
 
 /** The C condition under which field `fieldName` of `shape` is one of the
  * receiver's OWN keys — the single question Object.keys, JSON.stringify,
@@ -186,6 +221,8 @@ export interface ClassMeta {
        * trailing `ScrDyn *` member, treated as one more (dyn-typed) field
        * by new/release/trace. */
       srcproto?: true;
+      /** Every record carries the overflow slot and its dyn view (DYNX_MEMBER). */
+      dynx?: true;
       comment: string;
       /** Class shapes only; hierarchy members get the vtable machinery. */
       meta: ClassMeta | null;
@@ -220,6 +257,8 @@ export interface ClassMeta {
         ...(rec.tostr ? { tostr: true as const } : {}),
         ...(rec.ownmask ? { ownmask: true as const } : {}),
         ...(rec.srcproto ? { srcproto: true as const } : {}),
+        // Every record carries the overflow slot and its view (see DYNX_MEMBER).
+        dynx: true as const,
         comment: `record ${rec.id} { ${rec.fields.map((f) => f.name).join("; ")}${rec.indexValue ? "; [key: string]" : ""} }`,
         meta: null,
       })),
@@ -247,6 +286,9 @@ export interface ClassMeta {
       // cycle-capability fixpoint's dyn rule says so, and this slot joins
       // that fixpoint the way <overflow> and <toString> do).
       ...(s.srcproto ? [{ member: SRCPROTO_MEMBER, type: DYN, name: "<source prototype> slot" }] : []),
+      // The hidden OVERFLOW slot of a crossing record: a dyn object the
+      // origin owns, released with the record and TRACED like the slot above.
+      ...(s.dynx ? [{ member: DYNX_MEMBER, type: DYN, name: "<dyn overflow> slot" }] : []),
     ];
     // CLASS newFns start every undefined-armed union field at JS's
     // `undefined` — the interned immortal unit instance — instead of the
@@ -321,7 +363,11 @@ export interface ClassMeta {
           `  ScrDyn *${SRCPROTO_MEMBER}; /* hidden per-instance source [[Prototype]] (NULL = no crossing / no chain) */`,
         );
       }
+      if (s.dynx) {
+        decl.push(`  ScrDyn *${DYNX_MEMBER}; /* hidden per-instance overflow of undeclared keys written through a dyn view (NULL = none) */`);
+      }
       decl.push(`};`);
+      if (s.dynx) decl.push(...recordViewDeclC(s.struct, s.fields));
     }
     decl.push("");
     // Vtable struct typedefs are named after hierarchy ROOTS, which may be

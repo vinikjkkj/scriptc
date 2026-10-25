@@ -5907,6 +5907,28 @@ ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d);
  * field. */
 ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
                             void *(*retain)(void *), void (*release)(void *));
+/* A static record's view for the dyn side (see scr_json.c, "record views"):
+ * the field names, kinds and byte offsets inside the origin struct, and the
+ * offset of its hidden overflow slot (a ScrDyn * holding the keys the record
+ * type does not declare). The compiler emits one per record shape that can
+ * cross into dyn: offsetof() in C, a GEP constant in LLVM. Kinds:
+ * SCR_RV_NUM (f64), SCR_RV_BOOL (bool), SCR_RV_STR (refcounted ScrStr *),
+ * SCR_RV_OPAQUE (any other field type: readable through the copy, and a
+ * write through the view is refused naming the type hole). */
+enum { SCR_RV_NUM = 0, SCR_RV_BOOL = 1, SCR_RV_STR = 2, SCR_RV_OPAQUE = 3 };
+typedef struct ScrRecView {
+  uint32_t n;
+  const char *const *names;
+  const size_t *name_lens;
+  const uint8_t *kinds;
+  const size_t *offs;
+  size_t dynx_off;
+} ScrRecView;
+/* scr_dyn_origin_mark with a record view: writes through the copy land on
+ * the origin (declared fields) or on its overflow slot (other keys). */
+ScrDyn *scr_dyn_origin_mark_v(ScrDyn *d, void *obj, const char *tkey,
+                              void *(*retain)(void *), void (*release)(void *),
+                              const ScrRecView *view);
 /* "Was this copy made from a live <tkey>?" — the origin BORROWED, or
  * NULL, in which case the caller builds the fresh object it always
  * built. NULL for everything that is not a marked ARR/OBJ copy, so the

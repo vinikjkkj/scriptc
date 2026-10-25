@@ -968,7 +968,10 @@ void scr_dyn_release(ScrDyn *d) {
   scr_cyc_free(d);
 }
 
+static void rec_view_sync(ScrDyn *d);
+
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d->static_copy) rec_view_sync((ScrDyn *)d);
   for (size_t i = 0; i < d->v.obj.len; i++) {
     const ScrDynEntry *e = &d->v.obj.entries[i];
     if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
@@ -2047,6 +2050,7 @@ typedef struct {
   void *obj;        /* the static origin, RETAINED for the copy's lifetime */
   const char *tkey; /* compiler-emitted static literal; never owned */
   void (*release)(void *);
+  const ScrRecView *view; /* record views (below): NULL for everything else */
 } ScrDynOriginEnt;
 
 static ScrDynOriginEnt *dyn_origin_tab = NULL;
@@ -2113,6 +2117,12 @@ static void dyn_origin_grow(void) {
 
 ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
                             void *(*retain)(void *), void (*release)(void *)) {
+  return scr_dyn_origin_mark_v(d, obj, tkey, retain, release, NULL);
+}
+
+ScrDyn *scr_dyn_origin_mark_v(ScrDyn *d, void *obj, const char *tkey,
+                              void *(*retain)(void *), void (*release)(void *),
+                              const ScrRecView *view) {
   /* The crossing's whole effect: the existing static-copy mark over the
    * subtree, plus this node's origin. The mark comes FIRST because the
    * table is only ever consulted behind `static_copy`. */
@@ -2137,6 +2147,7 @@ ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
   dyn_origin_tab[i].obj = taken;
   dyn_origin_tab[i].tkey = tkey;
   dyn_origin_tab[i].release = release;
+  dyn_origin_tab[i].view = view;
   /* Re-marking a node that already carries an origin: the LAST crossing
    * wins, which is the only one whose static value is still the one this
    * copy was built from. Cannot happen from the emitted crossing (the
@@ -2245,6 +2256,177 @@ void scr_dyn_origin_forget(ScrDyn *d) {
   }
   /* The table is whole again; now the origin may go, re-entrantly or not. */
   if (gone.release) gone.release(gone.obj);
+}
+
+/* ── record views ─────────────────────────────────────────────────────────
+ * A static record that crossed into dyn is a COPY: its dyn representation is
+ * a table, its static one a struct. The copy is the only thing dyn code
+ * holds, and the two are kept coherent in BOTH directions:
+ *  - reads: the copy is a cache of the origin. Every read of the copy's table
+ *    (scr_dyn_obj_get) first re-syncs the declared scalar fields from the
+ *    origin and the overflow keys from its overflow slot, so a static write
+ *    made since the last read shows. The sync allocates only for a value that
+ *    changed. Two copies of one origin agree, because each re-syncs from it.
+ *  - writes: a key the view DECLARES writes the origin's field, converted to
+ *    its static type; a value the static type cannot hold is refused by name
+ *    (a type hole, loud). Any other key is stored in the origin's overflow
+ *    slot, a dyn object the origin owns, so every copy sees it. Either way the
+ *    copy is re-synced before the write returns.
+ * Why a re-syncing cache and not a proxy: a proxy would have to answer every
+ * table surface (keys, has, inspect, JSON, spread) itself, while the copy
+ * already answers all of them, so re-syncing the one table at its read
+ * entry keeps every surface coherent without a second implementation. A
+ * field whose static type is not NUM/BOOL/STR is SCR_RV_OPAQUE: it keeps its
+ * crossing-time value on the copy and refuses writes, named. */
+static bool rec_view_busy = false;
+
+static const ScrRecView *rec_view_of(const ScrDyn *d, void **obj) {
+  if (d == NULL || !d->static_copy || d->kind != SCR_DYN_OBJ || dyn_origin_cap == 0) return NULL;
+  const ScrDynOriginEnt *e = &dyn_origin_tab[dyn_origin_slot(d)];
+  if (e->d != d || e->view == NULL) return NULL;
+  *obj = e->obj;
+  return e->view;
+}
+
+static ScrDynEntry *rec_view_find(ScrDyn *d, const char *key, size_t key_len) {
+  for (size_t i = 0; i < d->v.obj.len; i++) {
+    ScrDynEntry *e = &d->v.obj.entries[i];
+    if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) return e;
+  }
+  return NULL;
+}
+
+static void rec_view_sync(ScrDyn *d) {
+  void *obj = NULL;
+  const ScrRecView *v = rec_view_of(d, &obj);
+  if (v == NULL || rec_view_busy) return;
+  rec_view_busy = true;
+  for (uint32_t i = 0; i < v->n; i++) {
+    if (v->kinds[i] == SCR_RV_OPAQUE) continue;
+    ScrDynEntry *e = rec_view_find(d, v->names[i], v->name_lens[i]);
+    if (e == NULL) continue;
+    const char *p = (const char *)obj + v->offs[i];
+    ScrDyn *nv = NULL;
+    if (v->kinds[i] == SCR_RV_NUM) {
+      double x;
+      memcpy(&x, p, sizeof x);
+      if (e->value->kind == SCR_DYN_NUM && memcmp(&e->value->v.num, &x, sizeof x) == 0) continue;
+      nv = scr_dyn_new_num(x);
+    } else if (v->kinds[i] == SCR_RV_BOOL) {
+      bool b;
+      memcpy(&b, p, sizeof b);
+      if (e->value->kind == SCR_DYN_BOOL && e->value->v.b == b) continue;
+      nv = scr_dyn_new_bool(b);
+    } else {
+      ScrStr *s;
+      memcpy(&s, p, sizeof s);
+      if (s == NULL) continue;
+      if (e->value->kind == SCR_DYN_STR && e->value->v.str == s) continue;
+      nv = scr_dyn_new_str(s); /* borrows; takes its own reference */
+    }
+    ScrDyn *old = e->value;
+    e->value = nv;
+    scr_dyn_release(old);
+  }
+  ScrDyn *x = NULL;
+  memcpy(&x, (const char *)obj + v->dynx_off, sizeof x);
+  if (x != NULL && x->kind == SCR_DYN_OBJ) {
+    for (uint32_t j = 0; j < x->v.obj.len; j++) {
+      ScrDynEntry *xe = &x->v.obj.entries[j];
+      ScrDynEntry *e = rec_view_find(d, xe->key, xe->key_len);
+      if (e == NULL) {
+        scr_dyn_obj_set(d, xe->key, xe->key_len, scr_dyn_retain(xe->value));
+      } else if (e->value != xe->value) {
+        ScrDyn *old = e->value;
+        e->value = scr_dyn_retain(xe->value);
+        scr_dyn_release(old);
+      }
+    }
+  }
+  rec_view_busy = false;
+}
+
+/* A write the view cannot carry onto the origin: named, and thrown. */
+static void rec_view_hole(const char *key, size_t key_len, int kind, ScrDynKind got) {
+  static const char *const kind_name[] = {"a number", "a boolean", "a string", "a type this view cannot write"};
+  char name[200];
+  size_t n = key_len < sizeof name - 1 ? key_len : sizeof name - 1;
+  memcpy(name, key, n);
+  name[n] = '\0';
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, "assigning '");
+  scr_jb_puts(&b, name);
+  scr_jb_puts(&b, "' through a record view is a type hole: the static field holds ");
+  scr_jb_puts(&b, kind_name[kind]);
+  if (kind == SCR_RV_OPAQUE) {
+    scr_jb_puts(&b, ", and a write of this field's static type is not supported yet through a view");
+  } else {
+    scr_jb_puts(&b, " and the value written has another dynamic kind (");
+    scr_jb_puts(&b, got == SCR_DYN_NUM ? "number" : got == SCR_DYN_BOOL ? "boolean" : got == SCR_DYN_STR ? "string" : "other");
+    scr_jb_puts(&b, "), which the static field cannot represent. Node stores it on the object; this build refuses it loudly instead of storing it where no static read can see it");
+  }
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+}
+
+/* A declared field was just written on the origin. The copy may have no
+ * entry for it (an own-key mask can leave a declared key out of the source's
+ * own keys), and the sync only re-reads entries that exist, so the write adds
+ * the entry itself; the sync then brings everything else up to date. */
+static void rec_view_after_field(ScrDyn *recv, const char *key, size_t key_len, ScrDyn *value) {
+  if (rec_view_find(recv, key, key_len) == NULL) scr_dyn_obj_set(recv, key, key_len, scr_dyn_retain(value));
+  rec_view_sync(recv);
+}
+
+/* The write side. True when the write was taken (landed, or thrown by name). */
+static bool rec_view_write(ScrDyn *recv, const char *key, size_t key_len, ScrDyn *value) {
+  void *obj = NULL;
+  const ScrRecView *v = rec_view_of(recv, &obj);
+  if (v == NULL) return false;
+  for (uint32_t i = 0; i < v->n; i++) {
+    if (v->name_lens[i] != key_len || memcmp(v->names[i], key, key_len) != 0) continue;
+    char *p = (char *)obj + v->offs[i];
+    switch (v->kinds[i]) {
+      case SCR_RV_NUM:
+        if (value->kind == SCR_DYN_NUM) {
+          memcpy(p, &value->v.num, sizeof(double));
+          rec_view_after_field(recv, key, key_len, value);
+          return true;
+        }
+        break;
+      case SCR_RV_BOOL:
+        if (value->kind == SCR_DYN_BOOL) {
+          memcpy(p, &value->v.b, sizeof(bool));
+          rec_view_after_field(recv, key, key_len, value);
+          return true;
+        }
+        break;
+      case SCR_RV_STR:
+        if (value->kind == SCR_DYN_STR) {
+          ScrStr *old;
+          memcpy(&old, p, sizeof old);
+          ScrStr *ns = scr_str_retain(value->v.str);
+          memcpy(p, &ns, sizeof ns);
+          scr_str_release(old);
+          rec_view_after_field(recv, key, key_len, value);
+          return true;
+        }
+        break;
+      default:
+        break;
+    }
+    rec_view_hole(key, key_len, v->kinds[i], value->kind);
+    return true;
+  }
+  ScrDyn *x = NULL;
+  memcpy(&x, (char *)obj + v->dynx_off, sizeof x);
+  if (x == NULL) {
+    x = scr_dyn_new_obj();
+    memcpy((char *)obj + v->dynx_off, &x, sizeof x);
+  }
+  scr_dyn_obj_set(x, key, key_len, scr_dyn_retain(value));
+  rec_view_sync(recv);
+  return true;
 }
 
 /* The live-view unit (scr_dyn_view.c) installs its operations here; NULL in a program that never links it. */
@@ -7111,6 +7293,8 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       scr_dyn_module_ns_refuse("assigning a property");
       return;
     }
+    /* A record copy with a view writes through to its origin (see "record views"). */
+    if (recv->kind == SCR_DYN_OBJ && rec_view_write(recv, key->data, key->len, value)) return;
     /* A live array view takes an index or `length` write through to its
      * origin (see "live array views"); any other key falls to the refusal. */
     if (recv->kind == SCR_DYN_ARR && scr_dyn_view_key_set(recv, key, value)) return;

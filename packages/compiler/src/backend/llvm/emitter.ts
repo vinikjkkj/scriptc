@@ -156,6 +156,7 @@ import {
   emitOwnPresentLl,
   ownMaskSlotIndex,
   srcProtoSlotIndex,
+  llRecordViewRef,
   toStrSlotIndex,
   traceAdapter,
   traceArg,
@@ -10634,11 +10635,12 @@ class LlEmitter {
         if (dynCopyIsObservable(e.value) || dynCopyHasLiveView(e.value)) {
           const { retain, release } = vAdapters(this, v.type);
           this.declare(
-            `declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`,
+            `declare ptr @scr_dyn_origin_mark_v(ptr, ptr, ptr, ptr, ptr, ptr)`,
           );
           const m = B.tmp();
+          const view = v.type.kind === "record" ? llRecordViewRef(this.recordsById.get(v.type.shapeId)) : "null";
           B.line(
-            `${m} = call ptr @scr_dyn_origin_mark(ptr ${t}, ptr ${v.name}, ptr ${this.cstr(typeKey(v.type))}, ptr ${retain}, ptr ${release})`,
+            `${m} = call ptr @scr_dyn_origin_mark_v(ptr ${t}, ptr ${v.name}, ptr ${this.cstr(typeKey(v.type))}, ptr ${retain}, ptr ${release}, ptr ${view})`,
           );
           return this.own({ name: m, type: e.type });
         }

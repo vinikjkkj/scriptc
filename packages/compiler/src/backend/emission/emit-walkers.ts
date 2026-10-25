@@ -14,7 +14,7 @@ import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangle
 import type { ClassMeta } from "./emit-shapes.js";
 import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
-import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC, recordViewRefC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
  * no INTERNAL SLOT for a field declaredOrder omits (internalSlotFields).
@@ -3847,7 +3847,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // live view of it, as every other crossing of such an array.
         const { retain, release } = vAdapters(t.ret);
         const tk = cStringLiteral(Buffer.from(typeKey(t.ret), "utf8"));
-        d.push(`  ScrDyn *out = scr_dyn_origin_mark(${toDynExprC(E, t.ret, "r")}, (void *)r, ${tk}, ${retain}, ${release});`);
+        d.push(`  ScrDyn *out = scr_dyn_origin_mark_v(${toDynExprC(E, t.ret, "r")}, (void *)r, ${tk}, ${retain}, ${release}, ${recordViewRefC(t.ret, E.recordsById)});`);
       } else {
         d.push(`  ScrDyn *out = ${toDynExprC(E, t.ret, "r")};`);
       }

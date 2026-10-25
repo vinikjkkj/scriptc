@@ -35,6 +35,8 @@ export interface ShapeHost {
   readonly tracedShapes: Set<string>;
   readonly tracedUnions: Set<string>;
   readonly recordsById: Map<string, IrRecordShape>;
+  /** A module-level C-string constant holding `text` (its global symbol). */
+  cstr(text: string): string;
 }
 
 /** Every emitted function/helper carries #0 = { sanitize_address } — see
@@ -81,6 +83,7 @@ export function computeTraced(mod: IrModule): { shapes: Set<string>; unions: Set
         // backend and collected on the other. emitter.ts's C twin is the
         // same list.
         ...(r.srcproto ? [{ name: "<srcproto>", type: DYN }] : []),
+        { name: "<dyn overflow>", type: DYN },
       ],
     })),
   ];
@@ -526,6 +529,9 @@ function rcMembers(shape: IrRecordShape): { index: number; type: IrType; name: s
     // The hidden SOURCE [[Prototype]] slot, LAST — released with the record
     // and TRACED as a dyn edge, the C backend's rcMembers row exactly.
     ...(shape.srcproto ? [{ index: srcProtoSlotIndex(shape), type: DYN, name: "<source prototype> slot" }] : []),
+    // The hidden OVERFLOW slot (undeclared keys written through a dyn view),
+    // LAST, released with the record and TRACED as a dyn edge.
+    { index: dynxSlotIndex(shape), type: DYN, name: "<dyn overflow> slot" },
   ];
 }
 
@@ -638,6 +644,43 @@ export function srcProtoSlotIndex(shape: IrRecordShape): number {
   return ownMaskSlotIndex(shape) + (shape.ownmask ? 1 : 0);
 }
 
+/** The hidden OVERFLOW slot's field index: right after the source
+ * [[Prototype]], so no existing member's index moves. The C twin is
+ * DYNX_MEMBER, laid out in the same position. */
+export function dynxSlotIndex(shape: IrRecordShape): number {
+  return srcProtoSlotIndex(shape) + (shape.srcproto ? 1 : 0);
+}
+
+/** The dyn view descriptor's global symbol for a crossing record shape
+ * (`@sc_rview_<struct>`), or `null` for a shape that cannot cross. */
+export function llRecordViewRef(shape: IrRecordShape | undefined): string {
+  return shape ? `@sc_rview_${mangleRecordStruct(shape.id)}` : "null";
+}
+
+/** The module-level globals of one crossing record's dyn view (the LLVM
+ * twin of recordViewDeclC): names, lengths, kinds, and the byte offset of
+ * each declared field, computed by a GEP constant so it is the layout this
+ * module actually uses, plus the overflow slot's offset. */
+function recordViewGlobalsLL(host: ShapeHost, shape: IrRecordShape, struct: string): string[] {
+  const sym = `sc_rview_${struct}`;
+  const fields = shape.fields;
+  const n = fields.length;
+  const pad = <T,>(xs: T[], z: T): T[] => [...xs, z];
+  const names = pad(fields.map((f) => host.cstr(f.name)), "null");
+  const lens = pad(fields.map((f) => Buffer.byteLength(f.name, "utf8")), 0);
+  const kindOf = (t: IrType): number => (t.kind === "f64" ? 0 : t.kind === "bool" ? 1 : t.kind === "string" ? 2 : 3);
+  const kinds = pad(fields.map((f) => kindOf(f.type)), 0);
+  const gep = (idx: number): string => `ptrtoint (ptr getelementptr inbounds (%${struct}, ptr null, i32 0, i32 ${idx}) to i64)`;
+  const offs = pad(fields.map((_f, i) => gep(i + 1)), "0");
+  return [
+    `@sc_rview_names_${struct} = internal constant [${names.length} x ptr] [${names.map((x) => (x === "null" ? "ptr null" : `ptr ${x}`)).join(", ")}]`,
+    `@sc_rview_lens_${struct} = internal constant [${lens.length} x i64] [${lens.map((x) => `i64 ${x}`).join(", ")}]`,
+    `@sc_rview_kinds_${struct} = internal constant [${kinds.length} x i8] [${kinds.map((x) => `i8 ${x}`).join(", ")}]`,
+    `@sc_rview_offs_${struct} = internal constant [${offs.length} x i64] [${offs.map((x) => (x === "0" ? "i64 0" : `i64 ${x}`)).join(", ")}]`,
+    `@${sym} = internal constant { i32, ptr, ptr, ptr, ptr, i64 } { i32 ${n}, ptr @sc_rview_names_${struct}, ptr @sc_rview_lens_${struct}, ptr @sc_rview_kinds_${struct}, ptr @sc_rview_offs_${struct}, i64 ${gep(dynxSlotIndex(shape))} }`,
+  ];
+}
+
 /** THE ONE PLACE the cycle header's layout is written down on this side of
  * the compiler.
  *
@@ -708,10 +751,12 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
     if (shape.tostr) fieldTys.push("ptr"); // the hidden toString slot (ScrClosure *)
     if (shape.ownmask) fieldTys.push(`[${ownMaskBytes(shape)} x i8]`); // the hidden own-key mask
     if (shape.srcproto) fieldTys.push("ptr"); // the hidden source [[Prototype]] (ScrDyn *)
+    fieldTys.push("ptr"); // the hidden overflow (ScrDyn *), after the source [[Prototype]]
     typeDefs.push(
       `%${struct} = type { i64${fieldTys.length ? ", " + fieldTys.join(", ") : ""} } ` +
         `; record ${shape.id} { ${shape.fields.map((f) => f.name).join("; ")}${shape.indexValue ? "; [key: string]" : ""} }`,
     );
+    defs.push(...recordViewGlobalsLL(host, shape, struct));
   }
 
   for (const shape of records) {
