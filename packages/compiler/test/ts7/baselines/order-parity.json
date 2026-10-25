@@ -13781,6 +13781,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9850-union-let-regex-exec-tag.js": {
+   "order": [
+    "<repo>/tests/corpus/9850-union-let-regex-exec-tag.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/986-exceptions-uncaught.ts": {
    "order": [
     "<repo>/tests/corpus/986-exceptions-uncaught.ts"
