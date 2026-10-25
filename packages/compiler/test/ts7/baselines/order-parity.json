@@ -579,6 +579,306 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10600-proto-undef-field-reads.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10600-proto-undef-field-reads.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10601-proto-undef-two-fields.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10601-proto-undef-two-fields.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10602-proto-undef-subclass-reads.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10602-proto-undef-subclass-reads.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10603-proto-undef-method-read.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10603-proto-undef-method-read.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10604-proto-undef-in-loop.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10604-proto-undef-in-loop.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10605-proto-undef-keys-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10605-proto-undef-keys-order.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10606-proto-undef-template.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10606-proto-undef-template.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10607-proto-undef-typeof.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10607-proto-undef-typeof.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10608-proto-undef-static-proto-read.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10608-proto-undef-static-proto-read.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10609-proto-undef-arrow-closure.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10609-proto-undef-arrow-closure.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10610-proto-undef-conditional-write.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10610-proto-undef-conditional-write.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10611-proto-undef-two-classes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10611-proto-undef-two-classes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10612-proto-value-read.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10612-proto-value-read.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10613-proto-value-later-write.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10613-proto-value-later-write.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10614-proto-value-number.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10614-proto-value-number.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10615-proto-value-bool.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10615-proto-value-bool.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10616-proto-value-subclass-no-own.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10616-proto-value-subclass-no-own.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10617-proto-value-subclass-shadow.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10617-proto-value-subclass-shadow.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10618-proto-value-two-writes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10618-proto-value-two-writes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10619-proto-value-many-names.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10619-proto-value-many-names.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10620-proto-value-string-method.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10620-proto-value-string-method.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10621-proto-value-equality.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10621-proto-value-equality.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10622-proto-value-in-array.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10622-proto-value-in-array.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10623-proto-value-if-else.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10623-proto-value-if-else.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10624-proto-value-object-literal.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10624-proto-value-object-literal.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10625-proto-value-function-value.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10625-proto-value-function-value.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10626-proto-value-accessor-pair.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10626-proto-value-accessor-pair.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10627-proto-value-factory.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10627-proto-value-factory.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10628-proto-value-class-static.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10628-proto-value-class-static.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10629-proto-value-pipeline.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10629-proto-value-pipeline.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10630-proto-undef-json-free-keys.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10630-proto-undef-json-free-keys.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10631-proto-value-nested-call.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10631-proto-value-nested-call.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10632-proto-value-ternary-chain.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10632-proto-value-ternary-chain.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10633-proto-value-replace-chain.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10633-proto-value-replace-chain.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10634-proto-value-string-concat-many.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10634-proto-value-string-concat-many.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10635-proto-value-update-in-method.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10635-proto-value-update-in-method.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10636-proto-undef-state-machine.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10636-proto-undef-state-machine.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10637-proto-value-maths.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10637-proto-value-maths.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10638-proto-value-chained-instances.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10638-proto-value-chained-instances.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10639-proto-value-boolean-flags-loop.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10639-proto-value-boolean-flags-loop.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10640-proto-value-error-free-compare.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10640-proto-value-error-free-compare.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10641-proto-value-subclass-chain-three.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10641-proto-value-subclass-chain-three.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10642-proto-value-instanceof-branch.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10642-proto-value-instanceof-branch.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10643-proto-value-number-format.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10643-proto-value-number-format.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10644-proto-value-undef-and-value-mix.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10644-proto-value-undef-and-value-mix.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10645-proto-value-global-function-reads.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10645-proto-value-global-function-reads.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10646-proto-value-array-of-classes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10646-proto-value-array-of-classes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10647-proto-value-no-write-after-read.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10647-proto-value-no-write-after-read.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10648-proto-undef-and-value-reads.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10648-proto-undef-and-value-reads.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10649-proto-value-logical-default.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10649-proto-value-logical-default.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/10700-strict-eq-across-static-kinds.cjs": {
    "order": [
     "<repo>/tests/corpus/10700-strict-eq-across-static-kinds.cjs"
@@ -678,6 +978,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/11100-publicencrypt-mysql-shape-sha1-str.js": {
+   "order": [
+    "<repo>/tests/corpus/11100-publicencrypt-mysql-shape-sha1-str.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11101-publicencrypt-mysql-shape-sha1-buf.js": {
+   "order": [
+    "<repo>/tests/corpus/11101-publicencrypt-mysql-shape-sha1-buf.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11102-publicencrypt-sha256-label-pkcs1.js": {
+   "order": [
+    "<repo>/tests/corpus/11102-publicencrypt-sha256-label-pkcs1.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11103-publicencrypt-pem-private-key.js": {
+   "order": [
+    "<repo>/tests/corpus/11103-publicencrypt-pem-private-key.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11104-publicencrypt-bad-key-error.js": {
+   "order": [
+    "<repo>/tests/corpus/11104-publicencrypt-bad-key-error.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11105-publicencrypt-too-long-error.js": {
+   "order": [
+    "<repo>/tests/corpus/11105-publicencrypt-too-long-error.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11106-publicencrypt-untyped-wrong-type-error.js": {
+   "order": [
+    "<repo>/tests/corpus/11106-publicencrypt-untyped-wrong-type-error.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11107-publicencrypt-no-padding-errors.js": {
+   "order": [
+    "<repo>/tests/corpus/11107-publicencrypt-no-padding-errors.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1111-math-random.ts": {
    "order": [
     "<repo>/tests/corpus/1111-math-random.ts"
@@ -735,6 +1083,30 @@
   "<repo>/tests/corpus/1120-web-globals-encoders.ts": {
    "order": [
     "<repo>/tests/corpus/1120-web-globals-encoders.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11200-warn-mixed-payload-no-listener.ts": {
+   "order": [
+    "<repo>/tests/corpus/11200-warn-mixed-payload-no-listener.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11201-warn-mixed-payload-dyn-listener-before.ts": {
+   "order": [
+    "<repo>/tests/corpus/11201-warn-mixed-payload-dyn-listener-before.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11202-warn-mixed-payload-dyn-listener-after.ts": {
+   "order": [
+    "<repo>/tests/corpus/11202-warn-mixed-payload-dyn-listener-after.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11203-consistent-error-payload-typed-listener.ts": {
+   "order": [
+    "<repo>/tests/corpus/11203-consistent-error-payload-typed-listener.ts"
    ],
    "diags": []
   },
@@ -16545,354 +16917,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/10600-proto-undef-field-reads.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10600-proto-undef-field-reads.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10601-proto-undef-two-fields.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10601-proto-undef-two-fields.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10602-proto-undef-subclass-reads.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10602-proto-undef-subclass-reads.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10603-proto-undef-method-read.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10603-proto-undef-method-read.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10604-proto-undef-in-loop.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10604-proto-undef-in-loop.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10605-proto-undef-keys-order.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10605-proto-undef-keys-order.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10606-proto-undef-template.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10606-proto-undef-template.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10607-proto-undef-typeof.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10607-proto-undef-typeof.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10608-proto-undef-static-proto-read.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10608-proto-undef-static-proto-read.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10609-proto-undef-arrow-closure.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10609-proto-undef-arrow-closure.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10610-proto-undef-conditional-write.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10610-proto-undef-conditional-write.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10611-proto-undef-two-classes.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10611-proto-undef-two-classes.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10612-proto-value-read.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10612-proto-value-read.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10613-proto-value-later-write.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10613-proto-value-later-write.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10614-proto-value-number.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10614-proto-value-number.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10615-proto-value-bool.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10615-proto-value-bool.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10616-proto-value-subclass-no-own.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10616-proto-value-subclass-no-own.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10617-proto-value-subclass-shadow.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10617-proto-value-subclass-shadow.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10618-proto-value-two-writes.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10618-proto-value-two-writes.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10619-proto-value-many-names.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10619-proto-value-many-names.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10620-proto-value-string-method.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10620-proto-value-string-method.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10621-proto-value-equality.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10621-proto-value-equality.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10622-proto-value-in-array.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10622-proto-value-in-array.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10623-proto-value-if-else.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10623-proto-value-if-else.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10624-proto-value-object-literal.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10624-proto-value-object-literal.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10625-proto-value-function-value.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10625-proto-value-function-value.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10626-proto-value-accessor-pair.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10626-proto-value-accessor-pair.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10627-proto-value-factory.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10627-proto-value-factory.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10628-proto-value-class-static.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10628-proto-value-class-static.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10629-proto-value-pipeline.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10629-proto-value-pipeline.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10630-proto-undef-json-free-keys.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10630-proto-undef-json-free-keys.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10631-proto-value-nested-call.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10631-proto-value-nested-call.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10632-proto-value-ternary-chain.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10632-proto-value-ternary-chain.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10633-proto-value-replace-chain.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10633-proto-value-replace-chain.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10634-proto-value-string-concat-many.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10634-proto-value-string-concat-many.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10635-proto-value-update-in-method.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10635-proto-value-update-in-method.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10636-proto-undef-state-machine.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10636-proto-undef-state-machine.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10637-proto-value-maths.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10637-proto-value-maths.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10638-proto-value-chained-instances.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10638-proto-value-chained-instances.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10639-proto-value-boolean-flags-loop.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10639-proto-value-boolean-flags-loop.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10640-proto-value-error-free-compare.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10640-proto-value-error-free-compare.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10641-proto-value-subclass-chain-three.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10641-proto-value-subclass-chain-three.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10642-proto-value-instanceof-branch.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10642-proto-value-instanceof-branch.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10643-proto-value-number-format.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10643-proto-value-number-format.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10644-proto-value-undef-and-value-mix.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10644-proto-value-undef-and-value-mix.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10645-proto-value-global-function-reads.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10645-proto-value-global-function-reads.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10646-proto-value-array-of-classes.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10646-proto-value-array-of-classes.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10647-proto-value-no-write-after-read.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10647-proto-value-no-write-after-read.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10648-proto-undef-and-value-reads.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10648-proto-undef-and-value-reads.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10649-proto-value-logical-default.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10649-proto-value-logical-default.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11100-publicencrypt-mysql-shape-sha1-str.js": {
-   "order": [
-    "<repo>/tests/corpus/11100-publicencrypt-mysql-shape-sha1-str.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11101-publicencrypt-mysql-shape-sha1-buf.js": {
-   "order": [
-    "<repo>/tests/corpus/11101-publicencrypt-mysql-shape-sha1-buf.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11102-publicencrypt-sha256-label-pkcs1.js": {
-   "order": [
-    "<repo>/tests/corpus/11102-publicencrypt-sha256-label-pkcs1.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11103-publicencrypt-pem-private-key.js": {
-   "order": [
-    "<repo>/tests/corpus/11103-publicencrypt-pem-private-key.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11104-publicencrypt-bad-key-error.js": {
-   "order": [
-    "<repo>/tests/corpus/11104-publicencrypt-bad-key-error.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11105-publicencrypt-too-long-error.js": {
-   "order": [
-    "<repo>/tests/corpus/11105-publicencrypt-too-long-error.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11106-publicencrypt-untyped-wrong-type-error.js": {
-   "order": [
-    "<repo>/tests/corpus/11106-publicencrypt-untyped-wrong-type-error.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11107-publicencrypt-no-padding-errors.js": {
-   "order": [
-    "<repo>/tests/corpus/11107-publicencrypt-no-padding-errors.js"
-   ],
-   "diags": []
   }
  }
 }
