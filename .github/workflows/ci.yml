@@ -353,6 +353,9 @@ jobs:
       # salted apart from shardOf so every part of every shard is non-empty
       # (shard.test.ts pins it, including this 20-way divisor).
       SCRIPTC_TEST_SHARD: ${{ matrix.shard }}/20
+      # Per-test phase records (tests/harness/phase-collect.ts): binary-cache hits,
+      # misses and compile time, summarized by tests/harness/phase-summary.mjs.
+      SCRIPTC_PHASE_LOG: ${{ github.workspace }}/phase-log
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -379,6 +382,19 @@ jobs:
       # lands in exactly ONE --shard slice, so an env-sharded file behind
       # --shard would run only one of its twenty case slices and silently
       # drop the rest. Files split by --shard here; cases split by env below.
+      # The compiled-program cache (cc.ts's bin/ and obj/, plus the oracle/ results)
+      # persists across runs. Every entry is content-addressed: the key covers
+      # the emitted C or LLVM text, the runtime sources, the full command line,
+      # the driver and its version, so a restored entry can only serve a build
+      # whose inputs match byte for byte. The prefix restores the newest entry
+      # of this OS, flavor and shard; the run id makes each save a new entry.
+      - name: Restore the compiled-program cache
+        uses: actions/cache/restore@v4
+        with:
+          path: node_modules/.cache/scriptc-tests/cas
+          key: scriptc-cas-${{ runner.os }}-${{ runner.arch }}-${{ matrix.flavor }}-${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: |
+            scriptc-cas-${{ runner.os }}-${{ runner.arch }}-${{ matrix.flavor }}-${{ matrix.shard }}-
       - name: Tests (file-sharded, case-sharded files excluded)
         if: ${{ inputs.vitest_filter == '' }}
         run: >-
@@ -415,6 +431,19 @@ jobs:
       - name: Tests (coverage sweep, slice ${{ matrix.shard }}/20)
         if: ${{ !cancelled() && matrix.flavor == 'plain' && inputs.vitest_filter == '' }}
         run: pnpm test tests/harness/corpus/coverage-corpus-
+
+      - name: Summarize the compiled-program cache
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          du -sh node_modules/.cache/scriptc-tests/cas 2>/dev/null || echo "cas: absent"
+          node tests/harness/phase-summary.mjs
+      - name: Save the compiled-program cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v4
+        with:
+          path: node_modules/.cache/scriptc-tests/cas
+          key: scriptc-cas-${{ runner.os }}-${{ runner.arch }}-${{ matrix.flavor }}-${{ matrix.shard }}-${{ github.run_id }}
 
   # Replaces the earlier full-corpus tests_macos. That job ran the WHOLE
   # corpus on macOS purely out of caution ("the platform the differential +
@@ -712,6 +741,9 @@ jobs:
       # (worker-pool oversubscription under the corpus compile fan-out).
       SCRIPTC_TEST_WORKERS: "4"
       SCRIPTC_TEST_SHARD: ${{ matrix.shard }}/20
+      # Per-test phase records (tests/harness/phase-collect.ts): binary-cache hits,
+      # misses and compile time, summarized by tests/harness/phase-summary.mjs.
+      SCRIPTC_PHASE_LOG: ${{ github.workspace }}/phase-log
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/zig
@@ -780,6 +812,19 @@ jobs:
       # coverage sweep) -- see that job's comments for why the axes must
       # not mix. No `ulimit`/core-dump step: that is an Ubuntu apport
       # workaround with no Windows equivalent.
+      # The compiled-program cache (cc.ts's bin/ and obj/, plus the oracle/ results)
+      # persists across runs. Every entry is content-addressed: the key covers
+      # the emitted C or LLVM text, the runtime sources, the full command line,
+      # the driver and its version, so a restored entry can only serve a build
+      # whose inputs match byte for byte. The prefix restores the newest entry
+      # of this OS, flavor and shard; the run id makes each save a new entry.
+      - name: Restore the compiled-program cache
+        uses: actions/cache/restore@v4
+        with:
+          path: node_modules/.cache/scriptc-tests/cas
+          key: scriptc-cas-${{ runner.os }}-${{ runner.arch }}-windows-${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: |
+            scriptc-cas-${{ runner.os }}-${{ runner.arch }}-windows-${{ matrix.shard }}-
       - name: Tests (file-sharded, case-sharded files excluded)
         if: ${{ inputs.vitest_filter == '' }}
         run: >-
@@ -813,6 +858,19 @@ jobs:
       - name: Tests (coverage sweep, slice ${{ matrix.shard }}/20)
         if: ${{ !cancelled() && inputs.vitest_filter == '' }}
         run: pnpm test tests/harness/corpus/coverage-corpus-
+
+      - name: Summarize the compiled-program cache
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          du -sh node_modules/.cache/scriptc-tests/cas 2>/dev/null || echo "cas: absent"
+          node tests/harness/phase-summary.mjs
+      - name: Save the compiled-program cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v4
+        with:
+          path: node_modules/.cache/scriptc-tests/cas
+          key: scriptc-cas-${{ runner.os }}-${{ runner.arch }}-windows-${{ matrix.shard }}-${{ github.run_id }}
 
   # Retain the pre-matrix "test" check for branch protection and badges.
   # Require this check on the stack base. Upper layers must not pass before
