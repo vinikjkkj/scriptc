@@ -1891,9 +1891,17 @@ function ccVersionOnce(argv: string[]): Promise<string> {
   if (memo === undefined) {
     // cwd: the version probe must not touch the caller's directory —
     // `zig cc --version` (zig 0.16) drops an empty a.o wherever it runs.
-    memo = execFileAsync(argv[0] ?? "clang", [...argv.slice(1), "--version"], { cwd: tmpdir() }).then(
+    // `zig cc --version` reports the clang zig embeds, not zig itself: two zig
+    // releases that embed the same clang (and so print the same first line)
+    // ship different libc/CRT objects. A zig driver therefore adds its own
+    // version to the identity, so a zig upgrade can never serve an old binary.
+    const driverVersion = execFileAsync(argv[0] ?? "clang", [...argv.slice(1), "--version"], { cwd: tmpdir() }).then(
       (r) => r.stdout.split("\n", 1)[0] ?? "",
     );
+    const zigVersion = (basename(argv[0] ?? "") === "zig" || basename(argv[0] ?? "") === "zig.exe")
+      ? execFileAsync(argv[0] ?? "zig", ["version"], { cwd: tmpdir() }).then((r) => `zig ${r.stdout.trim()}`)
+      : Promise.resolve("");
+    memo = Promise.all([driverVersion, zigVersion]).then(([d, z]) => (z === "" ? d : `${d}\n${z}`));
     ccVersionMemos.set(key, memo);
   }
   return memo;
