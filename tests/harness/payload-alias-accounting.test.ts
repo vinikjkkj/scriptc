@@ -146,7 +146,7 @@ describe("the dyn->static recovery is a copy, and the store into it is lost", ()
     // whole effect and additionally records the object the copy was made
     // FROM — so the marking this row is about is unchanged, and only its
     // call site's name moved.
-    expect(c).toMatch(/scr_dyn_origin_mark\(sc_td_\d+\(/);
+    expect(c).toMatch(/scr_dyn_origin_mark(?:_v)?\(sc_td_\d+\(/);
     expect(c).toMatch(/sc_dyn_key_get\(/);
   });
 
