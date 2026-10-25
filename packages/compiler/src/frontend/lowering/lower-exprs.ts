@@ -13232,6 +13232,9 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         return { kind: "dynFrom", value: closure([], STRING, () => ({ kind: "strLit", value: "[object Object]", type: STRING, loc })), type: DYN, loc };
       case "hasOwnProperty":
       case "propertyIsEnumerable": {
+        // An instance's own fields are its runtime class's: a subclass may add fields the
+        // static class does not know, so an instance read on a class with subclasses declines.
+        if (!viaPrototype && info.subclasses.length > 0) return null;
         // Own properties: an instance's fields; a prototype's own methods (and constructor).
         // propertyIsEnumerable: the fields (enumerable), never a method or constructor.
         const names = n === "propertyIsEnumerable" ? (viaPrototype ? [] : fieldNames) : viaPrototype ? [...ownMethodNames, "constructor"] : fieldNames;
