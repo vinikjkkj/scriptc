@@ -5,6 +5,7 @@ import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, 
 
 import { isJsSourceFile } from "./program.js";
 import { isSqliteTypesPath } from "./shared.js";
+import { isProvenanceSourceFile } from "./provenance-registry.js";
 import { accessorSlotProp, armDiscrimLits, armLitsConflict, builtinRenderingKey, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
@@ -2670,6 +2671,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const fields: { name: string; type: IrType }[] = [];
     for (let i = 0; i < args.length; i++) {
       let et = mapType(args[i]!, ctx);
+      // A library member's `any` element (lru.min's `entries(): IterableIterator<
+      // [any, any]>`): the library author's lazy any, the checked-dynamic slot,
+      // the same reading the array element takes under declMember.
+      if (et === null && ctx.declMember === true && (args[i]!.flags & ts.TypeFlags.Any) !== 0) et = DYN;
       // A unit-only element (`[number, undefined]`) rides the unit-only
       // union, the record-field rule.
       if (et?.kind === "void" && isUnitOnlyTsType(args[i]!)) et = unitOnlyUnion(unions);
@@ -5055,10 +5060,25 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // overlap. This is a plain OR, not a new, wider rule: a call site that
     // is neither a union-arm attempt nor mapping a bare .d.ts callable
     // literal still takes the global `any` decline exactly as before.
+    // LIBRARY-AUTHOR any RETURN (the return-position twin of the bare-`any`
+    // PARAMETER rule above): a signature declared in a package's .d.ts whose
+    // return resolves to `any` -- spelled, or by instantiating a declared
+    // type parameter (lru.min's `get(key: Key): Value | undefined` with
+    // Value = any, the record member that blocked mysql2's createLRU) -- is
+    // the library's lazy `any`: the checked-dynamic tier. The stdlib and the
+    // program's own declarations keep the global `any` decline.
+    // The package's own SOURCE (a provenance-attested tree, compiled from its
+    // implementation rather than its .d.ts) is the same library author.
+    const sigDeclForRet = checker.signatureDeclaration(sig);
+    const libraryAnyReturn =
+      !ctx.dynamic &&
+      sigDeclForRet !== undefined &&
+      ((sigDeclForRet.getSourceFile().isDeclarationFile && !ctx.isStdlibFile(sigDeclForRet.getSourceFile())) ||
+        isProvenanceSourceFile(sigDeclForRet.getSourceFile().fileName));
     const ret =
       retT.flags & ts.TypeFlags.Never
         ? VOID
-        : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral || (!ctx.dynamic && spellsAnyReturn(checker.signatureDeclaration(sig)))) && (retT.flags & ts.TypeFlags.Any) !== 0
+        : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral || libraryAnyReturn || (!ctx.dynamic && spellsAnyReturn(sigDeclForRet))) && (retT.flags & ts.TypeFlags.Any) !== 0
           ? DYN
           : mapType(retT, ctx);
     if (!ret) {
@@ -8663,7 +8683,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
               speculative: true,
               ...(bodylessOwner ? { declMember: true } : {}),
             }
-          : ctx.declMember !== true && libBagMember(p, ctx) && hasCallablePart(fieldTs, checker)
+          : ctx.declMember !== true && (libBagMember(p, ctx) || libraryOwnedMember(p, ctx)) && hasCallablePart(fieldTs, checker)
             ? { ...ctx, declMember: true }
             : admittedOverloadSet
               ? { ...tagOuterCtx(ctx), declMember: true }
@@ -9171,6 +9191,19 @@ function libBagMember(p: ts.Symbol, ctx: TypeMapperCtx): boolean {
       (ctx.isStdlibFile?.(d.getSourceFile()) ?? false),
   );
 }
+/** A member whose declarations are all in a package's own code: its .d.ts
+ * (not the standard library) or its provenance-attested source. Its `any`
+ * positions are the library author's lazy `any` (see ctx.declMember), so the
+ * member's signature maps under declMember. A program-authored member keeps
+ * every refusal. */
+function libraryOwnedMember(p: ts.Symbol, ctx: TypeMapperCtx): boolean {
+  if (ctx.dynamic) return false;
+  const ds = ctx.checker.declarationsOf(p);
+  return ds.length > 0 && ds.every((d) => {
+    const sf = d.getSourceFile();
+    return (sf.isDeclarationFile && !ctx.isStdlibFile(sf)) || isProvenanceSourceFile(sf.fileName);
+  });
+}
 function hasCallablePart(t: ts.Type, checker: ts.TypeChecker): boolean {
   return checker.getCallSignatures(t).length > 0 ||
     (t.isUnionType() && ts.constituentTypes(t).some((c) => checker.getCallSignatures(c).length > 0));
@@ -9213,7 +9246,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     // interface was named as the blocker whatever the real one was.
     const descAdmittedOverloadSet = isOverloadSetMember(fieldTs, checker) && !hasStdlibSignature(fieldTs, checker, ctx);
     const descCtx: TypeMapperCtx =
-      ctx.declMember !== true && ((libBagMember(p, ctx) && hasCallablePart(fieldTs, checker)) || descAdmittedOverloadSet)
+      ctx.declMember !== true && (((libBagMember(p, ctx) || libraryOwnedMember(p, ctx)) && hasCallablePart(fieldTs, checker)) || descAdmittedOverloadSet)
         ? { ...ctx, declMember: true }
         : ctx;
     // A GENERIC callable member leaves the shape speculatively (its mapping
