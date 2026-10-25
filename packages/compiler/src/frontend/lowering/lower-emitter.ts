@@ -1019,11 +1019,15 @@ function lowerListenerArg(
  * lexical class still answers, exactly like a prototype-chain walk). */
 export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
   access: ts.PropertyAccessExpression, info: ClassInfo,
-  superRecv?: { thisRef: IrExpr; cls: ClassInfo }): IrExpr | null {
+  superRecv?: { thisRef: IrExpr; cls: ClassInfo },
+  loweredRecv?: IrExpr): IrExpr | null {
   const member = access.name.text;
   const loc = locOf(call);
   const args = call.arguments;
-  const lowerReceiver = (): IrExpr => superRecv?.thisRef ?? L.lowerExpr(access.expression);
+  // A receiver the caller already lowered (the chained `.on(...)` whose
+  // checker type is `any` while its value is the emitter object): lowering
+  // it again would compile its side effects twice.
+  const lowerReceiver = (): IrExpr => superRecv?.thisRef ?? loweredRecv ?? L.lowerExpr(access.expression);
   // The class VALUE, not an instance (`EventEmitter.setMaxListeners(n)` —
   // the receiver's checker type carries construct signatures; mapType
   // answers the instance object for every EventEmitter-symbol type, so the
