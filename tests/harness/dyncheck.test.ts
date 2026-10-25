@@ -1263,24 +1263,15 @@ console.log("recovered");
     expect(r.stdout).toBe("assigned 2\nnever: boom\nrecovered\n");
   });
 
-  test("a dyn write through a NAMED record's copy REFUSES rather than landing on the copy", async () => {
-    // The crossing into an any/unknown slot copies a record (the static
-    // and dynamic representations are different memory), so a write
-    // through the copy cannot reach the object the caller still names --
-    // Node prints "2 2" here. This used to answer "1 2", the silent
-    // divergence; scr_dyn_static_copy_refuse replaced it with a loud one
-    // ("loud beats lost") and every mutating dyn entry point shares it.
+  test("a dyn write through a NAMED record's copy lands on the record, as in Node", async () => {
+    // The crossing into an any/unknown slot is a copy of the record's
+    // dynamic representation, and a write through it now writes the
+    // record's declared field on the origin (scr_dyn_key_set, "record
+    // views"), so the static read sees it. Node prints "2 2".
     //
-    // THE RECOVERY now hands back the origin (scr_dyn_origin_mark /
+    // THE RECOVERY hands back the origin too (scr_dyn_origin_mark /
     // scr_dyn_origin_take), so `base === (boxed as {a: number})` is true and
-    // a write through the RECOVERED value does reach `base`. This row is the
-    // other direction and is deliberately unchanged: `boxed.a = 2` never
-    // recovers anything — the receiver stays a ScrDyn and the store goes to
-    // scr_dyn_key_set, which would land on the copy's own entry table. That
-    // still refuses, because the origin remembers the object but the dyn
-    // node's storage is still its own. Making THAT land needs the two
-    // representations to share storage, which is the change the origin route
-    // exists to avoid.
+    // a write through the recovered value reaches `base` as well.
     const r = await compileAndRun(
       "any-record-copy",
       `const base = { a: 1 };
@@ -1289,11 +1280,26 @@ boxed.a = 2;
 console.log(base.a, boxed.a);
 `,
     );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("2 2\n");
+  });
+
+  test("a dyn write the static field cannot hold is refused by name, never stored silently", async () => {
+    // A string written into a number field is a TYPE HOLE: Node stores it,
+    // and the static field has no representation for it. This build refuses
+    // it loudly, naming the field, rather than storing it where no static
+    // read could see it. (Open: Node prints "x x" here.)
+    const r = await compileAndRun(
+      "any-record-type-hole",
+      `const base = { a: 1 };
+const boxed: any = base;
+boxed.a = "x";
+console.log(base.a, boxed.a);
+`,
+    );
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toBe("");
-    expect(r.stderr).toContain(
-      "assigning a property through a value that crossed into an 'unknown' (dynamic) slot",
-    );
+    expect(r.stderr).toContain("is a type hole");
   });
 
   test("an uninitialized `any` binding is the dyn undefined, not a trap", async () => {
