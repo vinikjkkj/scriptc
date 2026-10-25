@@ -13597,7 +13597,11 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // `env[key]` on a UNION of record shapes (`ProcessEnv | Record<string,
     // string>` — the env-bag parameter pattern): the per-arm keyed read,
     // joined exactly like the dot form (lowerUnionProperty's keyed path).
-    if (receiverIr?.kind === "union") {
+    // An UNMAPPED receiver (the checker's `any`, e.g. a JS match result whose
+    // receiver is untyped: `m[1]` after `this.info.match(re)`) that lowers to a
+    // union of array and unit arms takes the same keyed path. A plain name only:
+    // the probe lowering below is pure for it.
+    if (receiverIr?.kind === "union" || (receiverIr === null && ts.isIdentifier(expr.expression))) {
       const value = L.lowerExpr(expr.expression);
       if (value.type.kind === "union") {
         const key = L.lowerExpr(expr.argumentExpression);
