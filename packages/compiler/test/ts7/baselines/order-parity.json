@@ -16912,6 +16912,12 @@
     "<repo>/tests/corpus/10902-buffer-alias-reexport/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/10903-process-binding-buffer.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10903-process-binding-buffer.cjs"
+   ],
+   "diags": []
   }
  }
 }
