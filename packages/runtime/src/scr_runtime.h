@@ -7128,6 +7128,9 @@ void scr_dyn_this_pop(void);
  * handle whose tag has no installed ops — a unit that fires without its
  * dyn half never binds). */
 ScrDyn *scr_dyn_this_get(void);
+/* `this` of a sloppy plain function: a nullish receiver reads as globalThis (scr_json.c). */
+ScrDyn *scr_dyn_this_get_sloppy(void);
+bool scr_dyn_is_global_this(const ScrDyn *d);
 
 /* The data-chunk encoding window (setEncoding — scr_json.c's note): the
  * firing site opens/closes it around a 'data' pass; scr_dyn_new_chunk

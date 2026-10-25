@@ -5002,6 +5002,8 @@ export type IrLibFn =
    * (the strict-mode plain-call answer, the old constant). Zero args →
    * dyn (+1). Never throws. */
   | "dyn.this"
+  | "dyn.thisSloppy"
+  | "dyn.isGlobalThis"
   /** OPEN an ambient-receiver window: bind the dyn operand as `this` for
    * everything the current frame calls until the matching `dyn.thisPop`.
    * The operand is BORROWED at the call and retained for the window
