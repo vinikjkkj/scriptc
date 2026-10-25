@@ -239,7 +239,9 @@ console.log(JSON.stringify(o));`;
    * crossing marks its dyn copy and the rerouted write must REFUSE rather
    * than land on the copy. This is the row that proves the reroute did not
    * trade a lost write for a lie. */
-  test("a write through an asserted MARKED static copy still refuses", { timeout: 240_000 }, async () => {
+  test("a write through an asserted MARKED static copy lands on the record, as in Node", { timeout: 240_000 }, async () => {
+    // A dyn write to a declared field now writes the origin's field (the
+    // record view), so the static object sees it. Node and this build agree.
     const src = `const o = { n: 1 };
 const u: unknown = o;
 (u as Record<string, unknown>)["n"] = 2;
@@ -247,8 +249,20 @@ console.log(JSON.stringify(o));`;
     const { node, exe } = await bothWays("marked-static-copy", backend, src);
     expect(node.code).toBe(0);
     expect(node.out.trim()).toBe('{"n":2}');
+    expect(exe.code, exe.err).toBe(0);
+    expect(exe.out.trim()).toBe(node.out.trim());
+  });
+
+  test("a dyn write a MARKED static copy's field cannot hold still refuses loudly", { timeout: 240_000 }, async () => {
+    // A string written into a number field is a type hole: named, thrown,
+    // never stored where no static read can see it.
+    const src = `const o = { n: 1 };
+const u: unknown = o;
+(u as Record<string, unknown>)["n"] = "x";
+console.log(JSON.stringify(o));`;
+    const { exe } = await bothWays("marked-static-copy-hole", backend, src);
     expect(exe.code).not.toBe(0);
-    expect(exe.err).toMatch(/crossed into an 'unknown' \(dynamic\) slot/);
+    expect(exe.err).toMatch(/is a type hole/);
   });
 });
 
