@@ -13152,28 +13152,171 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     return L.maybeNarrow(get, expr);
   }
 
-  /** Members every object inherits from Object.prototype. scriptc has no value
-   * lowering for them (SC2020 on the dot forms), so a computed read that can
-   * name one fences loudly when the literal names it, and answers a loud
-   * run-time error when a non-literal key happens to be one of them. */
+  /** Members every object inherits from Object.prototype. Each one a computed
+   * read can name (its key pattern admits it) answers its JS value, or the
+   * read is refused at compile time (SC1090): never a run-time error arm.
+   * `__proto__` and the `__define/lookup*` family answer prototype OBJECTS or
+   * accessor helpers no value form exists for, and the prototype's own
+   * `valueOf` / `isPrototypeOf` answer the prototype object: those reads stay
+   * refused. */
   const OBJECT_PROTOTYPE_MEMBERS = [
     "constructor", "__proto__", "toString", "toLocaleString", "valueOf", "hasOwnProperty",
     "isPrototypeOf", "propertyIsEnumerable", "__defineGetter__", "__defineSetter__",
     "__lookupGetter__", "__lookupSetter__",
   ];
+  const OBJECT_PROTOTYPE_UNREPRESENTABLE = new Set([
+    "__proto__", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__",
+  ]);
+
+  /** The regular expressions of the names a computed key admits, one per constituent. A
+   * string or number literal names itself. A template LITERAL expression (`password${n}`)
+   * matches its texts around each span: a number span is the number's String form, a
+   * string-literal span its text, any other span anything. A key whose type is a
+   * template literal type but is not spelled as one here, or whose type admits any
+   * name (string, any), returns null: every name is admitted. */
+  function keyPatternsOf(L: Lowerer, keyNode: ts.Expression): RegExp[] | null {
+    const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const NUM = "(?:[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:e[+-]?\\d+)?|Infinity|NaN)";
+    if (ts.isTemplateExpression(keyNode)) {
+      let src = "^" + esc(keyNode.head.text);
+      for (const span of keyNode.templateSpans) {
+        const st = L.typeOf(span.expression);
+        if (st.isStringLiteralType()) src += esc(st.value);
+        else if (st.flags & ts.TypeFlags.NumberLike) src += NUM;
+        else src += "[\\s\\S]*";
+        src += esc(span.literal.text);
+      }
+      return [new RegExp(src + "$")];
+    }
+    const keyT = L.typeOf(keyNode);
+    const parts = keyT.isUnionType() ? ts.constituentTypes(keyT) : [keyT];
+    const out: RegExp[] = [];
+    for (const p of parts) {
+      if (p.isStringLiteralType()) out.push(new RegExp("^" + esc(p.value) + "$"));
+      else if (p.isNumberLiteralType()) out.push(new RegExp("^" + esc(String((p as unknown as { value: number }).value)) + "$"));
+      else if (p.flags & ts.TypeFlags.NumberLike) out.push(new RegExp("^" + NUM + "$"));
+      else return null;
+    }
+    return out;
+  }
+
+  /** The Object.prototype member's value as a DYN: a function value (a lifted closure
+   * whose receiver is the ambient `this` of the call, checked to the class), or, for
+   * `constructor`, the class value (the runtime class of the receiver when it has
+   * subclasses). Null when the member has no exact value here. */
+  function objectProtoValue(
+    L: Lowerer,
+    info: ClassInfo,
+    className: string,
+    viaPrototype: boolean,
+    n: string,
+    loc: SrcLoc,
+    recvRef: IrExpr | null,
+    fieldNames: string[],
+    ownMethodNames: string[],
+  ): IrExpr | null {
+    const where = viaPrototype ? "proto" : "inst";
+    const closure = (paramTypes: IrType[], ret: IrType, build: (self: IrExpr, args: IrExpr[]) => IrExpr): IrExpr => {
+      const name = `%objproto.${className}.${where}.${n}`;
+      const fnT = funcOf(paramTypes, ret);
+      if (!L.liftedFns.some((f) => f.name === name)) {
+        const selfT: IrType = { kind: "object", className };
+        const irParams: IrParam[] = paramTypes.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
+        const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
+        const self: IrExpr = { kind: "varRef", localId: "self.0", type: selfT, loc };
+        const result = build(self, args);
+        const stmt: IrStmt = ret.kind === "void" ? { kind: "exprStmt", expr: result, loc } : { kind: "return", value: result, loc };
+        L.liftedFns.push({
+          name,
+          params: irParams,
+          returnType: ret,
+          locals: [
+            { id: "self.0", name: "self", type: selfT, mutable: false },
+            ...irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+          ],
+          body: [
+            { kind: "varDecl", localId: "self.0", init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: selfT, loc }, loc },
+            stmt,
+          ],
+          loc,
+        });
+      }
+      return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
+    };
+    const boolChain = (args: IrExpr[], names: string[]): IrExpr => {
+      let r: IrExpr = { kind: "boolLit", value: false, type: BOOL, loc };
+      for (let i = names.length - 1; i >= 0; i--) {
+        const test: IrExpr = { kind: "strEq", negated: false, left: args[0]!, right: { kind: "strLit", value: names[i]!, type: STRING, loc }, type: BOOL, loc };
+        r = { kind: "ternary", cond: test, then: { kind: "boolLit", value: true, type: BOOL, loc }, else_: r, type: BOOL, loc };
+      }
+      return r;
+    };
+    switch (n) {
+      case "toString":
+      case "toLocaleString":
+        // `toLocaleString` calls the receiver's toString: an override of it is refused.
+        if (n === "toLocaleString" && (L.findMethodOn(info, "toString") !== null || findGenericMethodOn(L, info, "toString") !== null)) return null;
+        return { kind: "dynFrom", value: closure([], STRING, () => ({ kind: "strLit", value: "[object Object]", type: STRING, loc })), type: DYN, loc };
+      case "hasOwnProperty":
+      case "propertyIsEnumerable": {
+        // Own properties: an instance's fields; a prototype's own methods (and constructor).
+        // propertyIsEnumerable: the fields (enumerable), never a method or constructor.
+        const names = n === "propertyIsEnumerable" ? (viaPrototype ? [] : fieldNames) : viaPrototype ? [...ownMethodNames, "constructor"] : fieldNames;
+        return { kind: "dynFrom", value: closure([STRING], BOOL, (_self, args) => boolChain(args, names)), type: DYN, loc };
+      }
+      case "valueOf":
+        if (viaPrototype) return null;
+        return { kind: "dynFrom", value: closure([], DYN, (self) => ({ kind: "dynFrom", value: self, type: DYN, loc })), type: DYN, loc };
+      case "isPrototypeOf":
+        // An instance is never a prototype: nothing in a scriptc program sets a prototype
+        // (Object.create and setPrototypeOf have no lowering), so the answer is false.
+        if (viaPrototype) return null;
+        return { kind: "dynFrom", value: closure([DYN], BOOL, () => ({ kind: "boolLit", value: false, type: BOOL, loc })), type: DYN, loc };
+      case "constructor": {
+        const classVal = (cn: string): IrExpr => ({ kind: "dynFrom", value: { kind: "classRef", className: cn, type: { kind: "classval", className: cn }, loc }, type: DYN, loc });
+        if (viaPrototype || recvRef === null) return classVal(className);
+        const subs: { cls: ClassInfo; depth: number }[] = [];
+        const walk = (c: ClassInfo, depth: number): void => {
+          for (const s of c.subclasses) {
+            subs.push({ cls: s, depth });
+            walk(s, depth + 1);
+          }
+        };
+        walk(info, 1);
+        subs.sort((a, b) => a.depth - b.depth);
+        let chain: IrExpr = classVal(className);
+        for (const { cls } of subs) {
+          chain = {
+            kind: "ternary",
+            cond: { kind: "instanceOf", value: recvRef, className: cls.def.name, type: BOOL, loc },
+            then: classVal(cls.def.name),
+            else_: chain,
+            type: DYN,
+            loc,
+          };
+        }
+        return chain;
+      }
+      default:
+        return null;
+    }
+  }
 
   /** Computed-key reads `o[k]` on a CLASS INSTANCE (an `object` receiver) and
    * on a class PROTOTYPE (`C.prototype[k]`): the class's run-time key table.
-   * Each declared field and each method (own or inherited) is one arm
-   * `k === name ? value : …`; the arm's value is boxed into the checked-dynamic
-   * tree, and no arm matching answers the dyn undefined, which is JS's answer
-   * for an absent key. A key whose type is a union of string literals (or one
-   * literal) only consults those names. A method's value is the detached
-   * closure `o.m` / `C.prototype.m` hands out in JS: an instance read takes the
-   * method of the instance's own runtime class, and the receiver comes from the
-   * call that invokes it. Null, leaving the caller's fence, for every shape not
-   * covered: accessors, own-shadow properties, abstract members, field types the
-   * dyn tree cannot hold, and implicit-any methods a subclass overrides. */
+   * The key's TYPE decides which names it can name (keyPatternsOf: a literal, a
+   * union of literals, a template literal type such as `password${number}`);
+   * an unrestricted string key can name every member. Each named declared
+   * field and method (own or inherited) is one arm `k === name ? value : …`;
+   * the arm's value is boxed into the checked-dynamic tree, and no arm matching
+   * answers the dyn undefined, which is JS's answer for an absent key. A method's
+   * value is the detached closure `o.m` / `C.prototype.m` hands out in JS: an
+   * instance read takes the method of the instance's own runtime class, and the
+   * receiver comes from the call that invokes it. Null, leaving the caller's
+   * fence (SC1090, compile time), for every shape not covered: accessors,
+   * own-shadow properties, abstract members, field types the dyn tree cannot hold,
+   * implicit-any methods a subclass overrides, and the Object.prototype members
+   * listed in OBJECT_PROTOTYPE_MEMBERS that a key can name but have no exact value. */
   function lowerClassComputedKeyRead(L: Lowerer, expr: ts.ElementAccessExpression): IrExpr | null {
     if (expr.questionDotToken !== undefined) return null;
     const loc = locOf(expr);
@@ -13201,6 +13344,8 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // only; a prototype carries no instance fields), then methods up the chain.
     const names: string[] = [];
     const seen = new Set<string>();
+    const fieldNames: string[] = [];
+    const ownMethodNames: string[] = [];
     const add = (n: string): void => {
       if (!seen.has(n)) {
         seen.add(n);
@@ -13210,9 +13355,14 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     if (!viaPrototype) {
       for (const n of info.fields.keys()) {
         if (n.startsWith("#__sc_own$")) return null;
-        if (!n.startsWith("#") && !n.startsWith("%")) add(n);
+        if (!n.startsWith("#") && !n.startsWith("%")) {
+          add(n);
+          fieldNames.push(n);
+        }
       }
     }
+    for (const m of info.methods.keys()) if (!m.startsWith("#") && !m.startsWith("%")) ownMethodNames.push(m);
+    for (const m of info.genericMethods?.keys() ?? []) if (!m.startsWith("#")) ownMethodNames.push(m);
     for (let c: ClassInfo | null = info; c; c = c.base) {
       for (const m of c.methods.keys()) {
         if (m.startsWith("get:") || m.startsWith("set:")) return null;
@@ -13220,15 +13370,10 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       }
       for (const m of c.genericMethods?.keys() ?? []) if (!m.startsWith("#")) add(m);
     }
-    // The key: a literal-typed key names only its literals; anything else is
-    // any name the class answers (or, failing those, an Object.prototype member).
+    // The key: the names its TYPE admits (null admits every name).
     const keyNode = expr.argumentExpression;
-    const keyT = L.typeOf(keyNode);
-    const keyParts = keyT.isUnionType() ? ts.constituentTypes(keyT) : [keyT];
-    let only: Set<string> | null = null;
-    if (keyParts.every((p) => p.isStringLiteralType() || p.isNumberLiteralType())) {
-      only = new Set(keyParts.map((p) => (p.isStringLiteralType() ? p.value : String((p as unknown as { value: number }).value))));
-    }
+    const patterns = keyPatternsOf(L, keyNode);
+    const admits = (n: string): boolean => patterns === null || patterns.some((r) => r.test(n));
     // Plan the arms first: every decision is made before any lowering runs.
     type Plan =
       | { name: string; kind: "field"; type: IrType }
@@ -13237,7 +13382,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       | { name: string; kind: "objectProto" };
     const plans: Plan[] = [];
     for (const n of names) {
-      if (only !== null && !only.has(n)) continue;
+      if (!admits(n)) continue;
       const isField = !viaPrototype && info.fields.has(n);
       const m = L.findMethodOn(info, n);
       const g = m === null ? findGenericMethodOn(L, info, n) : null;
@@ -13254,13 +13399,11 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         plans.push({ name: n, kind: "generic" });
       }
     }
-    // Object.prototype members the class does not answer itself.
+    // Object.prototype members the class does not answer itself, that the key admits.
     for (const n of OBJECT_PROTOTYPE_MEMBERS) {
-      if (seen.has(n)) continue;
-      if (only !== null) {
-        if (!only.has(n)) continue;
-        L.unsupported("SC1090", expr, `computed read of the Object.prototype member '${n}' (no value lowering yet)`);
-      }
+      if (seen.has(n) || !admits(n)) continue;
+      if (OBJECT_PROTOTYPE_UNREPRESENTABLE.has(n)) return null;
+      if (viaPrototype && (n === "valueOf" || n === "isPrototypeOf")) return null;
       plans.push({ name: n, kind: "objectProto" });
     }
     // Lower the receiver and the key once, into hidden locals (JS evaluates
@@ -13285,23 +13428,24 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       const p = plans[i]!;
       let value: IrExpr;
       if (p.kind === "field") {
-        value = { kind: "fieldGet", obj: recvRef!, className, field: p.name, type: p.type, loc };
+        value = { kind: "dynFrom", value: { kind: "fieldGet", obj: recvRef!, className, field: p.name, type: p.type, loc }, type: DYN, loc };
       } else if (p.kind === "method") {
         const v = viaPrototype
           ? unboundMethodThunk(L, info, p.name, p.found, loc, true)
           : instanceMethodValue(L, info, p.name, p.found, loc, recvRef!);
         if (v === null) return null;
-        value = v;
+        value = { kind: "dynFrom", value: v, type: DYN, loc };
       } else if (p.kind === "generic") {
         const cl = unboundGenericClosures(L, expr, info, p.name, !viaPrototype);
         if (cl === null) return null;
-        value = viaPrototype ? cl.own : genericWithOverrides(cl, () => recvRef!, loc);
+        value = { kind: "dynFrom", value: viaPrototype ? cl.own : genericWithOverrides(cl, () => recvRef!, loc), type: DYN, loc };
       } else {
-        value = nodeThrowExpr(1, "", `scriptc: computed read of the Object.prototype member '${p.name}' is not lowered yet`, DYN, loc);
+        const v = objectProtoValue(L, info, className, viaPrototype, p.name, loc, recvRef, fieldNames, ownMethodNames);
+        if (v === null) return null;
+        value = v;
       }
-      const boxed: IrExpr = p.kind === "objectProto" ? value : { kind: "dynFrom", value, type: DYN, loc };
       const test: IrExpr = { kind: "strEq", negated: false, left: keyRef, right: { kind: "strLit", value: p.name, type: STRING, loc }, type: BOOL, loc };
-      chain = { kind: "ternary", cond: test, then: boxed, else_: chain, type: DYN, loc };
+      chain = { kind: "ternary", cond: test, then: value, else_: chain, type: DYN, loc };
     }
     return stmts.length === 0 ? chain : { kind: "seqExpr", stmts, result: chain, type: DYN, loc };
   }
