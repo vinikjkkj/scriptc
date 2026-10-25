@@ -16144,6 +16144,60 @@
     "<repo>/tests/corpus/10004-caught-base-typed-holds-leaf.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/10300-expando-date-usec.js": {
+   "order": [
+    "<repo>/tests/corpus/10300-expando-date-usec.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10301-expando-date-inspect.js": {
+   "order": [
+    "<repo>/tests/corpus/10301-expando-date-inspect.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10302-expando-record-radius.js": {
+   "order": [
+    "<repo>/tests/corpus/10302-expando-record-radius.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10303-expando-literal-this-method.js": {
+   "order": [
+    "<repo>/tests/corpus/10303-expando-literal-this-method.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10304-expando-date-keys.js": {
+   "order": [
+    "<repo>/tests/corpus/10304-expando-date-keys.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10305-expando-record-keys-order.js": {
+   "order": [
+    "<repo>/tests/corpus/10305-expando-record-keys-order.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10306-expando-date-identity.js": {
+   "order": [
+    "<repo>/tests/corpus/10306-expando-date-identity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10307-expando-record-in-union.js": {
+   "order": [
+    "<repo>/tests/corpus/10307-expando-record-in-union.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10308-expando-union-null-record.js": {
+   "order": [
+    "<repo>/tests/corpus/10308-expando-union-null-record.js"
+   ],
+   "diags": []
   }
  }
 }
