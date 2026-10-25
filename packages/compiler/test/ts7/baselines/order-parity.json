@@ -13339,6 +13339,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9453-cjs-webcrypto-object.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9453-cjs-webcrypto-object.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
