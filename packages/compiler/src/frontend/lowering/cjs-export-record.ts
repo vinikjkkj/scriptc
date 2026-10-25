@@ -178,7 +178,6 @@ function computeRecord(L: Lowerer, sf: ts.SourceFile): CjsExportRecord | null {
     if (cjsExportAssignmentOf(stmts[i]!)?.kind === "table" || cjsWholeExportAssignmentOf(stmts[i]!) !== null) lastT = i;
   }
   if (lastT < 0) return null;
-  const tPos = stmts[lastT]!.getStart(sf);
 
   // ---- collect every reference (any depth) -----------------------------
   const bare: ts.PropertyAccessExpression[] = [];
