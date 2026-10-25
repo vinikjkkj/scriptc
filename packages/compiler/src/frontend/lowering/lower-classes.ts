@@ -1553,6 +1553,61 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     return installs;
   }
 
+  /** The install is static: nothing may build an instance of C (or of a class derived from it),
+   * or reach its members, before the statement runs. Before the install, the module's top level
+   * may run nothing but declarations and require() calls: a function or method body runs when it
+   * is called, not when it is declared, and a class body runs only its static initializers
+   * (refused here, with any reference to C). Any other call or construction before the install,
+   * and any reference to C or to a derived class outside a heritage clause, refuses the install.
+   * A require() runs another module; a cycle back into this one is not modelled. */
+  function inertBeforeInstall(L: Lowerer, info: ClassInfo, decl: ts.ClassDeclaration, classSymbol: ts.Symbol,
+    sf: ts.SourceFile, stmt: ts.Statement): boolean {
+    const derivesFromC = (sym: ts.Symbol): boolean => {
+      const d = L.classBySymbol.get(sym);
+      for (let c: ClassInfo | null | undefined = d; c; c = c.base) if (c === info) return true;
+      return false;
+    };
+    const isStaticInit = (m: ts.ClassElement): boolean =>
+      ts.isClassStaticBlockDeclaration(m) ||
+      (ts.isPropertyDeclaration(m) && m.initializer !== undefined &&
+        (ts.getModifiers(m) ?? []).some((x) => x.kind === ts.SyntaxKind.StaticKeyword));
+    if (decl.members.some(isStaticInit)) return false;
+    let ok = true;
+    const visit = (n: ts.Node, inHeritage: boolean): void => {
+      if (!ok || n.pos >= stmt.pos) return;
+      if (
+        ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) ||
+        ts.isMethodDeclaration(n) || ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n) ||
+        ts.isConstructorDeclaration(n)
+      ) {
+        return;
+      }
+      if (ts.isPropertyDeclaration(n) && !isStaticInit(n)) return; // instance initializers run at construction
+      if (ts.isNewExpression(n)) { ok = false; return; }
+      if (ts.isCallExpression(n)) {
+        const callee = stripParensOf(n.expression);
+        const isRequire = ts.isIdentifier(callee) && callee.text === "require" && n.arguments.length === 1;
+        if (!isRequire) { ok = false; return; }
+      }
+      // A declaration's own name is not a reference (a class names itself in its declaration).
+      const declName = ts.isIdentifier(n) && n.parent !== undefined &&
+        (ts.isClassDeclaration(n.parent) || ts.isVariableDeclaration(n.parent) || ts.isFunctionDeclaration(n.parent)) &&
+        n.parent.name === n;
+      if (ts.isIdentifier(n) && !inHeritage && !declName) {
+        const sym = L.resolveValueSymbol(n);
+        if (sym !== null && (sym === classSymbol || derivesFromC(sym))) { ok = false; return; }
+      }
+      const heritage = inHeritage || ts.isHeritageClause(n);
+      ts.forEachChild(n, (c) => visit(c, heritage));
+    };
+    for (const s of sf.statements) {
+      if (s.pos >= stmt.pos) break;
+      visit(s, false);
+      if (!ok) return false;
+    }
+    return ok;
+  }
+
   /** A computed prototype install of the facade shape (mysql2's promise wrappers):
    *
    *     (function (names) {
@@ -1579,26 +1634,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     for (const stmt of sf.statements) {
       if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) continue;
       const top = stmt.expression;
-      // The install is static: a reference to the class before the statement (outside its own
-      // declaration) could build an instance Node would not yet have a method on. Refuse.
-      // A reference to C or to a class derived from it can build an instance; a heritage
-      // clause (`extends C`) only names the base and builds nothing.
-      const derivesFromC = (sym: ts.Symbol): boolean => {
-        const d = L.classBySymbol.get(sym);
-        for (let c: ClassInfo | null | undefined = d; c; c = c.base) if (c === info) return true;
-        return false;
-      };
-      let usedBefore = false;
-      (function scan(n: ts.Node): void {
-        if (usedBefore || n.pos >= stmt.pos) return;
-        if (n === decl || ts.isHeritageClause(n)) return;
-        if (ts.isIdentifier(n)) {
-          const sym = L.resolveValueSymbol(n);
-          if (sym !== null && (sym === classSymbol || derivesFromC(sym))) usedBefore = true;
-        }
-        ts.forEachChild(n, scan);
-      })(sf);
-      if (usedBefore) continue;
+      if (!inertBeforeInstall(L, info, decl, classSymbol, sf, stmt)) continue;
       const installs = computedInstallsOf(L, classSymbol, top);
       if (installs === null) continue;
       const plan: { name: string; inst: ComputedInstall }[] = [];
