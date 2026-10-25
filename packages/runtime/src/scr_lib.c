@@ -5601,7 +5601,10 @@ static ScrDyn *scr_wc_random_uuid(ScrClosure *clo, ScrDyn *const *args, size_t a
   (void)clo;
   (void)args;
   (void)argc;
-  return scr_dyn_new_str(scr_crypto_random_uuid());
+  ScrStr *s = scr_crypto_random_uuid(); /* +1 */
+  ScrDyn *d = scr_dyn_new_str(s);       /* retains its own reference */
+  scr_str_release(s);
+  return d;
 }
 
 static ScrDyn *scr_wc_subtle_get(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
