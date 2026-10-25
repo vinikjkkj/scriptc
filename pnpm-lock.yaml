@@ -38,6 +38,10 @@ importers:
       '@scriptc/compiler':
         specifier: workspace:@scriptc-fork/compiler@*
         version: link:../compiler
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
 
   packages/compiler:
     dependencies:
