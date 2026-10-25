@@ -16845,6 +16845,54 @@
     "<repo>/tests/corpus/10649-proto-value-logical-default.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/11100-publicencrypt-mysql-shape-sha1-str.js": {
+   "order": [
+    "<repo>/tests/corpus/11100-publicencrypt-mysql-shape-sha1-str.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11101-publicencrypt-mysql-shape-sha1-buf.js": {
+   "order": [
+    "<repo>/tests/corpus/11101-publicencrypt-mysql-shape-sha1-buf.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11102-publicencrypt-sha256-label-pkcs1.js": {
+   "order": [
+    "<repo>/tests/corpus/11102-publicencrypt-sha256-label-pkcs1.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11103-publicencrypt-pem-private-key.js": {
+   "order": [
+    "<repo>/tests/corpus/11103-publicencrypt-pem-private-key.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11104-publicencrypt-bad-key-error.js": {
+   "order": [
+    "<repo>/tests/corpus/11104-publicencrypt-bad-key-error.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11105-publicencrypt-too-long-error.js": {
+   "order": [
+    "<repo>/tests/corpus/11105-publicencrypt-too-long-error.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11106-publicencrypt-untyped-wrong-type-error.js": {
+   "order": [
+    "<repo>/tests/corpus/11106-publicencrypt-untyped-wrong-type-error.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11107-publicencrypt-no-padding-errors.js": {
+   "order": [
+    "<repo>/tests/corpus/11107-publicencrypt-no-padding-errors.js"
+   ],
+   "diags": []
   }
  }
 }
