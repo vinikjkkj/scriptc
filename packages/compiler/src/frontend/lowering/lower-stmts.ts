@@ -6392,6 +6392,54 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
   );
 }
 
+/** `exports.a = exports.b = void 0` (any length, every link a bare `exports.`
+ * member): true when the chain ends in undefined. */
+function voidExportChainOf(e: ts.Expression): boolean {
+  let cur: ts.Expression = e;
+  while (ts.isBinaryExpression(cur) && cur.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    if (!ts.isPropertyAccessExpression(cur.left) || !ts.isIdentifier(cur.left.expression) || cur.left.expression.text !== "exports") return false;
+    cur = cur.right;
+  }
+  while (ts.isParenthesizedExpression(cur)) cur = cur.expression;
+  return cur.kind === ts.SyntaxKind.VoidExpression || (ts.isIdentifier(cur) && cur.text === "undefined");
+}
+
+/** True when no statement before `stmt` (a top-level statement of the same
+ * file) can observe the export object: each one that mentions `exports` or
+ * `module.exports` is a void-chain export write, a value-only
+ * `Object.defineProperty(exports, ...)`, or a "use strict" directive. */
+function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
+  const sf = stmt.getSourceFile();
+  for (const prev of sf.statements) {
+    if (prev === stmt) break;
+    if (ts.isExpressionStatement(prev) && ts.isStringLiteral(prev.expression)) continue;
+    let allowed = false;
+    if (ts.isExpressionStatement(prev)) {
+      const e = prev.expression;
+      if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken && voidExportChainOf(e)) allowed = true;
+      if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression) && ts.isIdentifier(e.expression.expression) &&
+          e.expression.expression.text === "Object" && e.expression.name.text === "defineProperty" && e.arguments.length === 3 &&
+          ts.isIdentifier(e.arguments[0]!) && (e.arguments[0] as ts.Identifier).text === "exports" &&
+          ts.isObjectLiteralExpression(e.arguments[2]!) &&
+          e.arguments[2]!.properties.every((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && (p.name.text === "value" || p.name.text === "enumerable" || p.name.text === "configurable" || p.name.text === "writable"))) {
+        allowed = true;
+      }
+    }
+    if (!allowed) {
+      let mentions = false;
+      const walk = (n: ts.Node): void => {
+        if (mentions) return;
+        if (ts.isIdentifier(n) && n.text === "exports") mentions = true;
+        if (ts.isPropertyAccessExpression(n) && isModuleExportsAccess(n)) mentions = true;
+        ts.forEachChild(n, walk);
+      };
+      walk(prev);
+      if (mentions) return false;
+    }
+  }
+  return true;
+}
+
 /** A top-level CommonJS export statement (see cjsExportAssignmentOf):
    * `exports.f = <expr>` and each expression-valued property of
    * `module.exports = { ... }` assign their pre-registered export globals
@@ -6417,6 +6465,16 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           return cjsExportRecordWrite(L, recW, cjs.expr, cjs.text);
         }
       }
+    }
+    // The VOID PREAMBLE of an old export object that a later replacement
+    // discards (ioredis: `exports.Redis = exports.default = void 0;` above
+    // `exports = module.exports = X`). The writes store undefined into the
+    // object Node then throws away, and nothing can read that object before
+    // the replacement: every earlier statement that mentions `exports` is one
+    // of these void writes, a "use strict" directive, or a value-only
+    // defineProperty. Then the statement has no observable effect.
+    if (cjs.kind === "member" && ts.isExpressionStatement(cjs.expr.parent) && voidExportChainOf(cjs.expr.parent.expression) && oldExportObjectUnreadBefore(cjs.expr.parent)) {
+      return { kind: "block", body: [], loc };
     }
     // Statements Node discards (a replaced export object) fence instead of
     // shipping tsc's answer — the checker models them as live exports.
@@ -6780,6 +6838,33 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       const rt = dep !== null && dep !== undefined && dep.isDeclarationFile ? (L.declTwinSourceOf(dep) ?? dep) : dep;
       if (rt !== null && rt !== undefined && L.fileTag.has(rt) && isCjsJsFile(rt)) {
         return L.requireInitStmt((rhs.arguments[0] as ts.StringLiteral).text, rhs) ?? { kind: "block", body: [], loc };
+      }
+    }
+    // `module.exports = require('./impl').member` — the member-of-require
+    // spelling of the alias above (ioredis: `exports = module.exports =
+    // require("./Redis").default`). Exactly `const R = require('./impl').member;
+    // module.exports = R`: the member's value symbol is what requirers resolve
+    // through, and the require edge runs the implementation's init here.
+    if (
+      ts.isPropertyAccessExpression(rhs) &&
+      !rhs.questionDotToken &&
+      ts.isIdentifier(rhs.name) &&
+      ts.isCallExpression(rhs.expression) &&
+      ts.isIdentifier(rhs.expression.expression) &&
+      rhs.expression.expression.text === "require" &&
+      rhs.expression.arguments.length === 1 &&
+      ts.isStringLiteral(rhs.expression.arguments[0]!)
+    ) {
+      const specNode = rhs.expression.arguments[0] as ts.StringLiteral;
+      const dep = resolveImport(L.program, expr.getSourceFile(), specNode.text);
+      const rt = dep !== null && dep !== undefined && dep.isDeclarationFile ? (L.declTwinSourceOf(dep) ?? dep) : dep;
+      if (rt !== null && rt !== undefined && L.fileTag.has(rt) && isCjsJsFile(rt)) {
+        const member = L.cjsModuleExportSymbol(rt, rhs.name.text);
+        const value = member !== undefined ? (L.cjsExportValueSymbol(member) ?? member) : undefined;
+        // A class declaration counts even before its collection ran (the class collects on demand, as for `module.exports = C` aliases).
+        if (value !== undefined && (L.classBySymbol.has(value) || L.fnSigsBySymbol.has(value) || L.genericFnsBySymbol.has(value) || L.checker.declarationsOf(value).some(ts.isClassDeclaration))) {
+          return L.requireInitStmt(specNode.text, rhs) ?? { kind: "block", body: [], loc };
+        }
       }
     }
     const g = L.globalsByDeclNode.get(expr);

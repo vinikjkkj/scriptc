@@ -2639,8 +2639,9 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // existing path — globals, function values, classes — applies).
       // A JSON document's binding is a CommonJS binding too, but its members
       // are the document's own (jsonRequireTypeOverride): the record read
-      // below answers them, not the module-namespace delegation.
-      if (!expr.questionDotToken && L.cjsLocalModuleBindingOf(expr.expression) && jsonRequireTypeOverride(L, expr.expression) === null) {
+      // below answers them, not the module-namespace delegation. A whole-class
+      // require binding delegates to the module's export member first.
+      if (!expr.questionDotToken && ((L.cjsLocalModuleBindingOf(expr.expression) && jsonRequireTypeOverride(L, expr.expression) === null) || L.cjsWholeClassRequireDepOf(expr.expression) !== null)) {
         // A binding whose dep is a class-expression WHOLE export
         // (`module.exports = class {…}`): the member surface is the
         // CLASS's — `C.name` folds to NamedEvaluation's answer and own
@@ -2650,7 +2651,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // stdlib var instead — a wrong VALUE, not a fence. Unknown
         // members fall through to the delegation (expando statics ride
         // their pre-registered export globals).
-        const viaClass = lowerStaticFieldRead(L, expr);
+        // An export the module's table carries (a bare `exports.f =` after an
+        // `exports = module.exports = X` replacement) IS the class's static:
+        // it answers before the class's own bag read, which would answer
+        // undefined for every name it does not declare.
+        const wholeDep = L.cjsWholeClassRequireDepOf(expr.expression);
+        const viaClass = wholeDep !== null && L.cjsModuleExportSymbol(wholeDep, expr.name.text) !== undefined
+          ? null
+          : lowerStaticFieldRead(L, expr);
         if (viaClass) return viaClass;
         return lowerExpr(L, expr.name);
       }

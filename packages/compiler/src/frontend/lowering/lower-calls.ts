@@ -5579,14 +5579,17 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     if (
       ts.isPropertyAccessExpression(expr.expression) &&
       !expr.expression.questionDotToken &&
-      L.cjsLocalModuleBindingOf(expr.expression.expression)
+      (L.cjsLocalModuleBindingOf(expr.expression.expression) || L.cjsWholeClassRequireDepOf(expr.expression.expression) !== null)
     ) {
       // A binding whose dep is a class-expression WHOLE export
       // (`module.exports = class {…}`): `C.describe()` is a STATIC call
       // on that class — the static machinery answers before the member
       // delegation below resolves `describe` as a bare name (which no
       // binding form supports).
-      const viaStatic = lowerStaticMethodCall(L, expr, expr.expression);
+      const wholeDep = L.cjsWholeClassRequireDepOf(expr.expression.expression);
+      const viaStatic = wholeDep !== null && L.cjsModuleExportSymbol(wholeDep, expr.expression.name.text) !== undefined
+        ? null
+        : lowerStaticMethodCall(L, expr, expr.expression);
       if (viaStatic) return viaStatic;
       const nameId = expr.expression.name;
       if (!ts.isIdentifier(nameId)) {

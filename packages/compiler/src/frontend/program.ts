@@ -652,8 +652,22 @@ function isWholeExportRequire7(e: ts.Expression): boolean {
     ts.isIdentifier(e.left.expression) &&
     e.left.expression.text === "module" &&
     e.left.name.text === "exports" &&
-    requireSpecOf7(e.right) !== null
+    requireCallOf7(e.right) !== null
   );
+}
+
+/** The `require("s")` call a whole-export right-hand side names: the call
+ * itself, or its member read `require("s").member` (ioredis:
+ * `module.exports = require("./Redis").default`, the member-of-require
+ * alias). Null for anything else. */
+function requireCallOf7(e: ts.Expression): ts.CallExpression | null {
+  let x: ts.Expression = e;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  if (ts.isPropertyAccessExpression(x) && !x.questionDotToken && ts.isCallExpression(x.expression)) {
+    x = x.expression;
+  }
+  if (!ts.isCallExpression(x) || requireSpecOf7(x) === null) return null;
+  return x;
 }
 
 function requiresOf7(
@@ -661,10 +675,17 @@ function requiresOf7(
 ): { spec: string; node: ts.Node; decl: ts.VariableDeclaration | null }[] {
   if (ts.isExpressionStatement(stmt)) {
     const spec = requireSpecOf7(stmt.expression);
+    // `exports = module.exports = require("s").m`: the same pass-through edge,
+    // spelled with the `exports` binding rebound (exportsRebindInnerOf).
+    const rebind = exportsRebindInnerOf(stmt.expression);
+    if (rebind !== null) {
+      const call = requireCallOf7(rebind.right);
+      if (call !== null) return [{ spec: requireSpecOf7(call)!, node: call, decl: null }];
+    }
     if (spec === null && isWholeExportRequire7(stmt.expression)) {
       // `module.exports = require("s")`: the module edge of a pass-through
       // module (its export object IS the required module's).
-      const call = (stmt.expression as ts.BinaryExpression).right as ts.CallExpression;
+      const call = requireCallOf7((stmt.expression as ts.BinaryExpression).right)!;
       return [{ spec: requireSpecOf7(call)!, node: call, decl: null }];
     }
     return spec !== null ? [{ spec, node: stmt.expression, decl: null }] : [];
@@ -4093,6 +4114,15 @@ export function isCjsWholeExportAssign(e: ts.Expression): e is ts.BinaryExpressi
  *
  * The LAST one wins: Node's export object is whatever `module.exports`
  * holds when the body finishes. */
+export function exportsRebindInnerOf(e: ts.Expression): ts.BinaryExpression | null {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
+  if (!ts.isIdentifier(e.left) || e.left.text !== "exports") return null;
+  let r: ts.Expression = e.right;
+  while (ts.isParenthesizedExpression(r)) r = r.expression;
+  return isCjsWholeExportAssign(r) ? r : null;
+}
+
 export function cjsWholeExportAssignmentOf(stmt: ts.Statement): ts.BinaryExpression | null {
   if (!ts.isExpressionStatement(stmt)) return null;
   let found: ts.BinaryExpression | null = null;
@@ -4104,6 +4134,10 @@ export function cjsWholeExportAssignmentOf(stmt: ts.Statement): ts.BinaryExpress
       return;
     }
     if (isCjsWholeExportAssign(e)) found = e;
+    else {
+      const rebind = exportsRebindInnerOf(e);
+      if (rebind !== null) found = rebind;
+    }
   };
   scan(stmt.expression);
   return found;
@@ -4187,6 +4221,14 @@ export function cjsExportAssignmentOf(stmt: ts.Statement):
   | null {
   if (!ts.isExpressionStatement(stmt)) return null;
   const e = stmt.expression;
+  // `exports = module.exports = <obj>`: the whole-export replacement, spelled
+  // with the `exports` binding rebound too (ioredis's index.js). The inner
+  // assignment is the statement's whole-export; after it `exports` and
+  // `module.exports` are one object.
+  const rebind = exportsRebindInnerOf(e);
+  if (rebind !== null) {
+    return { kind: "table", obj: ts.isObjectLiteralExpression(rebind.right) ? rebind.right : null, expr: rebind };
+  }
   if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
   if (isModuleExportsAccess(e.left)) {
     return { kind: "table", obj: ts.isObjectLiteralExpression(e.right) ? e.right : null, expr: e };
@@ -4258,6 +4300,15 @@ export function cjsExportDiscardReason(stmt: ts.Statement): string | null {
   }
   if (lastTable < 0) return null;
   const myIdx = stmts.indexOf(stmt as never);
+  // A member written AFTER an `exports = module.exports = X` replacement is
+  // live: `exports` now references X itself, so `exports.f =` is X's static.
+  if (
+    mine.kind === "member" &&
+    myIdx > lastTable &&
+    exportsRebindInnerOf((stmts[lastTable] as ts.ExpressionStatement).expression) !== null
+  ) {
+    return null;
+  }
   if (mine.kind === "table") {
     return myIdx < lastTable
       ? "multiple 'module.exports =' assignments (Node keeps only the last one — this table is discarded)"

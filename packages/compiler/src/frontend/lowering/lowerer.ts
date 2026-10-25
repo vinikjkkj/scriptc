@@ -84,6 +84,8 @@ import {
   overridesDtsPath,
   npmStaticDepSf7,
   resolveProjectImportSf7,
+  isModuleExportsAccess,
+  cjsExportsGetterDefineOf,
   requireSpecOf,
   resolveImport,
   workspacePackageOfPath,
@@ -2305,7 +2307,7 @@ export class Lowerer {
     // ends of the export key one symbol identity, like 5.9.3's.
     if (!symbol && ident.parent && ts.isPropertyAccessExpression(ident.parent) && ident.parent.name === ident) {
       const recv = ident.parent.expression;
-      if (ts.isIdentifier(recv) && this.cjsLocalModuleBindingOf(recv)) {
+      if (ts.isIdentifier(recv) && (this.cjsLocalModuleBindingOf(recv) || this.cjsWholeClassRequireDepOf(recv) !== null)) {
         const recvSym = this.checker.getSymbolAtLocation(recv);
         const recvDecls = recvSym ? this.checker.declarationsOf(recvSym) : [];
         const recvDecl = recvDecls.find(ts.isImportClause) ?? recvDecls[0];
@@ -2370,6 +2372,12 @@ export class Lowerer {
     // alias plumbing, exactly like an ESM export list: importers land on
     // the original function/const/class symbols and every existing
     // registry (globals, fn signatures, classes) applies unchanged.
+    // A requirer's binding resolved to a CJS `module.exports = X` whose X the
+    // checker cannot alias (cjsExportEqClassSymbol): the class is the value.
+    {
+      const eqClass = this.cjsExportEqClassSymbol(symbol);
+      if (eqClass !== null) symbol = eqClass;
+    }
     const cjsValue = this.cjsExportValueSymbol(symbol);
     if (cjsValue) symbol = cjsValue;
     // A binding whose alias chain landed in a `.d.ts` whose compiled twin
@@ -2443,7 +2451,33 @@ export class Lowerer {
   cjsModuleExportSymbol(sf: ts.SourceFile, name: string): ts.Symbol | undefined {
     const moduleSym = this.checker.getSymbolAtLocation(sf);
     const found = moduleSym?.getExports().get(name as ts.__String);
-    if (found !== undefined || !isCjsTsSource(sf)) return found;
+    if (found !== undefined) return found;
+    // A getter export `Object.defineProperty(exports, name, { get })` that
+    // returns a class: the checker has no symbol for the accessor, so the
+    // class it names is the member's symbol (cjsGetterClassSymbol).
+    for (const stmt of sf.statements) {
+      if (!ts.isExpressionStatement(stmt)) continue;
+      const call = stmt.expression;
+      const def = ts.isCallExpression(call) ? cjsExportsGetterDefineOf(call) : null;
+      if (def === null || def.name !== name) continue;
+      const cls = this.cjsGetterClassSymbol(call);
+      if (cls !== null) return cls;
+    }
+    // A member the checker's table does not carry (a bare `exports.f = v` that
+    // follows an `exports = module.exports = X` replacement): the statement's own
+    // property symbol names it, the same identity its writes register under.
+    for (const stmt of sf.statements) {
+      if (!ts.isExpressionStatement(stmt)) continue;
+      const e = stmt.expression;
+      if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+      const l = e.left;
+      if (!ts.isPropertyAccessExpression(l) || !ts.isIdentifier(l.name) || l.name.text !== name) continue;
+      const recv = l.expression;
+      if (!(ts.isIdentifier(recv) && recv.text === "exports") && !isModuleExportsAccess(recv)) continue;
+      const sym = this.checker.getSymbolAtLocation(l.name);
+      if (sym !== undefined) return sym;
+    }
+    if (!isCjsTsSource(sf)) return undefined;
     // A CommonJS-style TypeScript module: tsc makes no export symbols for
     // `module.exports = <table>`, so the table's own property symbol names
     // the member (the same identity its declaration and reads resolve to).
@@ -2465,6 +2499,104 @@ export class Lowerer {
     return undefined;
   }
 
+  /** The CommonJS module a `const x = require("./m")` binding names when that
+   * module's whole export is a class (cjsExportEqClassSymbol): the receiver
+   * of `x.member` then reads the class's statics first, and the module's own
+   * export table second (statics attached after `module.exports = X` are the
+   * module's exports). Null for every other receiver. */
+  cjsWholeClassRequireDepOf(recv: ts.Expression): ts.SourceFile | null {
+    if (!ts.isIdentifier(recv)) return null;
+    const sym = this.checker.getSymbolAtLocation(recv);
+    const decl = sym ? this.checker.declarationsOf(sym).find(ts.isVariableDeclaration) : undefined;
+    if (decl === undefined || decl.initializer === undefined) return null;
+    const spec = requireSpecOf(decl.initializer);
+    if (spec === null || !isRelativeSpecifier(spec)) return null;
+    const dep = resolveImport(this.program, decl.getSourceFile(), spec);
+    if (!dep || !isCjsJsFile(dep)) return null;
+    const eq = this.checker.getSymbolAtLocation(dep)?.getExports().get("export=" as ts.__String);
+    if (eq === undefined || this.cjsExportEqClassSymbol(eq) === null) return null;
+    return dep;
+  }
+
+  /** The CLASS symbol a CommonJS whole-export statement `module.exports = X`
+   * names, when the checker's `export=` symbol is that statement and X is
+   * a class the program declares: an identifier bound to a class, or the
+   * member-of-require spelling `require("./impl").member` whose member
+   * resolves through the implementation's export table to a class. The
+   * checker cannot alias `export=` to a member read, so a requirer's
+   * `const I = require(...)` lands on the export= declaration and would
+   * read as a namespace object; this names the class it stands for.
+   * Null for every other symbol. */
+  cjsExportEqClassSymbol(symbol: ts.Symbol): ts.Symbol | null {
+    if (symbol.name !== "export=") return null;
+    const d = this.checker.declarationsOf(symbol)[0];
+    if (d === undefined || !ts.isBinaryExpression(d) || !isModuleExportsAccess(d.left)) return null;
+    let rhs: ts.Expression = d.right;
+    while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+    const isClassSym = (s: ts.Symbol | undefined): s is ts.Symbol =>
+      s !== undefined && this.checker.declarationsOf(s).some(ts.isClassDeclaration);
+    if (ts.isIdentifier(rhs)) {
+      let s = this.checker.getSymbolAtLocation(rhs);
+      if (s && s.flags & ts.SymbolFlags.Alias) s = this.checker.getAliasedSymbol(s);
+      return isClassSym(s) ? s : null;
+    }
+    if (
+      ts.isPropertyAccessExpression(rhs) &&
+      !rhs.questionDotToken &&
+      ts.isIdentifier(rhs.name) &&
+      ts.isCallExpression(rhs.expression) &&
+      ts.isIdentifier(rhs.expression.expression) &&
+      rhs.expression.expression.text === "require" &&
+      rhs.expression.arguments.length === 1 &&
+      ts.isStringLiteral(rhs.expression.arguments[0]!)
+    ) {
+      const spec = rhs.expression.arguments[0] as ts.StringLiteral;
+      const dep = isRelativeSpecifier(spec.text)
+        ? resolveImport(this.program, d.getSourceFile(), spec.text)
+        : this.bareRequireDepOf(d.getSourceFile(), spec.text);
+      if (!dep) return null;
+      const member = this.cjsModuleExportSymbol(dep, rhs.name.text);
+      if (member === undefined) return null;
+      const value = this.cjsExportValueSymbol(member) ?? member;
+      return isClassSym(value) ? value : null;
+    }
+    return null;
+  }
+
+  /** The CLASS a getter export of a CommonJS module returns: `d` is the
+   * `Object.defineProperty(exports, name, { get })` call, the getter's body is
+   * `return <e>;`, and `e` names a class — an identifier bound to a class, or
+   * `req.member` where req is a relative require binding whose member resolves
+   * to a class. Null otherwise. */
+  cjsGetterClassSymbol(d: ts.Node): ts.Symbol | null {
+    if (!ts.isCallExpression(d)) return null;
+    const def = cjsExportsGetterDefineOf(d);
+    if (def === null || !ts.isBlock(def.getter.body)) return null;
+    const body = def.getter.body.statements;
+    if (body.length !== 1 || !ts.isReturnStatement(body[0]!) || body[0]!.expression === undefined) return null;
+    let e: ts.Expression = body[0]!.expression;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (ts.isIdentifier(e)) {
+      let s = this.checker.getSymbolAtLocation(e);
+      if (s && s.flags & ts.SymbolFlags.Alias) s = this.checker.getAliasedSymbol(s);
+      return s && this.checker.declarationsOf(s).some(ts.isClassDeclaration) ? s : null;
+    }
+    if (ts.isPropertyAccessExpression(e) && !e.questionDotToken && ts.isIdentifier(e.name) && ts.isIdentifier(e.expression)) {
+      const recvSym = this.checker.getSymbolAtLocation(e.expression);
+      const decl = recvSym ? this.checker.declarationsOf(recvSym).find(ts.isVariableDeclaration) : undefined;
+      if (decl === undefined || decl.initializer === undefined) return null;
+      const spec = requireSpecOf(decl.initializer);
+      if (spec === null || !isRelativeSpecifier(spec)) return null;
+      const dep = resolveImport(this.program, decl.getSourceFile(), spec);
+      if (!dep || !isCjsJsFile(dep)) return null;
+      const member = this.cjsModuleExportSymbol(dep, e.name.text);
+      if (member === undefined) return null;
+      const value = this.cjsExportValueSymbol(member) ?? member;
+      return this.checker.declarationsOf(value).some(ts.isClassDeclaration) ? value : null;
+    }
+    return null;
+  }
+
   /** The local VALUE symbol behind a CJS export-table property symbol —
    * see resolveValueSymbol. Null when `symbol` is not such a property (or
    * the property's value is not a plain identifier reference).
@@ -2477,6 +2609,11 @@ export class Lowerer {
   cjsExportValueSymbol(symbol: ts.Symbol): ts.Symbol | null {
     const d = this.checker.declarationsOf(symbol)[0];
     if (!d) return null;
+    // A getter export that returns a class (`Object.defineProperty(exports,
+    // "Cluster", { get() { return cluster_1.default; } })`): the export IS
+    // that class, so its name resolves to the class declaration.
+    const getterClass = this.cjsGetterClassSymbol(d);
+    if (getterClass) return getterClass;
     // MEMBER-form class exports (`exports.C = C` — commander's error.js):
     // alias plumbing exactly like a table entry, so importers land on the
     // class declaration and the class registry applies unchanged (a class
@@ -2606,6 +2743,7 @@ export class Lowerer {
     // resolve through the table's property symbols.
     if (sym && sym.flags & ts.SymbolFlags.Alias) {
       const d = this.checker.declarationsOf(this.checker.getAliasedSymbol(sym))[0];
+      if (d && ts.isBinaryExpression(d) && this.cjsExportEqClassSymbol(this.checker.getAliasedSymbol(sym)) !== null) return false;
       if (d && (ts.isClassDeclaration(d) || ts.isFunctionDeclaration(d))) return false;
       if (d && ts.isVariableDeclaration(d)) {
         let init = d.initializer;
