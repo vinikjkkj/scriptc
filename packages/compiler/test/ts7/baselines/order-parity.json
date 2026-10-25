@@ -13517,6 +13517,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10150-fill-undefined-number.ts": {
+   "order": [
+    "<repo>/tests/corpus/10150-fill-undefined-number.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10151-fill-undefined-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/10151-fill-undefined-string.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10152-fill-undefined-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/10152-fill-undefined-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10153-fill-undefined-scan.ts": {
+   "order": [
+    "<repo>/tests/corpus/10153-fill-undefined-scan.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10154-fill-undefined-bound.ts": {
+   "order": [
+    "<repo>/tests/corpus/10154-fill-undefined-bound.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10155-fill-undefined-bool.ts": {
+   "order": [
+    "<repo>/tests/corpus/10155-fill-undefined-bool.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10156-fill-annotated-ref.ts": {
+   "order": [
+    "<repo>/tests/corpus/10156-fill-annotated-ref.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
