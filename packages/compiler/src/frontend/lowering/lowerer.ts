@@ -1448,6 +1448,24 @@ function isCjsTsSource(sf: ts.SourceFile): boolean {
   return isCjsJsFile(sf) && !/\.(js|mjs|cjs|jsx)$/.test(sf.fileName);
 }
 
+/** Does a `this` node belong to `fn`: its nearest enclosing function that is not an arrow (an
+ * arrow's `this` is its enclosing function's) is `fn`. A null fn owns nothing. */
+function thisOwnedBy(node: ts.Node, fn: ts.Node | null): boolean {
+  if (fn === null) return false;
+  let p: ts.Node | undefined = node.parent;
+  while (p !== undefined && !ts.isSourceFile(p)) {
+    if (
+      ts.isFunctionExpression(p) || ts.isFunctionDeclaration(p) || ts.isMethodDeclaration(p) ||
+      ts.isConstructorDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p) ||
+      ts.isClassDeclaration(p) || ts.isClassExpression(p)
+    ) {
+      return p === fn;
+    }
+    p = p.parent;
+  }
+  return false;
+}
+
 export class Lowerer {
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
@@ -5857,7 +5875,9 @@ export class Lowerer {
   }
 
   typeOf(node: ts.Node): ts.Type {
-    if (this.activeThisType !== null && node.kind === ts.SyntaxKind.ThisKeyword) return this.activeThisType;
+    if (this.activeThisType !== null && node.kind === ts.SyntaxKind.ThisKeyword && thisOwnedBy(node, this.activeThisFn)) {
+      return this.activeThisType;
+    }
     // A CommonJS JSON require (and the binding it bound) answers the
     // document's structural type, the one resolveJsonModule gives an ESM
     // import: the checker types `require` as `any`, which has no members.
@@ -14292,6 +14312,10 @@ export class Lowerer {
   readonly lateMethodConst = new Map<string, { sym: ts.Symbol; value: string }>();
   readonly constIdents = new Map<ts.Symbol, string>();
   activeThisType: ts.Type | null = null;
+  /** The function whose `this` activeThisType retypes: a late method's body. Only a `this`
+   * whose nearest non-arrow function is this one takes that type; a method lowered from inside
+   * the body keeps its own. */
+  activeThisFn: ts.Node | null = null;
   /** Class expressions whose collection is IN FLIGHT — the reentrancy
    * guard for heritage-demanded collection (lowerClassExpressionInfo). */
   readonly collectingExprClasses = new Set<ts.ClassExpression>();
