@@ -10355,10 +10355,13 @@ export function moduleCreatesPromises(mod: IrModule): boolean {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown; name?: unknown };
+    const node = v as { kind?: unknown; name?: unknown; fn?: unknown };
     if (
       node.kind === "newPromise" || node.kind === "promiseWithResolvers" ||
-      (node.kind === "intrinsic" && typeof node.name === "string" && node.name.startsWith("promise."))
+      (node.kind === "intrinsic" && typeof node.name === "string" && node.name.startsWith("promise.")) ||
+      // A dyn value's promise resolution queues its thenable job on the
+      // microtask queue, which only the loop drains.
+      (node.kind === "libCall" && node.fn === "dyn.adoptPromise")
     ) {
       found = true;
       return;
