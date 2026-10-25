@@ -75,7 +75,7 @@ import type {
   SrcLoc,
 } from "../../ir/nodes.js";
 import { moduleUsesDc, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn } from "../../ir/nodes.js";
-import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable } from "../dyn-members.js";
+import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
 // The stackless lane's admission, read from the ONE place that owns it.
@@ -3677,6 +3677,14 @@ class LlEmitter {
    * against) and retain/release off vAdapters, i.e. off the shared
    * rcAdapters table. Neither lane restates a class fact, so the two
    * cannot disagree about what a box contains. */
+  /** Interns the box descriptor of every boxable Error-rooted user class (the
+   * C twin: caughtToDynHelper in emit-walkers.ts). */
+  internErrorRootedDynClasses(): void {
+    for (const [cn, m] of this.classMeta) {
+      if (canBoxClassIntoDyn(cn) && isErrorRootedClass(m)) this.dynClassDesc(cn);
+    }
+  }
+
   dynClassDesc(className: string): string {
     const existing = this.dynClassDescSyms.get(className);
     if (existing) return `@${existing.sym}`;
