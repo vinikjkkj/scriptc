@@ -15663,12 +15663,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/fixtures/npm/cases/10250-method-ref-npm-static/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/10250-method-ref-npm-static/main.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts"
