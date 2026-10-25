@@ -14,6 +14,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10200-promise-all-dyn-entries.ts": {
+   "order": [
+    "<repo>/tests/corpus/10200-promise-all-dyn-entries.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10201-promise-allsettled-dyn-entries.ts": {
+   "order": [
+    "<repo>/tests/corpus/10201-promise-allsettled-dyn-entries.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10202-promise-then-allsettled-dyn.ts": {
+   "order": [
+    "<repo>/tests/corpus/10202-promise-then-allsettled-dyn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10203-promise-all-dyn-first-rejection.ts": {
+   "order": [
+    "<repo>/tests/corpus/10203-promise-all-dyn-first-rejection.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10204-promise-allsettled-dyn-tick-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/10204-promise-allsettled-dyn-tick-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10205-promise-combinators-non-iterable.ts": {
+   "order": [
+    "<repo>/tests/corpus/10205-promise-combinators-non-iterable.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/001-hello.ts": {
    "order": [
     "<repo>/tests/corpus/001-hello.ts"
