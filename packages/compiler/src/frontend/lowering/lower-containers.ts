@@ -4,7 +4,7 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { strandTrap } from "../../ir/nodes.js";
+import { canConvertToDyn, strandTrap } from "../../ir/nodes.js";
 import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { checkedArmBridge, lowerUnionContainerDispatch, captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
@@ -565,6 +565,25 @@ function lowerOptionalDefaultArg(
       // the ABI gate and its pointed fences.
       if (needle.type.kind === "classval" && elem.kind === "classval" && !typeEquals(needle.type, elem)) {
         needle = L.coerceInto(call.arguments[0]!, needle, elem);
+      }
+      // A DYN needle (an `any`-typed value: an untyped listener's parameter,
+      // a JSON field) searched in a static array. JS's search is strict
+      // equality element by element, and that is exactly the dyn array's own
+      // indexOf/includes (scr_dyn_invoke: scr_dyn_strict_eq per element). The
+      // receiver crosses as a dyn copy -- admitted only where the element
+      // type converts (canConvertToDyn), so no identity is lost on the way --
+      // and the result is a number/boolean, so the checked exit is exact.
+      if (needle.type.kind === "dyn" && canConvertToDyn(receiver.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+        const inv: IrExpr = {
+          kind: "dynInvoke",
+          recv: { kind: "dynFrom", value: receiver, type: DYN, loc },
+          method: name,
+          calleeName: access.getText(),
+          args: [needle],
+          type: DYN,
+          loc,
+        };
+        return { kind: "dynCheck", value: inv, type: name === "indexOf" ? F64 : BOOL, loc };
       }
       if (!typeEquals(needle.type, elem)) {
         L.badType(call.arguments[0]!, L.typeOf(call.arguments[0]!));
