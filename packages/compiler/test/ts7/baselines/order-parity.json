@@ -16234,6 +16234,20 @@
     "<repo>/tests/corpus/10405-defprop-accessor-two-exports.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/10406-defprop-cjs-key-order-insertion/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10406-defprop-cjs-key-order-insertion/dep.cjs",
+    "<repo>/tests/corpus/10406-defprop-cjs-key-order-insertion/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10407-defprop-cjs-key-order-literal/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10407-defprop-cjs-key-order-literal/dep.cjs",
+    "<repo>/tests/corpus/10407-defprop-cjs-key-order-literal/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
