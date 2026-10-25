@@ -2327,6 +2327,36 @@ export class Lowerer {
       }
     }
     if (!symbol) return null;
+    // A destructured CJS require binding (`const { calc } = require("./m")`):
+    // the checker answers an unresolved symbol for a member of a function-valued
+    // module (an expando on the exported function), so the alias walk below has
+    // nothing to follow. The member is the module's export-table entry, exactly
+    // as a member access reads it (cjsModuleExportSymbol).
+    const destructured = symbol.flags & ts.SymbolFlags.Alias
+      ? this.checker.declarationsOf(symbol)[0]
+      : undefined;
+    if (
+      destructured !== undefined &&
+      ts.isBindingElement(destructured) &&
+      this.checker.declarationsOf(this.checker.getAliasedSymbol(symbol)).length === 0 &&
+      destructured.name !== undefined &&
+      ts.isIdentifier(destructured.name) &&
+      destructured.dotDotDotToken === undefined &&
+      ts.isObjectBindingPattern(destructured.parent) &&
+      ts.isVariableDeclaration(destructured.parent.parent) &&
+      destructured.parent.parent.initializer !== undefined
+    ) {
+      const vd = destructured.parent.parent;
+      const spec = requireSpecOf(vd.initializer!);
+      const prop = destructured.propertyName ?? destructured.name;
+      if (spec !== null && prop !== undefined && ts.isIdentifier(prop)) {
+        const dep = isRelativeSpecifier(spec)
+          ? resolveImport(this.program, vd.getSourceFile(), spec)
+          : this.bareRequireDepOf(vd.getSourceFile(), spec);
+        const member = dep ? this.cjsModuleExportSymbol(dep, prop.text) : undefined;
+        if (member) symbol = member;
+      }
+    }
     // STATIC-tier dynamic-import alias plumbing: a binding introduced
     // by `const { a } = await import("./m.ts")` has no storage of its
     // own — it names the exporter's export, exactly like the alias a
