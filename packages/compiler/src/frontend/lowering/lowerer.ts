@@ -7913,7 +7913,7 @@ export class Lowerer {
       ) {
         continue;
       }
-      if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined || c.def.runtime) {
+      if (c.builtinEmitter || c.builtinStream !== undefined || (c.def.runtime && c.builtinError !== true)) {
         return why(`base chain reached builtin '${c.def.name}' (error=${c.builtinError === true} emitter=${c.builtinEmitter === true} stream=${c.builtinStream !== undefined} runtime=${c.def.runtime === true})`);
       }
     }
@@ -9602,7 +9602,7 @@ export class Lowerer {
     // not projectable storage.
     if (to.fields.some((f) => f.name.startsWith("%"))) return null;
     for (let c: ClassInfo | null = info; c; c = c.base) {
-      if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined || c.def.runtime) return null;
+      if (c.builtinEmitter || c.builtinStream !== undefined || (c.def.runtime && c.builtinError !== true)) return null;
     }
     const key = `obj:${className}:${toId}`;
     if (this.widthPlanning.has(key)) return new Map();
