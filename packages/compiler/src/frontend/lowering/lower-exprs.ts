@@ -34,7 +34,7 @@ import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
-import { type ParamShape, implicitDefaultInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
+import { type GenericInstance, type ParamShape, implicitDefaultInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -21180,6 +21180,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
   function lowerUnboundClassMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (!isJsSourceFile(expr.getSourceFile())) return null;
     if (expr.questionDotToken !== undefined) return null;
+    // `super.m` keeps its own refusal (lower-classes: bound method references through 'super').
+    if (expr.expression.kind === ts.SyntaxKind.SuperKeyword) return null;
     const recvT = L.mapTypeOf(L.typeOf(expr.expression));
     if (recvT?.kind !== "object") return null;
     const info = L.classes.get(recvT.className) ?? null;
@@ -21195,15 +21197,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     }
     if (found.sig.abstract === true) return null;
     if (found.sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable"))) return null;
-    // The receiver expression still evaluates (a plain read, no effects
-    // when it is `this` or an identifier; anything else is declined).
-    if (!isPlainMethodReceiver(expr.expression)) return null;
     // `C.prototype.m` is C's own function, never an override below it.
     const viaPrototype = ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype";
     const loc = locOf(expr);
     const name = expr.name.text;
     const own = unboundMethodThunk(L, info, name, found, loc, true);
-    if (viaPrototype || !L.overrideBelow(info, name)) return own;
+    // A receiver that is not a plain name or `this` is evaluated once, here (`new C().m`).
+    const pre: IrStmt[] = [];
+    let recv: IrExpr | null = null;
+    if (!viaPrototype && !isPlainMethodReceiver(expr.expression)) {
+      const lowered = L.lowerExpr(expr.expression);
+      const h = L.declareHiddenLocal("mref.recv", lowered.type);
+      pre.push({ kind: "varDecl", localId: h.id, init: lowered, loc });
+      recv = { kind: "varRef", localId: h.id, type: lowered.type, loc };
+    }
+    if (viaPrototype || !L.overrideBelow(info, name)) {
+      return pre.length === 0 ? own : { kind: "seqExpr", stmts: pre, result: own, type: own.type, loc };
+    }
     // A subclass overrides the method: `x.m` is the function of x's RUNTIME class
     // (B.prototype.m for a B behind an A-typed receiver), so the value is picked
     // by the receiver's class, deepest first. Each pick is the declarer's own
@@ -21219,68 +21229,119 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     walk(info, 1);
     subs.sort((a, b) => a.depth - b.depth);
     let chain: IrExpr = own;
+    const tested = recv ?? L.lowerExpr(expr.expression);
     for (const { cls } of subs) {
       const f = L.findMethodOn(cls, name);
       if (f === null || f.declarer === found.declarer || f.sig.abstract === true) continue;
       const pick = unboundMethodThunk(L, cls, name, f, loc, true);
-      if (!typeEquals(pick.type, own.type)) return own;
-      const recv = L.lowerExpr(expr.expression);
+      if (!typeEquals(pick.type, own.type)) return pre.length === 0 ? own : { kind: "seqExpr", stmts: pre, result: own, type: own.type, loc };
       chain = {
         kind: "ternary",
-        cond: { kind: "instanceOf", value: recv, className: cls.def.name, type: BOOL, loc },
+        cond: { kind: "instanceOf", value: tested, className: cls.def.name, type: BOOL, loc },
         then: pick,
         else_: chain,
         type: own.type,
         loc,
       };
     }
-    return chain;
+    return pre.length === 0 ? chain : { kind: "seqExpr", stmts: pre, result: chain, type: own.type, loc };
   }
 
-/** `C.prototype.m` for an implicit-any (monomorphized) method m of the program class C, as a
-   * VALUE: a zero-capture closure over an interned thunk whose receiver is the ambient `this`
-   * window checked against the declaring class, calling the method's all-dyn default instance
-   * (the one a dyn box of C answers `x.m()` with). Only through the prototype, which names the
-   * declarer's own function whatever a subclass overrides. Null for any other shape. */
+/** `C.prototype.m`, `this.m` or `x.m` for an implicit-any (monomorphized) method m of the program
+   * class C, as a VALUE: a zero-capture closure over an interned thunk per declaring class whose
+   * receiver is the ambient `this` window checked against that class, calling its all-dyn default
+   * instance (the one a dyn box of C answers `x.m()` with). Identity is per declaring class, so
+   * `x.m === C.prototype.m` when x's runtime class does not override m. Null for any other shape. */
   function lowerUnboundGenericMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, info: ClassInfo): IrExpr | null {
-    if (!ts.isPropertyAccessExpression(expr.expression) || expr.expression.name.text !== "prototype") return null;
-    if (!ts.isIdentifier(expr.expression.expression)) return null;
+    const viaPrototype = ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype" &&
+      ts.isIdentifier(expr.expression.expression);
     const method = expr.name.text;
     const gfound = findGenericMethodOn(L, info, method);
     if (gfound === null || gfound.info.implicitParams === undefined) return null;
     const loc = locOf(expr);
-    const instance = implicitDefaultInstance(L, expr, gfound.info);
-    const declName = gfound.declarer.def.name;
-    const name = `%unbound.${declName}.${method}%generic`;
-    const paramTypes = instance.params.map((p) => p.type);
-    const irParams: IrParam[] = paramTypes.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
-    const fnT = funcOf(paramTypes, instance.returnType);
-    if (!L.liftedFns.some((f) => f.name === name)) {
-      const selfT: IrType = { kind: "object", className: declName };
-      const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
-      const selfRef: IrExpr = { kind: "varRef", localId: "self.0", type: selfT, loc };
-      const call: IrExpr = { kind: "call", callee: instance.name, args: [selfRef, ...args], type: instance.returnType, loc };
-      L.liftedFns.push({
-        name,
-        params: irParams,
-        returnType: instance.returnType,
-        locals: [
-          { id: "self.0", name: "self", type: selfT, mutable: false },
-          ...irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
-        ],
-        body: [
-          {
-            kind: "varDecl",
-            localId: "self.0",
-            init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: selfT, loc },
-            loc,
-          },
-          instance.returnType.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc },
-        ],
-        loc,
-      });
+    const base = implicitDefaultInstance(L, expr, gfound.info);
+    const paramTypes = base.params.map((p) => p.type);
+    const fnT = funcOf(paramTypes, base.returnType);
+    // Overrides of the generic method strictly below its declarer. A TYPED re-declaration
+    // below it has a vtable slot the default instance cannot share: decline.
+    const overrides: { cls: ClassInfo; depth: number; inst: GenericInstance }[] = [];
+    let typedOverride = false;
+    const walk = (c: ClassInfo, depth: number): void => {
+      for (const s of c.subclasses) {
+        const g = s.genericMethods?.get(method);
+        if (g !== undefined && g.implicitParams !== undefined) {
+          const inst = implicitDefaultInstance(L, expr, g);
+          if (!typeEquals(funcOf(inst.params.map((p) => p.type), inst.returnType), fnT)) typedOverride = true;
+          overrides.push({ cls: s, depth, inst });
+        } else if (g !== undefined || s.methods.has(method)) {
+          typedOverride = true;
+        }
+        walk(s, depth + 1);
+      }
+    };
+    walk(gfound.declarer, 1);
+    if (typedOverride) return null;
+    // The thunk of class `cls`: receiver checked against `cls`, then `cls`'s own default instance.
+    const thunkOf = (cls: string, inst: GenericInstance): IrExpr => {
+      const name = `%unbound.${cls}.${method}%generic`;
+      if (!L.liftedFns.some((f) => f.name === name)) {
+        const irParams: IrParam[] = paramTypes.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
+        const selfT: IrType = { kind: "object", className: cls };
+        const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
+        const selfRef: IrExpr = { kind: "varRef", localId: "self.0", type: selfT, loc };
+        const call: IrExpr = { kind: "call", callee: inst.name, args: [selfRef, ...args], type: base.returnType, loc };
+        L.liftedFns.push({
+          name,
+          params: irParams,
+          returnType: base.returnType,
+          locals: [
+            { id: "self.0", name: "self", type: selfT, mutable: false },
+            ...irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+          ],
+          body: [
+            {
+              kind: "varDecl",
+              localId: "self.0",
+              init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: selfT, loc },
+              loc,
+            },
+            base.returnType.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc },
+          ],
+          loc,
+        });
+      }
+      return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
+    };
+    const own = thunkOf(gfound.declarer.def.name, base);
+    // A receiver that is not a plain name or `this` is evaluated once, here, as JS
+    // evaluates `expr.expression` for the read (`new C().m`): the value is a seqExpr.
+    const pre: IrStmt[] = [];
+    let recv: IrExpr | null = null;
+    if (!viaPrototype && !isPlainMethodReceiver(expr.expression)) {
+      const lowered = L.lowerExpr(expr.expression);
+      const h = L.declareHiddenLocal("mref.recv", lowered.type);
+      pre.push({ kind: "varDecl", localId: h.id, init: lowered, loc });
+      recv = { kind: "varRef", localId: h.id, type: lowered.type, loc };
     }
-    return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
+    // `C.prototype.m` names the declarer's own function whatever a subclass overrides.
+    let result: IrExpr = own;
+    if (!viaPrototype && overrides.length > 0) {
+      // `x.m` reads the function of x's RUNTIME class (JS: the override, when there is one). The
+      // receiver is tested shallowest-first, so the deepest matching override is the outermost test.
+      const tested = recv ?? L.lowerExpr(expr.expression);
+      for (const o of [...overrides].sort((a, b) => a.depth - b.depth)) {
+        result = {
+          kind: "ternary",
+          cond: { kind: "instanceOf", value: tested, className: o.cls.def.name, type: BOOL, loc },
+          then: thunkOf(o.cls.def.name, o.inst),
+          else_: result,
+          type: fnT,
+          loc,
+        };
+      }
+    }
+    if (pre.length === 0) return result;
+    return { kind: "seqExpr", stmts: pre, result, type: fnT, loc };
   }
 
 /** The detached-function closure of class method `method` of `info` (see
