@@ -198,6 +198,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10252-detached-call-side-effects-before-this.js": {
+   "order": [
+    "<repo>/tests/corpus/10252-detached-call-side-effects-before-this.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1026-throw-promise.ts": {
    "order": [
     "<repo>/tests/corpus/1026-throw-promise.ts"
