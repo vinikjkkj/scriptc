@@ -70,7 +70,7 @@ async function buildStatic(
     ...globSync(
       join(
         fixturesRoot,
-        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech,vshadow,tostrreach,protoread}/**/*.{js,json}",
+        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech,vshadow,tostrreach,protoread,mrefsm}/**/*.{js,json}",
       ),
     ).sort(),
   ];
@@ -2026,6 +2026,35 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(native).toBe(node);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
+
+  /* -- 10250: a command state machine in mysql2's shape, as an npm-static
+   * package. Every handler is an untyped (implicit-any, monomorphized) member
+   * and returns the NEXT handler as an unbound read (`return this.readRow`).
+   * On base every such read is SC1090 "bound method references ... not
+   * supported yet"; this is the class mysql2's command state machine trips
+   * (lib/commands/query.js, prepare.js). Covered: the driver's plain call
+   * `this.next(packet, conn)`, identity per declaring class, a subclass
+   * override read through the receiver's runtime class, a detached call's
+   * TypeError, and `.call` on the stored value. Byte-identical to Node. */
+  test("10250: an implicit-any state machine returns unbound method reads and matches Node", async () => {
+    const entry = join(fixturesRoot, "npm/cases/10250-method-ref-npm-static/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["mrefsm"] });
+    expect(coverage.npmStatic).toEqual([{ package: "mrefsm", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    for (const backend of ["c", "llvm"] as const) {
+      const binary = await buildStatic(entry, ["mrefsm"], backend);
+      const [nodeRes, nativeRes] = await Promise.all([
+        runBinary("node", [entry]),
+        runBinary(binary, []),
+      ]);
+      const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      expect(node.split("\n").filter((l) => l !== "").length).toBe(5);
+      expect(native, backend).toBe(node);
+      expect(nativeRes.exitCode, backend).toBe(0);
+    }
+  }, 300_000);
 
   test("a copied workspace member classifies identically to a symlinked one", () => {
     const { coverage } = analyze(join(fixturesRoot, "npm/cases/workspace-copied/main.ts"));
