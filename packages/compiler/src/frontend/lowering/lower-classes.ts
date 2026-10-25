@@ -3969,6 +3969,27 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           const sigOfMember = L.lambdaSignature(member);
           let shapes = sigOfMember.shapes;
           const ft = sigOfMember.funcType;
+          // A JS override's UNTYPED parameter adopts the base slot's declared
+          // type and mode at its position, but only where the slot's value has
+          // no dyn box (canConvertToDyn false: ioredis's WriteableStream is a
+          // union of interfaces). Where the slot's value boxes, the parameter
+          // stays dyn and the thunk boxes it (boundaryConvertible), so JS
+          // callers keep their JS parameter semantics. Adopting keeps the
+          // override exact on the remaining parameters; an untyped caller's
+          // argument is checked at the call boundary as any call into a typed
+          // parameter is.
+          const adoptSlot = isJsSourceFile(member.getSourceFile()) ? slotMethodOn(L, base, mName) : null;
+          if (adoptSlot) {
+            shapes = shapes.map((s, i) => {
+              const sp = member.parameters[i];
+              const st = adoptSlot.sig.params[i];
+              if (!sp || !st || sp.type !== undefined || !ts.isIdentifier(sp.name)) return s;
+              if (s.type.kind !== "dyn" || st.type.kind === "dyn") return s;
+              if (canConvertToDyn(st.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) return s;
+              if (s.mode === "dynRest" || s.mode === "rest" || s.mode === "islandRest") return s;
+              return { ...s, type: st.type, mode: st.mode };
+            });
+          }
           // A method whose body reads `arguments`: one dynRest shape carries
           // the whole argument list (the declared parameters, if any, leave
           // the ABI and re-bind off it in the prologue) — the same form a
