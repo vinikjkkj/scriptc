@@ -4550,6 +4550,19 @@ export function cjsInsertionOrderOf(sf: ts.SourceFile): string[] | null {
   return unknown ? null : order;
 }
 
+/** The enumerable accessor exports a CommonJS file defines
+ * (`Object.defineProperty(exports|module.exports, n, { enumerable: true, get })`):
+ * own keys whose values only a getter call yields. */
+export function cjsEnumerableAccessorNames(sf: ts.SourceFile): string[] {
+  const out: string[] = [];
+  for (const stmt of sf.statements) {
+    if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) continue;
+    const def = cjsExportsGetterDefineOf(stmt.expression);
+    if (def !== null && def.enumerable) out.push(def.name);
+  }
+  return out;
+}
+
 /** True when the file replaces its whole export object (`module.exports = …`
  * or `exports = …`) anywhere: a `module.exports` defineProperty target then
  * may name a different object at run time, so it is not a static receiver. */
