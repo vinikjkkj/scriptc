@@ -13373,9 +13373,15 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     }
     for (const m of info.methods.keys()) if (!m.startsWith("#") && !m.startsWith("%")) ownMethodNames.push(m);
     for (const m of info.genericMethods?.keys() ?? []) if (!m.startsWith("#")) ownMethodNames.push(m);
+    // Accessors are not names: an accessor the key admits refuses the read (its getter
+    // runs with the prototype as receiver, which has no value form).
+    const accessorNames: string[] = [];
     for (let c: ClassInfo | null = info; c; c = c.base) {
       for (const m of c.methods.keys()) {
-        if (m.startsWith("get:") || m.startsWith("set:")) return null;
+        if (m.startsWith("get:") || m.startsWith("set:")) {
+          accessorNames.push(m.slice(4));
+          continue;
+        }
         if (!m.startsWith("#") && !m.startsWith("%")) add(m);
       }
       for (const m of c.genericMethods?.keys() ?? []) if (!m.startsWith("#")) add(m);
@@ -13384,6 +13390,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     const keyNode = expr.argumentExpression;
     const patterns = keyPatternsOf(L, keyNode);
     const admits = (n: string): boolean => patterns === null || patterns.some((r) => r.test(n));
+    if (accessorNames.some((n) => admits(n))) return null;
     // Plan the arms first: every decision is made before any lowering runs.
     type Plan =
       | { name: string; kind: "field"; type: IrType }
