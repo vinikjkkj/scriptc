@@ -7795,6 +7795,20 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         anyRecvNarrowed = true;
       }
     }
+    // A `new` whose CHECKER type is bare `any` (a CommonJS `const U = require("url").URL`
+    // binding: the JS checker types the require as any) but whose VALUE lowers to a WHATWG
+    // URL: the lowered kind is the honest one, as the `.length` probe above takes it.
+    if (
+      kind === undefined &&
+      ts.isNewExpression(expr.expression) &&
+      (L.typeOf(expr.expression).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0
+    ) {
+      const probe = probeLower(L, expr.expression);
+      if (probe?.type.kind === "url") {
+        kind = "url";
+        anyRecvNarrowed = true;
+      }
+    }
     if (kind !== "string" && kind !== "array" && kind !== "map" && kind !== "set" && kind !== "f64" && kind !== "regex" && kind !== "url" && kind !== "searchParams" && kind !== "stats" && kind !== "fileHandle" && kind !== "spawnRes" && kind !== "child" && kind !== "bytes" && kind !== "symbol") {
       return null;
     }
