@@ -1636,6 +1636,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       }
       {
         const sym = L.checker.getSymbolAtLocation(expr);
+        // A Buffer-class alias (stdlibBufferVarAliasDecl) has no storage. A VALUE read of it
+        // refuses at the reference: the global's identity token would be a string where Node
+        // answers a function (measured: `take(Buffer)` prints "string"). Receiver uses
+        // (`B.from(x)`) lower through lowerBufferStaticCall before this point.
+        if (ts.isIdentifier(expr) && !L.isStdlibSymbol(sym) && stdlibGlobalNameOf(L, expr) === "Buffer") {
+          L.unsupported("SC1090", expr, `the reference to '${expr.text}' (a binding form with no lowering)`);
+        }
         if (L.isStdlibSymbol(sym) || expr.text === "globalThis") {
           if (isJsSourceFile(expr.getSourceFile())) {
             const canonical = stdlibGlobalNameOf(L, expr) ?? expr.text;
