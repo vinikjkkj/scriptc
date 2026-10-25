@@ -8239,13 +8239,16 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
   export function lowerProtoMethodMember(L: Lowerer, info: ClassInfo, mName: string,
     fn: ts.FunctionExpression,): IrFunction | null {
     const prevThis = L.activeThisType;
+    const prevThisFn = L.activeThisFn;
     L.activeThisType = L.lateMethodThis.get(fn) ?? null;
+    L.activeThisFn = fn;
     const konst = L.lateMethodConst.get(`${info.def.name}.${mName}`);
     if (konst !== undefined) L.constIdents.set(konst.sym, konst.value);
     try {
       return withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, fn));
     } finally {
       L.activeThisType = prevThis;
+      L.activeThisFn = prevThisFn;
       if (konst !== undefined) L.constIdents.delete(konst.sym);
     }
   }
