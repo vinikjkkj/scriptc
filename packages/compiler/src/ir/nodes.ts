@@ -10444,6 +10444,10 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
         // same reason the read's helper does: scr_json.c is always
         // linked and must not name the dispatch.
         (node.fn === "dyn.hasKey" || node.fn === "dyn.invokePack" ||
+          // sloppy this and the globalThis identity: the stand-in and its
+          // test live in the gated dispatch unit, so a program that never
+          // reads sloppy this links neither.
+          node.fn === "dyn.thisSloppy" || node.fn === "dyn.isGlobalThis" ||
           node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" || node.fn === "dyn.reflectDefine" ||
           node.fn === "dyn.captureStack" ||
           node.fn === "dyn.proxyNew" || node.fn === "dyn.proxyRevocable" ||

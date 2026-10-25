@@ -1311,7 +1311,38 @@ static ScrDyn *dyn_bound_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t a
   return r;
 }
 
+/* `this` in a SLOPPY plain function: a nullish receiver is globalThis there,
+ * and a primitive would be boxed (not modelled: a primitive stays primitive).
+ * The runtime has no global object value, so the stand-in is one immortal empty
+ * object: `typeof this` and the nullish tests answer as Node's do, and a member
+ * read finds nothing on it. Identity with `globalThis` is NOT modelled. */
+/* One IMMORTAL empty object (rc == SIZE_MAX, like the undefined singleton): it
+ * is never allocated, so the RC audit never counts it as live, and retain and
+ * release are no-ops on it. */
+static ScrDyn scr_dyn_global_stand_in_node = { SIZE_MAX, SCR_DYN_OBJ, { 0 } };
+ScrDyn *scr_dyn_this_get_sloppy(void) {
+  ScrDyn *t = scr_dyn_this_get(); /* +1 */
+  if (t->kind != SCR_DYN_UNDEF && t->kind != SCR_DYN_NULL) return t;
+  scr_dyn_release(t);
+  return &scr_dyn_global_stand_in_node;
+}
+
+/* `this === globalThis` for the sloppy stand-in: identity with the one box. */
+bool scr_dyn_is_global_this(const ScrDyn *d) {
+  return d == &scr_dyn_global_stand_in_node;
+}
+
+/* The name of a bound box: capture 2 holds the dyn string the box owns. Read
+ * off the box, which keeps it alive for as long as the function is. */
+static const char *dyn_bound_name_of(const ScrDyn *d) {
+  ScrDyn *s = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->caps[2]); /* +1 */
+  const char *p = s->v.str->data;
+  scr_dyn_release(s);
+  return p;
+}
+
 static ScrDyn *dyn_bind_func(ScrDyn *fn, ScrDyn *const *args, size_t argc) {
+  scr_dyn_bound_name_fn = dyn_bound_name_of;
   size_t nb = argc > 1 ? argc - 1 : 0;
   /* The bound name: "bound " + the target's name (an anonymous target gives "bound "). */
   const char *tn = scr_dyn_fn_name(fn);
