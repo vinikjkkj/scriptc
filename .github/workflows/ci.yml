@@ -8,7 +8,30 @@ on:
   # inputs -- the only consumer of the old macos_full input
   # (tests_macos's full-corpus nightly variant) no longer exists; see
   # macos_number_oracle below.
+  # Narrowing inputs (all optional; the default is the full run that landing
+  # judgments need). They only narrow the matrix and skip whole jobs: a job
+  # that runs does exactly what it does on push. `lanes` = comma list of
+  # windows, linux, linux-plain, linux-san, misc, or all. `shards` = comma
+  # list of case-shard numbers 1-20, or all. `vitest_filter` = a test-file
+  # substring; when set, the named files run in each selected shard with
+  # SCRIPTC_TEST_SHARD choosing the cases, and the corpus steps are skipped.
   workflow_dispatch:
+    inputs:
+      lanes:
+        description: "windows, linux, linux-plain, linux-san, misc, or all"
+        type: string
+        default: all
+        required: false
+      shards:
+        description: "comma list of shards 1-20, or all"
+        type: string
+        default: all
+        required: false
+      vitest_filter:
+        description: "test-file substring (empty = the full suite)"
+        type: string
+        default: ""
+        required: false
 
 concurrency:
   # Every push to main runs to completion in a group of its own commit (releases need a full result per
@@ -52,6 +75,69 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT, `full=${full}\n`);
           console.log(full ? 'Run full CI' : 'Defer full CI until this PR becomes the lowest unmerged layer');
           NODE
+
+  # Narrowing for workflow_dispatch (see the inputs above). On push every
+  # input is absent, so every output is the full matrix.
+  plan:
+    name: Select dispatch scope
+    needs: validation_scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      narrowed: ${{ steps.plan.outputs.narrowed }}
+      misc: ${{ steps.plan.outputs.misc }}
+      linux_flavors: ${{ steps.plan.outputs.linux_flavors }}
+      linux_shards: ${{ steps.plan.outputs.linux_shards }}
+      windows_shards: ${{ steps.plan.outputs.windows_shards }}
+    steps:
+      - id: plan
+        env:
+          LANES: ${{ inputs.lanes || 'all' }}
+          SHARDS: ${{ inputs.shards || 'all' }}
+          FILTER: ${{ inputs.vitest_filter || '' }}
+        run: |
+          set -euo pipefail
+          narrowed=false
+          if [ "$LANES" != all ] || [ "$SHARDS" != all ] || [ -n "$FILTER" ]; then narrowed=true; fi
+          plain=false; san=false; win=false; misc=false
+          IFS=, read -ra lanes <<< "$LANES"
+          for t in "${lanes[@]}"; do
+            t="${t// /}"
+            case "$t" in
+              all) plain=true; san=true; win=true; misc=true ;;
+              linux) plain=true; san=true ;;
+              linux-plain) plain=true ;;
+              linux-san) san=true ;;
+              windows) win=true ;;
+              misc) misc=true ;;
+              *) echo "unknown lane '$t' (windows, linux, linux-plain, linux-san, misc, all)"; exit 1 ;;
+            esac
+          done
+          if [ "$SHARDS" = all ]; then
+            shards=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20)
+          else
+            IFS=, read -ra shards <<< "$SHARDS"
+            for x in "${shards[@]}"; do
+              [[ "$x" =~ ^([1-9]|1[0-9]|20)$ ]] || { echo "bad shard '$x' (1-20)"; exit 1; }
+            done
+          fi
+          shards_json="[$(IFS=,; echo "${shards[*]}")]"
+          flavors=()
+          if [ "$plain" = true ]; then flavors+=(plain); fi
+          if [ "$san" = true ]; then flavors+=(san); fi
+          flavors_json="[]"
+          if [ ${#flavors[@]} -gt 0 ]; then flavors_json="[$(printf '"%s",' "${flavors[@]}" | sed 's/,$//')]"; fi
+          linux_shards_json=$([ ${#flavors[@]} -gt 0 ] && echo "$shards_json" || echo "[]")
+          windows_shards_json=$([ "$win" = true ] && echo "$shards_json" || echo "[]")
+          {
+            echo "narrowed=$narrowed"
+            echo "misc=$misc"
+            echo "linux_flavors=$flavors_json"
+            echo "linux_shards=$linux_shards_json"
+            echo "windows_shards=$windows_shards_json"
+          } >> "$GITHUB_OUTPUT"
+          echo "narrowed=$narrowed misc=$misc flavors=$flavors_json linux_shards=$linux_shards_json windows_shards=$windows_shards_json"
 
   # Which expensive lanes a pull request needs (scripts/ci-lanes.mjs, run from the base commit against the pull
   # request's diff, so a pull request cannot change its own selection). Pushes and the nightly sweep run every lane.
@@ -99,6 +185,8 @@ jobs:
 
   code_quality:
     name: lint
+    needs: [plan]
+    if: ${{ needs.plan.outputs.misc == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -116,8 +204,8 @@ jobs:
 
   tests:
     name: test (Linux, ${{ matrix.flavor }}, ${{ matrix.shard }}/20)
-    needs: [validation_scope, lanes]
-    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' }}
+    needs: [validation_scope, lanes, plan]
+    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' && needs.plan.outputs.linux_flavors != '[]' }}
     # Moved here from macOS (this fork's historical CI host for this job) so
     # the 20-way shard actually buys parallelism: GitHub caps macOS at 5
     # concurrent jobs on EVERY plan, so a 40-job (2 flavors x 20 shards)
@@ -153,8 +241,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        flavor: [plain, san]
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        flavor: ${{ fromJSON(needs.plan.outputs.linux_flavors) }}
+        shard: ${{ fromJSON(needs.plan.outputs.linux_shards) }}
     env:
       # Pinned so resolveProvenanceSources' own "cache directory is ... unset"
       # note (provenance.ts, emitted whenever this variable is unset) never
@@ -231,6 +319,7 @@ jobs:
       # --shard would run only one of its twenty case slices and silently
       # drop the rest. Files split by --shard here; cases split by env below.
       - name: Tests (file-sharded, case-sharded files excluded)
+        if: ${{ inputs.vitest_filter == '' }}
         run: >-
           ulimit -c 0 &&
           pnpm test --shard=${{ matrix.shard }}/20
@@ -238,12 +327,20 @@ jobs:
           --exclude=tests/harness/npm.test.ts
           --exclude=tests/harness/server.test.ts
           --exclude=tests/harness/vercel-e2e.test.ts
+      # Filter mode (workflow_dispatch vitest_filter): the named files run in
+      # every selected shard, SCRIPTC_TEST_SHARD choosing that shard's cases.
+      # No --shard here: vitest would park one matched file in one slice.
+      - name: Tests (filtered by vitest_filter, case slice ${{ matrix.shard }}/20)
+        if: ${{ inputs.vitest_filter != '' }}
+        env:
+          VITEST_FILTER: ${{ inputs.vitest_filter }}
+        run: ulimit -c 0 && pnpm test --passWithNoTests $VITEST_FILTER
       # Runs even when the file-sharded step above failed: a step without an
       # `if:` is skipped after any earlier failure, which left this slice's
       # corpus programs (and npm/server/vercel-e2e) unexecuted in every red
       # job. `!cancelled()` still honors a cancelled run.
       - name: Tests (case-sharded, slice ${{ matrix.shard }}/20)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.vitest_filter == '' }}
         run: >-
           ulimit -c 0 &&
           pnpm test
@@ -255,7 +352,7 @@ jobs:
       # Coverage analysis is frontend-only: SCRIPTC_SAN cannot change its
       # result, so the twenty plain slices cover the full corpus once.
       - name: Tests (coverage sweep, slice ${{ matrix.shard }}/20)
-        if: ${{ !cancelled() && matrix.flavor == 'plain' }}
+        if: ${{ !cancelled() && matrix.flavor == 'plain' && inputs.vitest_filter == '' }}
         run: pnpm test tests/harness/corpus/coverage-corpus-
 
   # Replaces the earlier full-corpus tests_macos. That job ran the WHOLE
@@ -305,8 +402,8 @@ jobs:
   # plain/san flavor split to carry here.
   macos_number_oracle:
     name: test (macOS number/string-to-number oracle)
-    needs: [validation_scope, lanes]
-    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.macos == 'true' }}
+    needs: [validation_scope, lanes, plan]
+    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.macos == 'true' && needs.plan.outputs.misc == 'true' }}
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -331,8 +428,8 @@ jobs:
   # Linux feature-test macro omissions at compile time and separate-libm
   # omissions/order errors at link time.
   linux_host_clang:
-    needs: [validation_scope, lanes]
-    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' }}
+    needs: [validation_scope, lanes, plan]
+    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' && needs.plan.outputs.misc == 'true' }}
     name: test (linux host clang/glibc)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -361,7 +458,7 @@ jobs:
   # slash styles, and the default executable must use the .exe suffix.
   windows_cli:
     name: test (windows CLI smoke)
-    needs: [validation_scope, lanes]
+    needs: [validation_scope, lanes, plan]
     # Deliberate, not a copy-paste: upstream's own scripts/ci-lanes.mjs names
     # this lane "linux" but documents it as "the Linux build and test
     # shards... and the smaller Linux, Windows and mobile jobs" -- Windows
@@ -370,7 +467,7 @@ jobs:
     # ci-lanes.mjs's diff-based selection), but if that script is ever ported
     # here, this gate should stay pointed at .linux, not switch to a
     # nonexistent .windows output.
-    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' }}
+    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' && needs.plan.outputs.misc == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 15
     env:
@@ -460,8 +557,8 @@ jobs:
   # result.
   tests_windows:
     name: test (Windows, ${{ matrix.shard }}/20)
-    needs: [validation_scope, lanes]
-    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' }}
+    needs: [validation_scope, lanes, plan]
+    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' && needs.plan.outputs.windows_shards != '[]' }}
     runs-on: windows-latest
     # windows_cli's 15 is a smoke-job number (a handful of targeted vitest
     # runs). This runs a full 1/20 shard of the suite, which clocks ~18min
@@ -476,7 +573,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        shard: ${{ fromJSON(needs.plan.outputs.windows_shards) }}
     env:
       SCRIPTC_NO_CACHE: "1"
       SCRIPTC_CC: zigcc
@@ -534,18 +631,28 @@ jobs:
       # not mix. No `ulimit`/core-dump step: that is an Ubuntu apport
       # workaround with no Windows equivalent.
       - name: Tests (file-sharded, case-sharded files excluded)
+        if: ${{ inputs.vitest_filter == '' }}
         run: >-
           pnpm test --shard=${{ matrix.shard }}/20
           --exclude=tests/harness/corpus/**
           --exclude=tests/harness/npm.test.ts
           --exclude=tests/harness/server.test.ts
           --exclude=tests/harness/vercel-e2e.test.ts
+      # Filter mode (workflow_dispatch vitest_filter): the named files run in
+      # every selected shard, SCRIPTC_TEST_SHARD choosing that shard's cases.
+      # No --shard here: vitest would park one matched file in one slice.
+      - name: Tests (filtered by vitest_filter, case slice ${{ matrix.shard }}/20)
+        if: ${{ inputs.vitest_filter != '' }}
+        env:
+          VITEST_FILTER: ${{ inputs.vitest_filter }}
+        shell: pwsh
+        run: pnpm test --passWithNoTests $env:VITEST_FILTER
       # Runs even when the file-sharded step above failed: a step without an
       # `if:` is skipped after any earlier failure, which left this slice's
       # corpus programs (and npm/server/vercel-e2e) unexecuted in every red
       # job. `!cancelled()` still honors a cancelled run.
       - name: Tests (case-sharded, slice ${{ matrix.shard }}/20)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.vitest_filter == '' }}
         run: >-
           pnpm test
           tests/harness/corpus/differential-
@@ -554,16 +661,17 @@ jobs:
           tests/harness/server.test.ts
           tests/harness/vercel-e2e.test.ts
       - name: Tests (coverage sweep, slice ${{ matrix.shard }}/20)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.vitest_filter == '' }}
         run: pnpm test tests/harness/corpus/coverage-corpus-
 
   # Retain the pre-matrix "test" check for branch protection and badges.
   # Require this check on the stack base. Upper layers must not pass before
   # full validation, so untested groups cannot merge. Merge bottom-up.
   test:
-    needs: [validation_scope, lanes, code_quality, tests, macos_number_oracle, linux_host_clang, windows_cli, tests_windows]
+    needs: [validation_scope, lanes, plan, code_quality, tests, macos_number_oracle, linux_host_clang, windows_cli, tests_windows]
     # Run even after failed or cancelled lanes: skipped required jobs allow merging.
-    if: ${{ always() }}
+    # A narrowed dispatch is not a landing verdict, so the aggregate stays out of it.
+    if: ${{ always() && needs.plan.outputs.narrowed != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
