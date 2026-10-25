@@ -31,7 +31,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dynFallbackType, type Lowerer } from "./lowerer.js";
 import { BOOL, type IrExpr, type IrStmt, type IrType } from "../../ir/nodes.js";
-import { cjsExportAssignmentOf, cjsWholeExportAssignmentOf, isCjsJsFile, isModuleExportsAccess, locOf } from "../program.js";
+import { cjsExportAssignmentOf, cjsWholeExportAssignmentOf, exportsRebindInnerOf, isCjsJsFile, isModuleExportsAccess, locOf } from "../program.js";
 
 export interface CjsExportRecord {
   /** The module global holding the record (the old export object); null until flagged. */
@@ -178,6 +178,13 @@ function computeRecord(L: Lowerer, sf: ts.SourceFile): CjsExportRecord | null {
     if (cjsExportAssignmentOf(stmts[i]!)?.kind === "table" || cjsWholeExportAssignmentOf(stmts[i]!) !== null) lastT = i;
   }
   if (lastT < 0) return null;
+  // `exports = module.exports = X` as the last replacement: `exports` IS X
+  // from there on, so no member write after it lands on the replaced object
+  // and there is no old-object record to keep (writes stay X's statics).
+  {
+    const last = stmts[lastT]!;
+    if (ts.isExpressionStatement(last) && exportsRebindInnerOf(last.expression) !== null) return null;
+  }
 
   // ---- collect every reference (any depth) -----------------------------
   const bare: ts.PropertyAccessExpression[] = [];
