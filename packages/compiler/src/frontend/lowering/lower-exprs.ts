@@ -13184,7 +13184,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
    * (`a.length`, `a[i]`, a truth test): no write or escape can change its elements. An
    * element read may be out of range (undefined, whose key is "undefined"), so that name is
    * always included. Null when the program does not fix the set. */
-  function boundedKeyValuesOf(L: Lowerer, keyNode: ts.Expression): Set<string> | null {
+  export function boundedKeyValuesOf(L: Lowerer, keyNode: ts.Expression): Set<string> | null {
     const strip = (e: ts.Expression): ts.Expression => {
       let x = e;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
@@ -13271,6 +13271,10 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       if (ts.isIdentifier(x)) {
         const sym = L.resolveValueSymbol(x);
         if (sym === null) return null;
+        // A binding the lowering already pins to one literal (a late method's factory
+        // parameter, Lowerer.constIdents) has exactly that value.
+        const pinned = L.constIdents.get(sym);
+        if (pinned !== undefined) return new Set([pinned]);
         const d = L.checker.valueDeclarationOf(sym);
         if (d !== undefined && ts.isVariableDeclaration(d) && d.initializer !== undefined && ts.isIdentifier(d.name) && bindingNeverReassigned(L, sym, d)) {
           return scalarOf(d.initializer, depth + 1);

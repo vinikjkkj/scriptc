@@ -24,7 +24,7 @@ import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStrea
 import { erasableSuperDelegation } from "./lower-emitter.js";
 import { emitOverrideShapeReason, emitSpecSuperForward, emitterRooted, lowerEmitterSuperCall, type EmitOverrideRec } from "./lower-emitter.js";
 import { declSymbolOf } from "./lower-modules.js";
-import { uniqueSymbolKeyOf } from "./lower-exprs.js";
+import { boundedKeyValuesOf, uniqueSymbolKeyOf } from "./lower-exprs.js";
 import { lowerHttpAgentNew, lowerHttpServerNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { bodylessMixinCalleeOf, mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
@@ -1351,6 +1351,300 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     return !dinfo.fields.has(name) && !dinfo.staticFields.some((s) => s.name === name);
   }
 
+  /** Member names a builtin base (node:events EventEmitter, Object.prototype) answers. A
+   * computed prototype key that names one of them is not decided by the program's own
+   * classes, so the install refuses it (prototypeMemberState). */
+  const BUILTIN_PROTO_NAMES = new Set([
+    "constructor", "__proto__", "toString", "toLocaleString", "valueOf", "hasOwnProperty",
+    "isPrototypeOf", "propertyIsEnumerable", "__defineGetter__", "__defineSetter__",
+    "__lookupGetter__", "__lookupSetter__",
+    "addListener", "emit", "eventNames", "getMaxListeners", "listenerCount", "listeners", "off", "on",
+    "once", "prependListener", "prependOnceListener", "rawListeners", "removeAllListeners",
+    "removeListener", "setMaxListeners",
+  ]);
+
+  /** What `C.prototype[name]` answers by C's own chain: "method" (a method, declared or
+   * implicit-any, own or inherited), "absent" (no member of that name), or null (not decidable
+   * here: an accessor, an Error base, a name a builtin answers). */
+  function prototypeMemberState(info: ClassInfo, name: string): "method" | "absent" | null {
+    if (name.startsWith("#") || name.startsWith("%") || BUILTIN_PROTO_NAMES.has(name)) return null;
+    for (let c: ClassInfo | null = info; c; c = c.base) {
+      if (c.builtinEmitter) return "absent"; // the emitter's members are BUILTIN_PROTO_NAMES
+      if (c.builtinError || c.builtinStream !== undefined || (c.def.runtime === true)) return null;
+      if (c.methods.has(`get:${name}`) || c.methods.has(`set:${name}`)) return null;
+      // An implicit-any method (a JS method with no declared parameters) is a generic member
+      // with a prototype value all the same: its existence is what the guard reads.
+      if (c.methods.has(name) || c.genericMethods?.has(name)) return "method";
+    }
+    return "absent";
+  }
+
+  /** `X.prototype[K]` where X is a program class: its class info, and whether K is the key
+   * identifier `keySym` or the literal `name`. */
+  function protoMemberClassOf(L: Lowerer, e: ts.Expression, keySym: ts.Symbol, name: string): ClassInfo | null {
+    const x = stripParensOf(e);
+    if (!ts.isElementAccessExpression(x) || x.questionDotToken !== undefined) return null;
+    const k = stripParensOf(x.argumentExpression);
+    const keyOk = ts.isIdentifier(k) ? L.resolveValueSymbol(k) === keySym : ts.isStringLiteral(k) && k.text === name;
+    if (!keyOk) return null;
+    const p = stripParensOf(x.expression);
+    if (!ts.isPropertyAccessExpression(p) || p.name.text !== "prototype" || !ts.isIdentifier(p.expression)) return null;
+    const t = L.mapTypeOf(L.typeOf(p.expression));
+    return t?.kind === "classval" ? (L.classes.get(t.className) ?? null) : null;
+  }
+
+  /** The truth of a guard of the facade shape for key `name` (keySym's value), or null when
+   * the shape is not one this decides: `typeof X.prototype[K] === 'function'`,
+   * `Y.prototype[K] === undefined`, their negations, and && / || / !. */
+  function guardValueFor(L: Lowerer, cond: ts.Expression, keySym: ts.Symbol, name: string): boolean | null {
+    const e = stripParensOf(cond);
+    if (ts.isPrefixUnaryExpression(e) && e.operator === ts.SyntaxKind.ExclamationToken) {
+      const v = guardValueFor(L, e.operand, keySym, name);
+      return v === null ? null : !v;
+    }
+    if (!ts.isBinaryExpression(e)) return null;
+    const op = e.operatorToken.kind;
+    if (op === ts.SyntaxKind.AmpersandAmpersandToken || op === ts.SyntaxKind.BarBarToken) {
+      const a = guardValueFor(L, e.left, keySym, name);
+      const b = guardValueFor(L, e.right, keySym, name);
+      if (a === null || b === null) return null;
+      return op === ts.SyntaxKind.AmpersandAmpersandToken ? a && b : a || b;
+    }
+    if (op !== ts.SyntaxKind.EqualsEqualsEqualsToken && op !== ts.SyntaxKind.ExclamationEqualsEqualsToken) return null;
+    const l = stripParensOf(e.left);
+    const r = stripParensOf(e.right);
+    let v: boolean | null = null;
+    if (ts.isTypeOfExpression(l) && ts.isStringLiteral(r) && r.text === "function") {
+      const info = protoMemberClassOf(L, l.expression, keySym, name);
+      const st = info === null ? null : prototypeMemberState(info, name);
+      v = st === null ? null : st === "method";
+    } else if (ts.isIdentifier(r) && r.text === "undefined") {
+      const info = protoMemberClassOf(L, l, keySym, name);
+      const st = info === null ? null : prototypeMemberState(info, name);
+      v = st === null ? null : st === "absent";
+    }
+    if (v === null) return null;
+    return op === ts.SyntaxKind.ExclamationEqualsEqualsToken ? !v : v;
+  }
+
+  function stripParensOf(e: ts.Expression): ts.Expression {
+    let x = e;
+    while (ts.isParenthesizedExpression(x)) x = x.expression;
+    return x;
+  }
+
+  interface ComputedInstall {
+    /** The install assignment's `if` (its only guard) and its key identifier. */
+    ifStmt: ts.IfStatement;
+    keyId: ts.Identifier;
+    keySym: ts.Symbol;
+    /** The factory IIFE's parameter (pinned per name) and the forwarder it returns. */
+    factorySym: ts.Symbol;
+    inner: ts.FunctionExpression;
+  }
+
+  /** The whole-statement shape check for a computed prototype install (see
+   * registerComputedPrototypeInstalls). Returns the installs, or null. Every node of the
+   * statement must be one that runs no effect beyond the installs: the loop, the guards,
+   * the reads, and the directly invoked functions that hold them. */
+  function computedInstallsOf(L: Lowerer, classSymbol: ts.Symbol, top: ts.CallExpression): ComputedInstall[] | null {
+    const installs: ComputedInstall[] = [];
+    let ok = true;
+    const isClassProto = (e: ts.Expression): boolean => {
+      const p = stripParensOf(e);
+      return ts.isPropertyAccessExpression(p) && p.name.text === "prototype" && ts.isIdentifier(p.expression) &&
+        L.resolveValueSymbol(p.expression) === classSymbol;
+    };
+    const factoryOf = (call: ts.CallExpression, keyId: ts.Identifier): { sym: ts.Symbol; inner: ts.FunctionExpression } | null => {
+      const callee = stripParensOf(call.expression);
+      if (!ts.isFunctionExpression(callee) || callee.parameters.length !== 1 || call.arguments.length !== 1) return null;
+      const p = callee.parameters[0]!;
+      if (!ts.isIdentifier(p.name) || p.initializer !== undefined || p.dotDotDotToken !== undefined) return null;
+      const arg = stripParensOf(call.arguments[0]!);
+      if (!ts.isIdentifier(arg) || L.resolveValueSymbol(arg) !== L.resolveValueSymbol(keyId)) return null;
+      const body = callee.body.statements;
+      if (body.length !== 1 || !ts.isReturnStatement(body[0]!) || body[0]!.expression === undefined) return null;
+      const ret = stripParensOf(body[0]!.expression);
+      if (!ts.isFunctionExpression(ret) || ret.asteriskToken !== undefined || ret.typeParameters !== undefined) return null;
+      const psym = L.checker.getSymbolAtLocation(p.name);
+      if (psym === undefined) return null;
+      return { sym: psym, inner: ret };
+    };
+    const visit = (n: ts.Node): void => {
+      if (!ok) return;
+      // a binary operator token is a child node of its expression
+      if (ts.isBinaryExpression(n.parent) && n.parent.operatorToken === n) return;
+      // an arrow's `=>` is a child node of the arrow as well.
+      if (ts.isArrowFunction(n.parent) && n.parent.equalsGreaterThanToken === n) return;
+      if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const lhs = stripParensOf(n.left);
+        if (!ts.isElementAccessExpression(lhs) || !isClassProto(lhs.expression) || !ts.isIdentifier(lhs.argumentExpression)) {
+          ok = false;
+          return;
+        }
+        const keyId = lhs.argumentExpression;
+        const keySym = L.resolveValueSymbol(keyId);
+        const rhs = stripParensOf(n.right);
+        const fac = ts.isCallExpression(rhs) && keySym ? factoryOf(rhs, keyId) : null;
+        // The install's guard: its statement is the lone body of an if (no else).
+        const stmt = n.parent;
+        const blockOrIf = ts.isExpressionStatement(stmt) ? stmt.parent : undefined;
+        let ifStmt: ts.IfStatement | undefined;
+        if (blockOrIf && ts.isIfStatement(blockOrIf) && blockOrIf.thenStatement === stmt && blockOrIf.elseStatement === undefined) ifStmt = blockOrIf;
+        if (blockOrIf && ts.isBlock(blockOrIf) && blockOrIf.parent && ts.isIfStatement(blockOrIf.parent) &&
+            blockOrIf.parent.thenStatement === blockOrIf && blockOrIf.parent.elseStatement === undefined) ifStmt = blockOrIf.parent;
+        if (fac === null || keySym === undefined || keySym === null || ifStmt === undefined) {
+          ok = false;
+          return;
+        }
+        installs.push({ ifStmt, keyId, keySym, factorySym: fac.sym, inner: fac.inner });
+        return; // the forwarder body runs at call time, not here
+      }
+      if (ts.isExpressionStatement(n) || ts.isParenthesizedExpression(n) || ts.isBlock(n) ||
+          ts.isVariableStatement(n) || ts.isVariableDeclarationList(n) || ts.isReturnStatement(n) ||
+          ts.isForStatement(n) || ts.isArrayLiteralExpression(n) || ts.isTypeOfExpression(n)) {
+        // structural: its children are visited below
+      } else if (ts.isVariableDeclaration(n)) {
+        if (!ts.isIdentifier(n.name)) { ok = false; return; }
+      } else if (ts.isParameter(n)) {
+        if (!ts.isIdentifier(n.name) || n.initializer !== undefined || n.dotDotDotToken !== undefined) { ok = false; return; }
+      } else if (ts.isIfStatement(n)) {
+        if (n.elseStatement !== undefined) { ok = false; return; }
+      } else if (ts.isBinaryExpression(n)) {
+        const k = n.operatorToken.kind;
+        const allowed = [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.EqualsEqualsEqualsToken,
+          ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.LessThanToken, ts.SyntaxKind.LessThanEqualsToken,
+          ts.SyntaxKind.GreaterThanToken, ts.SyntaxKind.GreaterThanEqualsToken];
+        if (!allowed.includes(k)) { ok = false; return; }
+      } else if (ts.isPrefixUnaryExpression(n)) {
+        if (n.operator !== ts.SyntaxKind.ExclamationToken && n.operator !== ts.SyntaxKind.PlusPlusToken && n.operator !== ts.SyntaxKind.MinusMinusToken) { ok = false; return; }
+      } else if (ts.isPostfixUnaryExpression(n)) {
+        if (n.operator !== ts.SyntaxKind.PlusPlusToken && n.operator !== ts.SyntaxKind.MinusMinusToken) { ok = false; return; }
+      } else if (ts.isPropertyAccessExpression(n)) {
+        if (n.name.text !== "length" && n.name.text !== "prototype") { ok = false; return; }
+      } else if (ts.isElementAccessExpression(n)) {
+        // reads only
+      } else if (ts.isCallExpression(n)) {
+        // Only a directly invoked function (an IIFE): its body is walked below.
+        const callee = stripParensOf(n.expression);
+        if (!ts.isFunctionExpression(callee) && !ts.isArrowFunction(callee)) { ok = false; return; }
+        if (n.arguments.some((a) => ts.isSpreadElement(a))) { ok = false; return; }
+        for (const p of callee.parameters) {
+          if (!ts.isIdentifier(p.name) || p.initializer !== undefined || p.dotDotDotToken !== undefined) { ok = false; return; }
+        }
+        if (!ts.isBlock(callee.body)) { ok = false; return; }
+      } else if (ts.isFunctionExpression(n) || ts.isArrowFunction(n)) {
+        // reached only as an IIFE callee (checked by the call above)
+        let up: ts.Node = n.parent;
+        while (ts.isParenthesizedExpression(up)) up = up.parent;
+        if (!ts.isCallExpression(up) || stripParensOf(up.expression) !== n) { ok = false; return; }
+      } else if (ts.isIdentifier(n) || ts.isStringLiteral(n) || ts.isNumericLiteral(n) ||
+                 ts.isNoSubstitutionTemplateLiteral(n) || n.kind === ts.SyntaxKind.TrueKeyword ||
+                 n.kind === ts.SyntaxKind.FalseKeyword || n.kind === ts.SyntaxKind.NullKeyword) {
+        return;
+      } else {
+        ok = false;
+        return;
+      }
+      n.forEachChild(visit);
+    };
+    visit(top);
+    if (!ok || installs.length === 0) return null;
+    return installs;
+  }
+
+  /** A computed prototype install of the facade shape (mysql2's promise wrappers):
+   *
+   *     (function (names) {
+   *       for (let i = 0; names && i < names.length; i++) {
+   *         const func = names[i];
+   *         if (typeof Base.prototype[func] === 'function' && C.prototype[func] === undefined) {
+   *           C.prototype[func] = (function factory(funcName) {
+   *             return function () { return Base.prototype[funcName].apply(this.conn, arguments); };
+   *           })(func);
+   *         }
+   *       }
+   *     })(['close', 'query']);
+   *
+   * The key's set is fixed by the program (boundedKeyValuesOf). The guard depends on the key
+   * alone, so each name's install is decided at compile time from the class facts
+   * (prototypeMemberState): a name the guard admits becomes a late method of C, its forwarder
+   * body lowered with the factory parameter bound to that name (Lowerer.lateMethodConst, the
+   * accessor families' mechanism), and the statement lowers to nothing. A guard the shape does
+   * not decide, a key the program does not bound, or a name installed twice refuses the whole
+   * statement, which then keeps its refusal. */
+  function registerComputedPrototypeInstalls(L: Lowerer, info: ClassInfo, decl: ts.ClassDeclaration, classSymbol: ts.Symbol): void {
+    const sf = decl.getSourceFile();
+    if (!isJsSourceFile(sf)) return;
+    for (const stmt of sf.statements) {
+      if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) continue;
+      const top = stmt.expression;
+      // The install is static: a reference to the class before the statement (outside its own
+      // declaration) could build an instance Node would not yet have a method on. Refuse.
+      // A reference to C or to a class derived from it can build an instance; a heritage
+      // clause (`extends C`) only names the base and builds nothing.
+      const derivesFromC = (sym: ts.Symbol): boolean => {
+        const d = L.classBySymbol.get(sym);
+        for (let c: ClassInfo | null | undefined = d; c; c = c.base) if (c === info) return true;
+        return false;
+      };
+      let usedBefore = false;
+      (function scan(n: ts.Node): void {
+        if (usedBefore || n.pos >= stmt.pos) return;
+        if (n === decl || ts.isHeritageClause(n)) return;
+        if (ts.isIdentifier(n)) {
+          const sym = L.resolveValueSymbol(n);
+          if (sym !== null && (sym === classSymbol || derivesFromC(sym))) usedBefore = true;
+        }
+        ts.forEachChild(n, scan);
+      })(sf);
+      if (usedBefore) continue;
+      const installs = computedInstallsOf(L, classSymbol, top);
+      if (installs === null) continue;
+      const plan: { name: string; inst: ComputedInstall }[] = [];
+      let decided = true;
+      for (const inst of installs) {
+        const set = boundedKeyValuesOf(L, inst.keyId);
+        if (set === null) { decided = false; break; }
+        for (const name of set) {
+          const g = guardValueFor(L, inst.ifStmt.expression, inst.keySym, name);
+          if (g === null) { decided = false; break; }
+          if (g) plan.push({ name, inst });
+        }
+        if (!decided) break;
+      }
+      if (!decided) continue;
+      const names = plan.map((p) => p.name);
+      if (new Set(names).size !== names.length || names.some((n) => info.fields.has(n) || info.methods.has(n))) continue;
+      const sigs: ReturnType<Lowerer["lambdaSignature"]>[] = [];
+      try {
+        for (const p of plan) sigs.push(L.lambdaSignature(p.inst.inner as unknown as ts.MethodDeclaration));
+      } catch (err) {
+        if (err instanceof PoisonError) continue;
+        throw err;
+      }
+      const ownType = L.checker.getDeclaredTypeOfSymbol(classSymbol);
+      const bodies = L.protoClassBodies.get(info.def.name) ?? new Map<string, ts.FunctionExpression>();
+      plan.forEach((p, i) => {
+        // A forwarder that reads `arguments` takes the whole list as one dynRest shape, the
+        // form a method that reads `arguments` takes (declareClassMethods' methodArgsBound).
+        const inner = p.inst.inner;
+        const readsArgs = !sigs[i]!.shapes.some((x) => x.mode === "dynRest") && bodyReadsArguments(inner);
+        const shapes = readsArgs ? [...sigs[i]!.shapes, { type: DYN, mode: "dynRest" as const }] : sigs[i]!.shapes;
+        info.methods.set(p.name, {
+          params: shapes,
+          ret: sigs[i]!.funcType.ret,
+          ...(readsArgs && inner.parameters.length > 0 ? { argsBound: true as const } : {}),
+        });
+        bodies.set(p.name, p.inst.inner);
+        L.lateMethodConst.set(`${info.def.name}.${p.name}`, { sym: p.inst.factorySym, value: p.name });
+        L.lateMethodThis.set(p.inst.inner, ownType);
+      });
+      L.protoClassBodies.set(info.def.name, bodies);
+      L.lateMethodAssigns.add(top);
+    }
+  }
+
 /** `C.prototype.m = <function-like>` at the top level of the file declaring
    * class C: a LATE METHOD. The function becomes `C`'s method `m` exactly as
    * if declared in the body (same module function `%C.m`, the
@@ -1367,6 +1661,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     if (!isJsSourceFile(sf)) return;
     registerDefinedStatics(L, info, decl, classSymbol);
     registerAccessorFamilies(L, info, decl, classSymbol);
+    registerComputedPrototypeInstalls(L, info, decl, classSymbol);
     for (const stmt of sf.statements) {
       if (!ts.isExpressionStatement(stmt)) continue;
       const e = stmt.expression;
