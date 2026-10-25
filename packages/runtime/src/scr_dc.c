@@ -809,3 +809,189 @@ void scr_dc_publish(double handle, ScrDyn *message) {
   for (size_t i = 0; i < n; i++) scr_dyn_release(snap[i]);
   free(snap);
 }
+
+/* ── checked-dynamic Channel / TracingChannel handles ───────────────────
+ * A channel value crosses into the checked-dynamic tree as a HANDLE box
+ * (SCR_DYNH_CHANNEL / SCR_DYNH_TRACING) whose pointer is the registry id
+ * itself (1-based, so never NULL). The registry is immortal, so retain and
+ * release are identities: one channel boxed twice is one channel, and
+ * `===` through the box compares (tag, id). Typed code keeps the id as a
+ * double; scr_dc_unbox_* converts a box back (a wrong-tag box throws the
+ * path-annotated TypeError through scr_dyn_handle_unbox).
+ *
+ * Members dispatched through a dyn receiver (`channel.publish(m)`,
+ * `ch.start.subscribe(h)`, `tc.tracePromise(fn, ctx)`) reach the SAME entry
+ * points the typed lowerings use. Argument vectors are borrowed; the trace
+ * forms build the rest array here. ALS store binds (bindStore/runStores)
+ * need an AsyncLocalStorage handle the dyn tree does not carry, so they
+ * throw the loud not-a-function ladder rather than answering wrongly. */
+
+static void *dc_h_retain(void *h) { return h; }
+static void dc_h_release(void *h) { (void)h; }
+
+static ScrDyn *dc_h_box(double id, ScrDynHandleTag tag) {
+  return scr_dyn_new_handle((void *)(uintptr_t)id, tag);
+}
+
+static double dc_h_unbox(const ScrDyn *d, ScrDynHandleTag tag, const char *want) {
+  void *p = scr_dyn_handle_unbox(d, tag, NULL, want);
+  if (p == NULL) return 0; /* the pending TypeError */
+  return (double)(uintptr_t)p;
+}
+
+static ScrDyn *dc_h_arg(ScrDyn *const *args, size_t argc, size_t i) {
+  return i < argc ? args[i] : scr_dyn_undefined();
+}
+
+static void dc_h_not_fn(const char *what) {
+  char msg[160];
+  const int n = snprintf(msg, sizeof msg, "%s is not a function", what);
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+}
+
+static ScrDyn *dc_chan_dynh_invoke(void *h, ScrDyn *self, const char *method,
+                                   ScrDyn *const *args, size_t argc, const char *what) {
+  double id = (double)(uintptr_t)h;
+  (void)self;
+  if (strcmp(method, "publish") == 0) {
+    scr_dc_publish(id, dc_h_arg(args, argc, 0));
+    return scr_dyn_undefined();
+  }
+  if (strcmp(method, "subscribe") == 0) {
+    scr_dc_chan_subscribe(id, dc_h_arg(args, argc, 0));
+    return scr_dyn_undefined();
+  }
+  if (strcmp(method, "unsubscribe") == 0) {
+    return scr_dyn_new_bool(scr_dc_chan_unsubscribe(id, dc_h_arg(args, argc, 0)));
+  }
+  dc_h_not_fn(what);
+  return NULL;
+}
+
+static ScrDyn *dc_chan_dynh_get(void *h, const char *key, size_t key_len) {
+  double id = (double)(uintptr_t)h;
+  (void)key_len;
+  if (strcmp(key, "hasSubscribers") == 0) return scr_dyn_new_bool(scr_dc_chan_has_subscribers(id));
+  if (strcmp(key, "name") == 0) {
+    ScrStr *n = scr_dc_chan_name(id); /* +1 */
+    ScrDyn *d = scr_dyn_new_str(n);
+    scr_str_release(n);
+    return d;
+  }
+  return NULL;
+}
+
+static bool dc_chan_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)h; (void)key; (void)key_len; (void)value;
+  return false;
+}
+
+static const ScrDynHandleOps dc_chan_dynh_ops = {
+  "Channel",
+  &dc_h_retain,
+  &dc_h_release,
+  &dc_chan_dynh_invoke,
+  &dc_chan_dynh_get,
+  &dc_chan_dynh_set,
+  NULL,
+};
+
+/* The rest array of a trace call: args[from..] as a fresh dyn array (the
+ * elements are retained — the argument vector is borrowed). */
+static ScrDyn *dc_h_rest(ScrDyn *const *args, size_t argc, size_t from) {
+  ScrDyn *arr = scr_dyn_new_arr();
+  for (size_t i = from; i < argc; i++) scr_dyn_arr_push(arr, scr_dyn_retain(args[i]));
+  return arr;
+}
+
+static ScrDyn *dc_tc_dynh_invoke(void *h, ScrDyn *self, const char *method,
+                                 ScrDyn *const *args, size_t argc, const char *what) {
+  double id = (double)(uintptr_t)h;
+  (void)self;
+  if (strcmp(method, "subscribe") == 0) {
+    scr_dc_tc_subscribe(id, dc_h_arg(args, argc, 0));
+    return scr_dyn_undefined();
+  }
+  if (strcmp(method, "unsubscribe") == 0) {
+    return scr_dyn_new_bool(scr_dc_tc_unsubscribe(id, dc_h_arg(args, argc, 0)));
+  }
+  if (strcmp(method, "traceSync") == 0 || strcmp(method, "tracePromise") == 0) {
+    bool promise = strcmp(method, "tracePromise") == 0;
+    ScrDyn *fresh = NULL;
+    ScrDyn *ctx = argc > 1 ? args[1] : NULL;
+    if (ctx == NULL) ctx = fresh = scr_dyn_new_obj(); /* Node's default context */
+    ScrDyn *rest = dc_h_rest(args, argc, 3);
+    ScrDyn *r = NULL;
+    if (promise) {
+      ScrPromise *p = scr_dc_tc_trace_promise(id, dc_h_arg(args, argc, 0), ctx,
+                                              dc_h_arg(args, argc, 2), rest);
+      if (p != NULL) {
+        r = scr_dyn_new_promise(p); /* borrows p */
+        scr_promise_release(p);
+      }
+    } else {
+      r = scr_dc_tc_trace_sync(id, dc_h_arg(args, argc, 0), ctx, dc_h_arg(args, argc, 2), rest);
+    }
+    scr_dyn_release(rest);
+    if (fresh != NULL) scr_dyn_release(fresh);
+    return r;
+  }
+  if (strcmp(method, "traceCallback") == 0) {
+    ScrDyn *fresh = NULL;
+    ScrDyn *ctx = argc > 2 ? args[2] : NULL;
+    if (ctx == NULL) ctx = fresh = scr_dyn_new_obj();
+    double pos = -1;
+    if (argc > 1 && args[1]->kind == SCR_DYN_NUM) pos = args[1]->v.num;
+    ScrDyn *rest = dc_h_rest(args, argc, 4);
+    ScrDyn *r = scr_dc_tc_trace_callback(id, dc_h_arg(args, argc, 0), pos, ctx,
+                                         dc_h_arg(args, argc, 3), rest);
+    scr_dyn_release(rest);
+    if (fresh != NULL) scr_dyn_release(fresh);
+    return r;
+  }
+  dc_h_not_fn(what);
+  return NULL;
+}
+
+static ScrDyn *dc_tc_dynh_get(void *h, const char *key, size_t key_len) {
+  double id = (double)(uintptr_t)h;
+  (void)key_len;
+  if (strcmp(key, "hasSubscribers") == 0) return scr_dyn_new_bool(scr_dc_tc_has_subscribers(id));
+  static const char *const evs[5] = { "start", "end", "asyncStart", "asyncEnd", "error" };
+  for (size_t i = 0; i < 5; i++) {
+    if (strcmp(key, evs[i]) == 0) return dc_h_box(scr_dc_tc_channel(id, (double)i), SCR_DYNH_CHANNEL);
+  }
+  return NULL;
+}
+
+static bool dc_tc_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)h; (void)key; (void)key_len; (void)value;
+  return false;
+}
+
+static const ScrDynHandleOps dc_tc_dynh_ops = {
+  "TracingChannel",
+  &dc_h_retain,
+  &dc_h_release,
+  &dc_tc_dynh_invoke,
+  &dc_tc_dynh_get,
+  &dc_tc_dynh_set,
+  NULL,
+};
+
+/* Typed <-> dyn crossings, used by the dc.boxChan / dc.boxTc / dc.unboxChan
+ * / dc.unboxTc libCalls and by the typed-name producers. */
+ScrDyn *scr_dc_channel_dyn(ScrStr *name) { return dc_h_box(scr_dc_channel(name), SCR_DYNH_CHANNEL); }
+ScrDyn *scr_dc_tracing_channel_dyn(ScrStr *name) {
+  return dc_h_box(scr_dc_tracing_channel(name), SCR_DYNH_TRACING);
+}
+ScrDyn *scr_dc_box_chan(double h) { return dc_h_box(h, SCR_DYNH_CHANNEL); }
+ScrDyn *scr_dc_box_tc(double h) { return dc_h_box(h, SCR_DYNH_TRACING); }
+double scr_dc_unbox_chan(const ScrDyn *d) { return dc_h_unbox(d, SCR_DYNH_CHANNEL, "Channel"); }
+double scr_dc_unbox_tc(const ScrDyn *d) { return dc_h_unbox(d, SCR_DYNH_TRACING, "TracingChannel"); }
+
+/* Emitted into main() whenever the IR carries dc.* libCalls (moduleUsesDc). */
+void scr_dc_dyn_install(void) {
+  scr_dyn_handle_install(SCR_DYNH_CHANNEL, &dc_chan_dynh_ops);
+  scr_dyn_handle_install(SCR_DYNH_TRACING, &dc_tc_dynh_ops);
+}
