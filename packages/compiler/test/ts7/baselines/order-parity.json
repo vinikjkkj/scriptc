@@ -98,6 +98,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10214-thenable-resolve-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/10214-thenable-resolve-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10215-thenable-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/10215-thenable-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10216-thenable-resolve-twice.ts": {
+   "order": [
+    "<repo>/tests/corpus/10216-thenable-resolve-twice.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10217-thenable-order-native.ts": {
+   "order": [
+    "<repo>/tests/corpus/10217-thenable-order-native.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/001-hello.ts": {
    "order": [
     "<repo>/tests/corpus/001-hello.ts"
