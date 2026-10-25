@@ -13125,6 +13125,202 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     return L.maybeNarrow(get, expr);
   }
 
+  /** Members every object inherits from Object.prototype. scriptc has no value
+   * lowering for them (SC2020 on the dot forms), so a computed read that can
+   * name one fences loudly when the literal names it, and answers a loud
+   * run-time error when a non-literal key happens to be one of them. */
+  const OBJECT_PROTOTYPE_MEMBERS = [
+    "constructor", "__proto__", "toString", "toLocaleString", "valueOf", "hasOwnProperty",
+    "isPrototypeOf", "propertyIsEnumerable", "__defineGetter__", "__defineSetter__",
+    "__lookupGetter__", "__lookupSetter__",
+  ];
+
+  /** Computed-key reads `o[k]` on a CLASS INSTANCE (an `object` receiver) and
+   * on a class PROTOTYPE (`C.prototype[k]`): the class's run-time key table.
+   * Each declared field and each method (own or inherited) is one arm
+   * `k === name ? value : …`; the arm's value is boxed into the checked-dynamic
+   * tree, and no arm matching answers the dyn undefined, which is JS's answer
+   * for an absent key. A key whose type is a union of string literals (or one
+   * literal) only consults those names. A method's value is the detached
+   * closure `o.m` / `C.prototype.m` hands out in JS: an instance read takes the
+   * method of the instance's own runtime class, and the receiver comes from the
+   * call that invokes it. Null, leaving the caller's fence, for every shape not
+   * covered: accessors, own-shadow properties, abstract members, field types the
+   * dyn tree cannot hold, and implicit-any methods a subclass overrides. */
+  function lowerClassComputedKeyRead(L: Lowerer, expr: ts.ElementAccessExpression): IrExpr | null {
+    if (expr.questionDotToken !== undefined) return null;
+    const loc = locOf(expr);
+    const receiverIr = neverTaintedJsType(L, expr.expression, L.typeOf(expr.expression)) ? null : L.mapTypeOf(L.typeOf(expr.expression));
+    let info: ClassInfo | null = null;
+    let viaPrototype = false;
+    let className = "";
+    // `C.prototype` is spelled as a property read, but the checker types it as an
+    // instance of C: the syntax decides, before the receiver's type does.
+    if (
+      ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype" &&
+      ts.isIdentifier(expr.expression.expression)
+    ) {
+      const ctorT = L.mapTypeOf(L.typeOf(expr.expression.expression));
+      if (ctorT?.kind !== "classval") return null;
+      info = L.classes.get(ctorT.className) ?? null;
+      className = ctorT.className;
+      viaPrototype = true;
+    } else if (receiverIr?.kind === "object") {
+      info = L.classes.get(receiverIr.className) ?? null;
+      className = receiverIr.className;
+    }
+    if (info === null || info.builtinError) return null;
+    // The member names the class answers: own and inherited fields (instances
+    // only; a prototype carries no instance fields), then methods up the chain.
+    const names: string[] = [];
+    const seen = new Set<string>();
+    const add = (n: string): void => {
+      if (!seen.has(n)) {
+        seen.add(n);
+        names.push(n);
+      }
+    };
+    if (!viaPrototype) {
+      for (const n of info.fields.keys()) {
+        if (n.startsWith("#__sc_own$")) return null;
+        if (!n.startsWith("#") && !n.startsWith("%")) add(n);
+      }
+    }
+    for (let c: ClassInfo | null = info; c; c = c.base) {
+      for (const m of c.methods.keys()) {
+        if (m.startsWith("get:") || m.startsWith("set:")) return null;
+        if (!m.startsWith("#") && !m.startsWith("%")) add(m);
+      }
+      for (const m of c.genericMethods?.keys() ?? []) if (!m.startsWith("#")) add(m);
+    }
+    // The key: a literal-typed key names only its literals; anything else is
+    // any name the class answers (or, failing those, an Object.prototype member).
+    const keyNode = expr.argumentExpression;
+    const keyT = L.typeOf(keyNode);
+    const keyParts = keyT.isUnionType() ? ts.constituentTypes(keyT) : [keyT];
+    let only: Set<string> | null = null;
+    if (keyParts.every((p) => p.isStringLiteralType() || p.isNumberLiteralType())) {
+      only = new Set(keyParts.map((p) => (p.isStringLiteralType() ? p.value : String((p as unknown as { value: number }).value))));
+    }
+    // Plan the arms first: every decision is made before any lowering runs.
+    type Plan =
+      | { name: string; kind: "field"; type: IrType }
+      | { name: string; kind: "method"; found: NonNullable<ReturnType<Lowerer["findMethodOn"]>> }
+      | { name: string; kind: "generic" }
+      | { name: string; kind: "objectProto" };
+    const plans: Plan[] = [];
+    for (const n of names) {
+      if (only !== null && !only.has(n)) continue;
+      const isField = !viaPrototype && info.fields.has(n);
+      const m = L.findMethodOn(info, n);
+      const g = m === null ? findGenericMethodOn(L, info, n) : null;
+      if (isField && (m !== null || g !== null)) return null;
+      if (isField) {
+        const ft = info.fields.get(n)!;
+        if (!L.dynConvertible(ft)) return null;
+        plans.push({ name: n, kind: "field", type: ft });
+      } else if (m !== null) {
+        if (m.sig.abstract === true) return null;
+        if (m.sig.params.some((p) => p.mode !== "required" && p.mode !== "omittable")) return null;
+        plans.push({ name: n, kind: "method", found: m });
+      } else if (g !== null) {
+        plans.push({ name: n, kind: "generic" });
+      }
+    }
+    // Object.prototype members the class does not answer itself.
+    for (const n of OBJECT_PROTOTYPE_MEMBERS) {
+      if (seen.has(n)) continue;
+      if (only !== null) {
+        if (!only.has(n)) continue;
+        L.unsupported("SC1090", expr, `computed read of the Object.prototype member '${n}' (no value lowering yet)`);
+      }
+      plans.push({ name: n, kind: "objectProto" });
+    }
+    // Lower the receiver and the key once, into hidden locals (JS evaluates
+    // the receiver, then the key, before any arm).
+    const recvRaw = viaPrototype ? null : L.lowerExpr(expr.expression);
+    if (recvRaw !== null && (recvRaw.type.kind !== "object" || recvRaw.type.className !== className)) return null;
+    let key = L.lowerExpr(keyNode);
+    if (key.type.kind === "f64" || key.type.kind === "dyn") key = L.ensureString(key, keyNode);
+    if (key.type.kind !== "string") return null;
+    const stmts: IrStmt[] = [];
+    let recvRef: IrExpr | null = null;
+    if (recvRaw !== null) {
+      const rl = L.declareHiddenLocal("%ekRecv", recvRaw.type);
+      stmts.push({ kind: "varDecl", localId: rl.id, init: recvRaw, loc });
+      recvRef = { kind: "varRef", localId: rl.id, type: recvRaw.type, loc };
+    }
+    const kl = L.declareHiddenLocal("%ekKey", STRING);
+    stmts.push({ kind: "varDecl", localId: kl.id, init: key, loc });
+    const keyRef: IrExpr = { kind: "varRef", localId: kl.id, type: STRING, loc };
+    let chain: IrExpr = dynUndefinedExpr(loc);
+    for (let i = plans.length - 1; i >= 0; i--) {
+      const p = plans[i]!;
+      let value: IrExpr;
+      if (p.kind === "field") {
+        value = { kind: "fieldGet", obj: recvRef!, className, field: p.name, type: p.type, loc };
+      } else if (p.kind === "method") {
+        const v = viaPrototype
+          ? unboundMethodThunk(L, info, p.name, p.found, loc, true)
+          : instanceMethodValue(L, info, p.name, p.found, loc, recvRef!);
+        if (v === null) return null;
+        value = v;
+      } else if (p.kind === "generic") {
+        const cl = unboundGenericClosures(L, expr, info, p.name, !viaPrototype);
+        if (cl === null) return null;
+        value = viaPrototype ? cl.own : genericWithOverrides(cl, () => recvRef!, loc);
+      } else {
+        value = nodeThrowExpr(1, "", `scriptc: computed read of the Object.prototype member '${p.name}' is not lowered yet`, DYN, loc);
+      }
+      const boxed: IrExpr = p.kind === "objectProto" ? value : { kind: "dynFrom", value, type: DYN, loc };
+      const test: IrExpr = { kind: "strEq", negated: false, left: keyRef, right: { kind: "strLit", value: p.name, type: STRING, loc }, type: BOOL, loc };
+      chain = { kind: "ternary", cond: test, then: boxed, else_: chain, type: DYN, loc };
+    }
+    return stmts.length === 0 ? chain : { kind: "seqExpr", stmts, result: chain, type: DYN, loc };
+  }
+
+  /** The method `name` of `info` as an instance read `o[name]` sees it: the function of
+   * the RUNTIME class of the receiver (`recv`), deepest override first, as
+   * lowerUnboundClassMethodValue does for `o.m`. Null when an override the chain
+   * cannot pick (a generic one) is in the way. */
+  function instanceMethodValue(
+    L: Lowerer,
+    info: ClassInfo,
+    name: string,
+    found: { declarer: ClassInfo; sig: { params: ParamShape[]; ret: IrType; abstract?: boolean } },
+    loc: SrcLoc,
+    recv: IrExpr,
+  ): IrExpr | null {
+    const own = unboundMethodThunk(L, info, name, found, loc, true);
+    if (!L.overrideBelow(info, name)) return own;
+    const subs: { cls: ClassInfo; depth: number }[] = [];
+    const walk = (c: ClassInfo, depth: number): void => {
+      for (const s of c.subclasses) {
+        subs.push({ cls: s, depth });
+        walk(s, depth + 1);
+      }
+    };
+    walk(info, 1);
+    subs.sort((a, b) => a.depth - b.depth);
+    let chain: IrExpr = own;
+    for (const { cls } of subs) {
+      if (cls.genericMethods?.has(name) === true) return null;
+      const f = L.findMethodOn(cls, name);
+      if (f === null || f.declarer === found.declarer || f.sig.abstract === true) continue;
+      const pick = unboundMethodThunk(L, cls, name, f, loc, true);
+      if (!typeEquals(pick.type, own.type)) return null;
+      chain = {
+        kind: "ternary",
+        cond: { kind: "instanceOf", value: recv, className: cls.def.name, type: BOOL, loc },
+        then: pick,
+        else_: chain,
+        type: own.type,
+        loc,
+      };
+    }
+    return chain;
+  }
+
 /** `a[i]` reads. Only f64 indices into array receivers are modeled; JS
    * string-key element access (`a["length"]`) and string indexing (`s[0]`
    * typechecks against the lib's index signature; use .charAt) stay out. */
@@ -13138,6 +13334,11 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // tail short-circuits with the guard.
     if (!expr.questionDotToken && chainTailClaimed(L, expr)) {
       return L.lowerOptionalChain(expr);
+    }
+    // Computed reads on class instances and class prototypes (the run-time key table).
+    {
+      const computed = lowerClassComputedKeyRead(L, expr);
+      if (computed !== null) return L.maybeNarrow(computed, expr);
     }
     // Enum accesses in element clothing — `E["A"]` forward reads and
     // `E[0]` reverse-mapping reads — fold to constants (lower-enums.ts),
@@ -21528,10 +21729,56 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
   function lowerUnboundGenericMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, info: ClassInfo): IrExpr | null {
     const viaPrototype = ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype" &&
       ts.isIdentifier(expr.expression.expression);
-    const method = expr.name.text;
+    const closures = unboundGenericClosures(L, expr, info, expr.name.text, !viaPrototype);
+    if (closures === null) return null;
+    const loc = locOf(expr);
+    // A receiver that is not a plain name or `this` is evaluated once, here, as JS
+    // evaluates `expr.expression` for the read (`new C().m`): the value is a seqExpr.
+    const pre: IrStmt[] = [];
+    let recv: IrExpr | null = null;
+    if (!viaPrototype && !isPlainMethodReceiver(expr.expression)) {
+      const lowered = L.lowerExpr(expr.expression);
+      const h = L.declareHiddenLocal("mref.recv", lowered.type);
+      pre.push({ kind: "varDecl", localId: h.id, init: lowered, loc });
+      recv = { kind: "varRef", localId: h.id, type: lowered.type, loc };
+    }
+    // `C.prototype.m` names the declarer's own function whatever a subclass overrides.
+    const result = viaPrototype
+      ? closures.own
+      : genericWithOverrides(closures, () => recv ?? L.lowerExpr(expr.expression), loc);
+    if (pre.length === 0) return result;
+    return { kind: "seqExpr", stmts: pre, result, type: closures.fnT, loc };
+  }
+
+  type GenericClosures = { own: IrExpr; overrides: { cls: string; value: IrExpr }[]; fnT: IrType };
+
+  /** The value of an implicit-any method read on an instance (`x.m`, `x[k]`): the declarer's
+   * closure, unless a subclass overrides it, in which case the override of the receiver's RUNTIME
+   * class is picked (the deepest matching override is the outermost test). */
+  function genericWithOverrides(closures: GenericClosures, tested: () => IrExpr, loc: SrcLoc): IrExpr {
+    let result = closures.own;
+    if (closures.overrides.length === 0) return result;
+    const recv = tested();
+    for (const o of closures.overrides) {
+      result = {
+        kind: "ternary",
+        cond: { kind: "instanceOf", value: recv, className: o.cls, type: BOOL, loc },
+        then: o.value,
+        else_: result,
+        type: closures.fnT,
+        loc,
+      };
+    }
+    return result;
+  }
+
+  /** The detached closures of implicit-any method `method` of `info` (see
+   * lowerUnboundGenericMethodValue): the declarer's own, and with `withOverrides` one per
+   * override strictly below it, shallowest first. Null when a body or override declines. */
+  function unboundGenericClosures(L: Lowerer, blame: ts.Node, info: ClassInfo, method: string, withOverrides: boolean): GenericClosures | null {
     const gfound = findGenericMethodOn(L, info, method);
     if (gfound === null || gfound.info.implicitParams === undefined) return null;
-    const loc = locOf(expr);
+    const loc = locOf(blame);
     // The detached variants need every body of the chain to be lowerable as one (no `this` in a
     // nested function); a chain with such a body keeps the up-front receiver check, as before.
     let detach = detachedDeclinable(gfound.info.decl);
@@ -21544,7 +21791,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     };
     scanChain(gfound.declarer);
     const instOf = (g: GenericFnInfo): GenericInstance =>
-      detach ? implicitDetachedInstance(L, expr, g) : implicitDefaultInstance(L, expr, g);
+      detach ? implicitDetachedInstance(L, blame, g) : implicitDefaultInstance(L, blame, g);
     const base = instOf(gfound.info);
     const paramTypes = base.params.map((p) => p.type);
     const fnT = funcOf(paramTypes, base.returnType);
@@ -21598,35 +21845,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
     };
     const own = thunkOf(gfound.declarer.def.name, base);
-    // A receiver that is not a plain name or `this` is evaluated once, here, as JS
-    // evaluates `expr.expression` for the read (`new C().m`): the value is a seqExpr.
-    const pre: IrStmt[] = [];
-    let recv: IrExpr | null = null;
-    if (!viaPrototype && !isPlainMethodReceiver(expr.expression)) {
-      const lowered = L.lowerExpr(expr.expression);
-      const h = L.declareHiddenLocal("mref.recv", lowered.type);
-      pre.push({ kind: "varDecl", localId: h.id, init: lowered, loc });
-      recv = { kind: "varRef", localId: h.id, type: lowered.type, loc };
-    }
-    // `C.prototype.m` names the declarer's own function whatever a subclass overrides.
-    let result: IrExpr = own;
-    if (!viaPrototype && overrides.length > 0) {
-      // `x.m` reads the function of x's RUNTIME class (JS: the override, when there is one). The
-      // receiver is tested shallowest-first, so the deepest matching override is the outermost test.
-      const tested = recv ?? L.lowerExpr(expr.expression);
-      for (const o of [...overrides].sort((a, b) => a.depth - b.depth)) {
-        result = {
-          kind: "ternary",
-          cond: { kind: "instanceOf", value: tested, className: o.cls.def.name, type: BOOL, loc },
-          then: thunkOf(o.cls.def.name, o.inst),
-          else_: result,
-          type: fnT,
-          loc,
-        };
-      }
-    }
-    if (pre.length === 0) return result;
-    return { kind: "seqExpr", stmts: pre, result, type: fnT, loc };
+    const ovs = withOverrides
+      ? [...overrides].sort((a, b) => a.depth - b.depth).map((o) => ({ cls: o.cls.def.name, value: thunkOf(o.cls.def.name, o.inst) }))
+      : [];
+    return { own, overrides: ovs, fnT };
   }
 
 /** The detached-function closure of class method `method` of `info` (see
