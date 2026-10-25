@@ -138,6 +138,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10100-class-instance-template-field-key.js": {
+   "order": [
+    "<repo>/tests/corpus/10100-class-instance-template-field-key.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10101-class-prototype-computed-typeof.js": {
+   "order": [
+    "<repo>/tests/corpus/10101-class-prototype-computed-typeof.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10102-class-prototype-apply-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/10102-class-prototype-apply-receiver.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10103-class-instance-arbitrary-key-table.js": {
+   "order": [
+    "<repo>/tests/corpus/10103-class-instance-arbitrary-key-table.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10104-class-prototype-override-by-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/10104-class-prototype-override-by-receiver.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10105-class-union-literal-key-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/10105-class-union-literal-key-read.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1011-json-unknown-typeof.ts": {
    "order": [
     "<repo>/tests/corpus/1011-json-unknown-typeof.ts"
