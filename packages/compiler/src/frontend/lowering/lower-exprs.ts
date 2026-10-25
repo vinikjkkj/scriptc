@@ -13205,7 +13205,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
             return psym !== null && readOnlyArrayParam(psym, pd, callee, depth + 1);
           };
           const readAccess =
-            (ts.isPropertyAccessExpression(p) && p.expression === n && p.name.text === "length") ||
+            (ts.isPropertyAccessExpression(p) && p.expression === n && p.name.text === "length" && !isWriteTarget(p)) ||
             (ts.isElementAccessExpression(p) && p.expression === n && !isWriteTarget(p)) ||
             (ts.isBinaryExpression(p) && p.left === n && p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) ||
             passedOn();
