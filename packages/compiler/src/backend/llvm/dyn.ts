@@ -36,7 +36,7 @@ import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestAppl
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
-import { dynMemberRows, dynStaticTable, isErrorRootedClass, type DynMemberClass } from "../dyn-members.js";
+import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
