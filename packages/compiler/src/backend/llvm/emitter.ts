@@ -11111,6 +11111,17 @@ class LlEmitter {
           const iv = this.classInterval(e.className!);
           test = B.tmp();
           B.line(`${test} = call zeroext i1 @scr_dyn_objinst_is(ptr ${d.name}, i64 ${iv.pre}, i64 ${iv.post})`);
+          if (e.member !== undefined) {
+            // No class-table member of that name (see the C lane's arm).
+            this.declare(`declare ptr @scr_dyn_objinst_member(ptr, ptr, i64)`);
+            const mem = B.tmp();
+            B.line(`${mem} = call ptr @scr_dyn_objinst_member(ptr ${d.name}, ptr ${this.cstr(e.member)}, i64 ${e.member.length})`);
+            const none = B.tmp();
+            B.line(`${none} = icmp eq ptr ${mem}, null`);
+            const both = B.tmp();
+            B.line(`${both} = and i1 ${test}, ${none}`);
+            test = both;
+          }
         } else if (e.test === "truthy") {
           this.declare(`declare zeroext i1 @scr_dyn_truthy(ptr)`);
           test = B.tmp();

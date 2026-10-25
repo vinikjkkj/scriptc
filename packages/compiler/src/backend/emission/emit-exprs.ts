@@ -3113,7 +3113,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const meta = E.classMeta.get(e.className!);
           if (!meta) throw new Error(`emitter bug: dynTest of unknown class ${e.className}`);
           E.dynClassDesc(e.className!);
-          const t = `scr_dyn_objinst_is(${d.name}, ${meta.pre}, ${meta.post})`;
+          let t = `scr_dyn_objinst_is(${d.name}, ${meta.pre}, ${meta.post})`;
+          if (e.member !== undefined) {
+            // The class table must not declare `member` (a user override
+            // keeps the call on the dynamic path, which finds it).
+            t = `(${t} && scr_dyn_objinst_member(${d.name}, ${JSON.stringify(e.member)}, ${e.member.length}) == NULL)`;
+          }
           return E.newTemp(e.type, e.negated ? `!(${t})` : t);
         }
         const test =
