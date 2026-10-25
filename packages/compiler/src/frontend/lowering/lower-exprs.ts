@@ -33,8 +33,8 @@ import { ambientErasedIdent, ambientNsRootOf, ambientUndefReadType, ambientUndef
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
-import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
-import { type GenericInstance, type ParamShape, implicitDefaultInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
+import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
+import { type GenericInstance, type ParamShape, detachedThisClassOf, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -1981,7 +1981,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // `this` in plain nested functions is already a tsc error under
       // noImplicitThis, so the generic scope walk here is preflight-safe.
       const local = L.resolveThis(expr);
-      if (local) return { kind: "varRef", localId: local.id, type: local.type, loc };
+      if (local) {
+        const detachedCls = detachedThisClassOf(local);
+        if (detachedCls !== undefined) return detachedThisExpr(expr, local, detachedCls);
+        return { kind: "varRef", localId: local.id, type: local.type, loc };
+      }
       // `this` in a plain JS FUNCTION (not a method): the AMBIENT
       // RECEIVER (libCall dyn.this — scr_dyn_this_get). Firing sites bind
       // the emitting handle around each listener call (Node calls
@@ -21252,6 +21256,31 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * receiver is the ambient `this` window checked against that class, calling its all-dyn default
    * instance (the one a dyn box of C answers `x.m()` with). Identity is per declaring class, so
    * `x.m === C.prototype.m` when x's runtime class does not override m. Null for any other shape. */
+  /** `this` inside a DETACHED variant (implicitDetachedInstance): the raw receiver checked
+   * against the class, and where it is not an instance a TypeError thrown HERE, at the access. Node
+   * throws at the member access of an undefined receiver (its message names the member), so the
+   * message is built from the access the `this` is the receiver of. */
+  function detachedThisExpr(expr: ts.Node, raw: IrLocal, className: string): IrExpr {
+    const loc = locOf(expr);
+    const selfT: IrType = { kind: "object", className };
+    const rawRef: IrExpr = { kind: "varRef", localId: raw.id, type: DYN, loc };
+    const p = expr.parent;
+    let message = "Cannot read properties of undefined";
+    if (p !== undefined && ts.isPropertyAccessExpression(p) && p.expression === expr) {
+      const gp = p.parent;
+      const write = gp !== undefined && ts.isBinaryExpression(gp) && gp.left === p && gp.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+      message = write ? `Cannot set properties of undefined (setting '${p.name.text}')` : `Cannot read properties of undefined (reading '${p.name.text}')`;
+    }
+    return {
+      kind: "ternary",
+      cond: { kind: "dynTest", test: "class", className, value: rawRef, type: BOOL, loc },
+      then: { kind: "dynCheck", value: rawRef, type: selfT, loc },
+      else_: nodeThrowExpr(1, "", message, selfT, loc),
+      type: selfT,
+      loc,
+    };
+  }
+
   function lowerUnboundGenericMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, info: ClassInfo): IrExpr | null {
     const viaPrototype = ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype" &&
       ts.isIdentifier(expr.expression.expression);
@@ -21259,7 +21288,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const gfound = findGenericMethodOn(L, info, method);
     if (gfound === null || gfound.info.implicitParams === undefined) return null;
     const loc = locOf(expr);
-    const base = implicitDefaultInstance(L, expr, gfound.info);
+    const base = implicitDetachedInstance(L, expr, gfound.info);
     const paramTypes = base.params.map((p) => p.type);
     const fnT = funcOf(paramTypes, base.returnType);
     // Overrides of the generic method strictly below its declarer. A TYPED re-declaration
@@ -21270,7 +21299,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       for (const s of c.subclasses) {
         const g = s.genericMethods?.get(method);
         if (g !== undefined && g.implicitParams !== undefined) {
-          const inst = implicitDefaultInstance(L, expr, g);
+          const inst = implicitDetachedInstance(L, expr, g);
           if (!typeEquals(funcOf(inst.params.map((p) => p.type), inst.returnType), fnT)) typedOverride = true;
           overrides.push({ cls: s, depth, inst });
         } else if (g !== undefined || s.methods.has(method)) {
@@ -21281,32 +21310,21 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     };
     walk(gfound.declarer, 1);
     if (typedOverride) return null;
-    // The thunk of class `cls`: receiver checked against `cls`, then `cls`'s own default instance.
+    // The thunk of class `cls`: the RAW ambient receiver goes to `cls`'s detached variant, which
+    // checks it at each `this` access (so a detached call runs Node's side effects first).
     const thunkOf = (cls: string, inst: GenericInstance): IrExpr => {
       const name = `%unbound.${cls}.${method}%generic`;
       if (!L.liftedFns.some((f) => f.name === name)) {
         const irParams: IrParam[] = paramTypes.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
-        const selfT: IrType = { kind: "object", className: cls };
         const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
-        const selfRef: IrExpr = { kind: "varRef", localId: "self.0", type: selfT, loc };
-        const call: IrExpr = { kind: "call", callee: inst.name, args: [selfRef, ...args], type: base.returnType, loc };
+        const raw: IrExpr = { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc };
+        const call: IrExpr = { kind: "call", callee: inst.name, args: [raw, ...args], type: base.returnType, loc };
         L.liftedFns.push({
           name,
           params: irParams,
           returnType: base.returnType,
-          locals: [
-            { id: "self.0", name: "self", type: selfT, mutable: false },
-            ...irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
-          ],
-          body: [
-            {
-              kind: "varDecl",
-              localId: "self.0",
-              init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: selfT, loc },
-              loc,
-            },
-            base.returnType.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc },
-          ],
+          locals: irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+          body: [base.returnType.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc }],
           loc,
         });
       }
@@ -21363,6 +21381,22 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const fnT = funcOf(params, found.sig.ret);
     if (virtual) L.noteVirtualEdge(info, method);
     else L.noteEdge(`%${found.declarer.def.name}.${method}`);
+    // A direct (non-virtual) thunk calls the declarer's DETACHED variant with the raw receiver, so
+    // the receiver is checked at each `this` access. Null when no variant exists: keep the up-front check.
+    const variant = virtual ? null : detachedMethodVariant(L, found.declarer, method);
+    if (variant !== null && !L.liftedFns.some((f) => f.name === name)) {
+      const raw: IrExpr = { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc };
+      const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
+      const call: IrExpr = { kind: "call", callee: variant, args: [raw, ...args], type: found.sig.ret, loc };
+      L.liftedFns.push({
+        name,
+        params: irParams,
+        returnType: found.sig.ret,
+        locals: irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        body: [found.sig.ret.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc }],
+        loc,
+      });
+    }
     if (!L.liftedFns.some((f) => f.name === name)) {
       const selfT: IrType = { kind: "object", className: info.def.name };
       const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
