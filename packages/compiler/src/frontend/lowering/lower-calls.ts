@@ -1037,7 +1037,9 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
         ? name.text
         : null;
     if (key === null) return null;
-    const objT = L.checker.getContextualType(parent);
+    // A literal with no contextual type (`let a = { test<K>(...) {...} }`)
+    // still has its own type; the member the shape kept reads off that type.
+    const objT = L.checker.getContextualType(parent) ?? L.checker.getTypeAtLocation(parent);
     if (objT === undefined) return null;
     const sym = L.checker.getPropertyOfType(objT, key);
     if (sym === undefined) return null;
