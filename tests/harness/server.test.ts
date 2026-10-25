@@ -24,6 +24,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
@@ -35,6 +36,7 @@ const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures/server");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
+const driverTrace = pathToFileURL(join(import.meta.dirname, "server-driver-trace.mjs")).href;
 
 interface ProgramRun {
   stdout: Buffer;
@@ -65,7 +67,9 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<Pr
         if (m) {
           driverStarted = true;
           driverDone = new Promise<void>((res, rej) => {
-            const d = spawn("node", [driver, m[1]!], { stdio: ["ignore", "pipe", "pipe"] });
+            // The preload writes every socket event to stderr synchronously,
+            // so the last line before a fast-fail survives (see its header).
+            const d = spawn("node", ["--import", driverTrace, driver, m[1]!], { stdio: ["ignore", "pipe", "pipe"] });
             let driverErr = "";
             d.stdout.on("data", (c: Buffer) => (driverStdout += c.toString("utf8")));
             d.stderr.on("data", (c: Buffer) => {
