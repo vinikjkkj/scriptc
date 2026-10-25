@@ -15897,6 +15897,34 @@
     "<repo>/tests/corpus/9650-record-identity-distinct-through-dyn.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/9750-cjs-destructured-function-values/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9750-cjs-destructured-function-values/fmod.cjs",
+    "<repo>/tests/corpus/9750-cjs-destructured-function-values/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9751-cjs-factory-call-in-object-literal/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9751-cjs-factory-call-in-object-literal/plugin.cjs",
+    "<repo>/tests/corpus/9751-cjs-factory-call-in-object-literal/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9752-cjs-class-shorthand-in-object-literal/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9752-cjs-class-shorthand-in-object-literal/packet.cjs",
+    "<repo>/tests/corpus/9752-cjs-class-shorthand-in-object-literal/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9753-cjs-class-value-passed-to-helper/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9753-cjs-class-value-passed-to-helper/packet.cjs",
+    "<repo>/tests/corpus/9753-cjs-class-value-passed-to-helper/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
