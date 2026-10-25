@@ -2384,7 +2384,12 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
  * key_delete, objwalk, to_string, fn_get, construct, instanceof: 40-100 bytes each at -Os, the call and its argument setup),
  * plus the absent marker (13) and the registry accessor (23). An inline wrapper through the ops table was tried for the
  * error-rooted test and saved only 39 bytes. Not gated further because (1) is the brief's own defect class for class-free code. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_526 : null;
+/* 2026-10-25 (dynref): RE-RECORDED 133_526 -> 135_430 (+1,904; CI run 40148258892 measured 135,430 against the recorded
+ * 133,526 on the windows-gnu zigcc lane). What the bytes buy: the RECORD VIEW of scr_json.c (ScrRecView, the
+ * re-syncing read and the write-through of declared fields and of overflow keys, "record views") is always linked, because every
+ * record-to-dyn crossing reaches it through the keyed readers and writers. It is not gated into its own unit yet, unlike the
+ * class and array units above; that is the next step for this figure, and the recorded figure must come back down when it lands. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 135_430 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
