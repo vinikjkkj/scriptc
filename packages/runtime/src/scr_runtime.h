@@ -6997,6 +6997,7 @@ ScrPromise *scr_dyn_promise_of(const ScrDyn *d);
  * (no tick, the identity Promise.resolve keeps); any other value gets a
  * promise fulfilled with it. BORROWS d; returns +1. Never throws. */
 ScrPromise *scr_dyn_adopt_promise(ScrDyn *d);
+bool scr_dyn_may_be_thenable(const ScrDyn *v);
 
 /* ── island values in the checked-dynamic tree (SCR_DYN_JSVAL) ─────────────────────────
  * Engine routing ops for JSVAL nodes, installed by the gated constructor
@@ -7492,6 +7493,7 @@ void scr_promise_fulfill_str(ScrPromise *p, ScrStr *v); /* moves in */
  * its trace visits the payload). */
 void scr_promise_fulfill_ref(ScrPromise *p, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace);
 void scr_promise_fulfill_void(ScrPromise *p);
+bool scr_promise_is_pending(const ScrPromise *p); /* the promise has not settled yet */
 
 /* Reject `p` with the exception pending in the active cell (moved out —
  * the cell resets); wakes waiters, enters the unhandled ledger. No-op

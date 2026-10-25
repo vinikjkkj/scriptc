@@ -10688,6 +10688,13 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
   /** `Promise.all(entries)` whose result is discarded (or void-typed): no
    * values array, the result resolves once every entry has, and the first
    * rejection rejects it. Covers untyped (dyn) entries. */
+  /** A static record with a callable `then` member: a thenable under PromiseResolve. */
+  function staticThenableValue(L: Lowerer, t: IrType): boolean {
+    if (t.kind !== "record") return false;
+    const shape = L.shapes.get(t.shapeId);
+    return shape?.fields.some((f) => f.name === "then" && f.type.kind === "func") ?? false;
+  }
+
   export function voidCountdown(L: Lowerer, entries: IrExpr, entryT: IrType, loc: SrcLoc): IrExpr | null {
     return countdown(L, entries, entryT, "void", VOID, loc);
   }
@@ -11795,6 +11802,17 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         value = L.lowerExprExpecting(argNode, resultT.inner);
       } finally {
         if (literalAtSlot !== null) L.literalCtxOverride.delete(literalAtSlot);
+      }
+      // An untyped value is PromiseResolve(v): a thenable is adopted through
+      // its then (dyn.adoptPromise), not fulfilled with the object itself.
+      if (value.type.kind === "dyn") {
+        return { kind: "libCall", fn: "dyn.adoptPromise", args: [value], type: resultT, loc };
+      }
+      if (staticThenableValue(L, value.type)) {
+        return {
+          kind: "libCall", fn: "dyn.adoptPromise",
+          args: [{ kind: "dynFrom", value, type: DYN, loc }], type: resultT, loc,
+        };
       }
       return { kind: "intrinsic", name: "promise.resolve", args: [value], type: resultT, loc };
     }

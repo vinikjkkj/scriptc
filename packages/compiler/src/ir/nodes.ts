@@ -10421,7 +10421,10 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
+    // A thenable's then is called through the dyn invoke path (scr_dyn_invoke_key),
+    // and the thenable reads of await and adoption reach it.
     if (
+      (node.kind === "libCall" && (node.fn === "dyn.adoptPromise" || node.fn === "async.awaitDyn")) ||
       node.kind === "dynInvoke" ||
       // The keyed/dot READ on a dyn value. `sc_dyn_key_get` now asks
       // scr_dyn_intrinsic_method_get whether the receiver's PROTOTYPE has
@@ -10559,7 +10562,7 @@ function typeReachesPromise(
 
 export function moduleUsesDynAsync(mod: IrModule): boolean {
   const fns = new Set([
-    "async.awaitDyn", "timers.immediatePromise",
+    "async.awaitDyn", "dyn.adoptPromise", "timers.immediatePromise",
     "process.onUnhandledRejection", "process.offUnhandledRejection",
     "process.onUncaught", "process.offUncaught",
     "process.onRejectionHandled", "process.offRejectionHandled",
