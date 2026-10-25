@@ -34,6 +34,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import { functionCtorEdits } from "./fn-ctor-desugar.js";
+import { mutatedClassEdits } from "./js-mutated-class.js";
 import { destructuredAliasEdits } from "./js-destructure-alias.js";
 
 const NESTED_REQUIRE_PREFILTER = /=\s*require\s*\(/;
@@ -2245,6 +2246,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const unwrapped = umdUnwrap(fileName, text);
     if (unwrapped !== null) return jsDesugar(fileName, unwrapped) ?? unwrapped;
+  }
+  {
+    const staged = mutatedClassEdits(fileName, text);
+    if (staged !== null) return jsDesugar(fileName, staged) ?? staged;
   }
   {
     const alias = destructuredAliasEdits(fileName, text);
