@@ -8533,6 +8533,20 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
     void *oa = scr_dyn_origin_peek(a, NULL);
     return oa != NULL && oa == scr_dyn_origin_peek(b, NULL);
   }
+  case SCR_DYN_OBJ: {
+    /* Two crossings of ONE static record are two boxes of one JS object
+     * (the same rule as the array arm above): same origin, same record.
+     * Only boundary copies carry an origin; a plain dynamic object is
+     * its own box, so the pointer answer stays for it. A record origin is
+     * the one released as a record (scr_arr_release_v names the array
+     * case), so the is_array flag tells a record origin from an array's. */
+    if (a == b) return true;
+    if (!a->static_copy || !b->static_copy) return false;
+    int ia = 0, ib = 0;
+    void *oa = scr_dyn_origin_peek(a, &ia);
+    void *ob = scr_dyn_origin_peek(b, &ib);
+    return oa != NULL && oa == ob && ia == ib;
+  }
   case SCR_DYN_PROMISE:
     /* And the PROMISE: one promise crossing twice is one JS value. */
     return a->v.promise == b->v.promise;
