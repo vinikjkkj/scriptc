@@ -10240,110 +10240,49 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * Promise.all/allSettled/any fence with the sequential-await hint;
    * resolve/reject and the rest fall to the member fence. Null for
    * non-Promise receivers. */
-/** `Promise.allSettled(ps)` over an array EXPRESSION: a lifted async helper
-   * that wraps every entry into a cannot-reject promise, then combines.
-   *
-   *   async (ps) => {
-   *     const wrapped = [];
-   *     let i = 0;
-   *     while (i < ps.length) { wrapped.push(wrap(ps[i])); i = i + 1; }
-   *     return await all(wrapped);
-   *   }
-   *
-   * The wrapping loop finishes before the first await, so every entry has
-   * its handler attached while they are all still in flight — an entry
-   * rejecting early is observed, not left pending until its turn. Null when
-   * the entry type has no wrapper, and the caller fences. */
+/** `Promise.allSettled(ps)` over an array EXPRESSION (`Promise.allSettled(pending)`):
+   * the settle-counting combinator (settledCountdown), which reacts to each
+   * entry in its own settle turn, exactly as Node does. Null when the settled
+   * description is not the value/reason pair, and the caller fences. */
   function allSettledOverArray(L: Lowerer, entries: IrExpr,
     entryT: IrType & { kind: "promise" },
     settledElem: IrType,
     loc: SrcLoc,): IrExpr | null {
-    const wrapper = settledWrapAdapter(L, entryT, settledElem, loc);
-    if (!wrapper) return null;
-    const wrappedT: IrType = { kind: "promise", inner: settledElem };
-    const listT = arrayOf(wrappedT);
-    const outT = arrayOf(settledElem);
-    const psT = arrayOf(entryT);
+    return settledCountdown(L, entries, entryT, settledElem, loc);
+  }
 
-    const key = `allsettled:${typeKey(psT)}:${typeKey(settledElem)}`;
-    const existing = L.retagHelpers.get(key);
-    if (existing) {
-      return { kind: "call", callee: existing, args: [entries], type: { kind: "promise", inner: outT }, loc };
-    }
-    const name = `%promise.allsettled.${L.retagHelpers.size}`;
-    L.retagHelpers.set(key, name);
-
-    const funcType: IrType & { kind: "func" } = {
-      kind: "func", params: [psT], ret: { kind: "promise", inner: outT },
+  /** The value and reason arms of an allSettled description, read off the
+   * union the checker's PromiseSettledResult maps to. Null when the union is
+   * not exactly that pair. */
+  function settledArmsOf(L: Lowerer, settledT: IrType): {
+    unionId: string;
+    okTag: number; okShapeId: string; okFields: { name: string; type: IrType }[];
+    errTag: number; errShapeId: string; errFields: { name: string; type: IrType }[];
+  } | null {
+    if (settledT.kind !== "union") return null;
+    const def = L.unions.get(settledT.unionId);
+    if (!def || def.arms.length !== 2) return null;
+    const armOf = (field: string): { tag: number; shapeId: string } | null => {
+      for (const [i, arm] of def.arms.entries()) {
+        if (arm.kind !== "record") continue;
+        if (L.shapes.get(arm.shapeId)?.fields.some((f) => f.name === field)) {
+          return { tag: i, shapeId: arm.shapeId };
+        }
+      }
+      return null;
     };
-    const fnCtx = newFnCtx(true, null, funcType, outT);
-    fnCtx.isAsync = true;
-    L.fnStack.push(fnCtx);
-    try {
-      const psLocal = L.declareHiddenLocal("ps", psT);
-      const listLocal = L.declareHiddenLocal("wrapped", listT);
-      const iLocal = L.declareHiddenLocal("i", F64);
-      iLocal.mutable = true;
-      const psRef: IrExpr = { kind: "varRef", localId: psLocal.id, type: psT, loc };
-      const listRef: IrExpr = { kind: "varRef", localId: listLocal.id, type: listT, loc };
-      const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
-      const wrapCall: IrExpr = {
-        kind: "call",
-        callee: wrapper,
-        args: [{ kind: "arrayGet", arr: psRef, index: iRef, type: entryT, loc }],
-        type: wrappedT,
-        loc,
-      };
-      const body: IrStmt[] = [
-        { kind: "varDecl", localId: listLocal.id, init: { kind: "arrayLit", elems: [], type: listT, loc }, loc },
-        { kind: "varDecl", localId: iLocal.id, init: { kind: "numLit", value: 0, type: F64, loc }, loc },
-        {
-          kind: "while",
-          cond: {
-            kind: "bin", op: "<", left: iRef,
-            right: { kind: "arrIntrinsic", method: "length", receiver: psRef, args: [], type: F64, loc },
-            type: BOOL, loc,
-          },
-          body: [
-            {
-              kind: "exprStmt",
-              expr: { kind: "arrIntrinsic", method: "push", receiver: listRef, args: [wrapCall], type: F64, loc },
-              loc,
-            },
-            {
-              kind: "assign",
-              localId: iLocal.id,
-              value: { kind: "bin", op: "+", left: iRef, right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc },
-              loc,
-            },
-          ],
-          loc,
-        },
-        {
-          kind: "return",
-          value: {
-            kind: "awaitExpr",
-            value: { kind: "intrinsic", name: "promise.all", args: [listRef], type: { kind: "promise", inner: outT }, loc },
-            type: outT,
-            loc,
-          },
-          loc,
-        },
-      ];
-      const ctx = L.ctx;
-      L.liftedFns.push({
-        name,
-        params: [{ localId: psLocal.id, name: psLocal.name, type: psT }],
-        returnType: outT,
-        locals: ctx.locals,
-        body,
-        loc,
-        async: true,
-      });
-      return { kind: "call", callee: name, args: [entries], type: { kind: "promise", inner: outT }, loc };
-    } finally {
-      L.fnStack.pop();
-    }
+    const okArm = armOf("value");
+    const errArm = armOf("reason");
+    if (!okArm || !errArm || okArm.tag === errArm.tag) return null;
+    const okShape = L.shapes.get(okArm.shapeId);
+    const errShape = L.shapes.get(errArm.shapeId);
+    if (!okShape || !errShape) return null;
+    if (errShape.fields.find((f) => f.name === "reason")?.type.kind !== "dyn") return null;
+    return {
+      unionId: settledT.unionId,
+      okTag: okArm.tag, okShapeId: okArm.shapeId, okFields: okShape.fields,
+      errTag: errArm.tag, errShapeId: errArm.shapeId, errFields: errShape.fields,
+    };
   }
 
   /** The async helper a dyn combinator calls when its argument is NOT
@@ -10425,6 +10364,293 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       finallyBody: null,
       loc,
     }];
+  }
+
+  /** `Promise.allSettled(ps)` with Node's SETTLEMENT TICKS.
+   *
+   * The wrapper-per-entry form costs one tick too many: each entry's wrapper
+   * promise resolves a tick after the entry settles, and the combinator reacts
+   * to the wrapper. Node reacts to each entry directly, in the microtask turn
+   * the entry settles, and resolves its result in that same turn. So the
+   * countdown lives INSIDE each entry's settle step:
+   *
+   *   step = async (p, i, values, cnt, done) => {
+   *     try { const v = await p; values[i] = {status: "fulfilled", value: v}; }
+   *     catch (e) { values[i] = {status: "rejected", reason: e}; }
+   *     cnt[0] = cnt[0] - 1;
+   *     if (cnt[0] === 0) done(values);
+   *   }
+   *   combined = (ps) => {
+   *     const w = Promise.withResolvers();
+   *     const n = ps.length; const values = [absent x n]; const cnt = [n];
+   *     if (n === 0) w.resolve(values);
+   *     let i = 0; while (i < n) { step(ps[i], i, values, cnt, w.resolve); i = i + 1; }
+   *     return w.promise;
+   *   }
+   *
+   * The step is not awaited: nothing observes it, and its stores cannot throw.
+   * `entryT` DYN: the entries are checked-dynamic (await adopts a dyn promise
+   * and passes a plain value through) and are read through the iterator pack,
+   * as the dyn for-of reads them; a non-iterable argument rejects. Null when
+   * the settled description is not the value/reason pair. */
+  function settledCountdown(
+    L: Lowerer,
+    entries: IrExpr,
+    entryT: IrType,
+    settledT: IrType,
+    loc: SrcLoc,
+  ): IrExpr | null {
+    const dyn = entryT.kind === "dyn";
+    if (!dyn && entryT.kind !== "promise") return null;
+    const arms = settledArmsOf(L, settledT);
+    if (!arms) return null;
+    const outT: IrType = arrayOf(settledT);
+    const psT: IrType = dyn ? DYN : arrayOf(entryT);
+    const pKey = typeKey(entryT);
+    const sKey = typeKey(settledT);
+    const key = `settledcount:${pKey}:${sKey}`;
+    const retT: IrType = { kind: "promise", inner: outT };
+    const resolveT: IrType = { kind: "func", params: [outT], ret: VOID };
+    const rejectT: IrType = { kind: "func", params: [{ kind: "object", className: "%Error" }], ret: VOID };
+    // The withResolvers record, interned exactly as the type mapper interns
+    // Promise.withResolvers<T>(): promise, reject (%Error), resolve (T).
+    const wShapeId = L.shapes.intern(
+      [
+        { name: "promise", type: retT },
+        { name: "reject", type: rejectT },
+        { name: "resolve", type: resolveT },
+      ],
+      false,
+      undefined,
+      ["promise", "resolve", "reject"],
+    );
+    const wT: IrType = { kind: "record", shapeId: wShapeId };
+
+    // The settle step: one lifted async helper per (entry type, settled type).
+    const stepKey = `settlestep:${pKey}:${sKey}`;
+    let step = L.retagHelpers.get(stepKey);
+    if (!step) {
+      step = `%promise.settlestep.${L.retagHelpers.size}`;
+      L.retagHelpers.set(stepKey, step);
+      const pT: IrType = dyn ? DYN : entryT;
+      const stepFnT: IrType & { kind: "func" } = {
+        kind: "func", params: [pT, F64, outT, arrayOf(F64), resolveT], ret: VOID,
+      };
+      const fnCtx = newFnCtx(true, null, stepFnT, VOID);
+      fnCtx.isAsync = true;
+      L.fnStack.push(fnCtx);
+      try {
+        const pLocal = L.declareHiddenLocal("p", pT);
+        const iLocal = L.declareHiddenLocal("i", F64);
+        const valuesLocal = L.declareHiddenLocal("values", outT);
+        const cntLocal = L.declareHiddenLocal("cnt", arrayOf(F64));
+        const doneLocal = L.declareHiddenLocal("done", resolveT);
+        const eLocal = L.declareHiddenLocal("e", CAUGHT);
+        const pRef: IrExpr = { kind: "varRef", localId: pLocal.id, type: pT, loc };
+        const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
+        const valuesRef: IrExpr = { kind: "varRef", localId: valuesLocal.id, type: outT, loc };
+        const cntRef: IrExpr = { kind: "varRef", localId: cntLocal.id, type: arrayOf(F64), loc };
+        const doneRef: IrExpr = { kind: "varRef", localId: doneLocal.id, type: resolveT, loc };
+        const eRef: IrExpr = { kind: "varRef", localId: eLocal.id, type: CAUGHT, loc };
+        const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
+        const str = (s: string): IrExpr => ({ kind: "strLit", value: s, type: STRING, loc });
+        const recLit = (shapeId: string, fields: { name: string; value: IrExpr }[]): IrExpr =>
+          ({ kind: "recordLit", fields, type: { kind: "record", shapeId }, loc });
+        // Store the settled record at input index i, count down, and hand the
+        // values array to done when the last entry has settled.
+        const store = (rec: IrExpr): IrStmt[] => [
+          { kind: "arraySet", arr: valuesRef, index: iRef, value: rec, loc },
+          {
+            kind: "arraySet", arr: cntRef, index: zero,
+            value: {
+              kind: "bin", op: "-",
+              left: { kind: "arrayGet", arr: cntRef, index: zero, type: F64, loc },
+              right: { kind: "numLit", value: 1, type: F64, loc },
+              type: F64, loc,
+            },
+            loc,
+          },
+          {
+            kind: "if",
+            cond: {
+              kind: "bin", op: "===",
+              left: { kind: "arrayGet", arr: cntRef, index: zero, type: F64, loc },
+              right: zero,
+              type: BOOL, loc,
+            },
+            then: [{
+              kind: "exprStmt",
+              expr: { kind: "callValue", callee: doneRef, args: [valuesRef], type: VOID, loc },
+              loc,
+            }],
+            else_: null,
+            loc,
+          },
+        ];
+        const okRec = (v: IrExpr): IrExpr => ({
+          kind: "unionWrap", unionId: arms.unionId, tag: arms.okTag,
+          value: recLit(arms.okShapeId, arms.okFields.map((f): { name: string; value: IrExpr } =>
+            f.name === "status" ? { name: f.name, value: str("fulfilled") }
+              : { name: f.name, value: L.coerceToExpected(v, f.type) })),
+          type: settledT, loc,
+        });
+        const errRec = (e: IrExpr): IrExpr => ({
+          kind: "unionWrap", unionId: arms.unionId, tag: arms.errTag,
+          value: recLit(arms.errShapeId, arms.errFields.map((f): { name: string; value: IrExpr } =>
+            f.name === "status" ? { name: f.name, value: str("rejected") }
+              : { name: f.name, value: { kind: "caughtToDyn", value: e, type: DYN, loc } })),
+          type: settledT, loc,
+        });
+        // The awaited value, and the statements that wait for it.
+        const tryBody: IrStmt[] = [];
+        let okValue: IrExpr;
+        if (dyn) {
+          const vLocal = L.declareHiddenLocal("v", DYN);
+          tryBody.push({
+            kind: "varDecl", localId: vLocal.id,
+            init: { kind: "libCall", fn: "async.awaitDyn", args: [pRef], type: DYN, loc },
+            loc,
+          });
+          okValue = { kind: "varRef", localId: vLocal.id, type: DYN, loc };
+        } else {
+          const innerT = (entryT as IrType & { kind: "promise" }).inner;
+          if (innerT.kind === "void") {
+            tryBody.push({ kind: "exprStmt", expr: { kind: "awaitExpr", value: pRef, type: VOID, loc }, loc });
+            okValue = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
+          } else {
+            const vLocal = L.declareHiddenLocal("v", innerT);
+            tryBody.push({
+              kind: "varDecl", localId: vLocal.id,
+              init: { kind: "awaitExpr", value: pRef, type: innerT, loc },
+              loc,
+            });
+            okValue = { kind: "varRef", localId: vLocal.id, type: innerT, loc };
+          }
+        }
+        tryBody.push(...store(okRec(okValue)));
+        const ctx = L.ctx;
+        L.liftedFns.push({
+          name: step,
+          params: [
+            { localId: pLocal.id, name: pLocal.name, type: pT },
+            { localId: iLocal.id, name: iLocal.name, type: F64 },
+            { localId: valuesLocal.id, name: valuesLocal.name, type: outT },
+            { localId: cntLocal.id, name: cntLocal.name, type: arrayOf(F64) },
+            { localId: doneLocal.id, name: doneLocal.name, type: resolveT },
+          ],
+          returnType: VOID,
+          locals: ctx.locals,
+          body: [{
+            kind: "tryCatch",
+            tryBody,
+            catchBody: store(errRec(eRef)),
+            catchLocalId: eLocal.id,
+            finallyBody: null,
+            loc,
+          }],
+          loc,
+          async: true,
+        });
+      } finally {
+        L.fnStack.pop();
+      }
+    }
+
+    // The combinator: a plain helper returning the pending result promise.
+    // Nothing between the last settle and the awaiters is a wrapper.
+    const existing = L.retagHelpers.get(key);
+    if (existing) return { kind: "call", callee: existing, args: [entries], type: retT, loc };
+    const name = `%promise.settlecount.${L.retagHelpers.size}`;
+    L.retagHelpers.set(key, name);
+    const funcType: IrType & { kind: "func" } = { kind: "func", params: [psT], ret: retT };
+    const fnCtx = newFnCtx(true, null, funcType, outT);
+    L.fnStack.push(fnCtx);
+    try {
+      const psLocal = L.declareHiddenLocal("ps", psT);
+      const wLocal = L.declareHiddenLocal("w", wT);
+      const packLocal = L.declareHiddenLocal("pack", DYN);
+      packLocal.mutable = true;
+      const nLocal = L.declareHiddenLocal("n", F64);
+      const valuesLocal = L.declareHiddenLocal("values", outT);
+      const cntLocal = L.declareHiddenLocal("cnt", arrayOf(F64));
+      const iLocal = L.declareHiddenLocal("i", F64);
+      iLocal.mutable = true;
+      const psRef: IrExpr = { kind: "varRef", localId: psLocal.id, type: psT, loc };
+      const wRef: IrExpr = { kind: "varRef", localId: wLocal.id, type: wT, loc };
+      const packRef: IrExpr = { kind: "varRef", localId: packLocal.id, type: DYN, loc };
+      const nRef: IrExpr = { kind: "varRef", localId: nLocal.id, type: F64, loc };
+      const valuesRef: IrExpr = { kind: "varRef", localId: valuesLocal.id, type: outT, loc };
+      const cntRef: IrExpr = { kind: "varRef", localId: cntLocal.id, type: arrayOf(F64), loc };
+      const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
+      const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
+      const resolveOf: IrExpr = { kind: "recordGet", obj: wRef, shapeId: wShapeId, field: "resolve", type: resolveT, loc };
+      const elemOf: IrExpr = dyn
+        ? { kind: "libCall", fn: "dyn.arrAt", args: [packRef, iRef], type: DYN, loc }
+        : { kind: "arrayGet", arr: psRef, index: iRef, type: entryT, loc };
+      const lenOf: IrExpr = dyn
+        ? { kind: "libCall", fn: "dyn.arrLen", args: [packRef], type: F64, loc }
+        : { kind: "arrIntrinsic", method: "length", receiver: psRef, args: [], type: F64, loc };
+      const body: IrStmt[] = [];
+      if (dyn) {
+        body.push(
+          { kind: "varDecl", localId: packLocal.id, init: dynUndefinedExpr(loc), loc },
+          ...dynPackStmts(L, psRef, packLocal, retT as IrType & { kind: "promise" }, loc),
+        );
+      }
+      body.push(
+        { kind: "varDecl", localId: wLocal.id, init: { kind: "promiseWithResolvers", type: wT, loc }, loc },
+        { kind: "varDecl", localId: nLocal.id, init: lenOf, loc },
+        { kind: "varDecl", localId: valuesLocal.id, init: { kind: "arrayNewLen", length: nRef, type: outT, loc }, loc },
+        { kind: "varDecl", localId: cntLocal.id, init: { kind: "arrayLit", elems: [nRef], type: arrayOf(F64), loc }, loc },
+        {
+          kind: "if",
+          cond: { kind: "bin", op: "===", left: nRef, right: zero, type: BOOL, loc },
+          then: [{ kind: "exprStmt", expr: { kind: "callValue", callee: resolveOf, args: [valuesRef], type: VOID, loc }, loc }],
+          else_: null,
+          loc,
+        },
+        { kind: "varDecl", localId: iLocal.id, init: zero, loc },
+        {
+          kind: "while",
+          cond: { kind: "bin", op: "<", left: iRef, right: nRef, type: BOOL, loc },
+          body: [
+            {
+              kind: "exprStmt",
+              expr: {
+                kind: "call", callee: step,
+                args: [elemOf, iRef, valuesRef, cntRef, resolveOf],
+                type: { kind: "promise", inner: VOID }, loc,
+              },
+              loc,
+            },
+            {
+              kind: "assign",
+              localId: iLocal.id,
+              value: { kind: "bin", op: "+", left: iRef, right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc },
+              loc,
+            },
+          ],
+          loc,
+        },
+        {
+          kind: "return",
+          value: { kind: "recordGet", obj: wRef, shapeId: wShapeId, field: "promise", type: retT, loc },
+          loc,
+        },
+      );
+      const ctx = L.ctx;
+      L.liftedFns.push({
+        name,
+        params: [{ localId: psLocal.id, name: psLocal.name, type: psT }],
+        returnType: retT,
+        locals: ctx.locals,
+        body,
+        loc,
+      });
+      return { kind: "call", callee: name, args: [entries], type: retT, loc };
+    } finally {
+      L.fnStack.pop();
+    }
   }
 
   /** `Promise.all(ps)` over a CHECKED-DYNAMIC argument whose combined result is
@@ -11188,6 +11414,14 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           first.kind === "promise" &&
           elems.every((e) => e.type.kind === "promise" && typeEquals(e.type, first))
         ) {
+          const counted = settledCountdown(
+            L,
+            { kind: "arrayLit", elems, type: arrayOf(first), loc },
+            first,
+            settledElem,
+            loc,
+          );
+          if (counted) return counted;
           const wrapper = settledWrapAdapter(L, first, settledElem, loc);
           if (wrapper) {
             const wrappedT: IrType = { kind: "promise", inner: settledElem };
@@ -11218,6 +11452,10 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         if (entries.type.kind === "array" && entries.type.elem.kind === "promise") {
           const built = allSettledOverArray(L, entries, entries.type.elem, settledElem, loc);
           if (built) return built;
+        }
+        if (entries.type.kind === "dyn" && settledElem) {
+          const counted = settledCountdown(L, entries, DYN, settledElem, loc);
+          if (counted) return counted;
         }
       }
       L.noLowering(
