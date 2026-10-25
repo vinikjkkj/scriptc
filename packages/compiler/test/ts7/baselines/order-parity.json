@@ -17335,12 +17335,6 @@
         "<repo>/tests/corpus/10903-process-binding-buffer.cjs"
       ],
       "diags": []
-    },
-    "<repo>/tests/corpus/10908-process-binding-buffer-try.cjs": {
-      "order": [
-        "<repo>/tests/corpus/10908-process-binding-buffer-try.cjs"
-      ],
-      "diags": []
     }
   }
 }
