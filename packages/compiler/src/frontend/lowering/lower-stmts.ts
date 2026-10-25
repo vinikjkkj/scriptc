@@ -31,7 +31,7 @@ import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
-import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf } from "./lower-exprs.js";
+import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -6917,6 +6917,15 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     // `C.prototype.m = fn` adopted as a late method of C: a definition, not
     // a runtime write (registerLateMethods).
     if (L.lateMethodAssigns.has(expr)) return { kind: "block", body: [], loc: locOf(expr) };
+    // `this.m = rhs` in a detached variant: the right side runs before the write throws.
+    if (ts.isBinaryExpression(expr) && detachedThisWriteFirst(L, expr)) {
+      const stmts = hoistDetachedWriteRhs(L, expr);
+      try {
+        return { kind: "block", body: [...stmts, lowerExprStatement(L, expr)], loc: locOf(expr) };
+      } finally {
+        L.preLowered.delete(expr.right);
+      }
+    }
     // `Object.defineProperty(C.prototype, name, { enumerable: true })`: an
     // attribute-only change of a prototype property. Enumerability is
     // observable only by enumerating a class instance, which has no
