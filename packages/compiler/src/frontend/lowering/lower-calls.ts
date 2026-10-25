@@ -10,7 +10,7 @@ import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
-import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { siblingDtsMethodReturnKind } from "../npm.js";
@@ -6770,6 +6770,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         loc: locOf(call),
       };
     }
+    // The EventEmitter members on a dyn receiver (see lowerDynEmitterReceiverCall).
+    const emitterArm = lowerDynEmitterReceiverCall(L, call, access, recv);
+    if (emitterArm !== null) return emitterArm;
     // SHARED prototype names with a runtime dispatch (scr_dyn_invoke):
     // push/slice/join/forEach/map/apply/... dispatch on the receiver's
     // RUNTIME kind — the honest answer for names more than one dyn-
@@ -6902,6 +6905,97 @@ function dynMapIterDrainContext(L: Lowerer, call: ts.CallExpression): boolean {
     return ts.isIdentifier(parent.expression) && (parent.expression.text === "Map" || parent.expression.text === "Set");
   }
   return false;
+}
+
+/** The EventEmitter members a dyn receiver can hold an emitter under. */
+const DYN_EMITTER_RECEIVER_METHODS: ReadonlySet<string> = new Set([
+  "on", "addListener", "once", "prependListener", "prependOnceListener",
+  "off", "removeListener", "listenerCount",
+]);
+
+/** `recv.m("literal", ...)` on a checked-dynamic receiver whose runtime value
+ * may be an EventEmitter instance (mysql2's inheritEvents forwarder, every
+ * untyped `src.on(name, fn)`). Node dispatches on the runtime object, so the
+ * lowering is a three-way choice made per call:
+ *
+ *   dynTest "emitterApi" (the value is a class instance inside the emitter's
+ *   preorder interval AND its class table has no member named `m`, so a user
+ *   override or own member still wins):
+ *     the STATIC emitter lowering on the receiver narrowed to the emitter
+ *     object (dynCheck), exactly as `emitter.m(...)` lowers for a typed one;
+ *   otherwise: the ordinary dynInvoke, which runs own/prototype members and
+ *     throws Node's "<spelling> is not a function" for everything else.
+ *
+ * The emitter arm is probed: if its lowering refuses, the whole claim is
+ * declined and the call keeps the dynInvoke lowering it had before. */
+function lowerDynEmitterReceiverCall(L: Lowerer, call: ts.CallExpression,
+  access: ts.PropertyAccessExpression, recv: IrExpr): IrExpr | null {
+  const member = access.name.text;
+  if (!DYN_EMITTER_RECEIVER_METHODS.has(member)) return null;
+  if (call.questionDotToken || access.questionDotToken) return null;
+  if (call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+  const nameArg = call.arguments[0];
+  if (nameArg === undefined || !ts.isStringLiteralLike(nameArg)) return null;
+  const info = L.classes.get(RUNTIME_EMITTER_CLASS);
+  if (info === undefined) return null;
+  const loc = locOf(call);
+  const ctx = L.ctx;
+  const count = ctx.localCounters.get("%dynem") ?? 0;
+  ctx.localCounters.set("%dynem", count + 1);
+  const localId = `%dynem.${count}`;
+  ctx.locals.push({ id: localId, name: "%dynem", type: DYN, mutable: false, boxed: true });
+  const ref: IrExpr = { kind: "varRef", localId, type: DYN, loc };
+  const emitterRecv: IrExpr = {
+    kind: "dynCheck", value: ref, type: { kind: "object", className: RUNTIME_EMITTER_CLASS }, loc,
+  };
+  // The emitter arm, probed: a refusal (or any diagnostic) declines the claim.
+  const savedSink = L.diagSink;
+  const captured: typeof L.diags = [];
+  L.diagSink = captured;
+  let emitter: IrExpr | null;
+  try {
+    emitter = lowerEmitterMethodCall(L, call, access, info, undefined, emitterRecv);
+  } catch (e) {
+    L.diagSink = savedSink;
+    if (e instanceof PoisonError) {
+      if (process.env["SCRIPTC_DYNEMIT_WHY"] !== undefined) {
+        console.error(`[dynemit] '${member}' refused: ${captured.map((d) => d.message).join(" | ")}`);
+      }
+      return null;
+    }
+    throw e;
+  }
+  L.diagSink = savedSink;
+  if (emitter === null || captured.length > 0) {
+    if (process.env["SCRIPTC_DYNEMIT_WHY"] !== undefined) {
+      console.error(`[dynemit] '${member}': ${emitter === null ? "the emitter arm declined" : "the emitter arm diagnosed: " + captured.map((d) => d.message).join(" | ")}`);
+    }
+    return null;
+  }
+  const emitterArm: IrExpr = emitter.type.kind === "dyn"
+    ? emitter
+    : emitter.type.kind === "void"
+      ? { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: emitter, loc }], result: dynUndefinedExpr(loc), type: DYN, loc }
+      : { kind: "dynFrom", value: emitter, type: DYN, loc };
+  const dynArm: IrExpr = {
+    kind: "dynInvoke",
+    recv: ref,
+    method: member,
+    calleeName: access.getText(),
+    args: call.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
+    type: DYN,
+    loc,
+  };
+  const test: IrExpr = {
+    kind: "dynTest", test: "class", className: RUNTIME_EMITTER_CLASS, member, value: ref, type: BOOL, loc,
+  };
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId, init: recv, loc }],
+    result: { kind: "ternary", cond: test, then: emitterArm, else_: dynArm, type: DYN, loc },
+    type: DYN,
+    loc,
+  };
 }
 
 /** SCRIPTC_MCALL_WHY probe: which arm declined a dyn-receiver method call,

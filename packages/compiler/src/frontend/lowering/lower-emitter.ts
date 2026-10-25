@@ -42,7 +42,7 @@ import { dynFallbackType, dynUndefinedExpr, newFnCtx } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { lowerDynObjectLiteral } from "./lower-exprs.js";
-import { strandTrap, arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { strandTrap, arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID, RUNTIME_EMITTER_CLASS } from "../../ir/nodes.js";
 import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
 import { handlerFnTypeNodeOf } from "../types.js";
 
@@ -550,6 +550,45 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       }
     }
   }
+  // The builtin root's own bucket (a dyn receiver, lowerDynEmitterReceiverCall,
+  // resolves to it): no class emit site writes it, so it carries the
+  // agreement of every emitter root that touches the name. A root whose
+  // tuple is not a prefix of the longest one is a conflict at the touching
+  // site, exactly as two class roots would be for one name.
+  const builtinKeyPrefix = emitterRootKey(L.classes.get(RUNTIME_EMITTER_CLASS));
+  const byName = new Map<string, EventSig[]>();
+  for (const [k, sig] of table) {
+    // The receivers of unknown class ("*") join: a dyn emit site or a dyn
+    // listener reaches every instance, so its signature is one of the roots'.
+    if (!k.startsWith("#") && !k.startsWith("*")) continue;
+    const i = k.indexOf("\u0000");
+    if (i < 0) continue;
+    const n = k.slice(i + 1);
+    const list = byName.get(n) ?? [];
+    list.push(sig);
+    byName.set(n, list);
+  }
+  for (const [n, sigs] of byName) {
+    const bkey = `${builtinKeyPrefix}\u0000${n}`;
+    if (table.has(bkey)) continue;
+    const longest = sigs.reduce((a, b) => (b.tuple.length > a.tuple.length ? b : a));
+    let conflict: string | null = sigs.find((x) => x.conflict !== null)?.conflict ?? null;
+    for (const x of sigs) {
+      if (conflict !== null) break;
+      if (x.tuple.length > longest.tuple.length) conflict = "the emitter classes disagree on the event's arity";
+      else if (!x.tuple.every((t, j) => typeEquals(t, longest.tuple[j]!))) {
+        conflict = "the emitter classes disagree on the event's argument types";
+      }
+    }
+    table.set(bkey, {
+      tuple: longest.tuple,
+      fromEmit: sigs.some((x) => x.fromEmit),
+      conflict,
+      dynListener: sigs.some((x) => x.dynListener),
+      listened: false,
+    });
+  }
+  // The listened flag covers the builtin bucket too, so it is set last.
   for (const [key, sig] of table) sig.listened = listenedNames.has(evDisplayName(key));
   holder.emitterEventTable = table;
   holder.emitterRegistrations = { names: registered, keys: registeredKeys, opaque: opaqueRegistration, opaqueAt };
@@ -713,7 +752,13 @@ function listenerlessEmitNoop(
   if (reg.opaque) return why(`a registration names its event opaquely (${reg.opaqueAt ?? "?"})`);
   // Per receiver root: a listener for this name on ANOTHER emitter class does
   // not reach this receiver's registry (the table is keyed by class).
-  if (reg.keys.has(evTableKey(info, name)) || reg.keys.has(evTableKey(undefined, name))) {
+  // The builtin root is what a dyn receiver resolves to (lowerDynEmitterReceiverCall):
+  // its instances can be of ANY emitter class, so every root's registrations count.
+  const sameName = (k: string): boolean => k.endsWith(`\u0000${name}`);
+  const reaches = info.builtinEmitter === true
+    ? [...reg.keys].some(sameName) || reg.keys.has(name)
+    : reg.keys.has(evTableKey(info, name)) || reg.keys.has(evTableKey(undefined, name));
+  if (reaches) {
     return why("this receiver's class (or a receiver of unknown class) registers a listener for it");
   }
   // An emit OVERRIDE may carry a body of its own (emitOverrideShapeReason
@@ -1054,11 +1099,14 @@ function lowerListenerArg(
  * lexical class still answers, exactly like a prototype-chain walk). */
 export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
   access: ts.PropertyAccessExpression, info: ClassInfo,
-  superRecv?: { thisRef: IrExpr; cls: ClassInfo }): IrExpr | null {
+  superRecv?: { thisRef: IrExpr; cls: ClassInfo },
+  /** A receiver the caller already lowered to the emitter object (the
+   * dyn-receiver narrowing in lower-calls): lowered once, never again. */
+  loweredRecv?: IrExpr): IrExpr | null {
   const member = access.name.text;
   const loc = locOf(call);
   const args = call.arguments;
-  const lowerReceiver = (): IrExpr => superRecv?.thisRef ?? L.lowerExpr(access.expression);
+  const lowerReceiver = (): IrExpr => superRecv?.thisRef ?? loweredRecv ?? L.lowerExpr(access.expression);
   // The class VALUE, not an instance (`EventEmitter.setMaxListeners(n)` —
   // the receiver's checker type carries construct signatures; mapType
   // answers the instance object for every EventEmitter-symbol type, so the
