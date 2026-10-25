@@ -12,7 +12,7 @@ import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorCla
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
-import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable } from "../dyn-members.js";
+import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -847,6 +847,12 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     if (E.caughtToDynFn) return E.caughtToDynFn;
     const name = "sc_cd";
     E.caughtToDynFn = name;
+    // A caught USER Error subclass crosses as its own instance (the runtime
+    // finds its descriptor in the registry by preorder position), so every
+    // Error-rooted class needs one interned whether or not a body boxes it.
+    for (const [cn, m] of E.classMeta) {
+      if (canBoxClassIntoDyn(cn) && isErrorRootedClass(m)) dynClassDesc(E, cn);
+    }
     const sig = `${E.link}ScrDyn *${name}(const ScrCaught *c)`;
     E.walkerProtos.push(`${sig}; /* caught -> unknown */`);
     E.walkerDefs.push(
