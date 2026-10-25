@@ -693,7 +693,7 @@
       "name": "crypto.publicEncrypt",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "the lowered shape is an RSA public key (a PEM string or Buffer, never a KeyObject) with OAEP padding and the sha1 oaepHash — every other key type, padding, oaepHash, or an oaepLabel has no lowering; scr_rsa_pubenc.c"
+      "note": "the lowered shape takes a PEM string, Buffer or untyped key, with OAEP, PKCS#1 v1.5 or NO_PADDING and a literal oaepHash; a KeyObject key (no KeyObject value model) or a non-literal padding or oaepHash has no lowering; scr_rsa_pubenc.c"
     },
     {
       "id": "node-builtin.crypto.randomBytes",
