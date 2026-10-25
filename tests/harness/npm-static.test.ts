@@ -63,6 +63,8 @@ async function buildStatic(
     ...globSync(join(pilotRoot, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
     // the bundler-emitted-CJS mini packages (cases 2465-2469, 2556-2557)
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
+    // the method-reference state machine (case 10250)
+    ...globSync(join(fixturesRoot, "npm-static/node_modules/mrefsm/**/*.{js,json}")).sort(),
     // the ws-address mini package (case 8210; its own tsconfig dir)
     ...globSync(join(fixturesRoot, "npm-url/**/*.{js,json,d.ts,ts}")).sort(),
     // the price-list mini packages (cases 4031-4032, 4061-4064) and the
@@ -70,7 +72,7 @@ async function buildStatic(
     ...globSync(
       join(
         fixturesRoot,
-        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech,vshadow,tostrreach,protoread,mrefsm}/**/*.{js,json}",
+        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech,vshadow,tostrreach,protoread}/**/*.{js,json}",
       ),
     ).sort(),
   ];
@@ -2037,7 +2039,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * override read through the receiver's runtime class, a detached call's
    * TypeError, and `.call` on the stored value. Byte-identical to Node. */
   test("10250: an implicit-any state machine returns unbound method reads and matches Node", async () => {
-    const entry = join(fixturesRoot, "npm/cases/10250-method-ref-npm-static/main.ts");
+    const entry = join(fixturesRoot, "npm-static/cases/10250-method-ref-npm-static/main.ts");
     const { coverage } = analyze(entry, { npmStatic: ["mrefsm"] });
     expect(coverage.npmStatic).toEqual([{ package: "mrefsm", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
