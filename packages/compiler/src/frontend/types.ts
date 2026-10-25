@@ -4749,7 +4749,12 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("PromiseFulfilledResult")) {
     const targ = checker.getTypeArguments(widened as ts.TypeReference)[0];
     const mapped = targ ? mapType(targ, ctx) : null;
-    const valueT = mapped?.kind === "void" ? unitOnlyUnion(unions) : mapped;
+    // An `any` payload (`Promise.allSettled(untypedValues)` types its
+    // results `PromiseSettledResult<any>`) settles with a checked-dynamic
+    // value, exactly as Promise<any> does in the static tier above: the
+    // value is a dyn, and every read of it is checked.
+    const anyValue = mapped === null && targ !== undefined && (targ.flags & ts.TypeFlags.Any) !== 0 && !ctx.dynamic;
+    const valueT = mapped?.kind === "void" ? unitOnlyUnion(unions) : anyValue ? DYN : mapped;
     if (!valueT) return null;
     return {
       kind: "record",
