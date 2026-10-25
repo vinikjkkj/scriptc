@@ -12893,6 +12893,12 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         if (gv) return gv;
       }
     }
+    // The value of `{ x }` IS the reference `x`. A binding none of the arms
+    // above knows (a class or function reached through a CJS require binding,
+    // `const { K } = require(...)`) lowers through the identifier path, which
+    // holds the full set of value forms; a name that resolves to nothing keeps
+    // the refusal below.
+    if (L.resolveValueSymbol(propName) !== null) return lowerExpr(L, propName);
     L.rejectUnresolvedSymbol(
       symbol ? (symbol.flags & ts.SymbolFlags.Alias ? L.checker.getAliasedSymbol(symbol) : symbol) : null,
       propName.text,
