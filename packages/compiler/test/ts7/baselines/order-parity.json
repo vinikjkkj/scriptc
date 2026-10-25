@@ -13503,36 +13503,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/9851-union-class-collapse-record.ts": {
-   "order": [
-    "<repo>/tests/corpus/9851-union-class-collapse-record.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9852-union-class-collapse-return.ts": {
-   "order": [
-    "<repo>/tests/corpus/9852-union-class-collapse-return.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9853-union-three-class-collapse-record.ts": {
-   "order": [
-    "<repo>/tests/corpus/9853-union-three-class-collapse-record.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9854-error-subclass-record-slot-and-tostring.ts": {
-   "order": [
-    "<repo>/tests/corpus/9854-error-subclass-record-slot-and-tostring.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9855-error-subclass-message-field-projection.ts": {
-   "order": [
-    "<repo>/tests/corpus/9855-error-subclass-message-field-projection.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
@@ -13737,6 +13707,34 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9750-cjs-destructured-function-values/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9750-cjs-destructured-function-values/fmod.cjs",
+    "<repo>/tests/corpus/9750-cjs-destructured-function-values/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9751-cjs-factory-call-in-object-literal/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9751-cjs-factory-call-in-object-literal/plugin.cjs",
+    "<repo>/tests/corpus/9751-cjs-factory-call-in-object-literal/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9752-cjs-class-shorthand-in-object-literal/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9752-cjs-class-shorthand-in-object-literal/packet.cjs",
+    "<repo>/tests/corpus/9752-cjs-class-shorthand-in-object-literal/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9753-cjs-class-value-passed-to-helper/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9753-cjs-class-value-passed-to-helper/packet.cjs",
+    "<repo>/tests/corpus/9753-cjs-class-value-passed-to-helper/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/976-unions-null.ts": {
    "order": [
     "<repo>/tests/corpus/976-unions-null.ts"
@@ -13800,6 +13798,36 @@
   "<repo>/tests/corpus/9850-union-let-regex-exec-tag.js": {
    "order": [
     "<repo>/tests/corpus/9850-union-let-regex-exec-tag.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9851-union-class-collapse-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/9851-union-class-collapse-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9852-union-class-collapse-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/9852-union-class-collapse-return.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9853-union-three-class-collapse-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/9853-union-three-class-collapse-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9854-error-subclass-record-slot-and-tostring.ts": {
+   "order": [
+    "<repo>/tests/corpus/9854-error-subclass-record-slot-and-tostring.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9855-error-subclass-message-field-projection.ts": {
+   "order": [
+    "<repo>/tests/corpus/9855-error-subclass-message-field-projection.ts"
    ],
    "diags": []
   },
