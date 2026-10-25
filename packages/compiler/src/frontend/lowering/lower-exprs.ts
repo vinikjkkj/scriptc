@@ -2746,6 +2746,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           const g =
             (sym ? L.globalsBySymbol.get(sym) : undefined) ??
             (resolved ? L.globalsBySymbol.get(resolved) : undefined);
+          // An accessor this module defines under the name (`Object.defineProperty(
+          // exports|module.exports, "K", { get, set })`): the read is the lifted
+          // getter's call. The member's expando global (a `module.exports.K = v`
+          // write the setter absorbed) is NOT its storage.
+          {
+            const acc = cjsExportAccessorOfName(L, sf, expr.name.text, loc);
+            if (acc !== null) return acc;
+          }
           if (g) return { kind: "varRef", localId: g.id, type: g.type, loc };
           // A member tsc knows no symbol for: attached only from inside a function
           // body (see cjsExportsBagOf). The read is the bag's, undefined when absent.
@@ -18348,8 +18356,94 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return cjsAccessorCall(L, getter, locOf(ident));
   }
 
-/** The interned lifted-getter call both accessor-read paths share. */
-  function cjsAccessorCall(L: Lowerer, getter: ts.GetAccessorDeclaration | ts.ArrowFunction | ts.FunctionExpression, loc: SrcLoc): IrExpr | null {
+  /** The write side of a CJS export accessor: `h.K = v` where K's declaration is
+   * `Object.defineProperty(exports|module.exports, "K", { get, set })` (a
+   * setter-bearing descriptor, program.ts cjsExportsGetterDefineOf). The write
+   * IS a call of the lifted setter with the RHS, Node's per-write evaluation.
+   * Statement position only (the value of `h.K = v` is v, so an expression-
+   * position write keeps its fence). Null when K has no setter here. */
+  export function cjsExportSetterWrite(L: Lowerer, access: ts.PropertyAccessExpression, rhs: ts.Expression, loc: SrcLoc): IrExpr | null {
+    // The file's OWN export object (`module.exports.K = v` / `exports.K = v`,
+    // at any depth): the accessor is this file's declaration, not an importer's.
+    const own = access.expression;
+    const ownReceiver = isModuleExportsAccess(own) ||
+      (ts.isIdentifier(own) && own.text === "exports" && L.resolveLocal(own) === null);
+    if (ownReceiver && isCjsJsFile(access.getSourceFile()) && !access.questionDotToken) {
+      const def = cjsOwnAccessorDef(access.getSourceFile(), access.name.text);
+      if (def === null) return null;
+      if (def.setter === null) {
+        L.unsupported("SC1090", access, `assignment to '${access.name.text}', an accessor export with no setter (Node ignores the write in sloppy mode and throws in strict mode; the compiler does not choose one silently)`);
+      }
+      const fn = cjsLiftedFn(L, def.setter);
+      if (fn === null || fn.type.params.length !== 1) return null;
+      const value = L.lowerExprExpecting(rhs, fn.type.params[0]);
+      const closureVal: IrExpr = { kind: "closure", fnName: fn.fnName, captures: [], type: fn.type, loc };
+      return { kind: "callValue", callee: closureVal, args: [value], type: fn.type.ret, loc };
+    }
+    const ident = nsMemberIdentOf(L, access);
+    if (ident === null) return null;
+    const symbol = L.resolveValueSymbol(ident);
+    if (!symbol) return null;
+    for (const d of L.checker.declarationsOf(symbol)) {
+      const def = ts.isCallExpression(d) ? cjsExportsGetterDefineOf(d) : null;
+      if (def === null || def.setter === null || !isJsSourceFile(d.getSourceFile())) continue;
+      const fn = cjsLiftedFn(L, def.setter);
+      if (fn === null || fn.type.params.length !== 1) return null;
+      const value = L.lowerExprExpecting(rhs, fn.type.params[0]);
+      const closureVal: IrExpr = { kind: "closure", fnName: fn.fnName, captures: [], type: fn.type, loc };
+      return { kind: "callValue", callee: closureVal, args: [value], type: fn.type.ret, loc };
+    }
+    return null;
+  }
+
+  /** `K = v` at a module's top level, where K is an accessor this module defines
+   * (`Object.defineProperty(exports|module.exports, "K", { get[, set] })`): the
+   * setter's lifted call, or a fence for a getter-only accessor (Node ignores or
+   * throws there, by mode; the compiler does not pick one silently). Null when K
+   * is not an accessor of this file. */
+  /** This file's own accessor declaration named `name`, or null. */
+  function cjsOwnAccessorDef(sf: ts.SourceFile, name: string): ReturnType<typeof cjsExportsGetterDefineOf> {
+    for (const stmt of sf.statements) {
+      if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) continue;
+      const def = cjsExportsGetterDefineOf(stmt.expression);
+      if (def !== null && def.name === name) return def;
+    }
+    return null;
+  }
+
+  export function cjsExportAccessorWriteStmt(L: Lowerer, sf: ts.SourceFile, name: string, rhs: ts.Expression, loc: SrcLoc): IrStmt | null {
+    for (const stmt of sf.statements) {
+      if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) continue;
+      const def = cjsExportsGetterDefineOf(stmt.expression);
+      if (def === null || def.name !== name) continue;
+      if (def.setter === null) {
+        L.unsupported("SC1090", rhs, `assignment to '${name}', an accessor export with no setter (Node ignores the write in sloppy mode and throws in strict mode; the compiler does not choose one silently)`);
+      }
+      const fn = cjsLiftedFn(L, def.setter);
+      if (fn === null || fn.type.params.length !== 1) return null;
+      const value = L.lowerExprExpecting(rhs, fn.type.params[0]);
+      const closureVal: IrExpr = { kind: "closure", fnName: fn.fnName, captures: [], type: fn.type, loc };
+      return { kind: "exprStmt", expr: { kind: "callValue", callee: closureVal, args: [value], type: fn.type.ret, loc }, loc };
+    }
+    return null;
+  }
+
+/** The read of a name this module defines as an accessor: the lifted getter's
+   * call (cjsAccessorCall), reached through the member expression `X.name`. Null
+   * when the file defines no accessor under the name. */
+  export function cjsExportAccessorOfName(L: Lowerer, sf: ts.SourceFile, name: string, loc: SrcLoc): IrExpr | null {
+    for (const stmt of sf.statements) {
+      if (!ts.isExpressionStatement(stmt) || !ts.isCallExpression(stmt.expression)) continue;
+      const def = cjsExportsGetterDefineOf(stmt.expression);
+      if (def !== null && def.name === name) return cjsAccessorCall(L, def.getter, loc);
+    }
+    return null;
+  }
+
+/** The interned lifted function of one accessor (getter or setter) node: the
+   * lambda lowers ONCE per declaration, so every read or write site calls one
+   * function. Null on the defensive non-closure outcome. */
+  function cjsLiftedFn(L: Lowerer, getter: ts.Node & (ts.ArrowFunction | ts.FunctionExpression | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration)): { fnName: string; type: IrType & { kind: "func" } } | null {
     let fn = L.cjsAccessorFns.get(getter);
     if (!fn) {
       const closure = L.lowerLambda(getter);
@@ -18357,6 +18451,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       fn = { fnName: closure.fnName, type: closure.type };
       L.cjsAccessorFns.set(getter, fn);
     }
+    return fn;
+  }
+
+/** The interned lifted-getter call both accessor-read paths share. */
+  function cjsAccessorCall(L: Lowerer, getter: ts.GetAccessorDeclaration | ts.ArrowFunction | ts.FunctionExpression, loc: SrcLoc): IrExpr | null {
+    const fn = cjsLiftedFn(L, getter);
+    if (fn === null) return null;
     // Lifted functions carry the closure ABI (an env parameter, even
     // capture-free) — the read calls through a zero-capture closure value,
     // the interned identity every lifted lambda uses.
