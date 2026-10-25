@@ -15741,6 +15741,18 @@
     "<repo>/tests/corpus/9151-array-from-map/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/9357-record-identity-expando-memo.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9357-record-identity-expando-memo.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9650-record-identity-distinct-through-dyn.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9650-record-identity-distinct-through-dyn.cjs"
+   ],
+   "diags": []
   }
  }
 }
