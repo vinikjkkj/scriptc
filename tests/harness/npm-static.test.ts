@@ -2050,7 +2050,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
       ]);
       const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
       const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
-      expect(node.split("\n").filter((l) => l !== "").length).toBe(5);
+      expect(node.split("\n").filter((l) => l !== "").length).toBe(6);
       expect(native, backend).toBe(node);
       expect(nativeRes.exitCode, backend).toBe(0);
     }
