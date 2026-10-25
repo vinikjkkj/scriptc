@@ -7563,7 +7563,7 @@ const inliningPredicates = new Set<ts.Symbol>();
   export function classToStringDispatch(L: Lowerer, recv: IrExpr, loc: SrcLoc): IrExpr | null {
     if (recv.type.kind !== "object") return null;
     const info = L.classes.get(recv.type.className);
-    if (!info || !info.decl) return null;
+    if (!info || (!info.decl && info.protoClass !== true)) return null;
     if (findGenericMethodOn(L, info, "toString") !== null) return null;
     const found = L.findMethodOn(info, "toString");
     if (!found) return null;
@@ -7640,7 +7640,8 @@ const inliningPredicates = new Set<ts.Symbol>();
   export function classInstanceToString(L: Lowerer, recv: IrExpr, loc: SrcLoc): IrExpr | null {
     if (recv.type.kind !== "object") return null;
     const info = L.classes.get(recv.type.className);
-    if (!info || !info.decl) return null;
+    // A paired prototype-class has no declaration node; its toString is the same method.
+    if (!info || (!info.decl && info.protoClass !== true)) return null;
     const dispatched = classToStringDispatch(L, recv, loc);
     if (dispatched !== null) return dispatched;
     if (findGenericMethodOn(L, info, "toString") !== null) return null;
