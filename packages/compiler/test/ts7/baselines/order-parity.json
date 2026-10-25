@@ -15897,6 +15897,39 @@
     "<repo>/tests/corpus/9650-record-identity-distinct-through-dyn.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/9800-tracing-cross-module-subscribers/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9800-tracing-cross-module-subscribers/tr.cjs",
+    "<repo>/tests/corpus/9800-tracing-cross-module-subscribers/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9801-tracing-class-method-gated-trace/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9801-tracing-class-method-gated-trace/tr.cjs",
+    "<repo>/tests/corpus/9801-tracing-class-method-gated-trace/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9802-tracing-optional-channel-union/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9802-tracing-optional-channel-union/trm.cjs",
+    "<repo>/tests/corpus/9802-tracing-optional-channel-union/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9803-tracing-channel-identity-untyped/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9803-tracing-channel-identity-untyped/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9804-tracing-dyn-member-dispatch/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9804-tracing-dyn-member-dispatch/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
