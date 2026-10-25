@@ -2,6 +2,7 @@
  * declarations including destructuring patterns, scoped blocks, control
  * flow (if/while/for/for-of/do, switch, try/catch, jumps with the
  * finally-crossing fence), and blocked-binding poisoning. */
+import { protoDataAssignStmt } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
@@ -6926,6 +6927,11 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     // `C.prototype.m = fn` adopted as a late method of C: a definition, not
     // a runtime write (registerLateMethods).
     if (L.lateMethodAssigns.has(expr)) return { kind: "block", body: [], loc: locOf(expr) };
+    // `C.prototype.name = v` of a prototype-data slot (lower-protodata.ts): the slot's store.
+    if (ts.isBinaryExpression(expr)) {
+      const pd = protoDataAssignStmt(L, expr);
+      if (pd) return pd;
+    }
     // `this.m = rhs` in a detached variant: the right side runs before the write throws.
     if (ts.isBinaryExpression(expr) && detachedThisWriteFirst(L, expr)) {
       const stmts = hoistDetachedWriteRhs(L, expr);

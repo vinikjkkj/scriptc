@@ -28,6 +28,7 @@ import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobal
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
+import { collectProtoDataNames } from "./lower-protodata.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isAnyDynContainer, inferContainerTypeFromUses, decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDefinitionThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
@@ -1876,6 +1877,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
     // register their module globals first — reads inside function bodies
     // collected earlier in this pass must resolve them (lower-expando.ts).
     collectExpandoMembers(L, sf);
+    collectProtoDataNames(L, sf);
     for (const stmt of topStmts) {
       // `export default <expr>`: the module's `default` binding is a const
       // module global (registered under the checker's default-export

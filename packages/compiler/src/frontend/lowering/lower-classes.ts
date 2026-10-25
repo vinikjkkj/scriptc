@@ -3,6 +3,7 @@
  * synthesized derived ctors and field initializers, super calls and super
  * accessor access, upcasts, `new` expressions, and the builtin Error
  * hierarchy registration. */
+import { protoDataFieldNames, registerProtoData } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
@@ -2162,7 +2163,10 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
           op === ts.SyntaxKind.QuestionQuestionEqualsToken ||
           op === ts.SyntaxKind.BarBarEqualsToken ||
           op === ts.SyntaxKind.AmpersandAmpersandEqualsToken;
-        if (isAssign && rhsMayBeUndefined(n.right)) names.add(n.left.name.text);
+        // A prototype-data write (`C.prototype.name = undefined`) stores the
+        // prototype's value, never an own property: it cannot make an own
+        // field's undefined arm a stored value (lower-protodata.ts).
+        if (isAssign && rhsMayBeUndefined(n.right) && !isClassPrototypeOf(L, n.left.expression)) names.add(n.left.name.text);
       }
       // A COMPUTED key names no member statically, so any such write is a
       // write to every name (`c[k] = undefined`).
@@ -4794,6 +4798,27 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // knows its parameter), which JS stores as an own property. The class
       // carries the same run-time property table defineProperty uses, so
       // those writes and the reads that follow them have somewhere to live.
+      // Prototype data written at the top level (`C.prototype.name = v`): an
+      // instance's own `name` is a checked-dynamic field the class carries,
+      // undefined until written (lower-protodata.ts). A name the class
+      // already declares, or a method source, keeps its own storage.
+      if (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && isJsSourceFile(decl.getSourceFile()) && classSymbolOf(L, decl) !== undefined) {
+        for (const pdName of protoDataFieldNames(L, decl, classSymbolOf(L, decl)!, (rhs) => lateMethodSourceOf(L, rhs) !== null)) {
+          if (methods.has(pdName) || methods.has(`get:${pdName}`) || methods.has(`set:${pdName}`)) continue;
+          // Unset means the property does not exist yet: enumeration skips it
+          // while undefined, unless the program can store undefined under the name.
+          const absentOk = !undefWrittenPropNames(L).has("*") && !undefWrittenPropNames(L).has(pdName);
+          if (fields.has(pdName)) {
+            // A field the inference already collected (first assigned outside
+            // the constructor) takes the same absence rule when it is DYN.
+            if (collectedFields.has(pdName) && fields.get(pdName)!.kind === "dyn" && absentOk) absentTrackedFields.add(pdName);
+            continue;
+          }
+          fields.set(pdName, DYN);
+          fieldOrder.push({ name: pdName, type: DYN, initializer: undefined });
+          if (absentOk) absentTrackedFields.add(pdName);
+        }
+      }
       const ownPropsTable =
         L.definePropStringTable(decl) ||
         (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && implicitMonoFile(decl.getSourceFile()));
@@ -4986,6 +5011,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       }
       if (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && classSymbol !== undefined) {
         registerLateMethods(L, info, decl, classSymbol);
+        registerProtoData(L, info, decl, classSymbol, (n) => undefWrittenPropNames(L).has("*") || undefWrittenPropNames(L).has(n));
       }
     }
   }
@@ -12485,3 +12511,16 @@ function reorderFieldsByCtorWrites(body: ts.Block, order: ClassInfo["fieldOrder"
     order[slot] = sorted[k]!;
   });
 }
+
+function classSymbolOf(L: Lowerer, decl: ts.ClassLikeDeclaration): ts.Symbol | undefined {
+  return decl.name !== undefined ? L.checker.getSymbolAtLocation(decl.name) : undefined;
+}
+
+/** `C.prototype` where C is a class declaration: the receiver of a prototype write. */
+function isClassPrototypeOf(L: Lowerer, e: ts.Expression): boolean {
+  if (!ts.isPropertyAccessExpression(e) || e.name.text !== "prototype" || !ts.isIdentifier(e.expression)) return false;
+  const sym = L.resolveValueSymbol(e.expression);
+  const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+  return d !== undefined && ts.isClassDeclaration(d);
+}
+

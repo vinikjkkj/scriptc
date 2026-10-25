@@ -4,6 +4,7 @@
  * comparisons, nullish coalescing and optional chains, conditions and
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
+import { protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
@@ -2826,6 +2827,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         {
           const ex = expandoMemberRead(L, expr);
           if (ex) return L.maybeNarrow(ex, expr);
+        }
+        // Prototype-data members of an ES class (`C.prototype.name = v`):
+        // the prototype slot, or the instance field when it is set.
+        {
+          const pd = protoDataMemberRead(L, expr);
+          if (pd) return L.maybeNarrow(pd, expr);
         }
         // An AMBIENT namespace receiver (`M.x` where only `declare
         // namespace M` exists): the namespace object never exists at
@@ -20500,6 +20507,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
     }
     const key = foldedStringKeyOf(L, expr.left);
+    // A prototype-data name of the receiver's class (lower-protodata.ts) is
+    // inherited by every instance: `'name' in o` is true whether or not an
+    // own value exists.
+    if (key !== null && protoDataHasKey(L, expr.right, key)) {
+      return { kind: "boolLit", value: true, type: BOOL, loc };
+    }
     if (key === null) {
       // A RUNTIME string key over an INDEX-SIGNATURE record receiver (the
       // `names.filter((k) => k in config)` idiom): the interned key-

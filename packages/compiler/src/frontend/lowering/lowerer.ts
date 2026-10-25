@@ -14271,6 +14271,14 @@ export class Lowerer {
    * assignment lowers to nothing), and the checker type that stands in for
    * `this` while such a method's body lowers under C. */
   readonly lateMethodAssigns = new Set<ts.Node>();
+  /** Prototype-data slots of ES classes (`C.prototype.name = v`), keyed by class name then member (lower-protodata.ts). */
+  readonly protoDataSlots = new Map<string, Map<string, import("./lower-protodata.js").ProtoDataSlot>>();
+  /** The top-level prototype-data write statements and the slot each one stores into. */
+  readonly protoDataAssigns = new Map<ts.Node, import("./lower-protodata.js").ProtoDataSlot>();
+  /** Names some ES class writes a non-undefined prototype datum to (program-wide, lower-protodata.ts). */
+  readonly protoDataNonUndef = new Set<string>();
+  /** `class.name` of a prototype datum fenced at collection, with the reason (reads and writes refuse). */
+  readonly protoDataFenced = new Map<string, string>();
   readonly lateMethodThis = new Map<ts.Node, ts.Type>();
   /** `<Class>.<method name>` members of a class BODY that a late definition
    * replaced (the class's own declaration no longer lowers). */
