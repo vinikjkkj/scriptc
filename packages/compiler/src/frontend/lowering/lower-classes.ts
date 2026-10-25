@@ -6918,9 +6918,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // `unknown`-returning method already gets in Node. A narrower slot
     // return has no such widening (there is no representation both the
     // slot's callers and the override's callers can read).
+    // A VOID override (a JS body that returns nothing) into the slot's
+    // `unknown` boxes the undefined value: dynFrom of a void call is legal
+    // (validate.ts: a void operand is evaluated for its effects).
     const retWidened = !retExact && slot.ret.kind === "dyn" && own.ret.kind !== "dyn" &&
-      own.ret.kind !== "void" &&
-      canConvertToDyn(own.ret, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+      (own.ret.kind === "void" ||
+        canConvertToDyn(own.ret, (id) => L.shapes.get(id), (id) => L.unions.get(id)));
     if (!retExact && !retWidened) return null;
     return retExact && arityExact && paramsIdentical ? "exact" : "widened";
   }
