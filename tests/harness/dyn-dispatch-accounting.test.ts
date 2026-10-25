@@ -94,10 +94,6 @@ const NOT_ROUTED: ReadonlyMap<string, string> = new Map([
   // mentioned only by the static-copy guard, listed in
   // dyn_arr_proto_unimpl, and therefore two guard arms that could never
   // fire (estado-fence.md §3.2, closed in estado-pinned.md).
-  // Function.prototype.bind over a dyn callee has no representation yet;
-  // the FUNC arm names it only to refuse loudly if it is ever reached
-  // through `f.bind.call(...)`.
-  ["bind", "no implementation — the FUNC arm refuses loudly, the frontend fences"],
   // The DYN_STRING_ONLY_METHODS family. lower-calls.ts consults that set
   // (~5518) BEFORE the dispatch set (~5627) and returns unconditionally, so
   // the DOTTED spelling `<dyn>.trim()` never reaches DYN_DISPATCH_METHODS:
