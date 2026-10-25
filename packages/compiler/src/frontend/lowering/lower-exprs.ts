@@ -27,7 +27,7 @@ import { absentRead, lowerLyingPlus, lowerNullablePointerChain, nullableFieldRea
 import { arrayAtOf, BYTES_CTORS, lowerBufferFlavorTest, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, mapIterDrainHelperCall, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
-import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf } from "./lower-modules.js";
+import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf, jsonRequireTypeOverride } from "./lower-modules.js";
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
 import { ambientErasedIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
@@ -2637,7 +2637,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // so the NAME resolves exactly like a bare identifier reference
       // (resolveValueSymbol lands on the exporter's declaration and every
       // existing path — globals, function values, classes — applies).
-      if (!expr.questionDotToken && L.cjsLocalModuleBindingOf(expr.expression)) {
+      // A JSON document's binding is a CommonJS binding too, but its members
+      // are the document's own (jsonRequireTypeOverride): the record read
+      // below answers them, not the module-namespace delegation.
+      if (!expr.questionDotToken && L.cjsLocalModuleBindingOf(expr.expression) && jsonRequireTypeOverride(L, expr.expression) === null) {
         // A binding whose dep is a class-expression WHOLE export
         // (`module.exports = class {…}`): the member surface is the
         // CLASS's — `C.name` folds to NamedEvaluation's answer and own

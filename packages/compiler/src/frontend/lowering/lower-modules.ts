@@ -1233,12 +1233,133 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
     }
   }
 
+/** The structural TS type of a JSON document: the type the checker gives the
+ * document's root expression, which is what resolveJsonModule types an ESM
+ * default import as. A CommonJS `require` is typed `any` by the checker, so
+ * the member reads of a JSON binding take THIS type through
+ * jsonRequireTypeOverride (the binding's own type is the checker's `any`). */
+export function jsonDocTsType(L: Lowerer, jsonSf: ts.SourceFile): ts.Type | null {
+  const cached = L.jsonDocTypes.get(jsonSf);
+  if (cached !== undefined) return cached;
+  const root = jsonSf.statements.find(ts.isExpressionStatement);
+  if (!root) return null;
+  const t = L.checker.getTypeAtLocation(root.expression);
+  L.jsonDocTypes.set(jsonSf, t);
+  return t;
+}
+
+/** The JSON file a relative `require("./x.json")` names, read from the path
+ * alone (no checker call: the checker types a CommonJS require `any`). */
+function jsonFileOfRelativeSpec(L: Lowerer, call: ts.CallExpression): ts.SourceFile | null {
+  const arg = call.arguments[0];
+  if (!arg || !ts.isStringLiteral(arg)) return null;
+  if (!arg.text.startsWith(".") || !arg.text.endsWith(".json")) return null;
+  const from = call.getSourceFile().fileName.replace(/\\/g, "/");
+  const dir = from.slice(0, from.lastIndexOf("/") + 1);
+  const parts = (dir + arg.text).split("/");
+  const norm: string[] = [];
+  for (const p of parts) {
+    if (p === "." || (p === "" && norm.length > 0)) continue;
+    if (p === "..") norm.pop();
+    else norm.push(p);
+  }
+  const modSf = L.program.getSourceFile(norm.join("/"));
+  return modSf && modSf.fileName.endsWith(".json") ? modSf : null;
+}
+
+/** Lowerer.typeOf for the JSON require forms: a `require("./x.json")` call
+ * answers the document's structural type, and a binding a JSON require
+ * bound answers the type recorded for its symbol. Null for everything else. */
+export function jsonRequireTypeOverride(L: Lowerer, node: ts.Node): ts.Type | null {
+  if (ts.isIdentifier(node)) {
+    if (L.jsonBindingTypes.size === 0) return null;
+    const sym = L.checker.getSymbolAtLocation(node);
+    return sym ? (L.jsonBindingTypes.get(sym) ?? null) : null;
+  }
+  if (
+    ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require" &&
+    node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0]!)
+  ) {
+    const sf = jsonFileOfRelativeSpec(L, node);
+    return sf !== null ? jsonDocTsType(L, sf) : null;
+  }
+  // A member read off a JSON-typed value takes the member's structural type:
+  // the checker types the receiver `any` (a CommonJS require), so it cannot
+  // answer `doc.title` or `rows[0][2]` itself.
+  if (ts.isPropertyAccessExpression(node) && !node.questionDotToken) {
+    const recv = jsonRequireTypeOverride(L, node.expression);
+    if (recv === null) return null;
+    const prop = L.checker.getPropertyOfType(recv, node.name.text);
+    return prop ? L.checker.getTypeOfSymbol(prop) : null;
+  }
+  if (ts.isElementAccessExpression(node) && !node.questionDotToken) {
+    const recv = jsonRequireTypeOverride(L, node.expression);
+    if (recv === null || !L.checker.isArrayType(recv)) return null;
+    const args = L.checker.getTypeArguments(recv as ts.TypeReference);
+    return args.length === 1 ? args[0]! : null;
+  }
+  return null;
+}
+
+/** The checker the lowerer asks, with the JSON members answered by their
+ * structure. The checker types a CommonJS require's members `any`, and its
+ * symbol for `doc.name` falls back to a same-named library global (`name`,
+ * `length`), so the member's name and type come from the document's type. */
+export function jsonAwareChecker(L: Lowerer, base: ts.TypeChecker): ts.TypeChecker {
+  return new Proxy(base, {
+    get(target, prop) {
+      if (prop === "getSymbolAtLocation") {
+        return (node: ts.Node): ts.Symbol | undefined => {
+          if (ts.isIdentifier(node) && ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) {
+            const recv = jsonRequireTypeOverride(L, node.parent.expression);
+            if (recv !== null) return target.getPropertyOfType(recv, node.text) ?? undefined;
+          }
+          return target.getSymbolAtLocation(node);
+        };
+      }
+      if (prop === "getTypeAtLocation") {
+        return (node: ts.Node): ts.Type => jsonRequireTypeOverride(L, node) ?? target.getTypeAtLocation(node);
+      }
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  });
+}
+
+/** The ONE baked global of a JSON document, shared by every require of its
+ * path (Node hands back the one cached parsed object per resolved file). Its
+ * value is built once, in the prelude of the ENTRY module: the entry's init
+ * runs before any top-level statement of any module, so every read — from a
+ * binding, a member read, or a nested require — sees the assigned value
+ * whatever order the modules load in. */
+function jsonDocGlobal(L: Lowerer, parts: FileParts[], jsonSf: ts.SourceFile, docType: ts.Type, n: ts.Node): { id: string; name: string; type: IrType; mutable: boolean } {
+  const have = L.jsonRequireGlobals.get(jsonSf.fileName);
+  if (have !== undefined) return have;
+  const mapped = L.mapTypeOf(docType);
+  if (!mapped || !L.comptimeBakeable(mapped)) L.badType(n, docType);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonSf.text);
+  } catch (e) {
+    L.pushDiag(invalidJsonModuleDiag(jsonSf.fileName, e instanceof Error ? e.message : String(e), locOf(n)));
+    throw new PoisonError();
+  }
+  const value = L.comptimeValueToIr(parsed, mapped, "$", n);
+  const g = { id: `%g.jsonreq.${L.globalsList.length}`, name: "json", type: mapped, mutable: false };
+  L.globalsList.push(g);
+  L.jsonRequireGlobals.set(jsonSf.fileName, g);
+  const entry = parts.find((fp) => L.fileTag.get(fp.sf) === "")?.sf ?? parts[0]!.sf;
+  const actions = L.jsonInitActions.get(entry) ?? [];
+  L.jsonInitActions.set(entry, actions);
+  actions.push({ kind: "assign", localId: g.id, value, loc: locOf(n) });
+  return g;
+}
+
 /** `require("./x.json")` read as a VALUE below a declaration (iconv-lite's
  * `table: function () { return require("./tables/cp936.json") }`, a member read
- * `require("./x.json").k`): Node hands back the one cached parsed document, so
- * the bake is ONE global per JSON file, assigned in the prelude of the first
- * file that names it (ahead of every top-level statement), and each site reads
- * that global. The declared-binding forms stay with collectJsonRequires. */
+ * `require("./x.json").k`): the call answers the file's one baked global (see
+ * jsonDocGlobal) and the typeOf override above types it. The declared-binding
+ * forms stay with collectJsonRequires. */
 export function collectNestedJsonRequires(L: Lowerer, parts: FileParts[]): void {
   for (const fp of parts) {
     const inspect = (n: ts.Node): void => {
@@ -1251,23 +1372,9 @@ export function collectNestedJsonRequires(L: Lowerer, parts: FileParts[]): void 
         const jsonSf = jsonModuleOfRequire(L, n);
         if (jsonSf !== null && !L.jsonRequireGlobals.has(jsonSf.fileName)) {
           try {
-            const tsType = L.typeOf(n);
-            const mapped = L.mapTypeOf(tsType);
-            if (!mapped || !L.comptimeBakeable(mapped)) L.badType(n, tsType);
-            let parsed: unknown;
-            try {
-              parsed = JSON.parse(jsonSf.text);
-            } catch (e) {
-              L.pushDiag(invalidJsonModuleDiag(jsonSf.fileName, e instanceof Error ? e.message : String(e), locOf(n)));
-              throw new PoisonError();
-            }
-            const value = L.comptimeValueToIr(parsed, mapped, "$", n);
-            const g = { id: `%g.jsonreq.${L.globalsList.length}`, name: "json", type: mapped, mutable: false };
-            L.globalsList.push(g);
-            L.jsonRequireGlobals.set(jsonSf.fileName, g);
-            const actions = L.jsonInitActions.get(fp.sf) ?? [];
-            L.jsonInitActions.set(fp.sf, actions);
-            actions.push({ kind: "assign", localId: g.id, value, loc: locOf(n) });
+            const docType = jsonDocTsType(L, jsonSf);
+            if (docType === null) throw new PoisonError();
+            jsonDocGlobal(L, parts, jsonSf, docType, n);
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
           }
@@ -1300,29 +1407,15 @@ export function jsonModuleOfRequire(L: Lowerer, call: ts.CallExpression): ts.Sou
   // A JSON document whose root is an array or a scalar types as `number[]` /
   // `string` — a type with no symbol of its own to trace back to the file.
   // The specifier literal still resolves to the module, so ask for that.
-  if (!arg.text.startsWith(".") || !arg.text.endsWith(".json")) return null;
-  const from = call.getSourceFile().fileName.replace(/\\/g, "/");
-  const dir = from.slice(0, from.lastIndexOf("/") + 1);
-  const parts = (dir + arg.text).split("/");
-  const norm: string[] = [];
-  for (const p of parts) {
-    if (p === "." || (p === "" && norm.length > 0)) continue;
-    if (p === "..") norm.pop();
-    else norm.push(p);
-  }
-  const modSf = L.program.getSourceFile(norm.join("/"));
-  return modSf && modSf.fileName.endsWith(".json") ? modSf : null;
+  return jsonFileOfRelativeSpec(L, call);
 }
 
-/** The CJS twin of collectJsonImports: `const { a, b } = require("./x.json")`
- * and `const j = require("./x.json")`. Node hands back the parsed document
- * either way, so the bake is the one the ESM default import already does — the
- * difference is the BINDING: a pattern names its fields, so each element bakes
- * the value at its key instead of the whole document.
- *
- * A JSON module has no compiled body to import from, which is why the generic
- * require path cannot serve it: the value is materialised from the file text at
- * compile time or not at all. */
+/** The CJS twin of collectJsonImports: `const { a, b } = require("./x.json")`,
+ * `const j = require("./x.json")`. Node hands back the parsed document either
+ * way. A whole-document binding reads the file's shared global; an object
+ * pattern names its fields, and each field binds the value at its key (its
+ * type is the field's structural type). Renamed or rest elements are fenced in
+ * program.ts (jsonRequireBakeable). */
 export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
   collectNestedJsonRequires(L, parts);
   for (const fp of parts) {
@@ -1334,61 +1427,55 @@ export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
         if (!ts.isIdentifier(init.expression) || init.expression.text !== "require") continue;
         const arg = init.arguments[0];
         if (init.arguments.length !== 1 || !arg || !ts.isStringLiteral(arg)) continue;
-        const t = L.typeOf(init);
-        const jsym = t.getSymbol() ?? t.getAliasSymbol();
-        const jsonSf = jsym ? L.checker.declarationsOf(jsym)[0]?.getSourceFile() : undefined;
-        if (!jsonSf || !jsonSf.fileName.endsWith(".json")) continue;
+        const jsonSf = jsonModuleOfRequire(L, init);
+        if (jsonSf === null) continue;
         try {
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(jsonSf.text);
-          } catch (e) {
-            L.pushDiag(invalidJsonModuleDiag(
-              jsonSf.fileName,
-              e instanceof Error ? e.message : String(e),
-              locOf(stmt),
-            ));
-            throw new PoisonError();
+          const docType = jsonDocTsType(L, jsonSf);
+          if (docType === null) throw new PoisonError();
+          const g = jsonDocGlobal(L, parts, jsonSf, docType, stmt);
+          if (ts.isIdentifier(decl.name)) {
+            const sym = L.checker.getSymbolAtLocation(decl.name);
+            if (!sym) continue;
+            // The shared global is immutable: a reassigned binding would
+            // need a slot of its own, so it refuses here.
+            if (!bindingNeverReassigned(L, sym, decl)) {
+              L.unsupported("SC1012", decl.name, "reassigned require() of a JSON module");
+            }
+            L.globalsBySymbol.set(sym, g);
+            L.jsonBindingTypes.set(sym, docType);
+            continue;
           }
-          const bind = (nameNode: ts.Identifier, value: unknown): void => {
-            const sym = L.checker.getSymbolAtLocation(nameNode);
-            if (!sym) return;
-            const tsType = L.typeOf(nameNode);
-            const mapped = L.mapTypeOf(tsType);
-            if (!mapped || !L.comptimeBakeable(mapped)) L.badType(nameNode, tsType);
-            const ir = L.comptimeValueToIr(value, mapped, "$", nameNode);
-            let g = L.globalsBySymbol.get(sym);
-            if (!g) {
-              g = {
-                id: `%g.jsonreq.${L.globalsList.length}`,
-                name: nameNode.text,
-                type: mapped,
-                mutable: false,
-              };
-              L.globalsBySymbol.set(sym, g);
-              L.globalsList.push(g);
+          if (!ts.isObjectBindingPattern(decl.name)) continue;
+          const doc = JSON.parse(jsonSf.text) as Record<string, unknown> | null;
+          for (const el of decl.name.elements) {
+            const elName = el.name;
+            if (el.dotDotDotToken || elName === undefined || !ts.isIdentifier(elName)) continue;
+            if (el.propertyName !== undefined) continue;
+            const sym = L.checker.getSymbolAtLocation(elName);
+            const prop = L.checker.getPropertyOfType(docType, elName.text);
+            if (!sym || !prop) continue;
+            if (!bindingNeverReassigned(L, sym, el)) {
+              L.unsupported("SC1012", elName, "reassigned require() of a JSON module");
             }
-            const actions = L.jsonInitActions.get(fp.sf) ?? [];
-            L.jsonInitActions.set(fp.sf, actions);
-            actions.push({ kind: "assign", localId: g.id, value: ir, loc: locOf(stmt) });
-          };
-          // Object pattern only. A whole-document binding
-          // (`const j = require("./x.json")`) needs the global to carry the
-          // record itself, and the member reads off it do not resolve to the
-          // baked global today — it fences in program.ts rather than
-          // compiling to something that misses.
-          if (ts.isObjectBindingPattern(decl.name)) {
-            const doc = parsed as Record<string, unknown> | null;
-            for (const el of decl.name.elements) {
-              const elName = el.name;
-              if (el.dotDotDotToken || elName === undefined || !ts.isIdentifier(elName)) continue;
-              // RENAMED elements (`{ a: b }`) stay out: the symbol at the
-              // local name resolves to the property, not the binding, so the
-              // global would be keyed wrong. The bakeable predicate in
-              // program.ts refuses the same shape, so it fences instead.
-              if (el.propertyName !== undefined) continue;
-              bind(elName, doc?.[elName.text]);
-            }
+            const fieldType = L.checker.getTypeOfSymbol(prop);
+            const mapped = L.mapTypeOf(fieldType);
+            if (!mapped || !L.comptimeBakeable(mapped)) L.badType(elName, fieldType);
+            // A field of a record document reads the document's OWN field, so
+            // `const { nested } = require(p)` and `require(p).nested` are the
+            // same object (Node's one cached document). Any other document
+            // root bakes the field's value.
+            const docMapped = L.mapTypeOf(docType);
+            const ir: IrExpr = docMapped !== null && docMapped.kind === "record"
+              ? { kind: "recordGet", obj: { kind: "varRef", localId: g.id, type: g.type, loc: locOf(stmt) }, shapeId: docMapped.shapeId, field: elName.text, type: mapped, loc: locOf(stmt) }
+              : L.comptimeValueToIr(doc?.[elName.text], mapped, "$", elName);
+            const fg = { id: `%g.jsonreq.${L.globalsList.length}`, name: elName.text, type: mapped, mutable: false };
+            L.globalsBySymbol.set(sym, fg);
+            L.globalsList.push(fg);
+            L.jsonBindingTypes.set(sym, fieldType);
+            const entry = parts.find((p) => L.fileTag.get(p.sf) === "")?.sf ?? parts[0]!.sf;
+            const actions = L.jsonInitActions.get(entry) ?? [];
+            L.jsonInitActions.set(entry, actions);
+            actions.push({ kind: "assign", localId: fg.id, value: ir, loc: locOf(stmt) });
           }
         } catch (e) {
           if (!(e instanceof PoisonError)) throw e;

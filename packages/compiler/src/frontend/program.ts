@@ -611,8 +611,8 @@ function requireSpecOf7(node: ts.Node): string | null {
  * These lower to NOTHING — the bindings are alias plumbing (tsc models
  * them as import aliases) and the module edge lives in the order walk. */
 /** True when a JSON require has a shape collectJsonRequires can bake: every
- * declaration binds an identifier or an object pattern (no array pattern, no
- * rest) over a literal specifier. */
+ * declaration binds an identifier (the whole document) or an object pattern
+ * (no array pattern, no rest, no rename) over a literal specifier. */
 function jsonRequireBakeable(stmt: ts.Statement): boolean {
   if (!ts.isVariableStatement(stmt)) return false;
   return stmt.declarationList.declarations.every((d) => {
@@ -620,6 +620,9 @@ function jsonRequireBakeable(stmt: ts.Statement): boolean {
     if (!init || !ts.isCallExpression(init) || init.arguments.length !== 1) return false;
     const a = init.arguments[0];
     if (!a || !ts.isStringLiteral(a)) return false;
+    // A whole-document binding bakes too (collectJsonRequires): the document
+    // is typed by its structure, and member reads take that type.
+    if (ts.isIdentifier(d.name)) return true;
     if (!ts.isObjectBindingPattern(d.name)) return false;
     return d.name.elements.every(
       (el) =>

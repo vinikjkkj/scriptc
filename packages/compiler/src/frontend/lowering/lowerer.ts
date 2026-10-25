@@ -113,7 +113,7 @@ import { settleOrValueArms,
 } from "../types.js";
 import { CompoundOp, IslandFnEntry, boundaryIntoIslandMsg, boundaryOutOfIslandMsg, BuiltinModuleFn, builtinConstLit, builtinModuleConstOf, builtinModulesArrayLit, builtinFenceHintOf, builtinModuleFnOf, stdlibMemberFence, isStdlibMember, isStdlibSymbol, isStdlibGlobal, stdlibGlobalMember, nodeTypesOnlySymbol } from "./surfaces.js";
 import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collectNpmImports, collectJsonImports,
-  collectJsonRequires, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
+  collectJsonRequires, jsonRequireTypeOverride, jsonAwareChecker, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
 import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerConstructorName, lowerStaticMethod, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
@@ -1774,6 +1774,11 @@ export class Lowerer {
   readonly jsonInitActions = new Map<ts.SourceFile, IrStmt[]>();
   /** The baked global of each JSON file `require`d as a value below a declaration, by file name. */
   readonly jsonRequireGlobals = new Map<string, { id: string; name: string; type: IrType; mutable: boolean }>();
+  /** The structural TS type of each JSON document, by file (jsonDocTsType). */
+  readonly jsonDocTypes = new Map<ts.SourceFile, ts.Type>();
+  /** The structural TS type of each binding a CommonJS JSON require bound, by
+   * symbol: the checker types `require` as `any`, so typeOf answers this. */
+  readonly jsonBindingTypes = new Map<ts.Symbol, ts.Type>();
   /** The embedded npm runtime graph (collectNpmImports), attached to the
    * emitted module. Null without npm imports or without --dynamic. */
   npmEmbedded: IrModule["embedded"] | null = null;
@@ -2184,7 +2189,9 @@ export class Lowerer {
     this.ffiImports = mode.ffiImports ?? [];
     this.ffiImportsByName = new Map(this.ffiImports.map((entry) => [entry.name, entry]));
     this.ffiBindingSymbols = mode.ffiBindingSymbols ?? null;
-    this.checker = program.getTypeChecker();
+    // The JSON-aware view (lower-modules.ts jsonAwareChecker): a CommonJS
+    // JSON document's members answer their structure, not the checker's `any`.
+    this.checker = jsonAwareChecker(this, program.getTypeChecker());
     this.typeCtx = {
       checker: this.checker,
       shapes: this.shapes,
@@ -5666,6 +5673,11 @@ export class Lowerer {
 
   typeOf(node: ts.Node): ts.Type {
     if (this.activeThisType !== null && node.kind === ts.SyntaxKind.ThisKeyword) return this.activeThisType;
+    // A CommonJS JSON require (and the binding it bound) answers the
+    // document's structural type, the one resolveJsonModule gives an ESM
+    // import: the checker types `require` as `any`, which has no members.
+    const jsonT = jsonRequireTypeOverride(this, node);
+    if (jsonT !== null) return jsonT;
     // Inside an optional-chain body the guarded receiver is typed by its
     // NON-NULLISH type (the chain's tag test proved it), so every
     // receiver-kind check downstream sees the narrowed arm.
