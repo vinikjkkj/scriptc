@@ -8183,6 +8183,28 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       }
     }
     const op = expr.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
+    // A JS-file union target that holds a number arm (`let id = start`, where
+    // start is a `string | number` array-literal arm): `++`/`--` are ToNumeric
+    // on the read, and the result is stored back as the number arm. Statement
+    // position only (the caller desugars it), so pre/post is unobservable.
+    if (
+      target.type.kind === "union" &&
+      isJsSourceFile(expr.getSourceFile()) &&
+      L.armTag(target.type.unionId, F64) >= 0 &&
+      L.dynConvertible(target.type)
+    ) {
+      const slot: IrExpr = { kind: "varRef", localId: target.id, type: target.type, loc };
+      const boxed: IrExpr = { kind: "dynFrom", value: slot, type: DYN, loc };
+      const read: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [boxed], type: F64, loc };
+      const computed: IrExpr = {
+        kind: "bin", op, left: read, right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc,
+      };
+      const tag = L.armTag(target.type.unionId, F64);
+      const value: IrExpr = {
+        kind: "unionWrap", unionId: target.type.unionId, tag, value: computed, type: target.type, loc,
+      };
+      return { kind: "assign", localId: target.id, value, loc };
+    }
     const readTarget: IrExpr = { kind: "varRef", localId: target.id, type: target.type, loc };
     // JS any-origin targets: `++`/`--` are ToNumeric on the READ — the
     // one increment form with no string arm at all (`x = '3'; x++` leaves

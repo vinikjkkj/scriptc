@@ -17601,6 +17601,54 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       if (l !== null) left = l;
       if (r !== null) right = r;
     }
+    // JS-file operators that have a JS conversion table are not dyn-only:
+    // a static `string | number` union operand (a JS array literal's arm,
+    // read by destructuring) crosses into the runtime as a dyn, so the
+    // operator runs its own conversion over the arm it holds. Equality keeps
+    // its union arms (unionEq) and never reaches this block.
+    if (isJsSourceFile(expr.getSourceFile())) {
+      const jsOps: ts.SyntaxKind[] = [
+        ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken, ts.SyntaxKind.AsteriskToken,
+        ts.SyntaxKind.SlashToken, ts.SyntaxKind.PercentToken, ts.SyntaxKind.AsteriskAsteriskToken,
+        ts.SyntaxKind.AmpersandToken, ts.SyntaxKind.BarToken, ts.SyntaxKind.CaretToken,
+        ts.SyntaxKind.LessThanLessThanToken, ts.SyntaxKind.GreaterThanGreaterThanToken,
+        ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken, ts.SyntaxKind.LessThanToken,
+        ts.SyntaxKind.LessThanEqualsToken, ts.SyntaxKind.GreaterThanToken,
+        ts.SyntaxKind.GreaterThanEqualsToken,
+      ];
+      if (jsOps.includes(op)) {
+        const toDynU = (e: IrExpr): IrExpr =>
+          e.type.kind === "union" && L.dynConvertible(e.type)
+            ? { kind: "dynFrom", value: e, type: DYN, loc: e.loc }
+            : e;
+        left = toDynU(left);
+        right = toDynU(right);
+      }
+      // Abstract relational comparison over the scalar pairs a JS file can
+      // hold statically (`NaN < 'a'`, `true < 2`, `'10' < 9`): the runtime's
+      // IsLessThan decides ToPrimitive, the string-versus-string test and NaN.
+      // Two statically-number or two statically-string operands keep the
+      // static nodes further down.
+      const relOp = op === ts.SyntaxKind.LessThanToken ? "<"
+        : op === ts.SyntaxKind.LessThanEqualsToken ? "<="
+        : op === ts.SyntaxKind.GreaterThanToken ? ">"
+        : op === ts.SyntaxKind.GreaterThanEqualsToken ? ">=" : null;
+      if (
+        relOp !== null &&
+        !(left.type.kind === "f64" && right.type.kind === "f64") &&
+        !(left.type.kind === "string" && right.type.kind === "string")
+      ) {
+        const relScalar = (t: IrType): boolean =>
+          t.kind === "f64" || t.kind === "string" || t.kind === "bool" || t.kind === "dyn" || isUnitType(t);
+        if (relScalar(left.type) && relScalar(right.type)) {
+          const asDynJ = (e: IrExpr): IrExpr =>
+            e.type.kind === "dyn" ? e : { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
+          const relJ: IrLibFn =
+            relOp === "<" ? "dyn.lt" : relOp === "<=" ? "dyn.le" : relOp === ">" ? "dyn.gt" : "dyn.ge";
+          return { kind: "libCall", fn: relJ, args: [asDynJ(left), asDynJ(right)], type: BOOL, loc };
+        }
+      }
+    }
     if (left.type.kind === "dyn" || right.type.kind === "dyn") {
       // The narrowing unit comparisons ARE answerable on unknown: `v ===
       // undefined` / `v !== null` test the dyn node's kind directly, and
@@ -17799,7 +17847,38 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
               cmp === "<" ? "dyn.lt" : cmp === "<=" ? "dyn.le" : cmp === ">" ? "dyn.gt" : "dyn.ge";
             return { kind: "libCall", fn, args: [left, right], type: BOOL, loc };
           }
+          // A dyn side with a static number is NOT a ToNumber question once
+          // the dyn may hold a BigInt: `5000000000n >= 3` compares exactly,
+          // and ToNumber would throw. The runtime's IsLessThan owns it.
+          if (left.type.kind === "dyn" || right.type.kind === "dyn") {
+            const asDynN = (e: IrExpr): IrExpr =>
+              e.type.kind === "dyn" ? e : { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
+            const relN: IrLibFn =
+              cmp === "<" ? "dyn.lt" : cmp === "<=" ? "dyn.le" : cmp === ">" ? "dyn.gt" : "dyn.ge";
+            return { kind: "libCall", fn: relN, args: [asDynN(left), asDynN(right)], type: BOOL, loc };
+          }
           return { kind: "bin", op: cmp, left: toNum(left, "relational"), right: toNum(right, "relational"), type: BOOL, loc };
+        }
+        // Abstract relational comparison over the remaining scalar pairs:
+        // a string, boolean or unit against a dyn, or statically across
+        // kinds (`NaN < 'a'`, `true < 2`, `'10' < 9`). The runtime's
+        // IsLessThan decides ToPrimitive, the string-versus-string test and
+        // NaN. Two statically-number or two statically-string operands keep
+        // the static nodes below.
+        if (
+          cmp &&
+          !(left.type.kind === "f64" && right.type.kind === "f64") &&
+          !(left.type.kind === "string" && right.type.kind === "string")
+        ) {
+          const relScalar = (t: IrType): boolean =>
+            t.kind === "f64" || t.kind === "string" || t.kind === "bool" || t.kind === "dyn" || isUnitType(t);
+          if (relScalar(left.type) && relScalar(right.type)) {
+            const asDynR = (e: IrExpr): IrExpr =>
+              e.type.kind === "dyn" ? e : { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
+            const relFn: IrLibFn =
+              cmp === "<" ? "dyn.lt" : cmp === "<=" ? "dyn.le" : cmp === ">" ? "dyn.gt" : "dyn.ge";
+            return { kind: "libCall", fn: relFn, args: [asDynR(left), asDynR(right)], type: BOOL, loc };
+          }
         }
         // `+` is the operator that is NOT a number context: after
         // ToPrimitive, EITHER side being a string makes the whole thing
@@ -18138,6 +18217,24 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           typeEquals(idLeft.type, idRight.type)
         ) {
           return { kind: "bin", op: negated ? "!==" : "===", left: idLeft, right: idRight, type: BOOL, loc };
+        }
+        // Two PRIMITIVE operands of different static kinds are never ===:
+        // JS compares the types first, so the answer is false (true for
+        // !==) with no conversion. Both operands still evaluate, left then
+        // right; pure reads and literals drop out.
+        {
+          const primKind = (t: IrType): boolean =>
+            t.kind === "f64" || t.kind === "string" || t.kind === "bool" || t.kind === "bigint" || isUnitType(t);
+          if (primKind(left.type) && primKind(right.type) && left.type.kind !== right.type.kind) {
+            const stmts: IrStmt[] = [];
+            for (const e of [left, right]) {
+              if (!pureReemittable(e) && e.kind !== "numLit" && e.kind !== "strLit" && e.kind !== "boolLit" && e.kind !== "unitLit") {
+                stmts.push({ kind: "exprStmt", expr: e, loc });
+              }
+            }
+            const answer: IrExpr = { kind: "boolLit", value: negated, type: BOOL, loc };
+            return stmts.length === 0 ? answer : { kind: "seqExpr", stmts, result: answer, type: BOOL, loc };
+          }
         }
         L.unsupported("SC1043", expr);
         break;
