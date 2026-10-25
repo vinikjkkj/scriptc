@@ -10411,7 +10411,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     const key = `settledcount:${pKey}:${sKey}`;
     const retT: IrType = { kind: "promise", inner: outT };
     const resolveT: IrType = { kind: "func", params: [outT], ret: VOID };
-    const rejectT: IrType = { kind: "func", params: [{ kind: "object", className: "%Error" }], ret: VOID };
+    const rejectT: IrType = { kind: "func", params: [DYN], ret: VOID };
     // The withResolvers record, interned exactly as the type mapper interns
     // Promise.withResolvers<T>(): promise, reject (%Error), resolve (T).
     const wShapeId = L.shapes.intern(

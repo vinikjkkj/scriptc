@@ -10779,15 +10779,14 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             rj.kind !== "func" ||
             rj.ret.kind !== "void" ||
             rj.params.length !== 1 ||
-            rj.params[0]!.kind !== "object" ||
-            rj.params[0]!.className !== "%Error"
+            rj.params[0]!.kind !== "dyn"
           ) {
             // A non-contextually-typed executor VALUE whose second param
             // isn't the pinned (reason: Error) => void shape.
             L.unsupported(
               "SC1090",
               args[0]!,
-              "Promise executors whose reject parameter is not '(reason: Error) => void'",
+              "Promise executors whose reject parameter is not '(reason: unknown) => void'",
             );
           }
         }
