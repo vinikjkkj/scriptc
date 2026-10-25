@@ -11,7 +11,7 @@ import { engineFunctionCtor } from "./lower-engine-fn.js";
 import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
-import { protoClassArmOn, protoClassInfoFor } from "./proto-class-consume.js";
+import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoDataGetterFns } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
@@ -6543,6 +6543,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // A require binding over `module.exports = class {…}`: the alias
       // lands on the expression's own symbol — exact, like the name.
       propertyAssignedClassInfoOf(L, symbol) ??
+      // A declaration-file class paired with the module's constructor (export =).
+      pairedProtoClassOfValue(L, access.expression) ??
       undefined;
     let info = direct ?? null;
     // A rebindable decorated name is a class VALUE receiver: the call
@@ -7700,6 +7702,14 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     if (info.genericMethods !== undefined && L.reachable?.has(`%${className}.%dynbox`) === true) {
       const listed = dynBoxedMethodInstances(L, info);
       if (listed.length > 0) info.def.dynMethods = listed;
+    }
+    // The prototype's constant data (defineProperty on the prototype) answers a boxed
+    // instance's read as its member getters, exactly where a declared accessor would.
+    if (L.reachable?.has(`%${className}.%dynset`) === true) {
+      for (const g of protoDataGetterFns(info)) {
+        out.push(g);
+        info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: g.name.slice(className.length + 2), fn: g.name }];
+      }
     }
     // The write half of the same box (see dynSetFn): every class a dyn box
     // can hold, for the same reason the method instances above are listed.
@@ -11135,7 +11145,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       isJsSourceFile(expr.getSourceFile()) &&
       !(expr.arguments ?? []).some((a) => ts.isSpreadElement(a))
     ) {
-      const proto = protoClassArmOn() ? protoClassInfoFor(L, expr.expression) : null;
+      const proto = (protoClassArmOn() ? protoClassInfoFor(L, expr.expression) : null) ?? pairedProtoClassInfoFor(L, expr);
       // OFF BY DEFAULT, and the reason is measured rather than cautious: a
       // class instance crossing into a DYN slot keeps its fields and loses
       // its methods, so `function use(x) { return x.get() }` called with an

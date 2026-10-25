@@ -1618,7 +1618,10 @@ export interface TypeMapperCtx {
   declFileHasCompiledImpl?: (sf: ts.SourceFile) => boolean;
   /** The program class a declaration-file type's values are instances of
    * (lower-twin-witness.ts), or null. */
-  dtsWitnessClass?: (t: ts.Type) => ts.ClassDeclaration | null;
+  dtsWitnessClass?: (t: ts.Type) => ts.ClassDeclaration | ts.FunctionDeclaration | null;
+  /** The instance type of a constructor function a declaration-file class is paired
+   * with through `export =` (lower-twin-witness.ts), or null. */
+  pairedProtoInstance?: (decl: ts.FunctionDeclaration) => IrType | null;
   /** The COMPILED twin's class behind a class declared in a declaration file
    * (`export declare class Box` beside the `class Box` the `.js` twin
    * defines), or null. The declaration keeps the type surface; the twin's
@@ -2377,7 +2380,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // the witness cannot say (the class value) and the symbol re-point.
   if (checker.getConstructSignatures(widened).length === 0) {
     const witness = ctx.dtsWitnessClass?.(widened);
-    if (witness !== undefined && witness !== null) return { kind: "object", className: classNamer(witness) };
+    if (witness !== undefined && witness !== null) {
+      if (ts.isFunctionDeclaration(witness)) {
+        const viaPair = ctx.pairedProtoInstance?.(witness);
+        if (viaPair) return viaPair;
+      } else {
+        return { kind: "object", className: classNamer(witness) };
+      }
+    }
   }
   // Types DECLARED by a shipped .d.ts — an npm package's, or a LOCAL
   // declaration file describing sibling JS the program loads dynamically
