@@ -2448,7 +2448,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.asym && opts.cipher ? [rt(join(rtDir, "scr_cipher_key.c"))] : []),
     ...(opts.assert || regex || opts.symbol ? [rt(join(rtDir, "scr_assert.c"))] : []),
     ...(opts.inspect ? [rt(join(rtDir, "scr_inspect.c"))] : []),
-    ...(opts.dynInvoke ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),
+    // scr_async_dyn.c calls the dispatch unit (a thenable's then is invoked
+    // with this = the thenable: scr_dyn_invoke_key, the proxy and class
+    // instance [[Get]]), so every binary that links the async unit links it.
+    ...(opts.dynInvoke || opts.dynAsync || opts.dc ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),
     ...(opts.dynClass ? [rt(join(rtDir, "scr_dyn_class.c"))] : []),
     ...(opts.dynExt ? [rt(join(rtDir, "scr_dyn_ext.c"))] : []),
     ...(opts.dc ? [rt(join(rtDir, "scr_dc.c"))] : []),
