@@ -13884,6 +13884,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9856-error-subclass-cast-member-projection.ts": {
+   "order": [
+    "<repo>/tests/corpus/9856-error-subclass-cast-member-projection.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/986-exceptions-uncaught.ts": {
    "order": [
     "<repo>/tests/corpus/986-exceptions-uncaught.ts"
