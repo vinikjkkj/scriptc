@@ -1693,6 +1693,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9600-class-prototype-write-replaces-method.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9600-class-prototype-write-replaces-method.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9601-class-computed-prototype-keys.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9601-class-computed-prototype-keys.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9602-class-instance-override-wraps-original.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9602-class-instance-override-wraps-original.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9603-destructured-expando-alias-writes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9603-destructured-expando-alias-writes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9604-destructured-literal-alias-write.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9604-destructured-literal-alias-write.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9605-class-extends-super-and-prototype-write.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9605-class-extends-super-and-prototype-write.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1615-cjs-export-shapes/main.cjs": {
    "order": [
     "<repo>/tests/corpus/1615-cjs-export-shapes/table.cjs",
