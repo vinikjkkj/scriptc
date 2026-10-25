@@ -125,6 +125,12 @@ interface EventSig {
    * the event's runtime bucket may hold originals of MIXED signatures —
    * so listeners()/rawListeners() have no one honest element type. */
   dynListener: boolean;
+  /** True when a TYPED listener (one declaring at least one parameter with a
+   * static type, or an unmapped one) pins this event's positions. Only an
+   * event no typed listener pins may widen a disagreeing position to dyn:
+   * a typed listener's declared type is the one thing the tuple must not
+   * widen past. Set once the whole table is built (see listenedNames). */
+  listened: boolean;
 }
 
 /** Which event names the program REGISTERS a listener for — the syntactic
@@ -185,15 +191,21 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   };
   if (holder.emitterEventTable) return holder.emitterEventTable;
   const table = new Map<string, EventSig>();
+  /** Bare event names a typed listener pins, in ANY emitter root: a listener
+   * on an unknown-class receiver (the "*" bucket) can observe emits of a
+   * known root at run time, so a pin must not stop at its own key. Filled by
+   * the listener pass, which runs before every emit, so the emit pass reads a
+   * complete set. */
+  const listenedNames = new Set<string>();
   const sigOf = (name: string): EventSig => {
     let sig = table.get(name);
-    if (!sig) table.set(name, (sig = { tuple: [], fromEmit: false, conflict: null, dynListener: false }));
+    if (!sig) table.set(name, (sig = { tuple: [], fromEmit: false, conflict: null, dynListener: false, listened: false }));
     return sig;
   };
   // The two forced tuples (see the header comment).
-  table.set("error", { tuple: [{ kind: "object", className: "%Error" }], fromEmit: true, conflict: null, dynListener: false });
-  table.set("newListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false });
-  table.set("removeListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false });
+  table.set("error", { tuple: [{ kind: "object", className: "%Error" }], fromEmit: true, conflict: null, dynListener: false, listened: false });
+  table.set("newListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false, listened: false });
+  table.set("removeListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false, listened: false });
 
   const fmt = (t: IrType): string => L.fmt(t);
   /** True when `arm` is one of `u`'s own arms. */
@@ -231,13 +243,30 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
     // looked like it needed it — `{node, frame}` out of an untyped emitter's
     // callback — is a RECORD whose FIELDS are dyn, not a dyn position, and it
     // is answered by the emit-payload shape instead.
+    // NOT the same rule as unifyEmitPos's widening (below): that one runs only
+    // where no typed listener reads the position, so there is no declared type
+    // to be unsound against, and it has an exercise (mysql2 'warn').
     return null;
   };
-  /** An emit's position against the recorded one: exact unification, and on
-   * an event with an unannotated listener (dyn parameters take anything) a
-   * disagreement widens the position to dyn instead of conflicting. */
-  const unifyEmitPos = (sig: EventSig, recorded: IrType, incoming: IrType): IrType | null =>
-    unifyPos(recorded, incoming, "recorded") ?? (sig.dynListener ? DYN : null);
+  /** Both sides carry one dyn value: each is dyn already or converts into one
+   * (the same boxing an emit payload gets in lowerExprExpecting). */
+  const dynJoinable = (a: IrType, b: IrType): boolean => {
+    const conv = (t: IrType): boolean =>
+      t.kind === "dyn" || isUnitType(t) || canConvertToDyn(t, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+    return conv(a) && conv(b);
+  };
+  /** An emit's position against the recorded one: exact unification. A
+   * disagreement widens the position to dyn in two cases, and only these:
+   * an event with an unannotated listener (dyn parameters take anything),
+   * and an event NO typed listener pins whose two sides both convert to dyn.
+   * The second is the mysql2 'warn' shape: `emit('warn', err)` with an Error
+   * at one site and an `unknown` at another, and no listener anywhere. No
+   * declared listener type is widened past there, so the listener-side
+   * soundness rule (unifyPos) is not in question; the emitted values are
+   * boxed and no reader sees them. A pinned event keeps the conflict. */
+  const unifyEmitPos = (name: string, sig: EventSig, recorded: IrType, incoming: IrType): IrType | null =>
+    unifyPos(recorded, incoming, "recorded") ??
+    (sig.dynListener || (!listenedNames.has(evDisplayName(name)) && dynJoinable(recorded, incoming)) ? DYN : null);
   const mergeEmit = (name: string, rawArgs: (IrType | null)[]): void => {
     // An `undefined` argument (`emit('fields', void 0)`) maps to void. On an
     // event with an unannotated (checked-dynamic) listener that position
@@ -286,7 +315,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       for (let i = 0; i < sig.tuple.length; i++) {
         // The recorded type is a LISTENER's here (nothing has emitted yet),
         // so it is the side allowed to be the union.
-        const u = unifyEmitPos(sig, sig.tuple[i]!, tuple[i]!);
+        const u = unifyEmitPos(name, sig, sig.tuple[i]!, tuple[i]!);
         if (u === null) {
           sig.conflict = `position ${i} is '${fmt(sig.tuple[i]!)}' at one site and '${fmt(tuple[i]!)}' at another`;
           return;
@@ -304,8 +333,10 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       // listener (dyn parameters, which take anything including undefined)
       // the event's tuple is the LONGEST one with the positions only some
       // sites supply widened to dyn; the shorter sites pad with the dyn
-      // undefined. Typed listeners keep the strict rule.
-      if (!sig.dynListener) {
+      // undefined. Typed listeners keep the strict rule. An event no typed
+      // listener pins takes the same widening: with no reader to hand a
+      // position to, the trailing ones are dyn and the shorter sites pad.
+      if (!sig.dynListener && listenedNames.has(evDisplayName(name))) {
         sig.conflict = `emit sites supply ${sig.tuple.length} and ${tuple.length} arguments`;
         return;
       }
@@ -316,7 +347,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
           merged.push(DYN);
           continue;
         }
-        const u = unifyEmitPos(sig, sig.tuple[i]!, tuple[i]!);
+        const u = unifyEmitPos(name, sig, sig.tuple[i]!, tuple[i]!);
         if (u === null) {
           sig.conflict = `position ${i} is '${fmt(sig.tuple[i]!)}' at one site and '${fmt(tuple[i]!)}' at another`;
           return;
@@ -329,7 +360,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
     for (let i = 0; i < tuple.length; i++) {
       // A position already widened to a listener's union absorbs a later
       // emit of any of its arms; two emits alone keep the strict rule.
-      const u = unifyEmitPos(sig, sig.tuple[i]!, tuple[i]!);
+      const u = unifyEmitPos(name, sig, sig.tuple[i]!, tuple[i]!);
       if (u === null) {
         sig.conflict = `position ${i} is '${fmt(sig.tuple[i]!)}' at one site and '${fmt(tuple[i]!)}' at another`;
         return;
@@ -338,6 +369,9 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
     }
   };
   const mergeListener = (name: string, params: (IrType | null)[]): void => {
+    // A parameterless listener constrains nothing; any other typed one, and
+    // an unmapped one (its declaration is unknown), pins the event.
+    if (params.length > 0) listenedNames.add(evDisplayName(name));
     if (params.some((p) => p === null)) return;
     // COPIED: the widening below writes the unified type back, and `params`
     // is the listener's own func-type parameter list — mutating it would
@@ -516,6 +550,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       }
     }
   }
+  for (const [key, sig] of table) sig.listened = listenedNames.has(evDisplayName(key));
   holder.emitterEventTable = table;
   holder.emitterRegistrations = { names: registered, keys: registeredKeys, opaque: opaqueRegistration, opaqueAt };
   return table;
@@ -1267,7 +1302,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, key, call);
     const sig = sigAt(table, key);
-    const padFromDyn = args.length - 1 < tuple.length && sig !== undefined && sig.dynListener &&
+    const padFromDyn = args.length - 1 < tuple.length && sig !== undefined && (sig.dynListener || !sig.listened) &&
       tuple.slice(args.length - 1).every((t) => t.kind === "dyn");
     if (args.length - 1 !== tuple.length && !padFromDyn) {
       // An event nothing listens to: the call has no observable effect,
