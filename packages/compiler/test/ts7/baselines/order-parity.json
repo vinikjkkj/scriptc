@@ -16198,6 +16198,42 @@
     "<repo>/tests/corpus/10308-expando-union-null-record.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/10400-defprop-module-exports-getset.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10400-defprop-module-exports-getset.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10401-defprop-exports-getset-flag.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10401-defprop-exports-getset-flag.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10402-defprop-accessor-string-setter.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10402-defprop-accessor-string-setter.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10403-defprop-accessor-getter-only.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10403-defprop-accessor-getter-only.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10404-defprop-accessor-read-in-function.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10404-defprop-accessor-read-in-function.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10405-defprop-accessor-two-exports.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10405-defprop-accessor-two-exports.cjs"
+   ],
+   "diags": []
   }
  }
 }
