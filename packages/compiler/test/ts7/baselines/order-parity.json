@@ -1,19 +1,5 @@
 {
  "entries": {
-  "<repo>/tests/corpus/9200-cjs-require-stored-closure/main.js": {
-   "order": [
-    "<repo>/tests/corpus/9200-cjs-require-stored-closure/impl.js",
-    "<repo>/tests/corpus/9200-cjs-require-stored-closure/url.js",
-    "<repo>/tests/corpus/9200-cjs-require-stored-closure/main.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/9900-cjs-json-require/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/9900-cjs-json-require/main.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/001-hello.ts": {
    "order": [
     "<repo>/tests/corpus/001-hello.ts"
@@ -35,6 +21,36 @@
   "<repo>/tests/corpus/1000-json-stringify-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1000-json-stringify-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10000-caught-subclass-unknown-instanceof.ts": {
+   "order": [
+    "<repo>/tests/corpus/10000-caught-subclass-unknown-instanceof.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10001-caught-subclass-dyn-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/10001-caught-subclass-dyn-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10002-rejected-subclass-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/10002-rejected-subclass-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10003-caught-subclass-identity-through-dyn.ts": {
+   "order": [
+    "<repo>/tests/corpus/10003-caught-subclass-identity-through-dyn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10004-caught-base-typed-holds-leaf.ts": {
+   "order": [
+    "<repo>/tests/corpus/10004-caught-base-typed-holds-leaf.ts"
    ],
    "diags": []
   },
@@ -170,6 +186,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10250-method-ref-state-machine.js": {
+   "order": [
+    "<repo>/tests/corpus/10250-method-ref-state-machine.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10251-method-ref-identity-and-unbound-call.js": {
+   "order": [
+    "<repo>/tests/corpus/10251-method-ref-identity-and-unbound-call.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1026-throw-promise.ts": {
    "order": [
     "<repo>/tests/corpus/1026-throw-promise.ts"
@@ -197,6 +225,60 @@
   "<repo>/tests/corpus/103-ternary.ts": {
    "order": [
     "<repo>/tests/corpus/103-ternary.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10300-expando-date-usec.js": {
+   "order": [
+    "<repo>/tests/corpus/10300-expando-date-usec.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10301-expando-date-inspect.js": {
+   "order": [
+    "<repo>/tests/corpus/10301-expando-date-inspect.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10302-expando-record-radius.js": {
+   "order": [
+    "<repo>/tests/corpus/10302-expando-record-radius.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10303-expando-literal-this-method.js": {
+   "order": [
+    "<repo>/tests/corpus/10303-expando-literal-this-method.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10304-expando-date-keys.js": {
+   "order": [
+    "<repo>/tests/corpus/10304-expando-date-keys.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10305-expando-record-keys-order.js": {
+   "order": [
+    "<repo>/tests/corpus/10305-expando-record-keys-order.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10306-expando-date-identity.js": {
+   "order": [
+    "<repo>/tests/corpus/10306-expando-date-identity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10307-expando-record-in-union.js": {
+   "order": [
+    "<repo>/tests/corpus/10307-expando-record-in-union.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10308-expando-union-null-record.js": {
+   "order": [
+    "<repo>/tests/corpus/10308-expando-union-null-record.js"
    ],
    "diags": []
   },
@@ -13305,6 +13387,14 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9200-cjs-require-stored-closure/main.js": {
+   "order": [
+    "<repo>/tests/corpus/9200-cjs-require-stored-closure/impl.js",
+    "<repo>/tests/corpus/9200-cjs-require-stored-closure/url.js",
+    "<repo>/tests/corpus/9200-cjs-require-stored-closure/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/9250-variable-tuple-native-length-and-index/main.ts": {
    "order": [
     "<repo>/tests/corpus/9250-variable-tuple-native-length-and-index/main.ts"
@@ -13923,6 +14013,12 @@
   "<repo>/tests/corpus/990-process-basics.ts": {
    "order": [
     "<repo>/tests/corpus/990-process-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9900-cjs-json-require/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9900-cjs-json-require/main.cjs"
    ],
    "diags": []
   },
@@ -16114,90 +16210,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/10000-caught-subclass-unknown-instanceof.ts": {
-   "order": [
-    "<repo>/tests/corpus/10000-caught-subclass-unknown-instanceof.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10001-caught-subclass-dyn-members.ts": {
-   "order": [
-    "<repo>/tests/corpus/10001-caught-subclass-dyn-members.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10002-rejected-subclass-unknown.ts": {
-   "order": [
-    "<repo>/tests/corpus/10002-rejected-subclass-unknown.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10003-caught-subclass-identity-through-dyn.ts": {
-   "order": [
-    "<repo>/tests/corpus/10003-caught-subclass-identity-through-dyn.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10004-caught-base-typed-holds-leaf.ts": {
-   "order": [
-    "<repo>/tests/corpus/10004-caught-base-typed-holds-leaf.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10300-expando-date-usec.js": {
-   "order": [
-    "<repo>/tests/corpus/10300-expando-date-usec.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10301-expando-date-inspect.js": {
-   "order": [
-    "<repo>/tests/corpus/10301-expando-date-inspect.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10302-expando-record-radius.js": {
-   "order": [
-    "<repo>/tests/corpus/10302-expando-record-radius.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10303-expando-literal-this-method.js": {
-   "order": [
-    "<repo>/tests/corpus/10303-expando-literal-this-method.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10304-expando-date-keys.js": {
-   "order": [
-    "<repo>/tests/corpus/10304-expando-date-keys.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10305-expando-record-keys-order.js": {
-   "order": [
-    "<repo>/tests/corpus/10305-expando-record-keys-order.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10306-expando-date-identity.js": {
-   "order": [
-    "<repo>/tests/corpus/10306-expando-date-identity.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10307-expando-record-in-union.js": {
-   "order": [
-    "<repo>/tests/corpus/10307-expando-record-in-union.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10308-expando-union-null-record.js": {
-   "order": [
-    "<repo>/tests/corpus/10308-expando-union-null-record.js"
-   ],
-   "diags": []
   }
  }
 }
