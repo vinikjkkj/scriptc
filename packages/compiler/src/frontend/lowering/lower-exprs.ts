@@ -13175,6 +13175,129 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     "__proto__", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__",
   ]);
 
+  /** The string values a key expression can take when the program fixes them (the
+   * key's TYPE may still be any): a string literal; a binding no write reaches whose
+   * initializer is such an expression; a parameter of a directly invoked function
+   * expression (an IIFE, the only call of that function) that no write reaches, taking the
+   * argument's values; an element read `a[i]` of an array whose elements are all such
+   * expressions. An array is an array literal, or an IIFE parameter passed one, read only
+   * (`a.length`, `a[i]`, a truth test): no write or escape can change its elements. An
+   * element read may be out of range (undefined, whose key is "undefined"), so that name is
+   * always included. Null when the program does not fix the set. */
+  function boundedKeyValuesOf(L: Lowerer, keyNode: ts.Expression): Set<string> | null {
+    const strip = (e: ts.Expression): ts.Expression => {
+      let x = e;
+      while (ts.isParenthesizedExpression(x)) x = x.expression;
+      return x;
+    };
+    // The IIFE call of a function expression, or null when it is not directly invoked.
+    const iifeCallOf = (fn: ts.Node): ts.CallExpression | null => {
+      let p: ts.Node = fn.parent;
+      while (ts.isParenthesizedExpression(p)) p = p.parent;
+      return ts.isCallExpression(p) && strip(p.expression) === fn ? p : null;
+    };
+    // The argument a parameter receives from its IIFE, when the call is plain.
+    const iifeArgOf = (sym: ts.Symbol): { arg: ts.Expression; decl: ts.ParameterDeclaration; fn: ts.Node } | null => {
+      const d = L.checker.valueDeclarationOf(sym);
+      if (d === undefined || !ts.isParameter(d) || d.dotDotDotToken !== undefined || d.initializer !== undefined) return null;
+      if (!ts.isIdentifier(d.name)) return null;
+      const fn = d.parent;
+      if (!ts.isFunctionExpression(fn) && !ts.isArrowFunction(fn)) return null;
+      const call = iifeCallOf(fn);
+      if (call === null || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+      const index = fn.parameters.indexOf(d);
+      const arg = call.arguments[index];
+      if (arg === undefined || !bindingNeverReassigned(L, sym, d)) return null;
+      return { arg, decl: d, fn };
+    };
+    // Every reference to an array parameter inside its function is a read.
+    const readOnlyArrayParam = (sym: ts.Symbol, decl: ts.ParameterDeclaration, fn: ts.Node, depth: number): boolean => {
+      let ok = true;
+      const isWriteTarget = (e: ts.Node): boolean => {
+        const p = e.parent;
+        if (ts.isBinaryExpression(p) && p.left === e) {
+          const k = p.operatorToken.kind;
+          return k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
+        }
+        if (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) return true;
+        return ts.isDeleteExpression(p);
+      };
+      const visit = (n: ts.Node): void => {
+        if (!ok) return;
+        if (ts.isIdentifier(n) && n !== decl.name && n.text === sym.name && L.resolveValueSymbol(n) === sym) {
+          const p = n.parent;
+          // Passed on to a directly invoked function whose parameter is itself read only.
+          const passedOn = (): boolean => {
+            if (!ts.isCallExpression(p) || !p.arguments.includes(n as ts.Expression) || depth > 16) return false;
+            const callee = strip(p.expression);
+            if (!ts.isFunctionExpression(callee) && !ts.isArrowFunction(callee)) return false;
+            if (iifeCallOf(callee) !== p || p.arguments.some((a) => ts.isSpreadElement(a))) return false;
+            const index = p.arguments.indexOf(n as ts.Expression);
+            const pd = callee.parameters[index];
+            if (pd === undefined || pd.dotDotDotToken !== undefined || pd.initializer !== undefined || !ts.isIdentifier(pd.name)) return false;
+            const psym = L.resolveValueSymbol(pd.name);
+            return psym !== null && readOnlyArrayParam(psym, pd, callee, depth + 1);
+          };
+          const readAccess =
+            (ts.isPropertyAccessExpression(p) && p.expression === n && p.name.text === "length") ||
+            (ts.isElementAccessExpression(p) && p.expression === n && !isWriteTarget(p)) ||
+            (ts.isBinaryExpression(p) && p.left === n && p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) ||
+            passedOn();
+          if (!readAccess) ok = false;
+        }
+        n.forEachChild(visit);
+      };
+      visit(fn);
+      return ok;
+    };
+    const unionOf = (parts: (Set<string> | null)[]): Set<string> | null => {
+      const out = new Set<string>();
+      for (const p of parts) {
+        if (p === null) return null;
+        for (const v of p) out.add(v);
+      }
+      return out;
+    };
+    const scalarOf = (e: ts.Expression, depth: number): Set<string> | null => {
+      if (depth > 16) return null;
+      const x = strip(e);
+      if (ts.isStringLiteral(x) || ts.isNoSubstitutionTemplateLiteral(x)) return new Set([x.text]);
+      if (ts.isElementAccessExpression(x)) {
+        const elems = arrayOf(x.expression, depth + 1);
+        if (elems === null) return null;
+        elems.add("undefined");
+        return elems;
+      }
+      if (ts.isIdentifier(x)) {
+        const sym = L.resolveValueSymbol(x);
+        if (sym === null) return null;
+        const d = L.checker.valueDeclarationOf(sym);
+        if (d !== undefined && ts.isVariableDeclaration(d) && d.initializer !== undefined && ts.isIdentifier(d.name) && bindingNeverReassigned(L, sym, d)) {
+          return scalarOf(d.initializer, depth + 1);
+        }
+        const p = iifeArgOf(sym);
+        if (p !== null) return scalarOf(p.arg, depth + 1);
+      }
+      return null;
+    };
+    const arrayOf = (e: ts.Expression, depth: number): Set<string> | null => {
+      if (depth > 16) return null;
+      const x = strip(e);
+      if (ts.isArrayLiteralExpression(x)) {
+        return unionOf(x.elements.map((el) => (ts.isSpreadElement(el) ? null : scalarOf(el, depth + 1))));
+      }
+      if (ts.isIdentifier(x)) {
+        const sym = L.resolveValueSymbol(x);
+        if (sym === null) return null;
+        const p = iifeArgOf(sym);
+        if (p === null || !readOnlyArrayParam(sym, p.decl, p.fn, 0)) return null;
+        return arrayOf(p.arg, depth + 1);
+      }
+      return null;
+    };
+    return scalarOf(keyNode, 0);
+  }
+
   /** The regular expressions of the names a computed key admits, one per constituent. A
    * string or number literal names itself. A template LITERAL expression (`password${n}`)
    * matches its texts around each span: a number span is the number's String form, a
@@ -13183,6 +13306,8 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
    * name (string, any), returns null: every name is admitted. */
   function keyPatternsOf(L: Lowerer, keyNode: ts.Expression): RegExp[] | null {
     const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const bounded = boundedKeyValuesOf(L, keyNode);
+    if (bounded !== null) return [...bounded].map((s) => new RegExp("^" + esc(s) + "$"));
     const NUM = "(?:[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:e[+-]?\\d+)?|Infinity|NaN)";
     if (ts.isTemplateExpression(keyNode)) {
       let src = "^" + esc(keyNode.head.text);
