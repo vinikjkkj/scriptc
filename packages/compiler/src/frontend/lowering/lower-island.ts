@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, requireSpecOf, resolveImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, cjsInsertionOrderOf, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, requireSpecOf, resolveImport } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
@@ -1413,7 +1413,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
    * Node sorts namespace keys (code-unit order). Type-only exports erase.
    * Unchanged from when it was inline in the builder — only a CommonJS
    * `export =` dependency takes a different path now. */
-  function esmNsFieldsOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"]): { key: IrExpr; value: IrExpr }[] {
+  function esmNsFieldsOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"], insertionOrder: boolean): { key: IrExpr; value: IrExpr }[] {
     const entries: [string, ts.Symbol][] = [];
     const modSym = L.checker.getSymbolAtLocation(dep);
     modSym?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
@@ -1435,7 +1435,17 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     for (const pair of star.entries) {
       if (!entries.some(([k]) => k === pair[0])) entries.push(pair);
     }
-    entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    // A namespace object lists its names SORTED (Node's namespace exotic
+    // object). A CommonJS module.exports object lists them in INSERTION order
+    // (the require() value): placed names first, in that order, the rest sorted.
+    const ins = insertionOrder && isCjsJsFile(dep) ? cjsInsertionOrderOf(dep) : null;
+    const rank = new Map<string, number>((ins ?? []).map((n, i) => [n, i] as [string, number]));
+    entries.sort((a, b) => {
+      const ra = rank.get(a[0]) ?? Number.POSITIVE_INFINITY;
+      const rb = rank.get(b[0]) ?? Number.POSITIVE_INFINITY;
+      if (ra !== rb) return ra < rb ? -1 : 1;
+      return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
+    });
     const fields: { key: IrExpr; value: IrExpr }[] = [];
     for (const [exportName, sym] of entries) {
       const value = exportDynValue(L, exportName, sym, loc);
@@ -1464,7 +1474,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
       : npmStaticDepSf7(L.program, decl.getSourceFile(), spec);
     if (!dep) return null;
     const loc = locOf(expr);
-    const builder = staticDynNsBuilderOf(L, dep, loc);
+    const builder = staticDynNsBuilderOf(L, dep, loc, true);
     if (builder === null) return null;
     // A CommonJS module WITHOUT `export =` has no `default` key in its
     // namespace snapshot (esmNsFieldsOf builds the names only): its
@@ -1485,8 +1495,9 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     };
   }
 
-  function staticDynNsBuilderOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"]): string | null {
-    const cached = L.dynNsBuilders.get(dep);
+  function staticDynNsBuilderOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"], forRequire = false): string | null {
+    const builders = forRequire ? L.dynExportsBuilders : L.dynNsBuilders;
+    const cached = builders.get(dep);
     if (cached !== undefined) return cached;
     const initName = L.initNameOf.get(dep);
     if (initName === undefined) return null;
@@ -1497,8 +1508,8 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     // function '%dynnsd.<tag>'", an ICE where a diagnostic belonged.
     refuseNsSnapshotIfLive(L, dep);
     const rawTag = L.fileTag.get(dep) ?? "";
-    const name = `%dynnsd.${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}`;
-    L.dynNsBuilders.set(dep, name);
+    const name = `${forRequire ? "%dynexpd." : "%dynnsd."}${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}`;
+    builders.set(dep, name);
     const fnCtx = newFnCtx(true, null, null, DYN);
     L.fnStack.push(fnCtx);
     try {
@@ -1515,14 +1526,15 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
       // export table instead, the way Node reads it off its lexer.
       const cjs = cjsExportTableNsOf(L, dep, loc);
       const prelude: IrStmt[] = cjs?.prelude ?? [];
-      const fields: { key: IrExpr; value: IrExpr }[] = cjs?.fields ?? esmNsFieldsOf(L, dep, loc);
+      const fields: { key: IrExpr; value: IrExpr }[] = cjs?.fields ?? esmNsFieldsOf(L, dep, loc, forRequire);
       // INTERNED, because Node answers the SAME namespace object for
       // every import of one module: measured on v25.9.0, two `import()`
       // sites of one package compare `===` true, and two fresh literals
       // compared false. The object is built on first call into a module
       // global and every later call returns that one.
-      const nsGid = `%g.${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}%dynnsobj`;
-      const builtGid = `%g.${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}%dynnsbuilt`;
+      const tagOut = rawTag === "" ? "e." : rawTag.replace(/^%/, "");
+      const nsGid = `%g.${tagOut}${forRequire ? "%dynexpobj" : "%dynnsobj"}`;
+      const builtGid = `%g.${tagOut}${forRequire ? "%dynexpbuilt" : "%dynnsbuilt"}`;
       L.globalsList.push({ id: nsGid, name: "%dynnsobj", type: DYN, mutable: true });
       L.globalsList.push({ id: builtGid, name: "%dynnsbuilt", type: BOOL, mutable: true });
       body.push({

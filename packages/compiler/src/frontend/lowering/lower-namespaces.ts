@@ -40,7 +40,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf } from "./lowerer.js";
 import type { FileParts } from "./lower-modules.js";
-import { cjsHiddenAccessorExport, isCjsJsFile, isNodeEsmFile, locOf, resolveImport } from "../program.js";
+import { cjsHiddenAccessorExport, cjsInsertionOrderOf, isCjsJsFile, isNodeEsmFile, locOf, requireSpecOf, resolveImport } from "../program.js";
 import { nearestPackageTypeOf, nearestPkgJsonPath } from "../resolve.js";
 import { F64, IrExpr, IrStmt, IrType, STRING } from "../../ir/nodes.js";
 import { normalize as nativePath } from "node:path";
@@ -307,11 +307,30 @@ export function moduleNsSourceFileOf(L: Lowerer, e: ts.Expression): ts.SourceFil
 export function moduleNsOwnKeys(
   L: Lowerer,
   sf: ts.SourceFile,
+  requireValue = false,
 ): { keys: string[]; missing: null } | { keys: null; missing: string } {
   const blocked: string[] = [];
   const names = nsNameSet(L, sf, new Set<ts.SourceFile>(), blocked);
   if (blocked.length > 0) return { keys: null, missing: blocked.sort()[0]! };
-  return { keys: [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), missing: null };
+  const sorted = [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  // A namespace object lists SORTED keys. A CommonJS module reached through
+  // a require() binding is its module.exports object: INSERTION order.
+  const ins = requireValue && isCjsJsFile(sf) ? cjsInsertionOrderOf(sf) : null;
+  if (ins === null) return { keys: sorted, missing: null };
+  const placed = ins.filter((n) => names.has(n));
+  const placedSet = new Set(placed);
+  return { keys: [...placed, ...sorted.filter((n) => !placedSet.has(n))], missing: null };
+}
+
+/** True when `e` names a binding bound by `const x = require(spec)` (a CommonJS
+ * value, not a namespace import). */
+export function isRequireBindingIdent(L: Lowerer, e: ts.Expression): boolean {
+  if (!ts.isIdentifier(e)) return false;
+  const sym = L.checker.getSymbolAtLocation(e);
+  if (sym === undefined) return false;
+  return L.checker.declarationsOf(sym).some(
+    (d) => ts.isVariableDeclaration(d) && d.initializer !== undefined && requireSpecOf(d.initializer) !== null,
+  );
 }
 
 /** One module's OWN export names — the checker's export table, filtered to
