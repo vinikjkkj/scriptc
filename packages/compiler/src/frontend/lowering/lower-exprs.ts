@@ -15,7 +15,7 @@ import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
 import { builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf } from "./lower-fnvalue.js";
-import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
+import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence, valuesCountdown, voidCountdown } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
@@ -23141,6 +23141,11 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       inner.kind === "void"
         ? { kind: "promise", inner: VOID }
         : { kind: "promise", inner: arrayOf(inner) };
+    // Node's settlement turns: the settle-counting combinator.
+    const counted = inner.kind === "void"
+      ? voidCountdown(L, entries, entryT, loc)
+      : valuesCountdown(L, entries, entryT, loc);
+    if (counted) return counted;
     return { kind: "intrinsic", name: "promise.all", args: [entries], type, loc };
   }
 

@@ -10366,54 +10366,62 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     }];
   }
 
-  /** `Promise.allSettled(ps)` with Node's SETTLEMENT TICKS.
+  /** The settle-counting combinator behind Promise.all, Promise.allSettled and
+   * the void collapse, with Node's SETTLEMENT TICKS.
    *
-   * The wrapper-per-entry form costs one tick too many: each entry's wrapper
-   * promise resolves a tick after the entry settles, and the combinator reacts
-   * to the wrapper. Node reacts to each entry directly, in the microtask turn
-   * the entry settles, and resolves its result in that same turn. So the
-   * countdown lives INSIDE each entry's settle step:
+   * A wrapper promise per entry costs one tick too many, and the runtime's
+   * own all combinator runs its countdown inside the settle wake, one turn
+   * before Node resumes the awaiters. Node reacts to each entry in the
+   * microtask turn that entry settles, and resolves the result in that same
+   * turn. So the countdown lives INSIDE each entry's settle step:
    *
-   *   step = async (p, i, values, cnt, done) => {
-   *     try { const v = await p; values[i] = {status: "fulfilled", value: v}; }
-   *     catch (e) { values[i] = {status: "rejected", reason: e}; }
-   *     cnt[0] = cnt[0] - 1;
-   *     if (cnt[0] === 0) done(values);
+   *   step = async (p, i, values, cnt, done, fail) => {
+   *     try { const v = await p; values[i] = v;        // mode "values"
+   *           cnt[0] = cnt[0] - 1; if (cnt[0] === 0) done(values); }
+   *     catch (e) { fail(e); }                          // first rejection wins
    *   }
    *   combined = (ps) => {
    *     const w = Promise.withResolvers();
    *     const n = ps.length; const values = [absent x n]; const cnt = [n];
    *     if (n === 0) w.resolve(values);
-   *     let i = 0; while (i < n) { step(ps[i], i, values, cnt, w.resolve); i = i + 1; }
+   *     let i = 0; while (i < n) { step(ps[i], i, values, cnt, w.resolve, w.reject); i = i + 1; }
    *     return w.promise;
    *   }
    *
-   * The step is not awaited: nothing observes it, and its stores cannot throw.
-   * `entryT` DYN: the entries are checked-dynamic (await adopts a dyn promise
-   * and passes a plain value through) and are read through the iterator pack,
-   * as the dyn for-of reads them; a non-iterable argument rejects. Null when
-   * the settled description is not the value/reason pair. */
-  function settledCountdown(
+   * Modes: "settled" (allSettled: each entry stores its settled record and a
+   * rejection never reaches the result), "values" (all: the value array, a
+   * rejection rejects the result), "void" (all whose result is only awaited:
+   * no array, the result resolves with nothing). The step is not awaited;
+   * nothing observes it and its stores cannot throw. `entryT` DYN: entries
+   * are checked-dynamic (await adopts a dyn promise and passes a plain value
+   * through) and are read through the iterator pack; a non-iterable argument
+   * rejects. Null when the description has no lowering. */
+  function countdown(
     L: Lowerer,
     entries: IrExpr,
     entryT: IrType,
-    settledT: IrType,
+    mode: "settled" | "values" | "void",
+    elemT: IrType,
     loc: SrcLoc,
   ): IrExpr | null {
     const dyn = entryT.kind === "dyn";
     if (!dyn && entryT.kind !== "promise") return null;
-    const arms = settledArmsOf(L, settledT);
-    if (!arms) return null;
-    const outT: IrType = arrayOf(settledT);
+    const innerT: IrType = dyn ? DYN : entryT.inner;
+    if (mode === "values" && innerT.kind === "void") return null;
+    let settleArms: ReturnType<typeof settledArmsOf> = null;
+    if (mode === "settled") {
+      settleArms = settledArmsOf(L, elemT);
+      if (!settleArms) return null;
+    }
+    const storeT: IrType = mode === "settled" ? elemT : mode === "values" ? innerT : VOID;
+    const outT: IrType = mode === "void" ? VOID : arrayOf(storeT);
     const psT: IrType = dyn ? DYN : arrayOf(entryT);
-    const pKey = typeKey(entryT);
-    const sKey = typeKey(settledT);
-    const key = `settledcount:${pKey}:${sKey}`;
+    const key = `countdown:${mode}:${typeKey(entryT)}:${typeKey(storeT)}`;
     const retT: IrType = { kind: "promise", inner: outT };
-    const resolveT: IrType = { kind: "func", params: [outT], ret: VOID };
+    const resolveT: IrType = { kind: "func", params: mode === "void" ? [] : [outT], ret: VOID };
     const rejectT: IrType = { kind: "func", params: [DYN], ret: VOID };
     // The withResolvers record, interned exactly as the type mapper interns
-    // Promise.withResolvers<T>(): promise, reject (%Error), resolve (T).
+    // Promise.withResolvers<T>(): promise, reject (dyn), resolve (T).
     const wShapeId = L.shapes.intern(
       [
         { name: "promise", type: retT },
@@ -10425,41 +10433,40 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       ["promise", "resolve", "reject"],
     );
     const wT: IrType = { kind: "record", shapeId: wShapeId };
-
-    // The settle step: one lifted async helper per (entry type, settled type).
-    const stepKey = `settlestep:${pKey}:${sKey}`;
-    let step = L.retagHelpers.get(stepKey);
+    const withValues = mode !== "void";
+    const stepSettledKey = `countstep:${key}`;
+    let step = L.retagHelpers.get(stepSettledKey);
     if (!step) {
-      step = `%promise.settlestep.${L.retagHelpers.size}`;
-      L.retagHelpers.set(stepKey, step);
+      step = `%promise.countstep.${L.retagHelpers.size}`;
+      L.retagHelpers.set(stepSettledKey, step);
       const pT: IrType = dyn ? DYN : entryT;
-      const stepFnT: IrType & { kind: "func" } = {
-        kind: "func", params: [pT, F64, outT, arrayOf(F64), resolveT], ret: VOID,
-      };
+      const stepParamTs: IrType[] = [pT, F64, ...(withValues ? [outT] : []), arrayOf(F64), resolveT, ...(mode === "settled" ? [] : [rejectT])];
+      const stepFnT: IrType & { kind: "func" } = { kind: "func", params: stepParamTs, ret: VOID };
       const fnCtx = newFnCtx(true, null, stepFnT, VOID);
       fnCtx.isAsync = true;
       L.fnStack.push(fnCtx);
       try {
         const pLocal = L.declareHiddenLocal("p", pT);
         const iLocal = L.declareHiddenLocal("i", F64);
-        const valuesLocal = L.declareHiddenLocal("values", outT);
+        const valuesLocal = withValues ? L.declareHiddenLocal("values", outT) : null;
         const cntLocal = L.declareHiddenLocal("cnt", arrayOf(F64));
         const doneLocal = L.declareHiddenLocal("done", resolveT);
+        const failLocal = mode === "settled" ? null : L.declareHiddenLocal("fail", rejectT);
         const eLocal = L.declareHiddenLocal("e", CAUGHT);
+        const stepParams = [pLocal, iLocal, ...(valuesLocal ? [valuesLocal] : []), cntLocal, doneLocal, ...(failLocal ? [failLocal] : [])];
         const pRef: IrExpr = { kind: "varRef", localId: pLocal.id, type: pT, loc };
         const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
-        const valuesRef: IrExpr = { kind: "varRef", localId: valuesLocal.id, type: outT, loc };
         const cntRef: IrExpr = { kind: "varRef", localId: cntLocal.id, type: arrayOf(F64), loc };
         const doneRef: IrExpr = { kind: "varRef", localId: doneLocal.id, type: resolveT, loc };
+        const valuesRef: IrExpr | null = valuesLocal ? { kind: "varRef", localId: valuesLocal.id, type: outT, loc } : null;
+        const failRef: IrExpr | null = failLocal ? { kind: "varRef", localId: failLocal.id, type: rejectT, loc } : null;
         const eRef: IrExpr = { kind: "varRef", localId: eLocal.id, type: CAUGHT, loc };
         const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
         const str = (s: string): IrExpr => ({ kind: "strLit", value: s, type: STRING, loc });
         const recLit = (shapeId: string, fields: { name: string; value: IrExpr }[]): IrExpr =>
           ({ kind: "recordLit", fields, type: { kind: "record", shapeId }, loc });
-        // Store the settled record at input index i, count down, and hand the
-        // values array to done when the last entry has settled.
-        const store = (rec: IrExpr): IrStmt[] => [
-          { kind: "arraySet", arr: valuesRef, index: iRef, value: rec, loc },
+        // Count down; the last settle hands the result to done.
+        const count: IrStmt[] = [
           {
             kind: "arraySet", arr: cntRef, index: zero,
             value: {
@@ -10480,30 +10487,16 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
             },
             then: [{
               kind: "exprStmt",
-              expr: { kind: "callValue", callee: doneRef, args: [valuesRef], type: VOID, loc },
+              expr: { kind: "callValue", callee: doneRef, args: valuesRef ? [valuesRef] : [], type: VOID, loc },
               loc,
             }],
             else_: null,
             loc,
           },
         ];
-        const okRec = (v: IrExpr): IrExpr => ({
-          kind: "unionWrap", unionId: arms.unionId, tag: arms.okTag,
-          value: recLit(arms.okShapeId, arms.okFields.map((f): { name: string; value: IrExpr } =>
-            f.name === "status" ? { name: f.name, value: str("fulfilled") }
-              : { name: f.name, value: L.coerceToExpected(v, f.type) })),
-          type: settledT, loc,
-        });
-        const errRec = (e: IrExpr): IrExpr => ({
-          kind: "unionWrap", unionId: arms.unionId, tag: arms.errTag,
-          value: recLit(arms.errShapeId, arms.errFields.map((f): { name: string; value: IrExpr } =>
-            f.name === "status" ? { name: f.name, value: str("rejected") }
-              : { name: f.name, value: { kind: "caughtToDyn", value: e, type: DYN, loc } })),
-          type: settledT, loc,
-        });
         // The awaited value, and the statements that wait for it.
         const tryBody: IrStmt[] = [];
-        let okValue: IrExpr;
+        let okValue: IrExpr | null = null;
         if (dyn) {
           const vLocal = L.declareHiddenLocal("v", DYN);
           tryBody.push({
@@ -10512,38 +10505,60 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
             loc,
           });
           okValue = { kind: "varRef", localId: vLocal.id, type: DYN, loc };
+        } else if (innerT.kind === "void") {
+          tryBody.push({ kind: "exprStmt", expr: { kind: "awaitExpr", value: pRef, type: VOID, loc }, loc });
+          okValue = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
         } else {
-          const innerT = (entryT as IrType & { kind: "promise" }).inner;
-          if (innerT.kind === "void") {
-            tryBody.push({ kind: "exprStmt", expr: { kind: "awaitExpr", value: pRef, type: VOID, loc }, loc });
-            okValue = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
-          } else {
-            const vLocal = L.declareHiddenLocal("v", innerT);
-            tryBody.push({
-              kind: "varDecl", localId: vLocal.id,
-              init: { kind: "awaitExpr", value: pRef, type: innerT, loc },
-              loc,
-            });
-            okValue = { kind: "varRef", localId: vLocal.id, type: innerT, loc };
-          }
+          const vLocal = L.declareHiddenLocal("v", innerT);
+          tryBody.push({
+            kind: "varDecl", localId: vLocal.id,
+            init: { kind: "awaitExpr", value: pRef, type: innerT, loc },
+            loc,
+          });
+          okValue = { kind: "varRef", localId: vLocal.id, type: innerT, loc };
         }
-        tryBody.push(...store(okRec(okValue)));
+        if (mode === "settled") {
+          const arms = settleArms!;
+          const okRec: IrExpr = {
+            kind: "unionWrap", unionId: arms.unionId, tag: arms.okTag,
+            value: recLit(arms.okShapeId, arms.okFields.map((f): { name: string; value: IrExpr } =>
+              f.name === "status" ? { name: f.name, value: str("fulfilled") }
+                : { name: f.name, value: L.coerceToExpected(okValue!, f.type) })),
+            type: elemT, loc,
+          };
+          tryBody.push({ kind: "arraySet", arr: valuesRef!, index: iRef, value: okRec, loc }, ...count);
+        } else if (mode === "values") {
+          tryBody.push({ kind: "arraySet", arr: valuesRef!, index: iRef, value: okValue!, loc }, ...count);
+        } else {
+          tryBody.push(...count);
+        }
+        const errRecord = (e: IrExpr): IrExpr => {
+          const arms = settleArms!;
+          return {
+            kind: "unionWrap", unionId: arms.unionId, tag: arms.errTag,
+            value: recLit(arms.errShapeId, arms.errFields.map((f): { name: string; value: IrExpr } =>
+              f.name === "status" ? { name: f.name, value: str("rejected") }
+                : { name: f.name, value: { kind: "caughtToDyn", value: e, type: DYN, loc } })),
+            type: elemT, loc,
+          };
+        };
+        const catchBody: IrStmt[] = mode === "settled"
+          ? [{ kind: "arraySet", arr: valuesRef!, index: iRef, value: errRecord(eRef), loc }, ...count]
+          : [{
+            kind: "exprStmt",
+            expr: { kind: "callValue", callee: failRef!, args: [{ kind: "caughtToDyn", value: eRef, type: DYN, loc }], type: VOID, loc },
+            loc,
+          }];
         const ctx = L.ctx;
         L.liftedFns.push({
           name: step,
-          params: [
-            { localId: pLocal.id, name: pLocal.name, type: pT },
-            { localId: iLocal.id, name: iLocal.name, type: F64 },
-            { localId: valuesLocal.id, name: valuesLocal.name, type: outT },
-            { localId: cntLocal.id, name: cntLocal.name, type: arrayOf(F64) },
-            { localId: doneLocal.id, name: doneLocal.name, type: resolveT },
-          ],
+          params: stepParams.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
           returnType: VOID,
           locals: ctx.locals,
           body: [{
             kind: "tryCatch",
             tryBody,
-            catchBody: store(errRec(eRef)),
+            catchBody,
             catchLocalId: eLocal.id,
             finallyBody: null,
             loc,
@@ -10560,7 +10575,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     // Nothing between the last settle and the awaiters is a wrapper.
     const existing = L.retagHelpers.get(key);
     if (existing) return { kind: "call", callee: existing, args: [entries], type: retT, loc };
-    const name = `%promise.settlecount.${L.retagHelpers.size}`;
+    const name = `%promise.countdown.${L.retagHelpers.size}`;
     L.retagHelpers.set(key, name);
     const funcType: IrType & { kind: "func" } = { kind: "func", params: [psT], ret: retT };
     const fnCtx = newFnCtx(true, null, funcType, outT);
@@ -10571,7 +10586,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       const packLocal = L.declareHiddenLocal("pack", DYN);
       packLocal.mutable = true;
       const nLocal = L.declareHiddenLocal("n", F64);
-      const valuesLocal = L.declareHiddenLocal("values", outT);
+      const valuesLocal = withValues ? L.declareHiddenLocal("values", outT) : null;
       const cntLocal = L.declareHiddenLocal("cnt", arrayOf(F64));
       const iLocal = L.declareHiddenLocal("i", F64);
       iLocal.mutable = true;
@@ -10579,11 +10594,12 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       const wRef: IrExpr = { kind: "varRef", localId: wLocal.id, type: wT, loc };
       const packRef: IrExpr = { kind: "varRef", localId: packLocal.id, type: DYN, loc };
       const nRef: IrExpr = { kind: "varRef", localId: nLocal.id, type: F64, loc };
-      const valuesRef: IrExpr = { kind: "varRef", localId: valuesLocal.id, type: outT, loc };
+      const valuesRef: IrExpr | null = valuesLocal ? { kind: "varRef", localId: valuesLocal.id, type: outT, loc } : null;
       const cntRef: IrExpr = { kind: "varRef", localId: cntLocal.id, type: arrayOf(F64), loc };
       const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
       const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
       const resolveOf: IrExpr = { kind: "recordGet", obj: wRef, shapeId: wShapeId, field: "resolve", type: resolveT, loc };
+      const rejectOf: IrExpr = { kind: "recordGet", obj: wRef, shapeId: wShapeId, field: "reject", type: rejectT, loc };
       const elemOf: IrExpr = dyn
         ? { kind: "libCall", fn: "dyn.arrAt", args: [packRef, iRef], type: DYN, loc }
         : { kind: "arrayGet", arr: psRef, index: iRef, type: entryT, loc };
@@ -10600,12 +10616,12 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       body.push(
         { kind: "varDecl", localId: wLocal.id, init: { kind: "promiseWithResolvers", type: wT, loc }, loc },
         { kind: "varDecl", localId: nLocal.id, init: lenOf, loc },
-        { kind: "varDecl", localId: valuesLocal.id, init: { kind: "arrayNewLen", length: nRef, type: outT, loc }, loc },
+        ...(valuesLocal ? [{ kind: "varDecl" as const, localId: valuesLocal.id, init: { kind: "arrayNewLen" as const, length: nRef, type: outT, loc }, loc }] : []),
         { kind: "varDecl", localId: cntLocal.id, init: { kind: "arrayLit", elems: [nRef], type: arrayOf(F64), loc }, loc },
         {
           kind: "if",
           cond: { kind: "bin", op: "===", left: nRef, right: zero, type: BOOL, loc },
-          then: [{ kind: "exprStmt", expr: { kind: "callValue", callee: resolveOf, args: [valuesRef], type: VOID, loc }, loc }],
+          then: [{ kind: "exprStmt", expr: { kind: "callValue", callee: resolveOf, args: valuesRef ? [valuesRef] : [], type: VOID, loc }, loc }],
           else_: null,
           loc,
         },
@@ -10618,7 +10634,12 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
               kind: "exprStmt",
               expr: {
                 kind: "call", callee: step,
-                args: [elemOf, iRef, valuesRef, cntRef, resolveOf],
+                args: [
+                  elemOf, iRef,
+                  ...(valuesRef ? [valuesRef] : []),
+                  cntRef, resolveOf,
+                  ...(mode === "settled" ? [] : [rejectOf]),
+                ],
                 type: { kind: "promise", inner: VOID }, loc,
               },
               loc,
@@ -10653,93 +10674,35 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     }
   }
 
+  /** `Promise.allSettled(entries)` (see countdown). */
+  function settledCountdown(
+    L: Lowerer,
+    entries: IrExpr,
+    entryT: IrType,
+    settledT: IrType,
+    loc: SrcLoc,
+  ): IrExpr | null {
+    return countdown(L, entries, entryT, "settled", settledT, loc);
+  }
+
+  /** `Promise.all(entries)` whose result is discarded (or void-typed): no
+   * values array, the result resolves once every entry has, and the first
+   * rejection rejects it. Covers untyped (dyn) entries. */
+  export function voidCountdown(L: Lowerer, entries: IrExpr, entryT: IrType, loc: SrcLoc): IrExpr | null {
+    return countdown(L, entries, entryT, "void", VOID, loc);
+  }
+
+  /** `Promise.all(entries)` over promises of one type with a value per entry. */
+  export function valuesCountdown(L: Lowerer, entries: IrExpr, entryT: IrType, loc: SrcLoc): IrExpr | null {
+    return countdown(L, entries, entryT, "values", VOID, loc);
+  }
+
   /** `Promise.all(ps)` over a CHECKED-DYNAMIC argument whose combined result is
    * discarded (`await Promise.all(commands.map(...))` where `commands` is
-   * untyped: the checker types the call `any[]`, and the values are promises or
-   * plain values, which Node adopts one by one). The values array would be an
-   * array of dyn, which has no representation, so the combined result exists
-   * only as its settlement: the void collapse.
-   *
-   * Each entry becomes the promise Node would use for it (dyn.adoptPromise:
-   * a boxed promise is itself, a plain value a promise fulfilled with it), and
-   * the list takes the runtime's all combinator directly, so no entry adds a
-   * tick. The helper itself is not async (an async body would add the tick its
-   * return costs); a non-iterable argument is routed to dynNotIterableHelper. */
+   * untyped). The argument stays dyn; entries are awaited as checked-dynamic
+   * values by voidCountdown. A non-iterable argument rejects (dynPackStmts). */
   function dynAllOverArray(L: Lowerer, entries: IrExpr, loc: SrcLoc): IrExpr | null {
-    const dynPromT: IrType & { kind: "promise" } = { kind: "promise", inner: DYN };
-    const key = "dynall:all";
-    const retT: IrType = { kind: "promise", inner: VOID };
-    const existing = L.retagHelpers.get(key);
-    if (existing) return { kind: "call", callee: existing, args: [entries], type: retT, loc };
-    const name = `%promise.dynall.${L.retagHelpers.size}`;
-    L.retagHelpers.set(key, name);
-
-    const funcType: IrType & { kind: "func" } = { kind: "func", params: [DYN], ret: retT };
-    const fnCtx = newFnCtx(true, null, funcType, VOID);
-    L.fnStack.push(fnCtx);
-    try {
-      const psLocal = L.declareHiddenLocal("ps", DYN);
-      const packLocal = L.declareHiddenLocal("pack", DYN);
-      packLocal.mutable = true;
-      const listT = arrayOf(dynPromT);
-      const listLocal = L.declareHiddenLocal("entries", listT);
-      const iLocal = L.declareHiddenLocal("i", F64);
-      iLocal.mutable = true;
-      const psRef: IrExpr = { kind: "varRef", localId: psLocal.id, type: DYN, loc };
-      const packRef: IrExpr = { kind: "varRef", localId: packLocal.id, type: DYN, loc };
-      const listRef: IrExpr = { kind: "varRef", localId: listLocal.id, type: listT, loc };
-      const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
-      const adopted: IrExpr = {
-        kind: "libCall", fn: "dyn.adoptPromise",
-        args: [{ kind: "libCall", fn: "dyn.arrAt", args: [packRef, iRef], type: DYN, loc }],
-        type: dynPromT, loc,
-      };
-      const body: IrStmt[] = [
-        { kind: "varDecl", localId: packLocal.id, init: dynUndefinedExpr(loc), loc },
-        ...dynPackStmts(L, psRef, packLocal, retT as IrType & { kind: "promise" }, loc),
-        { kind: "varDecl", localId: listLocal.id, init: { kind: "arrayLit", elems: [], type: listT, loc }, loc },
-        { kind: "varDecl", localId: iLocal.id, init: { kind: "numLit", value: 0, type: F64, loc }, loc },
-        {
-          kind: "while",
-          cond: {
-            kind: "bin", op: "<", left: iRef,
-            right: { kind: "libCall", fn: "dyn.arrLen", args: [packRef], type: F64, loc },
-            type: BOOL, loc,
-          },
-          body: [
-            {
-              kind: "exprStmt",
-              expr: { kind: "arrIntrinsic", method: "push", receiver: listRef, args: [adopted], type: F64, loc },
-              loc,
-            },
-            {
-              kind: "assign",
-              localId: iLocal.id,
-              value: { kind: "bin", op: "+", left: iRef, right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc },
-              loc,
-            },
-          ],
-          loc,
-        },
-        {
-          kind: "return",
-          value: { kind: "intrinsic", name: "promise.all", args: [listRef], type: retT, loc },
-          loc,
-        },
-      ];
-      const ctx = L.ctx;
-      L.liftedFns.push({
-        name,
-        params: [{ localId: psLocal.id, name: psLocal.name, type: DYN }],
-        returnType: retT,
-        locals: ctx.locals,
-        body,
-        loc,
-      });
-      return { kind: "call", callee: name, args: [entries], type: retT, loc };
-    } finally {
-      L.fnStack.pop();
-    }
+    return voidCountdown(L, entries, DYN, loc);
   }
 
 /** `Promise.all(ps)` over a `Promise<void>[]` whose result is held rather
@@ -11220,6 +11183,12 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
             kind: "promise",
             inner: first.inner.kind === "void" ? VOID : arrayOf(first.inner),
           };
+          // Node's settlement turns: the settle-counting combinator, not the
+          // runtime's all (which resumes awaiters a tick early).
+          const counted = first.inner.kind === "void"
+            ? voidCountdown(L, entriesArr, first, loc)
+            : valuesCountdown(L, entriesArr, first, loc);
+          if (counted) return counted;
           return { kind: "intrinsic", name: "promise.all", args: [entriesArr], type: resultT, loc };
         }
         // MIXED entries where some entry is already an ISLAND value (the
@@ -11386,6 +11355,10 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
             "so the result is Promise<T[]>, not a tuple",
         );
       }
+      const counted = inner.kind === "void" || inner.kind === "dyn"
+        ? voidCountdown(L, entries, entries.type.elem, loc)
+        : valuesCountdown(L, entries, entries.type.elem, loc);
+      if (counted) return counted;
       return { kind: "intrinsic", name: "promise.all", args: [entries], type: resultT, loc };
     }
     // `Promise.allSettled([...])` over a UNIFORM array literal: each entry is
