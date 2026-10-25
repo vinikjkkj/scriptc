@@ -2039,7 +2039,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                 }
               }
             }
-            const g: IrGlobal = { id: `%g.${tag}${name}`, name, type: t, mutable: false };
+            // The member's own id: a same-named module `var`/`let` owns `%g.${tag}${name}`,
+            // and two globals with one id share one C storage (a silent alias, and a
+            // double release at exit for a heap value).
+            const g: IrGlobal = { id: `%g.${tag}%xp.${name}`, name, type: t, mutable: false };
             L.globalsBySymbol.set(symbol, g);
             // Importer aliases resolve to a DISTINCT late-bound symbol with
             // the same declaration — key the node too (globalOf's fallback).

@@ -452,6 +452,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10408-defprop-export-member-not-var.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10408-defprop-export-member-not-var.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1050-comptime-tables.ts": {
    "order": [
     "<repo>/tests/corpus/1050-comptime-tables.ts"
