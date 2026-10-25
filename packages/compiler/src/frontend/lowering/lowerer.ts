@@ -7035,6 +7035,52 @@ export class Lowerer {
    * arm's canonical tag. Same-union values pass through untouched; anything
    * else (including a DIFFERENT union) is left for requireExactShape, which
    * rejects union mismatches with SC2003. */
+  /** A checked-dynamic value flowing into a Promise slot (`Promise<void>`,
+   * `Promise<unknown>`, or that promise with an undefined arm): Node's
+   * resolution rule, dyn.adoptPromise. A promise value IS the promise (the
+   * same object, no tick); any other value resolves a fresh promise with it.
+   * In a union with an undefined arm, an undefined value stays undefined
+   * (the dynTest), and every other value adopts. Null for any other target,
+   * and the caller keeps its fence. */
+  adoptDynIntoPromise(expr: IrExpr, expected: IrType): IrExpr | null {
+    if (expr.type.kind !== "dyn") return null;
+    const loc = expr.loc;
+    const promiseArm = (t: IrType): (IrType & { kind: "promise" }) | null =>
+      t.kind === "promise" && (t.inner.kind === "dyn" || t.inner.kind === "void") ? t : null;
+    // The adopt libCall answers the one promise type the runtime hands back;
+    // a void-inner slot reads the same object (its payload is never read).
+    const adopt = (value: IrExpr, p: IrType & { kind: "promise" }): IrExpr =>
+      ({ kind: "libCall", fn: "dyn.adoptPromise", args: [value], type: p, loc });
+    if (expected.kind === "promise") {
+      const p = promiseArm(expected);
+      return p ? adopt(expr, p) : null;
+    }
+    if (expected.kind !== "union") return null;
+    const def = this.unions.get(expected.unionId);
+    if (!def) return null;
+    const promTag = def.arms.findIndex((a) => promiseArm(a) !== null);
+    const undefTag = def.arms.findIndex((a) => a.kind === "undefinedT");
+    if (promTag < 0 || undefTag < 0 || def.arms.length !== 2) return null;
+    const pArm = promiseArm(def.arms[promTag]!)!;
+    const tmp = this.declareHiddenLocal("%dynadopt", DYN);
+    const tmpRef: IrExpr = { kind: "varRef", localId: tmp.id, type: DYN, loc };
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: tmp.id, init: expr, loc }],
+      result: {
+        kind: "ternary",
+        cond: { kind: "dynTest", test: "undefined", value: tmpRef, type: BOOL, loc },
+        then: { kind: "unionWrap", unionId: expected.unionId, tag: undefTag,
+          value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: expected, loc },
+        else_: { kind: "unionWrap", unionId: expected.unionId, tag: promTag, value: adopt(tmpRef, pArm), type: expected, loc },
+        type: expected,
+        loc,
+      },
+      type: expected,
+      loc,
+    };
+  }
+
   coerceToExpected(expr: IrExpr, expected: IrType): IrExpr {
     // An index-signature keyed read into a DYN slot reads at that slot's
     // width, so an absent key answers undefined the way JS does instead of
@@ -7042,6 +7088,8 @@ export class Lowerer {
     // conversion it replaces is the dynFrom the arms below would build.
     const atWidth = this.recordKeyReadAtSlotWidth(expr, expected);
     if (atWidth) return atWidth;
+    const adopted = this.adoptDynIntoPromise(expr, expected);
+    if (adopted) return adopted;
     // Island boundary, both directions. IN: any static value flowing into
     // an any-typed slot marshals implicitly (tsc allows the assignment;
     // the marshal is where its semantics live). OUT: an 'any' value

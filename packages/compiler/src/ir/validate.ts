@@ -5342,6 +5342,12 @@ function validateFunction(
             }
             break;
           }
+          // The adopt answers a promise of either payload (a void-inner slot
+          // reads the same runtime promise; the payload is never read).
+          if (e.fn === "dyn.adoptPromise") {
+            if (e.type.kind !== "promise") err(`libCall ${e.fn} must be a promise`, e.loc);
+            break;
+          }
           if (!typeEquals(e.type, sig.result)) {
             err(`libCall ${e.fn} must be ${sig.result.kind}, got ${e.type.kind}`, e.loc);
           }
@@ -5442,7 +5448,8 @@ function validateFunction(
             );
           }
         }
-        if (!typeEquals(e.type, sig.result)) {
+        // dyn.adoptPromise answers a promise of either payload (see its sig).
+        if (e.fn === "dyn.adoptPromise" ? e.type.kind !== "promise" : !typeEquals(e.type, sig.result)) {
           err(`libCall ${e.fn} must be ${sig.result.kind}, got ${e.type.kind}`, e.loc);
         }
         break;
