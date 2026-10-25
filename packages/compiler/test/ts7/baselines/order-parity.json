@@ -933,6 +933,37 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10900-buffer-alias-statics.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10900-buffer-alias-statics.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10901-buffer-alias-function-scope.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10901-buffer-alias-function-scope.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10902-buffer-alias-reexport/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10902-buffer-alias-reexport/codec.cjs",
+    "<repo>/tests/corpus/10902-buffer-alias-reexport/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10903-process-binding-buffer.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10903-process-binding-buffer.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10908-process-binding-buffer-try.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10908-process-binding-buffer-try.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/10950-tdz-var-hoisted-ctor-reads-later-var.cjs": {
    "order": [
     "<repo>/tests/corpus/10950-tdz-var-hoisted-ctor-reads-later-var.cjs"
@@ -1667,6 +1698,36 @@
    "order": [
     "<repo>/tests/corpus/11852-fn-ctor-namespace-return/lib/shapes.cjs",
     "<repo>/tests/corpus/11852-fn-ctor-namespace-return/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11900-modvalue-shorthand-literal/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11900-modvalue-shorthand-literal/local_date.cjs",
+    "<repo>/tests/corpus/11900-modvalue-shorthand-literal/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11901-modvalue-new-function-members/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11901-modvalue-new-function-members/local_date.cjs",
+    "<repo>/tests/corpus/11901-modvalue-new-function-members/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11902-modvalue-tofunction-bridge/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11902-modvalue-tofunction-bridge/local_date.cjs",
+    "<repo>/tests/corpus/11902-modvalue-tofunction-bridge/gen.cjs",
+    "<repo>/tests/corpus/11902-modvalue-tofunction-bridge/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11903-modvalue-function-apply-scope/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11903-modvalue-function-apply-scope/local_date.cjs",
+    "<repo>/tests/corpus/11903-modvalue-function-apply-scope/gen.cjs",
+    "<repo>/tests/corpus/11903-modvalue-function-apply-scope/main.cjs"
    ],
    "diags": []
   },
@@ -17501,36 +17562,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/11900-modvalue-shorthand-literal/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/11900-modvalue-shorthand-literal/local_date.cjs",
-    "<repo>/tests/corpus/11900-modvalue-shorthand-literal/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11901-modvalue-new-function-members/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/11901-modvalue-new-function-members/local_date.cjs",
-    "<repo>/tests/corpus/11901-modvalue-new-function-members/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11902-modvalue-tofunction-bridge/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/11902-modvalue-tofunction-bridge/local_date.cjs",
-    "<repo>/tests/corpus/11902-modvalue-tofunction-bridge/gen.cjs",
-    "<repo>/tests/corpus/11902-modvalue-tofunction-bridge/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/11903-modvalue-function-apply-scope/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/11903-modvalue-function-apply-scope/local_date.cjs",
-    "<repo>/tests/corpus/11903-modvalue-function-apply-scope/gen.cjs",
-    "<repo>/tests/corpus/11903-modvalue-function-apply-scope/main.cjs"
-   ],
-   "diags": []
   }
  }
 }

@@ -11,6 +11,7 @@ import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrPar
 import { STR_INTRINSIC_SIGS } from "../../ir/validate.js";
 import { definePropTableDecline } from "./lower-classes.js";
 import { isJsSourceFile, isNodeTypesPath, locOf, requireSpecOf } from "../program.js";
+import { canonicalBuiltinModule } from "../shared.js";
 
 /** Statement-level constructs rejected wholesale, keyed by syntax kind. */
 export const UNSUPPORTED_STMT: Partial<Record<ts.SyntaxKind, { code: keyof typeof UNSUPPORTED; feature?: string }>> = {
@@ -2190,6 +2191,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       if (!symbol) return null;
       const alias = L.stdlibGlobalAliases.get(symbol);
       if (alias !== undefined) return alias;
+      // A Buffer-class alias binding (no storage): the global by provenance (isBufferAliasSymbol).
+      if (isBufferAliasSymbol(L, symbol)) return "Buffer";
       // An IMPORTED binding of a builtin module's re-exported global
       // (`import { Buffer } from "node:buffer"` — Node's module spelling
       // of the same object) resolves through the alias to the fallback
@@ -2201,6 +2204,9 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       return resolved.name === "global" ? "globalThis" : resolved.name;
     }
     if (ts.isPropertyAccessExpression(expr) && !expr.questionDotToken) {
+      // `require('buffer').Buffer` spelled inline (`require("buffer").Buffer.from(x)`):
+      // the same class as the global, by module provenance (bufferClassRefOf).
+      if (bufferClassRefOf(L, expr)) return "Buffer";
       if (stdlibGlobalNameOf(L, expr.expression) !== "globalThis") return null;
       const symbol = L.checker.getSymbolAtLocation(expr.name);
       if (!symbol || !L.isStdlibSymbol(symbol)) return null;
@@ -2227,6 +2233,101 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     if (L.chainBlocked(access)) return null;
     return L.isStdlibGlobal(access.expression, name) ? access.name.text : null;
   }
+
+/** `require('buffer').Buffer`, or `<ns>.Buffer` where `<ns>` is a binding
+   * initialized by `require('buffer')` (`var buffer = require('buffer')`):
+   * the Buffer class the module re-exports. Measured under Node v24.15.0:
+   * `require("buffer").Buffer === Buffer`. Specifier provenance only (the
+   * builtin specifier, with or without `node:`); no package name is consulted,
+   * so a package that re-exports the builtin Buffer through its own module
+   * is NOT matched here and keeps its ordinary lowering. */
+export function bufferClassRefOf(L: Lowerer, init: ts.Expression): boolean {
+  let e: ts.Expression = init;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isPropertyAccessExpression(e) || e.questionDotToken !== undefined) return false;
+  if (e.name.text !== "Buffer") return false;
+  const recv = e.expression;
+  if (ts.isCallExpression(recv)) {
+    const spec = requireSpecOf(recv);
+    return spec !== null && canonicalBuiltinModule(spec) === "buffer";
+  }
+  if (!ts.isIdentifier(recv)) return false;
+  const sym = L.checker.getSymbolAtLocation(recv);
+  const decl = sym ? L.checker.declarationsOf(sym)[0] : undefined;
+  if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return false;
+  if (!ts.isIdentifier(decl.name)) return false;
+  const spec = requireSpecOf(decl.initializer);
+  return spec !== null && canonicalBuiltinModule(spec) === "buffer";
+}
+
+/** The Buffer class under another name: `const B = require('buffer').Buffer`,
+   * `var Buffer = buffer.Buffer` (with `var buffer = require('buffer')`), or
+   * `const X = Buffer`. Node: all of these are the same class object
+   * (`require("buffer").Buffer === Buffer`, measured under v24.15.0). The class
+   * lowers by receiver (lowerBufferStaticCall), so such a binding is alias plumbing:
+   * it emits nothing, and its receiver uses resolve to the global through
+   * stdlibGlobalNameOf. A VALUE read of the alias refuses (SC1090). */
+const writtenSymbolsByFile = new WeakMap<ts.SourceFile, Set<ts.Symbol>>();
+/** Writes to a symbol anywhere in a file, computed once per file: `=`, compound
+   * assignment, and ++/--. */
+function writtenSymbolsOf(L: Lowerer, sf: ts.SourceFile): Set<ts.Symbol> {
+  const cached = writtenSymbolsByFile.get(sf);
+  if (cached) return cached;
+  const out = new Set<ts.Symbol>();
+  const note = (n: ts.Expression): void => {
+    if (!ts.isIdentifier(n)) return;
+    const s = L.checker.getSymbolAtLocation(n);
+    if (s) out.add(s);
+  };
+  // Iterative (an explicit stack): a deeply nested program must reach the compiler's own
+  // depth refusal, not a JS stack overflow in this walk.
+  const stack: ts.Node[] = [sf];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        n.operatorToken.kind <= ts.SyntaxKind.LastAssignment) note(n.left);
+    else if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) &&
+        (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken)) note(n.operand);
+    ts.forEachChild(n, (c) => { stack.push(c); });
+  }
+  writtenSymbolsByFile.set(sf, out);
+  return out;
+}
+/** The pure alias predicate for a declaration `nameNode = init`. Syntax and checker
+   * symbols only, never lowering order: a function body lowered before its
+   * declaration (return-type inference) gets the same answer. The binding must be
+   * declared once in its file and never assigned. */
+function isBufferAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts.Expression | undefined, seen: Set<ts.Symbol>): boolean {
+  if (!init || !ts.isIdentifier(nameNode)) return false;
+  const sym = L.checker.getSymbolAtLocation(nameNode);
+  if (!sym || seen.has(sym)) return false;
+  const sf = nameNode.getSourceFile();
+  if (L.checker.declarationsOf(sym).filter((d) => d.getSourceFile() === sf).length !== 1) return false;
+  if (writtenSymbolsOf(L, sf).has(sym)) return false;
+  let e: ts.Expression = init;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (bufferClassRefOf(L, e)) return true;
+  if (!ts.isIdentifier(e)) return false;
+  const isym = L.checker.getSymbolAtLocation(e);
+  if (!isym) return false;
+  if (L.isStdlibSymbol(isym)) return e.text === "Buffer";
+  const d = L.checker.declarationsOf(isym).find((x) => ts.isVariableDeclaration(x));
+  if (d === undefined || !ts.isVariableDeclaration(d) || d.initializer === undefined) return false;
+  return isBufferAliasDecl(L, d.name, d.initializer, new Set([...seen, sym]));
+}
+
+/** True when `symbol` is a binding declared by a Buffer-class alias (isBufferAliasDecl). */
+export function isBufferAliasSymbol(L: Lowerer, symbol: ts.Symbol): boolean {
+  const d = L.checker.declarationsOf(symbol).find((x) => ts.isVariableDeclaration(x));
+  return d !== undefined && ts.isVariableDeclaration(d) && d.initializer !== undefined &&
+    isBufferAliasDecl(L, d.name, d.initializer, new Set());
+}
+
+/** The declaration walks' skip for a Buffer-class alias (collectGlobals and the
+   * statement lowering both call it). Returns true when the declaration is alias plumbing. */
+export function stdlibBufferVarAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts.Expression | undefined): boolean {
+  return isBufferAliasDecl(L, nameNode, init, new Set());
+}
 
 /** `const process = globalThis.process` (and any `const x = <stdlib
    * global>` snapshot — the suite harness's tamper-guard prologue): the
@@ -2255,7 +2356,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // identity (process, console, globalThis itself, and perf_hooks'
     // performance — the mockable-clock idiom snapshots it). Function-valued
     // globals (setTimeout) taken as values are a different story — the
-    // ordinary value paths (and their fences) apply.
+    // ordinary value paths (and their fences) apply. The Buffer class is
+    // aliased by stdlibBufferVarAliasDecl instead (it must also be never-assigned).
     if (name !== "process" && name !== "console" && name !== "globalThis" && name !== "performance") return false;
     const symbol = L.checker.getSymbolAtLocation(nameNode);
     if (!symbol) return false;
