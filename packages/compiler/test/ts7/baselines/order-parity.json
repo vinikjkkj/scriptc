@@ -16857,6 +16857,42 @@
     "<repo>/tests/corpus/10649-proto-value-logical-default.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/11150-prototype-install-facade-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/11150-prototype-install-facade-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11151-prototype-install-pool-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/11151-prototype-install-pool-receiver.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11152-prototype-install-duplicate-and-own-names.js": {
+   "order": [
+    "<repo>/tests/corpus/11152-prototype-install-duplicate-and-own-names.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11153-prototype-install-inherited-by-subclass.js": {
+   "order": [
+    "<repo>/tests/corpus/11153-prototype-install-inherited-by-subclass.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11154-prototype-install-declared-arity.js": {
+   "order": [
+    "<repo>/tests/corpus/11154-prototype-install-declared-arity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11155-prototype-install-skips-data-member.js": {
+   "order": [
+    "<repo>/tests/corpus/11155-prototype-install-skips-data-member.js"
+   ],
+   "diags": []
   }
  }
 }
