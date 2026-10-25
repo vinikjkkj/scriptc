@@ -34,7 +34,7 @@ import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
-import { type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
+import { type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -1998,7 +1998,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // constant. TypeScript keeps the fence (noImplicitThis makes it a
       // compile-time story there).
       if (isJsSourceFile(expr.getSourceFile()) || L.dynThisInLiterals > 0) {
-        return { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc };
+        return { kind: "libCall", fn: sloppyThisFnOf(expr) ? "dyn.thisSloppy" : "dyn.this", args: [], type: DYN, loc };
       }
       L.unsupported("SC1080", expr);
     }
@@ -9032,6 +9032,22 @@ function dynStaticKeyOf(L: Lowerer, prop: ts.ObjectLiteralElementLike): string |
  * receiver into a local at accessor entry and let `L.resolveThis` hand
  * THAT to the capture. It is not taken here: that edits this-resolution,
  * which another block owns. */
+/** Is `this` (in a plain JS function or method) read in SLOPPY code? The
+ * nearest enclosing non-arrow function decides: an arrow has no `this` of its
+ * own, so it is skipped. A sloppy receiver that is null or undefined reads as
+ * globalThis (scr_dyn_this_get_sloppy); strict code keeps the receiver as it is.
+ * Top-level `this` has no function to ask and keeps the plain read. */
+function sloppyThisFnOf(node: ts.Node): boolean {
+  let n: ts.Node | undefined = node.parent;
+  while (n !== undefined && !ts.isSourceFile(n)) {
+    if (ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isMethodDeclaration(n)) {
+      return !inStrictCode(n);
+    }
+    n = n.parent;
+  }
+  return false;
+}
+
 function rejectThisInDynAccessor(L: Lowerer, node: ts.Node, all: boolean, nested: boolean): void {
   if (node.kind === ts.SyntaxKind.ThisKeyword && (all || nested)) {
     L.unsupported(
@@ -16212,9 +16228,42 @@ export function hoistDetachedWriteRhs(L: Lowerer, expr: ts.BinaryExpression): Ir
   return [{ kind: "varDecl", localId: h.id, init: rhs, loc }];
 }
 
+/** `this === globalThis` (and `==`/`!=`/`!==`) in SLOPPY code: the receiver a
+ * nullish call gave the function is the global stand-in (scr_dyn_this_get_sloppy),
+ * so identity against it is a pointer test. Only `this` on the other side is
+ * answered: a bare `globalThis` is not a value here, and `globalThis === global`
+ * keeps its own lowering. */
+function sloppyThisGlobalIdentity(L: Lowerer, expr: ts.BinaryExpression): IrExpr | null {
+  const op = expr.operatorToken.kind;
+  const eq = op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.EqualsEqualsToken;
+  const neq = op === ts.SyntaxKind.ExclamationEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken;
+  if (!eq && !neq) return null;
+  const peelP = (n: ts.Expression): ts.Expression => {
+    let e = n;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    return e;
+  };
+  const isGlobalThisName = (n: ts.Expression): boolean =>
+    ts.isIdentifier(n) && n.text === "globalThis" && L.isStdlibGlobal(n, "globalThis");
+  const l = peelP(expr.left);
+  const r = peelP(expr.right);
+  let thisNode: ts.Expression | null = null;
+  if (l.kind === ts.SyntaxKind.ThisKeyword && isGlobalThisName(r)) thisNode = l;
+  else if (r.kind === ts.SyntaxKind.ThisKeyword && isGlobalThisName(l)) thisNode = r;
+  if (thisNode === null) return null;
+  const loc = locOf(expr);
+  const local = L.resolveThis(thisNode);
+  if (local && detachedThisClassOf(local) !== undefined) return null;
+  const callee = L.lowerExprExpecting(thisNode, DYN);
+  const test: IrExpr = { kind: "libCall", fn: "dyn.isGlobalThis", args: [callee], type: BOOL, loc };
+  return neq ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
+}
+
 export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const loc = locOf(expr);
     const op = expr.operatorToken.kind;
+    const globalIdentity = sloppyThisGlobalIdentity(L, expr);
+    if (globalIdentity !== null) return globalIdentity;
     if (detachedThisWriteFirst(L, expr)) {
       const stmts = hoistDetachedWriteRhs(L, expr);
       try {

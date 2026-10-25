@@ -6812,6 +6812,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_process_pid()`);
           case "dyn.this":
             return finish(`scr_dyn_this_get()`);
+          case "dyn.thisSloppy":
+            return finish(`scr_dyn_this_get_sloppy()`);
+          case "dyn.isGlobalThis":
+            return finish(`scr_dyn_is_global_this(${arg(0)})`);
           case "dyn.thisPush":
             // Opens the ambient-receiver window for the wrapper's extent
             // (the value is borrowed here and retained by the runtime for

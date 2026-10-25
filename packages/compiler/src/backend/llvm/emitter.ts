@@ -927,6 +927,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.toStringRangeDyn": "scr_dyn_to_string_range_dyn",
   "buffer.fromDynEnc": "scr_buffer_from_dyn_enc",
   "dyn.this": "scr_dyn_this_get",
+  "dyn.thisSloppy": "scr_dyn_this_get_sloppy",
+  "dyn.isGlobalThis": "scr_dyn_is_global_this",
   "dyn.thisPush": "scr_dyn_this_push_dyn",
   "dyn.thisPop": "scr_dyn_this_pop",
   "insp.dyn": "scr_insp_dyn",
