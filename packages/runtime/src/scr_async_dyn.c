@@ -861,17 +861,19 @@ static void scr_dyn_resolve_into(ScrPromise *p, ScrDyn *v);
 /* The resolving functions the job hands to then: a dyn function over a
  * closure whose capture is the shared record. */
 static ScrDyn *scr_then_resolve_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  /* scr_box_get_ref answers +1: the record is released on every exit. */
   ScrThenRec *rec = (ScrThenRec *)scr_box_get_ref(clo->caps[0]);
   if (!rec->done) {
     rec->done = true;
     ScrDyn *v = argc ? scr_dyn_retain(args[0]) : scr_dyn_retain(scr_dyn_undefined());
     scr_dyn_resolve_into(rec->p, v);
   }
+  scr_then_rec_release_v(rec);
   return scr_dyn_retain(scr_dyn_undefined());
 }
 
 static ScrDyn *scr_then_reject_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
-  ScrThenRec *rec = (ScrThenRec *)scr_box_get_ref(clo->caps[0]);
+  ScrThenRec *rec = (ScrThenRec *)scr_box_get_ref(clo->caps[0]); /* +1 */
   if (!rec->done) {
     rec->done = true;
     /* The reason is thrown into the active cell and moved into the promise,
@@ -879,6 +881,7 @@ static ScrDyn *scr_then_reject_thunk(ScrClosure *clo, ScrDyn *const *args, size_
     scr_throw_dyn(argc ? scr_dyn_retain(args[0]) : scr_dyn_retain(scr_dyn_undefined()));
     scr_promise_reject_pending(rec->p);
   }
+  scr_then_rec_release_v(rec);
   return scr_dyn_retain(scr_dyn_undefined());
 }
 
