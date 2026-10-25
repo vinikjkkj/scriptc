@@ -13517,6 +13517,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9851-union-class-collapse-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/9851-union-class-collapse-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9852-union-class-collapse-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/9852-union-class-collapse-return.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9853-union-three-class-collapse-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/9853-union-three-class-collapse-record.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
