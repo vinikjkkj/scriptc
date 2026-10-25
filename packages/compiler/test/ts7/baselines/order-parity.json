@@ -13419,6 +13419,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9850-union-let-regex-exec-tag.js": {
+   "order": [
+    "<repo>/tests/corpus/9850-union-let-regex-exec-tag.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",

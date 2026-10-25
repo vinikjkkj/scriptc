@@ -899,6 +899,17 @@ export class UnionRegistry {
    * its unionId. `armLits` is the calling site's per-arm literal
    * observation (foldArmLits); omit it when there is none to make. */
   intern(arms: IrType[], armLits?: Record<string, string[]>[]): string {
+    // A union ARM that is itself a union is the same set: `undefined | (A | B)`
+    // IS `undefined | A | B`. Synthetic joins (a ternary, a flow-merged `let`)
+    // intern their arms without the ts-level splice, so a nested arm reached
+    // the table and every arm test compared the outer arms only: a value of
+    // `string[] | null` into `undefined | (string[] | null)` refused with
+    // SC2003 (measured: JS `let match; match = re.exec(s)`, result.js:32).
+    // A nested arm with no finalized arm list (a pending recursive placeholder)
+    // stays as it is. Spliced arms carry no literal observation (undefined).
+    const flat = spliceNestedUnionArms(arms, this);
+    if (flat !== arms) armLits = undefined;
+    arms = flat;
     const key = JSON.stringify(arms.map(typeKey));
     let id = this.byKey.get(key);
     if (id === undefined) {
@@ -916,6 +927,34 @@ export class UnionRegistry {
   get(unionId: string): IrUnionDef | undefined {
     return this.byId.get(unionId);
   }
+}
+
+/** The flat arm list of a union whose arms may themselves be unions (see
+ * UnionTable.intern). Returns the input array itself when no arm is a
+ * spliceable union, so the common path allocates nothing. */
+function spliceNestedUnionArms(arms: IrType[], unions: { get(id: string): IrUnionDef | undefined; isPending(id: string): boolean }): IrType[] {
+  if (!arms.some((a) => a.kind === "union")) return arms;
+  const out: IrType[] = [];
+  const seen = new Set<string>();
+  const visiting = new Set<string>();
+  const add = (arm: IrType): void => {
+    if (arm.kind === "union") {
+      const inner = unions.get(arm.unionId);
+      if (inner !== undefined && inner.arms.length > 0 && !unions.isPending(arm.unionId) && !visiting.has(arm.unionId)) {
+        visiting.add(arm.unionId);
+        for (const x of inner.arms) add(x);
+        visiting.delete(arm.unionId);
+        return;
+      }
+    }
+    const k = typeKey(arm);
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(arm);
+    }
+  };
+  for (const a of arms) add(a);
+  return out;
 }
 
 /** Human-readable rendering of an IrType for diagnostics (records expand to
