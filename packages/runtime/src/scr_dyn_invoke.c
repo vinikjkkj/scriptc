@@ -2435,9 +2435,17 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
         }
         return scr_dyn_new_num(-1);
       }
+      /* includes compares with SameValueZero (NaN finds NaN), indexOf with
+       * strict equality (NaN never matches): the one difference, measured
+       * against Node on [NaN].includes(NaN) -> true. */
+      bool inc = dyn_name_is(method, "includes");
       for (size_t i = 0; i < len; i++) {
-        if (scr_dyn_strict_eq(recv->v.arr.items[i], needle)) {
-          return dyn_name_is(method, "includes") ? scr_dyn_new_bool(true) : scr_dyn_new_num((double)i);
+        ScrDyn *el = recv->v.arr.items[i];
+        bool hit = scr_dyn_strict_eq(el, needle) ||
+                   (inc && el->kind == SCR_DYN_NUM && needle->kind == SCR_DYN_NUM &&
+                    el->v.num != el->v.num && needle->v.num != needle->v.num);
+        if (hit) {
+          return inc ? scr_dyn_new_bool(true) : scr_dyn_new_num((double)i);
         }
       }
       return dyn_name_is(method, "includes") ? scr_dyn_new_bool(false) : scr_dyn_new_num(-1);
