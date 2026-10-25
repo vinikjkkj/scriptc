@@ -16216,6 +16216,18 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/10450-bind-on-an-untyped-callback-field.js": {
+   "order": [
+    "<repo>/tests/corpus/10450-bind-on-an-untyped-callback-field.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10451-rebound-untyped-callback-field.js": {
+   "order": [
+    "<repo>/tests/corpus/10451-rebound-untyped-callback-field.js"
+   ],
+   "diags": []
   }
  }
 }
