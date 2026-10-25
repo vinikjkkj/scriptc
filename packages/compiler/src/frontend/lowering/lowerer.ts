@@ -142,6 +142,7 @@ import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type Expand
 import { lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
 import { dtsWitnessClassOf } from "./lower-twin-witness.js";
+import { pairedProtoInstanceType } from "./proto-class-consume.js";
 
 /** Entry function name. '%' cannot appear in a TS identifier, so a user
  * function can never collide with it (mangling is injective per prefix). */
@@ -2227,6 +2228,7 @@ export class Lowerer {
       isProgramFile: (sf) => this.fileTag.has(sf),
       declFileHasCompiledImpl: (sf) => this.declTwinCompiled(sf),
       dtsWitnessClass: (t) => dtsWitnessClassOf(this, t),
+      pairedProtoInstance: (decl) => pairedProtoInstanceType(this, decl),
       declTwinClassDecl: (d) => this.declTwinClassDecl(d),
       accessorProducerProp: (sym) => this.accessorProducerProp(sym),
       nullPayloadPromiseProp: (sym) => this.nullPayloadPromiseProp(sym),

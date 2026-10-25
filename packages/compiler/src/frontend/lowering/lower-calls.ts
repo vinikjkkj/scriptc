@@ -15,7 +15,7 @@ import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
-import { protoThisType } from "./proto-class-consume.js";
+import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -4132,6 +4132,14 @@ export function lowerFfiCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null
 
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
+    // `P.m(...)` where P is a declaration-file class paired with the module's
+    // constructor: a static call of that constructor, ahead of the function-value
+    // spelling (`typeof P` is a function, and that route answers dyn).
+    if (ts.isPropertyAccessExpression(expr.expression) &&
+        !expr.expression.questionDotToken && pairedProtoClassOfValue(L, expr.expression.expression) !== null) {
+      const paired = lowerStaticMethodCall(L, expr, expr.expression);
+      if (paired !== null) return paired;
+    }
 
     // crypto.diffieHellman's CALLBACK form. Claimed at the head because the
     // spelling that reaches it is a CAST callee -- `(diffieHellman as (o,
@@ -5994,7 +6002,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // changes.
       {
         const recvNode = expr.expression.expression;
-        if (plainReadChain(recvNode)) {
+        if (plainReadChain(recvNode) || ts.isNewExpression(recvNode)) {
           const probe = probeLower(L, recvNode);
           if (probe !== null && probe.type.kind === "object") {
             const adopted = lowerObjectMethodCall(L, expr, expr.expression, probe.type.className);

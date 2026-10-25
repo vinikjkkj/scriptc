@@ -60,7 +60,10 @@ function klass(fields: ProtoField[]): ProtoClass {
     methods: [],
     protoConsts: [],
     statics: [],
+    staticFns: [],
     mergedMethods: [],
+    aliases: [],
+    protoData: [],
     bailouts: [],
   };
 }

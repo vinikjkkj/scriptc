@@ -23,11 +23,75 @@
  *
  * A declaration type with two different witnesses is ambiguous and keeps its
  * record mapping (no witness is better than a wrong one). */
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 
+/** The runtime file a `require()` of a package's declaration file loads. The
+ * checker resolves a bare specifier with the BUNDLER import condition, which can
+ * name a different copy (long's root index.d.ts types an ESM twin); Node takes
+ * the package's `exports` map under the "require" condition, and that branch's
+ * `default` is the file the program compiles. `types` in the same branch is the
+ * declaration the require pairs with. Returns null when the map has no require
+ * branch (the caller keeps the checker's answer). */
+export function requireBranchOf(pkgDir: string, subpath: string): { js: string; types: string | null } | null {
+  let pkg: { exports?: unknown } | null = null;
+  try {
+    pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")) as { exports?: unknown };
+  } catch {
+    return null;
+  }
+  const exp = pkg.exports as Record<string, unknown> | string | undefined;
+  if (exp === undefined || exp === null) return null;
+  const isSubpathMap = typeof exp === "object" && Object.keys(exp).some((k) => k.startsWith("."));
+  let target: unknown = isSubpathMap ? (exp as Record<string, unknown>)[subpath] : subpath === "." ? exp : undefined;
+  if (target === undefined) return null;
+  if (typeof target === "object" && target !== null && !Array.isArray(target)) {
+    target = (target as Record<string, unknown>)["require"];
+  } else {
+    return null;
+  }
+  const abs = (p: string): string => join(pkgDir, p.replace(/^\.\//, ""));
+  if (typeof target === "string") return { js: abs(target), types: null };
+  if (typeof target === "object" && target !== null) {
+    const r = target as Record<string, unknown>;
+    if (typeof r["default"] === "string") {
+      return { js: abs(r["default"]), types: typeof r["types"] === "string" ? abs(r["types"]) : null };
+    }
+  }
+  return null;
+}
+
+/** The nearest package root above `file` (the directory holding package.json). */
+export function packageRootOf(file: string): string | null {
+  let d = dirname(file);
+  for (;;) {
+    if (existsSync(join(d, "package.json"))) return d;
+    const up = dirname(d);
+    if (up === d) return null;
+    d = up;
+  }
+}
+
+/** The program's compiled source file the require of declaration file `dts`
+ * under `spec` runs: its `require`-branch JS, found among the lowered files. */
+export function requiredTwinOf(L: Lowerer, dts: ts.SourceFile, spec: string): ts.SourceFile | null {
+  const pkgDir = packageRootOf(dts.fileName);
+  if (pkgDir === null) return null;
+  const parts = spec.split("/");
+  const pkgName = spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
+  const rest = spec.slice(pkgName.length).replace(/^\//, "");
+  const branch = requireBranchOf(pkgDir, rest === "" ? "." : `./${rest}`);
+  if (branch === null) return null;
+  for (const f of L.fileTag.keys()) {
+    if (f.fileName === branch.js) return f;
+  }
+  return null;
+}
+
 /** null = conflicted (two different classes claimed it). */
-type Witness = ts.ClassDeclaration | null;
+type Witness = ts.ClassDeclaration | ts.FunctionDeclaration | null;
 
 const tables = new WeakMap<Lowerer, Map<ts.Symbol, Witness>>();
 
@@ -142,10 +206,44 @@ function declTypeSymbol(L: Lowerer, t: ts.Type): ts.Symbol | null {
   return ok ? sym : null;
 }
 
+/** The class a declaration file's `export = X` names (X an imported or local
+ * declared class), as its type symbol, or null. The class need not live in the
+ * declaration file that holds the `export =` (umd/index.d.ts re-exports the
+ * class declared in types.d.ts), and its own file has no twin of its own. */
+function exportEqualsClassSymbol(L: Lowerer, e: ts.Expression): ts.Symbol | null {
+  let sym = L.checker.getSymbolAtLocation(e);
+  if (sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0) sym = L.checker.getAliasedSymbol(sym);
+  if (sym === undefined) return null;
+  const decls = L.checker.declarationsOf(sym);
+  const ok = decls.length > 0 && decls.every(
+    (d) => ts.isClassDeclaration(d) && d.typeParameters === undefined && d.getSourceFile().isDeclarationFile &&
+      !L.isStdlibFile(d.getSourceFile()),
+  );
+  if (!ok) return null;
+  return sym;
+}
+
+/** The declaration the twin's `module.exports = X` assigns (X a function or
+ * class declared in the twin), or null. */
+export function cjsModuleExportsDecl(L: Lowerer, twin: ts.SourceFile): ts.Node | null {
+  for (const st of twin.statements) {
+    if (!ts.isExpressionStatement(st) || !ts.isBinaryExpression(st.expression)) continue;
+    const be = st.expression;
+    if (be.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+    const l = be.left;
+    if (!ts.isPropertyAccessExpression(l) || l.name.text !== "exports" || !ts.isIdentifier(l.expression) ||
+        l.expression.text !== "module") continue;
+    const d = resolveDecl(L, be.right);
+    if (d !== null && (ts.isFunctionDeclaration(d) || ts.isClassDeclaration(d)) && !d.getSourceFile().isDeclarationFile) return d;
+    return null;
+  }
+  return null;
+}
+
 function buildTable(L: Lowerer): Map<ts.Symbol, Witness> {
   const table = new Map<ts.Symbol, Witness>();
-  const work: [ts.Symbol, ts.ClassDeclaration][] = [];
-  const pairUp = (x: ts.Symbol, c: ts.ClassDeclaration): void => {
+  const work: [ts.Symbol, ts.ClassDeclaration | ts.FunctionDeclaration][] = [];
+  const pairUp = (x: ts.Symbol, c: ts.ClassDeclaration | ts.FunctionDeclaration): void => {
     if (!table.has(x)) {
       table.set(x, c);
       work.push([x, c]);
@@ -159,6 +257,15 @@ function buildTable(L: Lowerer): Map<ts.Symbol, Witness> {
     if (T === null) continue;
     const exp = twinExports(L, T);
     for (const st of D.statements) {
+      // `export = X` pairs the declared class with the twin's `module.exports`
+      // value, which is what the import binds (a CJS constructor function
+      // carries its prototype methods; the d.ts class is its surface).
+      if (ts.isExportAssignment(st) && st.isExportEquals) {
+        const xs = exportEqualsClassSymbol(L, st.expression);
+        const impl = cjsModuleExportsDecl(L, T);
+        if (xs !== null && impl !== null && (ts.isFunctionDeclaration(impl) || ts.isClassDeclaration(impl))) pairUp(xs, impl);
+        continue;
+      }
       if (!isExported(st)) continue;
       if ((ts.isClassDeclaration(st) || ts.isInterfaceDeclaration(st)) && st.name !== undefined) {
         const impl = exp.get(st.name.text);
@@ -184,6 +291,8 @@ function buildTable(L: Lowerer): Map<ts.Symbol, Witness> {
   }
   while (work.length > 0) {
     const [x, c] = work.pop()!;
+    // A constructor function pairs as a whole value; its members are not walked.
+    if (!ts.isClassDeclaration(c)) continue;
     const xType = L.checker.getDeclaredTypeOfSymbol(x);
     const cSym = c.name !== undefined ? L.checker.getSymbolAtLocation(c.name) : undefined;
     if (cSym === undefined) continue;
@@ -207,7 +316,7 @@ function buildTable(L: Lowerer): Map<ts.Symbol, Witness> {
 }
 
 /** The implementation class of the declaration-file type `t`, or null. */
-export function dtsWitnessClassOf(L: Lowerer, t: ts.Type): ts.ClassDeclaration | null {
+export function dtsWitnessClassOf(L: Lowerer, t: ts.Type): ts.ClassDeclaration | ts.FunctionDeclaration | null {
   const sym = t.getSymbol();
   if (sym === undefined) return null;
   const decls = L.checker.declarationsOf(sym);

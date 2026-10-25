@@ -22,7 +22,7 @@ import { cjsClassExprWholeExportOf, cjsExportsGetterDefineOf, cjsExportAssignmen
 import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf, stdlibHandleObjectTypeOf, stdlibHandleTypeOfAnswersObject, stdlibHandleDeclaresMember } from "./surfaces.js";
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
-import { protoThisType } from "./proto-class-consume.js";
+import { pairedProtoClassOfValue, protoDataNameAnywhere, protoDataNamesOf, protoDataReadOf, protoThisType } from "./proto-class-consume.js";
 import { absentRead, lowerLyingPlus, lowerNullablePointerChain, nullableFieldRead, presenceComparison } from "./lower-absent.js";
 import { arrayAtOf, BYTES_CTORS, lowerBufferFlavorTest, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, mapIterDrainHelperCall, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
@@ -2352,6 +2352,18 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (ts.isConditionalExpression(expr)) return lowerTernary(L, expr);
 
     if (ts.isPropertyAccessExpression(expr)) {
+      // A prototype DATUM of a paired class, read through a value whose checker type does
+      // not declare it (the declaration file names no `isPoint`): the lowering would answer
+      // the absent read `undefined`, where Node answers the constant. Refused loudly.
+      if (protoDataNameAnywhere(expr.name.text) && !expr.questionDotToken &&
+          L.checker.getPropertyOfType(L.typeOf(expr.expression), expr.name.text) === undefined &&
+          !L.isStdlibGlobal(expr.expression as ts.Identifier, "globalThis")) {
+        const recvT = L.typeOf(expr.expression);
+        if (recvT.getSymbol() !== undefined && L.checker.declarationsOf(recvT.getSymbol()!).some((d) => d.getSourceFile().isDeclarationFile)) {
+          L.unsupported("SC1090", expr, `reading '${expr.name.text}' through a value typed as its declaration class (a prototype datum of a paired class is not declared there)`);
+          return { kind: "boolLit", value: false, type: BOOL, loc };
+        }
+      }
       // `require('crypto').webcrypto` (any namespace spelling of the crypto module):
       // the same WebCrypto singleton `globalThis.crypto` is, so the two agree by identity.
       {
@@ -3381,6 +3393,21 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (recvLowered.type.kind === "union") {
         const served = lowerUnionFieldRead(L, expr, recvLowered, expr.name.text);
         if (served) return L.maybeNarrow(served, expr);
+      }
+      // A prototype-class instance reads a constant the class's prototype holds
+      // (`Object.defineProperty(P, k, { value: literal })`) when no own slot of
+      // that name exists: the read answers the prototype's value, as in Node.
+      if (recvLowered.type.kind === "object") {
+        const protoRead = protoDataReadOf(L, recvLowered.type.className, expr.name.text);
+        if (protoRead !== null) return L.maybeNarrow(protoRead, expr);
+      }
+      // A RECORD receiver (the declaration-file type of a paired class) has no field for
+      // a prototype datum, so an absent read would answer undefined where Node answers the
+      // constant: refused loudly until the record type carries the datum.
+      if (recvLowered.type.kind === "record" && protoDataNameAnywhere(expr.name.text) &&
+          L.shapes.get(recvLowered.type.shapeId)?.fields.some((f) => f.name === expr.name.text) !== true) {
+        L.unsupported("SC1090", expr, `reading '${expr.name.text}' through a value typed as its declaration class (a prototype datum of a paired class is not on that record type)`);
+        return { kind: "boolLit", value: false, type: BOOL, loc: locOf(expr) };
       }
       // `process.type` in a JavaScript source -- a member of Node's
       // `process` MEASURED absent from the runtime, read where Node answers
@@ -18721,6 +18748,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
   }
 
   export function lowerInstanceOf(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
+    // `x instanceof P` where P is a declaration-file class paired with the
+    // program's constructor (the require's module.exports value). The class is
+    // NOT ambient: its instances are the constructor's. A left operand whose
+    // static class is that class answers true; a literal or primitive answers
+    // false; any other left operand refuses (a subclass could also answer true).
+    const paired = pairedProtoClassOfValue(L, expr.right);
+    const pairedLeft = paired !== null && !L.caughtLocalOf(expr.left) ? probeLower(L, expr.left) : null;
+    if (paired !== null && pairedLeft !== null) {
+      const exprStmt = { kind: "exprStmt" as const, expr: pairedLeft, loc: locOf(expr.left) };
+      if (pairedLeft.type.kind === "object" && pairedLeft.type.className === paired.def.name) {
+        return { kind: "seqExpr", stmts: [exprStmt], result: { kind: "boolLit", value: true, type: BOOL, loc }, type: BOOL, loc };
+      }
+      if (ts.isObjectLiteralExpression(expr.left) || ts.isArrayLiteralExpression(expr.left) ||
+          pairedLeft.type.kind === "f64" || pairedLeft.type.kind === "string" || pairedLeft.type.kind === "bool") {
+        return { kind: "seqExpr", stmts: [exprStmt], result: { kind: "boolLit", value: false, type: BOOL, loc }, type: BOOL, loc };
+      }
+    }
     // `x instanceof net.Socket` over a union with a netSocket arm — the
     // h2 compat 'connect' narrowing (lower-server.ts): a union tag test.
     const sockTest = lowerSocketInstanceOf(L, expr, loc);
@@ -18752,7 +18796,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // sequenced ahead of the throw. A catch binding on the left is the one
     // read that has no effects and whose ordinary lowering fences, so it
     // is dropped rather than lowered.
-    if (ts.isIdentifier(expr.right) && ambientUndefinedClassSymbolOf(L, expr.right) !== null) {
+    if (paired === null && ts.isIdentifier(expr.right) && ambientUndefinedClassSymbolOf(L, expr.right) !== null) {
       const thrown = nsUndefRead(L, expr.right.text, expr.right, BOOL);
       if (L.caughtLocalOf(expr.left) !== null) return thrown;
       const stmts: IrStmt[] = [
@@ -18802,6 +18846,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const directRhs = rhsSymbol ? L.classBySymbol.get(rhsSymbol) : undefined;
     const target =
       (directRhs?.classDecorators?.valueGlobalId !== undefined ? undefined : directRhs) ??
+      paired ??
       rhsNsClass ??
       rhsCjsClass ??
       L.builtinErrorInfoOf(rhsSymbol) ??
@@ -19457,7 +19502,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // own position in the class preorder (the interval a typed instanceof
     // compares against), so `u instanceof D1` is true for a D2 instance
     // and false for every other value.
-    if (left.type.kind === "dyn" && !target.def.name.startsWith("%") && !target.generic) {
+    if (left.type.kind === "dyn" && (!target.def.name.startsWith("%") || target.protoClass === true) && !target.generic) {
       L.noteDynBoxedClass(target.def.name);
       return { kind: "dynTest", test: "class", className: target.def.name, value: left, type: BOOL, loc };
     }
@@ -19775,6 +19820,11 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (member.startsWith("#") || member.startsWith("%")) continue;
         names.add(member);
       }
+    }
+    // The prototype DATA of a prototype-class (defineProperty on its prototype) is
+    // inherited, so `in` answers true for it (Node: `"isPoint" in p`).
+    for (let info: ClassInfo | null = leaf; info; info = info.base) {
+      for (const n of protoDataNamesOf(info.def.name)) names.add(n);
     }
     for (const n of OBJECT_PROTOTYPE_NAMES) names.add(n);
     return names;
@@ -22151,6 +22201,26 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (value.type.kind !== "union") return null;
     const def = L.unions.get(value.type.unionId);
     if (!def) throw new Error(`lowerer bug: unknown union ${value.type.unionId}`);
+    // A prototype DATUM of a class arm (`Object.defineProperty(P, k, { value })`) is
+    // not a field of the arm: read the union through its dyn box, where the member
+    // table answers the constant as the prototype does.
+    const declaredInEveryArm = def.arms.every((arm) =>
+      arm.kind === "record" ? L.shapes.get(arm.shapeId)?.fields.some((f) => f.name === field) === true
+        : arm.kind === "object" ? L.classes.get(arm.className)?.fields.has(field) === true
+          : false);
+    if (!declaredInEveryArm && protoDataNameAnywhere(field)) {
+      if (def.arms.some((arm) => arm.kind === "object" && protoDataNamesOf(arm.className).includes(field))) {
+        return {
+          kind: "dynKeyGet",
+          key: { kind: "strLit", value: field, type: STRING, loc: locOf(expr) },
+          value: L.coerceToExpected(value, DYN),
+          type: DYN,
+          loc: locOf(expr),
+        };
+      }
+      L.unsupported("SC1090", expr, `reading '${field}' through a union whose arms do not carry the prototype datum of a paired class`);
+      return { kind: "boolLit", value: false, type: BOOL, loc: locOf(expr) };
+    }
     let common: IrType | null = null;
     for (const arm of def.arms) {
       let ft: IrType | undefined;

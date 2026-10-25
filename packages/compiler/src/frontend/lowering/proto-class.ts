@@ -148,9 +148,30 @@ export interface ProtoClass {
    * bundle these are 215 of 5,068 reader calls in the decode bodies (4.2%) --
    * small, but a class that silently omits them is wrong at those 215 sites. */
   mergedMethods: ProtoMethod[];
+  /** Local names bound to `X.prototype` (`var P = X.prototype`, the Closure /
+   * UMD idiom: `P.m = function () {...}` is a method of X). Only a name never
+   * reassigned in the file qualifies; each is valid inside `scope` only. */
+  aliases: ProtoAlias[];
+  /** Static FUNCTIONS `X.m = function (...)` (or `X.m = f` for a function declared
+   * at the top of the file): module functions with no receiver. */
+  staticFns: { name: string; fn: ts.FunctionExpression | ts.FunctionDeclaration }[];
+  /** Data properties installed by `Object.defineProperty(X.prototype, K, { value })`
+   * with a LITERAL value. Shared by every instance (not an own slot), read as a
+   * constant at a use site. Not methods; the instance shape does not carry them. */
+  protoData: ProtoDatum[];
   /** Non-empty means DO NOT treat this as a class. Human-readable and
    * deduplicated, so a refusal can be explained rather than merely counted. */
   bailouts: string[];
+}
+
+export interface ProtoAlias {
+  name: string;
+  scope: ts.Node;
+}
+
+export interface ProtoDatum {
+  name: string;
+  value: ts.Expression;
 }
 
 const isFnLike = (n: ts.Node): n is ts.FunctionExpression | ts.ArrowFunction =>
@@ -190,6 +211,61 @@ function isConditional(n: ts.Node, stop: ts.Node): boolean {
     c = c.parent;
   }
   return false;
+}
+
+/** ECMAScript globals every target provides as functions, so a branch guarded by
+ * `typeof G === "function"` is taken (the same answer Node gives). Only names the
+ * file does not declare itself count. */
+const ES_BUILTIN_FUNCTIONS = new Set(["BigInt"]);
+
+/** Is `n` reached only through guards that are known to hold? An `if` whose test
+ * is `typeof <builtin> === "function"` holds in its then-branch; every other
+ * branch/loop ancestor (up to `stop`) is a real condition. */
+function isConditionalAfterBuiltinGuards(n: ts.Node, stop: ts.Node, declared: Set<string>): boolean {
+  let child: ts.Node = n;
+  let c: ts.Node | undefined = n.parent;
+  while (c && c !== stop) {
+    if (ts.isIfStatement(c) && child === c.thenStatement && isBuiltinFunctionGuard(c.expression, declared)) {
+      child = c;
+      c = c.parent;
+      continue;
+    }
+    if (
+      ts.isIfStatement(c) || ts.isConditionalExpression(c) ||
+      ts.isForStatement(c) || ts.isForInStatement(c) || ts.isForOfStatement(c) ||
+      ts.isWhileStatement(c) || ts.isDoStatement(c) || ts.isSwitchStatement(c) ||
+      ts.isCatchClause(c) || ts.isTryStatement(c) ||
+      (ts.isBinaryExpression(c) &&
+        (c.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+         c.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+         c.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken))
+    ) return true;
+    child = c;
+    c = c.parent;
+  }
+  return false;
+}
+
+function isBuiltinFunctionGuard(e: ts.Expression, declared: Set<string>): boolean {
+  if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken) return false;
+  let t: ts.Expression = e.left;
+  let s: ts.Expression = e.right;
+  if (ts.isStringLiteral(e.left)) [t, s] = [e.right, e.left];
+  if (!ts.isTypeOfExpression(t) || !ts.isStringLiteral(s) || s.text !== "function") return false;
+  const g = t.expression;
+  return ts.isIdentifier(g) && ES_BUILTIN_FUNCTIONS.has(g.text) && !declared.has(g.text);
+}
+
+/** The function a static assignment's right side is: a function expression, or
+ * an identifier naming a function declared once at the top of the file. */
+function staticFunctionOf(e: ts.Expression, sf: ts.SourceFile): ts.FunctionExpression | ts.FunctionDeclaration | null {
+  let x: ts.Expression = e;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  if (ts.isFunctionExpression(x)) return x.asteriskToken === undefined ? x : null;
+  if (!ts.isIdentifier(x)) return null;
+  const decls = sf.statements.filter(
+    (s): s is ts.FunctionDeclaration => ts.isFunctionDeclaration(s) && s.name?.text === x.text && s.body !== undefined);
+  return decls.length === 1 && decls[0]!.asteriskToken === undefined ? decls[0]! : null;
 }
 
 /** `X.prototype.m` / `X.prototype` / `X.m` → the base name and the member. */
@@ -269,7 +345,7 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
     const fields = collectFields(fn);
     if (fields.length === 0) return;
     cands.push({ name, scope, ctor: fn, fields, methods: [], protoConsts: [],
-      statics: [], mergedMethods: [], bailouts: [] });
+      statics: [], staticFns: [], mergedMethods: [], aliases: [], protoData: [], bailouts: [] });
   };
 
   (function walk(n: ts.Node) {
@@ -291,6 +367,58 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
     return best;
   };
 
+  /* Pass 1b: prototype aliases. `var P = X.prototype` and then `P.m = ...`
+   * (Closure / UMD-compiled libraries such as long.js) is `X.prototype.m`.
+   * A name assigned anywhere in the file is not an alias (conservative). */
+  const assignedNames = new Set<string>();
+  const declaredNames = new Set<string>();
+  (function walk(n: ts.Node) {
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(n.left)) assignedNames.add(n.left.text);
+    if ((ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n) || ts.isVariableDeclaration(n) ||
+         ts.isParameter(n)) && n.name && ts.isIdentifier(n.name)) declaredNames.add(n.name.text);
+    ts.forEachChild(n, walk);
+  })(sf);
+  const aliasList: { name: string; scope: ts.Node; c: ProtoClass }[] = [];
+  (function walk(n: ts.Node) {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer &&
+        !assignedNames.has(n.name.text)) {
+      let init: ts.Expression = n.initializer;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      if (ts.isPropertyAccessExpression(init) && init.name.getText() === "prototype" &&
+          ts.isIdentifier(init.expression)) {
+        const c = resolve(init.expression.text, n);
+        if (c) {
+          const scope = scopeOf(n);
+          aliasList.push({ name: n.name.text, scope, c });
+          c.aliases.push({ name: n.name.text, scope });
+        }
+      }
+    }
+    ts.forEachChild(n, walk);
+  })(sf);
+  /** The class a bare identifier names as an alias of `X.prototype`, or null. */
+  const aliasOf = (name: string, at: ts.Node): ProtoClass | null => {
+    let best: { scope: ts.Node; c: ProtoClass } | null = null;
+    for (const a of aliasList) {
+      if (a.name !== name || !contains(a.scope, at)) continue;
+      if (best === null || contains(best.scope, a.scope)) best = { scope: a.scope, c: a.c };
+    }
+    return best?.c ?? null;
+  };
+  /** `X.prototype` or an alias of it, as the class it is. */
+  const protoRefOf = (e: ts.Node): ProtoClass | null => {
+    if (ts.isIdentifier(e)) return aliasOf(e.text, e);
+    if (ts.isPropertyAccessExpression(e) && e.name.getText() === "prototype" && ts.isIdentifier(e.expression)) {
+      return resolve(e.expression.text, e);
+    }
+    return null;
+  };
+  /* Object.defineProperty(X.prototype | P, "k", { value: ... }) with a data
+   * descriptor only: a prototype DATA member. Recorded; not a method. The
+   * descriptor's value must be read in full or the call is a bailout. */
+  const understoodDefs = new Set<ts.Node>();
+
   /* Merge calls whose member list we read in full. Such a call is NOT an
    * unknown escape: we know exactly what it does to the prototype. Anything
    * else that takes `X.prototype` as an argument still refuses. */
@@ -299,15 +427,19 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
   /* Pass 2: prototype members, statics, and every reason to refuse. */
   (function walk(n: ts.Node) {
     if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-      const t = targetOf(n.left);
+      const t0 = targetOf(n.left);
+      const aliasC = t0 && !t0.viaProto && t0.member !== null && resolve(t0.name, n) === null ? aliasOf(t0.name, n) : null;
+      const t = aliasC !== null && t0 !== null ? { name: t0.name, member: t0.member, viaProto: true } : t0;
       if (t) {
-        const c = resolve(t.name, n);
+        const c = aliasC ?? resolve(t.name, n);
         if (c) {
           if (!t.viaProto) {
             // A static. Harmless to the instance shape, but protobufjs
             // REWRITES `S.create` on first call, so statics are recorded and
             // never treated as constants.
             c.statics.push(t.member as string);
+            const sfn = staticFunctionOf(n.right, sf);
+            if (sfn !== null) c.staticFns.push({ name: t.member as string, fn: sfn });
           } else if (t.member === null) {
             // `X.prototype = something`: the whole method table is replaced by
             // a value we cannot see through. Never a class.
@@ -323,7 +455,7 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
             } else {
               c.methods.push({ name: t.member, fn: n.right });
             }
-            if (isConditional(n, c.scope)) {
+            if (isConditionalAfterBuiltinGuards(n, c.scope, declaredNames)) {
               c.bailouts.push(`prototype method '${t.member}' assigned conditionally`);
             }
           } else {
@@ -332,6 +464,42 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
               c.bailouts.push(`prototype member '${t.member}' assigned conditionally`);
             }
           }
+        }
+      }
+    }
+
+    /* `Object.defineProperty(X.prototype, "k", { value: v })`: a data member. */
+    if (ts.isCallExpression(n) && n.arguments.length === 3 &&
+        ts.isPropertyAccessExpression(n.expression) && n.expression.name.getText() === "defineProperty" &&
+        ts.isIdentifier(n.expression.expression) && n.expression.expression.text === "Object") {
+      const a0 = n.arguments[0]!;
+      const a1 = n.arguments[1]!;
+      const a2 = n.arguments[2]!;
+      const c = a0 && protoRefOf(a0);
+      if (c) {
+        understoodDefs.add(a0);
+        const keys = ts.isObjectLiteralExpression(a2)
+          ? a2.properties.map((p) => (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p) ? p.name.getText() : "?"))
+          : ["?"];
+        const isData = ts.isObjectLiteralExpression(a2) &&
+          a2.properties.every((p) => ts.isPropertyAssignment(p) &&
+            ["value", "writable", "enumerable", "configurable"].includes(p.name.getText()));
+        const valueProp = ts.isObjectLiteralExpression(a2)
+          ? a2.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && p.name.getText() === "value")
+          : undefined;
+        const literal = valueProp !== undefined && (
+          ts.isStringLiteralLike(valueProp.initializer) || ts.isNumericLiteral(valueProp.initializer) ||
+          valueProp.initializer.kind === ts.SyntaxKind.TrueKeyword ||
+          valueProp.initializer.kind === ts.SyntaxKind.FalseKeyword);
+        // An enumerable prototype datum would list on for-in and is not a row of the instance.
+        const enumerable = ts.isObjectLiteralExpression(a2) ? a2.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText() === "enumerable") : undefined;
+        const enumTrue = enumerable !== undefined && ts.isPropertyAssignment(enumerable) && enumerable.initializer.kind !== ts.SyntaxKind.FalseKeyword;
+        if (!ts.isStringLiteralLike(a1) || !isData || !keys.includes("value") || enumTrue) {
+          c.bailouts.push("prototype defineProperty with a non-data or unreadable descriptor @" + n.getStart());
+        } else if (!literal || valueProp === undefined) {
+          c.bailouts.push(`prototype data '${a1.text}' is not a literal value @` + n.getStart());
+        } else {
+          c.protoData.push({ name: a1.text, value: valueProp.initializer });
         }
       }
     }
@@ -386,9 +554,15 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
           if (ts.isPropertyAccessExpression(p) && p.name.getText() === "prototype" &&
               p.parent && ts.isCallExpression(p.parent) &&
               (p.parent.arguments as readonly ts.Node[]).includes(p) &&
-              !understoodMerges.has(p)) {
+              !understoodMerges.has(p) && !understoodDefs.has(p)) {
             c.bailouts.push("the prototype is passed to a call @" + p.getStart());
           }
+        }
+        // An alias of the prototype may only be read through `P.member`.
+        const ac = aliasOf(n.text, n);
+        if (ac !== null && !isDeclName && !(ts.isPropertyAccessExpression(p) && (p.expression === n || p.name === n)) &&
+            !(ts.isCallExpression(p) && (p.arguments as readonly ts.Node[]).includes(n) && understoodDefs.has(n))) {
+          ac.bailouts.push("the prototype alias '" + n.text + "' escapes (only P.member is modelled) @" + n.getStart());
         }
       }
     }
