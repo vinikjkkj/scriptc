@@ -476,6 +476,14 @@ ScrDyn *scr_dyn_promise_then(ScrPromise *src, ScrDyn *onf, ScrDyn *onr, ScrDyn *
  * modeled — SEMANTICS.md. */
 ScrDyn *scr_await_dyn_value(ScrDyn *v) {
   if (v->kind == SCR_DYN_PROMISE) return scr_await_dyn(v->v.promise);
+  if (scr_dyn_may_be_thenable(v)) {
+    /* `await v` is PromiseResolve(v) then the await: a thenable's then runs
+     * in its own job, and the awaiter parks on the resolved promise. */
+    ScrPromise *p = scr_dyn_adopt_promise(v);
+    ScrDyn *r = scr_await_dyn(p);
+    scr_promise_release(p);
+    return r;
+  }
   scr_await_hop();
   return scr_dyn_retain(v);
 }
@@ -811,9 +819,189 @@ ScrPromise *scr_dyn_promise_of(const ScrDyn *d) {
  * header). A boxed promise is the promise itself; a plain value is a fresh
  * promise fulfilled with the value (the dyn payload, retained). Borrows d;
  * returns +1. */
+/* ── Node's PromiseResolve for a checked-dynamic value ───────────────
+ * dyn.adoptPromise (Promise.resolve(v), the all combinators' entries, the
+ * untyped promise slots) and `await v` over a dyn value resolve a promise
+ * with v the way the spec's promise resolve function does:
+ *   - a promise is itself (no job);
+ *   - an object or function whose `then` is callable: the job
+ *     NewPromiseResolveThenableJob runs in its own microtask, calling
+ *     then(resolve, reject) with ONE shared alreadyResolved flag; a throw
+ *     from then rejects, unless resolve or reject already ran;
+ *   - the `then` read itself throwing rejects synchronously;
+ *   - anything else fulfills with the value.
+ * A value handed to resolve is resolved again (a thenable inside a thenable
+ * takes its own job), exactly as in JS. */
+static void scr_then_oom(void) {
+  fputs("scriptc: out of memory\n", stderr);
+  abort();
+}
+
+typedef struct ScrThenRec {
+  size_t rc;        /* the job's reference plus one per resolving function */
+  bool done;        /* alreadyResolved: the first resolve or reject wins */
+  ScrPromise *p;    /* the promise being resolved; retained */
+} ScrThenRec;
+
+static void *scr_then_rec_retain_v(void *r) {
+  ((ScrThenRec *)r)->rc++;
+  return r;
+}
+
+static void scr_then_rec_release_v(void *r) {
+  ScrThenRec *t = (ScrThenRec *)r;
+  if (--t->rc == 0) {
+    scr_promise_release(t->p);
+    free(t);
+  }
+}
+
+static void scr_dyn_resolve_into(ScrPromise *p, ScrDyn *v);
+
+/* The resolving functions the job hands to then: a dyn function over a
+ * closure whose capture is the shared record. */
+static ScrDyn *scr_then_resolve_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrThenRec *rec = (ScrThenRec *)scr_box_get_ref(clo->caps[0]);
+  if (!rec->done) {
+    rec->done = true;
+    ScrDyn *v = argc ? scr_dyn_retain(args[0]) : scr_dyn_retain(scr_dyn_undefined());
+    scr_dyn_resolve_into(rec->p, v);
+  }
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+static ScrDyn *scr_then_reject_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrThenRec *rec = (ScrThenRec *)scr_box_get_ref(clo->caps[0]);
+  if (!rec->done) {
+    rec->done = true;
+    /* The reason is thrown into the active cell and moved into the promise,
+     * exactly like the executor's reject (scr_reject_dyn_thunk). */
+    scr_throw_dyn(argc ? scr_dyn_retain(args[0]) : scr_dyn_retain(scr_dyn_undefined()));
+    scr_promise_reject_pending(rec->p);
+  }
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+static ScrDyn *scr_then_make_fn(ScrThenRec *rec, ScrDynThunk thunk, const char *name, const char *sig) {
+  ScrClosure *c = scr_closure_new((void *)thunk, 1);
+  ScrBox *b = scr_box_new_obj(scr_then_rec_retain_v, scr_then_rec_release_v, NULL);
+  scr_box_set_ref(b, scr_then_rec_retain_v(rec));
+  c->caps[0] = b;
+  return scr_dyn_new_func(c, thunk, 1, sig, name);
+}
+
+typedef struct ScrThenJob {
+  ScrPromise *p;      /* retained */
+  ScrDyn *thenable;   /* owned */
+  ScrDyn *then;       /* owned callable, or NULL for a native promise */
+  ScrThenRec *rec;    /* the job's reference */
+} ScrThenJob;
+
+static void scr_then_job_run(void *arg) {
+  ScrThenJob *j = (ScrThenJob *)arg;
+  ScrDyn *res = scr_then_make_fn(j->rec, scr_then_resolve_thunk, "resolve", "(value)");
+  ScrDyn *rej = scr_then_make_fn(j->rec, scr_then_reject_thunk, "reject", "(reason)");
+  ScrDyn *args[2] = {res, rej};
+  /* Call then with this = the thenable (the native promise's own then answers
+   * the same way). The property is read again here, which is the one place
+   * the dyn path reads it twice. */
+  ScrStr *key = scr_str_new("then", 4);
+  ScrDyn *r = scr_dyn_invoke_key(j->thenable, key, args, 2, "then");
+  scr_str_release(key);
+  if (r) {
+    scr_dyn_release(r);
+  } else if (scr_exc_pending()) {
+    if (!j->rec->done) {
+      j->rec->done = true;
+      scr_promise_reject_pending(j->p);
+    } else {
+      scr_exc_clear();
+    }
+  }
+  scr_dyn_release(res);
+  scr_dyn_release(rej);
+  scr_dyn_release(j->thenable);
+  scr_dyn_release(j->then);
+  scr_then_rec_release_v(j->rec);
+  scr_promise_release(j->p);
+  free(j);
+}
+
+static void scr_then_enqueue(ScrPromise *p, ScrDyn *v, ScrDyn *then) {
+  ScrThenJob *j = calloc(1, sizeof *j);
+  if (!j) scr_then_oom();
+  ScrThenRec *rec = calloc(1, sizeof *rec);
+  if (!rec) scr_then_oom();
+  rec->rc = 1;
+  rec->p = scr_promise_retain(p);
+  j->p = scr_promise_retain(p);
+  j->thenable = v; /* owned */
+  j->then = then;  /* owned or NULL */
+  j->rec = rec;
+  scr_queue_microtask_raw(scr_then_job_run, j, NULL);
+}
+
+/* The `then` of a dyn value, +1, or NULL: NULL with no exception pending when
+ * there is no callable `then`, NULL with an exception pending when the read
+ * threw. */
+static ScrDyn *scr_dyn_then_method(ScrDyn *v) {
+  ScrDyn *m = NULL;
+  ScrStr *k = scr_str_new("then", 4);
+  switch (v->kind) {
+    case SCR_DYN_OBJ: m = scr_dyn_obj_key_get(v, "then", 4); break;
+    case SCR_DYN_FUNC: m = scr_dyn_fn_get(v, "then", 4); break;
+    case SCR_DYN_PROXY: m = scr_dyn_proxy_get(v, k); break;
+    case SCR_DYN_OBJINST: m = scr_dyn_objinst_member_get(v, k); break;
+    case SCR_DYN_ARR: m = scr_dyn_arr_key_get(v, k); break;
+    default: break;
+  }
+  scr_str_release(k);
+  if (m == NULL) return NULL;
+  if (m->kind != SCR_DYN_FUNC) {
+    scr_dyn_release(m);
+    return NULL;
+  }
+  return m;
+}
+
+/* May v be a thenable at all (the kinds whose [[Get]] can see a then)? */
+bool scr_dyn_may_be_thenable(const ScrDyn *v) {
+  return v->kind == SCR_DYN_OBJ || v->kind == SCR_DYN_FUNC || v->kind == SCR_DYN_PROXY ||
+         v->kind == SCR_DYN_OBJINST || v->kind == SCR_DYN_ARR;
+}
+
+/* The promise resolve function, on the dyn value v (owned) into the pending
+ * promise p. */
+static void scr_dyn_resolve_into(ScrPromise *p, ScrDyn *v) {
+  if (!scr_promise_is_pending(p)) {
+    scr_dyn_release(v);
+    return;
+  }
+  if (v->kind == SCR_DYN_PROMISE) {
+    scr_then_enqueue(p, v, NULL);
+    return;
+  }
+  if (scr_dyn_may_be_thenable(v)) {
+    ScrDyn *then = scr_dyn_then_method(v);
+    if (then != NULL) {
+      scr_then_enqueue(p, v, then);
+      return;
+    }
+    if (scr_exc_pending()) {
+      /* then's read threw: the promise rejects with that exception. */
+      scr_dyn_release(v);
+      scr_promise_reject_pending(p);
+      return;
+    }
+  }
+  scr_promise_fulfill_ref(p, v, scr_dyn_retain_v, scr_dyn_release_v, NULL);
+}
+
+/* Promise.resolve(d) for a checked-dynamic d (dyn.adoptPromise). Borrows d;
+ * returns +1. */
 ScrPromise *scr_dyn_adopt_promise(ScrDyn *d) {
   if (d->kind == SCR_DYN_PROMISE) return scr_promise_retain(d->v.promise);
   ScrPromise *p = scr_promise_new();
-  scr_promise_fulfill_ref(p, scr_dyn_retain(d), scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_dyn_resolve_into(p, scr_dyn_retain(d));
   return p;
 }

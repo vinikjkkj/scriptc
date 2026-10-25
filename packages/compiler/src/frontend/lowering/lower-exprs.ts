@@ -2242,6 +2242,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         if (value.type.kind === "dyn") {
           return { kind: "libCall", fn: "async.awaitDyn", args: [value], type: DYN, loc };
         }
+        // A static record with a `then` member IS a thenable (Node adopts it):
+        // its value crosses to the dyn tree and awaits through the same adoption.
+        if (staticThenable(L, value.type)) {
+          return {
+            kind: "libCall", fn: "async.awaitDyn",
+            args: [{ kind: "dynFrom", value, type: DYN, loc }], type: DYN, loc,
+          };
+        }
         // A jsval whose CHECKER type is a promise is a package-returned
         // promise: the value lives in the engine. Bridge it — a static
         // promise the engine promise settles (fulfillment = the retained
@@ -23104,7 +23112,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * shape). Result Promise<T[]>; void inners collapse to Promise<void>
    * exactly like the array path. Null otherwise: heterogeneous literals
    * and non-literal arguments keep the array path and its fences. */
-  export function lowerPromiseAllTupleCall(L: Lowerer, call: ts.CallExpression,
+  /** A static record (or other shape) with a callable `then` member: a thenable
+ * under PromiseResolve. Only record shapes can carry a then member statically. */
+export function staticThenable(L: Lowerer, t: IrType): boolean {
+  if (t.kind !== "record") return false;
+  const shape = L.shapes.get(t.shapeId);
+  return shape?.fields.some((f) => f.name === "then" && f.type.kind === "func") ?? false;
+}
+
+export function lowerPromiseAllTupleCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call)) return null;
     if (L.stdlibGlobalMember(access, "Promise") !== "all") return null;

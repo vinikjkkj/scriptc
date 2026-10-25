@@ -3272,6 +3272,9 @@ void scr_promise_fulfill_ref(ScrPromise *p, void *v, void *(*retain)(void *), vo
   p->trace_fn = trace;
   scr_promise_settle_wake(p);
 }
+bool scr_promise_is_pending(const ScrPromise *p) {
+  return p->state == SCR_PROM_PENDING;
+}
 void scr_promise_fulfill_void(ScrPromise *p) {
   if (p->state != SCR_PROM_PENDING) return;
   p->state = SCR_PROM_FULFILLED;
