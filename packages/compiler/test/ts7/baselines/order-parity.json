@@ -13357,6 +13357,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9456-cjs-computed-emit-dyn-listener.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9456-cjs-computed-emit-dyn-listener.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
