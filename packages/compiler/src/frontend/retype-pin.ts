@@ -82,6 +82,132 @@ function insideFunction(n: ts.Node): boolean {
   return false;
 }
 
+/** Members every object has through Object.prototype: never an expando, so a read of one
+ * is not a reason to pin. */
+const OBJECT_PROTOTYPE_NAMES = new Set([
+  "constructor", "__proto__", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable",
+  "toString", "toLocaleString", "valueOf", "__defineGetter__", "__defineSetter__",
+  "__lookupGetter__", "__lookupSetter__",
+]);
+
+/** The uses of an expando binding that keep its object in the dynamic slot. A
+ * pinned object is a checked-dynamic value, and a dynamic object crossing into a
+ * typed slot is COPIED, so a write the callee makes through that slot is lost.
+ * (A Date crosses as a handle by reference, so this guard is for object literals.)
+ * Only two uses are safe: the receiver of a property read or write, and a
+ * `return` from a function with no JSDoc type of its own (its callers get the
+ * dynamic value, never a typed copy made here). Any other use (an argument, a
+ * stored value, a bare reference) keeps the binding as it is, and the write
+ * stays the loud refusal it was. */
+function onlyDynSafeUses(checker: ts.TypeChecker, sf: ts.SourceFile, sym: ts.Symbol, decl: ts.VariableDeclaration): boolean {
+  let scope: ts.Node = decl;
+  while (!ts.isFunctionLike(scope) && !ts.isSourceFile(scope)) scope = scope.parent;
+  let ok = true;
+  ts.walkPreorder(scope, (n) => {
+    if (!ok) return undefined;
+    if (!ts.isIdentifier(n) || n === decl.name) return undefined;
+    if (checker.getSymbolAtLocation(n) !== sym) return undefined;
+    const p = n.parent;
+    if ((ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p)) && p.expression === n) return undefined;
+    if (ts.isReturnStatement(p)) {
+      let fn: ts.Node = p;
+      while (!ts.isFunctionLike(fn) && !ts.isSourceFile(fn)) fn = fn.parent;
+      if (!ts.isSourceFile(fn) && !jsdocTypedFn(sf, fn)) return undefined;
+    }
+    ok = false;
+    return undefined;
+  });
+  return ok;
+}
+
+/** A function whose own JSDoc types it (`@returns`, `@param`, `@template`, `@type`). */
+function jsdocTypedFn(sf: ts.SourceFile, fn: ts.Node): boolean {
+  let i = fn.getStart(sf);
+  while (i > 0 && /\s/.test(sf.text[i - 1]!)) i--;
+  if (sf.text.slice(i - 2, i) !== "*/") return false;
+  const open = sf.text.lastIndexOf("/**", i - 2);
+  return open >= 0 && /@(?:returns?|param|template|type)\b/.test(sf.text.slice(open, i));
+}
+
+/** An EXPANDO pin (the second kind of pollution the header names). A JavaScript
+ * `x.k = v` on a function-local binding `x` whose static type is a plain object
+ * literal, or a non-generic, non-class interface (Date, an instance of a lib
+ * interface), and which declares no member `k` and no index signature: Node adds
+ * the own property, and the compiled object has no slot for it. The binding's
+ * initializer is re-served as an `any` cast, so the binding is the checked-dynamic
+ * slot and the write is a keyed dynamic write. Class instances keep their own
+ * property-table story (lowerUndeclaredMemberWrite), arrays and generic
+ * containers are not touched. */
+function expandoPins(checker: ts.TypeChecker, sf: ts.SourceFile): RetypePin[] {
+  const out: RetypePin[] = [];
+  const seen = new Set<number>();
+  // Every `x.k` over an identifier: a write (`x.k = v`) or a read. A read of a member the
+  // object's type never declares (`date.label` after `date.label = ...` in another function)
+  // is the same open object, and the same pin answers it.
+  const writes: ts.PropertyAccessExpression[] = [];
+  ts.walkPreorder(sf, (n) => {
+    if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) && !OBJECT_PROTOTYPE_NAMES.has(n.name.text)) {
+      writes.push(n);
+    }
+    return undefined;
+  });
+  for (const access of writes) {
+    const recv = access.expression as ts.Identifier;
+    const prop = access.name.text;
+    const sym = checker.getSymbolAtLocation(recv);
+    if (sym === undefined) continue;
+    const t = checker.getTypeAtLocation(recv);
+    // The receiver is an object, or a union of objects with null/undefined (a helper that returns
+    // `null` on one path and the record on the other): every object arm must be open, and none may
+    // declare the member.
+    const arms = t.isUnionType() ? ts.constituentTypes(t) : [t];
+    let open = false;
+    let literal = false;
+    let closed = false;
+    for (const c of arms) {
+      if ((c.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)) !== 0) continue;
+      if ((c.flags & ts.TypeFlags.Object) === 0) { closed = true; break; }
+      const csym = c.getSymbol();
+      if (csym !== undefined && (csym.flags & ts.SymbolFlags.Class) !== 0) { closed = true; break; }
+      const co = c as ts.ObjectType;
+      // A JavaScript object literal is typed with ObjectFlags.JSLiteral (the checker's "open" flag for JS
+      // object literals); a TypeScript one with ObjectLiteral.
+      const lit = (co.objectFlags & (ts.ObjectFlags.ObjectLiteral | ts.ObjectFlags.JSLiteral)) !== 0;
+      const iface = csym !== undefined && (csym.flags & ts.SymbolFlags.Interface) !== 0 &&
+        (co.objectFlags & ts.ObjectFlags.Reference) === 0;
+      if (!lit && !iface) { closed = true; break; }
+      if (checker.getPropertyOfType(c, prop) !== undefined || checker.getIndexInfosOfType(c).length > 0) {
+        closed = true;
+        break;
+      }
+      if (lit) literal = true;
+      open = true;
+    }
+    if (closed || !open) continue;
+    for (const d of checker.declarationsOf(sym)) {
+      if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name) || d.initializer === undefined) continue;
+      if (!ts.isVariableDeclarationList(d.parent) || !insideFunction(d)) continue;
+      const stmt = d.parent.parent;
+      if (hasTypeJsdoc(d) || (stmt !== undefined && hasTypeJsdoc(stmt))) break;
+      const start = d.initializer.getStart();
+      if (seen.has(start)) break;
+      // A Date (a lib interface) crosses into the dynamic slot as a handle, by reference: no copy, so
+      // every use keeps the identity. Only an object literal's copy can lose a write.
+      if (literal && !onlyDynSafeUses(checker, sf, sym, d)) break;
+      seen.add(start);
+      const end = d.initializer.getEnd();
+      out.push({
+        start,
+        end,
+        text: sf.text.slice(start, end),
+        why: `'${recv.text}' is ${checker.typeToString(t)} and takes the expando member '${prop}' it does not declare`,
+      });
+      break;
+    }
+  }
+  return out;
+}
+
 export function computeRetypePins(program: ts.Program): Map<string, RetypePin[]> {
   const checker = program.getTypeChecker();
   const out = new Map<string, RetypePin[]>();
@@ -106,7 +232,11 @@ export function computeRetypePins(program: ts.Program): Map<string, RetypePin[]>
       }
       return undefined;
     });
-    if (decls.length === 0 || assigns.length === 0) continue;
+    const expando = expandoPins(checker, sf);
+    if (decls.length === 0 || assigns.length === 0) {
+      if (expando.length > 0) out.set(sf.fileName, expando);
+      continue;
+    }
     const byName = new Map<string, ts.BinaryExpression[]>();
     for (const a of assigns) {
       const name = (a.left as ts.Identifier).text;
@@ -143,6 +273,7 @@ export function computeRetypePins(program: ts.Program): Map<string, RetypePin[]>
       const end = init.getEnd();
       pins.push({ start, end, text: sf.text.slice(start, end), why });
     }
+    for (const e of expando) if (!pins.some((p) => p.start === e.start)) pins.push(e);
     if (pins.length > 0) out.set(sf.fileName, pins);
   }
   return out;
