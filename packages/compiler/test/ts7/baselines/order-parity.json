@@ -16144,6 +16144,18 @@
     "<repo>/tests/corpus/10004-caught-base-typed-holds-leaf.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/10250-method-ref-state-machine.js": {
+   "order": [
+    "<repo>/tests/corpus/10250-method-ref-state-machine.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10251-method-ref-identity-and-unbound-call.js": {
+   "order": [
+    "<repo>/tests/corpus/10251-method-ref-identity-and-unbound-call.js"
+   ],
+   "diags": []
   }
  }
 }
