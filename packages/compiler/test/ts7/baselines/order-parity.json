@@ -13535,6 +13535,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9854-error-subclass-record-slot-and-tostring.ts": {
+   "order": [
+    "<repo>/tests/corpus/9854-error-subclass-record-slot-and-tostring.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9855-error-subclass-message-field-projection.ts": {
+   "order": [
+    "<repo>/tests/corpus/9855-error-subclass-message-field-projection.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
