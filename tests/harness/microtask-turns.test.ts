@@ -33,7 +33,8 @@
  *     5962-a-parked-for-await-wakes-on-a-tick-not-on-the-push
  *     7470-promiselike-is-a-promise-slot  7791-awaiting-a-promise-that-may-be-absent
  *
- * THREE ROWS WHERE THIS RUNTIME DIVERGES FROM NODE BY ONE TURN. They are
+ * TWO ROWS WHERE THIS RUNTIME DIVERGES FROM NODE BY ONE TURN (Promise.all
+ * matches Node since the settle-counting combinator). They are
  * pinned here with the scriptc number and the Node number beside it,
  * deliberately and as they are today -- see each row comment. They are NOT
  * bugs this file is waiting to have fixed; changing them is separate work with
@@ -80,7 +81,8 @@ const NODE_EXPECTED = [
   "1  await Promise.resolve(v)",
   // Node subscribes to every entry with .then, so an ALREADY-SETTLED entry
   // still delivers through a reaction job and the result settles a turn later.
-  // scr_promise_all settles the result inline at construction (scr_async.c).
+  // Promise.all now counts settles in each entry's own turn (lowerer's
+  // settle-counting combinator), so both lanes match Node here.
   "2  await Promise.all([settled, settled])",
   "3  for await over a 1-yield async generator",
   "5  for await over a 2-yield async generator",
@@ -96,13 +98,12 @@ const NODE_EXPECTED = [
   "",
 ].join("\n");
 
-/* scriptc, both backends. Identical to Node except the three rows whose
+/* scriptc, both backends. Identical to Node except the two rows whose
  * comments above say why, each of which is ONE turn cheaper here. */
 const NATIVE_EXPECTED = NODE_EXPECTED.replace(
   "3  await (async () => { return p })()",
   "2  await (async () => { return p })()",
 )
-  .replace("2  await Promise.all([settled, settled])", "1  await Promise.all([settled, settled])")
   .replace(
     "2  await Promise.race([settled, settled])",
     "1  await Promise.race([settled, settled])",
