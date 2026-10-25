@@ -65,6 +65,8 @@ async function buildStatic(
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
     // the method-reference state machine (case 10250)
     ...globSync(join(fixturesRoot, "npm-static/node_modules/mrefsm/**/*.{js,json}")).sort(),
+    // the export= class pairing package (case 10350)
+    ...globSync(join(fixturesRoot, "npm-static/node_modules/ptpair/**/*.{js,json,d.ts}")).sort(),
     // the ws-address mini package (case 8210; its own tsconfig dir)
     ...globSync(join(fixturesRoot, "npm-url/**/*.{js,json,d.ts,ts}")).sort(),
     // the price-list mini packages (cases 4031-4032, 4061-4064) and the
@@ -2053,6 +2055,30 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
       const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
       const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
       expect(node.split("\n").filter((l) => l !== "").length).toBe(6);
+      expect(native, backend).toBe(node);
+      expect(nativeRes.exitCode, backend).toBe(0);
+    }
+  }, 300_000);
+
+  /* -- 10350: `export = Point` in a declaration file (a declared class merged with a
+   * namespace), paired with the UMD-shaped constructor the package ships. Construction,
+   * prototype methods and a prototype datum, statics, `in`, instanceof directly and
+   * through an untyped value, and Map / JSON / Object.keys over the instances. */
+  test("10350: an export= class paired with its UMD constructor matches Node", async () => {
+    const entry = join(fixturesRoot, "npm-static/cases/10350-export-equals-pair/main.js");
+    const { coverage } = analyze(entry, { npmStatic: ["ptpair"] });
+    expect(coverage.npmStatic).toEqual([{ package: "ptpair", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    for (const backend of ["c", "llvm"] as const) {
+      const binary = await buildStatic(entry, ["ptpair"], backend);
+      const [nodeRes, nativeRes] = await Promise.all([
+        runBinary("node", [entry]),
+        runBinary(binary, []),
+      ]);
+      const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      expect(node.split("\n").filter((l) => l !== "").length).toBe(11);
       expect(native, backend).toBe(node);
       expect(nativeRes.exitCode, backend).toBe(0);
     }
