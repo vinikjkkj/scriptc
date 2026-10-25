@@ -7477,6 +7477,14 @@ const inliningPredicates = new Set<ts.Symbol>();
     if (findGenericMethodOn(L, info, "toString") !== null) return null;
     const found = L.findMethodOn(info, "toString");
     if (!found) return null;
+    // The builtin root (Error.prototype.toString) is the runtime's one
+    // implementation, called as the error.toString libCall that a direct
+    // `e.toString()` already lowers to (lower-calls.ts, found.declarer
+    // .builtinError). It has no `%Error.toString` function to call or keep
+    // reachable, and overriding it is fenced, so no dispatch is needed.
+    if (found.declarer.builtinError) {
+      return { kind: "libCall", fn: "error.toString", args: [L.upcastTo(recv, "%Error")], type: STRING, loc };
+    }
     // An abstract toString with no concrete override below has no
     // implementation to call; a non-string one has no string entry point.
     // Both keep the old answer rather than turning a wrong string into a
