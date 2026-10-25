@@ -2983,6 +2983,28 @@ const SYMBOLIC_PAIR_BUDGET = 256;
    * The receiver is the raw dyn value; the body's `this` is resolved by lowerExpr's ThisKeyword arm
    * (detachedThisClassOf). Declines a body whose `this` or `super` sits in a nested function: the
    * raw receiver is a parameter of this frame, and a closure would need a capture of it. */
+  /** True when a body can be lowered as a detached variant: no `this` or `super` sits in a nested
+   * function of it (see implicitDetachedInstance). */
+  export function detachedDeclinable(decl: ts.Node): boolean {
+    const bodyNode = (decl as { body?: ts.Node }).body;
+    if (bodyNode === undefined) return true;
+    let ok = true;
+    const scan = (n: ts.Node): void => {
+      if (!ok) return;
+      if (n.kind === ts.SyntaxKind.ThisKeyword || n.kind === ts.SyntaxKind.SuperKeyword) {
+        for (let p = n.parent; p !== undefined && p !== decl; p = p.parent) {
+          if (ts.isArrowFunction(p) || ts.isFunctionExpression(p) || ts.isFunctionDeclaration(p) || ts.isClassDeclaration(p) || ts.isClassExpression(p)) {
+            ok = false;
+            return;
+          }
+        }
+      }
+      n.forEachChild(scan);
+    };
+    bodyNode.forEachChild(scan);
+    return ok;
+  }
+
   export function implicitDetachedInstance(L: Lowerer, blame: ts.Node, info: GenericFnInfo): GenericInstance {
     const decl = info.decl;
     const shapes: ParamShape[] = decl.parameters.map((param, i) =>
