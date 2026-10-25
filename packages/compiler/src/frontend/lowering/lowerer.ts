@@ -11541,8 +11541,17 @@ export class Lowerer {
     const toT: IrType = { kind: "record", shapeId: toShapeId };
     // Plan every arm BEFORE interning anything.
     const plans: (IrExpr | null)[] = from.arms.map((arm, i) => {
-      if (isUnitType(arm) || arm.kind !== "record") return null;
+      if (isUnitType(arm)) return null;
       const probe: IrExpr = { kind: "unionNarrow", unionId: fromId, tag: i, value: { kind: "varRef", localId: "u.0", type: { kind: "union", unionId: fromId }, loc }, type: arm, loc };
+      // A CLASS INSTANCE arm projects into the shape through the same field
+      // copy a lone instance does (coerceToExpected's object -> record rule):
+      // `DatabaseError | NoticeMessage` into `{ length; name }` is one
+      // collapse, not a refusal, when each instance reaches the shape.
+      if (arm.kind === "object") {
+        const helper = this.objRecordWidthHelper(arm.className, toShapeId, loc);
+        return helper ? { kind: "call", callee: helper, args: [probe], type: toT, loc } : null;
+      }
+      if (arm.kind !== "record") return null;
       if (typeEquals(arm, toT)) return probe;
       return this.widthCoerce(probe, toT);
     });
