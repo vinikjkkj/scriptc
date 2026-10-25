@@ -2654,9 +2654,12 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // inference the `new` expression runs), the dyn-flavored container
             // otherwise — so a hoisted function reads the global the init assigns.
             const containerT = untypedContainerGlobalType(L, sf, decl, nameNode);
+            // The fill-proven `new Array(n)` arm (moduleFillArrayGlobalType): the
+            // binding gets a real slot when no read can run before its initializer.
+            const fillArrayT = moduleFillArrayGlobalType(L, sf, decl, nameNode);
             if (
-              isJsSourceFile(sf) && objFnValueT === null && containerT === null && !L.mapTypeOf(L.typeOf(nameNode)) &&
-              !jsFnLiteralSlot(L, decl, nameNode)
+              isJsSourceFile(sf) && objFnValueT === null && containerT === null && fillArrayT === null &&
+              !L.mapTypeOf(L.typeOf(nameNode)) && !jsFnLiteralSlot(L, decl, nameNode)
             ) continue;
             if (objFnValueT !== null && process.env["SCRIPTC_OBJFNVALUE_WHY"] !== undefined) {
               console.error(`[objfnvalue] global ${locOf(nameNode).file}:${locOf(nameNode).start} ${nameNode.text}`);
@@ -2738,6 +2741,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                     return { kind: "classval", className: castClass.def.name } as IrType;
                   })();
             let type =
+              fillArrayT ??
               handleT ??
               containerT ??
               castClassT ??
@@ -3147,7 +3151,7 @@ function preDeclarationSlot(
   }
   if (
     TDZ_GLOBAL_KINDS.has(type.kind) && !isUnitType(type) &&
-    readBeforeActivation(L, sf, symbol, name, decl.getStart(sf))
+    readBeforeActivation(L, sf, symbol, name, decl)
   ) {
     return { type, tdz: true };
   }
@@ -3227,17 +3231,138 @@ function readAbove(L: Lowerer, sf: ts.SourceFile, symbol: ts.Symbol, name: strin
  * function-like the earliest position from which it can be entered, so
  * this is one lookup per reference. */
 function readBeforeActivation(
-  L: Lowerer, sf: ts.SourceFile, symbol: ts.Symbol, name: string, start: number,
+  L: Lowerer, sf: ts.SourceFile, symbol: ts.Symbol, name: string, decl: ts.VariableDeclaration,
 ): boolean {
+  const start = decl.getStart(sf);
   let activations: Map<ts.Node, number> | null = null;
   for (const id of referencesTo(L, sf, symbol, name)) {
-    if (id.getStart(sf) < start) return true;
     const host = enclosingFunctionLike(id);
-    if (host === null) continue; // a top-level read below the declarator runs after it
+    if (host === null) {
+      // A top-level read above the declarator runs before it; one below runs after.
+      if (id.getStart(sf) < start) return true;
+      continue;
+    }
+    // A read inside a function runs only when the function is entered: early
+    // exactly when it can be entered above the declarator with a call in the window.
     activations ??= activationsOf(L, sf);
-    if ((activations.get(host) ?? Number.MAX_SAFE_INTEGER) < start) return true;
+    const act = activations.get(host) ?? Number.MAX_SAFE_INTEGER;
+    if (act < start && invocationWindowOpens(L, sf, act, decl)) return true;
   }
   return false;
+}
+
+/** The activation point of a function is only where the program CAN enter it.
+ * Entering it needs code to run: a call, a `new`, a getter, a `require` — the
+ * only ways control leaves a module body's top level. So the window between
+ * the earliest activation and the declarator is harmless when every top-level
+ * statement overlapping it is INERT: it runs no code the program does not
+ * own (literals, module-local reads, closure creation, `new Array(n)`, and
+ * stores into module bindings or `exports.X`). Statements that end before the
+ * activation cannot reach the function, since it did not exist for them yet.
+ *
+ * dbcs-codec's `exports._dbcs = DBCSCodec` above `var UNASSIGNED_NODE = new
+ * Array(256)` is the case: the window holds only literal `var`s, so nothing
+ * can call DBCSCodec before the array exists. A `require`, a call, or any
+ * other statement in the window keeps the window open (the refusal stays).
+ * A declarator that is not a direct top-level statement is never inert. */
+function invocationWindowOpens(L: Lowerer, sf: ts.SourceFile, act: number, decl: ts.VariableDeclaration): boolean {
+  const list = decl.parent;
+  const statement = list?.parent;
+  if (list === undefined || !ts.isVariableDeclarationList(list) || statement === undefined ||
+      !ts.isVariableStatement(statement) || statement.parent !== sf) return true;
+  const end = decl.getEnd();
+  for (const s of sf.statements) {
+    if (s.getEnd() <= act) continue;
+    if (s.getStart(sf) >= end) break;
+    if (!inertWindowStatement(L, sf, s)) return true;
+  }
+  return false;
+}
+
+function inertWindowStatement(L: Lowerer, sf: ts.SourceFile, s: ts.Statement): boolean {
+  if (ts.isFunctionDeclaration(s) || ts.isEmptyStatement(s)) return true;
+  if (ts.isVariableStatement(s)) {
+    return s.declarationList.declarations.every((d) =>
+      d.initializer === undefined || (ts.isIdentifier(d.name) && inertWindowExpr(L, sf, d.initializer)));
+  }
+  if (ts.isExpressionStatement(s)) return inertWindowExpr(L, sf, s.expression);
+  return false;
+}
+
+function isDeclaredInFile(L: Lowerer, sf: ts.SourceFile, id: ts.Identifier): boolean {
+  const sym = L.checker.getSymbolAtLocation(id);
+  return sym !== undefined && L.checker.declarationsOf(sym).some((d) => d.getSourceFile() === sf);
+}
+
+function literalOnlyWindowExpr(e: ts.Expression): boolean {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (ts.isNumericLiteral(e) || ts.isStringLiteral(e)) return true;
+  if (ts.isPrefixUnaryExpression(e)) return literalOnlyWindowExpr(e.operand);
+  if (ts.isBinaryExpression(e)) return literalOnlyWindowExpr(e.left) && literalOnlyWindowExpr(e.right);
+  return false;
+}
+
+/** An expression that runs no user code when evaluated (see invocationWindowOpens). */
+function inertWindowExpr(L: Lowerer, sf: ts.SourceFile, e: ts.Expression): boolean {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (
+    ts.isNumericLiteral(e) || ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e) ||
+    e.kind === ts.SyntaxKind.TrueKeyword || e.kind === ts.SyntaxKind.FalseKeyword ||
+    e.kind === ts.SyntaxKind.NullKeyword || e.kind === ts.SyntaxKind.ThisKeyword
+  ) return true;
+  if (ts.isIdentifier(e)) {
+    if (isDeclaredInFile(L, sf, e)) return true;
+    return e.text === "undefined" || e.text === "NaN" || e.text === "Infinity";
+  }
+  if (ts.isFunctionExpression(e) || ts.isArrowFunction(e)) return true;
+  if (ts.isPrefixUnaryExpression(e)) return literalOnlyWindowExpr(e);
+  if (ts.isBinaryExpression(e) && literalOnlyWindowExpr(e)) return true;
+  if (ts.isArrayLiteralExpression(e)) {
+    return e.elements.every((el) => ts.isOmittedExpression(el) || (!ts.isSpreadElement(el) && inertWindowExpr(L, sf, el)));
+  }
+  if (ts.isObjectLiteralExpression(e)) {
+    return e.properties.every((p) => {
+      if (ts.isMethodDeclaration(p)) return !ts.isComputedPropertyName(p.name);
+      if (ts.isPropertyAssignment(p)) return !ts.isComputedPropertyName(p.name) && inertWindowExpr(L, sf, p.initializer);
+      if (ts.isShorthandPropertyAssignment(p)) return ts.isIdentifier(p.name) && isDeclaredInFile(L, sf, p.name);
+      return false;
+    });
+  }
+  if (ts.isNewExpression(e) || ts.isCallExpression(e)) {
+    // Only the built-in Array constructor (never shadowed by this file).
+    const callee = e.expression;
+    if (!ts.isIdentifier(callee) || callee.text !== "Array" || isDeclaredInFile(L, sf, callee)) return false;
+    return (e.arguments ?? []).every((a) => inertWindowExpr(L, sf, a));
+  }
+  if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    const left = e.left;
+    const storeOk =
+      (ts.isIdentifier(left) && isDeclaredInFile(L, sf, left)) ||
+      (ts.isPropertyAccessExpression(left) && ts.isIdentifier(left.expression) && left.expression.text === "exports") ||
+      (ts.isPropertyAccessExpression(left) && ts.isPropertyAccessExpression(left.expression) &&
+        ts.isIdentifier(left.expression.expression) && left.expression.expression.text === "module" &&
+        left.expression.name.text === "exports");
+    return storeOk && inertWindowExpr(L, sf, e.right);
+  }
+  return false;
+}
+
+/** A JavaScript module `var X = new Array(n)` whose checker type is `any[]` (no
+ * mapping). Its initializer lowers to the checked-dynamic array (dynArrNew), so
+ * the module global takes that same representation and hoisted functions that
+ * read it bind to a real slot. Admitted only when no read can run before the
+ * initializer (readBeforeActivation); otherwise the binding stays unregistered
+ * and the reference keeps its SC1030 refusal. */
+function moduleFillArrayGlobalType(
+  L: Lowerer, sf: ts.SourceFile, decl: ts.VariableDeclaration, nameNode: ts.Identifier,
+): IrType | null {
+  if (L.dynamic || !isJsSourceFile(sf) || decl.name !== nameNode || !isVarDeclared(decl)) return null;
+  const init = decl.initializer;
+  if (init === undefined || !ts.isNewExpression(init) || !ts.isIdentifier(init.expression)) return null;
+  if (init.expression.text !== "Array" || !L.checkerAnyArray(nameNode)) return null;
+  const symbol = L.checker.getSymbolAtLocation(nameNode);
+  if (symbol === undefined || readBeforeActivation(L, sf, symbol, nameNode.text, decl)) return null;
+  return DYN;
 }
 
 function isFunctionLikeNode(n: ts.Node): boolean {
