@@ -3941,11 +3941,19 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     );
   }
 
+  /** The checker type a dc receiver is tested by. Inside an optional chain the
+   * receiver is a chain-bound handle (`ch?.publish()`): the body only runs when
+   * it is non-nullish, so its `Channel | undefined` union is read as the Channel. */
+  function dcReceiverType(L: Lowerer, node: ts.Expression): ts.Type {
+    const t = L.typeOf(node);
+    return L.chainRecvByNode.has(node) ? L.checker.getNonNullableType(t) : t;
+  }
+
   /** True when `node`'s checker type is diagnostics_channel's Channel
    * (stdlib provenance plus the ambient module, the readline.Interface
    * technique — the value itself is an f64 handle, types.ts). */
   function isDcChannelTyped(L: Lowerer, node: ts.Expression): boolean {
-    const t = L.typeOf(node);
+    const t = dcReceiverType(L, node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== "Channel") return false;
     return L.checker.declarationsOf(sym).some(
@@ -4100,7 +4108,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * TracingChannel (the Channel detection's shape — the value is an f64
    * handle into the tracing registry, types.ts). */
   function isDcTracingChannelTyped(L: Lowerer, node: ts.Expression): boolean {
-    const t = L.typeOf(node);
+    const t = dcReceiverType(L, node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== "TracingChannel") return false;
     return L.checker.declarationsOf(sym).some(
