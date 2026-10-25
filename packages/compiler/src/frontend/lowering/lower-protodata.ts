@@ -295,10 +295,6 @@ function isInitPosition(node: ts.Node): boolean {
   return true;
 }
 
-function typesEqualSlot(a: IrType, b: IrType): boolean {
-  return a.kind === b.kind && (a.kind !== "union" || (b.kind === "union" && a.unionId === b.unionId));
-}
-
 /** Static read `recv.name` of a prototype-data member, or null when the
  * name is not one (the caller continues with the ordinary read). */
 export function protoDataMemberRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
