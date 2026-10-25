@@ -6885,8 +6885,17 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       return methodAbiEquals(slot, { params: own.params, ret: own.ret }) ? "exact" : null;
     }
     const shared = Math.min(slot.params.length, own.params.length);
+    let paramsIdentical = true;
     for (let i = 0; i < shared; i++) {
-      if (!typeEquals(slot.params[i]!.type, own.params[i]!.type)) return null;
+      if (typeEquals(slot.params[i]!.type, own.params[i]!.type)) continue;
+      // A parameter whose ABI type differs is honest only when the override
+      // declares it dyn (a JS source's untyped parameter): the thunk boxes the
+      // slot's typed value into it, and the override reads what Node would
+      // hand it. The reverse (a dyn slot into a typed override parameter)
+      // would need a checked cast that throws where Node runs the override,
+      // so it stays a fence.
+      if (!boundaryConvertible(L, slot.params[i]!.type, own.params[i]!.type)) return null;
+      paramsIdentical = false;
     }
     // Parameters the OVERRIDE adds must be OMITTABLE and must have an
     // absent value the thunk can pass. A required extra parameter has no
@@ -6898,7 +6907,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // forward them — which is how bson's `MinKey.inspect()` implements
     // `abstract inspect(depth?, options?, inspect?)`.
     for (const p of own.params.slice(shared)) {
-      if (p.mode !== "omittable") return null;
+      // A dyn parameter may stay absent: its absent value is undefined.
+      if (p.mode !== "omittable" && p.type.kind !== "dyn") return null;
       if (omittedArgFor(L, p.type, { file: "<synthetic>", start: 0, end: 0 }) === null) return null;
     }
     const arityExact = own.params.length === slot.params.length;
@@ -6912,7 +6922,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       own.ret.kind !== "void" &&
       canConvertToDyn(own.ret, (id) => L.shapes.get(id), (id) => L.unions.get(id));
     if (!retExact && !retWidened) return null;
-    return retExact && arityExact ? "exact" : "widened";
+    return retExact && arityExact && paramsIdentical ? "exact" : "widened";
   }
 
 /** True when the vtable entry for `info`'s own `mName` cannot be the method
@@ -6956,6 +6966,25 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return { own, slot };
   }
 
+/** Whether a slot parameter of ABI type `from` can be handed to an override
+   * declaring `to` through a thunk. Only WIDENING into a dyn is honest: the
+   * override is a JS function that runs on whatever value arrives, so the
+   * slot's typed value boxes into the override's dyn parameter (any
+   * JSON-safe, boxable or class-instance type). The reverse, a dyn slot
+   * checked into the override's typed parameter, would throw where Node runs
+   * the override on the value, so it stays a fence. */
+  function boundaryConvertible(L: Lowerer, from: IrType, to: IrType): boolean {
+    if (typeEquals(from, to)) return true;
+    return to.kind === "dyn" && canConvertToDyn(from, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+  }
+
+  /** One argument of a VTABLE THUNK: the slot's local, boxed for an override
+   * whose parameter is dyn (see boundaryConvertible). */
+  function boundaryArg(value: IrExpr, from: IrType, to: IrType, loc: SrcLoc): IrExpr {
+    if (typeEquals(from, to)) return value;
+    return { kind: "dynFrom", value, type: DYN, loc };
+  }
+
 /** The synthesized VTABLE THUNK — `%C.m%vt`, spelled at the slot's
  * signature. Body: one call of `%C.m` with the slot's own arguments plus an
  * `undefined` for each parameter only the override declares, its result
@@ -6985,7 +7014,11 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const args: IrExpr[] = [{ kind: "varRef", localId: locals[0]!.id, type: locals[0]!.type, loc }];
     own.params.forEach((p, i) => {
       const l = locals[i + 1];
-      args.push(l ? { kind: "varRef", localId: l.id, type: l.type, loc } : omittedArgFor(L, p.type, loc)!);
+      args.push(
+        l
+          ? boundaryArg({ kind: "varRef", localId: l.id, type: l.type, loc }, slot.sig.params[i]!.type, p.type, loc)
+          : omittedArgFor(L, p.type, loc)!,
+      );
     });
     const call: IrExpr = {
       kind: "call",
