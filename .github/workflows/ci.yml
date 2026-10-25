@@ -512,6 +512,23 @@ jobs:
             pnpm install --frozen-lockfile
           }
       - run: pnpm build
+      # Every Windows job starts with an EMPTY zig global cache (only the zig
+      # install is restored, by .github/actions/zig). The first `zig cc` for
+      # x86_64-windows-gnu in a job builds the mingw CRT and compiler-rt from
+      # source, which took 110-290 s on this runner. Whichever test made that
+      # first call paid it inside its own vitest budget: emit-c's ASan probe
+      # (300 s testTimeout) timed out in 4 of 7 runs on 2026-10-25. Warm the
+      # cache here, outside every test budget, with the same target the tests
+      # use. The probe itself is unchanged and still runs in the test.
+      - name: Warm the zig cache for the Windows target
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "zig-warm"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $c = Join-Path $dir "warm.c"
+          Set-Content -Path $c -Value "int main(void){return 0;}" -Encoding ascii
+          zig cc -target x86_64-windows-gnu -o (Join-Path $dir "warm.exe") $c
+          if ($LASTEXITCODE -ne 0) { throw "zig cc warm-up for x86_64-windows-gnu failed" }
       # Same three-step split as `tests` (file-sharded / case-sharded /
       # coverage sweep) -- see that job's comments for why the axes must
       # not mix. No `ulimit`/core-dump step: that is an Ubuntu apport
