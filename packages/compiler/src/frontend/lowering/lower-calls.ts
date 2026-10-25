@@ -222,6 +222,10 @@ export interface GenericFnInfo {
 }
 
 export interface GenericInstance {
+  /** A DETACHED-receiver variant (see implicitDetachedInstance): its first parameter is the raw
+   * receiver as dyn, and every `this` member access in its body throws Node's TypeError at that
+   * access, after the side effects Node runs before it. */
+  detachedThis?: true;
   /** Born from CONSTRAINT-erased bindings. Travels WITH the instance
    * because its body lowers later, outside the frame that built it —
    * the rest-tuple rule has to hold exactly while that body is walked. */
@@ -2337,8 +2341,10 @@ const SYMBOLIC_PAIR_BUDGET = 256;
       if (cls && info.member!.kind === "method") {
         // Instance methods take `this` as param 0, exactly like plain
         // `%C.method` functions (lowerClassMethodMemberInner).
-        const thisType: IrType = { kind: "object", className: cls.def.name };
+        // A detached variant takes the RAW receiver (dyn): `this` is resolved per access.
+        const thisType: IrType = inst.detachedThis === true ? DYN : { kind: "object", className: cls.def.name };
         const thisLocal = L.declareThis(thisType);
+        if (inst.detachedThis === true) detachedThisClasses.set(thisLocal, cls.def.name);
         params.push({ localId: thisLocal.id, name: "this", type: thisType });
       }
       // Default-param initializers lower per instance, with the bindings
@@ -2970,11 +2976,59 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     return internImplicitInstance(L, blame, info, shapes, new Map());
   }
 
+  /** The DETACHED-receiver variant of an implicit-any method: the function a method value calls
+   * when its receiver is not known to be an instance (`const f = o.m; f(...)`, or `this` of a
+   * method read as a value and invoked plainly). Node runs the body with `this` undefined, so its
+   * side effects before the first `this` access happen and the TypeError comes at that access.
+   * The receiver is the raw dyn value; the body's `this` is resolved by lowerExpr's ThisKeyword arm
+   * (detachedThisClassOf). Declines a body whose `this` or `super` sits in a nested function: the
+   * raw receiver is a parameter of this frame, and a closure would need a capture of it. */
+  export function implicitDetachedInstance(L: Lowerer, blame: ts.Node, info: GenericFnInfo): GenericInstance {
+    const decl = info.decl;
+    const shapes: ParamShape[] = decl.parameters.map((param, i) =>
+      info.implicitParams![i] ? { type: DYN, mode: "required" as const } : L.paramShape(param),
+    );
+    const bodyNode = decl.body;
+    if (bodyNode !== undefined) {
+      const nested = (n: ts.Node): boolean => {
+        for (let p = n.parent; p !== undefined && p !== decl; p = p.parent) {
+          if (ts.isArrowFunction(p) || ts.isFunctionExpression(p) || ts.isFunctionDeclaration(p) || ts.isClassDeclaration(p) || ts.isClassExpression(p)) return true;
+        }
+        return false;
+      };
+      const scan = (n: ts.Node): void => {
+        if ((n.kind === ts.SyntaxKind.ThisKeyword || n.kind === ts.SyntaxKind.SuperKeyword) && nested(n)) {
+          L.unsupported("SC1090", n, `'${n.getText()}' inside a nested function of a method read as a detached value (the detached call's receiver is a parameter of the method frame)`);
+        }
+        n.forEachChild(scan);
+      };
+      bodyNode.forEachChild(scan);
+    }
+    return internImplicitInstance(L, blame, info, shapes, new Map(), true);
+  }
+
+  /** The class of a detached variant's raw receiver local, when `local` is one (see
+   * implicitDetachedInstance); undefined for every other `this` local. */
+  export function detachedThisClassOf(local: IrLocal): string | undefined {
+    return detachedThisClasses.get(local);
+  }
+
+  const detachedThisClasses = new WeakMap<IrLocal, string>();
+
+
+
+  /** Marks `local` as the raw receiver of a detached variant of class `className` (typed methods:
+   * lower-classes' detachedMethodVariant). */
+  export function markDetachedThis(local: IrLocal, className: string): void {
+    detachedThisClasses.set(local, className);
+  }
+
   function internImplicitInstance(L: Lowerer, blame: ts.Node,
     info: GenericFnInfo,
     shapes: ParamShape[],
-    argTypes: Map<ts.Symbol, ts.Type>,): GenericInstance {
-    const key = shapes.map((s) => typeKey(s.type)).join(",");
+    argTypes: Map<ts.Symbol, ts.Type>,
+    detached = false,): GenericInstance {
+    const key = (detached ? "detached|" : "") + shapes.map((s) => typeKey(s.type)).join(",");
     let inst = info.instances.get(key);
     if (inst) return inst;
     // The same two limits the call-keyed route applies, for the same
@@ -3017,6 +3071,7 @@ const SYMBOLIC_PAIR_BUDGET = 256;
       implicitArgTypes: argTypes,
       implicitState: "lowering",
       ...(declared === null ? { implicitInferReturn: true as const } : {}),
+      ...(detached ? { detachedThis: true as const } : {}),
     };
     info.instances.set(key, inst);
     // EAGER lowering (nested, the lambda discipline): the call site needs

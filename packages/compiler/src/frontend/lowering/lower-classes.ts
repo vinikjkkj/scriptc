@@ -8,7 +8,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
-import { implicitDefaultInstance, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
+import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { protoClassArmOn, protoClassInfoFor } from "./proto-class-consume.js";
@@ -8211,16 +8211,71 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     }
   }
 
+  /** The DETACHED variant of a declared instance method `mName` of `info` (its own declarer): the
+   * same body with the raw ambient receiver as param 0, whose `this` accesses throw Node's TypeError
+   * where they happen (lower-exprs detachedThisExpr). Returns the function's name, or null when the
+   * method has no plain body to vary (accessors, async and generator bodies, a `this` in a nested
+   * function, a member the class declaration does not carry) -- the caller then keeps the receiver
+   * check up front. */
+  export function detachedMethodVariant(L: Lowerer, info: ClassInfo, mName: string): string | null {
+    const name = `%detached.${info.def.name}.${mName}`;
+    if (L.liftedFns.some((f) => f.name === name)) return name;
+    // A body that reads its own method as a value (`return this.readRow`) asks for the variant
+    // it is lowering: the name is already committed to by then, so answer it.
+    const pending = detachedVariantsInProgress.get(name);
+    if (pending !== undefined) {
+      pending.hit = true;
+      return name;
+    }
+    const state = { hit: false };
+    detachedVariantsInProgress.set(name, state);
+    try {
+      return detachedVariantBody(L, info, mName, name, state);
+    } finally {
+      detachedVariantsInProgress.delete(name);
+    }
+  }
+
+  const detachedVariantsInProgress = new Map<string, { hit: boolean }>();
+
+  function detachedVariantBody(L: Lowerer, info: ClassInfo, mName: string, name: string, state: { hit: boolean }): string | null {
+    const member = info.decl?.members.find((m): m is ts.MethodDeclaration =>
+      ts.isMethodDeclaration(m) && m.body !== undefined && classMemberNameOf(L, m.name) === mName,
+    );
+    if (member === undefined) return null;
+    const nested = (n: ts.Node): boolean => {
+      if (n.kind === ts.SyntaxKind.ThisKeyword || n.kind === ts.SyntaxKind.SuperKeyword) {
+        for (let p = n.parent; p !== undefined && p !== member; p = p.parent) {
+          if (ts.isArrowFunction(p) || ts.isFunctionExpression(p) || ts.isFunctionDeclaration(p) || ts.isClassDeclaration(p) || ts.isClassExpression(p)) return true;
+        }
+      }
+      let found = false;
+      n.forEachChild((c) => { if (!found && nested(c)) found = true; });
+      return found;
+    };
+    if (member.body !== undefined && nested(member.body)) return null;
+    const fn = withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, member, true));
+    if (fn === null) {
+      // A self-reference was already committed to this name: it cannot be left dangling.
+      if (state.hit) L.unsupported("SC1090", member.name, `the detached variant of '${mName}' cannot be built`);
+      return null;
+    }
+    L.liftedFns.push(fn);
+    return name;
+  }
+
   /** One instance method body as its module function, shared by the declared
    * path and the synthesized one. Everything here reads only `parameters`,
    * `body` and the position -- which a FunctionExpression carries exactly as a
    * MethodDeclaration does. */
   function lowerMethodBodyInner(L: Lowerer, info: ClassInfo, mName: string,
-    fnLike: ts.MethodDeclaration | ts.AccessorDeclaration | ts.FunctionExpression,): IrFunction | null {
+    fnLike: ts.MethodDeclaration | ts.AccessorDeclaration | ts.FunctionExpression,
+    detached = false,): IrFunction | null {
     const className = info.def.name;
-    const thisType: IrType = { kind: "object", className };
+    const thisType: IrType = detached ? DYN : { kind: "object", className };
     const sig = info.methods.get(mName);
     if (!sig || !fnLike.body) return null;
+    if (detached && (sig.async === true || sig.gen !== undefined)) return null;
     const prevClass = L.currentClass;
     L.currentClass = info;
     // ASYNC methods: the module function is an async IrFunction — its
@@ -8249,6 +8304,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     L.fnStack.push(fnCtx);
     try {
       const thisLocal = L.declareThis(thisType);
+      if (detached) markDetachedThis(thisLocal, className);
       const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
       // `this` is declared first, so method parameter DEFAULTS may use it
       // (JS allows this in method defaults; it is param 0 here).
@@ -8268,7 +8324,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       // every function declaration and lambda gets.
       appendImplicitUndefinedReturn(L, body, bodyReturn, locOf(fnLike));
       const fn: IrFunction = {
-        name: `%${className}.${mName}`,
+        name: detached ? `%detached.${className}.${mName}` : `%${className}.${mName}`,
         params,
         returnType: bodyReturn,
         locals: L.ctx.locals,
