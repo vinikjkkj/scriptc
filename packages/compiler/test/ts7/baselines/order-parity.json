@@ -192,9 +192,57 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10206-promise-reject-non-error-reasons.ts": {
+   "order": [
+    "<repo>/tests/corpus/10206-promise-reject-non-error-reasons.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10207-promise-then-forwarding-handlers.ts": {
+   "order": [
+    "<repo>/tests/corpus/10207-promise-then-forwarding-handlers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10208-promise-all-settled-entries-tick-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/10208-promise-all-settled-entries-tick-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10209-promise-all-pending-tick-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/10209-promise-all-pending-tick-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1021-async-ordering.ts": {
    "order": [
     "<repo>/tests/corpus/1021-async-ordering.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10210-promise-all-typed-first-rejection.ts": {
+   "order": [
+    "<repo>/tests/corpus/10210-promise-all-typed-first-rejection.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10211-promise-dyn-all-tick-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/10211-promise-dyn-all-tick-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10212-promise-adopt-undefined-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/10212-promise-adopt-undefined-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10213-promise-adopt-void-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/10213-promise-adopt-void-slot.ts"
    ],
    "diags": []
   },
