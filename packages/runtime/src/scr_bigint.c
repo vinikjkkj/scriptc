@@ -963,6 +963,56 @@ static bool scr_big_eq_str(const ScrBigInt *b, const ScrStr *s) {
   return eq;
 }
 
+/* IsLessThan's BigInt arms (7.2.13 steps 4-7): the order of b against a
+ * bigint, a number (exact, never through a rounded double), or a string
+ * (StringToBigInt; a string that is no BigInt is UNORDERED, answer 2). */
+static int scr_big_rel_big(const ScrBigInt *a, const ScrBigInt *b) {
+  int c = scr_big_cmp(a, b);
+  return c < 0 ? -1 : (c > 0 ? 1 : 0);
+}
+
+static int scr_big_rel_f64(const ScrBigInt *b, double n) {
+  if (n != n) return 2;
+  if (n == INFINITY) return -1;
+  if (n == -INFINITY) return 1;
+  double fl = floor(n);
+  ScrBigInt *m = scr_big_from_f64(fl);
+  int c = scr_big_rel_big(b, m);
+  scr_big_release(m);
+  if (c == 0 && n != fl) return -1; /* b == floor(n), and n is above it */
+  return c;
+}
+
+static int scr_big_rel_str(const ScrBigInt *b, const ScrStr *s) {
+  const char *p = (const char *)s->data;
+  size_t n = s->len;
+  while (n && scr_big_ws(*p)) { p++; n--; }
+  while (n && scr_big_ws(p[n - 1])) n--;
+  ScrBigInt *m;
+  if (n == 0) {
+    m = scr_big_zero();
+  } else {
+    size_t i = 0;
+    int base = 10;
+    if (n > 2 && p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) { base = 16; i = 2; }
+    else if (n > 2 && p[0] == '0' && (p[1] == 'o' || p[1] == 'O')) { base = 8; i = 2; }
+    else if (n > 2 && p[0] == '0' && (p[1] == 'b' || p[1] == 'B')) { base = 2; i = 2; }
+    else if (p[0] == '+' || p[0] == '-') i = 1;
+    if (i >= n) return 2;
+    for (size_t k = i; k < n; k++) {
+      char c = p[k];
+      int d = (c >= '0' && c <= '9') ? c - '0'
+              : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+              : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : 99;
+      if (d >= base) return 2;
+    }
+    m = scr_big_parse(p, n);
+  }
+  int c = scr_big_rel_big(b, m);
+  scr_big_release(m);
+  return c;
+}
+
 static const ScrDynBigOps scr_big_dyn_ops = {
   scr_big_retain,
   scr_big_release,
@@ -972,6 +1022,9 @@ static const ScrDynBigOps scr_big_dyn_ops = {
   scr_big_eq_f64,
   scr_big_eq_str,
   scr_big_low_u64,
+  scr_big_rel_big,
+  scr_big_rel_f64,
+  scr_big_rel_str,
 };
 
 ScrDyn *scr_dyn_from_big(ScrBigInt *b) {

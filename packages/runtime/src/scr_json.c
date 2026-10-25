@@ -4278,6 +4278,22 @@ scr_add_done:
  * strCmp node without `utf16`), so the two spellings of one comparison
  * agree with each other and carry one documented divergence between them,
  * not two. Borrows; throws only on the reference kinds. */
+/* One side a BigInt (IsLessThan's ToNumeric and StringToBigInt arms): the
+ * order of x against y, -1/0/1, or 2 when unordered. A non-BigInt side
+ * other than a string is ToNumeric'd; the BigInt side never is. */
+static int scr_dyn_big_rel(const ScrDyn *x, const ScrDyn *y) {
+  const ScrDynBigOps *ops = scr_dyn_big_ops();
+  if (x->kind == SCR_DYN_BIG && y->kind == SCR_DYN_BIG) return ops->rel_big(x->v.big, y->v.big);
+  if (x->kind == SCR_DYN_BIG && y->kind == SCR_DYN_STR) return ops->rel_str(x->v.big, y->v.str);
+  if (x->kind == SCR_DYN_STR && y->kind == SCR_DYN_BIG) {
+    int r = ops->rel_str(y->v.big, x->v.str);
+    return r == 2 ? 2 : -r;
+  }
+  if (x->kind == SCR_DYN_BIG) return ops->rel_f64(x->v.big, scr_dyn_to_number(y));
+  int r = ops->rel_f64(y->v.big, scr_dyn_to_number(x));
+  return r == 2 ? 2 : -r;
+}
+
 static bool scr_dyn_rel(const ScrDyn *pa_in, const ScrDyn *pb_in, int op) {
   int c;
   /* Both sides ToPrimitive with the NUMBER hint, as 7.2.13 step 1 says.
@@ -4290,17 +4306,21 @@ static bool scr_dyn_rel(const ScrDyn *pa_in, const ScrDyn *pb_in, int op) {
     return false;
   }
   bool scr_rel_out = false;
-  if (!scr_dyn_is_prim(a)) {
+  bool a_big = a->kind == SCR_DYN_BIG, b_big = b->kind == SCR_DYN_BIG;
+  if (!a_big && !scr_dyn_is_prim(a)) {
     scr_dyn_check_fail(NULL, "a number or a string", a);
     goto scr_rel_done;
   }
-  if (!scr_dyn_is_prim(b)) {
+  if (!b_big && !scr_dyn_is_prim(b)) {
     scr_dyn_check_fail(NULL, "a number or a string", b);
     goto scr_rel_done;
   }
   if (a->kind == SCR_DYN_STR && b->kind == SCR_DYN_STR) {
     c = scr_str_cmp(a->v.str, b->v.str);
     c = c < 0 ? -1 : (c > 0 ? 1 : 0);
+  } else if (a_big || b_big) {
+    c = scr_dyn_big_rel(a, b);
+    if (c == 2) goto scr_rel_done; /* unordered: every relational op is false */
   } else {
     double x = scr_dyn_to_number(a);
     double y = scr_dyn_to_number(b);
@@ -6010,7 +6030,11 @@ bool scr_dyn_loose_eq_num(double n, const ScrDyn *d) {
   ScrDyn *p = scr_dyn_to_primitive(d, SCR_TOPRIM_DEFAULT);
   if (!p) return false; /* pending */
   bool eq = false;
-  if (p->kind != SCR_DYN_NULL && p->kind != SCR_DYN_UNDEF) {
+  if (p->kind == SCR_DYN_BIG) {
+    /* 1n == 1: exact by value (IsLooselyEqual 7.2.14 step 12); a BigInt
+     * is never ToNumber'd here, so no conversion throws. */
+    eq = scr_dyn_big_ops()->eq_f64(p->v.big, n);
+  } else if (p->kind != SCR_DYN_NULL && p->kind != SCR_DYN_UNDEF) {
     double m = scr_dyn_to_number(p);
     eq = !scr_exc_pending() && n == m; /* NaN compares false, as JS does */
   }
