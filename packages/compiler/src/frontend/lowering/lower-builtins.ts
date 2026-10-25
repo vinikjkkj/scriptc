@@ -1294,7 +1294,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (bi.module === "diagnostics_channel") {
       if (bi.member === "channel" && expr.arguments.length === 1) {
         const name = dcChannelNameArg(L, expr.arguments[0]!);
-        return { kind: "libCall", fn: "dc.channel", args: [name], type: F64, loc };
+        return { kind: "libCall", fn: "dc.channelDyn", args: [name], type: DYN, loc };
       }
       if ((bi.member === "subscribe" || bi.member === "unsubscribe") && expr.arguments.length === 2) {
         const name = dcChannelNameArg(L, expr.arguments[0]!);
@@ -1323,7 +1323,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
                 "the supported collection form assigns each of start/end/asyncStart/asyncEnd/error a Channel value inline",
               );
             }
-            byEvent.set(p.name.text, L.lowerExprExpecting(p.initializer, F64));
+            byEvent.set(p.name.text, dcHandleArg(L, p.initializer, "dc.unboxChan"));
           }
           if (byEvent.size !== 5) {
             L.noLowering(
@@ -1334,14 +1334,20 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           }
           return {
             kind: "libCall",
-            fn: "dc.tracingChannelOf",
-            args: DC_TRACE_EVENTS.map((ev) => byEvent.get(ev)!),
-            type: F64,
+            fn: "dc.boxTc",
+            args: [{
+              kind: "libCall",
+              fn: "dc.tracingChannelOf",
+              args: DC_TRACE_EVENTS.map((ev) => byEvent.get(ev)!),
+              type: F64,
+              loc,
+            }],
+            type: DYN,
             loc,
           };
         }
         const name = dcChannelNameArg(L, a);
-        return { kind: "libCall", fn: "dc.tracingChannel", args: [name], type: F64, loc };
+        return { kind: "libCall", fn: "dc.tracingChannelDyn", args: [name], type: DYN, loc };
       }
     }
     // readline.createInterface({ input: process.stdin, output:
@@ -3961,12 +3967,12 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     const name = access.name.text;
     const loc = locOf(call);
     if (name === "publish" && call.arguments.length === 1) {
-      const receiver = L.lowerExprExpecting(access.expression, F64);
+      const receiver = dcHandleArg(L, access.expression, "dc.unboxChan");
       const msg = dcMessageArg(L, call.arguments[0]!);
       return { kind: "libCall", fn: "dc.publish", args: [receiver, msg], type: VOID, loc };
     }
     if ((name === "subscribe" || name === "unsubscribe") && call.arguments.length === 1) {
-      const receiver = L.lowerExprExpecting(access.expression, F64);
+      const receiver = dcHandleArg(L, access.expression, "dc.unboxChan");
       const cb = dcSubscriberArg(L, call.arguments[0]!);
       return name === "subscribe"
         ? { kind: "libCall", fn: "dc.chanSubscribe", args: [receiver, cb], type: VOID, loc }
@@ -3987,7 +3993,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           "an AsyncLocalStorage instance (node:async_hooks) is the supported store",
         );
       }
-      const receiver = L.lowerExprExpecting(access.expression, F64);
+      const receiver = dcHandleArg(L, access.expression, "dc.unboxChan");
       const store = L.lowerExprExpecting(call.arguments[0]!, F64);
       if (name === "unbindStore") {
         return { kind: "libCall", fn: "dc.chanUnbindStore", args: [receiver, store], type: BOOL, loc };
@@ -3998,7 +4004,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       return { kind: "libCall", fn: "dc.chanBindStore", args: [receiver, store, transform], type: VOID, loc };
     }
     if (name === "runStores" && call.arguments.length >= 2) {
-      const receiver = L.lowerExprExpecting(access.expression, F64);
+      const receiver = dcHandleArg(L, access.expression, "dc.unboxChan");
       const data = dcMessageArg(L, call.arguments[0]!);
       const fn = dcSubscriberArg(L, call.arguments[1]!);
       const thisArg: IrExpr = call.arguments[2] !== undefined
@@ -4084,7 +4090,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (!isDcChannelTyped(L, access.expression)) return null;
     if (!L.isStdlibMember(access)) return null;
     const loc = locOf(access);
-    const receiver = L.lowerExprExpecting(access.expression, F64);
+    const receiver = dcHandleArg(L, access.expression, "dc.unboxChan");
     return name === "name"
       ? { kind: "libCall", fn: "dc.chanName", args: [receiver], type: STRING, loc }
       : { kind: "libCall", fn: "dc.chanHasSubscribers", args: [receiver], type: BOOL, loc };
@@ -4102,6 +4108,16 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
         L.isStdlibFile(d.getSourceFile()),
     );
+  }
+
+  /** A Channel or TracingChannel value as the f64 registry id the dc.* libCalls
+   * take. The static type is a dyn HANDLE box (types.ts), so it unboxes here;
+   * a value that already lowered to f64 passes through. */
+  function dcHandleArg(L: Lowerer, node: ts.Expression, unbox: "dc.unboxChan" | "dc.unboxTc"): IrExpr {
+    const e = L.lowerExpr(node);
+    if (e.type.kind === "f64") return e;
+    if (e.type.kind === "dyn") return { kind: "libCall", fn: unbox, args: [e], type: F64, loc: locOf(node) };
+    return L.badType(node, L.typeOf(node));
   }
 
   const DC_TRACE_EVENTS = ["start", "end", "asyncStart", "asyncEnd", "error"] as const;
@@ -4172,7 +4188,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     const name = access.name.text;
     const loc = locOf(call);
     if ((name === "subscribe" || name === "unsubscribe") && call.arguments.length === 1) {
-      const receiver = L.lowerExprExpecting(access.expression, F64);
+      const receiver = dcHandleArg(L, access.expression, "dc.unboxTc");
       const handlers = dcHandlersArg(L, call.arguments[0]!);
       return name === "subscribe"
         ? { kind: "libCall", fn: "dc.tcSubscribe", args: [receiver, handlers], type: VOID, loc }
@@ -4180,7 +4196,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     }
     if ((name === "traceSync" || name === "traceCallback" || name === "tracePromise") &&
         call.arguments.length >= 1) {
-      const receiver = L.lowerExprExpecting(access.expression, F64);
+      const receiver = dcHandleArg(L, access.expression, "dc.unboxTc");
       const fn = dcSubscriberArg(L, call.arguments[0]!);
       // traceSync(fn, context?, thisArg?, ...args) /
       // tracePromise(fn, context?, thisArg?, ...args) /
@@ -4241,13 +4257,19 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (!isDcTracingChannelTyped(L, access.expression)) return null;
     if (!L.isStdlibMember(access)) return null;
     const loc = locOf(access);
-    const receiver = L.lowerExprExpecting(access.expression, F64);
+    const receiver = dcHandleArg(L, access.expression, "dc.unboxTc");
     return idx >= 0
       ? {
           kind: "libCall",
-          fn: "dc.tcChannel",
-          args: [receiver, { kind: "numLit", value: idx, type: F64, loc }],
-          type: F64,
+          fn: "dc.boxChan",
+          args: [{
+            kind: "libCall",
+            fn: "dc.tcChannel",
+            args: [receiver, { kind: "numLit", value: idx, type: F64, loc }],
+            type: F64,
+            loc,
+          }],
+          type: DYN,
           loc,
         }
       : { kind: "libCall", fn: "dc.tcHasSubscribers", args: [receiver], type: BOOL, loc };

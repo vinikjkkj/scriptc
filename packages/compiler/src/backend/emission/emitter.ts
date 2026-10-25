@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass } from "../../ir/nodes.js";
+import { DYN, funcOf, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
@@ -1872,6 +1872,9 @@ export class CEmitter {
       // Symbol values cross the checked-dynamic tree as handles (SCR_DYNH_SYMBOL): the ops are installed
       // exactly when scr_symbol.c links (moduleUsesSymbol, cc.ts's gate).
       ...(moduleUsesSymbol(this.mod) ? [`  scr_sym_dyn_install();`] : []),
+      // The Channel / TracingChannel handle ops (scr_dc.c), whenever dc.* libCalls
+      // exist (cc.ts links scr_dc.c on the same predicate).
+      ...(moduleUsesDc(this.mod) ? [`  scr_dc_dyn_install();`] : []),
       // Child-stdio programs stamp the child-stream handle-dispatch ops so
       // `child.stdout` can cross into the checked-dynamic tree by
       // reference. scr_child.c is always linked, so this is a plain

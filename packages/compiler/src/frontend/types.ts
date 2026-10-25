@@ -3231,7 +3231,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         isDeclaredInAmbientModule(d, "diagnostics_channel"),
     )
   ) {
-    return F64;
+    return DYN; /* a HANDLE box (scr_dc.c): identity survives every dyn crossing */
   }
   // async_hooks.AsyncLocalStorage: the store value is an f64 handle into
   // the runtime's store id space (the Channel story — stores are
@@ -3258,7 +3258,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         isDeclaredInAmbientModule(d, "diagnostics_channel"),
     )
   ) {
-    return F64;
+    return DYN; /* a HANDLE box (scr_dc.c): identity survives every dyn crossing */
   }
   // string_decoder.StringDecoder: the decoder value is a two-field record
   // — the CANONICAL encoding name (construction normalizes aliases; the
