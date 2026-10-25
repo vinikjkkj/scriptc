@@ -20,10 +20,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json"
+    "build": "node node_modules/typescript/bin/tsc -p tsconfig.json"
   },
   "dependencies": {
     "@scriptc/compiler": "workspace:@scriptc-fork/compiler@*"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
   },
   "publishConfig": {
     "access": "public"
