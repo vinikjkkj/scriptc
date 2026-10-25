@@ -1786,6 +1786,17 @@ ScrDyn *scr_dyn_acc_slot(void) {
  * instead of one. */
 const char *scr_dyn_fn_sig_of(const ScrDyn *d) { return scr_dyn_fn_sig(d); }
 const char *scr_dyn_fn_name_of(const ScrDyn *d) { return scr_dyn_fn_name(d); }
+
+/* The name slot of a bound FUNC box (see scr_runtime.h). The spelling lives in
+ * capture 2 as a dyn string the box owns; it is read off the box, which keeps
+ * it alive for as long as the function is. */
+const char scr_dyn_bound_name_mark[] = "\x01bound-fn-name";
+const char *scr_dyn_bound_name(const ScrDyn *d) {
+  ScrDyn *s = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->caps[2]); /* +1 */
+  const char *p = s->v.str->data;
+  scr_dyn_release(s);
+  return p;
+}
 const char *scr_dyn_fn_src_of(const ScrDyn *d) { return scr_dyn_fn_src(d); }
 
 ScrDyn *scr_dyn_new_null(void) { return scr_dyn_alloc(SCR_DYN_NULL); }

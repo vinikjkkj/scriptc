@@ -1282,18 +1282,15 @@ static ScrDyn *dyn_bound_intrinsic_thunk(ScrClosure *clo, ScrDyn *const *args, s
 
 /* Function.prototype.bind over a dyn FUNC box (`this.onResult.bind(this, n)`
  * where the field is untyped). The bound function's captures are the target
- * box, the bound receiver, and one box per bound argument; the thunk runs
- * the target with the bound receiver in the ambient-receiver window and the
- * bound arguments ahead of the call's own. `length` is the target's minus
- * the bound argument count, floored at zero (JS's rule).
- *
- * NOT MODELLED: the name. A FUNC box's name is a static compiler literal
- * (scr_dyn_new_func_src: "never freed"), so a `bound X` name cannot be
- * minted here; the bound function reads as anonymous. */
+ * box, the bound receiver, the bound name (a dyn string, "bound " + the target's
+ * name), and one box per bound argument; the thunk runs the target with the
+ * bound receiver in the ambient-receiver window and the bound arguments ahead
+ * of the call's own. length is the target's minus the bound argument count,
+ * floored at zero; both are JS's rules. */
 static ScrDyn *dyn_bound_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   ScrDyn *target = (ScrDyn *)scr_box_get_ref(clo->caps[0]); /* +1 */
   ScrDyn *thisv = (ScrDyn *)scr_box_get_ref(clo->caps[1]);  /* +1 */
-  size_t nb = clo->ncaps - 2;
+  size_t nb = clo->ncaps - 3;
   size_t total = nb + argc;
   ScrDyn **all = (ScrDyn **)malloc((total > 0 ? total : 1) * sizeof(ScrDyn *));
   if (all == NULL) {
@@ -1302,7 +1299,7 @@ static ScrDyn *dyn_bound_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t a
     scr_trap_fmt("scriptc: out of memory binding a function\n");
     return NULL;
   }
-  for (size_t i = 0; i < nb; i++) all[i] = (ScrDyn *)scr_box_get_ref(clo->caps[2 + i]); /* +1 each */
+  for (size_t i = 0; i < nb; i++) all[i] = (ScrDyn *)scr_box_get_ref(clo->caps[3 + i]); /* +1 each */
   for (size_t j = 0; j < argc; j++) all[nb + j] = args[j];                              /* borrowed */
   scr_dyn_this_push_dyn(thisv);
   ScrDyn *r = scr_dyn_call(target, all, total, "a bound function");
@@ -1316,18 +1313,33 @@ static ScrDyn *dyn_bound_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t a
 
 static ScrDyn *dyn_bind_func(ScrDyn *fn, ScrDyn *const *args, size_t argc) {
   size_t nb = argc > 1 ? argc - 1 : 0;
-  ScrClosure *clo = scr_closure_new((void *)dyn_bound_fn_thunk, 2 + nb);
+  /* The bound name: "bound " + the target's name (an anonymous target gives "bound "). */
+  const char *tn = scr_dyn_fn_name(fn);
+  if (tn == NULL) tn = "";
+  size_t tl = strlen(tn);
+  char *nm = (char *)malloc(6 + tl + 1);
+  if (nm == NULL) scr_trap_fmt("scriptc: out of memory naming a bound function\n");
+  memcpy(nm, "bound ", 6);
+  memcpy(nm + 6, tn, tl);
+  ScrStr *ns = scr_str_new(nm, 6 + tl);
+  free(nm);
+  ScrDyn *nameDyn = scr_dyn_new_str(ns); /* retains */
+  scr_str_release(ns);
+
+  ScrClosure *clo = scr_closure_new((void *)dyn_bound_fn_thunk, 3 + nb);
   clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
   scr_box_set_ref(clo->caps[0], scr_dyn_retain(fn));
   clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
   scr_box_set_ref(clo->caps[1], scr_dyn_retain(argc >= 1 ? args[0] : scr_dyn_undefined()));
+  clo->caps[2] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[2], nameDyn); /* takes the +1 */
   for (size_t i = 0; i < nb; i++) {
-    clo->caps[2 + i] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
-    scr_box_set_ref(clo->caps[2 + i], scr_dyn_retain(args[1 + i]));
+    clo->caps[3 + i] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+    scr_box_set_ref(clo->caps[3 + i], scr_dyn_retain(args[1 + i]));
   }
   uint32_t target_len = fn->v.fn.arity;
   uint32_t len = target_len > nb ? (uint32_t)(target_len - nb) : 0;
-  return scr_dyn_new_func(clo, dyn_bound_fn_thunk, len, "()", NULL);
+  return scr_dyn_new_func(clo, dyn_bound_fn_thunk, len, "()", scr_dyn_bound_name_mark);
 }
 
 /* `m.call(x, ...)` / `m.apply(x, pack)` where `m` is a built-in method READ off a value

@@ -5192,7 +5192,17 @@ static inline bool scr_rva_fits(const void *p) {
 
 /* The SCR_DYN_FUNC box's three static literals. */
 static inline const char *scr_dyn_fn_sig(const ScrDyn *d) { return scr_rva_str(d->v.fn.sig); }
-static inline const char *scr_dyn_fn_name(const ScrDyn *d) { return scr_rva_str(d->v.fn.name); }
+/* A BOUND function's name is per-VALUE (`bound ` + the target's name), and a
+ * FUNC box stores its name as a static literal offset. So a bound box stores
+ * this marker in its name slot and keeps the spelling in its closure (scr_json.c,
+ * scr_dyn_bound_name). The marker is a static literal, so it round-trips
+ * through scr_rva_of like every other name. */
+extern const char scr_dyn_bound_name_mark[];
+const char *scr_dyn_bound_name(const ScrDyn *d);
+static inline const char *scr_dyn_fn_name(const ScrDyn *d) {
+  const char *n = scr_rva_str(d->v.fn.name);
+  return n == scr_dyn_bound_name_mark ? scr_dyn_bound_name(d) : n;
+}
 static inline const char *scr_dyn_fn_src(const ScrDyn *d) { return scr_rva_str(d->v.fn.src); }
 /* The same three as callable symbols: the LLVM backend emits calls, not
  * C, so it cannot reach a static inline -- and it used to read `sig` as
