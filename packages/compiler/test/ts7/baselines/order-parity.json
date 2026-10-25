@@ -548,6 +548,19 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10650-clsym-merged-class-statics.ts": {
+   "order": [
+    "<repo>/tests/corpus/10650-clsym-merged-class-statics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10651-clsym-dts-twin-alias-statics/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/10651-clsym-dts-twin-alias-statics/lib.js",
+    "<repo>/tests/corpus/10651-clsym-dts-twin-alias-statics/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1050-comptime-tables.ts": {
    "order": [
     "<repo>/tests/corpus/1050-comptime-tables.ts"
