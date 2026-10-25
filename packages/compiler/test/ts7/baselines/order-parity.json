@@ -13735,6 +13735,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9754-cjs-builtin-member-identity-with-global/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9754-cjs-builtin-member-identity-with-global/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/976-unions-null.ts": {
    "order": [
     "<repo>/tests/corpus/976-unions-null.ts"
