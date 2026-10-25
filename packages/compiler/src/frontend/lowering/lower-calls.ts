@@ -6541,6 +6541,20 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     if (recv.type.kind === "string") {
       return lowerRegexMethodCall(L, call, access, () => recv) ?? lowerStringMethodCall(L, call, access, () => recv);
     }
+    // A checker-`any` receiver whose LOWERED value is a program class
+    // instance: the chained `.on(...)` of mysql2's inheritEvents
+    // (`target.on(a, f).on(b, g)`, target implicit-any and monomorphized
+    // to PromiseConnection) — the inner call lowers to the emitter object,
+    // so the outer receiver is typed `any` by the checker and an object by
+    // IR. The emitter spoke takes the lowered receiver; nothing lowers twice.
+    if (recv.type.kind === "object") {
+      const info = L.classes.get(recv.type.className);
+      if (info && !L.findMethodOn(info, access.name.text) &&
+          EMITTER_API_MEMBERS.has(access.name.text) && emitterRooted(L, info)) {
+        return lowerEmitterMethodCall(L, call, access, info, undefined, recv);
+      }
+      return null;
+    }
     if (recv.type.kind !== "dyn") return null;
     // Typed-destination filter first (validated extraction into a real
     // T[]); an untyped destination falls through to the runtime dispatch
