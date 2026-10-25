@@ -575,6 +575,21 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10752-ov-jstwin-union-param-and-extra-arg/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/10752-ov-jstwin-union-param-and-extra-arg/lib.js",
+    "<repo>/tests/corpus/10752-ov-jstwin-union-param-and-extra-arg/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10753-ov-jstwin-void-return-through-unknown/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/10753-ov-jstwin-void-return-through-unknown/cmd.js",
+    "<repo>/tests/corpus/10753-ov-jstwin-void-return-through-unknown/lib.js",
+    "<repo>/tests/corpus/10753-ov-jstwin-void-return-through-unknown/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1050-comptime-tables.ts": {
    "order": [
     "<repo>/tests/corpus/1050-comptime-tables.ts"
