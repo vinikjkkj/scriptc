@@ -5578,6 +5578,8 @@ void scr_dyn_comparefn_throw(const ScrDyn *cmp);
  * property is a TypeError unless the first one asked for it. */
 ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len);
 bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len);
+/* `k in h` for a handle: true when the expando a JS write put on it (a Date's own data member) is present. */
+bool scr_dyn_handle_has_expando(const ScrDyn *d, const char *key, size_t key_len);
 bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len);
 void scr_dyn_obj_define_accessor(ScrDyn *recv, const char *key, size_t key_len,
                                  ScrDyn *getter, ScrDyn *setter, bool configurable,
@@ -6584,6 +6586,10 @@ typedef struct ScrDynHandleOps {
    * answers false for a pairing it does not model (the caller's loud
    * fence). NULL when the tag accepts no pipes. */
   bool (*pipe_from)(void *dst, const ScrDyn *src);
+  /* The BORROWED object of JavaScript expandos written onto this handle (`d.usec = 7` on a Date), or NULL
+   * when it has none. util.inspect prints it after the handle's own text, as Node does. NULL when the tag
+   * takes no expandos. */
+  ScrDyn *(*own_props)(void *h);
 } ScrDynHandleOps;
 
 void scr_dyn_handle_install(ScrDynHandleTag tag, const ScrDynHandleOps *ops);

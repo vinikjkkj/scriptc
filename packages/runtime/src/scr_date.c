@@ -61,6 +61,10 @@ struct ScrDate {
    * the epoch, or NaN for an invalid Date.  TimeClip runs once, at
    * construction, so every member read below is pure. */
   double ms;
+  /* The own data members a JavaScript expando wrote onto this Date (`d.usec = 7`):
+   * a dyn object, created by the first write and NULL until then. The dyn handle
+   * (scr_date_dyn.c) reads and writes it; the static Date never does. */
+  ScrDyn *props;
 };
 
 /* -- THE VALUE, AND WHY IT IS STILL A HANDLE --------------------------
@@ -94,6 +98,7 @@ ScrDate *scr_date_new(double ms) {
   if (d == NULL) scr_trap("scriptc: out of memory\n");
   d->rc = 1;
   d->ms = scr_date_time_clip(ms);
+  d->props = NULL;
   return d;
 }
 
@@ -174,7 +179,10 @@ ScrDate *scr_date_retain(ScrDate *d) {
 
 void scr_date_release(ScrDate *d) {
   if (d == NULL || d->rc == SIZE_MAX) return;
-  if (--d->rc == 0) free(d);
+  if (--d->rc == 0) {
+    if (d->props != NULL) scr_dyn_release(d->props);
+    free(d);
+  }
 }
 
 void *scr_date_retain_v(void *p) { return scr_date_retain((ScrDate *)p); }

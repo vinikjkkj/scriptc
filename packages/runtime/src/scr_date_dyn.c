@@ -10,7 +10,7 @@
 
 #include "scr_runtime.h"
 
-struct ScrDate { size_t rc; double ms; };
+struct ScrDate { size_t rc; double ms; ScrDyn *props; }; /* mirrors scr_date.c's layout */
 enum {
   SCR_DSET_MS, SCR_DSET_SEC, SCR_DSET_MIN, SCR_DSET_HOURS, SCR_DSET_DATE, SCR_DSET_MONTH, SCR_DSET_YEAR,
   SCR_DSET_UTC_MS, SCR_DSET_UTC_SEC, SCR_DSET_UTC_MIN, SCR_DSET_UTC_HOURS, SCR_DSET_UTC_DATE,
@@ -43,7 +43,19 @@ static ScrDyn *scr_date_dynh_num(double v) { return scr_dyn_new_num(v); }
 static ScrDyn *scr_date_dynh_invoke(void *h, ScrDyn *self, const char *method, ScrDyn *const *args, size_t argc,
                                     const char *what) {
   ScrDate *d = (ScrDate *)h;
-  (void)self;
+  /* An own function member (`d.getMicroSeconds = function () { return this.usec; }`) shadows the
+   * Date method of the same name, as an own property does in JS, and is called with the Date as `this`. */
+  if (d->props != NULL) {
+    ScrDyn *fn = scr_dyn_obj_own_data(d->props, method, strlen(method));
+    if (fn != NULL && fn->kind == SCR_DYN_FUNC) {
+      scr_dyn_retain(fn);
+      scr_dyn_this_push_dyn(self);
+      ScrDyn *r = scr_dyn_call(fn, args, argc, what);
+      scr_dyn_this_pop();
+      scr_dyn_release(fn);
+      return r;
+    }
+  }
   double ms = d->ms;
   {
     static const struct { const char *name; int op; size_t max; } setters[] = {
@@ -120,24 +132,29 @@ static ScrDyn *scr_date_dynh_invoke(void *h, ScrDyn *self, const char *method, S
   return NULL;
 }
 
+/* Own data members: the expandos a JavaScript write put on this Date. A Date with none answers
+ * NULL, and the caller answers undefined. */
 static ScrDyn *scr_date_dynh_get(void *h, const char *key, size_t key_len) {
-  (void)h;
-  (void)key;
-  (void)key_len;
-  return NULL; /* a Date has no own data properties: the caller answers undefined */
+  ScrDate *d = (ScrDate *)h;
+  if (d->props == NULL) return NULL;
+  ScrDyn *m = scr_dyn_obj_own_data(d->props, key, key_len); /* borrowed */
+  return m == NULL ? NULL : scr_dyn_retain(m);
 }
 
+/* `d.k = v` stores an own data member on the Date (the value is borrowed here, so the store retains it). */
 static bool scr_date_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
-  (void)h;
-  (void)key;
-  (void)key_len;
-  (void)value;
-  return false;
+  ScrDate *d = (ScrDate *)h;
+  if (d->props == NULL) d->props = scr_dyn_new_obj();
+  scr_dyn_obj_set(d->props, key, key_len, scr_dyn_retain((ScrDyn *)value));
+  return true;
 }
+
+/* The expando object (borrowed) for util.inspect; NULL while the Date has none. */
+static ScrDyn *scr_date_dynh_own_props(void *h) { return ((ScrDate *)h)->props; }
 
 static const ScrDynHandleOps scr_date_dynh_ops = {
     "Date", &scr_date_retain_v, &scr_date_release_v, &scr_date_dynh_invoke, &scr_date_dynh_get,
-    &scr_date_dynh_set, NULL,
+    &scr_date_dynh_set, NULL, &scr_date_dynh_own_props,
 };
 
 void scr_date_dyn_install(void) { scr_dyn_handle_install(SCR_DYNH_DATE, &scr_date_dynh_ops); }

@@ -6368,7 +6368,21 @@ ScrDyn *scr_dyn_obj_accessor_get(const ScrDyn *d, const char *key, size_t key_le
 /* `key in obj` over an OBJ receiver: own member, own hidden property,
  * then the chain — a non-enumerable property IS a property, so `in` sees
  * it even though Object.keys does not. Never throws (no getter runs). */
+/* The expando object a handle carries (borrowed), or NULL: a Date's own data members (scr_date_dyn.c). */
+static ScrDyn *scr_handle_own_props(const ScrDyn *d) {
+  if (d->kind != SCR_DYN_HANDLE) return NULL;
+  const ScrDynHandleOps *hops = scr_dyn_handle_ops_of(d);
+  return hops->own_props != NULL ? hops->own_props(d->v.handle.ptr) : NULL;
+}
+
+bool scr_dyn_handle_has_expando(const ScrDyn *d, const char *key, size_t key_len) {
+  const ScrDyn *own = scr_handle_own_props(d);
+  return own != NULL && scr_dyn_obj_has_own_prop(own, key, key_len);
+}
+
 bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len) {
+  ScrDyn *own = scr_handle_own_props(d);
+  if (own != NULL && scr_dyn_obj_has_own_prop(own, key, key_len)) return true;
   ScrDyn *found = NULL;
   if (scr_dyn_obj_resolve(d, key, key_len, &found, NULL) != SCR_PROP_ABSENT) return true;
   /* %Error.prototype% HAS a `constructor` in Node, and the fact that
@@ -6395,6 +6409,10 @@ bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len) {
  * answers TRUE for an own non-enumerable property (that is the whole
  * difference between hasOwn and Object.keys), so this must too. */
 bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d->kind == SCR_DYN_HANDLE) {
+    const ScrDyn *own = scr_handle_own_props(d);
+    return own != NULL && scr_dyn_obj_has_own_prop(own, key, key_len);
+  }
   if (d->kind != SCR_DYN_OBJ) return false;
   if (scr_dyn_obj_get(d, key, key_len) != NULL) return true;
   if (scr_dyn_ext(d)->hidden != NULL && scr_dyn_obj_get(scr_dyn_ext(d)->hidden, key, key_len) != NULL) {
@@ -7067,6 +7085,11 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
     /* One walk, accessors included: an accessor IS a property, so `in`
      * answers true for it even though Object.keys skips it. */
     return scr_dyn_obj_key_present(v, key->data, key->len);
+  }
+  if (v->kind == SCR_DYN_HANDLE) {
+    /* An expando a JS write put on the handle (a Date's own data member) is a property `in` sees. */
+    const ScrDyn *own = scr_handle_own_props(v);
+    if (own != NULL && scr_dyn_obj_has_own_prop(own, key->data, key->len)) return true;
   }
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
@@ -11531,6 +11554,15 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     free(ord);
     return out;
   }
+  if (v->kind == SCR_DYN_HANDLE) {
+    /* A handle's own members are the expandos a JS write put on it (a Date's, scr_date_dyn.c): the
+     * walk is the expando object's own. A handle with none falls through to the empty list. */
+    ScrDyn *props = scr_handle_own_props(v);
+    if (props != NULL) {
+      scr_dyn_release(out);
+      return scr_dyn_objwalk(props, mode);
+    }
+  }
   if (v->kind == SCR_DYN_OBJINST && scr_dyn_objinst_error_rooted(v) && scr_dyn_class_ops != NULL) {
     scr_dyn_release(out); /* the class unit builds its own */
     return scr_dyn_class_ops->walk_error(v, mode);
@@ -11889,6 +11921,10 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
    * check pending like every fallible dyn op). */
   if (v->kind == SCR_DYN_JSVAL) {
     return scr_dyn_jsval_ops()->has_own(v->v.jsval.cell, key) == 1;
+  }
+  if (v->kind == SCR_DYN_HANDLE) {
+    const ScrDyn *own = scr_handle_own_props(v);
+    return own != NULL && scr_dyn_obj_has_own_prop(own, key->data, key->len);
   }
   if (v->kind == SCR_DYN_OBJ) {
     /* Own presence, hidden table included: `hasOwn` differs from

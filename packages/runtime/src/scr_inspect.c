@@ -873,6 +873,34 @@ static void insp_emit_slots(const ScrDyn *d, double recurse, double depth) {
   }
 }
 
+/* A dyn object dumped after a base string (a Date's ISO text with its own expandos). Node's
+ * reduceToSingleString measures the base when it decides between one line and one entry per line, so the
+ * entries go through the same frame and join as every other object, with the base as its prefix. The
+ * entries are a plain object's: no class name, no accessors (a Date's expandos are data written by `=`). */
+static ScrStr *insp_with_base(ScrStr *base, ScrDyn *obj, double recurse, double depth) {
+  scr_insp_begin(recurse + 1);
+  size_t *ord = scr_dyn_obj_key_order(obj);
+  for (size_t i = 0; i < obj->v.obj.len; i++) {
+    ScrDynEntry *ent = &obj->v.obj.entries[ord ? ord[i] : i];
+    InspBuf eb = {0};
+    ScrStr *val = scr_insp_dyn(ent->value, recurse + 1, depth);
+    insp_key_into(&eb, ent->key, ent->key_len);
+    ib_cstr(&eb, ": ");
+    ib_bytes(&eb, val->data, val->len);
+    scr_str_release(val);
+    ScrStr *entry = ib_take(&eb);
+    scr_insp_entry(entry, false);
+    scr_str_release(entry);
+  }
+  free(ord);
+  ScrStr *b0 = scr_str_new("{", 1);
+  ScrStr *b1 = scr_str_new("}", 1);
+  ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, false, false);
+  scr_str_release(b0);
+  scr_str_release(b1);
+  return out;
+}
+
 /* The full inspect over a dyn tree — the one runtime type whose SHAPE
  * lives in the value, so the traversal lives here instead of a
  * synthesized helper. Same engine, same defaults. dyn-boxed bytes render
@@ -1330,7 +1358,13 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         if (j->kind == SCR_DYN_STR) ib_bytes(&out, j->v.str->data, j->v.str->len);
         else ib_cstr(&out, "Invalid Date");
         scr_dyn_release(j);
-        return ib_take(&out);
+        /* Own expandos follow the text as one more object, `2000-01-01T00:00:00.000Z { usec: 7 }`. */
+        ScrDyn *own = ops->own_props != NULL ? ops->own_props(d->v.handle.ptr) : NULL;
+        ScrStr *iso = ib_take(&out);
+        if (own == NULL || own->kind != SCR_DYN_OBJ) return iso;
+        ScrStr *with = insp_with_base(iso, own, recurse, depth);
+        scr_str_release(iso);
+        return with;
       }
       /* Node prints the class's full property dump (ServerResponse {
        * ... }) — internals we do not model. Fence loudly instead of a
