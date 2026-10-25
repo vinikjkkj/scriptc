@@ -594,6 +594,16 @@ void scr_throw_dyn(ScrDyn *v) {
     scr_throw_bool(b);
     return;
   }
+  /* A class instance of a HIERARCHY class (an Error subclass, a user class
+   * with a base) keeps its identity in the OBJ arm, so catch-side instanceof
+   * answers exactly as for a statically thrown instance. */
+  if (d->kind == SCR_DYN_OBJINST && d->v.inst.cls->vt) {
+    const ScrDynClass *cls = d->v.inst.cls;
+    void *o = cls->retain(d->v.inst.o); /* +1 for the throw */
+    scr_dyn_release(v);
+    scr_throw_obj(o, cls->retain, cls->release, NULL);
+    return;
+  }
   /* Every other dyn kind keeps the historical REF arm, byte for byte. */
   scr_throw_ref(v, scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
 }
