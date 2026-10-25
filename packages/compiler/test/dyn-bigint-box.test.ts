@@ -233,7 +233,10 @@ describe("the bigint unit stays GATED", () => {
     const decl = /typedef struct ScrDynBigOps \{([\s\S]*?)\} ScrDynBigOps;/.exec(header)?.[1];
     expect(decl, "ScrDynBigOps not found").toBeDefined();
     const fields = [...decl!.matchAll(/\(\*(\w+)\)/g)].map((m) => m[1]!);
-    expect(fields).toEqual(["retain", "release", "truthy", "eq", "to_str", "eq_f64", "eq_str", "low_u64"]);
+    expect(fields).toEqual([
+      "retain", "release", "truthy", "eq", "to_str", "eq_f64", "eq_str", "low_u64",
+      "rel_big", "rel_f64", "rel_str",
+    ]);
     const init = /static const ScrDynBigOps scr_big_dyn_ops = \{([\s\S]*?)\};/.exec(
       runtimeSrc("scr_bigint.c"),
     )?.[1];
