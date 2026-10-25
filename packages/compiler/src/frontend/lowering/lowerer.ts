@@ -3842,6 +3842,19 @@ export class Lowerer {
     // seed the worklist beside the init bodies. Unknown names are inert
     // (the export-map resolution reports them as SC4002 later).
     for (const root of extraRoots ?? []) this.onEdge?.(root);
+    // A user Error subclass crosses into dyn as a CAUGHT or REJECTED value, which
+    // no IR node names, so nothing else roots its methods: every Error-rooted
+    // user class is a dyn-boxed class whether or not a body boxes it. Without
+    // this `e.describe()` on a rejection reason is pruned out of the table.
+    for (const info of this.classes.values()) {
+      if (info.def.runtime === true) continue;
+      for (let a: ClassInfo | null | undefined = info; a; a = a.base) {
+        if (RUNTIME_ERROR_CLASSES.has(a.def.name)) {
+          this.noteDynBoxedClass(info.def.name);
+          break;
+        }
+      }
+    }
     // The functions a body produces BESIDE itself (lifted closures, implicit-
     // any instances lowered nested) carry dyn boxes of their own; scanning
     // them is what lets a class that crosses into dyn only inside one of
