@@ -450,7 +450,12 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       if (!nameT.isStringLiteralType()) {
         // A computed emit contributes its payload to every name it can carry
         // (see computedEmitNames); resolved after the registration walk.
-        if (isEmit) computedEmits.push({ node, info: L.classes.get(recvT.className) });
+        // A forwarder (`super.emit(event, ...args)`) carries no payload of its
+        // own: its values are its callers' emits, which the scan sees directly.
+        // Pinning its spread to every name would unify the callers' tuples away.
+        if (isEmit && !node.arguments.slice(1).some((a) => ts.isSpreadElement(a))) {
+          computedEmits.push({ node, info: L.classes.get(recvT.className) });
+        }
         return;
       }
       const name = nameT.value;
