@@ -6599,6 +6599,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_tp_set_immediate()`);
           case "dc.channel":
             return finish(`scr_dc_channel(${arg(0)})`);
+          case "dc.channelDyn":
+            return finish(`scr_dc_channel_dyn(${arg(0)})`);
+          case "dc.tracingChannelDyn":
+            return finish(`scr_dc_tracing_channel_dyn(${arg(0)})`);
+          case "dc.boxChan":
+            return finish(`scr_dc_box_chan(${arg(0)})`);
+          case "dc.boxTc":
+            return finish(`scr_dc_box_tc(${arg(0)})`);
+          case "dc.unboxChan":
+            return finish(`scr_dc_unbox_chan(${arg(0)})`);
+          case "dc.unboxTc":
+            return finish(`scr_dc_unbox_tc(${arg(0)})`);
           case "dc.subscribe":
             return finish(`scr_dc_subscribe(${arg(0)}, ${arg(1)})`);
           case "dc.unsubscribe":
