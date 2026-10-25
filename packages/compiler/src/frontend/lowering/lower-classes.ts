@@ -7588,7 +7588,10 @@ export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; 
   }
 
   // %dynNew(args)
+  // A prototype-class has no constructor unit until a call site names it, so a dyn
+  // `new` of its class value keeps the loud ladder (the synthesized `new` would be an ICE).
   const drivable =
+    info.protoClass !== true &&
     info.def.abstract !== true &&
     info.captures === undefined &&
     !info.generic &&
@@ -11141,6 +11144,17 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     // site does not, and a still-dyn value crossing into a typed slot only
     // relocates its guard to a dynCheck at the boundary instead of removing
     // it.
+    // A declaration-file class paired with the JavaScript constructor another module
+    // declares (`export =`, or a require binding): a TypeScript call site constructs
+    // the paired class too, because the paired instance is the d.ts class's value.
+    if (!isJsSourceFile(expr.getSourceFile()) && !(expr.arguments ?? []).some((a) => ts.isSpreadElement(a))) {
+      const paired = pairedProtoClassInfoFor(L, expr);
+      if (paired) {
+        L.noteEdge(`%${paired.def.name}.constructor`);
+        const args = L.completeArgs(expr.arguments ?? [], paired.ctorParams, loc, expr);
+        return { kind: "new", className: paired.def.name, args, type: { kind: "object", className: paired.def.name }, loc };
+      }
+    }
     if (
       isJsSourceFile(expr.getSourceFile()) &&
       !(expr.arguments ?? []).some((a) => ts.isSpreadElement(a))

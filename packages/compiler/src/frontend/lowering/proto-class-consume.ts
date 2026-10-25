@@ -488,7 +488,11 @@ export function pairedProtoClassInfoFor(L: Lowerer, expr: ts.NewExpression): Cla
   // A constructor the program declares in the SAME file is not a pairing: only one
   // another module declares (the require's twin) pairs with the declaration file.
   const crossFile = viaValue !== null && viaValue.getSourceFile() !== expr.expression.getSourceFile();
-  if (crossFile && viaValue !== null && ts.isFunctionDeclaration(viaValue)) {
+  // The module's own exported constructor is paired even inside its own file (a
+  // `new Point(...)` in a static of the same module is the same class).
+  const exported = viaValue !== null && ts.isFunctionDeclaration(viaValue) &&
+    cjsModuleExportsDecl(L, viaValue.getSourceFile()) === viaValue;
+  if ((crossFile || exported) && viaValue !== null && ts.isFunctionDeclaration(viaValue)) {
     const c = candidatesIn(viaValue.getSourceFile()).get(viaValue);
     if (c) return registered(L, c);
   }
