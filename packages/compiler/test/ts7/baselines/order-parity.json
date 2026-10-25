@@ -13829,6 +13829,46 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9950-cjs-rebind-member-require/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9950-cjs-rebind-member-require/redis.cjs",
+    "<repo>/tests/corpus/9950-cjs-rebind-member-require/index.cjs",
+    "<repo>/tests/corpus/9950-cjs-rebind-member-require/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9951-cjs-rebind-void-preamble/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9951-cjs-rebind-void-preamble/redis.cjs",
+    "<repo>/tests/corpus/9951-cjs-rebind-void-preamble/index.cjs",
+    "<repo>/tests/corpus/9951-cjs-rebind-void-preamble/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9952-cjs-rebind-late-statics/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9952-cjs-rebind-late-statics/redis.cjs",
+    "<repo>/tests/corpus/9952-cjs-rebind-late-statics/index.cjs",
+    "<repo>/tests/corpus/9952-cjs-rebind-late-statics/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9953-cjs-rebind-static-calls/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9953-cjs-rebind-static-calls/redis.cjs",
+    "<repo>/tests/corpus/9953-cjs-rebind-static-calls/index.cjs",
+    "<repo>/tests/corpus/9953-cjs-rebind-static-calls/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9954-cjs-getter-class-identity/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9954-cjs-getter-class-identity/redis.cjs",
+    "<repo>/tests/corpus/9954-cjs-getter-class-identity/index.cjs",
+    "<repo>/tests/corpus/9954-cjs-getter-class-identity/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/996-fs-rc-stress.ts": {
    "order": [
     "<repo>/tests/corpus/996-fs-rc-stress.ts"
