@@ -4408,18 +4408,23 @@ export function isCjsExportTableLiteral(obj: ts.ObjectLiteralExpression): boolea
   return false;
 }
 
-/** `Object.defineProperty(exports, "K", { enumerable?, configurable?, get: F })`
- * in a CommonJS module: the tsc re-export idiom, and the expansion of
- * `exports.__defineGetter__("K", F)` (js-desugar). The export is an ACCESSOR:
- * every read of `K` through the module calls F (Node's per-read evaluation),
- * so the statement itself lowers to nothing and the read path lifts F
- * (cjsExportAccessorRead). Returns the name and F, or null for any other
- * shape: a setter, a value, computed keys, or a getter function expression
- * whose body reads its own `this` (Node binds it to module.exports; that
- * stays a fence). */
+/** `Object.defineProperty(exports|module.exports, "K", { enumerable?, configurable?, get: F, set?: G })`
+ * in a CommonJS module: the tsc re-export idiom, the expansion of
+ * `exports.__defineGetter__("K", F)` (js-desugar), and the pg driver's
+ * `isWin` accessor (get + set over module state). The export is an ACCESSOR:
+ * every read of `K` through the module calls F and every write calls G
+ * (Node's per-read / per-write evaluation), so the statement itself lowers to
+ * nothing and the read path lifts F (cjsExportAccessorRead) and the write
+ * path lifts G (cjsExportSetterOf). `module.exports` is accepted only in a
+ * module with no whole-export replacement (`module.exports = ...`), where
+ * the receiver is that one object for the whole file. Returns the name, F and
+ * G (null when there is no setter), or null for any other shape: a setter
+ * without a getter, a value, computed keys, or a getter/setter function
+ * expression whose body reads its own `this` (Node binds it to module.exports;
+ * that stays a fence). */
 export function cjsExportsGetterDefineOf(
   e: ts.Node,
-): { name: string; getter: ts.ArrowFunction | ts.FunctionExpression } | null {
+): { name: string; getter: ts.ArrowFunction | ts.FunctionExpression; setter: ts.ArrowFunction | ts.FunctionExpression | null } | null {
   if (!ts.isCallExpression(e)) return null;
   const callee = e.expression;
   if (
@@ -4430,9 +4435,12 @@ export function cjsExportsGetterDefineOf(
   }
   if (e.arguments.length !== 3) return null;
   const [target, name, desc] = e.arguments as unknown as readonly [ts.Expression, ts.Expression, ts.Expression];
-  if (!ts.isIdentifier(target) || target.text !== "exports") return null;
+  const isExportsIdentTarget = ts.isIdentifier(target) && target.text === "exports";
+  const isModuleExportsTarget = isModuleExportsAccess(target) && !hasWholeExportReplacement(e.getSourceFile());
+  if (!isExportsIdentTarget && !isModuleExportsTarget) return null;
   if (!ts.isStringLiteral(name) || !ts.isObjectLiteralExpression(desc)) return null;
   let getter: ts.ArrowFunction | ts.FunctionExpression | undefined;
+  let setter: ts.ArrowFunction | ts.FunctionExpression | null = null;
   for (const p of desc.properties) {
     if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name)) return null;
     let v: ts.Expression = p.initializer;
@@ -4440,6 +4448,9 @@ export function cjsExportsGetterDefineOf(
     if (p.name.text === "get") {
       if (!ts.isArrowFunction(v) && !ts.isFunctionExpression(v)) return null;
       getter = v;
+    } else if (p.name.text === "set") {
+      if (!ts.isArrowFunction(v) && !ts.isFunctionExpression(v)) return null;
+      setter = v;
     } else if (p.name.text === "enumerable" || p.name.text === "configurable") {
       if (v.kind !== ts.SyntaxKind.TrueKeyword && v.kind !== ts.SyntaxKind.FalseKeyword) return null;
     } else {
@@ -4447,17 +4458,34 @@ export function cjsExportsGetterDefineOf(
     }
   }
   if (getter === undefined) return null;
-  if (ts.isFunctionExpression(getter)) {
-    let usesThis = false;
-    const walk = (n: ts.Node): void => {
-      if (usesThis) return;
-      if (n.kind === ts.SyntaxKind.ThisKeyword) { usesThis = true; return; }
-      // Only arrows inherit the getter's receiver; any other function form rebinds it.
-      if (n !== getter && ts.isFunctionLike(n) && !ts.isArrowFunction(n)) return;
-      ts.forEachChild(n, walk);
-    };
-    walk(getter.body);
-    if (usesThis) return null;
+  for (const fn of setter === null ? [getter] : [getter, setter]) {
+    if (ts.isFunctionExpression(fn)) {
+      let usesThis = false;
+      const walk = (n: ts.Node): void => {
+        if (usesThis) return;
+        if (n.kind === ts.SyntaxKind.ThisKeyword) { usesThis = true; return; }
+        // Only arrows inherit the accessor's receiver; any other function form rebinds it.
+        if (n !== fn && ts.isFunctionLike(n) && !ts.isArrowFunction(n)) return;
+        ts.forEachChild(n, walk);
+      };
+      walk(fn.body);
+      if (usesThis) return null;
+    }
   }
-  return { name: name.text, getter };
+  return { name: name.text, getter, setter };
+}
+
+/** True when the file replaces its whole export object (`module.exports = …`
+ * or `exports = …`) anywhere: a `module.exports` defineProperty target then
+ * may name a different object at run time, so it is not a static receiver. */
+function hasWholeExportReplacement(sf: ts.SourceFile): boolean {
+  let found = false;
+  ts.walkPreorder(sf, (n) => {
+    if (found) return;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      if (isModuleExportsAccess(n.left)) found = true;
+      if (ts.isIdentifier(n.left) && n.left.text === "exports") found = true;
+    }
+  });
+  return found;
 }

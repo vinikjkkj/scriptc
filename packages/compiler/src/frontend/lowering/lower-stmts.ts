@@ -31,7 +31,7 @@ import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
-import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf } from "./lower-exprs.js";
+import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -6458,6 +6458,15 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     cjs: NonNullable<ReturnType<typeof cjsExportAssignmentOf>>,
   ): IrStmt {
     const loc = locOf(cjs.expr);
+    // A write to a name this module DEFINES as an accessor
+    // (`Object.defineProperty(exports|module.exports, "K", { get, set })`):
+    // the member's storage is the accessor, not the module global below, so
+    // the write is the lifted setter's call (cjsExportSetterByName). A write
+    // to a getter-only accessor fences there.
+    if (cjs.kind === "member" && cjs.text !== null) {
+      const acc = cjsExportAccessorWriteStmt(L, cjs.expr.getSourceFile(), cjs.text, cjs.expr.right, loc);
+      if (acc !== null) return acc;
+    }
     // The old export object's members (cjs-export-record.ts): a bare
     // `exports.f =`, or a module-spelled write Node discards, writes the
     // record instead of a module global the importers never read.
@@ -7410,6 +7419,13 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
           {
             const resProp = lowerHttpResPropertyAssignment(L, expr.left, expr.right, locOf(expr));
             if (resProp) return resProp;
+          }
+          // `h.K = v` on a CJS export ACCESSOR with a setter
+          // (`Object.defineProperty(exports|module.exports, "K", { get, set })`):
+          // the write is the lifted setter's call (cjsExportSetterWrite).
+          if (!expr.left.questionDotToken) {
+            const setterWrite = cjsExportSetterWrite(L, expr.left, expr.right, locOf(expr));
+            if (setterWrite) return { kind: "exprStmt", expr: setterWrite, loc: locOf(expr) };
           }
           // `N.x = v` — a namespace-qualified write: exported `let`
           // members are module globals, so the qualified spelling assigns
