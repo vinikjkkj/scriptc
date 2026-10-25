@@ -13436,6 +13436,39 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         if (tol) return tol;
       }
     }
+    // A union element WITH an undefined arm has a value for every miss: Node's
+    // undefined, the interned unit. A read past the end, or at a fractional or
+    // negative index, answers it instead of trapping, so the slot stays typed
+    // `T | undefined` and no silent 0 can appear. The array and the index are
+    // evaluated once, in source order, into hidden locals first.
+    if (arr.type.kind === "array" && index.type.kind === "f64") {
+      const missU = L.wrappedUndefined(elemT, locOf(expr));
+      if (missU !== null) {
+        const loc = locOf(expr);
+        const ha = L.declareHiddenLocal("%oobArr", arr.type);
+        const hi = L.declareHiddenLocal("%oobIdx", F64);
+        const aref: IrExpr = { kind: "varRef", localId: ha.id, type: arr.type, loc };
+        const iref: IrExpr = { kind: "varRef", localId: hi.id, type: F64, loc };
+        const oob: IrExpr = {
+          kind: "seqExpr",
+          stmts: [
+            { kind: "varDecl", localId: ha.id, init: arr, loc },
+            { kind: "varDecl", localId: hi.id, init: index, loc },
+          ],
+          result: {
+            kind: "ternary",
+            cond: { kind: "arrIntrinsic", method: "hasIndex", receiver: aref as IrExpr & { type: { kind: "array" } }, args: [iref], type: BOOL, loc },
+            then: { kind: "arrayGet", arr: aref as IrExpr & { type: { kind: "array" } }, index: iref, type: elemT, loc },
+            else_: missU,
+            type: elemT,
+            loc,
+          },
+          type: elemT,
+          loc,
+        };
+        return L.maybeNarrow(oob, expr);
+      }
+    }
     // A union-element read narrows like an identifier when the checker has
     // narrowed THIS occurrence (`if (a[0] !== undefined) use(a[0])` — tsc
     // narrows literal-index element accesses).
