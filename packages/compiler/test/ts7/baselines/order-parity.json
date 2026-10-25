@@ -16162,6 +16162,12 @@
     "<repo>/tests/corpus/10252-detached-call-side-effects-before-this.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/10250-method-ref-npm-static/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/10250-method-ref-npm-static/main.ts"
+   ],
+   "diags": []
   }
  }
 }
