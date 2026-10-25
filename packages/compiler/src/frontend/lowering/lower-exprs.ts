@@ -16244,6 +16244,11 @@ export function hoistDetachedWriteRhs(L: Lowerer, expr: ts.BinaryExpression): Ir
   return [{ kind: "varDecl", localId: h.id, init: rhs, loc }];
 }
 
+/** `this === null` / `this === undefined` (and `==` / `!=`) in a DETACHED method
+ * body. The body is typed by its class, so an identity test against null folds to
+ * false and never reads the receiver: a call with a null receiver then ran the
+ * body with `this` non-null (a silent wrong answer). The raw receiver is the
+ * dyn local the variant takes, so the test is a dyn test on it. */
 /** `this === globalThis` (and `==`/`!=`/`!==`) in SLOPPY code: the receiver a
  * nullish call gave the function is the global stand-in (scr_dyn_this_get_sloppy),
  * so identity against it is a pointer test. Only `this` on the other side is
@@ -16275,9 +16280,49 @@ function sloppyThisGlobalIdentity(L: Lowerer, expr: ts.BinaryExpression): IrExpr
   return neq ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
 }
 
+function detachedThisNullTest(L: Lowerer, expr: ts.BinaryExpression): IrExpr | null {
+  const op = expr.operatorToken.kind;
+  const strict = op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+  const loose = op === ts.SyntaxKind.EqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken;
+  if (!strict && !loose) return null;
+  const peelP = (n: ts.Expression): ts.Expression => {
+    let e = n;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    return e;
+  };
+  const litOf = (n: ts.Expression): "null" | "undefined" | null => {
+    if (n.kind === ts.SyntaxKind.NullKeyword) return "null";
+    if (ts.isIdentifier(n) && n.text === "undefined") return "undefined";
+    return null;
+  };
+  const l = peelP(expr.left);
+  const r = peelP(expr.right);
+  let thisNode: ts.Expression | null = null;
+  let lit: "null" | "undefined" | null = null;
+  if (l.kind === ts.SyntaxKind.ThisKeyword && litOf(r) !== null) {
+    thisNode = l;
+    lit = litOf(r);
+  } else if (r.kind === ts.SyntaxKind.ThisKeyword && litOf(l) !== null) {
+    thisNode = r;
+    lit = litOf(l);
+  }
+  if (thisNode === null || lit === null) return null;
+  const local = L.resolveThis(thisNode);
+  if (!local || detachedThisClassOf(local) === undefined) return null;
+  const loc = locOf(expr);
+  const test: "null" | "undefined" | "nullish" = loose ? "nullish" : lit;
+  const negated = op === ts.SyntaxKind.ExclamationEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken;
+  const raw: IrExpr = { kind: "varRef", localId: local.id, type: DYN, loc };
+  return negated
+    ? { kind: "dynTest", test, negated: true, value: raw, type: BOOL, loc }
+    : { kind: "dynTest", test, value: raw, type: BOOL, loc };
+}
+
 export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const loc = locOf(expr);
     const op = expr.operatorToken.kind;
+    const nullTest = detachedThisNullTest(L, expr);
+    if (nullTest !== null) return nullTest;
     const globalIdentity = sloppyThisGlobalIdentity(L, expr);
     if (globalIdentity !== null) return globalIdentity;
     if (detachedThisWriteFirst(L, expr)) {
@@ -21458,11 +21503,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const write = gp !== undefined && ts.isBinaryExpression(gp) && gp.left === p && gp.operatorToken.kind === ts.SyntaxKind.EqualsToken;
       message = write ? `Cannot set properties of undefined (setting '${p.name.text}')` : `Cannot read properties of undefined (reading '${p.name.text}')`;
     }
+    // Node names the receiver it really got: `null` or `undefined` (a
+    // strict-mode method's `this`). Any other non-class receiver keeps the
+    // undefined spelling.
+    const throwAs = (word: string): IrExpr =>
+      nodeThrowExpr(1, "", message.replace(/^(Cannot \w+ properties of )undefined/, `$1${word}`), selfT, loc);
     return {
       kind: "ternary",
       cond: { kind: "dynTest", test: "class", className, value: rawRef, type: BOOL, loc },
       then: { kind: "dynCheck", value: rawRef, type: selfT, loc },
-      else_: nodeThrowExpr(1, "", message, selfT, loc),
+      else_: {
+        kind: "ternary",
+        cond: { kind: "dynTest", test: "null", value: rawRef, type: BOOL, loc },
+        then: throwAs("null"),
+        else_: throwAs("undefined"),
+        type: selfT,
+        loc,
+      },
       type: selfT,
       loc,
     };
