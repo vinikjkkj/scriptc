@@ -85,6 +85,18 @@ export function evTableKey(info: ClassInfo | undefined | null, name: string): st
   if (name === "error" || META_EVENTS.has(name)) return name;
   return `${emitterRootKey(info)}\u0000${name}`;
 }
+/** The table entry an event resolves to from a receiver root. A receiver of
+ * unknown class registers into its own "*" bucket; when the root has no
+ * entry for the name, that bucket is the one a listener on this receiver can
+ * reach, so it answers. */
+function sigAt(table: Map<string, EventSig>, key: string): EventSig | undefined {
+  const direct = table.get(key);
+  if (direct !== undefined) return direct;
+  const i = key.indexOf("\u0000");
+  if (i < 0) return undefined;
+  return table.get(`*${key.slice(i)}`);
+}
+
 /** The bare event name a table key stands for (for diagnostics). */
 export function evDisplayName(key: string): string {
   const i = key.indexOf("\u0000");
@@ -381,6 +393,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   // Collecting is one cheap syntactic pass; the type-heavy merging is what
   // gets ordered, so nothing is scanned twice.
   const sites: { isEmit: boolean; name: string; key: string; node: ts.CallExpression }[] = [];
+  const computedEmits: { node: ts.CallExpression; info: ClassInfo | undefined }[] = [];
   const registered = new Set<string>();
   const registeredKeys = new Set<string>();
   let opaqueRegistration = false;
@@ -434,7 +447,12 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       }
       if (!resolved || nameT === null) return; // checker trouble is the lowering's business, not the scan's
       if (recvT?.kind !== "object" || !emitterRooted(L, L.classes.get(recvT.className))) return;
-      if (!nameT.isStringLiteralType()) return;
+      if (!nameT.isStringLiteralType()) {
+        // A computed emit contributes its payload to every name it can carry
+        // (see computedEmitNames); resolved after the registration walk.
+        if (isEmit) computedEmits.push({ node, info: L.classes.get(recvT.className) });
+        return;
+      }
       const name = nameT.value;
       if (META_EVENTS.has(name) || name === "error") return; // forced tuples
       // Stream receivers' runtime-emitted events carry PER-BASE forced
@@ -445,6 +463,28 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       sites.push({ isEmit, name, node, key: evTableKey(L.classes.get(recvT.className), name) });
     };
     walk(sf);
+  }
+  // Computed emits: each candidate name of the receiver's root contributes the
+  // emit's payload to its tuple, exactly as a literal emit of that name would.
+  // A union of literals names exactly its members; a plain string names every
+  // registered key on the root, plus the "*" bucket (unknown-class listeners).
+  for (const { node, info } of computedEmits) {
+    const nameT = L.typeOf(node.arguments[0]!);
+    let names: string[];
+    if (nameT.isUnionType() && ts.constituentTypes(nameT).every((c) => c.isStringLiteralType())) {
+      names = ts.constituentTypes(nameT).map((c) => (c as unknown as { value: string }).value);
+    } else {
+      const root = emitterRootKey(info);
+      names = [];
+      for (const k of registeredKeys) {
+        if (k.startsWith(`${root}\u0000`) || k.startsWith("*\u0000")) names.push(evDisplayName(k));
+      }
+    }
+    for (const name of names) {
+      if (META_EVENTS.has(name) || name === "error") continue;
+      if (streamForcedTuple(L, info, name) !== null) continue;
+      sites.push({ isEmit: true, name, key: evTableKey(info, name), node });
+    }
   }
   for (const pass of [false, true]) {
     for (const { isEmit, key, node } of sites) {
@@ -501,7 +541,7 @@ const boolLit = (value: boolean, loc: SrcLoc): IrExpr => ({ kind: "boolLit", val
 
 /** The event's unified tuple, with conflicts reported at this site. */
 function tupleOf(L: Lowerer, table: Map<string, EventSig>, key: string, blame: ts.Node): IrType[] {
-  const sig = table.get(key);
+  const sig = sigAt(table, key);
   if (!sig) return [];
   if (sig.conflict) {
     L.noLowering(
@@ -1221,7 +1261,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       };
     }
     const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, key, call);
-    const sig = table.get(key);
+    const sig = sigAt(table, key);
     const padFromDyn = args.length - 1 < tuple.length && sig !== undefined && sig.dynListener &&
       tuple.slice(args.length - 1).every((t) => t.kind === "dyn");
     if (args.length - 1 !== tuple.length && !padFromDyn) {
@@ -1381,7 +1421,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     const name = eventNameOf(L, member, args[0]!);
     const key = evTableKey(info, name);
-    const sig = table.get(key);
+    const sig = sigAt(table, key);
     if (sig?.dynListener) {
       // A dyn-adapted registration means the runtime bucket can hold
       // originals of MIXED signatures — no one honest element type.
@@ -2426,7 +2466,7 @@ function looseEmitDispatcher(
 
   const arms: { name: string; tuple: IrType[] }[] = [];
   for (const key of keySet.keys) {
-    const sig = table.get(evTableKey(info, key));
+    const sig = sigAt(table, evTableKey(info, key));
     // Named by no emit and no listener in the whole program: emitting it is
     // a no-op, which is exactly what the fallthrough does.
     if (!sig) continue;
@@ -2716,7 +2756,7 @@ export function boundEmitDispatcher(
 
   const arms: { name: string; tuple: IrType[]; payload: IrExpr[] }[] = [];
   for (const key of keySet.keys) {
-    const sig = table.get(evTableKey(info, key));
+    const sig = sigAt(table, evTableKey(info, key));
     // Named by no emit and no listener in the whole program: emitting it is
     // a no-op, which is exactly what the fallthrough does.
     if (!sig) continue;
@@ -3140,7 +3180,7 @@ export function boundSubscribeDispatcher(
     // static type. The direct path fences on it; so does this one.
     if (META_EVENTS.has(key)) return why(`'${key}' is a meta event`);
     if (streamForcedTuple(L, info, key) !== null) return why(`'${key}' is a stream event`);
-    const sig = table.get(evTableKey(info, key));
+    const sig = sigAt(table, evTableKey(info, key));
     if (sig?.conflict) return why(`'${key}' has conflicting argument types`);
     // A dyn-flavored listener elsewhere in the program means the bucket may
     // hold originals of mixed signatures; the arm has no one static tuple.
