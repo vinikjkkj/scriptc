@@ -1801,11 +1801,13 @@ const char *scr_dyn_fn_name_of(const ScrDyn *d) { return scr_dyn_fn_name(d); }
  * capture 2 as a dyn string the box owns; it is read off the box, which keeps
  * it alive for as long as the function is. */
 const char scr_dyn_bound_name_mark[] = "\x01bound-fn-name";
-const char *scr_dyn_bound_name(const ScrDyn *d) {
-  ScrDyn *s = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->caps[2]); /* +1 */
-  const char *p = s->v.str->data;
-  scr_dyn_release(s);
-  return p;
+/* The bound box's name reader lives in the GATED dispatch unit (scr_dyn_invoke.c),
+ * which installs it the first time a bound box is minted; a program that never
+ * binds never links it. */
+const char *(*scr_dyn_bound_name_fn)(const ScrDyn *d) = NULL;
+__attribute__((noinline)) const char *scr_dyn_fn_name(const ScrDyn *d) {
+  const char *n = scr_rva_str(d->v.fn.name);
+  return n == scr_dyn_bound_name_mark ? scr_dyn_bound_name_fn(d) : n;
 }
 const char *scr_dyn_fn_src_of(const ScrDyn *d) { return scr_dyn_fn_src(d); }
 
@@ -4003,25 +4005,6 @@ void scr_dyn_this_pop(void) {
   }
   ScrDynThisEnt *e = &scr_dyn_this_stack[--scr_dyn_this_n];
   if (e->dv) scr_dyn_release(e->dv);
-}
-
-/* `this` in a SLOPPY plain function: a nullish receiver is globalThis there,
- * and a primitive would be boxed (not modelled: a primitive stays primitive).
- * The runtime has no global object value, so the stand-in is one immortal empty
- * object: `typeof this` and the nullish tests answer as Node's do, and a member
- * read finds nothing on it. Identity with `globalThis` is NOT modelled. */
-static ScrDyn *scr_dyn_global_stand_in;
-ScrDyn *scr_dyn_this_get_sloppy(void) {
-  ScrDyn *t = scr_dyn_this_get(); /* +1 */
-  if (t->kind != SCR_DYN_UNDEF && t->kind != SCR_DYN_NULL) return t;
-  scr_dyn_release(t);
-  if (scr_dyn_global_stand_in == NULL) scr_dyn_global_stand_in = scr_dyn_new_obj(); /* kept alive forever */
-  return scr_dyn_retain(scr_dyn_global_stand_in);
-}
-
-/* `this === globalThis` for the sloppy stand-in: identity with the one box. */
-bool scr_dyn_is_global_this(const ScrDyn *d) {
-  return scr_dyn_global_stand_in != NULL && d == scr_dyn_global_stand_in;
 }
 
 ScrDyn *scr_dyn_this_get(void) {
