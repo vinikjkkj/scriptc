@@ -6915,7 +6915,7 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // own-member/prototype-chain call on every other kind — which is what
   // `Long.prototype.sub` needs and what the fence-only listing denied it.
   ...STRING_HTML_METHODS,
-  "apply", "call",
+  "apply", "bind", "call",
   // Object.prototype.hasOwnProperty — the one Object.prototype METHOD
   // every dyn kind inherits, and the same question Object.hasOwn(o, k)
   // already answers statically (scr_dyn_has_own is the shared body). An
