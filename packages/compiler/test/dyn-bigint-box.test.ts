@@ -128,7 +128,13 @@ const ANSWERING_TABLES: { fn: string; why: string; exempt: string[] }[] = [
     // made from ONE array are one JS value and compare equal by origin
     // (the ARR arm). An ARR built in dyn-land still compares by node
     // identity, which that arm's first line answers.
-    exempt: ["SCR_DYN_OBJ"],
+    //
+    // SCR_DYN_OBJ left the list for the same reason as ARR: a dyn OBJ that
+    // is a boundary copy of a static record carries its origin, so two
+    // boxes made from ONE record are one JS object and compare equal by
+    // origin (the OBJ arm). A plain dyn object still compares by node
+    // identity, which that arm's first line answers.
+    exempt: [],
   },
   {
     fn: "const char *scr_dyn_kind_name(const ScrDyn *d)",
