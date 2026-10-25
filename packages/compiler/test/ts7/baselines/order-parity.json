@@ -13345,6 +13345,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/9454-ts-emitter-classes-keyed-tuples.ts": {
+   "order": [
+    "<repo>/tests/corpus/9454-ts-emitter-classes-keyed-tuples.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9455-ts-emit-computed-union-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/9455-ts-emit-computed-union-name.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/950-modules-basic/main.ts": {
    "order": [
     "<repo>/tests/corpus/950-modules-basic/util.ts",
