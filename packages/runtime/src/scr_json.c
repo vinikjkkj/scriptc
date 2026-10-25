@@ -4918,9 +4918,53 @@ static void scr_err_hide(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v) 
 
 static void scr_error_props_drop_impl(void *obj);
 
+/* Enter one (error, dyn node) pair into the identity cache. Retains both. */
+static void scr_errdyn_enter(const ScrError *e, ScrDyn *d) {
+  if (scr_errdyn_n == scr_errdyn_cap) {
+    scr_errdyn_cap = scr_errdyn_cap ? scr_errdyn_cap * 2 : 8;
+    scr_errdyn_cache = realloc(scr_errdyn_cache, scr_errdyn_cap * sizeof *scr_errdyn_cache);
+    if (!scr_errdyn_cache) {
+      scr_trap("scriptc: out of memory\n");
+    }
+  }
+  if (!scr_errdyn_teardown_registered) {
+    scr_errdyn_teardown_registered = true;
+    scr_atexit(scr_errdyn_teardown);
+  }
+  scr_errdyn_cache[scr_errdyn_n].err = scr_error_retain((ScrError *)e);
+  scr_errdyn_cache[scr_errdyn_n].dyn = scr_dyn_retain(d);
+  scr_errdyn_n++;
+}
+
+/* The registry descriptor of the USER class whose EXACT instance `e` is
+ * (`class DB extends Error`), or NULL when `e` is a runtime error kind or
+ * the class was never registered. The preorder position is the instance's
+ * own class (the fact instanceof reads), and the emitter registers every
+ * Error-rooted user class so a caught one reaches here. */
+static const ScrDynClass *scr_dyn_error_user_class(const ScrError *e) {
+  if (scr_cls_reg == NULL || e->vt == NULL) return NULL;
+  for (size_t i = 0; i < scr_cls_reg_n; i++) {
+    const ScrDynClass *c = scr_cls_reg[i];
+    if (c->errorRooted && c->pre == e->vt->pre) return c;
+  }
+  return NULL;
+}
+
 ScrDyn *scr_dyn_from_error(const ScrError *e) {
   for (size_t i = 0; i < scr_errdyn_n; i++) {
     if (scr_errdyn_cache[i].err == e) return scr_dyn_retain(scr_errdyn_cache[i].dyn);
+  }
+  /* A USER Error subclass keeps its class: the box is the instance itself
+   * (SCR_DYN_OBJINST), the representation a directly boxed `new DB()` already
+   * gets, so instanceof, prototype members and identity agree with Node. The
+   * encoding below would answer Error.prototype for it. */
+  {
+    const ScrDynClass *uc = scr_dyn_error_user_class(e);
+    if (uc != NULL) {
+      ScrDyn *u = scr_dyn_new_objinst((void *)e, uc);
+      scr_errdyn_enter(e, u); /* the cache takes its own +1; the +1 from new_objinst is ours to return */
+      return u;
+    }
   }
   /* NODE'S SHAPE, built out of machinery that was already here and that
    * this encoding did not use: the %Error.prototype% chain, and the
@@ -5032,20 +5076,7 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
       me->props = scr_dyn_retain(d);
     }
   }
-  if (scr_errdyn_n == scr_errdyn_cap) {
-    scr_errdyn_cap = scr_errdyn_cap ? scr_errdyn_cap * 2 : 8;
-    scr_errdyn_cache = realloc(scr_errdyn_cache, scr_errdyn_cap * sizeof *scr_errdyn_cache);
-    if (!scr_errdyn_cache) {
-      scr_trap("scriptc: out of memory\n");
-    }
-  }
-  if (!scr_errdyn_teardown_registered) {
-    scr_errdyn_teardown_registered = true;
-    scr_atexit(scr_errdyn_teardown);
-  }
-  scr_errdyn_cache[scr_errdyn_n].err = scr_error_retain((ScrError *)e);
-  scr_errdyn_cache[scr_errdyn_n].dyn = scr_dyn_retain(d);
-  scr_errdyn_n++;
+  scr_errdyn_enter(e, d);
   return d;
 }
 
