@@ -68,6 +68,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10050-dyn-strict-eq-kinds.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10050-dyn-strict-eq-kinds.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10051-indexof-dyn-needle.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10051-indexof-dyn-needle.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10052-dyn-eq-scalar-unions.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10052-dyn-eq-scalar-unions.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1006-json-fs-config.ts": {
    "order": [
     "<repo>/tests/corpus/1006-json-fs-config.ts"
