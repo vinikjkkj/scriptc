@@ -202,9 +202,65 @@ jobs:
       - run: pnpm lint
 
 
+  build_linux:
+    name: build (Linux dist)
+    needs: [validation_scope, lanes, plan]
+    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' && needs.plan.outputs.linux_flavors != '[]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      # Compiled once per tree and OS family, then shared: the tsc output
+      # is what every test job of this family used to rebuild. The key covers
+      # every input tsc reads (compiler, cli and runtime sources, tsconfigs,
+      # package manifests, the lockfile, the Node pin) and this workflow
+      # itself, plus the OS and arch. Line endings differ by OS (no newLine
+      # is set), so Linux and Windows keep separate dists.
+      - id: dist
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            packages/cli/dist
+            packages/compiler/dist
+          key: scriptc-dist-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/cli/**', 'packages/compiler/**', 'packages/runtime/**', 'tsconfig.base.json', '**/tsconfig.json', '**/package.json', 'pnpm-lock.yaml', '.node-version', '.github/workflows/ci.yml') }}
+      - uses: pnpm/action-setup@v4
+        if: ${{ steps.dist.outputs.cache-hit != 'true' }}
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        if: ${{ steps.dist.outputs.cache-hit != 'true' }}
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        if: ${{ steps.dist.outputs.cache-hit != 'true' }}
+        run: |
+          pnpm install --frozen-lockfile
+      - name: Build
+        if: ${{ steps.dist.outputs.cache-hit != 'true' }}
+        run: pnpm build
+      - name: Save the dist cache
+        if: ${{ steps.dist.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            packages/cli/dist
+            packages/compiler/dist
+          key: ${{ steps.dist.outputs.cache-primary-key }}
+      - name: Pack the dist for the test jobs
+        shell: bash
+        run: tar -cf scriptc-dist.tar packages/cli/dist packages/compiler/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scriptc-dist-linux
+          path: scriptc-dist.tar
+          retention-days: 1
+
   tests:
     name: test (Linux, ${{ matrix.flavor }}, ${{ matrix.shard }}/20)
-    needs: [validation_scope, lanes, plan]
+    needs: [validation_scope, lanes, plan, build_linux]
     if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' && needs.plan.outputs.linux_flavors != '[]' }}
     # Moved here from macOS (this fork's historical CI host for this job) so
     # the 20-way shard actually buys parallelism: GitHub caps macOS at 5
@@ -307,7 +363,12 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+      - uses: actions/download-artifact@v4
+        with:
+          name: scriptc-dist-linux
+      - name: Unpack the dist built by the build job
+        shell: bash
+        run: tar -xf scriptc-dist.tar
       # Ubuntu pipes core dumps to apport, and RLIMIT_CORE does not limit a
       # piped dump: the kernel streams every page of the runtime's reserved
       # allocator address space through the pipe, so an expected abort
@@ -555,9 +616,70 @@ jobs:
   # wall time as after Linux (20 Windows + 40 Linux against a ~40-slot
   # cap is two queued waves either way) without being hostage to Linux's
   # result.
+  build_windows:
+    name: build (Windows dist)
+    needs: [validation_scope, lanes, plan]
+    if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' && needs.plan.outputs.windows_shards != '[]' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      # Compiled once per tree and OS family, then shared: the tsc output
+      # is what every test job of this family used to rebuild. The key covers
+      # every input tsc reads (compiler, cli and runtime sources, tsconfigs,
+      # package manifests, the lockfile, the Node pin) and this workflow
+      # itself, plus the OS and arch. Line endings differ by OS (no newLine
+      # is set), so Linux and Windows keep separate dists.
+      - id: dist
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            packages/cli/dist
+            packages/compiler/dist
+          key: scriptc-dist-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/cli/**', 'packages/compiler/**', 'packages/runtime/**', 'tsconfig.base.json', '**/tsconfig.json', '**/package.json', 'pnpm-lock.yaml', '.node-version', '.github/workflows/ci.yml') }}
+      - uses: pnpm/action-setup@v4
+        if: ${{ steps.dist.outputs.cache-hit != 'true' }}
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        if: ${{ steps.dist.outputs.cache-hit != 'true' }}
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        if: ${{ steps.dist.outputs.cache-hit != 'true' }}
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "pnpm exited without a diagnostic; retrying once"
+            pnpm install --frozen-lockfile
+          }
+      - name: Build
+        if: ${{ steps.dist.outputs.cache-hit != 'true' }}
+        run: pnpm build
+      - name: Save the dist cache
+        if: ${{ steps.dist.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            packages/cli/dist
+            packages/compiler/dist
+          key: ${{ steps.dist.outputs.cache-primary-key }}
+      - name: Pack the dist for the test jobs
+        shell: bash
+        run: tar -cf scriptc-dist.tar packages/cli/dist packages/compiler/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scriptc-dist-windows
+          path: scriptc-dist.tar
+          retention-days: 1
+
   tests_windows:
     name: test (Windows, ${{ matrix.shard }}/20)
-    needs: [validation_scope, lanes, plan]
+    needs: [validation_scope, lanes, plan, build_windows]
     if: ${{ needs.validation_scope.outputs.full == 'true' && needs.lanes.outputs.linux == 'true' && needs.plan.outputs.windows_shards != '[]' }}
     runs-on: windows-latest
     # windows_cli's 15 is a smoke-job number (a handful of targeted vitest
@@ -608,7 +730,29 @@ jobs:
             Write-Host "pnpm exited without a diagnostic; retrying once"
             pnpm install --frozen-lockfile
           }
-      - run: pnpm build
+      - uses: actions/download-artifact@v4
+        with:
+          name: scriptc-dist-windows
+      - name: Unpack the dist built by the build job
+        shell: bash
+        run: tar -xf scriptc-dist.tar
+      - name: Locate the zig global cache
+        id: zigdir
+        shell: pwsh
+        run: |
+          $txt = (zig env) -join "`n"
+          $m = [regex]::Match($txt, 'global_cache_dir = "([^"]+)"')
+          if (-not $m.Success) { throw "zig env printed no global_cache_dir" }
+          $dir = $m.Groups[1].Value -replace '\\\\', '\'
+          "dir=$dir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      # Restored before the warm step below, keyed on the zig version and the
+      # target: zig's global cache is content-addressed, so an entry is only
+      # reused for the same zig build and target it was produced by.
+      - id: zigcache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.zigdir.outputs.dir }}
+          key: zig-global-0.16.0-${{ runner.os }}-x86_64-windows-gnu-v1
       # Every Windows job starts with an EMPTY zig global cache (only the zig
       # install is restored, by .github/actions/zig). The first `zig cc` for
       # x86_64-windows-gnu in a job builds the mingw CRT and compiler-rt from
@@ -626,6 +770,12 @@ jobs:
           Set-Content -Path $c -Value "int main(void){return 0;}" -Encoding ascii
           zig cc -target x86_64-windows-gnu -o (Join-Path $dir "warm.exe") $c
           if ($LASTEXITCODE -ne 0) { throw "zig cc warm-up for x86_64-windows-gnu failed" }
+      - name: Save the zig global cache
+        if: ${{ steps.zigcache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.zigdir.outputs.dir }}
+          key: ${{ steps.zigcache.outputs.cache-primary-key }}
       # Same three-step split as `tests` (file-sharded / case-sharded /
       # coverage sweep) -- see that job's comments for why the axes must
       # not mix. No `ulimit`/core-dump step: that is an Ubuntu apport
