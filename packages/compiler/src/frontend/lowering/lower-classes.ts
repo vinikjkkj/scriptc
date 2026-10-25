@@ -10050,7 +10050,13 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         const staticArr = ((): (IrType & { kind: "array" }) | null => {
           let t = L.mapTypeOf(L.typeOf(expr));
           if (t?.kind !== "array") {
-            const ctx = L.checker.getContextualType(expr);
+            // `new Array(n).fill(v)` has no contextual type of its own: the
+            // receiver of a method call is not contextualised. The annotated
+            // declaration is the fill call's contextual type, so the fill call
+            // carries the array type (lrumin's `new Array(max).fill(undefined)`
+            // into `(T | undefined)[]`).
+            const fillCall = fillReceiverCallOf(expr);
+            const ctx = L.checker.getContextualType(fillCall ?? expr);
             const ctxMapped = ctx ? L.mapTypeOf(ctx) : null;
             if (ctxMapped?.kind === "array") t = ctxMapped;
             else if (ctx !== undefined && ctx.isUnionType()) {
@@ -11545,6 +11551,15 @@ function noteFillLoopProof(expr: ts.NewExpression): void {
  * `absent` gate runs after this and keeps the ratified stance (SEMANTICS.md
  * 46). This decides only WHICH element type, never whether holes are
  * readable. */
+/** The whole-range `.fill(...)` call that receives `expr` as its receiver, or
+ * null. Used to read the annotation of `const a: T[] = new Array(n).fill(v)`. */
+function fillReceiverCallOf(expr: ts.NewExpression): ts.CallExpression | null {
+  const p = expr.parent;
+  if (!ts.isPropertyAccessExpression(p) || p.expression !== expr || p.name.text !== "fill") return null;
+  const c = p.parent;
+  return ts.isCallExpression(c) && c.expression === p ? c : null;
+}
+
 function newArrayFillElemType(L: Lowerer, expr: ts.NewExpression): (IrType & { kind: "array" }) | null {
   const writes = fullFillLoopWrites(expr);
   if (writes === null || writes.length === 0) return null;
