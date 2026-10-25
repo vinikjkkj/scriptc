@@ -15753,6 +15753,24 @@
     "<repo>/tests/corpus/9650-record-identity-distinct-through-dyn.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/9651-record-view-coherence.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9651-record-view-coherence.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9652-record-write-through-any-param.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9652-record-write-through-any-param.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/9653-record-expando-write-through-alias.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9653-record-expando-write-through-alias.cjs"
+   ],
+   "diags": []
   }
  }
 }
