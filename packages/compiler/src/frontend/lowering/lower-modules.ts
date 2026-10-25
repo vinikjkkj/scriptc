@@ -24,7 +24,7 @@ import { irAlwaysExits, dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLit
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { dynImportBindingDepOf } from "./lower-island.js";
 import { bufferSpeciesAliasDecl } from "./lower-containers.js";
-import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
+import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibBufferVarAliasDecl, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
@@ -2260,6 +2260,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // probes below would otherwise claim the call-initializer shape
         // and put its fences on the build.
         if (provenanceElidedConstDecl(L, decl)) continue;
+        // `var Buffer = require("buffer").Buffer` (or `const B = Buffer`) at file scope: the
+        // Buffer class under another name. Checked before the probes below, which would
+        // otherwise lower the initializer's property access (stdlibBufferVarAliasDecl).
+        if (stdlibBufferVarAliasDecl(L, decl.name, decl.initializer)) continue;
         // A stored built-in numeric value iterator has no first-class
         // global representation. Its same-%init for-of uses are backed by
         // hidden source/cursor/done locals registered when the declaration

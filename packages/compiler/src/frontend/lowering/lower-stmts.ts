@@ -14,7 +14,7 @@ import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, resolveImport, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordWrite, isBareExportsAccess } from "./cjs-export-record.js";
-import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
+import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibBufferVarAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { requestInitWriteFence } from "./lower-fetch.js";
 import { lowerWrtcWrite } from "./lower-wrtc.js";
@@ -4671,6 +4671,9 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // `const process = globalThis.process` — a stdlib-global snapshot:
     // alias plumbing (see stdlibGlobalAliasDecl), no storage, no code.
     if (!isLet && stdlibGlobalAliasDecl(L, decl.name, decl.initializer)) return null;
+    // `var Buffer = require("buffer").Buffer` / `const B = Buffer`: the Buffer class
+    // under another name (stdlibBufferVarAliasDecl; never-assigned is checked there).
+    if (stdlibBufferVarAliasDecl(L, decl.name, decl.initializer)) return null;
 
     // `var hasOwnProperty = Object.prototype.hasOwnProperty` — compile-time
     // plumbing: the `.call(o, k)` uses lower to the own-key probe through
