@@ -305,6 +305,26 @@ function diffieHellmanFnValue(L: Lowerer, loc: SrcLoc): IrExpr {
 /** Builtin module members that are the same object as a global of the same name
  * (measured under Node v24: `require("buffer").Buffer === Buffer`, and likewise for
  * the URL and TextEncoder pairs). They share the global's identity token. */
+/** `process.binding('buffer').kStringMaxLength` (safer-buffer's probe, under a
+ * try/catch). Measured under $NODE_CI (v24.15.0): process.binding('buffer') returns
+ * an object (no throw) and its kStringMaxLength is 536870888, V8's String::kMaxLength
+ * on 64-bit hosts. The compiled program answers that constant. Only this spelling
+ * is served: other binding names and members keep their fence (null here). */
+const PROCESS_BINDING_BUFFER_MEMBERS: Readonly<Record<string, number>> = { kStringMaxLength: 536870888 };
+export function processBindingMemberOf(L: Lowerer, expr: ts.Expression): IrExpr | null {
+  if (!ts.isPropertyAccessExpression(expr) || expr.questionDotToken !== undefined) return null;
+  const call = expr.expression;
+  if (!ts.isCallExpression(call) || !ts.isPropertyAccessExpression(call.expression)) return null;
+  if (call.expression.name.text !== "binding") return null;
+  if (!L.isStdlibGlobal(call.expression.expression, "process")) return null;
+  const arg = call.arguments[0];
+  if (call.arguments.length !== 1 || arg === undefined || !ts.isStringLiteral(arg) || arg.text !== "buffer") return null;
+  const member = expr.name.text;
+  if (!Object.prototype.hasOwnProperty.call(PROCESS_BINDING_BUFFER_MEMBERS, member)) return null;
+  const value = PROCESS_BINDING_BUFFER_MEMBERS[member]!;
+  return { kind: "numLit", value, type: F64, loc: locOf(expr) };
+}
+
 const BUILTIN_MEMBER_IS_GLOBAL: ReadonlySet<string> = new Set([
   "buffer.Buffer", "url.URL", "url.URLSearchParams", "util.TextEncoder", "util.TextDecoder",
 ]);
@@ -2937,6 +2957,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // Builtin namespace imports (`path.sep`, `os.EOL`,
         // `fs.constants.R_OK` where the root is `import * as ...`): the
         // same constants and per-member fences as named builtin imports.
+        processBindingMemberOf(L, expr) ??
         L.lowerNamespaceBuiltinProperty(expr) ??
         L.lowerJsonProperty(expr) ??
         staticMemberDynFnValueOf(L, expr, locOf(expr)) ??

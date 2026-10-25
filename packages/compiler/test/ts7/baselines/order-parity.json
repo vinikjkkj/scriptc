@@ -958,12 +958,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/10908-process-binding-buffer-try.cjs": {
-   "order": [
-    "<repo>/tests/corpus/10908-process-binding-buffer-try.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/10950-tdz-var-hoisted-ctor-reads-later-var.cjs": {
    "order": [
     "<repo>/tests/corpus/10950-tdz-var-hoisted-ctor-reads-later-var.cjs"
