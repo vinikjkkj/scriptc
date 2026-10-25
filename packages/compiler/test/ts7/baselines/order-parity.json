@@ -561,6 +561,20 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10750-ov-jstwin-base-typed-override-arity/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/10750-ov-jstwin-base-typed-override-arity/lib.js",
+    "<repo>/tests/corpus/10750-ov-jstwin-base-typed-override-arity/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10751-ov-jstwin-dropped-and-added-params/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/10751-ov-jstwin-dropped-and-added-params/lib.js",
+    "<repo>/tests/corpus/10751-ov-jstwin-dropped-and-added-params/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1050-comptime-tables.ts": {
    "order": [
     "<repo>/tests/corpus/1050-comptime-tables.ts"
