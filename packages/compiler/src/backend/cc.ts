@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { tapPhase } from "../phase-tap.js";
 import { createHash } from "node:crypto";
+// Comment-only edit (cache measurement D2): no emitted byte changes.
 import { createRequire } from "node:module";
 import { appendFile, chmod, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
