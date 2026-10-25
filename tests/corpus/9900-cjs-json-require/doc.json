@@ -1,0 +1,1 @@
+{"name":"mongo","n":42,"f":1.5e-7,"big":12345678901234,"neg":-0,"nested":{"a":[1,2,3],"obj":{"b":"x"},"ok":true,"nil":null},"uni":"héllo ☃ 😀 \"q\" \\ \n","order":{"z":1,"a":2,"m":3},"empty":{},"list":[]}
