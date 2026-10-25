@@ -40,7 +40,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf } from "./lowerer.js";
 import type { FileParts } from "./lower-modules.js";
-import { isCjsJsFile, isNodeEsmFile, locOf, resolveImport } from "../program.js";
+import { cjsHiddenAccessorExport, isCjsJsFile, isNodeEsmFile, locOf, resolveImport } from "../program.js";
 import { nearestPackageTypeOf, nearestPkgJsonPath } from "../resolve.js";
 import { F64, IrExpr, IrStmt, IrType, STRING } from "../../ir/nodes.js";
 import { normalize as nativePath } from "node:path";
@@ -325,6 +325,8 @@ function nsOwnNameSet(L: Lowerer, sf: ts.SourceFile, blocked: string[]): Set<str
   }
   modSym.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
     const n = String(key);
+    // A CommonJS accessor defined without `enumerable: true` is no key of the object.
+    if (cjsHiddenAccessorExport(sf, n)) return;
     if (n === "export=") {
       blocked.push(
         "it is a CommonJS `export =` module, whose namespace Node assembles from module.exports through its own lexer",

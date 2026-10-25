@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, requireSpecOf, resolveImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, requireSpecOf, resolveImport } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
@@ -1418,7 +1418,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     const modSym = L.checker.getSymbolAtLocation(dep);
     modSym?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
       const n = String(key);
-      if (!n.startsWith("__")) entries.push([n, sym]);
+      if (!n.startsWith("__") && !cjsHiddenAccessorExport(dep, n)) entries.push([n, sym]);
     });
     // getExports() carries the module's OWN table only — `export *`
     // re-exports are not in it, and a namespace built without them
