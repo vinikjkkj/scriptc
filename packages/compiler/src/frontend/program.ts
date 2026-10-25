@@ -4492,6 +4492,64 @@ export function cjsHiddenAccessorExport(dep: ts.SourceFile, name: string): boole
     return false;
   }
 
+/** The names a CommonJS module's export object holds, in Node's INSERTION
+ * order (the object's own keys: first assignment, a literal's own order on
+ * whole replacement). Only top-level statements are walked; a name written
+ * elsewhere (inside a function or a block) is not placed here, and the caller
+ * appends it. Null when the object is replaced by something whose key order
+ * is not visible here (a non-literal `module.exports = X`, or `exports = X`). */
+export function cjsInsertionOrderOf(sf: ts.SourceFile): string[] | null {
+  const order: string[] = [];
+  const add = (n: string): void => {
+    if (!order.includes(n)) order.push(n);
+  };
+  const isExportsObj = (e: ts.Expression): boolean =>
+    (ts.isIdentifier(e) && e.text === "exports") || isModuleExportsAccess(e);
+  let unknown = false;
+  const visit = (e: ts.BinaryExpression): void => {
+    if (e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return;
+    let right: ts.Expression = e.right;
+    while (ts.isParenthesizedExpression(right)) right = right.expression;
+    // `a.x = b.y = v`: the inner assignment runs first.
+    if (ts.isBinaryExpression(right)) visit(right);
+    const left = e.left;
+    if (ts.isIdentifier(left) && left.text === "exports") {
+      unknown = true;
+    } else if (isModuleExportsAccess(left)) {
+      if (!ts.isObjectLiteralExpression(right)) {
+        unknown = true;
+        return;
+      }
+      order.length = 0;
+      for (const p of right.properties) {
+        if (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p) && !ts.isMethodDeclaration(p)) {
+          unknown = true;
+          return;
+        }
+        if (!ts.isIdentifier(p.name) && !ts.isStringLiteral(p.name)) {
+          unknown = true;
+          return;
+        }
+        add(p.name.text);
+      }
+    } else if (ts.isPropertyAccessExpression(left) && isExportsObj(left.expression) && ts.isIdentifier(left.name)) {
+      add(left.name.text);
+    }
+  };
+  for (const stmt of sf.statements) {
+    if (!ts.isExpressionStatement(stmt)) continue;
+    const e = stmt.expression;
+    if (ts.isBinaryExpression(e)) visit(e);
+    else if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression) &&
+      ts.isIdentifier(e.expression.expression) && e.expression.expression.text === "Object" &&
+      e.expression.name.text === "defineProperty" && e.arguments.length === 3 &&
+      isExportsObj(e.arguments[0]!) && ts.isStringLiteral(e.arguments[1]!)) {
+      add((e.arguments[1] as ts.StringLiteral).text);
+    }
+  }
+  return unknown ? null : order;
+}
+
 /** True when the file replaces its whole export object (`module.exports = …`
  * or `exports = …`) anywhere: a `module.exports` defineProperty target then
  * may name a different object at run time, so it is not a static receiver. */

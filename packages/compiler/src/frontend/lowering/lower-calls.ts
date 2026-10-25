@@ -32,7 +32,7 @@ import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBER
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
 import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
-import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
+import { isRequireBindingIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
 import { declSymbolOf } from "./lower-modules.js";
 import { expandoMemberRead } from "./lower-expando.js";
 import { isNpmStaticPackage, npmStaticPackageOfPath } from "../npm-static.js";
@@ -12169,7 +12169,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (objMember === "keys" && ts.isIdentifier(argNode)) {
       const nsSf = moduleNsSourceFileOf(L, argNode);
       if (nsSf !== null) {
-        const own = moduleNsOwnKeys(L, nsSf);
+        const own = moduleNsOwnKeys(L, nsSf, isRequireBindingIdent(L, argNode));
         if (own.keys === null) {
           L.unsupported(
             "SC1013",

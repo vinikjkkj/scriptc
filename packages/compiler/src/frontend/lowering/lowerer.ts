@@ -1800,6 +1800,8 @@ export class Lowerer {
    * (lowerOwnModuleImport): every `import()` of the same program module
    * shares one builder. */
   readonly dynNsBuilders = new Map<ts.SourceFile, string>();
+  /** The require() value builders (module.exports order), apart from the import() namespace builders. */
+  readonly dynExportsBuilders = new Map<ts.SourceFile, string>();
   /** Per CommonJS module: the dyn global holding the members `module.exports`
    * gains only from inside function bodies (no static symbol, no storage of
    * their own) -- see cjsExportsBagOf. */
