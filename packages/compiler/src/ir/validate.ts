@@ -1233,6 +1233,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.objCreateNullProto": { argTypes: [], result: DYN },
   "dyn.errorProto": { argTypes: [], result: DYN },
   "dyn.u8Ctor": { argTypes: [], result: DYN },
+  "dyn.webCrypto": { argTypes: [], result: DYN },
   "dyn.u8Proto": { argTypes: [], result: DYN },
   "dyn.u8From": { argTypes: [], result: DYN },
   "dyn.u8Of": { argTypes: [], result: DYN },
