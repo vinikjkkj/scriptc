@@ -549,6 +549,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10700-strict-eq-across-static-kinds.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10700-strict-eq-across-static-kinds.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10701-strict-eq-static-kind-operand-effects.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10701-strict-eq-static-kind-operand-effects.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10702-loose-eq-across-scalars.ts": {
+   "order": [
+    "<repo>/tests/corpus/10702-loose-eq-across-scalars.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10703-relational-dyn-nan-and-strings.ts": {
+   "order": [
+    "<repo>/tests/corpus/10703-relational-dyn-nan-and-strings.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10704-relational-dyn-bigint.ts": {
+   "order": [
+    "<repo>/tests/corpus/10704-relational-dyn-bigint.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10705-bigint-shift-of-untyped-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/10705-bigint-shift-of-untyped-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10706-union-operands-of-a-destructured-table.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10706-union-operands-of-a-destructured-table.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1100-island-eval-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1100-island-eval-basics.ts"
