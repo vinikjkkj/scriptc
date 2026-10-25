@@ -134,32 +134,23 @@ test("node-types: declared-but-not-lowered surface fences, naming @types/node", 
   await expect(rendered).toMatchFileSnapshot("__snapshots__/node-types-fenced.txt");
 });
 
-test("json-any: any-typed JSON.parse reads pass preflight (the project's own tsc is the oracle) and LOWER now; the non-Error reject still fences", async () => {
+test("json-any: any-typed JSON.parse reads pass preflight (the project's own tsc is the oracle) and LOWER; a string reject lowers too", async () => {
   const outDir = outDirFor("json-any");
   const entry = join(fixture("json-any"), "main.ts");
   // Analyzable: the program typechecks under its own tsconfig, so the
   // override-manufactured errors (parse(): unknown, reject's pinned
-  // `(reason: Error) => void`) never fail preflight — coverage computes
+  // `(reason: unknown) => void`) never fail preflight — coverage computes
   // instead of stopping.
   const { coverage } = analyze(entry);
   expect(coverage.preflightFailed).toBe(false);
-  // The build still fails — at LOWERING, with the honest fence for the
-  // string reject (a bound reject called with an Error is the supported
-  // surface and lowers). The unknown READS lower now (the dyn keyed read,
-  // corpus 1544) — no SC1100 remains. Never a SC0001.
+  // The rejection reason is checked-dynamic (any thrown value), so a string
+  // reject lowers, and the unknown reads lower through the dyn keyed read.
   const result = await compile(entry, {
     outPath: join(outDir, exeName("main")),
     outDir,
     sanitize,
   });
-  expect(result.ok).toBe(false);
-  if (result.ok) return;
-  const codes = result.diagnostics.map((d) => d.code);
-  expect(codes).not.toContain("SC0001");
-  expect(codes).not.toContain("SC1100");
-  expect(
-    result.diagnostics.some((d) => d.message.includes("'string' values where 'Error' is expected")),
-  ).toBe(true);
+  expect(result.ok).toBe(true);
 });
 
 test("json-any-broken: genuine type errors report the project world's own tsc errors, not override-manufactured ones", async () => {
