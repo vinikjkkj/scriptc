@@ -15925,6 +15925,12 @@
     "<repo>/tests/corpus/9753-cjs-class-value-passed-to-helper/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/9754-cjs-builtin-member-identity-with-global/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/9754-cjs-builtin-member-identity-with-global/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
