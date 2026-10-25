@@ -301,6 +301,13 @@ function diffieHellmanFnValue(L: Lowerer, loc: SrcLoc): IrExpr {
   return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
 }
 
+/** Builtin module members that are the same object as a global of the same name
+ * (measured under Node v24: `require("buffer").Buffer === Buffer`, and likewise for
+ * the URL and TextEncoder pairs). They share the global's identity token. */
+const BUILTIN_MEMBER_IS_GLOBAL: ReadonlySet<string> = new Set([
+  "buffer.Buffer", "url.URL", "url.URLSearchParams", "util.TextEncoder", "util.TextDecoder",
+]);
+
 export function lowerExpr(L: Lowerer, expr: ts.Expression): IrExpr {
     const pre = L.preLowered.size > 0 ? L.preLowered.get(expr) : undefined;
     if (pre !== undefined) return pre;
@@ -1451,6 +1458,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
                 `library functions as values (call '${expr.text}' directly)`,
               );
             }
+            // A class the module re-exports from the GLOBAL object (`require("buffer").Buffer
+            // === Buffer`, measured under Node v24): the same identity token as the
+            // global, so `===` between the two spellings holds.
+            const globalAlias = BUILTIN_MEMBER_IS_GLOBAL.has(`${bi.module}.${bi.member}`);
+            if (globalAlias) return { kind: "strLit", value: `[builtin ${bi.member}]`, type: STRING, loc };
             return { kind: "strLit", value: `[builtin ${bi.module}.${bi.member}]`, type: STRING, loc };
           }
           // (The shape-probing diffieHellman lift that used to sit here was
