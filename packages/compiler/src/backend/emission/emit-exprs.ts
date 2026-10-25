@@ -8858,8 +8858,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const twoArg = execT !== undefined && execT.params.length === 2;
           const rejectA = twoArg
             ? E.newTemp(
-                { kind: "func", params: [{ kind: "object", className: "%Error" }], ret: { kind: "void" } },
-                `scr_make_reject(${q.name})`,
+                { kind: "func", params: [{ kind: "dyn" }], ret: { kind: "void" } },
+                `scr_make_reject_dyn(${q.name})`,
               )
             : undefined;
           const execA = E.emitExpr(e.executor);
@@ -8902,8 +8902,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // wins in the runtime; both closures' +1 move into the call.
         if (e.executor.type.kind === "func" && e.executor.type.params.length === 2) {
           const reject = E.newTemp(
-            { kind: "func", params: [{ kind: "object", className: "%Error" }], ret: { kind: "void" } },
-            `scr_make_reject(${p.name})`,
+            { kind: "func", params: [{ kind: "dyn" }], ret: { kind: "void" } },
+            `scr_make_reject_dyn(${p.name})`,
           );
           const exec2 = E.emitExpr(e.executor);
           E.moveTemp(resolve);
@@ -8967,7 +8967,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             mk = `scr_make_resolve_fn(${p.name}, (void *)&${E.resolveThunkFor(inner)})`;
         }
         const resolve = E.newTemp(resolveT, mk);
-        const reject = E.newTemp(rejectT, `scr_make_reject(${p.name})`);
+        const reject = E.newTemp(rejectT, `scr_make_reject_dyn(${p.name})`);
         const rec = E.newTemp(e.type, `${mangleRecordNew(e.type.shapeId)}()`);
         // The promise's +1 moves into the record; the record's own read
         // of it at the call site retains per field access as usual.

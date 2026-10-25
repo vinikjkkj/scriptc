@@ -5702,16 +5702,16 @@ function validateFunction(
           break;
         }
         if (exec.params.length === 2) {
-          // The reject closure's one shape: (reason: %Error) => void.
+          // The reject closure's one shape: (reason: dyn) => void — any
+          // rejection value, the thrown-value representation (scr_throw_dyn).
           const rj = exec.params[1]!;
           if (
             rj.kind !== "func" ||
             rj.ret.kind !== "void" ||
             rj.params.length !== 1 ||
-            rj.params[0]!.kind !== "object" ||
-            rj.params[0]!.className !== "%Error"
+            rj.params[0]!.kind !== "dyn"
           ) {
-            err("newPromise reject param must be (%Error) => void", e.loc);
+            err("newPromise reject param must be (dyn) => void", e.loc);
           }
         }
         if (exec.params.length >= 1) {
@@ -5770,10 +5770,9 @@ function validateFunction(
           reject.kind !== "func" ||
           reject.ret.kind !== "void" ||
           reject.params.length !== 1 ||
-          reject.params[0]!.kind !== "object" ||
-          reject.params[0]!.className !== "%Error"
+          reject.params[0]!.kind !== "dyn"
         ) {
-          err("promiseWithResolvers reject must be (%Error) => void", e.loc);
+          err("promiseWithResolvers reject must be (dyn) => void", e.loc);
         }
         break;
       }

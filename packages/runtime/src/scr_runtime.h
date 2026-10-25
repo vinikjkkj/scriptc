@@ -7810,6 +7810,7 @@ void scr_resolve_ref_impl(ScrClosure *self, void *v, void *(*retain)(void *), vo
  * SCR_EXC_OBJ payload (the thrown-Error representation) and wakes waiters;
  * a reject after any settle is a no-op (first settle wins, exactly JS). */
 ScrClosure *scr_make_reject(ScrPromise *p);
+ScrClosure *scr_make_reject_dyn(ScrPromise *p); /* reason: dyn (any thrown value) */
 void scr_promise_run_executor(ScrPromise *p, ScrClosure *exec, ScrClosure *resolve);
 void scr_promise_run_executor0(ScrPromise *p, ScrClosure *exec);
 void scr_promise_run_executor2(ScrPromise *p, ScrClosure *exec, ScrClosure *resolve, ScrClosure *reject);

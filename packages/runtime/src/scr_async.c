@@ -4847,6 +4847,33 @@ ScrClosure *scr_make_reject(ScrPromise *p) {
   return c;
 }
 
+/* The executor's reject for ANY reason (the (reason: unknown) => void shape):
+ * the reason is thrown into the active exception cell (scr_throw_dyn unwraps
+ * it to the arm it came from: a boxed Error to OBJ, a string to STR, anything
+ * else to REF) and the promise rejects with that cell, exactly like a throw
+ * that escapes an async body. First settle wins; a settled promise releases
+ * the reason and does nothing. The payload is the rejection, so an await
+ * rethrows the same value and catch sees the same identity. */
+static void scr_reject_dyn_thunk(ScrClosure *self, ScrDyn *reason) {
+  ScrPromise *p = scr_resolve_target(self);
+  if (p->state != SCR_PROM_PENDING) {
+    scr_dyn_release(reason);
+  } else {
+    scr_throw_dyn(reason); /* takes ownership */
+    scr_promise_reject_pending(p);
+  }
+  scr_promise_release(p);
+}
+
+ScrClosure *scr_make_reject_dyn(ScrPromise *p) {
+  ScrClosure *c = scr_closure_new((void *)&scr_reject_dyn_thunk, 1);
+  ScrBox *b = scr_box_new_obj(scr_promise_retain_v, scr_promise_release_v,
+                               scr_promise_trace_v);
+  scr_box_set_ref(b, scr_promise_retain(p));
+  c->caps[0] = b;
+  return c;
+}
+
 /* Shared executor epilogue: an escaping throw rejects a still-pending
  * promise (payload moved out of the active exception cell); a throw after
  * the promise settled is swallowed, like resolve-then-throw in JS. */

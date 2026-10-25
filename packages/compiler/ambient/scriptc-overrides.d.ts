@@ -71,7 +71,7 @@ interface JSON {
  * lowering on their types. */
 interface PromiseConstructor {
   new <T>(
-    executor: (resolve: (value: T) => void, reject: (reason: Error) => void) => void,
+    executor: (resolve: (value: T) => void, reject: (reason: unknown) => void) => void,
   ): Promise<T>;
   /* ES2024's Promise.withResolvers, in the executor's own scriptc shape:
    * resolve takes the plain value (no PromiseLike union; the conditional
@@ -90,6 +90,6 @@ interface PromiseConstructor {
       : [T] extends [void]
         ? () => void
         : (value: T) => void;
-    reject: (reason: Error) => void;
+    reject: (reason: unknown) => void;
   };
 }

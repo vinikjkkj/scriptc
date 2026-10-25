@@ -10313,9 +10313,9 @@ class LlEmitter {
           B.line(`${resolveA} = call ptr @scr_make_resolve_fn(ptr ${q}, ptr @${this.resolveThunkFor(sov)})`);
           let rejectA: string | undefined;
           if (execT.params.length === 2) {
-            this.declare(`declare ptr @scr_make_reject(ptr)`);
+            this.declare(`declare ptr @scr_make_reject_dyn(ptr)`);
             rejectA = B.tmp();
-            B.line(`${rejectA} = call ptr @scr_make_reject(ptr ${q})`);
+            B.line(`${rejectA} = call ptr @scr_make_reject_dyn(ptr ${q})`);
           }
           const execA = this.emitExpr(e.executor);
           if (rejectA !== undefined) {
@@ -10345,9 +10345,9 @@ class LlEmitter {
           // Two-param executor: reject is a runtime-provided closure
           // rejecting the promise with its Error reason. First settle
           // wins in the runtime; both closures' +1 move into the call.
-          this.declare(`declare ptr @scr_make_reject(ptr)`);
+          this.declare(`declare ptr @scr_make_reject_dyn(ptr)`);
           const reject = B.tmp();
-          B.line(`${reject} = call ptr @scr_make_reject(ptr ${p})`);
+          B.line(`${reject} = call ptr @scr_make_reject_dyn(ptr ${p})`);
           const exec2 = this.emitExpr(e.executor);
           this.declare(`declare void @scr_promise_run_executor2(ptr, ptr, ptr, ptr)`);
           B.line(`call void @scr_promise_run_executor2(ptr ${p}, ptr ${exec2.name}, ptr ${resolve}, ptr ${reject})`);
@@ -10371,7 +10371,7 @@ class LlEmitter {
         }
         const inner = promT.inner;
         this.declare(`declare ptr @scr_promise_new()`);
-        this.declare(`declare ptr @scr_make_reject(ptr)`);
+        this.declare(`declare ptr @scr_make_reject_dyn(ptr)`);
         const p = B.tmp();
         B.line(`${p} = call ptr @scr_promise_new()`);
         const kindNums: Partial<Record<IrType["kind"], number>> = { f64: 0, bool: 1, string: 2, void: 3 };
@@ -10385,7 +10385,7 @@ class LlEmitter {
           B.line(`${resolve} = call ptr @scr_make_resolve_fn(ptr ${p}, ptr @${this.resolveThunkFor(inner)})`);
         }
         const reject = B.tmp();
-        B.line(`${reject} = call ptr @scr_make_reject(ptr ${p})`);
+        B.line(`${reject} = call ptr @scr_make_reject_dyn(ptr ${p})`);
         const rec = B.tmp();
         B.line(`${rec} = call ptr @${mangleRecordNew(e.type.shapeId)}()`);
         const out = this.own({ name: rec, type: e.type });

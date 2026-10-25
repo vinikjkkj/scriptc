@@ -3341,7 +3341,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
               { name: "promise", type: promT },
               {
                 name: "reject",
-                type: { kind: "func", params: [{ kind: "object", className: "%Error" }], ret: VOID },
+                type: { kind: "func", params: [{ kind: "dyn" }], ret: VOID },
               },
               {
                 name: "resolve",
