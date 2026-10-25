@@ -1246,6 +1246,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (L.isSelfReference(expr)) {
         return { kind: "selfRef", type: L.ctx.selfType!, loc };
       }
+      // The free `exports` as a VALUE (`merge(exports, src)`). When the file
+      // has an export record, the value is the record (cjs-export-record.ts).
+      // Without one, the bag global it would fall back to is a COPY at the first
+      // dyn crossing: a callee's writes never reach `exports` (measured: `merge(exports,
+      // {q: 3}); exports.q` printed undefined where Node prints 3). Refuse instead.
+      if (ts.isIdentifier(expr) && expr.text === "exports" && isCjsJsFile(expr.getSourceFile()) && L.resolveLocal(expr) === null) {
+        const recV = cjsExportRecordOf(L, expr.getSourceFile());
+        if (recV !== null) return cjsExportRecordRef(recV, loc);
+        L.unsupported("SC1090", expr, "'exports' as a value (this module's export object is not a record: its members are written through a value that copies)");
+      }
       // `arguments` in a variadic JS function (the rest-marked form): the
       // synthetic trailing dyn-array param — lambdaSignature marked the
       // type and lowerLambda declared the local. Inside an ARROW the same
