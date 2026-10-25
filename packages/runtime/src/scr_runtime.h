@@ -3521,6 +3521,15 @@ ScrPromise *scr_tp_set_immediate(void);
  * ERR_INVALID_ARG_TYPE TypeError for non-function subscribers (MAY
  * THROW). Names and subscriber args are BORROWED; chanName's result +1. */
 double scr_dc_channel(ScrStr *name);
+/* Checked-dynamic channel handles (scr_dc.c): a box holds the registry id by
+ * identity; unbox answers the id (wrong tag: the path-annotated TypeError). */
+ScrDyn *scr_dc_channel_dyn(ScrStr *name);
+ScrDyn *scr_dc_tracing_channel_dyn(ScrStr *name);
+ScrDyn *scr_dc_box_chan(double h);
+ScrDyn *scr_dc_box_tc(double h);
+double scr_dc_unbox_chan(const ScrDyn *d);
+double scr_dc_unbox_tc(const ScrDyn *d);
+void scr_dc_dyn_install(void);
 void scr_dc_subscribe(ScrStr *name, ScrDyn *cb);
 bool scr_dc_unsubscribe(ScrStr *name, ScrDyn *cb);
 bool scr_dc_has_subscribers(ScrStr *name);
@@ -4678,6 +4687,8 @@ typedef enum {
   SCR_DYNH_DATE,        /* ScrDate — Date (immutable time value, by reference) */
   SCR_DYNH_SYMBOL,       /* ScrSym — an ES Symbol (immutable identity value, by reference) */
   SCR_DYNH_TEXTCODEC,    /* the immortal TextEncoder/TextDecoder values (scr_json.c; ops install lazily) */
+  SCR_DYNH_CHANNEL,      /* scr_dc.c — diagnostics_channel Channel (registry id, by identity) */
+  SCR_DYNH_TRACING,      /* scr_dc.c — diagnostics_channel TracingChannel (registry id) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
