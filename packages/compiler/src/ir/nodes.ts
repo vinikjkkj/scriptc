@@ -6114,6 +6114,12 @@ export type IrLibFn =
    * documented divergence. subscribe/unsubscribe throw Node's
    * ERR_INVALID_ARG_TYPE TypeError for non-function subscribers. */
   | "dc.channel"
+  | "dc.channelDyn"
+  | "dc.tracingChannelDyn"
+  | "dc.boxChan"
+  | "dc.boxTc"
+  | "dc.unboxChan"
+  | "dc.unboxTc"
   | "dc.subscribe"
   | "dc.unsubscribe"
   | "dc.hasSubscribers"

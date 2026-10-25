@@ -907,13 +907,13 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
   // carry canonical shapes and route the dispatch). The Channel method
   // surface lowers through lowerDcChannelMethodCall/lowerDcChannelProperty.
   diagnostics_channel: {
-    channel: { fn: "dc.channel", params: [STRING], result: F64 },
+    channel: { fn: "dc.channelDyn", params: [STRING], result: DYN },
     subscribe: { fn: "dc.subscribe", params: [STRING, DYN], result: VOID },
     unsubscribe: { fn: "dc.unsubscribe", params: [STRING, DYN], result: BOOL },
     hasSubscribers: { fn: "dc.hasSubscribers", params: [STRING], result: BOOL },
     // The string form's canonical shape; the collection form (an object
     // literal of five Channels) is special-cased in lowerBuiltinModuleCall.
-    tracingChannel: { fn: "dc.tracingChannel", params: [STRING], result: F64 },
+    tracingChannel: { fn: "dc.tracingChannelDyn", params: [STRING], result: DYN },
   },
 };
 
