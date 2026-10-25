@@ -16228,6 +16228,24 @@
     "<repo>/tests/corpus/10451-rebound-untyped-callback-field.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/10452-bound-function-names-and-lengths.js": {
+   "order": [
+    "<repo>/tests/corpus/10452-bound-function-names-and-lengths.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10453-sloppy-this-nullish-receiver.cjs": {
+   "order": [
+    "<repo>/tests/corpus/10453-sloppy-this-nullish-receiver.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10454-detached-class-method-null-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/10454-detached-class-method-null-receiver.js"
+   ],
+   "diags": []
   }
  }
 }
