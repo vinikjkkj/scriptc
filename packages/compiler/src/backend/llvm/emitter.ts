@@ -10989,6 +10989,20 @@ class LlEmitter {
         // helper answers false for every other kind, so this arm is a
         // plain unconditional call.
         B.startBlock(lNotFn);
+        // A HANDLE carries the expandos a JS write put on it (a Date's own data members): the same
+        // presence answer the C twin gives. Every other handle answers false here, as before.
+        const lHnd = B.newLabel("dhk.hd");
+        const lNotHnd = B.newLabel("dhk.nh");
+        const isHnd = B.tmp();
+        B.line(`${isHnd} = icmp eq i32 ${kd}, ${DK.HANDLE}`);
+        B.condBr(isHnd, lHnd, lNotHnd);
+        B.startBlock(lHnd);
+        this.declare(`declare zeroext i1 @scr_dyn_handle_has_expando(ptr, ptr, i64)`);
+        const hndHas = B.tmp();
+        B.line(`${hndHas} = call zeroext i1 @scr_dyn_handle_has_expando(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${keyBytes})`);
+        B.line(`store i1 ${hndHas}, ptr ${slot}`);
+        B.br(lj);
+        B.startBlock(lNotHnd);
         this.declare(`declare zeroext i1 @scr_dyn_isl_fence(ptr, ptr)`);
         const fenced = B.tmp();
         B.line(`${fenced} = call zeroext i1 @scr_dyn_isl_fence(ptr ${d.name}, ptr ${this.cstr("'in'")})`);
