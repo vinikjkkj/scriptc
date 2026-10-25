@@ -385,6 +385,9 @@ if (LOWER_FP_ON) {
  * constructor, and a second static one would be a different object from
  * the one every engine-side typed array is linked to. */
 export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc): IrExpr | null {
+  // The WebCrypto object is an object in Node (typeof "object"), not a
+  // string token: one process singleton, shared with require('crypto').webcrypto.
+  if (canonical === "crypto" && !L.dynamic) return { kind: "libCall", fn: "dyn.webCrypto", args: [], type: DYN, loc };
   if (canonical !== "Uint8Array" || L.dynamic) return null;
   return { kind: "libCall", fn: "dyn.u8Ctor", args: [], type: DYN, loc };
 }
@@ -1426,6 +1429,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           // harness adds worker_threads.Worker to its identity Set).
           if (isJsSourceFile(expr.getSourceFile())) {
             // A FUNCTION member (`const { isIP } = require('net'); const f = isIP`)
+            // `const w = require('crypto').webcrypto` (a named-import alias) and
+            // `import { webcrypto } from 'crypto'`: the WebCrypto singleton, not a token.
+            if (bi.module === "crypto" && bi.member === "webcrypto" && !L.dynamic) {
+              return { kind: "libCall", fn: "dyn.webCrypto", args: [], type: DYN, loc };
+            }
             // has to be a function value: the token is a string, `typeof f` says
             // 'string', and `f(x)` throws "f is not a function" where Node
             // answers. A member the value table covers is the same interned
@@ -2303,6 +2311,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (ts.isConditionalExpression(expr)) return lowerTernary(L, expr);
 
     if (ts.isPropertyAccessExpression(expr)) {
+      // `require('crypto').webcrypto` (any namespace spelling of the crypto module):
+      // the same WebCrypto singleton `globalThis.crypto` is, so the two agree by identity.
+      {
+        const bi = L.builtinMemberOf(expr);
+        if (bi !== null && bi.module === "crypto" && bi.member === "webcrypto" && !L.dynamic) {
+          return { kind: "libCall", fn: "dyn.webCrypto", args: [], type: DYN, loc };
+        }
+      }
 
       // `import.meta.dirname` / `.filename` / `.url` — the ESM spelling of
       // "where is this module". They lower to COMPILE-TIME constants of the
