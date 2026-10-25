@@ -6949,6 +6949,9 @@ typedef struct ScrDynBigOps {
   bool (*eq_f64)(const ScrBigInt *b, double n);        /* 1n == 1, exact, never throws */
   bool (*eq_str)(const ScrBigInt *b, const ScrStr *s); /* 1n == "1" via StringToBigInt */
   uint64_t (*low_u64)(const ScrBigInt *b);             /* the value modulo 2^64 (ToBigUint64's bits) */
+  int (*rel_big)(const ScrBigInt *a, const ScrBigInt *b);  /* -1/0/1 by value */
+  int (*rel_f64)(const ScrBigInt *b, double n);            /* -1/0/1 exact; 2 = NaN (unordered) */
+  int (*rel_str)(const ScrBigInt *b, const ScrStr *s);     /* -1/0/1 via StringToBigInt; 2 = no BigInt */
 } ScrDynBigOps;
 
 /* Boxes 64 raw bits as the bigint they spell (signed: two's complement
