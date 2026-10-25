@@ -54,6 +54,43 @@ export function emitterRooted(L: Lowerer, info: ClassInfo | undefined | null): b
   return false;
 }
 
+/** Event tables are keyed by (declaring emitter class, event name): two classes
+ * that each extend EventEmitter may both emit 'end' with different arguments
+ * (Connection's `end` takes none, Query's takes the results), and the
+ * program-wide name table would unify them into a conflict. The root of a
+ * receiver is the class DIRECTLY under the builtin emitter on its base chain
+ * (or the builtin itself for a plain EventEmitter), so a subclass shares its
+ * base's key and a listener resolves through the receiver's static class.
+ * "*" marks a receiver that is not emitter-rooted. Meta and error events are
+ * program-wide by Node's own contract and keep their bare name. */
+const EMITTER_ROOT_IDS = new WeakMap<object, number>();
+let emitterRootNext = 1;
+export function emitterRootKey(info: ClassInfo | undefined | null): string {
+  let c: ClassInfo | null = info ?? null;
+  let prev: ClassInfo | null = null;
+  while (c && !c.builtinEmitter) {
+    prev = c;
+    c = c.base;
+  }
+  if (!c) return "*";
+  const top: ClassInfo = prev ?? c;
+  let id = EMITTER_ROOT_IDS.get(top);
+  if (id === undefined) {
+    id = emitterRootNext++;
+    EMITTER_ROOT_IDS.set(top, id);
+  }
+  return `#${id}`;
+}
+export function evTableKey(info: ClassInfo | undefined | null, name: string): string {
+  if (name === "error" || META_EVENTS.has(name)) return name;
+  return `${emitterRootKey(info)}\u0000${name}`;
+}
+/** The bare event name a table key stands for (for diagnostics). */
+export function evDisplayName(key: string): string {
+  const i = key.indexOf("\u0000");
+  return i < 0 ? key : key.slice(i + 1);
+}
+
 const REGISTER_MEMBERS: ReadonlySet<string> = new Set([
   "on", "addListener", "once", "prependListener", "prependOnceListener",
 ]);
@@ -97,6 +134,9 @@ interface EventSig {
  * are the only ones excluded — everything unresolved counts. */
 interface EmitterRegistrations {
   names: ReadonlySet<string>;
+  /** Registered table keys (see evTableKey): a literal registration on a
+   * typed receiver, or "*"-keyed for a receiver that is not emitter-rooted. */
+  keys: ReadonlySet<string>;
   opaque: boolean;
   /** Where the first opaque registration is, for SCRIPTC_NOOPEMIT_WHY. */
   opaqueAt: string | null;
@@ -340,8 +380,9 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   //
   // Collecting is one cheap syntactic pass; the type-heavy merging is what
   // gets ordered, so nothing is scanned twice.
-  const sites: { isEmit: boolean; name: string; node: ts.CallExpression }[] = [];
+  const sites: { isEmit: boolean; name: string; key: string; node: ts.CallExpression }[] = [];
   const registered = new Set<string>();
+  const registeredKeys = new Set<string>();
   let opaqueRegistration = false;
   let opaqueAt: string | null = null;
   for (const sf of L.program.getSourceFiles()) {
@@ -378,7 +419,10 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
         const notAnEmitter =
           resolved && recvT?.kind === "object" && !emitterRooted(L, L.classes.get(recvT.className));
         if (!notAnEmitter) {
-          if (resolved && nameT !== null && nameT.isStringLiteralType()) registered.add(nameT.value);
+          if (resolved && nameT !== null && nameT.isStringLiteralType()) {
+            registered.add(nameT.value);
+            registeredKeys.add(evTableKey(recvT?.kind === "object" ? L.classes.get(recvT.className) : undefined, nameT.value));
+          }
           else {
             opaqueRegistration = true;
             if (opaqueAt === null) {
@@ -398,16 +442,16 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       // global table, so a stream's 'data' cannot collide with a user
       // event named 'data' on a plain emitter.
       if (streamForcedTuple(L, L.classes.get(recvT.className), name) !== null) return;
-      sites.push({ isEmit, name, node });
+      sites.push({ isEmit, name, node, key: evTableKey(L.classes.get(recvT.className), name) });
     };
     walk(sf);
   }
   for (const pass of [false, true]) {
-    for (const { isEmit, name, node } of sites) {
+    for (const { isEmit, key, node } of sites) {
       if (isEmit !== pass) continue;
       try {
         if (isEmit) {
-          mergeEmit(name, node.arguments.slice(1).map((a) => L.mapTypeOf(L.typeOf(a))));
+          mergeEmit(key, node.arguments.slice(1).map((a) => L.mapTypeOf(L.typeOf(a))));
         } else if (node.arguments[1]) {
           const cbCt = L.typeOf(node.arguments[1]);
           const cbT = L.mapTypeOf(cbCt) ?? dynFallbackType(L, node.arguments[1], cbCt);
@@ -417,9 +461,9 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
           // tuple position, and positions past the tuple read the boxed
           // undefined (exactly JS's extra-parameter semantics).
           if (cbT?.kind === "dyn" || (cbT?.kind === "func" && cbT.params.some((p) => p.kind === "dyn"))) {
-            sigOf(name).dynListener = true;
+            sigOf(key).dynListener = true;
           } else if (cbT?.kind === "func") {
-            mergeListener(name, cbT.params);
+            mergeListener(key, cbT.params);
           }
         }
       } catch {
@@ -428,7 +472,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
     }
   }
   holder.emitterEventTable = table;
-  holder.emitterRegistrations = { names: registered, opaque: opaqueRegistration, opaqueAt };
+  holder.emitterRegistrations = { names: registered, keys: registeredKeys, opaque: opaqueRegistration, opaqueAt };
   return table;
 }
 
@@ -436,7 +480,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
 function emitterRegistrations(L: Lowerer): EmitterRegistrations {
   emitterEvents(L);
   return (L as unknown as { emitterRegistrations?: EmitterRegistrations }).emitterRegistrations ??
-    { names: new Set<string>(), opaque: true, opaqueAt: null };
+    { names: new Set<string>(), keys: new Set<string>(), opaque: true, opaqueAt: null };
 }
 
 /** The compile-time event name of the first argument, or a pointed fence
@@ -456,12 +500,12 @@ const strLit = (value: string, loc: SrcLoc): IrExpr => ({ kind: "strLit", value,
 const boolLit = (value: boolean, loc: SrcLoc): IrExpr => ({ kind: "boolLit", value, type: BOOL, loc });
 
 /** The event's unified tuple, with conflicts reported at this site. */
-function tupleOf(L: Lowerer, table: Map<string, EventSig>, name: string, blame: ts.Node): IrType[] {
-  const sig = table.get(name);
+function tupleOf(L: Lowerer, table: Map<string, EventSig>, key: string, blame: ts.Node): IrType[] {
+  const sig = table.get(key);
   if (!sig) return [];
   if (sig.conflict) {
     L.noLowering(
-      `the event '${name}' with conflicting argument types`,
+      `the event '${evDisplayName(key)}' with conflicting argument types`,
       blame,
       `every emit site and listener of one event name must agree on one argument tuple — ${sig.conflict}`,
     );
@@ -587,7 +631,11 @@ function listenerlessEmitNoop(
   if (superRecv !== undefined) return why("super.emit forwards up the prototype chain");
   const reg = emitterRegistrations(L);
   if (reg.opaque) return why(`a registration names its event opaquely (${reg.opaqueAt ?? "?"})`);
-  if (reg.names.has(name)) return why("the program registers a listener for it");
+  // Per receiver root: a listener for this name on ANOTHER emitter class does
+  // not reach this receiver's registry (the table is keyed by class).
+  if (reg.keys.has(evTableKey(info, name)) || reg.keys.has(evTableKey(undefined, name))) {
+    return why("this receiver's class (or a receiver of unknown class) registers a listener for it");
+  }
   // An emit OVERRIDE may carry a body of its own (emitOverrideShapeReason
   // constrains only the rest parameter's forwarding), so skipping the call
   // would skip that body. The type-only forwarder — `return
@@ -1020,6 +1068,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       L.noLowering(`${member} with ${args.length} arguments`, call, "the supported form is (eventName, listener)");
     }
     const name = eventNameOf(L, member, args[0]!);
+    const key = evTableKey(info, name);
     const registering = REGISTER_MEMBERS.has(member);
     // The runtime fires the meta events INTERNALLY (scr_ee_emit_meta —
     // Node calls this.emit, which would dispatch through an emit
@@ -1090,7 +1139,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     // Stream-rooted receivers consult the per-base FORCED tuples first
     // (runtime-emitted 'end'/'pipe'/... payloads); the dyn-listener check
     // below then sees the forced tuple exactly like a table one.
-    const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, name, call);
+    const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, key, call);
     const dynFlavor = dynListenerFlavor(L, args[1]!);
     if (dynFlavor !== null) {
       return lowerDynListenerCall(
@@ -1113,7 +1162,8 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     if (args.length === 0) {
       L.noLowering("emit without an event name", call);
     }
-    const name = eventNameOf(L, member, args[0]!);
+    const emitAs = (name: string): IrExpr => {
+      const key = evTableKey(info, name);
     const receiver = lowerReceiver();
     if (name === "error") {
       // The special event: exactly one %Error-rooted payload; no listener
@@ -1170,8 +1220,8 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
         loc,
       };
     }
-    const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, name, call);
-    const sig = table.get(name);
+    const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, key, call);
+    const sig = table.get(key);
     const padFromDyn = args.length - 1 < tuple.length && sig !== undefined && sig.dynListener &&
       tuple.slice(args.length - 1).every((t) => t.kind === "dyn");
     if (args.length - 1 !== tuple.length && !padFromDyn) {
@@ -1267,6 +1317,10 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     // The trailing positions this site does not supply read undefined.
     while (payload.length < tuple.length) payload.push(dynUndefinedExpr(loc));
     return emitDispatchExpr(L, info, name, tuple, receiver, payload, superRecv?.cls, loc);
+    };
+    const computed = computedEmitNames(L, info, access, args);
+    if (computed === null) return emitAs(eventNameOf(L, member, args[0]!));
+    return computedEmitDispatch(L, call, access, args, info, computed, emitAs, loc);
   }
 
   // The pure-introspection members take ANY string-typed name — no tuple
@@ -1326,7 +1380,8 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       L.noLowering(`${member} with ${args.length} arguments`, call, "the supported form is (eventName)");
     }
     const name = eventNameOf(L, member, args[0]!);
-    const sig = table.get(name);
+    const key = evTableKey(info, name);
+    const sig = table.get(key);
     if (sig?.dynListener) {
       // A dyn-adapted registration means the runtime bucket can hold
       // originals of MIXED signatures — no one honest element type.
@@ -1336,7 +1391,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
         "a listener of this event is checked-dynamic (unannotated parameters), so the listener array has no one static element type — listenerCount(name) counts",
       );
     }
-    const tuple = tupleOf(L, table, name, call);
+    const tuple = tupleOf(L, table, key, call);
     const receiver = lowerReceiver();
     return {
       kind: "libCall",
@@ -1739,6 +1794,94 @@ export function lowerEmitterSuperCall(L: Lowerer, call: ts.CallExpression,
  * specialization call when an override sits at-or-above it; an interned
  * instanceOf-branch helper when overrides exist only strictly below
  * (evaluating receiver and payload exactly once as its arguments). */
+/** A computed event name (the emit's first argument is not a string
+ * literal) as the list of names it can take, or null when the argument is
+ * a literal (eventNameOf owns that path). A union of string literals is
+ * exactly its members. A plain `string` is every name a registration on
+ * THIS receiver's root could carry: the registrations already in the
+ * program (a receiver that is not emitter-rooted contributes to every
+ * root), plus 'error', which throws when nothing listens. Any name outside
+ * that set has no listener on this receiver, so the emit is Node's
+ * `false` with no effect. An opaque registration (a name that is not a
+ * literal) could name anything, so the set is not provable and the emit
+ * fences. */
+function computedEmitNames(L: Lowerer, info: ClassInfo, access: ts.PropertyAccessExpression, args: ts.NodeArray<ts.Expression>): string[] | null {
+  void access;
+  const nameArg = args[0]!;
+  const t = L.typeOf(nameArg);
+  if (t.isStringLiteralType()) return null;
+  if (t.isUnionType() && ts.constituentTypes(t).every((c) => c.isStringLiteralType())) {
+    return [...new Set(ts.constituentTypes(t).map((c) => (c as unknown as { value: string }).value))];
+  }
+  if ((t.flags & ts.TypeFlags.StringLike) === 0) return null;
+  const regs = emitterRegistrations(L);
+  if (regs.opaque) {
+    L.noLowering(
+      "emit with a computed event name",
+      nameArg,
+      `a registration whose event name is not a compile-time literal could name anything (${regs.opaqueAt ?? "unknown site"}), so the names this receiver can emit are not provable`,
+    );
+  }
+  const root = emitterRootKey(info);
+  if (root === "*") {
+    L.noLowering("emit with a computed event name on a receiver that is not emitter-rooted", nameArg);
+  }
+  const names = new Set<string>(["error"]);
+  for (const k of regs.keys) {
+    if (k === "error" || META_EVENTS.has(k)) names.add(k);
+    else if (k.startsWith(`${root}\u0000`) || k.startsWith("*\u0000")) names.add(evDisplayName(k));
+  }
+  return [...names];
+}
+
+/** True for an operand whose re-evaluation is unobservable: a name, `this`,
+ * a literal, or a property read chain over one. The computed-name emit
+ * lowers its receiver and payload once per candidate name. */
+function pureEmitOperand(e: ts.Expression): boolean {
+  let x: ts.Expression = e;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  if (ts.isIdentifier(x) || x.kind === ts.SyntaxKind.ThisKeyword || ts.isStringLiteralLike(x) ||
+      ts.isNumericLiteral(x) || x.kind === ts.SyntaxKind.TrueKeyword || x.kind === ts.SyntaxKind.FalseKeyword ||
+      x.kind === ts.SyntaxKind.NullKeyword) return true;
+  if (ts.isPropertyAccessExpression(x)) return pureEmitOperand(x.expression);
+  return false;
+}
+
+/** `emit(nameExpr, ...payload)` with a computed name: one emit per candidate
+ * name, selected by a string equality on the name, falling through to
+ * `false`. Each arm is the ordinary literal emit lowered under that name. */
+function computedEmitDispatch(
+  L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression,
+  args: ts.NodeArray<ts.Expression>, info: ClassInfo, names: string[],
+  emitAs: (name: string) => IrExpr, loc: SrcLoc,
+): IrExpr {
+  void info;
+  for (const a of [access.expression, ...args.slice(1)]) {
+    if (!pureEmitOperand(a)) {
+      L.noLowering(
+        "emit with a computed event name and a non-trivial receiver or payload",
+        a,
+        "the emit lowers once per candidate event name, so its receiver and payload must be names or literals",
+      );
+    }
+  }
+  const nameIR = L.lowerExpr(args[0]!);
+  if (nameIR.type.kind !== "string") {
+    L.noLowering("emit with a computed event name of a non-string type", args[0]!);
+  }
+  let acc: IrExpr = boolLit(false, loc);
+  for (let i = names.length - 1; i >= 0; i--) {
+    const name = names[i]!;
+    const arm = emitAs(name);
+    if (arm.type.kind !== "bool") {
+      L.noLowering("a computed-name emit arm that does not answer a boolean", call);
+    }
+    const cond: IrExpr = { kind: "strEq", negated: false, left: nameIR, right: strLit(name, loc), type: BOOL, loc };
+    acc = { kind: "ternary", cond, then: arm, else_: acc, type: BOOL, loc };
+  }
+  return acc;
+}
+
 function emitDispatchExpr(
   L: Lowerer,
   info: ClassInfo,
@@ -2283,7 +2426,7 @@ function looseEmitDispatcher(
 
   const arms: { name: string; tuple: IrType[] }[] = [];
   for (const key of keySet.keys) {
-    const sig = table.get(key);
+    const sig = table.get(evTableKey(info, key));
     // Named by no emit and no listener in the whole program: emitting it is
     // a no-op, which is exactly what the fallthrough does.
     if (!sig) continue;
@@ -2573,7 +2716,7 @@ export function boundEmitDispatcher(
 
   const arms: { name: string; tuple: IrType[]; payload: IrExpr[] }[] = [];
   for (const key of keySet.keys) {
-    const sig = table.get(key);
+    const sig = table.get(evTableKey(info, key));
     // Named by no emit and no listener in the whole program: emitting it is
     // a no-op, which is exactly what the fallthrough does.
     if (!sig) continue;
@@ -2997,7 +3140,7 @@ export function boundSubscribeDispatcher(
     // static type. The direct path fences on it; so does this one.
     if (META_EVENTS.has(key)) return why(`'${key}' is a meta event`);
     if (streamForcedTuple(L, info, key) !== null) return why(`'${key}' is a stream event`);
-    const sig = table.get(key);
+    const sig = table.get(evTableKey(info, key));
     if (sig?.conflict) return why(`'${key}' has conflicting argument types`);
     // A dyn-flavored listener elsewhere in the program means the bucket may
     // hold originals of mixed signatures; the arm has no one static tuple.
