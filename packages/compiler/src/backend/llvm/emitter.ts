@@ -904,6 +904,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.iterPack": "scr_dyn_iter_pack",
   "dyn.arrLen": "scr_dyn_arr_len",
   "dyn.arrAt": "scr_dyn_arr_at",
+  "dyn.adoptPromise": "scr_dyn_adopt_promise",
   // the stored walk PLUS the unstored prototype methods (emit-exprs.ts twin)
   "dyn.hasKey": "scr_dyn_has_key_full",
   "dyn.invokePack": "scr_dyn_invoke_pack",

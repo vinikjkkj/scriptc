@@ -3664,6 +3664,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // The for-of pack's element at index (+1; never throws — the
             // undefined singleton past the end).
             return finish(`scr_dyn_arr_at(${arg(0)}, ${arg(1)})`);
+          case "dyn.adoptPromise":
+            // Promise.resolve(v) for a checked-dynamic entry (+1; borrows v; never throws).
+            return finish(`scr_dyn_adopt_promise(${arg(0)})`);
           case "dyn.typeof":
             // Bare typeof on a dyn value: the dyn kind's JS answer (+1).
             return finish(`scr_dyn_typeof(${arg(0)})`);

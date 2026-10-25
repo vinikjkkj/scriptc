@@ -806,3 +806,14 @@ ScrDyn *scr_dyn_new_promise_adapting(ScrPromise *src,
 ScrPromise *scr_dyn_promise_of(const ScrDyn *d) {
   return d->kind == SCR_DYN_PROMISE ? d->v.promise : NULL;
 }
+
+/* Promise.resolve(v) for a checked-dynamic v (dyn.adoptPromise, see the
+ * header). A boxed promise is the promise itself; a plain value is a fresh
+ * promise fulfilled with the value (the dyn payload, retained). Borrows d;
+ * returns +1. */
+ScrPromise *scr_dyn_adopt_promise(ScrDyn *d) {
+  if (d->kind == SCR_DYN_PROMISE) return scr_promise_retain(d->v.promise);
+  ScrPromise *p = scr_promise_new();
+  scr_promise_fulfill_ref(p, scr_dyn_retain(d), scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  return p;
+}

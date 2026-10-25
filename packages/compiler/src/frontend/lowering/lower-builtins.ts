@@ -10346,6 +10346,176 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     }
   }
 
+  /** The async helper a dyn combinator calls when its argument is NOT
+   * iterable. Node answers such a call with a REJECTED promise (the TypeError
+   * from the iteration), while the synchronous path of the combinator would
+   * throw at the call. The helper's body is the same iteration, so it throws
+   * again inside an async function, which is exactly that rejection. */
+  function dynNotIterableHelper(L: Lowerer, retT: IrType & { kind: "promise" }, loc: SrcLoc): string {
+    const key = `dynnotiter:${typeKey(retT)}`;
+    const existing = L.retagHelpers.get(key);
+    if (existing) return existing;
+    const name = `%promise.dynnotiter.${L.retagHelpers.size}`;
+    L.retagHelpers.set(key, name);
+    const funcType: IrType & { kind: "func" } = { kind: "func", params: [DYN], ret: retT };
+    const fnCtx = newFnCtx(true, null, funcType, retT.inner);
+    fnCtx.isAsync = true;
+    L.fnStack.push(fnCtx);
+    try {
+      const psLocal = L.declareHiddenLocal("ps", DYN);
+      const psRef: IrExpr = { kind: "varRef", localId: psLocal.id, type: DYN, loc };
+      const body: IrStmt[] = [
+        {
+          kind: "exprStmt",
+          expr: {
+            kind: "libCall", fn: "dyn.iterPack",
+            args: [psRef, { kind: "strLit", value: "", type: STRING, loc }], type: DYN, loc,
+          },
+          loc,
+        },
+      ];
+      // Unreachable for a non-iterable argument (the iteration throws above);
+      // present so every path of the async body returns the payload type.
+      body.push(retT.inner.kind === "void"
+        ? { kind: "return", value: null, loc }
+        : { kind: "return", value: { kind: "arrayNewLen", length: { kind: "numLit", value: 0, type: F64, loc }, type: retT.inner, loc }, loc });
+      const ctx = L.ctx;
+      L.liftedFns.push({
+        name,
+        params: [{ localId: psLocal.id, name: psLocal.name, type: DYN }],
+        returnType: retT.inner,
+        locals: ctx.locals,
+        body,
+        loc,
+        async: true,
+      });
+      return name;
+    } finally {
+      L.fnStack.pop();
+    }
+  }
+
+  /** The iterator pack of a dyn combinator argument, with the not-iterable
+   * case routed to dynNotIterableHelper. Returns the statements that set
+   * `pack` (a mutable dyn local) and, on the not-iterable path, return the
+   * helper's promise. */
+  function dynPackStmts(
+    L: Lowerer,
+    psRef: IrExpr,
+    packLocal: IrLocal,
+    retT: IrType & { kind: "promise" },
+    loc: SrcLoc,
+  ): IrStmt[] {
+    const catchLocal = L.declareHiddenLocal("e", CAUGHT);
+    const helper = dynNotIterableHelper(L, retT, loc);
+    return [{
+      kind: "tryCatch",
+      tryBody: [{
+        kind: "assign",
+        localId: packLocal.id,
+        value: { kind: "libCall", fn: "dyn.iterPack", args: [psRef, { kind: "strLit", value: "", type: STRING, loc }], type: DYN, loc },
+        loc,
+      }],
+      catchBody: [{
+        kind: "return",
+        value: { kind: "call", callee: helper, args: [psRef], type: retT, loc },
+        loc,
+      }],
+      catchLocalId: catchLocal.id,
+      finallyBody: null,
+      loc,
+    }];
+  }
+
+  /** `Promise.all(ps)` over a CHECKED-DYNAMIC argument whose combined result is
+   * discarded (`await Promise.all(commands.map(...))` where `commands` is
+   * untyped: the checker types the call `any[]`, and the values are promises or
+   * plain values, which Node adopts one by one). The values array would be an
+   * array of dyn, which has no representation, so the combined result exists
+   * only as its settlement: the void collapse.
+   *
+   * Each entry becomes the promise Node would use for it (dyn.adoptPromise:
+   * a boxed promise is itself, a plain value a promise fulfilled with it), and
+   * the list takes the runtime's all combinator directly, so no entry adds a
+   * tick. The helper itself is not async (an async body would add the tick its
+   * return costs); a non-iterable argument is routed to dynNotIterableHelper. */
+  function dynAllOverArray(L: Lowerer, entries: IrExpr, loc: SrcLoc): IrExpr | null {
+    const dynPromT: IrType & { kind: "promise" } = { kind: "promise", inner: DYN };
+    const key = "dynall:all";
+    const retT: IrType = { kind: "promise", inner: VOID };
+    const existing = L.retagHelpers.get(key);
+    if (existing) return { kind: "call", callee: existing, args: [entries], type: retT, loc };
+    const name = `%promise.dynall.${L.retagHelpers.size}`;
+    L.retagHelpers.set(key, name);
+
+    const funcType: IrType & { kind: "func" } = { kind: "func", params: [DYN], ret: retT };
+    const fnCtx = newFnCtx(true, null, funcType, VOID);
+    L.fnStack.push(fnCtx);
+    try {
+      const psLocal = L.declareHiddenLocal("ps", DYN);
+      const packLocal = L.declareHiddenLocal("pack", DYN);
+      packLocal.mutable = true;
+      const listT = arrayOf(dynPromT);
+      const listLocal = L.declareHiddenLocal("entries", listT);
+      const iLocal = L.declareHiddenLocal("i", F64);
+      iLocal.mutable = true;
+      const psRef: IrExpr = { kind: "varRef", localId: psLocal.id, type: DYN, loc };
+      const packRef: IrExpr = { kind: "varRef", localId: packLocal.id, type: DYN, loc };
+      const listRef: IrExpr = { kind: "varRef", localId: listLocal.id, type: listT, loc };
+      const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
+      const adopted: IrExpr = {
+        kind: "libCall", fn: "dyn.adoptPromise",
+        args: [{ kind: "libCall", fn: "dyn.arrAt", args: [packRef, iRef], type: DYN, loc }],
+        type: dynPromT, loc,
+      };
+      const body: IrStmt[] = [
+        { kind: "varDecl", localId: packLocal.id, init: dynUndefinedExpr(loc), loc },
+        ...dynPackStmts(L, psRef, packLocal, retT as IrType & { kind: "promise" }, loc),
+        { kind: "varDecl", localId: listLocal.id, init: { kind: "arrayLit", elems: [], type: listT, loc }, loc },
+        { kind: "varDecl", localId: iLocal.id, init: { kind: "numLit", value: 0, type: F64, loc }, loc },
+        {
+          kind: "while",
+          cond: {
+            kind: "bin", op: "<", left: iRef,
+            right: { kind: "libCall", fn: "dyn.arrLen", args: [packRef], type: F64, loc },
+            type: BOOL, loc,
+          },
+          body: [
+            {
+              kind: "exprStmt",
+              expr: { kind: "arrIntrinsic", method: "push", receiver: listRef, args: [adopted], type: F64, loc },
+              loc,
+            },
+            {
+              kind: "assign",
+              localId: iLocal.id,
+              value: { kind: "bin", op: "+", left: iRef, right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc },
+              loc,
+            },
+          ],
+          loc,
+        },
+        {
+          kind: "return",
+          value: { kind: "intrinsic", name: "promise.all", args: [listRef], type: retT, loc },
+          loc,
+        },
+      ];
+      const ctx = L.ctx;
+      L.liftedFns.push({
+        name,
+        params: [{ localId: psLocal.id, name: psLocal.name, type: DYN }],
+        returnType: retT,
+        locals: ctx.locals,
+        body,
+        loc,
+      });
+      return { kind: "call", callee: name, args: [entries], type: retT, loc };
+    } finally {
+      L.fnStack.pop();
+    }
+  }
+
 /** `Promise.all(ps)` over a `Promise<void>[]` whose result is held rather
    * than awaited for its effect: the array of `undefined`s Node produces.
    *
@@ -10895,6 +11065,10 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           if (!(err instanceof PoisonError)) throw err;
           L.diags.splice(diagsBefore);
         }
+      }
+      if (entries.type.kind === "dyn" && allResultIsDiscarded(call)) {
+        const built = dynAllOverArray(L, entries, loc);
+        if (built) return built;
       }
       if (entries.type.kind !== "array" || entries.type.elem.kind !== "promise") {
         // The heterogeneous-literal case: the checker's tuple overload
