@@ -7169,6 +7169,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "dyn.u8Of":
             // `Uint8Array.of`, likewise (+1). Never throws.
             return finish(`scr_dyn_uint8array_of()`);
+          case "dyn.webCrypto":
+            // `globalThis.crypto` as a value: the WebCrypto process singleton (+1).
+            return finish(`scr_dyn_web_crypto()`);
           case "dyn.u8Ctor":
             // `Uint8Array` as a value: the process singleton constructor
             // object (+1 per read, one node per process — the pinned

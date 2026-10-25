@@ -5525,6 +5525,10 @@ export type IrLibFn =
    * identity. Never throws. Static builds only; under --dynamic the
    * engine owns the real one. */
   | "dyn.u8Ctor"
+  /** `globalThis.crypto` (the WebCrypto object) as a VALUE: the process
+   * singleton scr_dyn_web_crypto. One object per process, so `===` and the
+   * `require('crypto').webcrypto` spelling agree. */
+  | "dyn.webCrypto"
   /** `Uint8Array.prototype` as a VALUE (scr_json.c): the same process
    * singleton `dyn.u8Ctor`'s `prototype` is pinned to, so the two
    * spellings answer ONE object and `Uint8Array.prototype ===

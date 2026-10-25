@@ -10827,6 +10827,74 @@ ScrDyn *scr_dyn_uint8array_of(void) {
   return scr_dyn_retain(scr_u8_of_fn);
 }
 
+/* ── globalThis.crypto (the WebCrypto object) as a value ─────────────────
+ * One process singleton, so `globalThis.crypto === crypto` and
+ * `require('crypto').webcrypto === globalThis.crypto` both hold (Node's
+ * identity). Its two methods are the static randomness the crypto module
+ * already serves: getRandomValues fills an integer TypedArray in place from
+ * the same arc4random_buf CSPRNG, randomUUID answers the same UUID.
+ * `subtle` is not served: reading it throws Node-shaped by name rather than
+ * answering undefined, which would be a silent wrong answer. */
+static ScrDyn *scr_wc_obj;
+
+static void scr_wc_throw(const char *msg) {
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, strlen(msg), "");
+}
+
+static void scr_wc_teardown(void) {
+  scr_dyn_release(scr_wc_obj);
+  scr_wc_obj = NULL;
+}
+
+static ScrDyn *scr_wc_get_random_values(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  const ScrDyn *ta = argc > 0 ? args[0] : NULL;
+  if (ta == NULL || ta->kind != SCR_DYN_BYTES || ta->v.bytes == NULL ||
+      ta->v.bytes->elem == SCR_BYTES_F32 || ta->v.bytes->elem == SCR_BYTES_F64 ||
+      ta->v.bytes->elem == SCR_BYTES_BUF) {
+    scr_wc_throw("The data argument must be an integer-type TypedArray");
+    return NULL;
+  }
+  ScrBytes *b = ta->v.bytes;
+  size_t n = b->len * scr_bytes_elem_size(b->elem);
+  if (n > 65536) {
+    scr_wc_throw("The requested length exceeds 65,536 bytes");
+    return NULL;
+  }
+  if (n > 0) arc4random_buf(b->data, n);
+  return scr_dyn_retain((ScrDyn *)ta);
+}
+
+static ScrDyn *scr_wc_random_uuid(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  (void)args;
+  (void)argc;
+  return scr_dyn_new_str(scr_crypto_random_uuid());
+}
+
+static ScrDyn *scr_wc_subtle_get(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  (void)args;
+  (void)argc;
+  static const char msg[] =
+      "reading 'subtle' off globalThis.crypto is not supported yet"
+      " (SubtleCrypto has no lowering; answering undefined would be a silent wrong answer)";
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "");
+  return NULL;
+}
+
+ScrDyn *scr_dyn_web_crypto(void) {
+  if (scr_wc_obj == NULL) {
+    ScrDyn *o = scr_dyn_new_obj(); /* +1, the singleton's own reference */
+    scr_u8_define_method(o, "getRandomValues", scr_wc_get_random_values, 1);
+    scr_u8_define_method(o, "randomUUID", scr_wc_random_uuid, 0);
+    scr_u8_define_getter(o, "subtle", scr_wc_subtle_get);
+    scr_wc_obj = o;
+    scr_atexit(scr_wc_teardown);
+  }
+  return scr_dyn_retain(scr_wc_obj);
+}
+
 /* `b.constructor` on a typed array. Node answers the constructor
  * FUNCTION, and protobufjs's `Reader.prototype.raw` builds through it
  * (`new this.buf.constructor(0)`); undefined would be the silent kind of
