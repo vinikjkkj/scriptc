@@ -186,6 +186,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10108-object-prototype-members-instance.js": {
+   "order": [
+    "<repo>/tests/corpus/10108-object-prototype-members-instance.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10109-object-prototype-members-prototype.js": {
+   "order": [
+    "<repo>/tests/corpus/10109-object-prototype-members-prototype.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1011-json-unknown-typeof.ts": {
    "order": [
     "<repo>/tests/corpus/1011-json-unknown-typeof.ts"

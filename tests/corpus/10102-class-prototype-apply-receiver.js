@@ -1,4 +1,4 @@
-// Calling a method read by an arbitrary string key with an explicit receiver, through .apply.
+// A method read from a class prototype by literal key, called through .apply with an explicit receiver (the promise-wrapper idiom).
 class Base {
   n = 4;
   close() { return 'close:' + this.n; }
@@ -6,12 +6,9 @@ class Base {
 }
 class Wrapper {
   constructor(c) { this.connection = c; }
-  call(func, s) {
-    return Base.prototype[func].apply(this.connection, [s]);
-  }
+  closeIt() { return Base.prototype['close'].apply(this.connection, []); }
+  escapeIt(s) { return Base.prototype['escape'].apply(this.connection, [s]); }
 }
-const names = ['close', 'escape'];
 const w = new Wrapper(new Base());
-for (let i = 0; i < names.length; i++) {
-  console.log(names[i], w.call(names[i], 'x'));
-}
+console.log(w.closeIt());
+console.log(w.escapeIt('x'));
