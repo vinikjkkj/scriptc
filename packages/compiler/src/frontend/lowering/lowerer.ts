@@ -139,7 +139,7 @@ import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueT
 import { lowerDeleteValue, lowerElemValuePosition, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { recordKeyResultOk, narrowBridgeDyn, FieldTarget, lowerDynObjectLiteral, lowerDynSpreadObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, numberConvAtDynWidth, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
 import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type ExpandoMember } from "./lower-expando.js";
-import { lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch } from "./lower-calls.js";
+import { lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch, throwOnlyValueType } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
 import { dtsWitnessClassOf } from "./lower-twin-witness.js";
 import { pairedProtoInstanceType } from "./proto-class-consume.js";
@@ -5956,6 +5956,14 @@ export class Lowerer {
       }
     }
     const t = this.checker.getTypeAtLocation(node);
+    // A call of a throw-only JS method (or a const bound to one) is typed by
+    // the method's declaration file, not the `void` TypeScript infers from the
+    // JS body (see declaredReturnType): the value a subclass override returns
+    // is what the call answers, and a binding of it must agree.
+    if (!this.dynamic && (t.flags & (ts.TypeFlags.Void | ts.TypeFlags.Never)) !== 0) {
+      const declared = throwOnlyValueType(this, node);
+      if (declared !== null) return declared;
+    }
     // ALIASED-TYPEOF narrowing: inside a branch a `type === 'string'`
     // test proves (type = typeof val, both never reassigned), references
     // to the tested operand answer the proven arm — the var/let alias

@@ -13,6 +13,7 @@ import { lowerFetchMethodCall } from "./lower-fetch.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
+import { siblingDtsMethodReturnKind } from "../npm.js";
 import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
@@ -1248,7 +1249,77 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     });
   }
 
-/** A declaration's checker-derived IR return type. The unmappable-type
+  /** The declared return of a throw-only JS method, read from its sibling
+   * `.d.ts` (the file the package's typings sit beside: `X.js` with `X.d.ts`,
+   * the class matched by name, else the first class declaring the method).
+   * The declaration file is not a program source for a JS import, so it is
+   * parsed on its own with typescript5, the sanctioned syntactic island.
+   * `void` answers `"void"`; every other declared type answers `"dyn"` (a
+   * throw-only body never returns, so the slot can only promise a dyn value);
+   * null when no declaration file names the method. */
+  export function throwOnlyDeclaredKind(decl: ts.MethodDeclaration): "void" | "dyn" | null {
+    const name = ts.isIdentifier(decl.name) ? decl.name.text : null;
+    if (name === null) return null;
+    const jsClass = decl.parent;
+    const className = (ts.isClassDeclaration(jsClass) || ts.isClassExpression(jsClass)) && jsClass.name !== undefined
+      ? jsClass.name.text
+      : null;
+    return siblingDtsMethodReturnKind(decl.getSourceFile().fileName, className, name);
+  }
+
+  /** A JS method whose body only throws: no return statement in its own scope,
+   * and the body ends in a `throw`. TypeScript types such a method declaration
+   * `void` (it infers `never` only for expressions). */
+  export function isThrowOnlyJsMethod(decl: ts.MethodDeclaration): boolean {
+    const body = decl.body;
+    if (body === undefined || body.statements.length === 0) return false;
+    if (!ts.isThrowStatement(body.statements[body.statements.length - 1]!)) return false;
+    let returns = false;
+    const visit = (n: ts.Node): void => {
+      if (returns || ts.isFunctionLike(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n)) return;
+      if (ts.isReturnStatement(n)) {
+        returns = true;
+        return;
+      }
+      ts.forEachChild(n, visit);
+    };
+    ts.forEachChild(body, visit);
+    return !returns;
+  }
+
+  /** The IR return of a throw-only JS METHOD (see declaredReturnType): the
+   * declared `void` when its `.d.ts` says so, else dyn (the declared `unknown`,
+   * or no declaration file naming the method). */
+  function throwOnlyJsMethodReturn(decl: ts.MethodDeclaration): IrType {
+    return throwOnlyDeclaredKind(decl) === "void" ? VOID : DYN;
+  }
+
+  /** The checker type of a call of a throw-only JS method, or of a `const`
+   * bound to one, when the declaration says dyn: `unknown`, the type the
+   * declaration states. Null when the node is neither, or the declared return
+   * is void (the checker's `void` already agrees). The lowering asks only for
+   * nodes the checker already types `void` or `never`. */
+  export function throwOnlyValueType(L: Lowerer, node: ts.Node): ts.Type | null {
+    if (ts.isIdentifier(node)) {
+      const sym = L.checker.getSymbolAtLocation(node);
+      const vd = sym === undefined ? undefined : L.checker.valueDeclarationOf(sym);
+      if (sym === undefined || vd === undefined || !ts.isVariableDeclaration(vd) || vd.initializer === undefined) return null;
+      if (!ts.isCallExpression(vd.initializer) || !bindingNeverReassigned(L, sym, vd)) return null;
+      return throwOnlyValueType(L, vd.initializer);
+    }
+    if (!ts.isCallExpression(node)) return null;
+    const sig = L.checker.getResolvedSignature(node);
+    const decl = sig === undefined ? undefined : L.checker.signatureDeclaration(sig);
+    if (
+      decl === undefined || !ts.isMethodDeclaration(decl) || decl.type !== undefined ||
+      !isJsSourceFile(decl.getSourceFile()) || !isThrowOnlyJsMethod(decl)
+    ) {
+      return null;
+    }
+    return throwOnlyJsMethodReturn(decl) === DYN ? L.checker.getUnknownType() : null;
+  }
+
+  /** A declaration's checker-derived IR return type. The unmappable-type
    * diagnostic points at `blame` (the name for top-level declarations, the
    * whole node for lambda-likes — preserving each caller's historical loc). */
   export function declaredReturnType(L: Lowerer, decl: ts.SignatureDeclaration, blame: ts.Node): IrType {
@@ -1260,7 +1331,26 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     // void with a stronger guarantee (`() => never` is assignable to
     // `() => void`), and throw-only callbacks are ordinary code
     // (`.action(() => { throw ... })`). `never` VALUES stay unmapped.
-    if (retTsType.flags & ts.TypeFlags.Never) return VOID;
+    // TypeScript types a throw-only JS method declaration `void` (`never` is
+    // the expression rule); the same stub answers its declaration's return.
+    if (
+      (retTsType.flags & ts.TypeFlags.Void) !== 0 && isJsSourceFile(decl.getSourceFile()) &&
+      ts.isMethodDeclaration(decl) && decl.type === undefined && isThrowOnlyJsMethod(decl)
+    ) {
+      return throwOnlyJsMethodReturn(decl);
+    }
+    if (retTsType.flags & ts.TypeFlags.Never) {
+      // A JS METHOD whose body only throws (a stub a subclass overrides,
+      // `send(c) { throw new Error(...) }`) infers `never` from its JS body,
+      // but the package's declaration file states what the method returns,
+      // and a subclass override returns a value. The slot follows the
+      // declaration (`unknown` is dyn); a stub with no declaration to read
+      // is dyn too, since no value can be promised for a method that throws.
+      if (isJsSourceFile(decl.getSourceFile()) && ts.isMethodDeclaration(decl) && decl.type === undefined) {
+        return throwOnlyJsMethodReturn(decl);
+      }
+      return VOID;
+    }
     // `void | undefined` — the inferred return of `x => obj?.voidMethod()`
     // (an optional-chain call of a void method): both arms are the no-value
     // unit and the union has no data representation, yet it IS a void return

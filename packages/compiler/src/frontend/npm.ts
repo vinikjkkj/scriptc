@@ -469,6 +469,40 @@ function packageNameOf(specifier: string): string {
 /** Package name from a PATH into node_modules ("…/node_modules/@s/p/d/x.js"
  * → "@s/p"), for diagnostics/chains when the entry is a file, not a bare
  * specifier. Null when the path holds no node_modules segment. */
+/** The declared return kind of a JS method, read from its sibling `.d.ts`
+ * (`X.js` with `X.d.ts`; the class matched by name, else the first class
+ * declaring the method). A declaration file beside a relative JS import is
+ * not a program source, so it is parsed on its own here: the 5.9.3 island
+ * is purely syntactic. `"void"` when the declaration says void; `"dyn"` for
+ * any other declared type; null when no declaration file names the method. */
+export function siblingDtsMethodReturnKind(
+  jsFile: string,
+  className: string | null,
+  method: string,
+): "void" | "dyn" | null {
+  const stem = jsFile.replace(/\.(js|cjs|mjs)$/, "");
+  if (stem === jsFile) return null;
+  for (const path of [`${stem}.d.ts`, `${stem}.d.cts`, `${stem}.d.mts`]) {
+    const text = trackedReadFile(path);
+    if (text === null) continue;
+    const sf = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+    const kindOf = (m: ts.MethodDeclaration): "void" | "dyn" =>
+      m.type !== undefined && m.type.kind === ts.SyntaxKind.VoidKeyword ? "void" : "dyn";
+    let fallback: ts.MethodDeclaration | null = null;
+    for (const st of sf.statements) {
+      if (!ts.isClassDeclaration(st)) continue;
+      const m = st.members.find(
+        (x): x is ts.MethodDeclaration => ts.isMethodDeclaration(x) && ts.isIdentifier(x.name) && x.name.text === method,
+      );
+      if (!m) continue;
+      if (st.name?.text === className) return kindOf(m);
+      fallback ??= m;
+    }
+    return fallback === null ? "dyn" : kindOf(fallback);
+  }
+  return null;
+}
+
 export function packageNameOfPath(path: string): string | null {
   const norm = path.split("\\").join("/");
   const idx = norm.lastIndexOf("/node_modules/");
