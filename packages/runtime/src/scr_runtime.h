@@ -6616,6 +6616,7 @@ const ScrDynHandleOps *scr_dyn_handle_ops_of(const ScrDyn *d);
  * The tag MUST be installed — emitted programs install a unit's ops
  * whenever they can box its handles. */
 ScrDyn *scr_dyn_new_handle(void *h, ScrDynHandleTag tag);
+extern ScrDyn *(*scr_dyn_date_box_hook)(double ms); /* see scr_json.c */
 /* `new TextEncoder()` / `new TextDecoder()` evaluate to one of two IMMORTAL
  * strings (scr_json.c) instead of a fresh "utf-8", and scr_dyn_new_str
  * boxes exactly those two as a SCR_DYNH_TEXTCODEC handle — so a codec that

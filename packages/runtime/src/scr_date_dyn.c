@@ -157,4 +157,15 @@ static const ScrDynHandleOps scr_date_dynh_ops = {
     &scr_date_dynh_set, NULL, &scr_date_dynh_own_props,
 };
 
-void scr_date_dyn_install(void) { scr_dyn_handle_install(SCR_DYNH_DATE, &scr_date_dynh_ops); }
+/* A time value from the engine (scr_island.c) boxed as a Date handle. */
+static ScrDyn *scr_date_dyn_box(double ms) {
+  ScrDate *d = scr_date_new(ms);
+  ScrDyn *b = scr_dyn_new_handle(d, SCR_DYNH_DATE);
+  scr_date_release(d);
+  return b;
+}
+
+void scr_date_dyn_install(void) {
+  scr_dyn_handle_install(SCR_DYNH_DATE, &scr_date_dynh_ops);
+  scr_dyn_date_box_hook = scr_date_dyn_box;
+}

@@ -2786,6 +2786,11 @@ static void scr_dyn_handle_release(void *h, ScrDynHandleTag tag) {
   scr_dyn_handle_ops(tag)->release(h);
 }
 
+/* The Date box hook: set by scr_date_dyn_install when the Date handle is
+ * linked, read by the island's engine-to-native crossing (scr_island.c). A
+ * program without the Date handle keeps the engine object by reference. */
+ScrDyn *(*scr_dyn_date_box_hook)(double ms) = NULL;
+
 ScrDyn *scr_dyn_new_handle(void *h, ScrDynHandleTag tag) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_HANDLE);
   d->v.handle.ptr = scr_dyn_handle_ops(tag)->retain(h);
