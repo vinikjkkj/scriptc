@@ -17310,6 +17310,29 @@
     "<repo>/tests/corpus/11665-fnvalue-map-string-dyn-numbers.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/11850-fn-ctor-namespace-bom/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11850-fn-ctor-namespace-bom/lib/bom-handling.cjs",
+    "<repo>/tests/corpus/11850-fn-ctor-namespace-bom/lib/index.cjs",
+    "<repo>/tests/corpus/11850-fn-ctor-namespace-bom/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11851-fn-ctor-namespace-state/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11851-fn-ctor-namespace-state/lib/counter.cjs",
+    "<repo>/tests/corpus/11851-fn-ctor-namespace-state/lib/index.cjs",
+    "<repo>/tests/corpus/11851-fn-ctor-namespace-state/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11852-fn-ctor-namespace-return/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11852-fn-ctor-namespace-return/lib/shapes.cjs",
+    "<repo>/tests/corpus/11852-fn-ctor-namespace-return/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
