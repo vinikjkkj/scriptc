@@ -622,6 +622,9 @@ function widthCensus(kind: string, fromId: string, toId: string, dropped: string
  *
  * Off by default - lowerProfileOn() is one env read - and nothing in the
  * compiler ever reads the output back. It never fails a build. */
+/** Object.prototype methods the buffer module object answers when called through the namespace
+ * (`buffer.hasOwnProperty(k)`, safer-buffer). Measured in the probe set; the rest keep their fence. */
+const OBJECT_PROTOTYPE_METHODS: ReadonlySet<string> = new Set(["hasOwnProperty"]);
 const lowerProfile = new Map<string, number>();
 export function lowerProfileOn(): boolean {
   const v = process.env["SCRIPTC_LOWER_PROFILE"];
@@ -16850,6 +16853,20 @@ export class Lowerer {
     }
     const bi = this.builtinMemberOf(access);
     if (!bi) return null;
+    // `buffer.hasOwnProperty(k)` and the other Object.prototype methods: the same calls on the module object.
+    if (bi.module === "buffer" && !this.dynamic && !call.arguments.some(ts.isSpreadElement) &&
+        OBJECT_PROTOTYPE_METHODS.has(bi.member)) {
+      const loc = locOf(call);
+      return {
+        kind: "dynInvoke",
+        recv: bufferValueOf(14, loc),
+        method: bi.member,
+        calleeName: access.getText(),
+        args: call.arguments.map((a) => this.lowerExprExpecting(a, DYN)),
+        type: DYN,
+        loc,
+      };
+    }
     // `buffer.atob(s)`, `buffer.isUtf8(b)` ... through the module: the held function members the value
     // table gives, called as the function object they are (a dynamic call on the value read).
     if (bi.module === "buffer" && !this.dynamic && !call.arguments.some(ts.isSpreadElement)) {
