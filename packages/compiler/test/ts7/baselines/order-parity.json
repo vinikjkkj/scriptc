@@ -1377,6 +1377,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/11759-let-widen-for-in-key-into-number-let.js": {
+   "order": [
+    "<repo>/tests/corpus/11759-let-widen-for-in-key-into-number-let.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11758-let-agreeing-writes-stay-number.js": {
+   "order": [
+    "<repo>/tests/corpus/11758-let-agreeing-writes-stay-number.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11757-let-widen-boolean-to-number-and-back.js": {
+   "order": [
+    "<repo>/tests/corpus/11757-let-widen-boolean-to-number-and-back.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11756-let-widen-compound-concat-then-arithmetic.js": {
+   "order": [
+    "<repo>/tests/corpus/11756-let-widen-compound-concat-then-arithmetic.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11755-let-widen-function-returns-the-widened-let.js": {
+   "order": [
+    "<repo>/tests/corpus/11755-let-widen-function-returns-the-widened-let.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11754-let-widen-top-level-number-to-string.js": {
+   "order": [
+    "<repo>/tests/corpus/11754-let-widen-top-level-number-to-string.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11753-let-widen-number-string-alternating-in-loop.js": {
+   "order": [
+    "<repo>/tests/corpus/11753-let-widen-number-string-alternating-in-loop.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11752-let-widen-closure-reads-reassigned-let.js": {
+   "order": [
+    "<repo>/tests/corpus/11752-let-widen-closure-reads-reassigned-let.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11751-let-widen-typeof-at-each-stage.js": {
+   "order": [
+    "<repo>/tests/corpus/11751-let-widen-typeof-at-each-stage.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11750-let-widen-number-then-padded-string-slice-length.js": {
+   "order": [
+    "<repo>/tests/corpus/11750-let-widen-number-then-padded-string-slice-length.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1200-regex-test-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1200-regex-test-basics.ts"
