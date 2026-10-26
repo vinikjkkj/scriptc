@@ -307,6 +307,19 @@ export interface FnCtx {
   ctl: { kind: "loop" | "switch" | "block" | "tryFinally" | "finallyBlock"; labels?: string[] }[];
 }
 
+/** The symbol an identifier READS. In the shorthand `{ name }` the identifier
+ * is also the property's name, and getSymbolAtLocation answers the PROPERTY
+ * symbol there, not the binding it reads: `{ LocalDate }` over a
+ * `const LocalDate = require(...)` must resolve to that const, which is what
+ * getShorthandAssignmentValueSymbol names. */
+export function referencedValueSymbol(checker: ts.TypeChecker, expr: ts.Identifier): ts.Symbol | undefined {
+  const parent = expr.parent;
+  if (parent !== undefined && ts.isShorthandPropertyAssignment(parent) && parent.name === expr) {
+    return checker.getShorthandAssignmentValueSymbol(parent);
+  }
+  return checker.getSymbolAtLocation(expr);
+}
+
 export function newFnCtx(
   lifted: boolean,
   selfSymbol: ts.Symbol | null,
@@ -2766,7 +2779,7 @@ export class Lowerer {
    * namespace-object fence, like ESM namespace imports of builtins. */
   cjsLocalModuleBindingOf(expr: ts.Expression): boolean {
     if (!ts.isIdentifier(expr)) return false;
-    const sym = this.checker.getSymbolAtLocation(expr);
+    const sym = referencedValueSymbol(this.checker, expr);
     const decls = sym ? this.checker.declarationsOf(sym) : [];
     const decl = decls.find(ts.isImportClause) ?? decls[0];
     if (!decl) return false;

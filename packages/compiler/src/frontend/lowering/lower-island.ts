@@ -14,7 +14,7 @@ import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImp
 import { pureReemittable } from "./lower-exprs.js";
 import { cjsLexedExportsOf } from "../cjs-lexer.js";
 import { moduleNsStarExports } from "./lower-namespaces.js";
-import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
+import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } from "./lowerer.js";
 
 /** True iff the checker's type for this node maps to jsval ('any') —
    * the island test in front of every engine-op lowering (receivers,
@@ -1463,7 +1463,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
    * program module with a static export table, which keeps the original
    * fence. */
   export function cjsRequireBindingValueOf(L: Lowerer, expr: ts.Identifier): IrExpr | null {
-    const sym = L.checker.getSymbolAtLocation(expr);
+    const sym = referencedValueSymbol(L.checker, expr);
     const decls = sym ? L.checker.declarationsOf(sym) : [];
     const decl = decls[0];
     if (!decl || !ts.isVariableDeclaration(decl) || !decl.initializer) return null;
