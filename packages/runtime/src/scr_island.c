@@ -995,6 +995,9 @@ static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
    * host-function shim (isl_dynfn_new below) — the routed-call lane's
    * uniform argument conversion. */
   case SCR_DYN_HANDLE:
+    /* A Date crosses by value (isl_date_from_handle): the engine gets its
+     * own Date over the same time value. Every other handle stays named. */
+    if (d->v.handle.tag == SCR_DYNH_DATE) return NULL;
     return "a runtime handle";
   case SCR_DYN_OBJINST:
     /* A class instance held by reference: the engine has no cell for a
@@ -1041,8 +1044,34 @@ static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
 
 static JSValue isl_dynfn_new(const ScrDyn *d); /* the checked-dynamic tree-function shim, below */
 
+/* A Date handle entering the engine: a fresh engine Date over the same
+ * time value (read through the handle's own getTime, so the value is the
+ * one Node's Date holds, Invalid Date included). The copy is by VALUE: an
+ * engine-side Date is a different object, so identity across the crossing
+ * is not kept (documented divergence; a ScrDate is an immutable time value
+ * natively, so no native write can be missed). */
+static JSValue isl_date_from_handle(const ScrDyn *d) {
+  const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
+  ScrDyn *t = ops->invoke(d->v.handle.ptr, (ScrDyn *)d, "getTime", NULL, 0, "getTime");
+  if (t == NULL) return JS_ThrowTypeError(isl_ctx, "a Date could not be read for the engine");
+  double ms = t->kind == SCR_DYN_NUM ? t->v.num : NAN;
+  scr_dyn_release(t);
+  JSValue global = JS_GetGlobalObject(isl_ctx);
+  JSValue ctor = JS_GetPropertyStr(isl_ctx, global, "Date");
+  JS_FreeValue(isl_ctx, global);
+  if (JS_IsException(ctor)) return ctor;
+  JSValue arg = JS_NewFloat64(isl_ctx, ms);
+  JSValue made = JS_CallConstructor(isl_ctx, ctor, 1, &arg);
+  JS_FreeValue(isl_ctx, arg);
+  JS_FreeValue(isl_ctx, ctor);
+  return made;
+}
+
 static JSValue isl_from_dyn(const ScrDyn *d) {
   switch (d->kind) {
+  case SCR_DYN_HANDLE:
+    if (d->v.handle.tag == SCR_DYNH_DATE) return isl_date_from_handle(d);
+    return JS_ThrowTypeError(isl_ctx, "a runtime handle cannot enter dynamically-executed code");
   case SCR_DYN_FUNC:
     /* A boxed dyn function enters as ONE generic host-function shim over
      * its uniform call thunk (ScrDynThunk): engine args wrap as dyn
@@ -1168,6 +1197,14 @@ static ScrDyn *isl_dyn_from_value(JSValue v) {
     ScrDyn *d = scr_dyn_new_str(s);
     scr_str_release(s);
     return d;
+  }
+  if (JS_IsDate(v) && scr_dyn_date_box_hook != NULL) {
+    /* An engine Date comes back as a native Date by VALUE (the time value
+     * is copied; the engine object is not kept). Without the Date handle
+     * linked, the engine object stays a reference box as before. */
+    double ms = NAN;
+    JS_ToFloat64(isl_ctx, &ms, v); /* Date's ToPrimitive(number): the time value */
+    return scr_dyn_date_box_hook(ms);
   }
   return scr_dyn_alloc_jsval(isl_cell_new(JS_DupValue(isl_ctx, v)), &isl_dynjs_ops);
 }
