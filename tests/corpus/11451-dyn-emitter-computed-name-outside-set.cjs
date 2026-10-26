@@ -8,11 +8,17 @@ function track(src, name) {
   const g = function (a) { console.log('ghost', name, a); };
   src.on(name, g);
   console.log('after on', src.listenerCount(name), src.listenerCount('known'));
-  src.emit('known', 5);
+  return g;
+}
+function untrack(src, name, g) {
   src.removeListener(name, g);
   console.log('after remove', src.listenerCount(name));
-  src.emit('known', 6);
 }
-track(c, 'phantom');
-track(c, 'known');
+const g1 = track(c, 'phantom');
+c.emit('known', 5);
+untrack(c, 'phantom', g1);
+c.emit('known', 6);
+const g2 = track(c, 'known');
+c.emit('known', 7);
+untrack(c, 'known', g2);
 console.log('final', c.listenerCount('phantom'), c.listenerCount('known'));

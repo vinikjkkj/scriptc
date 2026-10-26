@@ -6924,7 +6924,7 @@ function dynMapIterDrainContext(L: Lowerer, call: ts.CallExpression): boolean {
 /** The EventEmitter members a dyn receiver can hold an emitter under. */
 const DYN_EMITTER_RECEIVER_METHODS: ReadonlySet<string> = new Set([
   "on", "addListener", "once", "prependListener", "prependOnceListener",
-  "off", "removeListener", "listenerCount", "emit",
+  "off", "removeListener", "listenerCount",
 ]);
 
 /** `recv.m("literal", ...)` on a checked-dynamic receiver whose runtime value
@@ -6951,11 +6951,6 @@ function lowerDynEmitterReceiverCall(L: Lowerer, call: ts.CallExpression,
   const nameArg = call.arguments[0];
   if (nameArg === undefined) return null;
   const literalName = ts.isStringLiteralLike(nameArg);
-  // A computed name on an emit has no lowering: the arms dispatch the
-  // registry's listeners by name, and an emit of a name nothing in the
-  // program spells would have to fire the computed registrations with the
-  // caller's boxed payload. Declined; the dynamic call keeps its old lowering.
-  if (member === "emit" && !literalName) return null;
   const info = L.classes.get(RUNTIME_EMITTER_CLASS);
   if (info === undefined) return null;
   const loc = locOf(call);

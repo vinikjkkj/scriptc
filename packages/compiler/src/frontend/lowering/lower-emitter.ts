@@ -485,18 +485,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       }
       if (!resolved || nameT === null) return; // checker trouble is the lowering's business, not the scan's
       if (isEmit && nameT.isStringLiteralType()) emittedNames.add(nameT.value);
-      if (recvT?.kind !== "object" || !emitterRooted(L, L.classes.get(recvT.className))) {
-        // An emit on a receiver of unknown class (a dyn value) can reach an
-        // instance of ANY emitter root: its literal payload joins the "*"
-        // bucket, which every root's signature agrees with (the byName
-        // synthesis below and sigAt's fallback). Without it the emit has no
-        // tuple and the lowering refuses it. Registrations stay out: a
-        // dyn receiver's listener is the builtin root's (lowerDynEmitterReceiverCall).
-        if (isEmit && nameT.isStringLiteralType() && recvT?.kind !== "object" && !META_EVENTS.has(nameT.value) && nameT.value !== "error") {
-          sites.push({ isEmit, name: nameT.value, node, key: evTableKey(undefined, nameT.value) });
-        }
-        return;
-      }
+      if (recvT?.kind !== "object" || !emitterRooted(L, L.classes.get(recvT.className))) return;
       if (!nameT.isStringLiteralType()) {
         // A computed emit contributes its payload to every name it can carry
         // (see computedEmitNames); resolved after the registration walk.
@@ -572,34 +561,6 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   // tuple is not a prefix of the longest one is a conflict at the touching
   // site, exactly as two class roots would be for one name.
   const builtinKeyPrefix = emitterRootKey(L.classes.get(RUNTIME_EMITTER_CLASS));
-  // An untyped emit ("*" bucket) reaches an instance of EVERY root, so each
-  // root's tuple for that name agrees with it: a root whose own entry (a
-  // listener's registration) is shorter takes the longer tuple, and a
-  // disagreement is the same conflict two roots would be.
-  const starByName = new Map<string, EventSig>();
-  for (const [k, sig] of table) {
-    if (!k.startsWith("*")) continue;
-    const i = k.indexOf("\u0000");
-    if (i >= 0) starByName.set(k.slice(i + 1), sig);
-  }
-  for (const [k, own] of [...table]) {
-    if (!k.startsWith("#")) continue;
-    const star = starByName.get(evDisplayName(k));
-    if (star === undefined) continue;
-    const longer = star.tuple.length > own.tuple.length ? star : own;
-    const shorter = longer === star ? own : star;
-    let conflict: string | null = own.conflict ?? star.conflict;
-    if (conflict === null && !shorter.tuple.every((t, j) => typeEquals(t, longer.tuple[j]!))) {
-      conflict = "the untyped emit and the emitter class disagree on the event's argument types";
-    }
-    table.set(k, {
-      tuple: longer.tuple,
-      fromEmit: own.fromEmit || star.fromEmit,
-      conflict,
-      dynListener: own.dynListener || star.dynListener,
-      listened: false,
-    });
-  }
   const byName = new Map<string, EventSig[]>();
   for (const [k, sig] of table) {
     // The receivers of unknown class ("*") join: a dyn emit site or a dyn
