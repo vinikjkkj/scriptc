@@ -65,6 +65,8 @@ async function buildStatic(
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
     // the method-reference state machine (case 10250)
     ...globSync(join(fixturesRoot, "npm-static/node_modules/mrefsm/**/*.{js,json}")).sort(),
+    // the doneInsert-shape emitter package (case 11553)
+    ...globSync(join(fixturesRoot, "npm-static/node_modules/doneq/**/*.{js,json}")).sort(),
     // the export= class pairing package (case 10350)
     ...globSync(join(fixturesRoot, "npm-static/node_modules/ptpair/**/*.{js,json,d.ts}")).sort(),
     // the ws-address mini package (case 8210; its own tsconfig dir)
@@ -2055,6 +2057,31 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
       const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
       const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
       expect(node.split("\n").filter((l) => l !== "").length).toBe(6);
+      expect(native, backend).toBe(node);
+      expect(nativeRes.exitCode, backend).toBe(0);
+    }
+  }, 300_000);
+
+  /* -- 11553: the mysql2 query.js doneInsert shape as an npm-static package. An
+   * implicit-any method called with the null literal binds its parameter to
+   * null | undefined; the body reads a field of that parameter on a path that
+   * only reaches it when called with null. On base the read is SC1090 "reading
+   * 'serverStatus' on a union-typed value". Byte-identical to Node. */
+  test("11553: a unit-only parameter read in an implicit-any method matches Node", async () => {
+    const entry = join(fixturesRoot, "npm-static/cases/11553-doneinsert-null-union-npm-static/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["doneq"] });
+    expect(coverage.npmStatic).toEqual([{ package: "doneq", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    for (const backend of ["c", "llvm"] as const) {
+      const binary = await buildStatic(entry, ["doneq"], backend);
+      const [nodeRes, nativeRes] = await Promise.all([
+        runBinary("node", [entry]),
+        runBinary(binary, []),
+      ]);
+      const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      expect(node.split("\n").filter((l) => l !== "").length).toBe(3);
       expect(native, backend).toBe(node);
       expect(nativeRes.exitCode, backend).toBe(0);
     }

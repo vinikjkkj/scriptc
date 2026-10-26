@@ -23192,6 +23192,61 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return { kind: "call", callee: name, args: [value], type: answer, loc };
   }
 
+  /** `r.f` over a union whose arms are ALL unit (null | undefined): every arm
+   * answers Node's TypeError for the read, with that arm's own message
+   * ("Cannot read properties of null (reading 'f')"). The read never answers,
+   * so its type is the checker's when that maps, else DYN (the checked-dynamic
+   * slot the consumer converts). A lifted helper switches on the tag and throws
+   * at the arm, the same discipline the length read keeps for unit arms. */
+  function lowerUnitOnlyFieldThrow(L: Lowerer, expr: ts.Node, value: IrExpr, field: string): IrExpr | null {
+    if (value.type.kind !== "union") return null;
+    const fromId = value.type.unionId;
+    const def = L.unions.get(fromId);
+    if (!def || def.arms.length === 0 || !def.arms.every((arm) => isUnitType(arm))) return null;
+    const checkerT = ts.isPropertyAccessExpression(expr) ? L.mapTypeOf(L.typeOf(expr)) : null;
+    const answer: IrType = checkerT !== null && checkerT.kind !== "void" ? checkerT : DYN;
+    const loc = locOf(expr);
+    const key = `ufield:${fromId}:${field}`;
+    let name = L.widthHelpers.get(key);
+    if (name === undefined) {
+      name = `%union.field.${L.widthHelpers.size}`;
+      L.widthHelpers.set(key, name);
+      const fromT: IrType = { kind: "union", unionId: fromId };
+      const u: IrExpr = { kind: "varRef", localId: "u.0", type: fromT, loc };
+      const body: IrStmt[] = [];
+      def.arms.forEach((arm, i) => {
+        const thrown = nodeThrowExpr(
+          1,
+          "",
+          `Cannot read properties of ${arm.kind === "undefinedT" ? "undefined" : "null"} (reading '${field}')`,
+          answer,
+          loc,
+        );
+        const ret: IrStmt = { kind: "return", value: thrown, loc };
+        if (i === def.arms.length - 1) {
+          body.push(ret);
+        } else {
+          body.push({
+            kind: "if",
+            cond: { kind: "unionIsTag", unionId: fromId, tag: i, negated: false, value: u, type: BOOL, loc },
+            then: [ret],
+            else_: null,
+            loc,
+          });
+        }
+      });
+      L.liftedFns.push({
+        name,
+        params: [{ localId: "u.0", name: "u", type: fromT }],
+        returnType: answer,
+        locals: [{ id: "u.0", name: "u", type: fromT, mutable: true }],
+        body,
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [value], type: answer, loc };
+  }
+
   /** `u[i]` (a NUMBER index) over a union of array arms and boolean/number
    * arms: an array arm answers its element through the ordinary indexed read
    * (an out-of-range index keeps the documented trap, divergence 4), and a
@@ -23328,8 +23383,9 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       declared.push(ft);
     }
     const recordAnswers = declared.filter((t): t is IrType => t !== null);
-    // An all-unit union has no record arm to answer here; it keeps the existing path.
-    if (recordAnswers.length === 0) return null;
+    // An all-unit union has no record arm to answer here: every arm throws Node's
+    // TypeError for the read (see lowerUnitOnlyFieldThrow).
+    if (recordAnswers.length === 0) return lowerUnitOnlyFieldThrow(L, expr, value, field);
     const unitArms = declared.length - recordAnswers.length;
     // The join is the flattened set of the arms' answers, exactly as
     // lowerUnionKeyedRead builds it — a union answer contributes its own
