@@ -15262,14 +15262,14 @@
    "diags": [
     {
      "code": "SC1016",
-     "message": "circular imports (<repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js → <repo>/tests/diagnostics/cjs-cycle-export-replacement/b.js → <repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js; <repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js:4 replaces the module's export object after this edge read it — the binding keeps the OLD object for the rest of the program (Node), which a require binding with no storage of its own cannot represent) are not supported yet",
+     "message": "circular imports (<repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js \u2192 <repo>/tests/diagnostics/cjs-cycle-export-replacement/b.js \u2192 <repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js; <repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js:4 replaces the module's export object after this edge read it \u2014 the binding keeps the OLD object for the rest of the program (Node), which a require binding with no storage of its own cannot represent) are not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js",
       "start": 0,
       "end": 0
      },
      "milestone": "later",
-     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names \u2014 move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
     }
    ]
   },
@@ -15282,14 +15282,14 @@
    "diags": [
     {
      "code": "SC1016",
-     "message": "circular imports (<repo>/tests/diagnostics/cjs-cycle-top-level-read/a.js → <repo>/tests/diagnostics/cjs-cycle-top-level-read/b.js → <repo>/tests/diagnostics/cjs-cycle-top-level-read/a.js; the cycle-crossing binding 'a' is read at <repo>/tests/diagnostics/cjs-cycle-top-level-read/b.js:6, outside any function body — the exporter has not attached that member yet, so Node answers 'undefined' there and this lowering would answer the final value) are not supported yet",
+     "message": "circular imports (<repo>/tests/diagnostics/cjs-cycle-top-level-read/a.js \u2192 <repo>/tests/diagnostics/cjs-cycle-top-level-read/b.js \u2192 <repo>/tests/diagnostics/cjs-cycle-top-level-read/a.js; the cycle-crossing binding 'a' is read at <repo>/tests/diagnostics/cjs-cycle-top-level-read/b.js:6, outside any function body \u2014 the exporter has not attached that member yet, so Node answers 'undefined' there and this lowering would answer the final value) are not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/cjs-cycle-top-level-read/a.js",
       "start": 0,
       "end": 0
      },
      "milestone": "later",
-     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names \u2014 move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
     }
    ]
   },
@@ -15319,7 +15319,7 @@
    "diags": [
     {
      "code": "SC1013",
-     "message": "require() below code that can reach its binding 'greet' (Node initializes the binding AT the require and throws ReferenceError on any earlier access, which is not modeled — move the require above the code that can run first) is not supported yet",
+     "message": "require() below code that can reach its binding 'greet' (Node initializes the binding AT the require and throws ReferenceError on any earlier access, which is not modeled \u2014 move the require above the code that can run first) is not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/cjs-require-tdz/main.js",
       "start": 336,
@@ -15376,14 +15376,14 @@
    "diags": [
     {
      "code": "SC1016",
-     "message": "circular imports (<repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/constants.ts → <repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/bot.ts → <repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/jid.ts → <repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/constants.ts; top-level code at <repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/jid.ts:2 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "message": "circular imports (<repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/constants.ts \u2192 <repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/bot.ts \u2192 <repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/jid.ts \u2192 <repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/constants.ts; top-level code at <repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/jid.ts:2 can run user code during the cycle's init window \u2014 only declaration-only module bodies are admitted) are not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/cycle-barrel-declarer-unevaluated/constants.ts",
       "start": 0,
       "end": 0
      },
      "milestone": "later",
-     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names \u2014 move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
     }
    ]
   },
@@ -15396,14 +15396,14 @@
    "diags": [
     {
      "code": "SC1016",
-     "message": "circular imports (<repo>/tests/diagnostics/cycle-tdz-read/a.ts → <repo>/tests/diagnostics/cycle-tdz-read/b.ts → <repo>/tests/diagnostics/cycle-tdz-read/a.ts; the cycle-crossing binding 'a' is read at <repo>/tests/diagnostics/cycle-tdz-read/b.ts:2, outside any function body — a read during the init window observes the partially-initialized module (Node's TDZ ReferenceError / stale var), which is not modeled) are not supported yet",
+     "message": "circular imports (<repo>/tests/diagnostics/cycle-tdz-read/a.ts \u2192 <repo>/tests/diagnostics/cycle-tdz-read/b.ts \u2192 <repo>/tests/diagnostics/cycle-tdz-read/a.ts; the cycle-crossing binding 'a' is read at <repo>/tests/diagnostics/cycle-tdz-read/b.ts:2, outside any function body \u2014 a read during the init window observes the partially-initialized module (Node's TDZ ReferenceError / stale var), which is not modeled) are not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/cycle-tdz-read/a.ts",
       "start": 0,
       "end": 0
      },
      "milestone": "later",
-     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names \u2014 move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
     }
    ]
   },
@@ -15416,14 +15416,14 @@
    "diags": [
     {
      "code": "SC1016",
-     "message": "circular imports (<repo>/tests/diagnostics/cycle-window-callee-reads-a-partner/a.ts → <repo>/tests/diagnostics/cycle-window-callee-reads-a-partner/b.ts → <repo>/tests/diagnostics/cycle-window-callee-reads-a-partner/a.ts; top-level code at <repo>/tests/diagnostics/cycle-window-callee-reads-a-partner/b.ts:15 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "message": "circular imports (<repo>/tests/diagnostics/cycle-window-callee-reads-a-partner/a.ts \u2192 <repo>/tests/diagnostics/cycle-window-callee-reads-a-partner/b.ts \u2192 <repo>/tests/diagnostics/cycle-window-callee-reads-a-partner/a.ts; top-level code at <repo>/tests/diagnostics/cycle-window-callee-reads-a-partner/b.ts:15 can run user code during the cycle's init window \u2014 only declaration-only module bodies are admitted) are not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/cycle-window-callee-reads-a-partner/a.ts",
       "start": 0,
       "end": 0
      },
      "milestone": "later",
-     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names \u2014 move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
     }
    ]
   },
@@ -15436,14 +15436,14 @@
    "diags": [
     {
      "code": "SC1016",
-     "message": "circular imports (<repo>/tests/diagnostics/cycle/a.ts → <repo>/tests/diagnostics/cycle/b.ts → <repo>/tests/diagnostics/cycle/a.ts; the cycle-crossing binding 'a' is read at <repo>/tests/diagnostics/cycle/b.ts:2, outside any function body — a read during the init window observes the partially-initialized module (Node's TDZ ReferenceError / stale var), which is not modeled) are not supported yet",
+     "message": "circular imports (<repo>/tests/diagnostics/cycle/a.ts \u2192 <repo>/tests/diagnostics/cycle/b.ts \u2192 <repo>/tests/diagnostics/cycle/a.ts; the cycle-crossing binding 'a' is read at <repo>/tests/diagnostics/cycle/b.ts:2, outside any function body \u2014 a read during the init window observes the partially-initialized module (Node's TDZ ReferenceError / stale var), which is not modeled) are not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/cycle/a.ts",
       "start": 0,
       "end": 0
      },
      "milestone": "later",
-     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names \u2014 move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
     }
    ]
   },
@@ -16175,7 +16175,7 @@
     },
     {
      "code": "SC1010",
-     "message": "the 'node:v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "message": "the 'node:v8' module (it observes V8 engine internals \u2014 heap statistics and snapshots, GC and CPU profiles, serialize/deserialize \u2014 and a compiled binary embeds no V8 engine to observe) is not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/module-out-of-scope.ts",
       "start": 347,
@@ -16219,7 +16219,7 @@
     },
     {
      "code": "SC1010",
-     "message": "the 'node:inspector' module (it drives the V8 inspector protocol — debugger, profiler, heap access — and a compiled binary embeds no V8 engine to inspect) is not supported yet",
+     "message": "the 'node:inspector' module (it drives the V8 inspector protocol \u2014 debugger, profiler, heap access \u2014 and a compiled binary embeds no V8 engine to inspect) is not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/module-out-of-scope.ts",
       "start": 512,
@@ -16358,7 +16358,7 @@
    "diags": [
     {
      "code": "SC1010",
-     "message": "the '#types' import (it resolves only to type declarations — there is no runtime implementation to compile) is not supported yet",
+     "message": "the '#types' import (it resolves only to type declarations \u2014 there is no runtime implementation to compile) is not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/pkg-import-fences/main.ts",
       "start": 449,
@@ -16369,7 +16369,7 @@
     },
     {
      "code": "SC1010",
-     "message": "the 'ambientonly' module (it exists only as an ambient 'declare module' type surface — there is no runtime module to import) is not supported yet",
+     "message": "the 'ambientonly' module (it exists only as an ambient 'declare module' type surface \u2014 there is no runtime module to import) is not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/pkg-import-fences/main.ts",
       "start": 383,
@@ -16380,7 +16380,7 @@
     },
     {
      "code": "SC1010",
-     "message": "the 'patternXmod' module (it exists only as an ambient 'declare module' type surface — there is no runtime module to import) is not supported yet",
+     "message": "the 'patternXmod' module (it exists only as an ambient 'declare module' type surface \u2014 there is no runtime module to import) is not supported yet",
      "loc": {
       "file": "<repo>/tests/diagnostics/pkg-import-fences/main.ts",
       "start": 416,
@@ -16620,7 +16620,7 @@
    "diags": [
     {
      "code": "SC1010",
-     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "message": "the 'v8' module (it observes V8 engine internals \u2014 heap statistics and snapshots, GC and CPU profiles, serialize/deserialize \u2014 and a compiled binary embeds no V8 engine to observe) is not supported yet",
      "loc": {
       "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
       "start": 422,
@@ -17236,6 +17236,78 @@
   "<repo>/tests/corpus/11552-union-elem-number-or-array.js": {
    "order": [
     "<repo>/tests/corpus/11552-union-elem-number-or-array.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11650-fnvalue-datestrings-map-string.js": {
+   "order": [
+    "<repo>/tests/corpus/11650-fnvalue-datestrings-map-string.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11651-fnvalue-filter-boolean-any.ts": {
+   "order": [
+    "<repo>/tests/corpus/11651-fnvalue-filter-boolean-any.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11654-fnvalue-map-number-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/11654-fnvalue-map-number-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11656-fnvalue-typeof-name-length.ts": {
+   "order": [
+    "<repo>/tests/corpus/11656-fnvalue-typeof-name-length.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11657-fnvalue-typeof-name-length.js": {
+   "order": [
+    "<repo>/tests/corpus/11657-fnvalue-typeof-name-length.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11658-fnvalue-json-stringify-callback.js": {
+   "order": [
+    "<repo>/tests/corpus/11658-fnvalue-json-stringify-callback.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11659-fnvalue-json-stringify-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/11659-fnvalue-json-stringify-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11660-fnvalue-isarray-callback.js": {
+   "order": [
+    "<repo>/tests/corpus/11660-fnvalue-isarray-callback.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11661-fnvalue-encode-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/11661-fnvalue-encode-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11663-fnvalue-identity-interned.ts": {
+   "order": [
+    "<repo>/tests/corpus/11663-fnvalue-identity-interned.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11664-fnvalue-bool-filter-static.ts": {
+   "order": [
+    "<repo>/tests/corpus/11664-fnvalue-bool-filter-static.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11665-fnvalue-map-string-dyn-numbers.ts": {
+   "order": [
+    "<repo>/tests/corpus/11665-fnvalue-map-string-dyn-numbers.ts"
    ],
    "diags": []
   }
