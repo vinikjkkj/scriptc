@@ -5489,6 +5489,16 @@ void scr_dyn_error_ctor_fence(void);
  * +1 per call, never NULL. Static builds only — under --dynamic the
  * engine owns the real one and the value keeps its fence. */
 ScrDyn *scr_dyn_uint8array_ctor(void);
+/* The builtin Buffer class as a value (%Buffer%, a function object whose property
+ * table holds the twelve enumerable statics) and one enumerable member of
+ * require('buffer') by index (scr_dyn_ext.c, the Buffer-value section, where the index
+ * order is written). */
+ScrDyn *scr_dyn_buffer_ctor(void);
+ScrDyn *scr_dyn_buffer_value(double which);
+/* require('buffer') as a value: the module object, its fourteen enumerable keys in Node order
+ * (scr_dyn_ext.c). Blob and File are the classes of the same unit. */
+ScrDyn *scr_dyn_buffer_module(void);
+ScrDyn *scr_dyn_blob_class(bool is_file);
 /* %Uint8Array.prototype% itself — the same object `Uint8Array.prototype`
  * answers, for the spelling that reaches the member statically. +1. */
 ScrDyn *scr_dyn_uint8array_prototype(void);
