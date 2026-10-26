@@ -158,6 +158,9 @@ interface EmitterRegistrations {
   opaque: boolean;
   /** Where the first opaque registration is, for SCRIPTC_NOOPEMIT_WHY. */
   opaqueAt: string | null;
+  /** Every literal event name an emit names, on ANY receiver (a dyn
+   * receiver's emit included). */
+  emitted: ReadonlySet<string>;
 }
 
 /** `super.on(event, listener)` inside `on`'s own declaration — the
@@ -432,6 +435,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   const registeredKeys = new Set<string>();
   let opaqueRegistration = false;
   let opaqueAt: string | null = null;
+  const emittedNames = new Set<string>();
   for (const sf of L.program.getSourceFiles()) {
     if (sf.isDeclarationFile) continue;
     const walk = (node: ts.Node): void => {
@@ -480,7 +484,19 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
         }
       }
       if (!resolved || nameT === null) return; // checker trouble is the lowering's business, not the scan's
-      if (recvT?.kind !== "object" || !emitterRooted(L, L.classes.get(recvT.className))) return;
+      if (isEmit && nameT.isStringLiteralType()) emittedNames.add(nameT.value);
+      if (recvT?.kind !== "object" || !emitterRooted(L, L.classes.get(recvT.className))) {
+        // An emit on a receiver of unknown class (a dyn value) can reach an
+        // instance of ANY emitter root: its literal payload joins the "*"
+        // bucket, which every root's signature agrees with (the byName
+        // synthesis below and sigAt's fallback). Without it the emit has no
+        // tuple and the lowering refuses it. Registrations stay out: a
+        // dyn receiver's listener is the builtin root's (lowerDynEmitterReceiverCall).
+        if (isEmit && nameT.isStringLiteralType() && recvT?.kind !== "object" && !META_EVENTS.has(nameT.value) && nameT.value !== "error") {
+          sites.push({ isEmit, name: nameT.value, node, key: evTableKey(undefined, nameT.value) });
+        }
+        return;
+      }
       if (!nameT.isStringLiteralType()) {
         // A computed emit contributes its payload to every name it can carry
         // (see computedEmitNames); resolved after the registration walk.
@@ -556,6 +572,34 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   // tuple is not a prefix of the longest one is a conflict at the touching
   // site, exactly as two class roots would be for one name.
   const builtinKeyPrefix = emitterRootKey(L.classes.get(RUNTIME_EMITTER_CLASS));
+  // An untyped emit ("*" bucket) reaches an instance of EVERY root, so each
+  // root's tuple for that name agrees with it: a root whose own entry (a
+  // listener's registration) is shorter takes the longer tuple, and a
+  // disagreement is the same conflict two roots would be.
+  const starByName = new Map<string, EventSig>();
+  for (const [k, sig] of table) {
+    if (!k.startsWith("*")) continue;
+    const i = k.indexOf("\u0000");
+    if (i >= 0) starByName.set(k.slice(i + 1), sig);
+  }
+  for (const [k, own] of [...table]) {
+    if (!k.startsWith("#")) continue;
+    const star = starByName.get(evDisplayName(k));
+    if (star === undefined) continue;
+    const longer = star.tuple.length > own.tuple.length ? star : own;
+    const shorter = longer === star ? own : star;
+    let conflict: string | null = own.conflict ?? star.conflict;
+    if (conflict === null && !shorter.tuple.every((t, j) => typeEquals(t, longer.tuple[j]!))) {
+      conflict = "the untyped emit and the emitter class disagree on the event's argument types";
+    }
+    table.set(k, {
+      tuple: longer.tuple,
+      fromEmit: own.fromEmit || star.fromEmit,
+      conflict,
+      dynListener: own.dynListener || star.dynListener,
+      listened: false,
+    });
+  }
   const byName = new Map<string, EventSig[]>();
   for (const [k, sig] of table) {
     // The receivers of unknown class ("*") join: a dyn emit site or a dyn
@@ -591,7 +635,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   // The listened flag covers the builtin bucket too, so it is set last.
   for (const [key, sig] of table) sig.listened = listenedNames.has(evDisplayName(key));
   holder.emitterEventTable = table;
-  holder.emitterRegistrations = { names: registered, keys: registeredKeys, opaque: opaqueRegistration, opaqueAt };
+  holder.emitterRegistrations = { names: registered, keys: registeredKeys, opaque: opaqueRegistration, opaqueAt, emitted: emittedNames };
   return table;
 }
 
@@ -599,7 +643,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
 function emitterRegistrations(L: Lowerer): EmitterRegistrations {
   emitterEvents(L);
   return (L as unknown as { emitterRegistrations?: EmitterRegistrations }).emitterRegistrations ??
-    { names: new Set<string>(), keys: new Set<string>(), opaque: true, opaqueAt: null };
+    { names: new Set<string>(), keys: new Set<string>(), opaque: true, opaqueAt: null, emitted: new Set<string>() };
 }
 
 /** The compile-time event name of the first argument, or a pointed fence
@@ -857,6 +901,20 @@ function lowerDynListenerCall(
   const metaListenerReadsOnlyName = (): boolean => {
     let n: ts.Expression = cbNode;
     while (ts.isParenthesizedExpression(n)) n = n.expression;
+    // A named listener (`const onRemove = function (name) {...}`): its
+    // declaration is the function to read. Only a const binding is a fixed
+    // function; a parameter or a let may hold anything.
+    if (ts.isIdentifier(n)) {
+      const sym = L.checker.getSymbolAtLocation(n);
+      const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+      if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined ||
+          !ts.isVariableDeclarationList(decl.parent) || (decl.parent.flags & ts.NodeFlags.Const) === 0) {
+        return false;
+      }
+      let init: ts.Expression = decl.initializer;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      n = init;
+    }
     if (!(ts.isArrowFunction(n) || ts.isFunctionExpression(n))) return false;
     if (n.parameters.length > 1 || n.parameters.some((p) => p.dotDotDotToken !== undefined)) return false;
     let usesArguments = false;
@@ -868,7 +926,9 @@ function lowerDynListenerCall(
     });
     return !usesArguments;
   };
-  if (META_EVENTS.has(name) && !metaListenerReadsOnlyName()) {
+  // Only a REGISTRATION hands the meta listener its second argument; a removal
+  // matches the listener by identity and fires nothing into it.
+  if (registering && META_EVENTS.has(name) && !metaListenerReadsOnlyName()) {
     L.noLowering(
       `'${member}' of '${name}' with a checked-dynamic listener`,
       cbNode,
@@ -937,7 +997,7 @@ function dynListenerRegistration(
   L: Lowerer,
   tuple: IrType[],
   receiver: IrExpr,
-  name: string,
+  name: string | IrExpr,
   cbDyn: IrExpr,
   registering: boolean,
   once: boolean,
@@ -1010,15 +1070,73 @@ function dynListenerRegistration(
     }
     L.liftedFns.push({ name: helper, params, returnType: recvT, locals, body, loc });
   }
+  const nameExpr = typeof name === "string" ? strLit(name, loc) : name;
   return {
     kind: "call",
     callee: helper,
     args: registering
-      ? [receiver, strLit(name, loc), cbDyn, boolLit(once, loc), boolLit(prepend, loc)]
-      : [receiver, strLit(name, loc), cbDyn],
+      ? [receiver, nameExpr, cbDyn, boolLit(once, loc), boolLit(prepend, loc)]
+      : [receiver, nameExpr, cbDyn],
     type: recvT,
     loc,
   };
+}
+
+/** Every event name the program can name in an emitter call, sorted: the
+ * table's names (listeners and emits on typed receivers, the builtin and
+ * "*" buckets), every literal registration on any receiver, and every
+ * literal emit on any receiver. A non-literal event name on an untyped
+ * receiver is dispatched over this set (lowerDynEmitterReceiverCall). A
+ * name outside it is never emitted anywhere in the program. */
+export function emitterEventNames(L: Lowerer): string[] {
+  const names = new Set<string>();
+  for (const k of emitterEvents(L).keys()) names.add(evDisplayName(k));
+  const regs = emitterRegistrations(L);
+  for (const n of regs.names) names.add(n);
+  for (const n of regs.emitted) names.add(n);
+  return [...names].sort();
+}
+
+/** An EventEmitter registration, removal or count on an untyped receiver
+ * whose event name is NOT one of the program's literal names
+ * (emitterEventNames). No emit anywhere in the program can name it, so the
+ * listener never fires; the registry still keeps it under the runtime name,
+ * so listenerCount and removeListener answer exactly as Node's do. The
+ * adapter takes no parameters: it is never invoked. `recv` is the lowered
+ * emitter object and `nameIr` the STRING event name. */
+export function lowerUnnamedEmitterCall(L: Lowerer, call: ts.CallExpression,
+  member: string, recv: IrExpr, nameIr: IrExpr, loc: SrcLoc): IrExpr {
+  if (member === "listenerCount") {
+    if (call.arguments.length !== 1) {
+      L.noLowering(`listenerCount with ${call.arguments.length} arguments on a dynamic receiver`, call);
+    }
+    return { kind: "libCall", fn: "emitter.count", args: [recv, nameIr], type: F64, loc };
+  }
+  const registering = REGISTER_MEMBERS.has(member);
+  if (call.arguments.length < 2) {
+    L.noLowering(`${member} with ${call.arguments.length} arguments`, call, "the supported form is (eventName, listener)");
+  }
+  const cbNode = call.arguments[1]!;
+  const getRecord = (id: string) => L.shapes.get(id);
+  const getUnion = (id: string) => L.unions.get(id);
+  let cb = L.lowerExpr(cbNode);
+  if (cb.type.kind === "union") cb = L.maybeNarrow(cb, cbNode);
+  let cbDyn: IrExpr;
+  if (cb.type.kind === "dyn") {
+    cbDyn = cb;
+  } else {
+    if (cb.type.kind !== "func" || !canBoxFuncIntoDyn(cb.type, getRecord, getUnion)) {
+      L.noLowering(
+        `'${member}' with a listener of this signature on a dynamic receiver`,
+        cbNode,
+        "a listener registered under a computed event name must box across the dynamic boundary",
+      );
+    }
+    cbDyn = { kind: "dynFrom", value: cb, type: DYN, loc };
+  }
+  const once = member === "once" || member === "prependOnceListener";
+  const prepend = member === "prependListener" || member === "prependOnceListener";
+  return dynListenerRegistration(L, [], recv, nameIr, cbDyn, registering, once, prepend, false, loc);
 }
 
 /** A listener argument: lowered, checked void-returning, and its
@@ -1102,7 +1220,11 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
   superRecv?: { thisRef: IrExpr; cls: ClassInfo },
   /** A receiver the caller already lowered to the emitter object (the
    * dyn-receiver narrowing in lower-calls): lowered once, never again. */
-  loweredRecv?: IrExpr): IrExpr | null {
+  loweredRecv?: IrExpr,
+  /** The event name, when the caller has already picked a literal for a
+   * non-literal argument (lowerDynEmitterReceiverCall's name switch). The
+   * argument is then not re-read as a name. */
+  nameLit?: string): IrExpr | null {
   const member = access.name.text;
   const loc = locOf(call);
   const args = call.arguments;
@@ -1195,7 +1317,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     if (args.length < 2 || !extrasPure) {
       L.noLowering(`${member} with ${args.length} arguments`, call, "the supported form is (eventName, listener)");
     }
-    const name = eventNameOf(L, member, args[0]!);
+    const name = nameLit ?? eventNameOf(L, member, args[0]!);
     const key = evTableKey(info, name);
     const registering = REGISTER_MEMBERS.has(member);
     // The runtime fires the meta events INTERNALLY (scr_ee_emit_meta —
@@ -1446,8 +1568,8 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     while (payload.length < tuple.length) payload.push(dynUndefinedExpr(loc));
     return emitDispatchExpr(L, info, name, tuple, receiver, payload, superRecv?.cls, loc);
     };
-    const computed = computedEmitNames(L, info, access, args);
-    if (computed === null) return emitAs(eventNameOf(L, member, args[0]!));
+    const computed = nameLit !== undefined ? null : computedEmitNames(L, info, access, args);
+    if (computed === null) return emitAs(nameLit ?? eventNameOf(L, member, args[0]!));
     return computedEmitDispatch(L, call, access, args, info, computed, emitAs, loc);
   }
 
@@ -1478,7 +1600,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       L.noLowering(`listenerCount with ${args.length} arguments`, call);
     }
     const receiver = lowerReceiver();
-    const name = L.lowerExprExpecting(args[0]!, STRING);
+    const name = nameLit !== undefined ? strLit(nameLit, loc) : L.lowerExprExpecting(args[0]!, STRING);
     if (name.type.kind !== "string") {
       L.noLowering(`listenerCount with a '${L.fmt(name.type)}' event name`, args[0]!);
     }
