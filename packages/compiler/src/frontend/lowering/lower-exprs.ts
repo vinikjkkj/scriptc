@@ -310,7 +310,7 @@ function diffieHellmanFnValue(L: Lowerer, loc: SrcLoc): IrExpr {
  * an object (no throw) and its kStringMaxLength is 536870888, V8's String::kMaxLength
  * on 64-bit hosts. The compiled program answers that constant. Only this spelling
  * is served: other binding names and members keep their fence (null here). */
-const PROCESS_BINDING_BUFFER_MEMBERS: Readonly<Record<string, number>> = { kStringMaxLength: 536870888 };
+const PROCESS_BINDING_BUFFER_MEMBERS: Readonly<Record<string, number>> = { kMaxLength: 9007199254740991, kStringMaxLength: 536870888 };
 export function processBindingMemberOf(L: Lowerer, expr: ts.Expression): IrExpr | null {
   if (!ts.isPropertyAccessExpression(expr) || expr.questionDotToken !== undefined) return null;
   const call = expr.expression;
@@ -323,6 +323,23 @@ export function processBindingMemberOf(L: Lowerer, expr: ts.Expression): IrExpr 
   if (!Object.prototype.hasOwnProperty.call(PROCESS_BINDING_BUFFER_MEMBERS, member)) return null;
   const value = PROCESS_BINDING_BUFFER_MEMBERS[member]!;
   return { kind: "numLit", value, type: F64, loc: locOf(expr) };
+}
+
+/** The builtin `buffer` module members and the Buffer class as VALUES. The index is the
+ * runtime's (scr_json.c, scr_dyn_buffer_value). Blob and File are classes of scr_dyn_ext.c,
+ * and the module object itself is index 14 (lowerExpr). */
+const BUFFER_VALUE_INDEX: Readonly<Record<string, number>> = {
+  Buffer: 0, SlowBuffer: 1, transcode: 2, isUtf8: 3, isAscii: 4, kMaxLength: 5,
+  kStringMaxLength: 6, btoa: 7, atob: 8, constants: 9, INSPECT_MAX_BYTES: 10, resolveObjectURL: 11,
+  Blob: 12, File: 13,
+};
+/** The value index of `buffer.<member>`, or undefined when it is not a held value. */
+export function bufferValueIndexOf(member: string): number | undefined {
+  return Object.prototype.hasOwnProperty.call(BUFFER_VALUE_INDEX, member) ? BUFFER_VALUE_INDEX[member] : undefined;
+}
+/** The IR of a builtin buffer-module member or the Buffer class read as a value. */
+export function bufferValueOf(index: number, loc: SrcLoc): IrExpr {
+  return { kind: "libCall", fn: "dyn.bufferValue", args: [{ kind: "numLit", value: index, type: F64, loc }], type: DYN, loc };
 }
 
 const BUILTIN_MEMBER_IS_GLOBAL: ReadonlySet<string> = new Set([
@@ -417,6 +434,11 @@ export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc
   // The WebCrypto object is an object in Node (typeof "object"), not a
   // string token: one process singleton, shared with require('crypto').webcrypto.
   if (canonical === "crypto" && !L.dynamic) return { kind: "libCall", fn: "dyn.webCrypto", args: [], type: DYN, loc };
+  // The Buffer class is a function object in Node (typeof "function", identity, statics).
+  if (canonical === "Buffer" && !L.dynamic) return bufferValueOf(0, loc);
+  // The global Blob and File are the buffer module's own classes (Node: the same objects).
+  if (canonical === "Blob" && !L.dynamic) return bufferValueOf(12, loc);
+  if (canonical === "File" && !L.dynamic) return bufferValueOf(13, loc);
   if (canonical !== "Uint8Array" || L.dynamic) return null;
   return { kind: "libCall", fn: "dyn.u8Ctor", args: [], type: DYN, loc };
 }
@@ -1469,6 +1491,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           // is the same identity-token story as stdlib globals above (the
           // harness adds worker_threads.Worker to its identity Set).
           if (isJsSourceFile(expr.getSourceFile())) {
+            // The buffer module's held members and the Buffer class: function objects and
+            // values in Node, so a token is wrong for them (typeof, statics, identity).
+            if (bi.module === "buffer" && !L.dynamic) {
+              const bIdx = bufferValueIndexOf(bi.member);
+              if (bIdx !== undefined) return bufferValueOf(bIdx, loc);
+            }
             // A FUNCTION member (`const { isIP } = require('net'); const f = isIP`)
             // `const w = require('crypto').webcrypto` (a named-import alias) and
             // `import { webcrypto } from 'crypto'`: the WebCrypto singleton, not a token.
@@ -1530,6 +1558,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             L.resolveValueSymbol(expr),
           );
         }
+      }
+      // `buffer` (a `require('buffer')` binding or the spelled call) as a VALUE: the module object.
+      if ((ts.isIdentifier(expr) || ts.isCallExpression(expr)) && !L.dynamic && isJsSourceFile(expr.getSourceFile()) &&
+          L.builtinNamespaceModuleOf(expr) === "buffer") {
+        return bufferValueOf(14, loc);
       }
       // A builtin namespace import used as a bare VALUE (`const f = fs`):
       // the namespace object has no representation — members lower at
@@ -1667,6 +1700,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // answers a function (measured: `take(Buffer)` prints "string"). Receiver uses
         // (`B.from(x)`) lower through lowerBufferStaticCall before this point.
         if (ts.isIdentifier(expr) && !L.isStdlibSymbol(sym) && stdlibGlobalNameOf(L, expr) === "Buffer") {
+          // A JavaScript alias of the class (`var B = require('buffer').Buffer`) is the same function object.
+          if (isJsSourceFile(expr.getSourceFile()) && !L.dynamic) return bufferValueOf(0, loc);
           L.unsupported("SC1090", expr, `the reference to '${expr.text}' (a binding form with no lowering)`);
         }
         if (L.isStdlibSymbol(sym) || expr.text === "globalThis") {
@@ -2396,6 +2431,27 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         if (recvT.getSymbol() !== undefined && L.checker.declarationsOf(recvT.getSymbol()!).some((d) => d.getSourceFile().isDeclarationFile)) {
           L.unsupported("SC1090", expr, `reading '${expr.name.text}' through a value typed as its declaration class (a prototype datum of a paired class is not declared there)`);
           return { kind: "boolLit", value: false, type: BOOL, loc };
+        }
+      }
+      // `Buffer.prototype` has no object in a static build (the Buffer methods are the bytes methods).
+      // Answering a fresh empty object would make `for (k in Buffer.prototype)` visit nothing where Node
+      // visits the methods, so the read refuses by name.
+      if (expr.name.text === "prototype" && !L.dynamic && isJsSourceFile(expr.getSourceFile()) &&
+          stdlibGlobalNameOf(L, expr.expression) === "Buffer") {
+        L.unsupported(
+          "SC1090",
+          expr,
+          "Buffer.prototype as a value (the class has no prototype object in a static build: its methods are the bytes methods)",
+        );
+        return bufferValueOf(0, loc);
+      }
+      // `require('buffer').Buffer` / `buffer.<member>` read as a value (JavaScript): the class and the
+      // module's held members, as the runtime's values (scr_dyn_buffer_value).
+      {
+        const bi = L.builtinMemberOf(expr);
+        if (bi !== null && bi.module === "buffer" && isJsSourceFile(expr.getSourceFile()) && !L.dynamic) {
+          const bIdx = bufferValueIndexOf(bi.member);
+          if (bIdx !== undefined) return bufferValueOf(bIdx, loc);
         }
       }
       // `require('crypto').webcrypto` (any namespace spelling of the crypto module):
