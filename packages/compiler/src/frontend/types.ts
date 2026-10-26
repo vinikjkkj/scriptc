@@ -4,6 +4,7 @@ import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../i
 import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isUnitType, JSVAL, mapOf, weakMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
+import { dynBuiltinFnType, dynBuiltinSigOfType } from "./dyn-builtin-sigs.js";
 import { isSqliteTypesPath } from "./shared.js";
 import { accessorSlotProp, armDiscrimLits, armLitsConflict, builtinRenderingKey, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
@@ -2238,6 +2239,18 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     ) {
       return boxSym.name === "Number" ? F64 : boxSym.name === "String" ? STRING : BOOL;
     }
+  }
+  // The two stdlib FUNCTIONS that had no value form on main (Array.isArray,
+  // JSON.stringify) map to their DYN signature (dyn-builtin-sigs.ts). Only
+  // the keys in DYN_MAPPED_KEYS: every other builtin keeps the mapping it
+  // had, because a typed value row on main depends on that mapping.
+  {
+    const dynRow = dynBuiltinSigOfType(
+      checker.getCallSignatures(widened),
+      (sig) => checker.signatureDeclaration(sig) as ts.Node | undefined,
+      (d) => ctx.isStdlibFile(d.getSourceFile()),
+    );
+    if (dynRow !== null) return dynBuiltinFnType(dynRow);
   }
   // The lib's PRIMITIVE-CONSTRUCTOR interfaces as TYPES (`typeof String`,
   // a `type: StringConstructor` record field — the CLI option-table

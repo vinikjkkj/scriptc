@@ -83,9 +83,13 @@ import {
   typeEquals,
   DYN,
   VOID,
+  typeKey,
+  isUnitType,
 } from "../../ir/nodes.js";
 import { type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf } from "./surfaces.js";
 import { optionalTimerHandleClear } from "./lower-calls.js";
+import { DYN_BUILTIN_SIGS, dynBuiltinFnType } from "../dyn-builtin-sigs.js";
+import { isJsSourceFile } from "../program.js";
 
 
 interface BuiltinFnValue {
@@ -742,4 +746,266 @@ export function jsGlobalFnValueOf(L: Lowerer, expr: ts.Identifier, name: string,
     L.liftedFns.push(fn);
   }
   return { kind: "closure", fnName, captures: [], type: mapped, loc };
+}
+
+/* THE DYN-SIGNATURE FORM of a global builtin function taken as a value.
+ *
+ * Every entry above is typed by the checker's own mapping of the name, and
+ * the gate refuses a builtin whose mapping has no exact row. The refusal
+ * cases are the callbacks a dyn receiver passes: `anyArray.map(String)`
+ * (the element is any value), `.filter(Boolean)`, `.map(parseInt)`. In a
+ * JavaScript source the identifier used to be an identity TOKEN (the
+ * string "[builtin String]"), and `token(elem)` threw "string ... is not a
+ * function" at run time where Node calls the function. That is the
+ * mysql2 dateStringsKey site (parser_cache.js: `dateStrings.map(String)`).
+ *
+ * The form here is the one a user arrow already gets when it is handed to
+ * a dyn receiver: an interned lifted function whose PARAMETERS are DYN, so
+ * the caller's boxed elements arrive as they are, and whose body is the
+ * JS conversion (ToString / ToNumber / ToBoolean / Array.isArray /
+ * JSON.stringify) over them. Identity is the interned closure, so
+ * `f === f` holds. Extra arguments a callback receives (`map` passes
+ * index and array) are dropped, as JS drops them for a function that
+ * declares fewer parameters; `parseInt` declares its radix, so the index
+ * IS its radix, as in Node.
+ */
+interface DynBuiltinFn {
+  readonly body: (a: readonly IrExpr[], loc: SrcLoc) => IrExpr;
+}
+
+function toStr(a: IrExpr, loc: SrcLoc): IrExpr {
+  return libCall("dyn.toStringCoerce", [a], STRING, loc);
+}
+function toNum(a: IrExpr, loc: SrcLoc): IrExpr {
+  return libCall("dyn.toNumber", [a], F64, loc);
+}
+
+/** The keys are the global's source spelling (`String`, `JSON.stringify`). */
+const DYN_BUILTIN_FNS: Readonly<Record<string, DynBuiltinFn | undefined>> = {
+  String: { body: (a, loc) => toStr(a[0]!, loc) },
+  Number: { body: (a, loc) => toNum(a[0]!, loc) },
+  Boolean: { body: (a, loc) => ({ kind: "dynTest", test: "truthy", value: a[0]!, type: BOOL, loc }) },
+  parseInt: {
+    body: (a, loc) => libCall("num.parseInt", [toStr(a[0]!, loc), toNum(a[1]!, loc)], F64, loc),
+  },
+  parseFloat: { body: (a, loc) => libCall("num.parseFloat", [toStr(a[0]!, loc)], F64, loc) },
+  isNaN: { body: (a, loc) => libCall("num.isNaN", [toNum(a[0]!, loc)], BOOL, loc) },
+  isFinite: { body: (a, loc) => libCall("number.isFinite", [toNum(a[0]!, loc)], BOOL, loc) },
+  encodeURIComponent: { body: (a, loc) => libCall("str.encodeUriComponent", [toStr(a[0]!, loc)], STRING, loc) },
+  encodeURI: { body: (a, loc) => libCall("str.encodeUri", [toStr(a[0]!, loc)], STRING, loc) },
+  decodeURIComponent: { body: (a, loc) => libCall("str.decodeUriComponent", [toStr(a[0]!, loc)], STRING, loc) },
+  decodeURI: { body: (a, loc) => libCall("str.decodeUri", [toStr(a[0]!, loc)], STRING, loc) },
+  escape: { body: (a, loc) => libCall("str.escape", [toStr(a[0]!, loc)], STRING, loc) },
+  unescape: { body: (a, loc) => libCall("str.unescape", [toStr(a[0]!, loc)], STRING, loc) },
+  "Array.isArray": { body: (a, loc) => ({ kind: "dynTest", test: "array", value: a[0]!, type: BOOL, loc }) },
+  "JSON.stringify": { body: (a, loc) => ({ kind: "jsonStringify", value: a[0]!, type: STRING, loc }) },
+};
+
+/** The DYN-table key of a global function EXPRESSION (`String`, `parseInt`,
+ * `JSON.stringify`, `Array.isArray`), or null: the identifier must resolve
+ * to the library's own declarations, the member must be the stdlib's. */
+export function dynBuiltinKeyOf(L: Lowerer, node: ts.Expression): string | null {
+  let key: string;
+  if (ts.isIdentifier(node)) {
+    key = node.text;
+    const sym = L.resolveValueSymbol(node);
+    if (!sym) return null;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return null;
+  } else if (ts.isPropertyAccessExpression(node) && !node.questionDotToken) {
+    if (L.stdlibGlobalMember(node, "Array") === "isArray") key = "Array.isArray";
+    else if (L.stdlibGlobalMember(node, "JSON") === "stringify") key = "JSON.stringify";
+    else return null;
+  } else {
+    return null;
+  }
+  return hasDynBuiltinFnValue(key) ? key : null;
+}
+
+/** `String.name`, `String.length`, `parseInt.length`, `JSON.stringify.length`
+ * (a builtin's Function properties, read off the builtin's own identifier):
+ * constants, as Node reports them. The `name` of a member is its last
+ * segment (`JSON.stringify` is "stringify"). Null for every other read. */
+export function dynBuiltinFnPropertyOf(L: Lowerer, expr: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
+  const prop = expr.name.text;
+  if (prop !== "name" && prop !== "length") return null;
+  const key = dynBuiltinKeyOf(L, expr.expression);
+  if (key === null) return null;
+  if (prop === "name") return { kind: "strLit", value: key.slice(key.lastIndexOf(".") + 1), type: STRING, loc };
+  const sig = ownRow(DYN_BUILTIN_SIGS, key);
+  if (sig === undefined) return null;
+  // Node's declared length: JSON.stringify takes (value, replacer, space).
+  const declared = key === "JSON.stringify" ? 3 : sig.arity;
+  return { kind: "numLit", value: declared, type: F64, loc };
+}
+
+/** Is `key` one of the globals with a DYN-signature value form? */
+export function hasDynBuiltinFnValue(key: string): boolean {
+  return ownRow(DYN_BUILTIN_FNS, key) !== undefined && ownRow(DYN_BUILTIN_SIGS, key) !== undefined;
+}
+
+/** The interned DYN-signature closure of the global `key`, lifted once per
+ * program. The caller proves the identifier is the library's own symbol. */
+export function dynBuiltinFnValueOf(L: Lowerer, key: string, loc: SrcLoc): IrExpr {
+  const row = ownRow(DYN_BUILTIN_FNS, key);
+  const sig = ownRow(DYN_BUILTIN_SIGS, key);
+  if (row === undefined || sig === undefined) throw new Error(`dynBuiltinFnValueOf: no row for ${key}`);
+  const fnName = `%builtin.dyn.${key}`;
+  if (!L.liftedFns.some((f) => f.name === fnName)) {
+    const params = Array.from({ length: sig.arity }, (_, i) => ({ localId: `p${i}.0`, name: `p${i}`, type: DYN }));
+    const args: IrExpr[] = params.map((p) => ({ kind: "varRef", localId: p.localId, type: DYN, loc }));
+    L.liftedFns.push({
+      name: fnName,
+      params,
+      returnType: sig.ret,
+      locals: params.map((p) => ({ id: p.localId, name: p.name, type: DYN, mutable: false })),
+      body: [{ kind: "return", value: row.body(args, loc), loc }],
+      loc,
+    });
+  }
+  return { kind: "closure", fnName, captures: [], type: dynBuiltinFnType(sig), loc };
+}
+
+
+/** `Array.isArray` / `JSON.stringify` read without a call, as the DYN-
+ * signature value. Null for every other receiver and member. */
+export function staticMemberDynFnValueOf(L: Lowerer, expr: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
+  if (expr.questionDotToken) return null;
+  if (L.stdlibGlobalMember(expr, "Array") === "isArray") return dynBuiltinFnValueOf(L, "Array.isArray", loc);
+  if (!L.dynamic && L.stdlibGlobalMember(expr, "JSON") === "stringify") return dynBuiltinFnValueOf(L, "JSON.stringify", loc);
+  return null;
+}
+
+/** The typed-row globals: their value form predates this one (lower-fnvalue.ts's
+ * BUILTIN_FN_VALUES and the JS rows), so this form only fills their callbacks
+ * where no value form exists. */
+const TYPED_ROW_KEYS: ReadonlySet<string> = new Set([
+  "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent", "encodeURI",
+  "decodeURIComponent", "decodeURI", "escape", "unescape",
+]);
+
+/** A callback parameter the DYN boxing takes faithfully: a dyn, a primitive,
+ * an array, undefined/null, or a union of those. */
+function boxableCallbackParam(L: Lowerer, t: IrType): boolean {
+  if (t.kind === "dyn" || t.kind === "jsval" || t.kind === "f64" || t.kind === "bool" || t.kind === "string" || t.kind === "array") return true;
+  if (isUnitType(t)) return true;
+  if (t.kind === "union") {
+    const arms = L.unions.get(t.unionId)?.arms;
+    return arms !== undefined && arms.every((a) => boxableCallbackParam(L, a));
+  }
+  return false;
+}
+
+/** A DYN-signature builtin passed as a HOF CALLBACK (`xs.map(String)`,
+ * `xs.filter(Boolean)`, `xs.map(parseInt)`): minted at the element types
+ * the loop actually passes, so the static element needs no adapter.
+ *
+ * The loop passes the lead values (the element; accumulator + element for
+ * reduce), then the index (F64) and the array. The callback declares a
+ * PREFIX of those, so parameter i has the i-th of that list, and the body
+ * boxes each one into the builtin's DYN parameter (dynFrom) before the
+ * conversion. Like booleanCtorHofCallback (lower-containers.ts), the
+ * closure is consumed by the HOF's own helper and never compared, so no
+ * identity escapes; every REFERENCE to the builtin still lowers to the
+ * interned value above.
+ *
+ * Null (the caller keeps its own fence) when the identifier is not the
+ * library's, has no row, or an element type does not box into DYN. */
+export function dynBuiltinHofCallback(
+  L: Lowerer,
+  argNode: ts.Expression,
+  lead: readonly IrType[],
+  arrT: IrType,
+  loc: SrcLoc,
+): { fnArg: IrExpr & { type: IrType & { kind: "func" } }; arity: number } | null {
+  const key = dynBuiltinKeyOf(L, argNode);
+  if (key === null) return null;
+  const sig = ownRow(DYN_BUILTIN_SIGS, key);
+  if (sig === undefined) return null;
+  const row = ownRow(DYN_BUILTIN_FNS, key);
+  if (row === undefined) return null;
+  // Which callbacks this form takes. Boolean has its own static predicate
+  // (booleanCtorHofCallback), so it is taken here only over a dyn element. The
+  // typed-row globals (parseInt, encodeURIComponent, ...) already have a value
+  // form that main lowers for a static callback and in JavaScript, so this form
+  // takes them only over a dyn element in a TypeScript source; every other
+  // combination keeps the path it had.
+  const dynLead = lead[0]?.kind === "dyn" || lead[0]?.kind === "jsval";
+  if (key === "Boolean" && !dynLead) return null;
+  if (TYPED_ROW_KEYS.has(key) && (!dynLead || isJsSourceFile(argNode.getSourceFile()))) return null;
+  // Parameter i of the callback receives: the lead values, then the index, then the array.
+  const passed: IrType[] = [...lead, F64, arrT];
+  const params: IrType[] = [];
+  for (let i = 0; i < sig.arity; i++) {
+    const t = passed[i];
+    if (t === undefined) return null;
+    params.push(t);
+  }
+  // A static OBJECT element is not boxed here: the boxed object's ToString
+  // is the runtime's object protocol, which has no Object.prototype member
+  // table, so it refuses at run time where Node prints "[object Object]".
+  // Those callbacks keep their refusal at compile time instead.
+  for (const t of params) {
+    if (!boxableCallbackParam(L, t)) return null;
+  }
+  // JSON.stringify of an undefined-capable element: the direct call refuses
+  // it (SC1090), because the walker would print the TEXT "undefined" where
+  // Node answers the undefined value. The callback form refuses the same way.
+  if (key === "JSON.stringify") {
+    for (const t of params) {
+      const arms = t.kind === "union" ? (L.unions.get(t.unionId)?.arms ?? []) : [t];
+      if (arms.some((a) => isUnitType(a) || a.kind === "void")) return null;
+    }
+  }
+  const fnName = `%builtin.dyn.hof.${key}.${params.map((t) => typeKey(t)).join("|")}`;
+  if (!L.liftedFns.some((f) => f.name === fnName)) {
+    const ps = params.map((type, i) => ({ localId: `p${i}.0`, name: `p${i}`, type }));
+    const args: IrExpr[] = ps.map((p) => {
+      const v: IrExpr = { kind: "varRef", localId: p.localId, type: p.type, loc };
+      return p.type.kind === "dyn" ? v : { kind: "dynFrom", value: v, type: DYN, loc };
+    });
+    L.liftedFns.push({
+      name: fnName,
+      params: ps,
+      returnType: sig.ret,
+      locals: ps.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+      body: [{ kind: "return", value: row.body(args, loc), loc }],
+      loc,
+    });
+  }
+  return {
+    fnArg: { kind: "closure", fnName, captures: [], type: funcOf(params, sig.ret), loc } as IrExpr & { type: IrType & { kind: "func" } },
+    arity: sig.arity,
+  };
+}
+
+/** A global builtin passed as an ARGUMENT of a method call on a dyn (or
+ * jsval) receiver: `anyArr.map(String)`, `anyArr.filter(Boolean)`. The
+ * receiver's elements are dyn values, so the callback must take any value;
+ * the typed value form (STRING parameter) fails on the first non-string
+ * element at run time. The DYN-signature closure is the callback there,
+ * and only there: every other reference keeps the value it had.
+ * TypeScript keeps the typed-row globals' own value forms everywhere else. */
+export function dynReceiverCallbackValue(L: Lowerer, expr: ts.Identifier, loc: SrcLoc): IrExpr | null {
+  const key = expr.text;
+  if (ownRow(DYN_BUILTIN_FNS, key) === undefined || !hasDynBuiltinFnValue(key)) return null;
+  const isJs = isJsSourceFile(expr.getSourceFile());
+  if (TYPED_ROW_KEYS.has(key) && isJs) return null;
+  const call = expr.parent;
+  if (!ts.isCallExpression(call) || !call.arguments.includes(expr)) return null;
+  if (!ts.isPropertyAccessExpression(call.expression)) return null;
+  const recvNode = call.expression.expression;
+  const recvTs = L.typeOf(recvNode);
+  const recv = L.mapTypeOf(recvTs);
+  const dynKind = (k: IrType | null | undefined): boolean => k !== null && k !== undefined && (k.kind === "dyn" || k.kind === "jsval");
+  const dynElems = recv !== null && recv.kind === "array" && dynKind(recv.elem);
+  // A receiver whose type names `any` (`any`, `any[]`, or a union with one):
+  // its elements are dyn values whatever the mapper settled on.
+  const anyish = L.checker.typeToString(recvTs).split(/[^A-Za-z]+/).includes("any");
+  if (!dynKind(recv) && !dynElems && !anyish) return null;
+  const sym = L.resolveValueSymbol(expr);
+  if (!sym) return null;
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return null;
+  return dynBuiltinFnValueOf(L, key, loc);
 }

@@ -14,6 +14,7 @@ import { DYN_DISPATCH_METHODS, islandPrimitiveExit } from "./lower-calls.js";
 import { dynAssertionReceiver } from "./lower-exprs.js";
 import { typeKey } from "../types.js";
 import { dynUndefinedExpr, own, WidthLift } from "./lowerer.js";
+import { dynBuiltinHofCallback } from "./lower-fnvalue.js";
 
 /** The nine in-place Array.prototype methods — `scr_dyn_invoke.c`'s own
  * static-copy list, verbatim.
@@ -886,6 +887,13 @@ function lowerOptionalDefaultArg(
         return { fnArg: boolPred as IrExpr & { type: IrType & { kind: "func" } }, arity: 1 };
       }
     }
+    // The other callable globals with a DYN-signature value form (String,
+    // Number, parseInt, JSON.stringify, ...): minted at the loop's element
+    // types, the same way (lower-fnvalue.ts, dynBuiltinHofCallback).
+    {
+      const dynCb = dynBuiltinHofCallback(L, argNode, lead, arrT, locOf(argNode));
+      if (dynCb !== null) return dynCb;
+    }
     // A DYN-receiver HOF's callback (`parsed.flatMap((value) => ...)`):
     // the contextual signature types the unannotated param `any` (the
     // receiver is checker-`any[]`), while the VALUE each call receives is
@@ -1083,6 +1091,12 @@ function lowerOptionalDefaultArg(
       // PRIMITIVE element by value: there is no identity or aliasing for the
       // dyn conversion to break, unlike an aggregate element it would copy.
       if (p.kind === "dyn" && (w.kind === "f64" || w.kind === "bool" || w.kind === "string")) return true;
+      // A primitive UNION element (`(number | string)[]`) boxes arm by arm the same way:
+      // a builtin value stored in a variable (`const conv = Number`) reaches here.
+      if (p.kind === "dyn" && w.kind === "union") {
+        const arms = L.unions.get(w.unionId)?.arms;
+        if (arms !== undefined && arms.length > 0 && arms.every((a) => a.kind === "f64" || a.kind === "bool" || a.kind === "string")) return true;
+      }
       if (p.kind !== "union") return widthCopyOnly(w, p);
       if (L.armTag(p.unionId, w) >= 0) return true;
       if (w.kind === "union") {

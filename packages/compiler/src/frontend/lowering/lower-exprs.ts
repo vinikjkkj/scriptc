@@ -15,7 +15,7 @@ import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExport
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
-import { builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf } from "./lower-fnvalue.js";
+import { builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf, staticMemberDynFnValueOf, dynBuiltinFnPropertyOf, dynReceiverCallbackValue } from "./lower-fnvalue.js";
 import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence, valuesCountdown, voidCountdown } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
@@ -1593,6 +1593,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           return { kind: "numLit", value: expr.text === "NaN" ? NaN : Infinity, type: F64, loc };
         }
       }
+      // A global builtin as the callback of a method call on a dyn receiver
+      // (`anyArr.map(String)`): the DYN-signature value (lower-fnvalue.ts).
+      if (ts.isIdentifier(expr)) {
+        const dc = dynReceiverCallbackValue(L, expr, loc);
+        if (dc !== null) return dc;
+      }
       // The primitive constructors as VALUES (`const f = String`, an
       // option table's `type: Boolean` field, `opt.type === Number`): the
       // interned coercion closure — one synthesized module function per
@@ -2926,6 +2932,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // same constants and per-member fences as named builtin imports.
         L.lowerNamespaceBuiltinProperty(expr) ??
         L.lowerJsonProperty(expr) ??
+        staticMemberDynFnValueOf(L, expr, locOf(expr)) ??
+        dynBuiltinFnPropertyOf(L, expr, locOf(expr)) ??
         L.lowerErrorCodeProperty(expr) ??
         // An own EXPANDO property read off an error object (`err.fatal`,
         // `e.errno`): the property no declaration names.

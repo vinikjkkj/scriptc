@@ -43,6 +43,7 @@ import { unitOnlyUnion } from "../types.js";
 let hkdfSyncCalls = 0;
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { deferredCallThunk, timerStyleCallback } from "./lower-calls.js";
+import { dynBuiltinFnValueOf } from "./lower-fnvalue.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
 import { lowerDateLocaleFormat } from "./lower-numfmt.js";
 import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -7310,6 +7311,8 @@ let digestInputValueDispatches = 0;
       }
       return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
     }
+    // JSON.stringify as a VALUE: the DYN-signature form (lower-fnvalue.ts).
+    if (member === "stringify" && !L.dynamic) return dynBuiltinFnValueOf(L, "JSON.stringify", locOf(expr));
     L.unsupported("SC1090", expr, `JSON methods as values (call '${member}' directly)`);
   }
 
