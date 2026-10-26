@@ -1498,6 +1498,60 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/11600-buffer-value-stored-typeof.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11600-buffer-value-stored-typeof.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11601-buffer-value-alias-statics.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11601-buffer-value-alias-statics.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11602-buffer-module-members.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11602-buffer-module-members.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11603-buffer-module-member-identity.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11603-buffer-module-member-identity.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11604-process-binding-kmax.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11604-process-binding-kmax.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11605-buffer-module-forin-copy.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11605-buffer-module-forin-copy.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11606-buffer-for-in-statics.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11606-buffer-for-in-statics.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11607-buffer-blob-file.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11607-buffer-blob-file.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11608-buffer-blob-bytes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11608-buffer-blob-bytes.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/11650-fnvalue-datestrings-map-string.js": {
    "order": [
     "<repo>/tests/corpus/11650-fnvalue-datestrings-map-string.js"
