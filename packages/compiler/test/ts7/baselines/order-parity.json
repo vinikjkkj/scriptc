@@ -17238,6 +17238,24 @@
     "<repo>/tests/corpus/11552-union-elem-number-or-array.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/11800-optchain-let-narrowed-by-assignment-union-body.ts": {
+   "order": [
+    "<repo>/tests/corpus/11800-optchain-let-narrowed-by-assignment-union-body.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11801-optchain-let-narrowed-union-string-body.ts": {
+   "order": [
+    "<repo>/tests/corpus/11801-optchain-let-narrowed-union-string-body.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11802-optchain-let-narrowed-tail-statement.ts": {
+   "order": [
+    "<repo>/tests/corpus/11802-optchain-let-narrowed-tail-statement.ts"
+   ],
+   "diags": []
   }
  }
 }
