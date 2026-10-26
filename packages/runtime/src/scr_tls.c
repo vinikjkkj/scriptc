@@ -1846,3 +1846,12 @@ static const ScrNetDynhTlsHooks SCR_TLS_DYNH = {
   &scr_tls_dynh_on,
   &scr_tls_dynh_invoke,
 };
+
+/* `u instanceof tls.TLSSocket` on an unknown value (the lowering's tls.dynInstanceOf).
+ * A TLSSocket is a net-socket handle carrying a TLS transport from construction
+ * (scr_net_sock_set_transport), and the transport is never detached, so the encrypted
+ * flag decides the class. A plain net.Socket, a server, or any other kind answers false. */
+bool scr_tls_dyn_instanceof(const ScrDyn *d) {
+  if (!scr_dyn_handle_is(d, SCR_DYNH_NET_SOCKET)) return false;
+  return scr_net_sock_encrypted((ScrNetSocket *)d->v.handle.ptr);
+}

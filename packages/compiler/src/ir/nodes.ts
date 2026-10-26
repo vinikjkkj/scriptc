@@ -5393,6 +5393,7 @@ export type IrLibFn =
    * answer). args are the borrowed dyn and the SCR_ERR_* kind literal.
    * Never throws. */
   | "dyn.errInstanceof"
+  | "tls.dynInstanceOf"
   /** ToNumber (ECMA-262 7.1.4) over a checked-dynamic operand
    * (scr_json.c) — the numeric sibling of scr_dyn_truthy (ToBoolean) and
    * scr_dyn_string_coerce (ToString), and the conversion every
