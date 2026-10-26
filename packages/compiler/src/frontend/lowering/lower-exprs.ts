@@ -19416,6 +19416,27 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     );
   }
 
+  /** Is this class one whose instances a dyn box can carry as program
+   * objects, so that its preorder interval decides `u instanceof C`?
+   *
+   * The test is PROVENANCE, not the name. The '%' prefix used to stand for
+   * "not a program class", but the file tag gives every module other than
+   * the entry the prefix (`%m<i>.Name`, lowerer.fileTag), so a class exported
+   * from a sibling module was refused exactly like a builtin. A program
+   * class has a declaration WITH A BODY in a source file the program owns;
+   * the runtime-provided builtins (Error hierarchy, EventEmitter, streams)
+   * carry no declaration or a builtin flag and keep their own routes. A
+   * prototype class (a JS pre-class constructor) has no declaration but is a
+   * program class and is admitted by its flag. */
+  function isProgramClassInfo(L: Lowerer, info: ClassInfo): boolean {
+    if (info.protoClass === true) return true;
+    if (info.builtinError === true || info.builtinEmitter === true || info.builtinStream !== undefined) return false;
+    const decl = info.decl;
+    if (decl === null) return false;
+    const sf = decl.getSourceFile();
+    return !sf.isDeclarationFile && !L.isStdlibFile(sf);
+  }
+
   /** The WHATWG URL constructor as a value: the global `URL`, the named
    * import/require binding of node:url's `URL` (`const { URL } =
    * require('url')`), or the namespace spelling `url.URL`. All three are
@@ -20188,7 +20209,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // own position in the class preorder (the interval a typed instanceof
     // compares against), so `u instanceof D1` is true for a D2 instance
     // and false for every other value.
-    if (left.type.kind === "dyn" && (!target.def.name.startsWith("%") || target.protoClass === true) && !target.generic) {
+    if (left.type.kind === "dyn" && isProgramClassInfo(L, target) && !target.generic) {
       L.noteDynBoxedClass(target.def.name);
       return { kind: "dynTest", test: "class", className: target.def.name, value: left, type: BOOL, loc };
     }
