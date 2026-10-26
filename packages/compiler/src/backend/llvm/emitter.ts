@@ -1255,6 +1255,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.objCreateNullProto": "scr_dyn_new_obj_null_proto",
   "dyn.errorProto": "scr_dyn_error_prototype",
   "dyn.u8Ctor": "scr_dyn_uint8array_ctor",
+  "dyn.bufferValue": "scr_dyn_buffer_value",
   "dyn.webCrypto": "scr_dyn_web_crypto",
   "dyn.u8Proto": "scr_dyn_uint8array_prototype",
   "dyn.u8From": "scr_dyn_uint8array_from",

@@ -5533,6 +5533,10 @@ export type IrLibFn =
    * identity. Never throws. Static builds only; under --dynamic the
    * engine owns the real one. */
   | "dyn.u8Ctor"
+  /** A builtin `buffer` module member, or the Buffer class, as a VALUE (scr_json.c).
+   * `args[0]` is the member index in that section order (0 Buffer ... 11 resolveObjectURL).
+   * The class is one process singleton, so `===` holds across spellings. Never throws. */
+  | "dyn.bufferValue"
   /** `globalThis.crypto` (the WebCrypto object) as a VALUE: the process
    * singleton scr_dyn_web_crypto. One object per process, so `===` and the
    * `require('crypto').webcrypto` spelling agree. */
@@ -10368,7 +10372,10 @@ export function moduleCreatesPromises(mod: IrModule): boolean {
       (node.kind === "intrinsic" && typeof node.name === "string" && node.name.startsWith("promise.")) ||
       // A dyn value's promise resolution queues its thenable job on the
       // microtask queue, which only the loop drains.
-      (node.kind === "libCall" && node.fn === "dyn.adoptPromise")
+      (node.kind === "libCall" && node.fn === "dyn.adoptPromise") ||
+      // A Blob read (text, arrayBuffer, bytes) settles in a later turn through the immediate queue,
+      // which only the loop drains (scr_dyn_ext.c). A buffer value may be one of those reads.
+      (node.kind === "libCall" && node.fn === "dyn.bufferValue")
     ) {
       found = true;
       return;
@@ -10499,6 +10506,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
 const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
   "fs.readFileCb", "fs.mkdtempCb", "fs.mkdtempSyncOpts", "fs.readCb", "fs.lchmodCb", "fs.lchmodSyncChk", "fsp.lchmodChk",
   "buffer.concatDyn", "buffer.concatDynLen", "buffer.byteLenDyn", "buffer.isEncodingDyn", "error.msgDyn", "dyn.isBuffer", "dyn.looseEq", "error.ext",
+  "dyn.bufferValue",
 ]);
 export function moduleUsesDynExt(mod: IrModule): boolean {
   let found = false;
@@ -10583,6 +10591,8 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     "process.onWarning", "process.offWarning", "process.emitWarning", "util.deprecationWarn",
     "als.new", "als.get", "als.run", "als.exitRun", "als.enterWith", "als.disable",
     "dc.chanBindStore", "dc.chanUnbindStore", "dc.chanRunStores",
+    // Blob and File are promise-returning classes (text, arrayBuffer, bytes): their values link scr_async_dyn.c.
+    "dyn.bufferValue",
   ]);
   const recs = new Map((mod.records ?? []).map((r) => [r.id, r] as const));
   const uns = new Map((mod.unions ?? []).map((u) => [u.id, u] as const));
