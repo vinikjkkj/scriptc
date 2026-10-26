@@ -25,6 +25,7 @@ import { bufferSpeciesAliasDecl, ForOfIterProjection, lowerForOfArrayIter, lower
 import { jsLetWidened, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
+import { classInstanceKeyPlan, type ClassKeyPlan } from "./forin-class-keys.js";
 import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation, staticBagWrite } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
@@ -11017,10 +11018,12 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       if (probe?.type.kind === "dyn") return lowerForInDyn(L, stmt, labels);
     }
     if (recvT?.kind === "object") {
+      const plan = classInstanceKeyPlan(L, recvT.className);
+      if (plan.ok) return lowerForInClassInstance(L, stmt, labels, recvT.className, plan);
       L.unsupported(
         "SC1052",
         stmt.expression,
-        "for-in over class instances (which keys exist on an instance depends on runtime property creation the class model does not track — for-in over records and arrays compiles)",
+        `for-in over class instances (${plan.reason}): the instance's key order is not static, so the walk is refused rather than guessed`,
       );
     }
     L.unsupported(
@@ -11060,6 +11063,61 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
    * the arm and not of the loop), accessor-carrying shapes (the
    * single-record path fences on those too — Node visits the accessor
    * names and the static walk cannot), arrays, classes and dyn. */
+  /** for-in over a class instance with a static key order (forin-class-keys.ts):
+   * the receiver is bound once, the key list is chosen by the runtime class
+   * (deepest subclass first, the else-chain), then walked like any key list. */
+  function lowerForInClassInstance(
+    L: Lowerer,
+    stmt: ts.ForInStatement,
+    labels: string[] | undefined,
+    className: string,
+    plan: Extract<ClassKeyPlan, { ok: true }>,
+  ): IrStmt {
+    const loc = locOf(stmt);
+    const receiver = L.lowerExpr(stmt.expression);
+    if (receiver.type.kind !== "object" || receiver.type.className !== className) {
+      L.badType(stmt.expression, L.typeOf(stmt.expression));
+    }
+    const strArr = arrayOf(STRING);
+    const lit = (names: string[]): IrExpr => ({
+      kind: "arrayLit",
+      elems: names.map((value): IrExpr => ({ kind: "strLit", value, type: STRING, loc })),
+      type: strArr,
+      loc,
+    });
+    const recv = L.declareHiddenLocal("%inobj", receiver.type);
+    const keys = L.declareHiddenLocal("%inkeys", strArr);
+    // Assigned by the runtime-class chain below: the one mutable hidden local here.
+    keys.mutable = true;
+    const recvRef: IrExpr = { kind: "varRef", localId: recv.id, type: receiver.type, loc };
+    // Subclasses sorted shallow to deep, then wrapped in turn: the deepest
+    // (wrapped last) becomes the outermost test, so a runtime subclass
+    // matches its own key list, never an ancestor's.
+    const subs = [...plan.subs].sort((a, b) => a.depth - b.depth);
+    let chain: IrStmt[] = [{ kind: "assign", localId: keys.id, value: lit(plan.base.keys), loc }];
+    for (const sub of subs) {
+      chain = [{
+        kind: "if",
+        cond: { kind: "instanceOf", value: recvRef, className: sub.info.def.name, type: BOOL, loc },
+        then: [{ kind: "assign", localId: keys.id, value: lit(sub.keys), loc }],
+        else_: chain,
+        loc,
+      }];
+    }
+    const keysRef: IrExpr = { kind: "varRef", localId: keys.id, type: strArr, loc };
+    const loop = lowerForInOverKeys(L, stmt, keysRef, labels);
+    return {
+      kind: "block",
+      body: [
+        { kind: "varDecl", localId: recv.id, init: receiver, loc },
+        { kind: "varDecl", localId: keys.id, init: lit(plan.base.keys), loc },
+        ...chain,
+        loop,
+      ],
+      loc,
+    };
+  }
+
   function lowerForInUnion(L: Lowerer, stmt: ts.ForInStatement, labels: string[] | undefined): IrStmt | null {
     const loc = locOf(stmt);
     const receiver = L.lowerExpr(stmt.expression);
