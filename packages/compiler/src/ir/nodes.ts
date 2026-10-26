@@ -5697,6 +5697,7 @@ export type IrLibFn =
   | "emitter.removeAll"
   | "emitter.emit"
   | "emitter.emitError"
+  | "emitter.emitDyn"
   | "emitter.count"
   | "emitter.countFn"
   | "emitter.names"
@@ -12694,6 +12695,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // 'error' has no listener, Node's unhandled-'error' contract.
   "emitter.emit",
   "emitter.emitError",
+  "emitter.emitDyn",
   "emitter.on",
   "emitter.off",
   "emitter.checkListener",

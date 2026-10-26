@@ -1272,6 +1272,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "emitter.removeAll": { argTypes: [null, STRING, BOOL], result: VOID },
   "emitter.emit": { argTypes: [null, STRING], result: BOOL },
   "emitter.emitError": { argTypes: [null, STRING, null], result: BOOL },
+  "emitter.emitDyn": { argTypes: [null, DYN], result: BOOL },
   "emitter.count": { argTypes: [null, STRING], result: F64 },
   "emitter.countFn": { argTypes: [null, STRING, null], result: F64 },
   "emitter.names": { argTypes: [null], result: VOID },
@@ -5428,7 +5429,7 @@ function validateFunction(
           }
           if (e.fn === "emitter.emit" || e.fn === "emitter.count" ||
               e.fn === "emitter.getMax" || e.fn === "emitter.ctor" ||
-              e.fn === "emitter.countFn" || e.fn === "emitter.emitError") {
+              e.fn === "emitter.countFn" || e.fn === "emitter.emitError" || e.fn === "emitter.emitDyn") {
             if (!typeEquals(e.type, sig.result)) {
               err(`libCall ${e.fn} must be ${sig.result.kind}, got ${e.type.kind}`, e.loc);
             }

@@ -2665,6 +2665,12 @@ ScrEmitter *scr_emitter_remove_all(ScrEmitter *em, ScrStr *name, bool all);
  * emit('error', err): no listener ⇒ THROWS err (borrowed; +1 taken). */
 bool scr_emitter_emit(ScrEmitter *em, ScrStr *name, ...);
 bool scr_emitter_emit_error(ScrEmitter *em, ScrStr *name, ScrError *err);
+/* emit.apply(this, arr): arr[0] is the event name (JS ToPropertyKey), arr[1..]
+ * the listener arguments. Only for a receiver whose listeners of the event
+ * are ALL checked-dynamic (the frontend fences the rest): each listener's
+ * original dyn function is called with the full list. arr borrowed; true
+ * when the event had listeners. */
+bool scr_emitter_emit_dyn_array(ScrEmitter *em, ScrDyn *arr);
 double scr_emitter_listener_count(ScrEmitter *em, ScrStr *name);
 double scr_emitter_listener_count_fn(ScrEmitter *em, ScrStr *name, ScrClosure *fn);
 ScrArr *scr_emitter_event_names(ScrEmitter *em);          /* +1 string[] */

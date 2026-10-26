@@ -666,6 +666,81 @@ bool scr_emitter_emit(ScrEmitter *em, ScrStr *name, ...) {
   return had;
 }
 
+/* emit.apply(this, arr) — the event name and the listener arguments come from
+ * one runtime array (`target.emit.apply(target, args)`). Each listener's
+ * original dyn function (its box) is called with the full argument list, so
+ * the listener sees Node's exact arguments. The frontend compiles this only
+ * when every listener of the event is checked-dynamic, so a listener without
+ * a box cannot be reached (trapped, not thrown, if that guarantee breaks).
+ * Unhandled 'error' throws the first argument, as emit('error') does. */
+bool scr_emitter_emit_dyn_array(ScrEmitter *em, ScrDyn *arr) {
+  size_t total = (size_t)scr_dyn_arr_len(arr);
+  size_t argc = total > 0 ? total - 1 : 0;
+  ScrDyn *key_d = scr_dyn_arr_at(arr, 0);
+  ScrStr *name = scr_dyn_string_coerce_js(key_d);
+  scr_dyn_release(key_d);
+  if (name == NULL) return false; /* ToPropertyKey threw: the exception is pending */
+  ScrDyn **argv = argc ? malloc(argc * sizeof *argv) : NULL;
+  if (argc && !argv) scr_ee_oom();
+  for (size_t i = 0; i < argc; i++) argv[i] = scr_dyn_arr_at(arr, (double)(i + 1));
+  ScrEeBucket *b = em->reg ? scr_ee_bucket_find(em->reg, name->data, name->len) : NULL;
+  bool had = b != NULL && b->n > 0;
+  if (!had && name->len == 5 && memcmp(name->data, "error", 5) == 0) {
+    /* the payload throws (catchable): the first argument, or undefined */
+    ScrDyn *payload = argc ? scr_dyn_retain(argv[0]) : scr_dyn_arr_at(arr, 1.0);
+    for (size_t i = 0; i < argc; i++) scr_dyn_release(argv[i]);
+    free(argv);
+    scr_str_release(name);
+    scr_throw_dyn(payload);
+    return false;
+  }
+  if (had) {
+    size_t n = b->n;
+    ScrEeEntry **snap = malloc(n * sizeof *snap);
+    if (!snap) scr_ee_oom();
+    for (size_t i = 0; i < n; i++) {
+      snap[i] = b->ls[i];
+      snap[i]->refs++;
+    }
+    for (size_t i = 0; i < n; i++) {
+      ScrEeEntry *e = snap[i];
+      if (scr_exc_pending()) {
+        scr_ee_entry_unref(e);
+        continue;
+      }
+      if (e->once) {
+        if (e->fired) {
+          scr_ee_entry_unref(e);
+          continue;
+        }
+        e->fired = true;
+        ScrEeBucket *live = scr_ee_bucket_find(em->reg, name->data, name->len);
+        if (live) {
+          for (size_t j = 0; j < live->n; j++) {
+            if (live->ls[j] == e) {
+              scr_ee_remove_at(em, live, j);
+              break;
+            }
+          }
+        }
+        if (scr_exc_pending()) {
+          scr_ee_entry_unref(e);
+          continue;
+        }
+      }
+      if (e->box == NULL) scr_trap("scriptc: emit with a dynamic argument list reached a typed listener\n");
+      ScrDyn *r = scr_dyn_call(e->box, argv, argc, "listener");
+      scr_dyn_release(r);
+      scr_ee_entry_unref(e);
+    }
+    free(snap);
+  }
+  for (size_t i = 0; i < argc; i++) scr_dyn_release(argv[i]);
+  free(argv);
+  scr_str_release(name);
+  return had;
+}
+
 /* emit('error', err) — Node's special event: with no 'error' listener the
  * payload THROWS (catchable; uncaught exits 1 with the error report).
  * err is borrowed; the throw takes its own +1. */
