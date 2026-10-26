@@ -23003,29 +23003,50 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * is a call, not an expression the tag switch can inline, so this form
    * lifts the whole read into a function: one tag test per arm, the
    * narrowed payload's field, and the planned conversion into the join.
-   * Every arm must declare the field and every conversion must plan
-   * (purely, before anything interns); index-signature arms stay with
+   * Every record or class arm must declare the field and every conversion must plan
+   * (purely, before anything interns); a null or undefined arm throws the
+   * catchable TypeError Node throws for it, so `{serverStatus: number} | null`
+   * reads `serverStatus` as the record's answer or throws at the null arm.
+   * Index-signature arms stay with
    * unionKeyGet, whose helper owns the missing-key policy. */
   function lowerUnionFieldJoinRead(L: Lowerer, expr: ts.Node, value: IrExpr, field: string): IrExpr | null {
     if (value.type.kind !== "union") return null;
     const fromId = value.type.unionId;
     const def = L.unions.get(fromId);
     if (!def || def.arms.length === 0) return null;
-    const declared: IrType[] = [];
+    // A unit arm (null / undefined) carries no field: its read is Node's
+    // TypeError for that value, word for word, the same arm rule the length
+    // read gives. Only record arms contribute to the join.
+    const declared: (IrType | null)[] = [];
     for (const arm of def.arms) {
-      if (arm.kind !== "record") return null;
-      const shape = L.shapes.get(arm.shapeId);
-      if (!shape || shape.tuple) return null;
-      const ft = shape.fields.find((f) => f.name === field)?.type;
+      if (isUnitType(arm)) {
+        declared.push(null);
+        continue;
+      }
+      let ft: IrType | undefined;
+      if (arm.kind === "record") {
+        const shape = L.shapes.get(arm.shapeId);
+        if (!shape || shape.tuple) return null;
+        ft = shape.fields.find((f) => f.name === field)?.type;
+      } else if (arm.kind === "object") {
+        // A class instance arm: its instance fields (methods are not in `fields`).
+        ft = L.classes.get(arm.className)?.fields.get(field);
+      } else {
+        return null;
+      }
       if (!ft || ft.kind === "void" || isUnitType(ft)) return null;
       declared.push(ft);
     }
+    const recordAnswers = declared.filter((t): t is IrType => t !== null);
+    // An all-unit union has no record arm to answer here; it keeps the existing path.
+    if (recordAnswers.length === 0) return null;
+    const unitArms = declared.length - recordAnswers.length;
     // The join is the flattened set of the arms' answers, exactly as
     // lowerUnionKeyedRead builds it — a union answer contributes its own
     // arms, so `Sock | (null | undefined)` joins to three arms, not two.
     const joinArms: IrType[] = [];
     const seen = new Set<string>();
-    for (const t of declared) {
+    for (const t of recordAnswers) {
       const parts = t.kind === "union" ? L.unions.get(t.unionId)?.arms : [t];
       if (!parts) return null;
       for (const a of parts) {
@@ -23047,12 +23068,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const join: IrType =
       joinArms.length === 1 ? joinArms[0]! : { kind: "union", unionId: L.unions.intern(joinArms) };
     // A single-arm join is unionDisc's job and it already declined (a unit
-    // field, a void field); nothing here improves on that.
-    if (join.kind !== "union") return null;
+    // field, a void field); nothing here improves on that. With a unit arm
+    // the single answer is the whole join, so that case is kept.
+    if (join.kind !== "union" && unitArms === 0) return null;
     const loc = locOf(expr);
     // Plan every conversion BEFORE interning, so a later arm that cannot
     // convert never leaves a half-built helper behind.
-    const plans = declared.map((t) => (typeEquals(t, join) ? { how: "copy" as const } : L.widthLiftPlan(t, join)));
+    const plans = recordAnswers.map((t) => (typeEquals(t, join) ? { how: "copy" as const } : L.widthLiftPlan(t, join)));
     if (plans.some((pl) => pl === null)) return null;
     const key = `ufield:${fromId}:${field}:${typeKey(join)}`;
     let name = L.widthHelpers.get(key);
@@ -23062,20 +23084,37 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const fromT: IrType = { kind: "union", unionId: fromId };
       const u: IrExpr = { kind: "varRef", localId: "u.0", type: fromT, loc };
       const body: IrStmt[] = [];
+      let recordIndex = 0;
       def.arms.forEach((arm, i) => {
-        const narrowed: IrExpr = { kind: "unionNarrow", unionId: fromId, tag: i, value: u, type: arm, loc };
-        const read: IrExpr = {
-          kind: "recordGet",
-          obj: narrowed,
-          shapeId: (arm as IrType & { kind: "record" }).shapeId,
-          field,
-          type: declared[i]!,
-          loc,
-        };
+        let answer: IrExpr;
+        if (declared[i] === null) {
+          answer = nodeThrowExpr(
+            1,
+            "",
+            `Cannot read properties of ${arm.kind === "undefinedT" ? "undefined" : "null"} (reading '${field}')`,
+            join,
+            loc,
+          );
+        } else {
+          const r = recordIndex++;
+          const narrowed: IrExpr = { kind: "unionNarrow", unionId: fromId, tag: i, value: u, type: arm, loc };
+          const read: IrExpr =
+            arm.kind === "object"
+              ? { kind: "fieldGet", obj: narrowed, className: arm.className, field, type: recordAnswers[r]!, loc }
+              : {
+                  kind: "recordGet",
+                  obj: narrowed,
+                  shapeId: (arm as IrType & { kind: "record" }).shapeId,
+                  field,
+                  type: recordAnswers[r]!,
+                  loc,
+                };
+          answer = L.applyWidthLift(plans[r]!, read, join, loc);
+        }
         body.push({
           kind: "if",
           cond: { kind: "unionIsTag", unionId: fromId, tag: i, negated: false, value: u, type: BOOL, loc },
-          then: [{ kind: "return", value: L.applyWidthLift(plans[i]!, read, join, loc), loc }],
+          then: [{ kind: "return", value: answer, loc }],
           else_: null,
           loc,
         });
