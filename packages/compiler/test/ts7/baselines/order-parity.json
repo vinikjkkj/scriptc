@@ -198,18 +198,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/10800-promise-wrapper-literal-name-list.js": {
-   "order": [
-    "<repo>/tests/corpus/10800-promise-wrapper-literal-name-list.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/10801-pool-wrapper-nested-iife-name-list.js": {
-   "order": [
-    "<repo>/tests/corpus/10801-pool-wrapper-nested-iife-name-list.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/1011-json-unknown-typeof.ts": {
    "order": [
     "<repo>/tests/corpus/1011-json-unknown-typeof.ts"
@@ -933,6 +921,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/10800-promise-wrapper-literal-name-list.js": {
+   "order": [
+    "<repo>/tests/corpus/10800-promise-wrapper-literal-name-list.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/10801-pool-wrapper-nested-iife-name-list.js": {
+   "order": [
+    "<repo>/tests/corpus/10801-pool-wrapper-nested-iife-name-list.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/10950-tdz-var-hoisted-ctor-reads-later-var.cjs": {
    "order": [
     "<repo>/tests/corpus/10950-tdz-var-hoisted-ctor-reads-later-var.cjs"
@@ -1068,6 +1068,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/11150-prototype-install-facade-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/11150-prototype-install-facade-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11151-prototype-install-pool-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/11151-prototype-install-pool-receiver.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11152-prototype-install-duplicate-and-own-names.js": {
+   "order": [
+    "<repo>/tests/corpus/11152-prototype-install-duplicate-and-own-names.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11153-prototype-install-inherited-by-subclass.js": {
+   "order": [
+    "<repo>/tests/corpus/11153-prototype-install-inherited-by-subclass.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11154-prototype-install-declared-arity.js": {
+   "order": [
+    "<repo>/tests/corpus/11154-prototype-install-declared-arity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11155-prototype-install-skips-data-member.js": {
+   "order": [
+    "<repo>/tests/corpus/11155-prototype-install-skips-data-member.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1116-island-static-mix.ts": {
    "order": [
     "<repo>/tests/corpus/1116-island-static-mix.ts"
@@ -1143,6 +1179,85 @@
   "<repo>/tests/corpus/1124-union-narrowed-retag.ts": {
    "order": [
     "<repo>/tests/corpus/1124-union-narrowed-retag.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11400-ov-variadic-slot-fixed-override.js": {
+   "order": [
+    "<repo>/tests/corpus/11400-ov-variadic-slot-fixed-override.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11401-ov-variadic-override-of-fixed-base.js": {
+   "order": [
+    "<repo>/tests/corpus/11401-ov-variadic-override-of-fixed-base.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11402-ov-void-base-value-override.js": {
+   "order": [
+    "<repo>/tests/corpus/11402-ov-void-base-value-override.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11403-ov-super-call-across-mismatched-signatures.js": {
+   "order": [
+    "<repo>/tests/corpus/11403-ov-super-call-across-mismatched-signatures.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11404-ov-jstwin-base-typed-override-arity/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/11404-ov-jstwin-base-typed-override-arity/lib.d.ts",
+    "<repo>/tests/corpus/11404-ov-jstwin-base-typed-override-arity/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Merged declaration 'Redis' cannot include a default export declaration. Consider adding a separate 'export default Redis' declaration instead.",
+     "loc": {
+      "file": "<repo>/tests/corpus/11404-ov-jstwin-base-typed-override-arity/lib.d.ts",
+      "start": 101,
+      "end": 106
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Merged declaration 'Redis' cannot include a default export declaration. Consider adding a separate 'export default Redis' declaration instead.",
+     "loc": {
+      "file": "<repo>/tests/corpus/11404-ov-jstwin-base-typed-override-arity/lib.d.ts",
+      "start": 272,
+      "end": 277
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/11405-ov-jstwin-dropped-and-added-params/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/11405-ov-jstwin-dropped-and-added-params/lib.d.ts",
+    "<repo>/tests/corpus/11405-ov-jstwin-dropped-and-added-params/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11406-ov-jstwin-union-param-and-extra-arg/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/11406-ov-jstwin-union-param-and-extra-arg/lib.d.ts",
+    "<repo>/tests/corpus/11406-ov-jstwin-union-param-and-extra-arg/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11407-ov-jstwin-void-return-through-unknown/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/11407-ov-jstwin-void-return-through-unknown/lib.d.ts",
+    "<repo>/tests/corpus/11407-ov-jstwin-void-return-through-unknown/cmd.d.ts",
+    "<repo>/tests/corpus/11407-ov-jstwin-void-return-through-unknown/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11408-ov-throw-only-base-declared-unknown/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/11408-ov-throw-only-base-declared-unknown/lib.d.ts",
+    "<repo>/tests/corpus/11408-ov-throw-only-base-declared-unknown/main.ts"
    ],
    "diags": []
   },
@@ -16298,84 +16413,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/fixtures/node-types/argv-env.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/argv-env.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/child-stdio.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/import-fences.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/import-fences.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC1010",
-     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
-     "loc": {
-      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
-      "start": 422,
-      "end": 461
-     },
-     "milestone": "M4",
-     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
-    }
-   ]
-  },
-  "<repo>/tests/fixtures/node-types/path-os.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/path-os.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/server-address-states.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stream-capture.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/streams.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts"
@@ -16929,6 +16966,84 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/fixtures/node-types/argv-env.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/argv-env.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/import-fences.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/import-fences.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1010",
+     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
+      "start": 422,
+      "end": 461
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/fixtures/node-types/path-os.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/path-os.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stream-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/streams.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/streams.ts"
+   ],
+   "diags": []
   }
  }
 }
