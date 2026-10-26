@@ -12880,11 +12880,17 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       return ts.isIdentifier(x) ? L.resolveValueSymbol(x) : null;
     };
     // Every identifier inside a destructuring target may be the binding.
-    const noteAllIn = (n: ts.Node): void => {
-      if (ts.isIdentifier(n)) note(L.resolveValueSymbol(n), "?");
-      else n.forEachChild(noteAllIn);
+    // Iterative (explicit stack): this walks a whole file before the depth
+    // guard, and a deeply nested expression must not overflow the JS stack.
+    const noteAllIn = (root: ts.Node): void => {
+      const todo: ts.Node[] = [root];
+      while (todo.length > 0) {
+        const n = todo.pop()!;
+        if (ts.isIdentifier(n)) note(L.resolveValueSymbol(n), "?");
+        else n.forEachChild((c) => { todo.push(c); });
+      }
     };
-    const visit = (n: ts.Node): void => {
+    const visitOne = (n: ts.Node): void => {
       if (ts.isBinaryExpression(n)) {
         const k = n.operatorToken.kind;
         if (k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment) {
@@ -12901,9 +12907,13 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         if (ts.isForInStatement(n)) note(symOf(n.initializer as ts.Expression), "string");
         else noteAllIn(n.initializer);
       }
-      n.forEachChild(visit);
     };
-    sf.forEachChild(visit);
+    const todo: ts.Node[] = [sf];
+    while (todo.length > 0) {
+      const n = todo.pop()!;
+      visitOne(n);
+      n.forEachChild((c) => { todo.push(c); });
+    }
     jsLetWriteKindsByFile.set(sf, out);
     return out;
   }
@@ -12966,17 +12976,15 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     const body = (fn as ts.FunctionLikeDeclaration).body;
     if (fn.type !== undefined || !isJsSourceFile(fn.getSourceFile()) || body === undefined) return false;
     if (!ts.isBlock(body)) return widenedJsLetOf(L, body);
-    let found = false;
-    const visit = (n: ts.Node): void => {
-      if (found || ts.isFunctionLike(n)) return;
-      if (ts.isReturnStatement(n) && n.expression !== undefined && widenedJsLetOf(L, n.expression)) {
-        found = true;
-        return;
-      }
-      n.forEachChild(visit);
-    };
-    body.forEachChild(visit);
-    return found;
+    // Iterative, nested functions skipped (their returns are their own).
+    const todo: ts.Node[] = [body];
+    while (todo.length > 0) {
+      const n = todo.pop()!;
+      if (n !== body && ts.isFunctionLike(n)) continue;
+      if (ts.isReturnStatement(n) && n.expression !== undefined && widenedJsLetOf(L, n.expression)) return true;
+      n.forEachChild((c) => { todo.push(c); });
+    }
+    return false;
   }
 
 /** Strips the value-preserving wrappers off an expression: parens,
