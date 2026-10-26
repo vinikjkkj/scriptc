@@ -818,6 +818,70 @@ function dynListenerFlavor(L: Lowerer, node: ts.Expression): "dyn" | "func" | nu
   return null;
 }
 
+/** True when a META listener (newListener/removeListener registration) reads nothing
+ * but its event name: a listener literal (or a const-bound one) with at most one
+ * parameter and no `arguments`. Only such a listener can take the static path; any
+ * other one takes the dyn path, where the runtime hands it the listener box as
+ * Node's second argument. */
+function metaListenerReadsOnlyName(L: Lowerer, cbNode: ts.Expression): boolean {
+  let n: ts.Expression = cbNode;
+  while (ts.isParenthesizedExpression(n)) n = n.expression;
+  // A named listener (`const onRemove = function (name) {...}`): its
+  // declaration is the function to read. Only a const binding is a fixed
+  // function; a parameter or a let may hold anything.
+  if (ts.isIdentifier(n)) {
+    const sym = L.checker.getSymbolAtLocation(n);
+    const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined ||
+        !ts.isVariableDeclarationList(decl.parent) || (decl.parent.flags & ts.NodeFlags.Const) === 0) {
+      return false;
+    }
+    let init: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    n = init;
+  }
+  if (!(ts.isArrowFunction(n) || ts.isFunctionExpression(n))) return false;
+  if (n.parameters.length > 1 || n.parameters.some((p) => p.dotDotDotToken !== undefined)) return false;
+  let usesArguments = false;
+  ts.walkPreorder(n.body, (x) => {
+    // a nested non-arrow function has an `arguments` of its own
+    if (ts.isFunctionExpression(x) || ts.isFunctionDeclaration(x) || ts.isMethodDeclaration(x) || ts.isGetAccessorDeclaration(x) || ts.isSetAccessorDeclaration(x) || ts.isConstructorDeclaration(x)) return "skip";
+    if (ts.isIdentifier(x) && x.text === "arguments") usesArguments = true;
+    return undefined;
+  });
+  return !usesArguments;
+}
+
+const META_OBSERVER_CACHE = new WeakMap<ts.Program, boolean>();
+/** True when some registration in the program hands a META listener more than its
+ * event name (a second parameter, `arguments`, or a listener the syntax cannot read
+ * as name-only). Such an observer receives each registered listener FUNCTION, so in
+ * this program every registration takes the dyn path, which carries the box.
+ * Computed once per program. */
+function programObservesMetaArgs(L: Lowerer): boolean {
+  const cached = META_OBSERVER_CACHE.get(L.program);
+  if (cached !== undefined) return cached;
+  let found = false;
+  const visit = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+        REGISTER_MEMBERS.has(n.expression.name.text) && n.arguments.length >= 2 &&
+        ts.isStringLiteralLike(n.arguments[0]!) && META_EVENTS.has(n.arguments[0].text) &&
+        !metaListenerReadsOnlyName(L, n.arguments[1]!)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  for (const sf of L.program.getSourceFiles()) {
+    if (sf.isDeclarationFile) continue;
+    visit(sf);
+    if (found) break;
+  }
+  META_OBSERVER_CACHE.set(L.program, found);
+  return found;
+}
+
 /** A dyn-flavored listener registration/removal (the JS lane's unannotated
  * listeners, and mustCall-style wrapped ones): the listener registers as a
  * checked-dynamic value through an interned helper —
@@ -859,42 +923,14 @@ function lowerDynListenerCall(
   // A listener LITERAL that declares at most the event name cannot observe the
   // second argument Node passes (the listener function), so there is nothing to
   // convert: mysql2's inheritEvents registers `(eventName) => {...}`.
-  const metaListenerReadsOnlyName = (): boolean => {
-    let n: ts.Expression = cbNode;
-    while (ts.isParenthesizedExpression(n)) n = n.expression;
-    // A named listener (`const onRemove = function (name) {...}`): its
-    // declaration is the function to read. Only a const binding is a fixed
-    // function; a parameter or a let may hold anything.
-    if (ts.isIdentifier(n)) {
-      const sym = L.checker.getSymbolAtLocation(n);
-      const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
-      if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined ||
-          !ts.isVariableDeclarationList(decl.parent) || (decl.parent.flags & ts.NodeFlags.Const) === 0) {
-        return false;
-      }
-      let init: ts.Expression = decl.initializer;
-      while (ts.isParenthesizedExpression(init)) init = init.expression;
-      n = init;
-    }
-    if (!(ts.isArrowFunction(n) || ts.isFunctionExpression(n))) return false;
-    if (n.parameters.length > 1 || n.parameters.some((p) => p.dotDotDotToken !== undefined)) return false;
-    let usesArguments = false;
-    ts.walkPreorder(n.body, (x) => {
-      // a nested non-arrow function has an `arguments` of its own
-      if (ts.isFunctionExpression(x) || ts.isFunctionDeclaration(x) || ts.isMethodDeclaration(x) || ts.isGetAccessorDeclaration(x) || ts.isSetAccessorDeclaration(x) || ts.isConstructorDeclaration(x)) return "skip";
-      if (ts.isIdentifier(x) && x.text === "arguments") usesArguments = true;
-      return undefined;
-    });
-    return !usesArguments;
-  };
-  // Only a REGISTRATION hands the meta listener its second argument; a removal
-  // matches the listener by identity and fires nothing into it.
-  if (registering && META_EVENTS.has(name) && !metaListenerReadsOnlyName()) {
-    L.noLowering(
-      `'${member}' of '${name}' with a checked-dynamic listener`,
-      cbNode,
-      "Node passes the listener FUNCTION as the meta event's second argument, which has no dynamic conversion — annotate the listener's parameter as a string",
-    );
+  // Only a REGISTRATION hands the meta listener its second argument (Node's
+  // listener FUNCTION); a removal matches the listener by identity and fires
+  // nothing into it. A listener that reads more than the name takes the event
+  // tuple [string, dyn]: the runtime's meta emit (scr_ee_emit_meta) passes the
+  // event name and the registered listener's own dyn box, and the dyn adapter
+  // forwards both to the listener as its two arguments.
+  if (registering && META_EVENTS.has(name) && !metaListenerReadsOnlyName(L, cbNode)) {
+    tuple = [STRING, DYN];
   }
   const getRecord = (id: string) => L.shapes.get(id);
   const getUnion = (id: string) => L.unions.get(id);
@@ -1351,7 +1387,11 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     // (runtime-emitted 'end'/'pipe'/... payloads); the dyn-listener check
     // below then sees the forced tuple exactly like a table one.
     const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, key, call);
-    const dynFlavor = dynListenerFlavor(L, args[1]!);
+    // In a program with a meta observer that reads more than the name, every
+    // registration takes the dyn path: the runtime hands the observer each listener's
+    // box as Node's second argument (programObservesMetaArgs).
+    let dynFlavor = dynListenerFlavor(L, args[1]!);
+    if (dynFlavor === null && registering && programObservesMetaArgs(L)) dynFlavor = "func";
     if (dynFlavor !== null) {
       return lowerDynListenerCall(
         L, member, name, tuple, receiver, args[1]!, dynFlavor, registering, once, prepend, loc, false,

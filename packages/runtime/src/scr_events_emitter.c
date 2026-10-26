@@ -68,6 +68,11 @@ typedef struct ScrEeEntry {
    * removeListener/off match it, listenerCount(name, fn) counts it, and
    * listeners()/rawListeners() answer it — Node's identity semantics. */
   ScrClosure *orig;
+  /* NULL unless a dyn-adapted registration: the dyn box the listener was
+   * registered with (owned, retained). A meta event hands it to a checked-
+   * dynamic 'newListener' / 'removeListener' listener as Node's second
+   * argument, the listener function. */
+  ScrDyn *box;
   ScrEeInvoke inv;
   bool once;
   bool fired; /* a once entry that already ran (snapshot skip rule) */
@@ -113,6 +118,7 @@ static void scr_ee_entry_unref(ScrEeEntry *e) {
   if (--e->refs > 0) return;
   scr_closure_release(e->cb);
   scr_closure_release(e->orig); /* NULL-tolerant */
+  scr_dyn_release(e->box);      /* NULL-tolerant */
   free(e);
 }
 
@@ -296,10 +302,17 @@ static bool scr_ee_emit_va(ScrEmitter *em, ScrStr *name, ...);
 /* Fires a meta event with the affected event's NAME as the argument
  * (listeners are fenced to arity <= 1, so the listener-function argument
  * Node passes second is never read). */
-static void scr_ee_emit_meta(ScrEmitter *em, const char *meta, ScrStr *name) {
+static void scr_ee_emit_meta(ScrEmitter *em, const char *meta, ScrStr *name, ScrDyn *fn) {
   if (!scr_ee_has(em->reg, meta)) return;
   ScrStr *m = scr_str_new(meta, strlen(meta));
-  scr_ee_emit_va(em, m, name);
+  /* Node's (eventName, listener): the listener FUNCTION rides as the second
+   * tuple slot. Name-only meta listeners never read it; a checked-dynamic
+   * one with more parameters (or one reading `arguments`) reads the box.
+   * The box is borrowed for the emit. A registration with no box (one the
+   * runtime itself made, or a typed listener in a program with no meta observer)
+   * hands the observer undefined: the compiler gives every registration a box
+   * whenever a meta observer reads the second argument. */
+  scr_ee_emit_va(em, m, name, (void *)(fn != NULL ? fn : scr_dyn_undefined()));
   scr_str_release(m);
 }
 
@@ -332,14 +345,16 @@ static void scr_ee_warn_maybe(ScrEmitter *em, ScrEeBucket *b) {
  * try). */
 static ScrEmitter *scr_ee_add(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
                               ScrClosure *orig /*moves; may be NULL*/,
+                              ScrDyn *box /*borrowed; retained; NULL for direct*/,
                               ScrEeInvoke inv, bool once, bool prepend) {
   scr_ee_reg_ensure(em);
-  scr_ee_emit_meta(em, "newListener", name);
+  scr_ee_emit_meta(em, "newListener", name, box);
   ScrEeBucket *b = scr_ee_bucket_ensure(em->reg, name);
   ScrEeEntry *e = calloc(1, sizeof *e);
   if (!e) scr_ee_oom();
   e->cb = cb;
   e->orig = orig;
+  e->box = box ? scr_dyn_retain(box) : NULL;
   e->inv = inv;
   e->once = once;
   e->refs = 1;
@@ -362,7 +377,7 @@ static ScrEmitter *scr_ee_add(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*mov
 
 ScrEmitter *scr_emitter_on(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
                             ScrEeInvoke inv, bool once, bool prepend) {
-  return scr_ee_add(em, name, cb, NULL, inv, once, prepend);
+  return scr_ee_add(em, name, cb, NULL, NULL, inv, once, prepend);
 }
 
 /* The dyn-adapted registration (JS-lane checked-dynamic listeners): the
@@ -375,8 +390,8 @@ ScrEmitter *scr_emitter_on(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*
 ScrEmitter *scr_emitter_on_dyn(ScrEmitter *em, ScrStr *name, const ScrDyn *cb,
                                 ScrClosure *adapter /*moves*/,
                                 ScrEeInvoke inv, bool once, bool prepend) {
-  return scr_ee_add(em, name, adapter, scr_closure_retain(cb->v.fn.clo), inv, once,
-                    prepend);
+  return scr_ee_add(em, name, adapter, scr_closure_retain(cb->v.fn.clo), (ScrDyn *)cb,
+                    inv, once, prepend);
 }
 
 /* The adapter-mediated registration (the LLVM backend): adapter is what
@@ -385,7 +400,7 @@ ScrEmitter *scr_emitter_on_dyn(ScrEmitter *em, ScrStr *name, const ScrDyn *cb,
 ScrEmitter *scr_emitter_on_via(ScrEmitter *em, ScrStr *name, ScrClosure *orig /*moves*/,
                                 ScrClosure *adapter /*moves*/,
                                 ScrEeInvoke inv, bool once, bool prepend) {
-  return scr_ee_add(em, name, adapter, orig, inv, once, prepend);
+  return scr_ee_add(em, name, adapter, orig, NULL, inv, once, prepend);
 }
 
 /* ── fixed-arity invoke shims (scr_runtime.h's contract) ──────────────
@@ -431,8 +446,10 @@ static void scr_ee_remove_at(ScrEmitter *em, ScrEeBucket *b, size_t i) {
   b->n--;
   ScrStr *name = scr_str_retain(b->name);
   if (b->n == 0 && !em->reg->shape) scr_ee_bucket_drop(em->reg, b);
+  /* The removed entry outlives its list slot until the meta event has
+   * fired: 'removeListener' hands the listener box it still holds. */
+  scr_ee_emit_meta(em, "removeListener", name, e->box);
   scr_ee_entry_unref(e);
-  scr_ee_emit_meta(em, "removeListener", name);
   scr_str_release(name);
 }
 
