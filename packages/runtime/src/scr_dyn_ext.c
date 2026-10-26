@@ -855,3 +855,450 @@ double scr_fs_read_at(double fd, ScrBytes *buf, double offset, double length, do
 #undef SCR_RA_SEEK
   return n;
 }
+
+/* ── Blob and File as VALUES ─────────────────────────────────────────────
+ *
+ * The two members of require('buffer') that are classes of their own. A
+ * Blob is an ordinary dyn object whose prototype is %Blob.prototype%; its
+ * bytes and type ride in two HIDDEN own data keys (non-enumerable, so Object.keys
+ * and for-in never see them; the key strings start with \x01, which no
+ * JavaScript identifier spells). A File is a Blob with a name and a
+ * lastModified. The constructors are FUNC boxes (process singletons, built on
+ * first read through scr_dyn_buffer_value), and `new` reaches the thunk through
+ * the ordinary construct path, which takes the object the thunk returns.
+ * text()/arrayBuffer()/bytes() answer settled promises. Gated with the buffer
+ * values (cc.ts links this unit for dyn.bufferValue).
+ *
+ * NOT MAPPED yet (named, not silent): Blob#stream() and the Symbol.toStringTag
+ * of Blob.prototype. Both are absent from the prototype, so reading them answers
+ * undefined. That is recorded in the slice report as the remaining gap. */
+
+#define SCR_BLOB_KEY_BYTES "\x01" "b"
+#define SCR_BLOB_KEY_TYPE "\x01" "t"
+#define SCR_BLOB_KEY_NAME "\x01" "n"
+#define SCR_BLOB_KEY_LM "\x01" "m"
+
+static ScrDyn *scr_blob_proto_box = NULL; /* %Blob.prototype%, owned by the singleton */
+static ScrDyn *scr_file_proto_box = NULL; /* %File.prototype% */
+static ScrDyn *scr_blob_ctor_box = NULL;  /* %Blob% */
+static ScrDyn *scr_file_ctor_box = NULL;  /* %File% */
+
+/* Blob.type: ASCII printable only, lowercased; anything else is the empty type (the spec). */
+static ScrStr *scr_blob_norm_type(const ScrDyn *v) {
+  if (v == NULL || v->kind != SCR_DYN_STR) return scr_str_new("", 0);
+  const ScrStr *s = v->v.str;
+  char *out = (char *)malloc(s->len + 1);
+  if (out == NULL) scr_bytes_io_oom();
+  for (size_t i = 0; i < s->len; i++) {
+    unsigned char c = (unsigned char)s->data[i];
+    if (c < 0x20 || c > 0x7E) {
+      free(out);
+      return scr_str_new("", 0);
+    }
+    out[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : (char)c;
+  }
+  ScrStr *r = scr_str_new(out, s->len);
+  free(out);
+  return r;
+}
+
+/* The bytes of one blob-part (a string as UTF-8; a view or an ArrayBuffer by copy;
+ * a Blob by copy of its bytes; anything else by its ToString). +1, NULL with the pending throw. */
+static ScrBytes *scr_blob_part_bytes(const ScrDyn *p) {
+  ScrStr *utf8 = scr_str_new("utf8", 4);
+  ScrBytes *out = NULL;
+  if (p->kind == SCR_DYN_STR) {
+    out = scr_bytes_from_str(p->v.str, utf8);
+  } else if ((p->kind == SCR_DYN_BYTES || p->kind == SCR_DYN_ARRBUF) && p->v.bytes != NULL) {
+    size_t n = p->v.bytes->len * scr_bytes_elem_size(p->v.bytes->elem);
+    out = scr_bytes_new(SCR_BYTES_U8, (double)n);
+    if (out != NULL && n > 0) memcpy(out->data, p->v.bytes->data, n);
+  } else if (p->kind == SCR_DYN_OBJ) {
+    const ScrDyn *inner = scr_dyn_obj_own_data(p, SCR_BLOB_KEY_BYTES, 2);
+    if (inner != NULL && inner->kind == SCR_DYN_BYTES && inner->v.bytes != NULL) {
+      size_t n = inner->v.bytes->len;
+      out = scr_bytes_new(SCR_BYTES_U8, (double)n);
+      if (out != NULL && n > 0) memcpy(out->data, inner->v.bytes->data, n);
+    } else {
+      ScrStr *s = scr_dyn_to_string(p, utf8);
+      if (s != NULL) {
+        out = scr_bytes_from_str(s, utf8);
+        scr_str_release(s);
+      }
+    }
+  } else {
+    ScrStr *s = scr_dyn_to_string(p, utf8);
+    if (s != NULL) {
+      out = scr_bytes_from_str(s, utf8);
+      scr_str_release(s);
+    }
+  }
+  scr_str_release(utf8);
+  return out;
+}
+
+static double scr_blob_now_ms(void) {
+  /* Second resolution (clock_gettime needs a POSIX feature macro this unit does not set). */
+  return (double)time(NULL) * 1000.0;
+}
+
+/* A Blob (or File) object over `bytes` (+1, consumed) with `type` (+1, consumed). */
+static ScrDyn *scr_blob_make(ScrBytes *bytes, ScrStr *type, bool is_file, ScrStr *name, double lm) {
+  ScrDyn *obj = scr_dyn_new_obj(); /* +1 */
+  scr_dyn_obj_set_proto(obj, is_file ? scr_file_proto_box : scr_blob_proto_box);
+  ScrDyn *bd = scr_dyn_new_bytes_ref(bytes); /* +1, retains */
+  scr_bytes_release(bytes);
+  scr_dyn_obj_define_hidden_data(obj, SCR_BLOB_KEY_BYTES, 2, bd, false, false);
+  scr_dyn_release(bd);
+  ScrDyn *td = scr_dyn_new_str(type); /* consumes type */
+  scr_dyn_obj_define_hidden_data(obj, SCR_BLOB_KEY_TYPE, 2, td, false, false);
+  scr_dyn_release(td);
+  if (is_file) {
+    ScrDyn *nd = scr_dyn_new_str(name); /* consumes name */
+    scr_dyn_obj_define_hidden_data(obj, SCR_BLOB_KEY_NAME, 2, nd, false, false);
+    scr_dyn_release(nd);
+    ScrDyn *md = scr_dyn_new_num(lm);
+    scr_dyn_obj_define_hidden_data(obj, SCR_BLOB_KEY_LM, 2, md, false, false);
+    scr_dyn_release(md);
+  }
+  return obj;
+}
+
+/* `this` of a Blob method: the receiver object (borrowed from the +1 window read `self`). */
+static const ScrDyn *scr_blob_this_bytes(ScrDyn *self, const char *what) {
+  const ScrDyn *b = (self != NULL && self->kind == SCR_DYN_OBJ) ? scr_dyn_obj_own_data(self, SCR_BLOB_KEY_BYTES, 2) : NULL;
+  if (b == NULL || b->kind != SCR_DYN_BYTES) {
+    ScrJsonBuf jb;
+    scr_jb_init(&jb);
+    scr_jb_puts(&jb, "Value of \"this\" must be of type Blob (");
+    scr_jb_puts(&jb, what);
+    scr_jb_puts(&jb, ")");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&jb));
+    return NULL;
+  }
+  return b;
+}
+
+static ScrDyn *scr_blob_construct(ScrDyn *const *args, size_t argc, bool is_file) {
+  const char *cname = is_file ? "File" : "Blob";
+  ScrDyn *self = scr_dyn_this_get(); /* +1; the construct path binds the fresh object here */
+  bool plain = self == NULL || self->kind == SCR_DYN_UNDEF;
+  scr_dyn_release(self);
+  if (plain) {
+    ScrJsonBuf jb;
+    scr_jb_init(&jb);
+    scr_jb_puts(&jb, "Class constructor ");
+    scr_jb_puts(&jb, cname);
+    scr_jb_puts(&jb, " cannot be invoked without 'new'");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&jb));
+    return NULL;
+  }
+  const ScrDyn *undef = scr_dyn_undefined();
+  const ScrDyn *sources = argc >= 1 ? args[0] : undef;
+  const ScrDyn *opts = argc >= (is_file ? 3u : 2u) ? args[is_file ? 2 : 1] : undef;
+  if (is_file && argc < 2) {
+    static const char msg[] = "The \"fileBits\" and \"fileName\" arguments must be specified";
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_MISSING_ARGS");
+    return NULL;
+  }
+  /* The parts, in order. */
+  size_t nparts = 0;
+  if (sources->kind == SCR_DYN_ARR) nparts = sources->v.arr.len;
+  else if (sources->kind != SCR_DYN_UNDEF) {
+    scr_dyn_arg_type_fail("sources", "an instance of Array", sources);
+    return NULL;
+  }
+  ScrBytes **parts = nparts > 0 ? (ScrBytes **)calloc(nparts, sizeof(ScrBytes *)) : NULL;
+  if (nparts > 0 && parts == NULL) scr_bytes_io_oom();
+  size_t total = 0;
+  for (size_t i = 0; i < nparts; i++) {
+    parts[i] = scr_blob_part_bytes(sources->v.arr.items[i]);
+    if (parts[i] == NULL) {
+      for (size_t j = 0; j < i; j++) scr_bytes_release(parts[j]);
+      free(parts);
+      return NULL;
+    }
+    total += parts[i]->len;
+  }
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)total);
+  if (out == NULL) {
+    for (size_t j = 0; j < nparts; j++) scr_bytes_release(parts[j]);
+    free(parts);
+    return NULL;
+  }
+  size_t off = 0;
+  for (size_t i = 0; i < nparts; i++) {
+    if (parts[i]->len > 0) memcpy(out->data + off, parts[i]->data, parts[i]->len);
+    off += parts[i]->len;
+    scr_bytes_release(parts[i]);
+  }
+  free(parts);
+  /* The options bag: type, and for File lastModified. */
+  ScrStr *type = scr_str_new("", 0);
+  if (opts->kind == SCR_DYN_OBJ) {
+    const ScrDyn *t = scr_dyn_obj_get(opts, "type", 4);
+    if (t != NULL) {
+      scr_str_release(type);
+      type = scr_blob_norm_type(t);
+    }
+  } else if (opts->kind != SCR_DYN_UNDEF) {
+    scr_str_release(type);
+    scr_dyn_arg_type_fail("options", "of type object", opts);
+    scr_bytes_release(out);
+    return NULL;
+  }
+  ScrStr *name = NULL;
+  double lm = 0.0;
+  if (is_file) {
+    ScrStr *utf8 = scr_str_new("utf8", 4);
+    name = scr_dyn_to_string(args[1], utf8);
+    scr_str_release(utf8);
+    if (name == NULL) {
+      scr_bytes_release(out);
+      scr_str_release(type);
+      return NULL;
+    }
+    lm = scr_blob_now_ms();
+    if (opts->kind == SCR_DYN_OBJ) {
+      const ScrDyn *m = scr_dyn_obj_get(opts, "lastModified", 12);
+      if (m != NULL && m->kind == SCR_DYN_NUM) lm = m->v.num;
+    }
+  }
+  return scr_blob_make(out, type, is_file, name, lm);
+}
+
+static ScrDyn *scr_blob_ctor_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  return scr_blob_construct(args, argc, false);
+}
+
+static ScrDyn *scr_file_ctor_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  return scr_blob_construct(args, argc, true);
+}
+
+/* Prototype members. Each reads its receiver from the `this` window. */
+static ScrDyn *scr_blob_g_size(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  ScrDyn *self = scr_dyn_this_get();
+  const ScrDyn *b = scr_blob_this_bytes(self, "size");
+  double n = b != NULL ? (double)b->v.bytes->len : 0.0;
+  scr_dyn_release(self);
+  if (b == NULL) return NULL;
+  return scr_dyn_new_num(n);
+}
+
+static ScrDyn *scr_blob_g_type(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  ScrDyn *self = scr_dyn_this_get();
+  const ScrDyn *b = scr_blob_this_bytes(self, "type");
+  if (b == NULL) { scr_dyn_release(self); return NULL; }
+  const ScrDyn *t = scr_dyn_obj_own_data(self, SCR_BLOB_KEY_TYPE, 2);
+  ScrStr *s = scr_str_new(t != NULL && t->kind == SCR_DYN_STR ? t->v.str->data : "", t != NULL && t->kind == SCR_DYN_STR ? t->v.str->len : 0);
+  scr_dyn_release(self);
+  return scr_dyn_new_str(s);
+}
+
+static ScrDyn *scr_blob_g_name(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  ScrDyn *self = scr_dyn_this_get();
+  const ScrDyn *b = scr_blob_this_bytes(self, "name");
+  if (b == NULL) { scr_dyn_release(self); return NULL; }
+  const ScrDyn *n = scr_dyn_obj_own_data(self, SCR_BLOB_KEY_NAME, 2);
+  ScrStr *s = scr_str_new(n != NULL && n->kind == SCR_DYN_STR ? n->v.str->data : "", n != NULL && n->kind == SCR_DYN_STR ? n->v.str->len : 0);
+  scr_dyn_release(self);
+  return scr_dyn_new_str(s);
+}
+
+static ScrDyn *scr_blob_g_last_modified(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  ScrDyn *self = scr_dyn_this_get();
+  const ScrDyn *b = scr_blob_this_bytes(self, "lastModified");
+  if (b == NULL) { scr_dyn_release(self); return NULL; }
+  const ScrDyn *m = scr_dyn_obj_own_data(self, SCR_BLOB_KEY_LM, 2);
+  double v = m != NULL && m->kind == SCR_DYN_NUM ? m->v.num : 0.0;
+  scr_dyn_release(self);
+  return scr_dyn_new_num(v);
+}
+
+/* slice(start?, end?, contentType?): Node's relative-index clamp over the byte length. */
+static ScrDyn *scr_blob_m_slice(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  ScrDyn *self = scr_dyn_this_get();
+  const ScrDyn *bd = scr_blob_this_bytes(self, "slice");
+  if (bd == NULL) { scr_dyn_release(self); return NULL; }
+  double size = (double)bd->v.bytes->len;
+  const ScrDyn *undef = scr_dyn_undefined();
+  double start = 0, end = size;
+  const ScrDyn *a0 = argc >= 1 ? args[0] : undef;
+  const ScrDyn *a1 = argc >= 2 ? args[1] : undef;
+  const ScrDyn *a2 = argc >= 3 ? args[2] : undef;
+  if (a0->kind != SCR_DYN_UNDEF) {
+    double r = scr_dyn_to_number(a0);
+    if (scr_exc_pending()) { scr_dyn_release(self); return NULL; }
+    if (r != r) r = 0;
+    start = r < 0 ? (size + r < 0 ? 0 : size + r) : (r > size ? size : r);
+  }
+  if (a1->kind != SCR_DYN_UNDEF) {
+    double r = scr_dyn_to_number(a1);
+    if (scr_exc_pending()) { scr_dyn_release(self); return NULL; }
+    if (r != r) r = 0;
+    end = r < 0 ? (size + r < 0 ? 0 : size + r) : (r > size ? size : r);
+  }
+  double len = end > start ? end - start : 0;
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, len);
+  if (out == NULL) { scr_dyn_release(self); return NULL; }
+  if (len > 0) memcpy(out->data, bd->v.bytes->data + (size_t)start, (size_t)len);
+  ScrStr *type = a2->kind == SCR_DYN_UNDEF ? scr_str_new("", 0) : scr_blob_norm_type(a2);
+  scr_dyn_release(self);
+  return scr_blob_make(out, type, false, NULL, 0.0);
+}
+
+/* A Blob read settles in a LATER turn, as Node's does (its read runs off the main
+ * turn): a pending promise fulfilled from the immediate queue, so the reactions
+ * already queued (a plain Promise.resolve(...).then) run first. The closure holds the
+ * promise and the payload; the immediate calls it once. */
+static void scr_blob_settle_str_later(ScrClosure *self) {
+  ScrPromise *p = (ScrPromise *)scr_box_get_ref(self->caps[0]); /* +1 */
+  ScrStr *s = (ScrStr *)scr_box_get_ref(self->caps[1]);         /* +1, moves into the fulfil */
+  scr_promise_fulfill_str(p, s);
+  scr_promise_release(p);
+}
+/* The payload of a dyn promise is a checked-dynamic value (scr_await_dyn reads it as one). */
+static void scr_blob_settle_dyn_later(ScrClosure *self) {
+  ScrPromise *p = (ScrPromise *)scr_box_get_ref(self->caps[0]); /* +1 */
+  ScrDyn *v = (ScrDyn *)scr_box_get_ref(self->caps[1]);         /* +1, moves into the promise */
+  scr_promise_fulfill_ref(p, v, scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_promise_release(p);
+}
+
+/* A pending promise over the closure `fn`, fulfilled by the immediate queue. +1. */
+static ScrPromise *scr_blob_deferred(void (*fn)(ScrClosure *), void *payload,
+                                     void *(*pretain)(void *), void (*prelease)(void *),
+                                     void *(*pl_retain)(void *), void (*pl_release)(void *)) {
+  ScrPromise *p = scr_promise_new(); /* +1, ours */
+  ScrClosure *c = scr_closure_new((void *)fn, 2);
+  ScrBox *pb = scr_box_new_obj(pretain, prelease, NULL);
+  scr_box_set_ref(pb, scr_promise_retain(p));
+  ScrBox *vb = scr_box_new_obj(pl_retain, pl_release, NULL);
+  scr_box_set_ref(vb, pl_retain(payload));
+  c->caps[0] = pb;
+  c->caps[1] = vb;
+  scr_set_immediate(c);
+  return p;
+}
+
+/* text(): a promise of the bytes decoded as UTF-8, settled in a later turn. */
+static ScrDyn *scr_blob_m_text(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  ScrDyn *self = scr_dyn_this_get();
+  const ScrDyn *bd = scr_blob_this_bytes(self, "text");
+  if (bd == NULL) { scr_dyn_release(self); return NULL; }
+  ScrStr *utf8 = scr_str_new("utf8", 4);
+  ScrStr *s = scr_bytes_to_str(bd->v.bytes, utf8);
+  scr_str_release(utf8);
+  scr_dyn_release(self);
+  ScrPromise *p = scr_blob_deferred(scr_blob_settle_str_later, s, &scr_promise_retain_v, &scr_promise_release_v,
+                                    &scr_str_retain_v, &scr_str_release_v);
+  scr_str_release(s);
+  ScrDyn *d = scr_dyn_new_promise(p);
+  scr_promise_release(p);
+  return d;
+}
+
+/* bytes(): a settled promise of a fresh Uint8Array copy. */
+static ScrDyn *scr_blob_m_bytes(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  ScrDyn *self = scr_dyn_this_get();
+  const ScrDyn *bd = scr_blob_this_bytes(self, "bytes");
+  if (bd == NULL) { scr_dyn_release(self); return NULL; }
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)bd->v.bytes->len);
+  if (out != NULL && bd->v.bytes->len > 0) memcpy(out->data, bd->v.bytes->data, bd->v.bytes->len);
+  scr_dyn_release(self);
+  if (out == NULL) return NULL;
+  ScrDyn *dv = scr_dyn_new_bytes_ref(out); /* +1 */
+  scr_bytes_release(out);
+  ScrPromise *p = scr_blob_deferred(scr_blob_settle_dyn_later, dv, &scr_promise_retain_v, &scr_promise_release_v,
+                                    &scr_dyn_retain_v, &scr_dyn_release_v);
+  scr_dyn_release(dv);
+  ScrDyn *d = scr_dyn_new_promise(p);
+  scr_promise_release(p);
+  return d;
+}
+
+/* arrayBuffer(): a settled promise of a fresh ArrayBuffer copy. */
+static ScrDyn *scr_blob_m_array_buffer(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  ScrDyn *self = scr_dyn_this_get();
+  const ScrDyn *bd = scr_blob_this_bytes(self, "arrayBuffer");
+  if (bd == NULL) { scr_dyn_release(self); return NULL; }
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)bd->v.bytes->len);
+  if (out != NULL && bd->v.bytes->len > 0) memcpy(out->data, bd->v.bytes->data, bd->v.bytes->len);
+  scr_dyn_release(self);
+  if (out == NULL) return NULL;
+  ScrDyn *ab = scr_dyn_new_arrbuf_ref(out); /* +1, retains */
+  scr_bytes_release(out);
+  ScrPromise *p = scr_blob_deferred(scr_blob_settle_dyn_later, ab, &scr_promise_retain_v, &scr_promise_release_v,
+                                    &scr_dyn_retain_v, &scr_dyn_release_v);
+  scr_dyn_release(ab);
+  ScrDyn *d = scr_dyn_new_promise(p);
+  scr_promise_release(p);
+  return d;
+}
+
+static void scr_blob_define_method(ScrDyn *target, const char *name, ScrDynThunk thunk, uint32_t arity) {
+  ScrDyn *f = scr_dyn_new_func(scr_closure_new((void *)thunk, 0), thunk, arity, "()", name); /* +1 */
+  scr_dyn_obj_define_hidden_data(target, name, strlen(name), f, true, true);
+  scr_dyn_release(f);
+}
+
+static void scr_blob_define_getter(ScrDyn *target, const char *name, ScrDynThunk thunk) {
+  ScrDyn *g = scr_dyn_new_func(scr_closure_new((void *)thunk, 0), thunk, 0, "()", name); /* +1 */
+  scr_dyn_obj_define_accessor(target, name, strlen(name), g, scr_dyn_undefined(), true, false);
+  scr_dyn_release(g);
+}
+
+static void scr_blob_teardown(void) {
+  scr_dyn_release(scr_file_ctor_box);
+  scr_file_ctor_box = NULL;
+  scr_dyn_release(scr_blob_ctor_box);
+  scr_blob_ctor_box = NULL;
+  scr_dyn_release(scr_file_proto_box);
+  scr_file_proto_box = NULL;
+  scr_dyn_release(scr_blob_proto_box);
+  scr_blob_proto_box = NULL;
+}
+
+/* %Blob% (is_file false) or %File% as process singletons. */
+ScrDyn *scr_dyn_blob_class(bool is_file) {
+  if (scr_blob_proto_box == NULL) {
+    ScrDyn *bp = scr_dyn_new_obj(); /* %Blob.prototype% +1 */
+    scr_blob_define_method(bp, "slice", scr_blob_m_slice, 0);
+    scr_blob_define_method(bp, "text", scr_blob_m_text, 0);
+    scr_blob_define_method(bp, "arrayBuffer", scr_blob_m_array_buffer, 0);
+    scr_blob_define_method(bp, "bytes", scr_blob_m_bytes, 0);
+    scr_blob_define_getter(bp, "size", scr_blob_g_size);
+    scr_blob_define_getter(bp, "type", scr_blob_g_type);
+    ScrDyn *c = scr_dyn_new_func(scr_closure_new((void *)scr_blob_ctor_thunk, 0), scr_blob_ctor_thunk, 2, "()", "Blob");
+    ScrDyn *table = scr_dyn_fn_props(c);
+    scr_dyn_obj_set(table, "prototype", 9, scr_dyn_retain(bp));
+    scr_dyn_release(table);
+    scr_dyn_obj_define_hidden_data(bp, "constructor", 11, c, true, true);
+    scr_blob_ctor_box = c;
+    scr_blob_proto_box = bp;
+
+    ScrDyn *fp = scr_dyn_new_obj(); /* %File.prototype% +1 */
+    scr_dyn_obj_set_proto(fp, bp);
+    scr_blob_define_getter(fp, "name", scr_blob_g_name);
+    scr_blob_define_getter(fp, "lastModified", scr_blob_g_last_modified);
+    ScrDyn *fc = scr_dyn_new_func(scr_closure_new((void *)scr_file_ctor_thunk, 0), scr_file_ctor_thunk, 3, "()", "File");
+    ScrDyn *ftable = scr_dyn_fn_props(fc);
+    scr_dyn_obj_set(ftable, "prototype", 9, scr_dyn_retain(fp));
+    scr_dyn_release(ftable);
+    scr_dyn_obj_define_hidden_data(fp, "constructor", 11, fc, true, true);
+    scr_file_ctor_box = fc;
+    scr_file_proto_box = fp;
+    scr_atexit(scr_blob_teardown);
+  }
+  return scr_dyn_retain(is_file ? scr_file_ctor_box : scr_blob_ctor_box);
+}
