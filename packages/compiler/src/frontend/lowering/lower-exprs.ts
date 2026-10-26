@@ -1049,7 +1049,9 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // builtinMemberOf, and a module binding is the one receiver `?.` never skips.
         const mod = L.builtinNamespaceModuleOf(expr.expression.expression);
         const bi = mod !== null ? { module: mod, member: expr.expression.name.text } : L.builtinMemberOf(expr.expression);
-        if (bi !== null && builtinModuleFnOf(L, bi.module, bi.member) !== null) {
+        // builtinModuleFnOf answers undefined (not null) for a member with no row: `!== null` read that
+        // as a function (MEASURED: `typeof require("buffer").kMaxLength` printed "function").
+        if (bi !== null && builtinModuleFnOf(L, bi.module, bi.member) !== undefined) {
           return { kind: "strLit", value: "function", type: STRING, loc };
         }
       }
@@ -6230,6 +6232,10 @@ function typeofMethodSniff(L: Lowerer, expr: ts.TypeOfExpression, loc: SrcLoc): 
   let inner: ts.Expression = expr.expression;
   while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
   if (!ts.isPropertyAccessExpression(inner) || inner.questionDotToken !== undefined) return null;
+  // A builtin MODULE namespace is not a class instance: its members are values (a number, a
+  // function, an object), and the class-method reasoning below says nothing about them. Their
+  // typeof answers come from the member lowerings (builtinModuleFnOf, bufferValueOf).
+  if (L.builtinNamespaceModuleOf(inner.expression) !== null) return null;
   const member = inner.name.text;
   // Peel the casts, remembering the type the outermost one asserts.
   let e0: ts.Expression = inner.expression;
@@ -7617,7 +7623,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // in pg's connection.js): the member is a function the binary has.
     if (ts.isPropertyAccessExpression(e) && !e.questionDotToken) {
       const bi = L.builtinMemberOf(e);
-      if (bi !== null && builtinModuleFnOf(L, bi.module, bi.member) !== null) {
+      if (bi !== null && builtinModuleFnOf(L, bi.module, bi.member) !== undefined) {
         return { kind: "boolLit", value: true, type: BOOL, loc: locOf(e) };
       }
     }
