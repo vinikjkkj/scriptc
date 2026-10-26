@@ -22886,8 +22886,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * a runtime case throwing the CATCHABLE TypeError Node itself throws,
    * word for word ("Cannot read properties of undefined (reading
    * 'length')"). Sound narrowing never reaches it; an unsound one throws
-   * what Node throws instead of answering a made-up number. At least one
-   * arm must be intrinsic, so a unit-only union still declines. */
+   * what Node throws instead of answering a made-up number.
+   *
+   * A BOOLEAN or NUMBER arm answers undefined (Node: `(true).length` is
+   * undefined, and so is `(5).length`), so the answer becomes the join of
+   * F64 and undefined and every arm answers its own: the intrinsic length,
+   * the unit throw, or undefined. A union with no intrinsic arm and only
+   * undefined answers declines (a lone undefined type has no representation).
+   * A union of unit arms only throws, and keeps the F64 answer. Any other
+   * arm (a record, an object, a function) still declines. */
   function lowerUnionIntrinsicLengthRead(L: Lowerer, expr: ts.Node, value: IrExpr, field: string): IrExpr | null {
     if (field !== "length") return null;
     if (value.type.kind !== "union") return null;
@@ -22898,12 +22905,31 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const nodeKindOf = (k: string): (typeof INTRINSIC)[keyof typeof INTRINSIC] | null =>
       k === "bytes" || k === "string" || k === "array" ? INTRINSIC[k] : null;
     let intrinsicArms = 0;
+    let undefArms = 0;
     for (const arm of def.arms) {
       if (nodeKindOf(arm.kind) !== null) intrinsicArms++;
+      else if (arm.kind === "bool" || arm.kind === "f64") undefArms++;
       else if (!isUnitType(arm)) return null;
     }
-    if (intrinsicArms === 0) return null;
+    // A boolean or number arm ANSWERS undefined (Node: `(true).length` and
+    // `(5).length` are undefined, neither primitive owns a `length`), so the
+    // read's answer is the join of F64 and undefined. A union whose only
+    // non-throwing answer is undefined has no representation (a lone unit arm
+    // does not), so it declines. A unit-only union (null | undefined) always
+    // throws and keeps the F64 answer its stranded-arm throws already had.
+    if (intrinsicArms === 0 && undefArms > 0) return null;
+    const answer: IrType =
+      undefArms > 0
+        ? { kind: "union", unionId: L.unions.intern([F64, UNDEFINED_T].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1))) }
+        : F64;
     const loc = locOf(expr);
+    // A union answer takes each arm's value at that arm's tag (unionWrap). The
+    // width-lift relation has no unit-into-union step, so the tags are looked up
+    // in the interned answer directly.
+    const answerArms = answer.kind === "union" ? (L.unions.get(answer.unionId)?.arms ?? []) : [];
+    const numTag = answerArms.findIndex((a) => a.kind === "f64");
+    const undefTag = answerArms.findIndex((a) => a.kind === "undefinedT");
+    if (answer.kind === "union" && (numTag < 0 || undefTag < 0)) return null;
     const key = `ulength:${fromId}`;
     let name = L.widthHelpers.get(key);
     if (name === undefined) {
@@ -22914,23 +22940,32 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const body: IrStmt[] = [];
       def.arms.forEach((arm, i) => {
         const nk = nodeKindOf(arm.kind);
-        const read: IrExpr =
-          nk === null
-            ? nodeThrowExpr(
-                1,
-                "",
-                `Cannot read properties of ${arm.kind === "undefinedT" ? "undefined" : "null"} (reading 'length')`,
-                F64,
-                loc,
-              )
-            : ({
-                kind: nk,
-                method: "length",
-                receiver: { kind: "unionNarrow", unionId: fromId, tag: i, value: u, type: arm, loc },
-                args: [],
-                type: F64,
-                loc,
-              } as unknown as IrExpr);
+        // Each arm's answer, typed as the helper's return: an intrinsic arm's
+        // length (F64, joined into the answer union when there is one), a unit
+        // arm's catchable TypeError, a boolean/number arm's undefined.
+        let read: IrExpr;
+        if (nk !== null) {
+          const len = {
+            kind: nk,
+            method: "length",
+            receiver: { kind: "unionNarrow", unionId: fromId, tag: i, value: u, type: arm, loc },
+            args: [],
+            type: F64,
+            loc,
+          } as unknown as IrExpr;
+          read = answer.kind === "union" ? { kind: "unionWrap", unionId: answer.unionId, tag: numTag, value: len, type: answer, loc } : len;
+        } else if (isUnitType(arm)) {
+          read = nodeThrowExpr(
+            1,
+            "",
+            `Cannot read properties of ${arm.kind === "undefinedT" ? "undefined" : "null"} (reading 'length')`,
+            answer,
+            loc,
+          );
+        } else {
+          const undef: IrExpr = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
+          read = answer.kind === "union" ? { kind: "unionWrap", unionId: answer.unionId, tag: undefTag, value: undef, type: answer, loc } : undef;
+        }
         body.push({
           kind: "if",
           cond: { kind: "unionIsTag", unionId: fromId, tag: i, negated: false, value: u, type: BOOL, loc },
@@ -22949,13 +22984,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       L.liftedFns.push({
         name,
         params: [{ localId: "u.0", name: "u", type: fromT }],
-        returnType: F64,
+        returnType: answer,
         locals: [{ id: "u.0", name: "u", type: fromT, mutable: true }],
         body,
         loc,
       });
     }
-    return { kind: "call", callee: name, args: [value], type: F64, loc };
+    return { kind: "call", callee: name, args: [value], type: answer, loc };
   }
 
   /** unionKeyGet's arm answers must SURFACE as the join — each is the join
