@@ -7366,11 +7366,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(
               `scr_emitter_emit((ScrEmitter *)${arg(0)}, ${arg(1)}${e.args.slice(2).map((_, i) => `, ${arg(i + 2)}`).join("")})`,
             );
-          case "emitter.emitError":
           case "emitter.emitDyn":
             // emit.apply(this, arr): the runtime reads the name and the listener
             // arguments from one dyn array (may-throw: listeners and unhandled error).
             return finish(`scr_emitter_emit_dyn_array((ScrEmitter *)${arg(0)}, ${arg(1)})`);
+          case "emitter.emitError":
             // emit('error', err): unhandled ⇒ the runtime throws the
             // payload through the exception cell (may-throw seed).
             return finish(
