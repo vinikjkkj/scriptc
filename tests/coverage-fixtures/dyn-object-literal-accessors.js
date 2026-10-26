@@ -47,10 +47,11 @@ class Holder {
 }
 console.log(String(new Holder().build().b));
 
-// The message this site is LEFT with, and the only construct it still names:
-// a SPREAD on the road that carries a whole literal in. A literal in a dyn
-// slot, or one spreading a checked-dynamic member chain, routes to the spread
-// folder instead and never reaches here.
+// A SPREAD beside a computed key used to be refused here. Every dyn literal
+// with a spread now folds through dyn.assign (the run-time key is a run of
+// its own, and the spread copies over it in source order), so this site
+// lowers: the spread of a checked-dynamic source is copied onto the table.
+// (The accessor-plus-spread fence below is still named by its own message.)
 function spreadUnderRuntimeKey(key, src) {
   const o = { [key]: 1, ...src };
   return JSON.stringify(o);
