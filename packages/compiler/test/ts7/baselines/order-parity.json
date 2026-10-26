@@ -1363,6 +1363,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/11450-dyn-emitter-computed-name-on-off-count.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11450-dyn-emitter-computed-name-on-off-count.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11451-dyn-emitter-computed-name-outside-set.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11451-dyn-emitter-computed-name-outside-set.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11452-dyn-emitter-computed-name-once.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11452-dyn-emitter-computed-name-once.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11453-dyn-emitter-emit-literal-no-tuple.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11453-dyn-emitter-emit-literal-no-tuple.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11454-dyn-emitter-computed-name-meta-listener.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11454-dyn-emitter-computed-name-meta-listener.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11455-dyn-not-emitter-computed-name-type-error.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11455-dyn-not-emitter-computed-name-type-error.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11456-dyn-emitter-computed-name-numeric.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11456-dyn-emitter-computed-name-numeric.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11457-dyn-emitter-computed-name-forwarder.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11457-dyn-emitter-computed-name-forwarder.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/11500-instof-unknown-class-chain.ts": {
    "order": [
     "<repo>/tests/corpus/11500-instof-unknown-class-chain.ts"
