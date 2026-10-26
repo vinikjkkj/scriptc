@@ -7465,10 +7465,19 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       }
     }
     const noArm = declared.kind !== "union" || L.armTag(declared.unionId, UNDEFINED_T) < 0;
-    const type =
-      noArm && slotWidenedRecv && typeEquals(declared, body.type) && armCarryableChainWidth(body.type)
-        ? L.withUndefinedArm(body.type)
-        : declared;
+    // A UNION body is the same case, one level up: `cm?.getComms()` where
+    // getComms answers `Comms | null`. The checker folded the `?.` away
+    // (cm is narrowed by the assignment before the closure), so the chain's
+    // declared type is `Comms | null` with no undefined arm, while the
+    // slot the receiver lives in still holds the null arm. The short-circuit
+    // answers undefined, so the arm is added by the canonical union
+    // widener (flattened, not nested, the same way the non-union rung adds
+    // it to a single-width body).
+    const type = (() => {
+      if (!(noArm && slotWidenedRecv && typeEquals(declared, body.type))) return declared;
+      if (body.type.kind === "union") return L.withUndefinedArmOf(body.type) ?? declared;
+      return armCarryableChainWidth(body.type) ? L.withUndefinedArm(body.type) : declared;
+    })();
     if (type.kind !== "union" || L.armTag(type.unionId, UNDEFINED_T) < 0) {
       L.unsupported(
         "SC1090",
