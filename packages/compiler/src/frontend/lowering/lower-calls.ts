@@ -30,7 +30,7 @@ import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
-import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
+import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitApplyCall, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
 import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
 import { isRequireBindingIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
@@ -4230,6 +4230,12 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         !expr.expression.questionDotToken && pairedProtoClassOfValue(L, expr.expression.expression) !== null) {
       const paired = lowerStaticMethodCall(L, expr, expr.expression);
       if (paired !== null) return paired;
+    }
+    // `E.emit.apply(E, args)` on an emitter receiver: Node applies emit to a runtime
+    // argument list (mysql2's inheritEvents forwarder). Null for every other shape.
+    {
+      const emitApply = lowerEmitApplyCall(L, expr, loc);
+      if (emitApply !== null) return emitApply;
     }
 
     // crypto.diffieHellman's CALLBACK form. Claimed at the head because the

@@ -1101,6 +1101,57 @@ export function emitterEventNames(L: Lowerer): string[] {
  * so listenerCount and removeListener answer exactly as Node's do. The
  * adapter takes no parameters: it is never invoked. `recv` is the lowered
  * emitter object and `nameIr` the STRING event name. */
+/** `E.emit.apply(E, args)` on an emitter-rooted receiver (mysql2's inheritEvents
+ * forwarder, `target.emit.apply(target, args)`): Node applies `emit` to a
+ * RUNTIME argument list, whose first element is the event name. The runtime
+ * calls each listener's original checked-dynamic function with the full list.
+ * A typed listener on a reachable event cannot take a dynamic list, so that
+ * is a compile-time refusal. Null for every other shape (nothing lowered). */
+export function lowerEmitApplyCall(L: Lowerer, call: ts.CallExpression, loc: SrcLoc): IrExpr | null {
+  const apply = call.expression;
+  if (!ts.isPropertyAccessExpression(apply) || apply.questionDotToken !== undefined || apply.name.text !== "apply") return null;
+  const emitAcc = apply.expression;
+  if (!ts.isPropertyAccessExpression(emitAcc) || emitAcc.questionDotToken !== undefined || emitAcc.name.text !== "emit") return null;
+  if (call.arguments.length !== 2) return null;
+  const thisNode = call.arguments[0]!;
+  const argsNode = call.arguments[1]!;
+  // Only plain references: the receiver is lowered once here, and an identifier
+  // or `this` read has no effect of its own, so a shape declined below is safe.
+  const pureRef = (n: ts.Expression): boolean => ts.isIdentifier(n) || n.kind === ts.SyntaxKind.ThisKeyword;
+  if (!pureRef(emitAcc.expression) || !pureRef(thisNode) || ts.isSpreadElement(argsNode)) return null;
+  if (emitAcc.expression.getText() !== thisNode.getText()) return null;
+  const recv = L.lowerExpr(emitAcc.expression);
+  if (recv.type.kind !== "object") return null;
+  const info = L.classes.get(recv.type.className);
+  if (!info || !emitterRooted(L, info) || L.findMethodOn(info, "emit") !== null) return null;
+  // No TYPED listener can be reached by this emit: a typed listener on the
+  // receiver's root keys, the untyped bucket, or the program-wide 'error' key
+  // (emit-only signatures do not count; a dyn listener takes the list).
+  const rootKey = emitterRootKey(info);
+  for (const [key, sig] of emitterEvents(L)) {
+    const reachable = key === "error" || key.startsWith(`${rootKey}\u0000`) || key.startsWith("*\u0000");
+    if (reachable && sig.listened) {
+      L.noLowering(
+        `'emit' applied to a dynamic argument list on '${evDisplayName(key)}'`,
+        call,
+        "Node spreads the list into each listener call, and a listener with typed parameters cannot take a dynamic list. Leave the listener's parameters unannotated so it is checked-dynamic, or emit with literal arguments",
+      );
+    }
+  }
+  const arr = L.lowerExpr(argsNode);
+  const getRecord = (id: string) => L.shapes.get(id);
+  const getUnion = (id: string) => L.unions.get(id);
+  if (arr.type.kind !== "dyn" && !canConvertToDyn(arr.type, getRecord, getUnion)) {
+    L.noLowering(
+      `'emit.apply' with an argument list of type '${L.fmt(arr.type)}'`,
+      call,
+      "the argument list must box into a dynamic value",
+    );
+  }
+  const dynArr: IrExpr = arr.type.kind === "dyn" ? arr : { kind: "dynFrom", value: arr, type: DYN, loc };
+  return { kind: "libCall", fn: "emitter.emitDyn", args: [recv, dynArr], type: BOOL, loc };
+}
+
 export function lowerUnnamedEmitterCall(L: Lowerer, call: ts.CallExpression,
   member: string, recv: IrExpr, nameIr: IrExpr, loc: SrcLoc): IrExpr {
   if (member === "listenerCount") {

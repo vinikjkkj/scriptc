@@ -1014,6 +1014,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "emitter.checkListener": "scr_emitter_check_listener",
   "emitter.removeAll": "scr_emitter_remove_all",
   "emitter.emitError": "scr_emitter_emit_error",
+  "emitter.emitDyn": "scr_emitter_emit_dyn_array",
   "emitter.count": "scr_emitter_listener_count",
   "emitter.countFn": "scr_emitter_listener_count_fn",
   "emitter.names": "scr_emitter_event_names",
