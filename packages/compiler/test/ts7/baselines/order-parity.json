@@ -1539,6 +1539,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/11700-dyn-meta-listener-two-params.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11700-dyn-meta-listener-two-params.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11701-dyn-meta-listener-reads-arguments.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11701-dyn-meta-listener-reads-arguments.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11702-dyn-remove-listener-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11702-dyn-remove-listener-order.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11704-dyn-emit-apply-argument-list.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11704-dyn-emit-apply-argument-list.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11705-dyn-emit-apply-once-and-error.cjs": {
+   "order": [
+    "<repo>/tests/corpus/11705-dyn-emit-apply-once-and-error.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/11750-let-widen-number-then-padded-string-slice-length.js": {
    "order": [
     "<repo>/tests/corpus/11750-let-widen-number-then-padded-string-slice-length.js"
