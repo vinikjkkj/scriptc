@@ -6168,6 +6168,11 @@ ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint);
  * answers. A dyn value that never came from an error answers false. */
 bool scr_dyn_err_instanceof(const ScrDyn *d, double kind);
 
+/* `u instanceof tls.TLSSocket` on a checked-dynamic value (scr_tls.c). A TLSSocket is a
+ * net-socket handle whose TLS transport is attached at construction and never detached, so
+ * the transport IS the class membership. Borrowed; false for every other kind. */
+bool scr_tls_dyn_instanceof(const ScrDyn *d);
+
 /* structuredClone over the checked-dynamic tree: JSON-safe data + bytes deep-copy;
  * functions/handles throw the spec's catchable DataCloneError; cycles
  * throw the scriptc fence (the checked-dynamic tree cannot represent them). Option

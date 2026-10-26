@@ -19437,6 +19437,18 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return !sf.isDeclarationFile && !L.isStdlibFile(sf);
   }
 
+  /** The builtin 'tls' class `TLSSocket` as the right-hand side of instanceof:
+   * the namespace member (`Tls.TLSSocket`) or the named import. The module is
+   * canonical ('node:tls' and 'tls' are one module). */
+  function isTlsSocketCtorRef(L: Lowerer, e: ts.Expression): boolean {
+    const bi = ts.isIdentifier(e)
+      ? L.builtinImportOf(e)
+      : ts.isPropertyAccessExpression(e)
+        ? L.builtinMemberOf(e)
+        : null;
+    return bi !== null && bi.module === "tls" && bi.member === "TLSSocket";
+  }
+
   /** The WHATWG URL constructor as a value: the global `URL`, the named
    * import/require binding of node:url's `URL` (`const { URL } =
    * require('url')`), or the namespace spelling `url.URL`. All three are
@@ -20055,6 +20067,22 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             `'instanceof ${rSym!.name}' on this operand (supported: a union carrying the flavor as an arm, or a bound value of a bytes type — an 'unknown' operand needs a runtime flavor test the checked-dynamic tree does not carry yet: it tags bytes as one kind, and only Uint8Array reads that tag)`,
           );
         }
+      }
+      // `x instanceof tls.TLSSocket` (the namespace member or the named import of
+      // the builtin 'tls'; the sha256_password shape). A TLSSocket and a plain
+      // net.Socket share one static socket kind, so a typed operand cannot be
+      // decided here and refuses; an untyped operand asks the handle at run time
+      // (scr_tls_dyn_instanceof: the TLS transport is the class membership).
+      if (isTlsSocketCtorRef(L, expr.right) && !L.caughtLocalOf(expr.left)) {
+        const left = L.lowerExpr(expr.left);
+        if (left.type.kind === "dyn") {
+          return { kind: "libCall", fn: "tls.dynInstanceOf", args: [left], type: BOOL, loc };
+        }
+        L.unsupported(
+          "SC1090",
+          expr,
+          "'instanceof tls.TLSSocket' on a typed socket value (net.Socket and tls.TLSSocket share one static kind, so the answer is a run-time transport test; only an untyped operand is decided)",
+        );
       }
       // `x instanceof String` / `Number` / `Boolean` — the BOXED WRAPPER
       // test, and the answer is a constant because the constructor that

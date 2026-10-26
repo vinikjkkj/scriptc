@@ -1225,6 +1225,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "error.ext": { argTypes: [null, STRING], result: DYN },
   "error.domClone": { argTypes: [null, DYN], result: VOID },
   "dyn.errInstanceof": { argTypes: [DYN, F64], result: BOOL },
+  "tls.dynInstanceOf": { argTypes: [DYN], result: BOOL },
   "dyn.objKeys": { argTypes: [DYN], result: DYN },
   "dyn.hasOwn": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.objectToString": { argTypes: [DYN], result: STRING },
