@@ -4315,6 +4315,39 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           ) {
             methodArgsBound = member.parameters.length > 0;
             shapes = [...shapes, { type: DYN, mode: "dynRest" }];
+          } else if (
+            isJsSourceFile(member.getSourceFile()) && !shapes.some((s) => s.mode === "dynRest") &&
+            ts.isIdentifier(member.name) && overrideBelowOfKind(L, decl, member.name.text, "args")
+          ) {
+            // A FIXED-arity method with a VARIADIC override below it: the slot
+            // must carry the whole argument list, or the override's `arguments`
+            // would see the base's padded arity. The method takes the same
+            // arguments-bound form a method that reads `arguments` takes, so its
+            // declared names re-bind off the list in the prologue. The rebinding
+            // is exact only for parameters whose values are dyn (no typed
+            // re-check, no default, no rest), so any other spelling fences here.
+            const unbindable = member.parameters.find((p) =>
+              !ts.isIdentifier(p.name) || p.dotDotDotToken !== undefined || p.initializer !== undefined ||
+              (ts.isIdentifier(p.name) && p.name.text === "this") ||
+              (L.checker.getTypeAtLocation(p.name).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0);
+            if (unbindable !== undefined) {
+              L.unsupported(
+                "SC1090",
+                member.name,
+                `a method with a variadic override below it (a subclass reads 'arguments' where this method declares a fixed parameter list) — its declared parameters must be untyped to re-bind off the argument list; '${mName}' declares a typed, defaulted or rest parameter`,
+              );
+            }
+            methodArgsBound = member.parameters.length > 0;
+            shapes = [{ type: DYN, mode: "dynRest" }];
+          }
+          // A method whose JS body returns nothing, with a subclass override that
+          // returns a value: the slot answers the value (dyn, the `unknown` a
+          // base-typed reader gets), and a call the base body answers is undefined.
+          if (
+            ft.ret.kind === "void" && isJsSourceFile(member.getSourceFile()) &&
+            ts.isIdentifier(member.name) && overrideBelowOfKind(L, decl, member.name.text, "value")
+          ) {
+            ft.ret = DYN;
           }
           if (fields.has(mName)) {
             L.unsupported("SC1090", member.name, "methods shadowing inherited fields");
@@ -5342,6 +5375,11 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       }
       if (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && classSymbol !== undefined) {
         registerLateMethods(L, info, decl, classSymbol);
+        // Late methods (prototype installs, `C.prototype.m = ...`) join the
+        // class's method table after the IR definition captured its list, so
+        // the definition is refreshed: a subclass overriding one of them
+        // dispatches through a vtable slot the base's definition must name.
+        if (info.methods.size > 0) info.def.methods = [...info.methods.keys()];
         registerProtoData(L, info, decl, classSymbol, (n) => undefWrittenPropNames(L).has("*") || undefWrittenPropNames(L).has(n));
       }
     }
@@ -7149,6 +7187,88 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return null;
   }
 
+/** The JS class declarations whose method of a given name carries a property
+   * of the slot-widening kind: `args` (the body reads `arguments`) or `value`
+   * (the body returns a value). One index per lowering and kind, built on first use. */
+  const methodIndexOf = new WeakMap<Lowerer, Map<"args" | "value", Map<string, ts.ClassLikeDeclaration[]>>>();
+  function methodIndex(L: Lowerer, kind: "args" | "value"): Map<string, ts.ClassLikeDeclaration[]> {
+    let kinds = methodIndexOf.get(L);
+    if (kinds === undefined) methodIndexOf.set(L, (kinds = new Map()));
+    const hit = kinds.get(kind);
+    if (hit !== undefined) return hit;
+    const index = new Map<string, ts.ClassLikeDeclaration[]>();
+    const has = (m: ts.MethodDeclaration): boolean =>
+      kind === "args" ? bodyReadsArguments(m) : returnsValue(m);
+    for (const sf of L.program.getSourceFiles()) {
+      if (!isJsSourceFile(sf)) continue;
+      const visit = (n: ts.Node): void => {
+        if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) {
+          for (const m of n.members) {
+            if (ts.isMethodDeclaration(m) && ts.isIdentifier(m.name) && m.body !== undefined && has(m)) {
+              const list = index.get(m.name.text) ?? [];
+              list.push(n);
+              index.set(m.name.text, list);
+            }
+          }
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+    kinds.set(kind, index);
+    return index;
+  }
+
+/** A method body that returns a VALUE somewhere in its own scope (a nested
+   * function's returns are its own, and a bare `return;` answers nothing). */
+  function returnsValue(m: ts.MethodDeclaration): boolean {
+    if (m.asteriskToken !== undefined || m.body === undefined) return false;
+    let found = false;
+    const visit = (n: ts.Node): void => {
+      if (found) return;
+      if (ts.isFunctionLike(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n)) return;
+      if (ts.isReturnStatement(n) && n.expression !== undefined) {
+        found = true;
+        return;
+      }
+      ts.forEachChild(n, visit);
+    };
+    ts.forEachChild(m.body, visit);
+    return found;
+  }
+
+/** The class a class declaration extends by a bare name (its base's
+   * declaration), or null when the heritage is absent or not a name. */
+  function extendedClassOf(L: Lowerer, cd: ts.ClassLikeDeclaration): ts.ClassLikeDeclaration | null {
+    const ident = cd.heritageClauses
+      ?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword)
+      ?.types.map((t) => t.expression)
+      .find(ts.isIdentifier);
+    if (ident === undefined) return null;
+    const sym = L.resolveValueSymbol(ident);
+    if (!sym) return null;
+    return L.checker.declarationsOf(sym).find(
+      (d): d is ts.ClassLikeDeclaration => ts.isClassDeclaration(d) || ts.isClassExpression(d),
+    ) ?? null;
+  }
+
+/** True when a STRICT subclass of `decl`, at any depth, overrides the method
+   * `mName` with a body that reads `arguments`: the base's slot must then
+   * carry the whole argument list (see the method collection). */
+  function overrideBelowOfKind(L: Lowerer, decl: ts.ClassLikeDeclaration, mName: string, kind: "args" | "value"): boolean {
+    const cands = methodIndex(L, kind).get(mName);
+    if (cands === undefined) return false;
+    return cands.some((c) => {
+      if (c === decl) return false;
+      let cur: ts.ClassLikeDeclaration | null = extendedClassOf(L, c);
+      for (let depth = 0; cur !== null && depth < 64; depth++) {
+        if (cur === decl) return true;
+        cur = extendedClassOf(L, cur);
+      }
+      return false;
+    });
+  }
+
 /** The ROOT-MOST declaration of `name` at/above `info` — the one that owns
    * the VTABLE SLOT (the backend's collectSlots walks down and stops at the
    * first class whose chain declares it), and therefore the one signature
@@ -7238,6 +7358,30 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // trailing argument would then be observable, so those keep exactness.
     const packed = (p: ParamShape): boolean =>
       p.mode === "rest" || p.mode === "dynRest" || p.mode === "islandRest";
+    // A VARIADIC slot (a dynRest tail: a forwarder, or an arguments-reading
+    // base) hands the implementation the whole argument list as one dyn
+    // array after its fixed prefix. A FIXED-arity override never observes
+    // past its own parameter list, so it reads its parameters out of that
+    // array: parameter j is element j - prefix, undefined past the end. A
+    // typed parameter takes the element through dynCheck, so only a
+    // dyn-typed or omittable parameter can take the absent value.
+    const slotTail = slot.params.length > 0 && slot.params[slot.params.length - 1]!.mode === "dynRest";
+    if (slotTail && !own.params.some(packed)) {
+      const prefix = slot.params.length - 1;
+      for (let i = 0; i < Math.min(prefix, own.params.length); i++) {
+        if (!typeEquals(slot.params[i]!.type, own.params[i]!.type)) return null;
+      }
+      for (const p of own.params.slice(prefix)) {
+        if (p.type.kind === "dyn") continue;
+        if (p.mode !== "omittable") return null;
+        if (omittedArgFor(L, p.type, { file: "<synthetic>", start: 0, end: 0 }) === null) return null;
+      }
+      const retOk =
+        typeEquals(slot.ret, own.ret) ||
+        (slot.ret.kind === "dyn" && own.ret.kind !== "dyn" &&
+          (own.ret.kind === "void" || canConvertToDyn(own.ret, (id) => L.shapes.get(id), (id) => L.unions.get(id))));
+      return retOk ? "widened" : null;
+    }
     if (slot.params.some(packed) || own.params.some(packed)) {
       return methodAbiEquals(slot, { params: own.params, ret: own.ret }) ? "exact" : null;
     }
@@ -7255,7 +7399,9 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // forward them — which is how bson's `MinKey.inspect()` implements
     // `abstract inspect(depth?, options?, inspect?)`.
     for (const p of own.params.slice(shared)) {
-      if (p.mode !== "omittable") return null;
+      // An untyped (dyn) extra parameter takes the absent value as the
+      // dyn undefined, which is what a JS function reads for a missing argument.
+      if (p.mode !== "omittable" && p.type.kind !== "dyn") return null;
       if (omittedArgFor(L, p.type, { file: "<synthetic>", start: 0, end: 0 }) === null) return null;
     }
     const arityExact = own.params.length === slot.params.length;
@@ -7265,9 +7411,11 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // `unknown`-returning method already gets in Node. A narrower slot
     // return has no such widening (there is no representation both the
     // slot's callers and the override's callers can read).
+    // A VOID own return answers the slot's `unknown` with undefined, which
+    // is exactly what a base-typed reader of the slot already gets in Node.
     const retWidened = !retExact && slot.ret.kind === "dyn" && own.ret.kind !== "dyn" &&
-      own.ret.kind !== "void" &&
-      canConvertToDyn(own.ret, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+      (own.ret.kind === "void" ||
+        canConvertToDyn(own.ret, (id) => L.shapes.get(id), (id) => L.unions.get(id)));
     if (!retExact && !retWidened) return null;
     return retExact && arityExact ? "exact" : "widened";
   }
@@ -7328,6 +7476,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const need = vtThunkKind(L, info, mName);
     if (!need) return null;
     const { own, slot } = need;
+    const slotTail = slot.sig.params.length > 0 && slot.sig.params[slot.sig.params.length - 1]!.mode === "dynRest";
     const loc = info.decl ? locOf(info.decl) : { file: "<synthetic>", start: 0, end: 0 };
     const thisType: IrType = { kind: "object", className };
     const locals: IrLocal[] = [{ id: "this.0", name: "this", type: thisType, mutable: false }];
@@ -7340,7 +7489,23 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // override does not declare are simply not forwarded — JS ignores
     // arguments past a function's list.
     const args: IrExpr[] = [{ kind: "varRef", localId: locals[0]!.id, type: locals[0]!.type, loc }];
+    // A dynRest tail (the slot's whole argument list past its fixed prefix)
+    // feeds the override's parameters by index: element k, a dynCheck to the
+    // parameter's type; past the end the element reads undefined.
+    const tailLocal = slotTail ? locals[locals.length - 1]! : null;
+    const prefixLen = slotTail ? locals.length - 2 : locals.length - 1;
     own.params.forEach((p, i) => {
+      if (tailLocal !== null && i >= prefixLen) {
+        const elem: IrExpr = {
+          kind: "dynKeyGet",
+          key: { kind: "strLit", value: String(i - prefixLen), type: STRING, loc },
+          value: { kind: "varRef", localId: tailLocal.id, type: tailLocal.type, loc },
+          type: DYN,
+          loc,
+        };
+        args.push(p.type.kind === "dyn" ? elem : { kind: "dynCheck", value: elem, type: p.type, loc });
+        return;
+      }
       const l = locals[i + 1];
       args.push(l ? { kind: "varRef", localId: l.id, type: l.type, loc } : omittedArgFor(L, p.type, loc)!);
     });
@@ -7351,9 +7516,18 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       type: own.ret,
       loc,
     };
-    const value: IrExpr = typeEquals(slot.sig.ret, own.ret)
+    // A void override under a value slot answers undefined: the call is a
+    // statement, and the thunk returns the slot's undefined.
+    const voidUnderValue = own.ret.kind === "void" && slot.sig.ret.kind !== "void";
+    const value: IrExpr = typeEquals(slot.sig.ret, own.ret) || voidUnderValue
       ? call
       : { kind: "dynFrom", value: call, type: DYN, loc };
+    const thunkBody: IrStmt[] = [];
+    if (slot.sig.ret.kind === "void") thunkBody.push({ kind: "exprStmt", expr: value, loc });
+    else if (voidUnderValue) {
+      thunkBody.push({ kind: "exprStmt", expr: call, loc });
+      thunkBody.push({ kind: "return", value: dynUndefinedExpr(loc), loc });
+    } else thunkBody.push({ kind: "return", value, loc });
     return {
       name: `%${className}.${mName}%vt`,
       params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
@@ -7361,11 +7535,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       locals,
       // A void slot (only the parameter list widened) has no value to
       // hand back — the call IS the whole body.
-      body: [
-        slot.sig.ret.kind === "void"
-          ? { kind: "exprStmt", expr: value, loc }
-          : { kind: "return", value, loc },
-      ],
+      body: thunkBody,
       loc,
     };
   }
