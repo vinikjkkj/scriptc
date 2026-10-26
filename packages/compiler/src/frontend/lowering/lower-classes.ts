@@ -12,7 +12,7 @@ import { engineFunctionCtor } from "./lower-engine-fn.js";
 import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
-import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoDataGetterFns } from "./proto-class-consume.js";
+import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
@@ -10185,11 +10185,32 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           );
         }
         if (info) return lowerProgramClassNew(L, expr, info, loc);
-        L.unsupported(
-          "SC1090",
-          expr,
-          `constructing '${expr.expression.name.text}' (a namespace member with no class lowering)`,
-        );
+        // A function constructor the module exports (`exports.C = C`): the member
+        // constructs as the constructor's registered class, the same class `new C(...)`
+        // builds through its own require binding. Only a member the recognizer proves
+        // usable answers here.
+        const fnCtor = protoClassOfNamespaceMember(L, expr.expression);
+        if (fnCtor && !(expr.arguments ?? []).some((a) => ts.isSpreadElement(a))) {
+          L.noteEdge(`%${fnCtor.def.name}.constructor`);
+          const args = L.completeArgs(expr.arguments ?? [], fnCtor.ctorParams, loc, expr);
+          return {
+            kind: "new",
+            className: fnCtor.def.name,
+            args,
+            type: { kind: "object", className: fnCtor.def.name },
+            loc,
+          };
+        }
+        // A JavaScript namespace member no class answers (a constructor whose own body
+        // returns a value) keeps JS's [[Construct]] semantics: it falls through to the
+        // runtime construction arms below. TypeScript keeps the refusal.
+        if (!isJsSourceFile(expr.getSourceFile())) {
+          L.unsupported(
+            "SC1090",
+            expr,
+            `constructing '${expr.expression.name.text}' (a namespace member with no class lowering)`,
+          );
+        }
       }
       // `new B.C()` where B is an AMBIENT namespace (fundule merges
       // included): Node evaluates the callee first and throws

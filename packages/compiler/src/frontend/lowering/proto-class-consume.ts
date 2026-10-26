@@ -46,7 +46,7 @@
  */
 import * as ts from "../ts7/adapter.js";
 import { BOOL, F64, STRING, type IrExpr, type IrFunction, type IrLocal, type IrType } from "../../ir/nodes.js";
-import { locOf } from "../program.js";
+import { isJsSourceFile, locOf } from "../program.js";
 import { pinnableSlot, type ClassInfo } from "./lower-classes.js";
 import type { Lowerer } from "./lowerer.js";
 import type { ProtoClass, ProtoMethod } from "./proto-class.js";
@@ -160,6 +160,26 @@ function siblingAlias(c: ProtoClass, init: ts.Expression): ProtoMethod | null {
   return c.methods.find((m) => m.name === init.name.getText()) ?? null;
 }
 
+
+/** Does the constructor's own body return a value (`return x`)? In JavaScript such
+ * a return REPLACES the instance (`new C()` answers the returned object), which the
+ * class lowering has no path for, so a namespace construction of such a constructor
+ * keeps the runtime [[Construct]] path (protoClassOfNamespaceMember). Nested functions
+ * and classes are not this constructor's returns. An explicit stack, not recursion,
+ * so a deep body cannot overflow the compiler. */
+function ctorReturnsValue(body: ts.Block): boolean {
+  const stack: ts.Node[] = [body];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (ts.isReturnStatement(n) && n.expression !== undefined) return true;
+    if (n !== body && (ts.isFunctionLike(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n))) continue;
+    ts.forEachChild(n, (child) => {
+      stack.push(child);
+      return undefined;
+    });
+  }
+  return false;
+}
 
 /** Why this recognized class still cannot become an IrClassDef, or null. */
 function consumeBailout(c: ProtoClass): string | null {
@@ -500,6 +520,47 @@ export function pairedProtoClassInfoFor(L: Lowerer, expr: ts.NewExpression): Cla
   const w = dtsWitnessClassOf(L, L.typeOf(expr));
   if (!w || !ts.isFunctionDeclaration(w)) return null;
   const c = candidatesIn(w.getSourceFile()).get(w);
+  return c ? registered(L, c) : null;
+}
+
+/** The registered function-constructor class a NAMESPACE member names, or null:
+ * `new ns.Ctor(...)` where `ns` is a require() binding and the module exports the
+ * constructor function as `exports.Ctor = Ctor` (iconv-lite's bom-handling
+ * wrappers: `new bomHandling.PrependBOM(...)`). The member's single producer must
+ * be that top-level assignment of a bare identifier, which must name a function
+ * declaration in a JavaScript module. The constructor builds through the same
+ * recognizer and registry as `new Ctor(...)` reached through its own require
+ * binding, so a namespace construction answers with the same class. Anything else
+ * (a member with several producers, a non-function right-hand side, a bailing
+ * recognizer) answers null and keeps the refusal. */
+export function protoClassOfNamespaceMember(L: Lowerer, callee: ts.PropertyAccessExpression): ClassInfo | null {
+  if (!pairedClassEnabled() || !ts.isIdentifier(callee.name) || !ts.isIdentifier(callee.expression)) return null;
+  if (!L.cjsLocalModuleBindingOf(callee.expression)) return null;
+  let sym = L.resolveValueSymbol(callee.name) ?? L.checker.getSymbolAtLocation(callee.name) ?? undefined;
+  if (sym === undefined || sym === null) return null;
+  if (sym.flags & ts.SymbolFlags.Alias) sym = L.checker.getAliasedSymbol(sym) ?? undefined;
+  if (sym === undefined) return null;
+  const decls = L.checker.declarationsOf(sym);
+  const assigns = decls.filter(
+    (d): d is ts.BinaryExpression => ts.isBinaryExpression(d) && d.operatorToken.kind === ts.SyntaxKind.EqualsToken,
+  );
+  if (decls.length !== 1 || assigns.length !== 1) return null;
+  const a = assigns[0]!;
+  if (!ts.isExpressionStatement(a.parent) || !ts.isSourceFile(a.parent.parent)) return null;
+  let rhs: ts.Expression = a.right;
+  while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+  if (!ts.isIdentifier(rhs)) return null;
+  let target = L.resolveValueSymbol(rhs) ?? L.checker.getSymbolAtLocation(rhs) ?? undefined;
+  if (target === undefined || target === null) return null;
+  if (target.flags & ts.SymbolFlags.Alias) target = L.checker.getAliasedSymbol(target) ?? undefined;
+  if (target === undefined) return null;
+  const fn = L.checker.valueDeclarationOf(target) ?? L.checker.declarationsOf(target)[0] ?? null;
+  if (fn === null || !ts.isFunctionDeclaration(fn) || fn.getSourceFile().isDeclarationFile) return null;
+  if (!isJsSourceFile(fn.getSourceFile())) return null;
+  // A constructor whose own body returns a value answers that value, not the
+  // instance: the class has no such path, so the member keeps the runtime path.
+  if (fn.body === undefined || ctorReturnsValue(fn.body)) return null;
+  const c = candidatesIn(fn.getSourceFile()).get(fn);
   return c ? registered(L, c) : null;
 }
 
