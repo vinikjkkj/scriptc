@@ -22,7 +22,7 @@
  * http2 lanes inherit (the design note atop scr_net.c has the story). */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, globSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, globSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, test } from "vitest";
@@ -30,16 +30,27 @@ import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
 import { defineEmptyShardTest } from "./shard-guard.js";
 import { exeName } from "./exe.js";
+import { oracleNote } from "./captured-run.js";
 import { holdScratch } from "./scratch-lease.mjs";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures/server");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
+/* Stdout is a FILE for every leg (see captured-run.ts: a Windows pipe can
+ * lose a dying child's last writes). Returns the open fd and its path. */
+function stdoutFile(): { fd: number; path: string; dir: string } {
+  mkdirSync(cacheDir, { recursive: true });
+  const dir = mkdtempSync(join(cacheDir, "server-stdout-"));
+  const path = join(dir, "stdout");
+  return { fd: openSync(path, "w"), path, dir };
+}
+
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 const driverTrace = pathToFileURL(join(import.meta.dirname, "server-driver-trace.mjs")).href;
 
 interface ProgramRun {
   stdout: Buffer;
+  stderr: string;
   exitCode: number;
   /** The driver's stdout, "" for driver-less cases. */
   driverStdout: string;
@@ -49,8 +60,9 @@ interface ProgramRun {
  * the case has a driver, and collect all three compared legs. */
 function runLane(cmd: string, args: string[], driver: string | null): Promise<ProgramRun> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
-    const out: Buffer[] = [];
+    const sout = stdoutFile();
+    const child = spawn(cmd, args, { stdio: ["ignore", sout.fd, "pipe"] });
+    closeSync(sout.fd);
     let errText = "";
     let driverStdout = "";
     let driverStarted = false;
@@ -59,7 +71,6 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<Pr
       child.kill("SIGKILL");
       reject(new Error(`server program timed out\nstderr so far:\n${errText}`));
     }, 60_000);
-    child.stdout.on("data", (c: Buffer) => out.push(c));
     child.stderr.on("data", (c: Buffer) => {
       errText += c.toString("utf8");
       if (driver !== null && !driverStarted) {
@@ -69,14 +80,17 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<Pr
           driverDone = new Promise<void>((res, rej) => {
             // The preload writes every socket event to stderr synchronously,
             // so the last line before a fast-fail survives (see its header).
-            const d = spawn("node", ["--import", driverTrace, driver, m[1]!], { stdio: ["ignore", "pipe", "pipe"] });
+            const dout = stdoutFile();
+            const d = spawn("node", ["--import", driverTrace, driver, m[1]!], { stdio: ["ignore", dout.fd, "pipe"] });
+            closeSync(dout.fd);
             let driverErr = "";
-            d.stdout.on("data", (c: Buffer) => (driverStdout += c.toString("utf8")));
             d.stderr.on("data", (c: Buffer) => {
               driverErr += c.toString("utf8");
               process.stderr.write(c);
             });
             d.on("close", (code, sig) => {
+              driverStdout = readFileSync(dout.path, "utf8");
+              rmSync(dout.dir, { recursive: true, force: true });
               if (code === 0) res();
               else {
                 // A driver that died leaves the server waiting for a peer
@@ -98,6 +112,8 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<Pr
     });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
+      const out = readFileSync(sout.path);
+      rmSync(sout.dir, { recursive: true, force: true });
       if (signal) {
         reject(new Error(`server program died to ${signal}\nstderr:\n${errText}`));
         return;
@@ -107,7 +123,7 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<Pr
         return;
       }
       driverDone.then(
-        () => resolve({ stdout: Buffer.concat(out), exitCode: code ?? 0, driverStdout }),
+        () => resolve({ stdout: out, stderr: errText, exitCode: code ?? 0, driverStdout }),
         reject,
       );
     });
@@ -172,7 +188,7 @@ describe(`server differential (${cases.length} programs${sanitize ? ", sanitized
     // real sockets — parallelism buys little and interleaves kernel state.
     const nodeRes = await runLane("node", [c.entry], c.driver);
     const nativeRes = await runLane(binary, [], c.driver);
-    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.stdout.toString("utf8"), oracleNote(nodeRes.exitCode, nodeRes.stderr)).toBe(nodeRes.stdout.toString("utf8"));
     if (!nodeRes.stdout.equals(nativeRes.stdout)) {
       expect.unreachable("stdout differed at byte level but not after utf8 decode");
     }

@@ -23,22 +23,20 @@
  * so the LLVM-emitted frames are covered too. The refusal histogram and
  * the claimed count print at the end — phase 2's queue.
  */
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { globSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
 import { corpusSlice, partSuffix, shardSuffix } from "./shard.js";
+import { oracleNote, runCaptured } from "./captured-run.js";
 import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-report.js";
 import { EXE_SUFFIX } from "./exe.js";
 import { tapPhase } from "../../packages/compiler/src/phase-tap.js";
 import { holdScratch } from "./scratch-lease.mjs";
 
-const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const corpusDir = join(repoRoot, "tests/corpus");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
@@ -159,22 +157,19 @@ async function runBinary(cmd: string, args: string[]): Promise<RunResult> {
   // its own spawn window, and exec answers ETXTBSY until that fd closes.
   // The condition is transient by construction — retry briefly, the
   // npm/cargo stance.
+  // stdout and stderr go to files (runCaptured), not pipes, for EVERY leg
+  // so the three are collected alike: a Windows child that dies after a
+  // pipe write can lose the tail of its output, and the Node oracle was the
+  // leg whose truncated stdout failed CI (40364003139, 40356161346).
   for (let attempt = 0; ; attempt++) {
-    const pending = execFileAsync(cmd, args, { encoding: "buffer" });
-    pending.child.stdin?.end();
     try {
-      const { stdout, stderr } = await pending;
-      return { stdout, stderr, exitCode: 0 };
+      return await runCaptured(cmd, args, cacheDir, "pipe");
     } catch (err) {
-      const e = err as { code?: unknown; stdout?: Buffer; stderr?: Buffer };
-      if (e.code === "ETXTBSY" && attempt < 10) {
+      if ((err as { code?: unknown }).code === "ETXTBSY" && attempt < 10) {
         await new Promise((r) => setTimeout(r, 50));
         continue;
       }
-      if (typeof e.code !== "number" || !Buffer.isBuffer(e.stdout) || !Buffer.isBuffer(e.stderr)) {
-        throw err;
-      }
-      return { stdout: e.stdout, stderr: e.stderr, exitCode: e.code };
+      throw err;
     }
   }
 }
@@ -407,12 +402,14 @@ export function defineLlvmDifferentialSuite(part = 1, parts = 1): void {
         tapPhase("native.run", performance.now() - runT0);
 
         // stdout: byte parity across all three lanes.
+        // The oracle's exit status and stderr ride on EVERY stdout
+        // mismatch message, so a Node death is named before any byte diff.
         if (!llvm.stdout.equals(c.stdout)) {
-          expect(llvm.stdout.toString("utf8")).toBe(c.stdout.toString("utf8"));
+          expect(llvm.stdout.toString("utf8"), oracleNote(node.exitCode, node.stderr)).toBe(c.stdout.toString("utf8"));
           expect.unreachable("llvm-vs-c stdout differed at byte level but not after utf8 decode");
         }
         if (!llvm.stdout.equals(node.stdout)) {
-          expect(llvm.stdout.toString("utf8")).toBe(node.stdout.toString("utf8"));
+          expect(llvm.stdout.toString("utf8"), oracleNote(node.exitCode, node.stderr)).toBe(node.stdout.toString("utf8"));
           expect.unreachable("llvm-vs-node stdout differed at byte level but not after utf8 decode");
         }
         // stderr: the exit-0 contract of the main differential suite.
