@@ -29,7 +29,7 @@ import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
-import { boundEmitDispatcher, boundSubscribeDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
+import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
 import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
 import { isRequireBindingIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
@@ -6833,7 +6833,7 @@ function dynMapIterDrainContext(L: Lowerer, call: ts.CallExpression): boolean {
 /** The EventEmitter members a dyn receiver can hold an emitter under. */
 const DYN_EMITTER_RECEIVER_METHODS: ReadonlySet<string> = new Set([
   "on", "addListener", "once", "prependListener", "prependOnceListener",
-  "off", "removeListener", "listenerCount",
+  "off", "removeListener", "listenerCount", "emit",
 ]);
 
 /** `recv.m("literal", ...)` on a checked-dynamic receiver whose runtime value
@@ -6858,64 +6858,135 @@ function lowerDynEmitterReceiverCall(L: Lowerer, call: ts.CallExpression,
   if (call.questionDotToken || access.questionDotToken) return null;
   if (call.arguments.some((a) => ts.isSpreadElement(a))) return null;
   const nameArg = call.arguments[0];
-  if (nameArg === undefined || !ts.isStringLiteralLike(nameArg)) return null;
+  if (nameArg === undefined) return null;
+  const literalName = ts.isStringLiteralLike(nameArg);
+  // A computed name on an emit has no lowering: the arms dispatch the
+  // registry's listeners by name, and an emit of a name nothing in the
+  // program spells would have to fire the computed registrations with the
+  // caller's boxed payload. Declined; the dynamic call keeps its old lowering.
+  if (member === "emit" && !literalName) return null;
   const info = L.classes.get(RUNTIME_EMITTER_CLASS);
   if (info === undefined) return null;
   const loc = locOf(call);
   const ctx = L.ctx;
-  const count = ctx.localCounters.get("%dynem") ?? 0;
-  ctx.localCounters.set("%dynem", count + 1);
-  const localId = `%dynem.${count}`;
+  const fresh = (base: string): string => {
+    const count = ctx.localCounters.get(base) ?? 0;
+    ctx.localCounters.set(base, count + 1);
+    return `${base}.${count}`;
+  };
+  const localId = fresh("%dynem");
   ctx.locals.push({ id: localId, name: "%dynem", type: DYN, mutable: false, boxed: true });
   const ref: IrExpr = { kind: "varRef", localId, type: DYN, loc };
   const emitterRecv: IrExpr = {
     kind: "dynCheck", value: ref, type: { kind: "object", className: RUNTIME_EMITTER_CLASS }, loc,
   };
   // The emitter arm, probed: a refusal (or any diagnostic) declines the claim.
-  const savedSink = L.diagSink;
-  const captured: typeof L.diags = [];
-  L.diagSink = captured;
-  let emitter: IrExpr | null;
-  try {
-    emitter = lowerEmitterMethodCall(L, call, access, info, undefined, emitterRecv);
-  } catch (e) {
+  const probe = (run: () => IrExpr | null): IrExpr | null => {
+    const savedSink = L.diagSink;
+    const captured: typeof L.diags = [];
+    L.diagSink = captured;
+    let emitter: IrExpr | null;
+    try {
+      emitter = run();
+    } catch (e) {
+      L.diagSink = savedSink;
+      if (e instanceof PoisonError) {
+        if (process.env["SCRIPTC_DYNEMIT_WHY"] !== undefined) {
+          console.error(`[dynemit] '${member}' refused: ${captured.map((d) => d.message).join(" | ")}`);
+        }
+        return null;
+      }
+      throw e;
+    }
     L.diagSink = savedSink;
-    if (e instanceof PoisonError) {
+    if (emitter === null || captured.length > 0) {
       if (process.env["SCRIPTC_DYNEMIT_WHY"] !== undefined) {
-        console.error(`[dynemit] '${member}' refused: ${captured.map((d) => d.message).join(" | ")}`);
+        console.error(`[dynemit] '${member}': ${emitter === null ? "the emitter arm declined" : "the emitter arm diagnosed: " + captured.map((d) => d.message).join(" | ")}`);
       }
       return null;
     }
-    throw e;
+    return emitter.type.kind === "dyn"
+      ? emitter
+      : emitter.type.kind === "void"
+        ? { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: emitter, loc }], result: dynUndefinedExpr(loc), type: DYN, loc }
+        : { kind: "dynFrom", value: emitter, type: DYN, loc };
+  };
+  const dynArmArgs = (nameValue: IrExpr): IrExpr[] => [
+    nameValue,
+    ...call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, DYN)),
+  ];
+  const test: IrExpr = {
+    kind: "dynTest", test: "class", className: RUNTIME_EMITTER_CLASS, member, value: ref, type: BOOL, loc,
+  };
+  if (literalName) {
+    const emitterArm = probe(() => lowerEmitterMethodCall(L, call, access, info, undefined, emitterRecv));
+    if (emitterArm === null) return null;
+    const dynArm: IrExpr = {
+      kind: "dynInvoke",
+      recv: ref,
+      method: member,
+      calleeName: access.getText(),
+      args: call.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
+      type: DYN,
+      loc,
+    };
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId, init: recv, loc }],
+      result: { kind: "ternary", cond: test, then: emitterArm, else_: dynArm, type: DYN, loc },
+      type: DYN,
+      loc,
+    };
   }
-  L.diagSink = savedSink;
-  if (emitter === null || captured.length > 0) {
-    if (process.env["SCRIPTC_DYNEMIT_WHY"] !== undefined) {
-      console.error(`[dynemit] '${member}': ${emitter === null ? "the emitter arm declined" : "the emitter arm diagnosed: " + captured.map((d) => d.message).join(" | ")}`);
-    }
-    return null;
+  // A computed event name (a dyn value, or a string the program does not
+  // spell): the name is converted once (ToString, as the registry keys
+  // it), then dispatched over the program's closed set of literal names.
+  // Each arm is the static lowering for that literal; the default arm
+  // keeps a name nothing in the program emits (lowerUnnamedEmitterCall).
+  const nameLocalId = fresh("%dynnm");
+  ctx.locals.push({ id: nameLocalId, name: "%dynnm", type: DYN, mutable: false });
+  const nameRef: IrExpr = { kind: "varRef", localId: nameLocalId, type: DYN, loc };
+  const strLocalId = fresh("%dynns");
+  ctx.locals.push({ id: strLocalId, name: "%dynns", type: STRING, mutable: false });
+  const strRef: IrExpr = { kind: "varRef", localId: strLocalId, type: STRING, loc };
+  const names = emitterEventNames(L);
+  let chain: IrExpr | null = probe(() => lowerUnnamedEmitterCall(L, call, member, emitterRecv, strRef, loc));
+  if (chain === null) return null;
+  for (let i = names.length - 1; i >= 0; i--) {
+    const arm = probe(() => lowerEmitterMethodCall(L, call, access, info, undefined, emitterRecv, names[i]!));
+    if (arm === null) return null;
+    chain = {
+      kind: "ternary",
+      cond: { kind: "strEq", negated: false, left: strRef, right: { kind: "strLit", value: names[i]!, type: STRING, loc }, type: BOOL, loc },
+      then: arm,
+      else_: chain,
+      type: DYN,
+      loc,
+    };
   }
-  const emitterArm: IrExpr = emitter.type.kind === "dyn"
-    ? emitter
-    : emitter.type.kind === "void"
-      ? { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: emitter, loc }], result: dynUndefinedExpr(loc), type: DYN, loc }
-      : { kind: "dynFrom", value: emitter, type: DYN, loc };
   const dynArm: IrExpr = {
     kind: "dynInvoke",
     recv: ref,
     method: member,
     calleeName: access.getText(),
-    args: call.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
+    args: dynArmArgs(nameRef),
     type: DYN,
     loc,
   };
-  const test: IrExpr = {
-    kind: "dynTest", test: "class", className: RUNTIME_EMITTER_CLASS, member, value: ref, type: BOOL, loc,
+  const named: IrExpr = {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: strLocalId, init: { kind: "libCall", fn: "dyn.toStringCoerce", args: [nameRef], type: STRING, loc }, loc }],
+    result: chain,
+    type: DYN,
+    loc,
   };
   return {
     kind: "seqExpr",
-    stmts: [{ kind: "varDecl", localId, init: recv, loc }],
-    result: { kind: "ternary", cond: test, then: emitterArm, else_: dynArm, type: DYN, loc },
+    stmts: [
+      { kind: "varDecl", localId, init: recv, loc },
+      { kind: "varDecl", localId: nameLocalId, init: L.lowerExprExpecting(nameArg, DYN), loc },
+    ],
+    result: { kind: "ternary", cond: test, then: named, else_: dynArm, type: DYN, loc },
     type: DYN,
     loc,
   };
