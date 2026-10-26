@@ -34,3 +34,33 @@ export function engineFunctionCtor(L: Lowerer, expr: ts.NewExpression | ts.CallE
   const made: IrExpr = { kind: "jsOp", op: "construct", args: [fnVal, ...marshaled], type: JSVAL, loc };
   return { kind: "dynFromJsval", value: made, type: DYN, loc, fnBox: true };
 }
+
+/* `Function.apply(null, <string[]>)` (generate-function's toFunction builds
+ * the function as `Function.apply(null, keys.concat(src))`): the same engine
+ * route as the constructor, with the argument list marshalled as one engine
+ * array. Only the null receiver and a string-array argument list claim the
+ * site; everything else keeps the refusal (returns null). The result is the
+ * engine function, boxed like the constructor's. */
+export function engineFunctionApply(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr | null {
+  const callee = expr.expression;
+  if (!ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined) return null;
+  if (callee.name.text !== "apply" || !ts.isIdentifier(callee.expression)) return null;
+  if (callee.expression.text !== "Function") return null;
+  const args = expr.arguments;
+  if (args.length !== 2 || args.some((a) => ts.isSpreadElement(a))) return null;
+  if (args[0]!.kind !== ts.SyntaxKind.NullKeyword) return null;
+  const listType = L.mapTypeOf(L.typeOf(args[1]!));
+  if (listType === null || listType.kind !== "array" || listType.elem.kind !== "string") return null;
+  const list = L.lowerExpr(args[1]!);
+  const fnVal: IrExpr = { kind: "jsOp", op: "globalGet", name: "Function", args: [], type: JSVAL, loc };
+  const nullThis: IrExpr = { kind: "jsOp", op: "nullLit", args: [], type: JSVAL, loc };
+  const made: IrExpr = {
+    kind: "jsOp",
+    op: "callMethod",
+    name: "apply",
+    args: [fnVal, nullThis, { kind: "jsMarshal", value: list, type: JSVAL, loc: list.loc }],
+    type: JSVAL,
+    loc,
+  };
+  return { kind: "dynFromJsval", value: made, type: DYN, loc, fnBox: true };
+}
