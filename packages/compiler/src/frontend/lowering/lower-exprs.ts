@@ -13910,6 +13910,16 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
           );
         }
       }
+      // A checker-`any` receiver whose VALUE is a union of array and boolean/number
+      // arms (`const v = keyOf(n); v[i]` where keyOf answers `true | string[]`): the
+      // per-arm element read, see lowerUnionElementRead.
+      if (obj.type.kind === "union") {
+        // The index takes the ordinary checked-number conversion (a dyn index
+        // from an untyped JS parameter becomes a checked f64).
+        const index = checkedJsNumber(L, expr.argumentExpression, L.lowerExpr(expr.argumentExpression));
+        const elemRead = index === null ? null : lowerUnionElementRead(L, expr, obj, index);
+        if (elemRead) return L.maybeNarrow(elemRead, expr);
+      }
     }
     // `env[key]` on a UNION of record shapes (`ProcessEnv | Record<string,
     // string>` — the env-bag parameter pattern): the per-arm keyed read,
@@ -13957,6 +13967,10 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
               );
             }
           }
+          // `s[i]` over a string[] | boolean union (mysql2 parser_cache sameList):
+          // the per-arm element read, see lowerUnionElementRead.
+          const elemRead = lowerUnionElementRead(L, expr, value, key);
+          if (elemRead) return L.maybeNarrow(elemRead, expr);
         }
       }
     }
@@ -23176,6 +23190,97 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       });
     }
     return { kind: "call", callee: name, args: [value], type: answer, loc };
+  }
+
+  /** `u[i]` (a NUMBER index) over a union of array arms and boolean/number
+   * arms: an array arm answers its element through the ordinary indexed read
+   * (an out-of-range index keeps the documented trap, divergence 4), and a
+   * boolean or number arm answers undefined (Node: `(true)[0]` and `(5)[0]`
+   * are undefined; neither primitive owns an index). The answer is the element
+   * joined with undefined, and each arm writes its own answer at its tag
+   * (unionWrap) inside a lifted helper. Unit arms are declined: Node's
+   * TypeError names the index, which a constant helper message cannot carry.
+   * Every array arm must share one non-union element type. */
+  function lowerUnionElementRead(L: Lowerer, expr: ts.Node, value: IrExpr, key: IrExpr): IrExpr | null {
+    if (value.type.kind !== "union" || key.type.kind !== "f64") return null;
+    const fromId = value.type.unionId;
+    const def = L.unions.get(fromId);
+    if (!def) return null;
+    let elemFound: IrType | null = null;
+    let undefArms = 0;
+    for (const arm of def.arms) {
+      if (arm.kind === "array") {
+        if (elemFound === null) elemFound = arm.elem;
+        else if (!typeEquals(elemFound, arm.elem)) return null;
+      } else if (arm.kind === "bool" || arm.kind === "f64") {
+        undefArms++;
+      } else {
+        return null;
+      }
+    }
+    if (elemFound === null || elemFound.kind === "union" || undefArms === 0) return null;
+    const elemT: IrType = elemFound;
+    const answer = L.withUndefinedArm(elemT);
+    if (answer === null || answer.kind !== "union") return null;
+    const answerArms = L.unions.get(answer.unionId)?.arms ?? [];
+    const elemTag = answerArms.findIndex((a) => typeEquals(a, elemT));
+    const undefTag = answerArms.findIndex((a) => a.kind === "undefinedT");
+    if (elemTag < 0 || undefTag < 0) return null;
+    const loc = locOf(expr);
+    const key2 = `uelem:${fromId}`;
+    let name = L.widthHelpers.get(key2);
+    if (name === undefined) {
+      name = `%union.elem.${L.widthHelpers.size}`;
+      L.widthHelpers.set(key2, name);
+      const fromT: IrType = { kind: "union", unionId: fromId };
+      const u: IrExpr = { kind: "varRef", localId: "u.0", type: fromT, loc };
+      const ix: IrExpr = { kind: "varRef", localId: "i.0", type: F64, loc };
+      const body: IrStmt[] = [];
+      def.arms.forEach((arm, i) => {
+        let read: IrExpr;
+        if (arm.kind === "array") {
+          const got = {
+            kind: "arrayGet",
+            arr: { kind: "unionNarrow", unionId: fromId, tag: i, value: u, type: arm, loc },
+            index: ix,
+            type: elemT,
+            loc,
+          } as unknown as IrExpr;
+          read = { kind: "unionWrap", unionId: answer.unionId, tag: elemTag, value: got, type: answer, loc };
+        } else {
+          const undef: IrExpr = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
+          read = { kind: "unionWrap", unionId: answer.unionId, tag: undefTag, value: undef, type: answer, loc };
+        }
+        // The last arm answers unconditionally (the tag is exhaustive), so the
+        // helper never falls off its end.
+        if (i === def.arms.length - 1) {
+          body.push({ kind: "return", value: read, loc });
+          return;
+        }
+        body.push({
+          kind: "if",
+          cond: { kind: "unionIsTag", unionId: fromId, tag: i, negated: false, value: u, type: BOOL, loc },
+          then: [{ kind: "return", value: read, loc }],
+          else_: null,
+          loc,
+        });
+      });
+      L.liftedFns.push({
+        name,
+        params: [
+          { localId: "u.0", name: "u", type: fromT },
+          { localId: "i.0", name: "i", type: F64 },
+        ],
+        returnType: answer,
+        locals: [
+          { id: "u.0", name: "u", type: fromT, mutable: true },
+          { id: "i.0", name: "i", type: F64, mutable: true },
+        ],
+        body,
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [value, key], type: answer, loc };
   }
 
   /** unionKeyGet's arm answers must SURFACE as the join — each is the join
