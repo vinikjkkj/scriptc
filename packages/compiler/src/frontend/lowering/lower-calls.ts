@@ -3,6 +3,7 @@
  * function/lambda lowering and signature collection, and monomorphizing
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
 import * as ts from "../ts7/adapter.js";
+import { engineFunctionApply } from "./lower-engine-fn.js";
 import { applyEnumRefill, registerEnumRefill } from "./ir-patch.js";
 import type { EnumRefill } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
@@ -4223,6 +4224,11 @@ export function lowerFfiCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null
 
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
+    // Function.apply(null, <string[]>): the engine route (lower-engine-fn.ts).
+    {
+      const ea = engineFunctionApply(L, expr, loc);
+      if (ea !== null) return ea;
+    }
     // `P.m(...)` where P is a declaration-file class paired with the module's
     // constructor: a static call of that constructor, ahead of the function-value
     // spelling (`typeof P` is a function, and that route answers dyn).
