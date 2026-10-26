@@ -8892,14 +8892,12 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
    * definition rule, that Node does not — dynObjLitAccessors says why for
    * each.
    *
-   * SPREADS stay fenced HERE and only here. A literal whose SLOT is dyn,
-   * or one of whose spread sources is a checked-dynamic member chain,
-   * never reaches this function at all — it routes to
-   * lowerDynSpreadObjectLiteral, which folds each spread through
-   * dyn.assign. What is left for this fence is the road that carries every
-   * member of a literal straight in: the non-folding COMPUTED KEY
-   * (`{ [k]: 1, ...src }` bound to a plain local) and the Object.create
-   * descriptor map. */
+   * SPREADS never reach the run builder. lowerDynObjectLiteral folds a
+   * literal with a spread through lowerDynSpreadObjectLiteral (dyn.assign,
+   * one fold per spread), on every road that builds a dyn literal: a dyn
+   * slot, a checked-dynamic member-chain source, the JS declaration fallback,
+   * the non-folding COMPUTED KEY (`{ [k]: 1, ...src }`), and the Object.create
+   * descriptor map. The fence that remains in this builder is defensive. */
   /** One RUN of ordinary properties of a dyn object literal, lowered to the
    * key/value pairs a `dynObjLit` holds. Split out of lowerDynObjectLiteral so
    * lowerDynSpreadObjectLiteral can build the runs BETWEEN spreads with the
@@ -8917,16 +8915,14 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
       const isMethod = ts.isMethodDeclaration(prop) && prop.body !== undefined;
       if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop) && !isMethod) {
         // Accessors are peeled off before this loop can see them
-        // (dynObjLitRun), so the member form that reaches here is a SPREAD
-        // on a road that carries the whole literal in — and the message
-        // names that one construct instead of a list the site no longer
-        // refuses. The `else` arm is a defensive boundary, not a shape any
-        // road produces today.
+        // (dynObjLitRun), and every literal with a SPREAD folds through
+        // lowerDynSpreadObjectLiteral before it reaches a run, so a spread
+        // here is a defensive boundary, not a shape any road produces today.
         L.unsupported(
           "SC1090",
           prop,
           ts.isSpreadAssignment(prop)
-            ? "a spread in a dyn object literal whose keys are run-time values (methods and get/set accessors lower; the spread would have to copy onto a table whose key order is not a compile-time fact)"
+            ? "a spread that reached the dyn run builder without folding (internal boundary: every dyn literal with a spread folds through dyn.assign)"
             : `'${ts.SyntaxKind[prop.kind]}' members of a dyn object literal (properties, methods and get/set accessors lower)`,
         );
       }
@@ -9346,10 +9342,21 @@ function dynObjLitRun(
 }
 
   export function lowerDynObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
-    if (!L.dynThisLiterals.has(expr)) return dynObjLitRun(L, expr, expr.properties, null, dynAccessorPlan(L, expr));
+    // A literal with a SPREAD on this road (the JS declaration fallback, a
+    // dyn descriptor map, a dyn argument) folds through dyn.assign, exactly as
+    // lowerDynSpreadObjectLiteral does for a dyn slot. The run builder below
+    // has no spread member: it used to refuse one here, which turned every
+    // spread of a call source (`{ ...fieldMetadata(f), string() {} }`, whose
+    // literal type is unmapped) into SC1090 even though the source's own keys
+    // are known in declaration order and copy the same way.
+    const build = (): IrExpr =>
+      expr.properties.some((p) => ts.isSpreadAssignment(p))
+        ? lowerDynSpreadObjectLiteral(L, expr)
+        : dynObjLitRun(L, expr, expr.properties, null, dynAccessorPlan(L, expr));
+    if (!L.dynThisLiterals.has(expr)) return build();
     L.dynThisInLiterals++;
     try {
-      return dynObjLitRun(L, expr, expr.properties, null, dynAccessorPlan(L, expr));
+      return build();
     } finally {
       L.dynThisInLiterals--;
     }
