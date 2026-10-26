@@ -16917,6 +16917,78 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/11350-union-length-string-array-or-boolean.js": {
+   "order": [
+    "<repo>/tests/corpus/11350-union-length-string-array-or-boolean.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11351-union-length-string-or-number.js": {
+   "order": [
+    "<repo>/tests/corpus/11351-union-length-string-or-number.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11352-union-length-buffer-or-null.js": {
+   "order": [
+    "<repo>/tests/corpus/11352-union-length-buffer-or-null.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11353-union-field-missing-in-one-arm.js": {
+   "order": [
+    "<repo>/tests/corpus/11353-union-field-missing-in-one-arm.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11354-union-length-null-undefined-throw.js": {
+   "order": [
+    "<repo>/tests/corpus/11354-union-length-null-undefined-throw.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11355-union-length-mask-after-read.js": {
+   "order": [
+    "<repo>/tests/corpus/11355-union-length-mask-after-read.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11356-union-length-unit-only-throw.js": {
+   "order": [
+    "<repo>/tests/corpus/11356-union-length-unit-only-throw.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11357-union-length-compressed-frame-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/11357-union-length-compressed-frame-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11358-union-length-samelist-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/11358-union-length-samelist-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11359-union-field-unit-only-throw.js": {
+   "order": [
+    "<repo>/tests/corpus/11359-union-field-unit-only-throw.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11360-union-field-nullish-doneinsert-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/11360-union-field-nullish-doneinsert-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11361-union-field-record-or-null-throw.js": {
+   "order": [
+    "<repo>/tests/corpus/11361-union-field-record-or-null-throw.js"
+   ],
+   "diags": []
   }
  }
 }
