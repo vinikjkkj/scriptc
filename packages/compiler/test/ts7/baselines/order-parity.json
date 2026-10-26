@@ -17310,6 +17310,54 @@
     "<repo>/tests/corpus/11665-fnvalue-map-string-dyn-numbers.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/11950-dynspread-fixed-keys-helper.js": {
+   "order": [
+    "<repo>/tests/corpus/11950-dynspread-fixed-keys-helper.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11951-dynspread-override-order.js": {
+   "order": [
+    "<repo>/tests/corpus/11951-dynspread-override-order.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11952-dynspread-runtime-source.js": {
+   "order": [
+    "<repo>/tests/corpus/11952-dynspread-runtime-source.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11953-dynspread-entries-methods.js": {
+   "order": [
+    "<repo>/tests/corpus/11953-dynspread-entries-methods.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11954-dynspread-untyped-spread-arg.js": {
+   "order": [
+    "<repo>/tests/corpus/11954-dynspread-untyped-spread-arg.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11955-dynspread-typed-record-call.js": {
+   "order": [
+    "<repo>/tests/corpus/11955-dynspread-typed-record-call.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11956-dynspread-method-this-call-source.js": {
+   "order": [
+    "<repo>/tests/corpus/11956-dynspread-method-this-call-source.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11957-dynspread-computed-key-spread-collision.js": {
+   "order": [
+    "<repo>/tests/corpus/11957-dynspread-computed-key-spread-collision.js"
+   ],
+   "diags": []
   }
  }
 }
