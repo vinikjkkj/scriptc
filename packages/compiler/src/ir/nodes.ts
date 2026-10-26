@@ -10504,6 +10504,27 @@ const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
   "buffer.concatDyn", "buffer.concatDynLen", "buffer.byteLenDyn", "buffer.isEncodingDyn", "error.msgDyn", "dyn.isBuffer", "dyn.looseEq", "error.ext",
   "dyn.bufferValue",
 ]);
+/** True when the module holds a dyn.bufferValue libCall: the buffer module values and Blob/File
+ * (scr_buffer_val.c, cc.ts bufferVal). Same walk as moduleUsesDynExt. */
+export function moduleUsesBufferValue(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "dyn.bufferValue") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 export function moduleUsesDynExt(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {
