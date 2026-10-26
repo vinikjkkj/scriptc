@@ -10933,6 +10933,11 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
   export function lowerForIn(L: Lowerer, stmt: ts.ForInStatement): IrStmt {
     const labels = L.takeLabels();
     const loc = locOf(stmt);
+    // `require('buffer')` as a value (the module object, a checked-dynamic record of its fourteen
+    // enumerable keys): the dyn walk, which lists the keys in Node's order.
+    if (isJsSourceFile(stmt.getSourceFile()) && !L.dynamic && L.builtinNamespaceModuleOf(stmt.expression) === "buffer") {
+      return lowerForInDyn(L, stmt, labels);
+    }
     if (stdlibGlobalNameOf(L, stmt.expression) === "globalThis") {
       return { kind: "block", body: [], loc };
     }
