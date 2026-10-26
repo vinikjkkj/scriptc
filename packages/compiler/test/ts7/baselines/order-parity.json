@@ -16893,6 +16893,50 @@
     "<repo>/tests/corpus/11107-publicencrypt-no-padding-errors.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/11500-instof-unknown-class-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/11500-instof-unknown-class-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11501-instof-any-class-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/11501-instof-any-class-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11502-instof-unknown-registry-roundtrip.ts": {
+   "order": [
+    "<repo>/tests/corpus/11502-instof-unknown-registry-roundtrip.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11503-instof-unknown-module-boundary/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/11503-instof-unknown-module-boundary/shapes.ts",
+    "<repo>/tests/corpus/11503-instof-unknown-module-boundary/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11504-instof-unknown-sha256-tls-shape/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/11504-instof-unknown-sha256-tls-shape/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11505-instof-unknown-static-ctor-param.ts": {
+   "order": [
+    "<repo>/tests/corpus/11505-instof-unknown-static-ctor-param.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11506-instof-unknown-pool-release/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/11506-instof-unknown-pool-release/conn.ts",
+    "<repo>/tests/corpus/11506-instof-unknown-pool-release/main.ts"
+   ],
+   "diags": []
   }
  }
 }
