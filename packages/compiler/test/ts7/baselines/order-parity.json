@@ -17160,6 +17160,24 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/11550-union-elem-string-array-or-boolean.js": {
+   "order": [
+    "<repo>/tests/corpus/11550-union-elem-string-array-or-boolean.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11551-union-elem-samelist-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/11551-union-elem-samelist-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/11552-union-elem-number-or-array.js": {
+   "order": [
+    "<repo>/tests/corpus/11552-union-elem-number-or-array.js"
+   ],
+   "diags": []
   }
  }
 }
