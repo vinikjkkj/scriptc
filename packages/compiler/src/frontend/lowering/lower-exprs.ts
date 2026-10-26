@@ -8,7 +8,7 @@ import { protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExportRecordReadDyn, cjsExportRecordRef, isBareExportsAccess } from "./cjs-export-record.js";
@@ -354,7 +354,16 @@ export function lowerExpr(L: Lowerer, expr: ts.Expression): IrExpr {
     }
     lowerExprDepth++;
     try {
-      const out = lowerExprInner(L, expr);
+      let out = lowerExprInner(L, expr);
+      // A JavaScript call or member the checker types as a Buffer, whose VALUE came out of the
+      // checked-dynamic tree (a Buffer read off a dynamic record: `o.B.from(s)`): the runtime value IS
+      // bytes, so the typed consumer takes the checked dyn-to-bytes exit (the same exit every dyn-to-typed
+      // read takes), instead of a bytes intrinsic over a dyn receiver that the validator refuses.
+      if (out.type.kind === "dyn" && (ts.isCallExpression(expr) || ts.isPropertyAccessExpression(expr)) &&
+          isJsSourceFile(expr.getSourceFile())) {
+        const mt = L.mapTypeOf(L.typeOf(expr));
+        if (mt?.kind === "bytes" && mt.elem === "u8") out = L.coerceInto(expr, out, BYTES_U8);
+      }
       if (LOWER_FP_ON) lowerFpAccum(expr, out);
       return out;
     } finally {
