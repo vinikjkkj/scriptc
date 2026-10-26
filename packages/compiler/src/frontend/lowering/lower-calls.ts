@@ -1324,6 +1324,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
    * whole node for lambda-likes — preserving each caller's historical loc). */
   export function declaredReturnType(L: Lowerer, decl: ts.SignatureDeclaration, blame: ts.Node): IrType {
     if (L.dynReturnFnNodes.has(decl)) return DYN;
+    if (returnsWidenedJsLet(L, decl)) return DYN;
     const sig = L.checker.getSignatureFromDeclaration(decl);
     if (!sig) L.unsupported("SC1090", decl, "this function form");
     const retTsType = L.checker.getReturnTypeOfSignature(sig);
@@ -12852,6 +12853,130 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     decl.getSourceFile().forEachChild(visit);
     L.neverReassignedCache.set(sym, !written);
     return !written;
+  }
+
+  /** Per file, the IR kinds every write to each local symbol produces, keyed
+   * by symbol. A write's kind is the mapped type of the assignment (or ++/--,
+   * for-in: f64 / string); a write the scan cannot type (destructuring, for-of)
+   * records '?', which never agrees with a declared kind. */
+  const jsLetWriteKindsByFile = new WeakMap<ts.SourceFile, Map<ts.Symbol, Set<string>>>();
+  function jsLetWriteKinds(L: Lowerer, sf: ts.SourceFile): Map<ts.Symbol, Set<string>> {
+    const cached = jsLetWriteKindsByFile.get(sf);
+    if (cached !== undefined) return cached;
+    const out = new Map<ts.Symbol, Set<string>>();
+    const note = (sym: ts.Symbol | null | undefined, kind: string): void => {
+      if (!sym) return;
+      let s = out.get(sym);
+      if (s === undefined) { s = new Set<string>(); out.set(sym, s); }
+      s.add(kind);
+    };
+    const strip = (e: ts.Expression): ts.Expression => {
+      let x = e;
+      while (ts.isParenthesizedExpression(x)) x = x.expression;
+      return x;
+    };
+    const symOf = (e: ts.Expression): ts.Symbol | null => {
+      const x = strip(e);
+      return ts.isIdentifier(x) ? L.resolveValueSymbol(x) : null;
+    };
+    // Every identifier inside a destructuring target may be the binding.
+    const noteAllIn = (n: ts.Node): void => {
+      if (ts.isIdentifier(n)) note(L.resolveValueSymbol(n), "?");
+      else n.forEachChild(noteAllIn);
+    };
+    const visit = (n: ts.Node): void => {
+      if (ts.isBinaryExpression(n)) {
+        const k = n.operatorToken.kind;
+        if (k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment) {
+          const left = strip(n.left);
+          if (ts.isIdentifier(left)) note(symOf(left), kindOfWrite(L, n));
+          else if (ts.isArrayLiteralExpression(left) || ts.isObjectLiteralExpression(left)) noteAllIn(left);
+        }
+      } else if (
+        (ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) &&
+        (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken)
+      ) {
+        note(symOf(n.operand as ts.Expression), "f64");
+      } else if ((ts.isForInStatement(n) || ts.isForOfStatement(n)) && !ts.isVariableDeclarationList(n.initializer)) {
+        if (ts.isForInStatement(n)) note(symOf(n.initializer as ts.Expression), "string");
+        else noteAllIn(n.initializer);
+      }
+      n.forEachChild(visit);
+    };
+    sf.forEachChild(visit);
+    jsLetWriteKindsByFile.set(sf, out);
+    return out;
+  }
+
+  /** The IR kind of the value an assignment expression writes. */
+  function kindOfWrite(L: Lowerer, assign: ts.BinaryExpression): string {
+    return L.mapTypeOf(L.typeOf(assign))?.kind ?? "?";
+  }
+
+  /** A JS `let` (no annotation) whose checker type is one primitive IR kind
+   * (f64 / string / bool) but whose writes produce ANOTHER kind somewhere in
+   * the file: `let ms = 0; ms = str` (mysql2's readDateTimeString). tsc types
+   * the binding by its initializer and does not narrow a non-union declared
+   * type on assignment, so a static slot cannot hold both. The caller widens
+   * such a binding to the checked-dynamic kind. Every write agreeing keeps the
+   * native kind. */
+  export function jsLetWritesDisagree(L: Lowerer, decl: ts.VariableDeclaration, declared: string): boolean {
+    if (!ts.isIdentifier(decl.name)) return false;
+    const sym = L.checker.getSymbolAtLocation(decl.name);
+    if (!sym) return false;
+    const kinds = jsLetWriteKinds(L, decl.getSourceFile()).get(sym);
+    return kinds !== undefined && [...kinds].some((k) => k !== declared);
+  }
+
+  /** A JS `let` (no annotation) that is WIDENED to the checked-dynamic kind:
+   * its checker type is one primitive kind and a later write produces
+   * another (jsLetWritesDisagree). The declaration, every read and every
+   * return of the binding use this one test, so they agree. */
+  export function jsLetWidened(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+    if (!ts.isIdentifier(decl.name) || decl.type !== undefined || !isJsSourceFile(decl.getSourceFile())) return false;
+    if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Let) === 0) return false;
+    const kind = L.mapTypeOf(L.typeOf(decl.name))?.kind;
+    if (kind !== "f64" && kind !== "string" && kind !== "bool") return false;
+    return jsLetWritesDisagree(L, decl, kind);
+  }
+
+  /** The widened JS let an expression names, if it is one (parens stripped). */
+  function widenedJsLetOf(L: Lowerer, node: ts.Node): boolean {
+    let n: ts.Node = node;
+    while (ts.isParenthesizedExpression(n)) n = n.expression;
+    if (!ts.isIdentifier(n)) return false;
+    const sym = L.resolveValueSymbol(n);
+    const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    return decl !== undefined && ts.isVariableDeclaration(decl) && jsLetWidened(L, decl);
+  }
+
+  /** A READ of a widened JS let stays checked-dynamic. The checker types
+   * every read of a non-union `let` by its declaration, so `ms.length` after
+   * `ms = str` reads `number`, and maybeNarrow's scalar bridge would validate
+   * the string against number and throw. The dyn value is the truth; its
+   * member and operator reads go through the dyn paths. */
+  export function jsLetReadStaysDyn(L: Lowerer, node: ts.Node): boolean {
+    return widenedJsLetOf(L, node);
+  }
+
+  /** An unannotated JS function that RETURNS a widened let (`return ms`):
+   * the checker types the return by the declaration (number), so the return
+   * slot is checked-dynamic instead, and the value is returned as it is. */
+  export function returnsWidenedJsLet(L: Lowerer, fn: ts.SignatureDeclaration): boolean {
+    const body = (fn as ts.FunctionLikeDeclaration).body;
+    if (fn.type !== undefined || !isJsSourceFile(fn.getSourceFile()) || body === undefined) return false;
+    if (!ts.isBlock(body)) return widenedJsLetOf(L, body);
+    let found = false;
+    const visit = (n: ts.Node): void => {
+      if (found || ts.isFunctionLike(n)) return;
+      if (ts.isReturnStatement(n) && n.expression !== undefined && widenedJsLetOf(L, n.expression)) {
+        found = true;
+        return;
+      }
+      n.forEachChild(visit);
+    };
+    body.forEachChild(visit);
+    return found;
   }
 
 /** Strips the value-preserving wrappers off an expression: parens,
