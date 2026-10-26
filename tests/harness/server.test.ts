@@ -81,15 +81,25 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<Pr
             // The preload writes every socket event to stderr synchronously,
             // so the last line before a fast-fail survives (see its header).
             const dout = stdoutFile();
-            const d = spawn("node", ["--import", driverTrace, driver, m[1]!], { stdio: ["ignore", dout.fd, "pipe"] });
+            // Stderr is a FILE too: a Windows pipe write is asynchronous and
+            // is lost when the driver dies on a fast-fail (F8), so a runtime
+            // assertion or V8 FATAL line would never reach the harness.
+            const derrPath = join(dout.dir, "stderr");
+            const derrFd = openSync(derrPath, "w");
+            const d = spawn("node", ["--import", driverTrace, driver, m[1]!], { stdio: ["ignore", dout.fd, derrFd] });
             closeSync(dout.fd);
-            let driverErr = "";
-            d.stderr.on("data", (c: Buffer) => {
-              driverErr += c.toString("utf8");
-              process.stderr.write(c);
-            });
+            closeSync(derrFd);
+            // Bounded: a driver that stops making progress (its server closed
+            // while it still waits on a socket) used to hang this promise
+            // until vitest's 120 s test limit, with no driver output at all.
+            const driverTimer = setTimeout(() => {
+              d.kill("SIGKILL");
+            }, 60_000);
             d.on("close", (code, sig) => {
+              clearTimeout(driverTimer);
               driverStdout = readFileSync(dout.path, "utf8");
+              const driverErr = readFileSync(derrPath, "utf8");
+              process.stderr.write(driverErr);
               rmSync(dout.dir, { recursive: true, force: true });
               if (code === 0) res();
               else {
