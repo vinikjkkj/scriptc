@@ -18549,6 +18549,14 @@
     "<repo>/tests/corpus/14052-proto-alias-two-classes.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/14053-proto-alias-required-base/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14053-proto-alias-required-base/base.cjs",
+    "<repo>/tests/corpus/14053-proto-alias-required-base/connection.cjs",
+    "<repo>/tests/corpus/14053-proto-alias-required-base/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
