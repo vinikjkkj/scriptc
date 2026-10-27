@@ -1064,6 +1064,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "buffer.concatDyn": { argTypes: [DYN], result: BYTES_U8 },
   "array.sortDyn": { argTypes: [arrayOf(DYN)], result: arrayOf(DYN) },
   "array.toSortedDyn": { argTypes: [arrayOf(DYN)], result: arrayOf(DYN) },
+  "array.fromDynIter": { argTypes: [DYN, STRING], result: arrayOf(DYN) },
+  "array.toF64Dyn": { argTypes: [arrayOf(DYN)], result: arrayOf(F64) },
   "dyn.dataViewNew": { argTypes: [DYN, DYN, DYN], result: BYTES_U8 },
   "dyn.u8ViewNew": { argTypes: [DYN, DYN, DYN], result: BYTES_U8 },
   "buffer.concatDynLen": { argTypes: [DYN, DYN], result: BYTES_U8 },

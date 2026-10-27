@@ -1976,6 +1976,13 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         return { kind: "libCall", fn: "string.fromCharCode", args: [packed], type: STRING, loc };
       }
     }
+    // An any[] (dyn elements, the lazy any of an untyped accumulator): a copy
+    // of its ToNumber values, which is the list the callee reads.
+    const argsLow = L.lowerExpr(argsNode);
+    if (argsLow.type.kind === "array" && argsLow.type.elem.kind === "dyn") {
+      const numbers: IrExpr = { kind: "libCall", fn: "array.toF64Dyn", args: [argsLow], type: arrayOf(F64), loc };
+      return { kind: "libCall", fn: "string.fromCharCode", args: [numbers], type: STRING, loc };
+    }
     const packed = L.lowerExprExpecting(argsNode, arrayOf(F64));
     return { kind: "libCall", fn: "string.fromCharCode", args: [packed], type: STRING, loc };
   }
