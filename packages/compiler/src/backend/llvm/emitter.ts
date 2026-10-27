@@ -14090,6 +14090,15 @@ class LlEmitter {
         // empty, everything else through the union ToString) — the C
         // emitter's sc_uj_*, ported in walkers.ts.
         const sep = this.emitExpr(e.args[0]!);
+        if (elem.kind === "dyn") {
+          // Dyn elements: ToString per slot with the object protocol; a throw
+          // pends and the pending check unwinds (scr_arr_join_dyn).
+          this.declare(`declare ptr @scr_arr_join_dyn(ptr, ptr)`);
+          const t = B.tmp();
+          B.line(`${t} = call ptr @scr_arr_join_dyn(ptr ${r.name}, ptr ${sep.name})`);
+          this.emitPendingCheck();
+          return this.own({ name: t, type: e.type });
+        }
         if (elem.kind === "union") {
           const helper = this.walkers.unionJoinHelper(elem.unionId);
           const t = B.tmp();

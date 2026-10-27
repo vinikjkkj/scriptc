@@ -3007,7 +3007,7 @@ function validateFunction(
                           : { argTypes: [], result: F64 }; // length
         if (
           e.method === "join" &&
-          elem.kind !== "f64" && elem.kind !== "string" && elem.kind !== "bool" &&
+          elem.kind !== "f64" && elem.kind !== "string" && elem.kind !== "bool" && elem.kind !== "dyn" &&
           !(
             elem.kind === "union" &&
             (unions
