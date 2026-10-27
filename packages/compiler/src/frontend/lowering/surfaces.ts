@@ -3060,6 +3060,51 @@ export function stdlibBufferVarAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts
    * It keeps its own fence, which names it. */
   const NODE_ABSENT_PROCESS_MEMBERS: ReadonlySet<string> = new Set(["type"]);
 
+  /** Names every object inherits from Object.prototype: an absent-looking read of
+   * one of these is NOT absent in Node (it answers the inherited function or
+   * accessor), so it never takes the absent answer below. */
+  const OBJECT_PROTOTYPE_NAMES: ReadonlySet<string> = new Set([
+    "constructor", "__proto__", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable",
+    "toString", "toLocaleString", "valueOf",
+  ]);
+
+  /** `o.x` in a JavaScript source, where the receiver `o` is a RECORD whose
+   * shape is CLOSED (no index signature) and carries no field `x`, and whose
+   * checker type declares no property `x` either: Node answers `undefined`
+   * for the absent read (a JS object literal such as `{}` passed as an
+   * argument, then read in a `||` chain). The read lowers to `undefined`
+   * after the receiver's own effects run. The receiver's type stays a record,
+   * so the read's type is the undefined arm alone. Dynamic receivers never
+   * reach here (they read through the dyn keyed read), and an index-signature
+   * shape is not closed, so both keep their existing answers.
+   *
+   * Called from ONE place: the "reading 'X' from a value of type 'Y'" fence in
+   * lowerPropertyAccess, so only a site that was about to refuse can change. */
+  export function absentRecordMemberValue(
+    L: Lowerer,
+    access: ts.PropertyAccessExpression,
+    recv: IrExpr,
+  ): IrExpr | null {
+    const name = access.name.text;
+    if (!isJsSourceFile(access.getSourceFile())) return null;
+    if (recv.type.kind !== "record") return null;
+    if (OBJECT_PROTOTYPE_NAMES.has(name)) return null;
+    const shape = L.shapes.get(recv.type.shapeId);
+    if (!shape || shape.indexValue !== undefined || shape.tuple === true) return null;
+    if (shape.fields.some((f) => f.name === name)) return null;
+    if (L.checker.getPropertyOfType(L.typeOf(access.expression), name) !== undefined) return null;
+    const loc = locOf(access);
+    const undef: IrExpr = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
+    if (recv.kind === "varRef") return undef;
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: recv, loc }],
+      result: undef,
+      type: UNDEFINED_T,
+      loc,
+    };
+  }
+
   /** `process.type` / `globalThis.process?.type` -- a member of Node's
    * `process` this host MEASURABLY does not have, read in a JavaScript
    * source, where Node answers `undefined`.
