@@ -2728,6 +2728,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13502-stringdecoder-ctor-through-var-alias.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13502-stringdecoder-ctor-through-var-alias.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13503-replace-callback-untyped-bound-to-this.js": {
+   "order": [
+    "<repo>/tests/corpus/13503-replace-callback-untyped-bound-to-this.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13504-stringdecoder-run-time-encoding-names.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13504-stringdecoder-run-time-encoding-names.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13507-stringdecoder-dyn-last-fields.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13507-stringdecoder-dyn-last-fields.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1351-path-parts.ts": {
    "order": [
     "<repo>/tests/corpus/1351-path-parts.ts"
