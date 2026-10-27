@@ -14586,9 +14586,14 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       litKey !== null
         ? ({ kind: "strLit", value: litKey, type: STRING, loc: locOf(keyNode) } satisfies IrExpr)
         : L.lowerExpr(keyNode);
-    // Runtime NUMBER keys ride the JS-exact formatter (o[n] is o[String(n)]
-    // in JS — the number-keyed-signature access path).
-    if (key.type.kind === "f64") key = L.ensureString(key, keyNode);
+    // Runtime NUMBER and checked-dynamic keys ride the JS-exact formatter
+    // (o[n] is o[String(n)] in JS — the number-keyed-signature access path;
+    // an `unknown`/`any` key is ToPropertyKey'd the same way: `INTEGER[t]`
+    // with t = 1 reads "1", with t = "1" reads "1"). A computed key that is
+    // not a literal may miss the declared fields, and a miss answers
+    // undefined: `dynamicKey` arms the read's type below.
+    const dynamicKey = litKey === null && (key.type.kind === "f64" || key.type.kind === "dyn");
+    if (key.type.kind === "f64" || key.type.kind === "dyn") key = L.ensureString(key, keyNode);
     if (key.type.kind !== "string") {
       L.unsupported("SC1090", keyNode, "indexing records with non-string or non-number keys");
     }
@@ -14628,6 +14633,13 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         expr,
         `dynamic keyed reads of '${L.fmt({ kind: "record", shapeId })}' (the declared fields have no one common type)`,
       );
+    }
+    // A computed key on a record with no index signature can miss every
+    // declared field; the miss answers undefined, so the read's type carries
+    // the undefined arm (recordKeyGet's helper answers it instead of aborting).
+    if (dynamicKey && !shape.indexValue) {
+      declared = L.withUndefinedArmOf(declared);
+      if (!declared) L.badType(expr, L.typeOf(expr));
     }
     // A LITERAL key naming no declared field can only hit the overflow:
     // the declared-field surfacing constraint doesn't apply.
