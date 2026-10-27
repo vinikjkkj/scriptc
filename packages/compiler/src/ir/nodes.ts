@@ -6144,6 +6144,7 @@ export type IrLibFn =
   | "strdec.write"
   | "strdec.next"
   | "strdec.end"
+  | "strdec.encOf"
   /** node:readline's question/close slice (scr_readline.c, linked under
    * the events gate — these fns imply moduleUsesProcessEvents). The
    * interface value is an f64 handle (the Timeout-id precedent).
@@ -13392,6 +13393,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.openSync",
   "fs.readSync",
   "fs.closeSync",
+  // new StringDecoder(enc) with a run-time encoding: an unknown name throws.
+  "strdec.encOf",
   "fs.readStream",
   "fs.readStreamOpts",
   "fs.writeStreamOpts",

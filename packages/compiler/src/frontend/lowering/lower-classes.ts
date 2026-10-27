@@ -10796,13 +10796,22 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         if (args.length > 1) {
           L.noLowering("new StringDecoder with 2 arguments", expr, undefined, symbol);
         }
-        const encName = args.length === 1 ? bufEncoding(L, "new StringDecoder", args[0]!) : "utf8";
+        // A literal spelling folds at compile time; any other encoding (a run-time
+        // string, e.g. `codec.enc`) is normalized at construction by the runtime
+        // (strdec.encOf: Node's alias set, case-insensitive, ERR_UNKNOWN_ENCODING).
+        const encArg = args[0];
+        const encValue: IrExpr =
+          encArg === undefined
+            ? { kind: "strLit", value: "utf8", type: STRING, loc }
+            : L.typeOf(encArg).isStringLiteralType()
+              ? { kind: "strLit", value: bufEncoding(L, "new StringDecoder", encArg), type: STRING, loc }
+              : { kind: "libCall", fn: "strdec.encOf", args: [L.lowerExprExpecting(encArg, DYN)], type: STRING, loc };
         const decT = L.mapTypeOf(L.typeOf(expr));
         if (decT?.kind !== "record") L.badType(expr, L.typeOf(expr));
         return {
           kind: "recordLit",
           fields: [
-            { name: "encoding", value: { kind: "strLit", value: encName, type: STRING, loc } },
+            { name: "encoding", value: encValue },
             { name: "%pending", value: { kind: "numLit", value: 0, type: F64, loc } },
           ],
           type: decT,

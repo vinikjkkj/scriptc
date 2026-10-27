@@ -8164,6 +8164,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_strdec_next(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "strdec.end":
             return finish(`scr_strdec_end(${arg(0)}, ${arg(1)})`);
+          // new StringDecoder(enc) over a run-time value: Node's normalization (+1), throws ERR_UNKNOWN_ENCODING.
+          case "strdec.encOf":
+            return finish(`scr_strdec_enc_of(${arg(0)})`);
           // The Number statics (scr_lib.c): pure f64 → bool, never throw.
           case "number.isFinite":
             return finish(`scr_num_is_finite(${arg(0)})`);

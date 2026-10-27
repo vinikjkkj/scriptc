@@ -9126,6 +9126,7 @@ bool scr_bytes_is_plain_u8(const ScrBytes *b, const ScrStr *why);
  * incomplete-tail walk, base64's mod-3 groups, utf16le's odd-byte and
  * trailing-lead-surrogate holds. None throws. */
 ScrStr *scr_strdec_write(const ScrStr *enc, double pending, const ScrBytes *chunk);
+ScrStr *scr_strdec_enc_of(const ScrDyn *v);
 double scr_strdec_next(const ScrStr *enc, double pending, const ScrBytes *chunk);
 ScrStr *scr_strdec_end(const ScrStr *enc, double pending);
 
