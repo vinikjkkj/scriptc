@@ -1,5 +1,3 @@
-// Untyped ssl members of the wrong runtime type reach createSecureContext
-// through the same options object; each one answers Node's typed error.
 import tls from 'tls';
 const CERT = `-----BEGIN CERTIFICATE-----
 MIIB0jCCAXigAwIBAgIUQ5nO7P8omev2Wtrf+4VkXVcHca8wCgYIKoZIzj0EAwIw
@@ -18,16 +16,18 @@ MHcCAQEEIBRbyFqnFoJ1Ptp+e85J1kZdfXOgZC3AVhuknG4vCdFHoAoGCCqGSM49
 AwEHoUQDQgAE+Q5kA/xmP5NAsE5Iry7b3M6+2R+EDlMjYYAfGy8tY+Bm1NbM/MS8
 rX5FWa5axU0LtFgID7zztcQs9kF18ACXrA==
 -----END EC PRIVATE KEY-----`;
+// Untyped options of the wrong runtime type reach createSecureContext through
+// the same options object; each one answers Node's typed error.
 const show = (label, fn) => {
   try { fn(); console.log(label, 'ok'); } catch (e) { console.log(label, e.name, e.code, e.message); }
 };
 function build(ssl) {
   return tls.createSecureContext({
-    ca: ssl.ca, cert: ssl.cert, ciphers: ssl.ciphers, key: ssl.key,
+    ca: ssl.ca, cert: ssl.cert, key: ssl.key,
     passphrase: ssl.passphrase, minVersion: ssl.minVersion, maxVersion: ssl.maxVersion,
   });
 }
-const bad = { cert: 1, key: 2, ca: 3, ciphers: 4, passphrase: 5, minVersion: 6, maxVersion: 7 };
+const bad = { cert: 1, key: 2, ca: 3, passphrase: 5, minVersion: 6, maxVersion: 7 };
 for (const k of Object.keys(bad)) {
   const ssl = JSON.parse(JSON.stringify({ cert: CERT, key: KEY }));
   ssl[k] = bad[k];

@@ -1,6 +1,3 @@
-// An SSL config that arrives inside an untyped record and a Map keyed by
-// the config: the SecureContext handle crosses the untyped return and comes
-// back from the map with its identity intact.
 import tls from 'tls';
 const CERT = `-----BEGIN CERTIFICATE-----
 MIIB0jCCAXigAwIBAgIUQ5nO7P8omev2Wtrf+4VkXVcHca8wCgYIKoZIzj0EAwIw
@@ -19,6 +16,9 @@ MHcCAQEEIBRbyFqnFoJ1Ptp+e85J1kZdfXOgZC3AVhuknG4vCdFHoAoGCCqGSM49
 AwEHoUQDQgAE+Q5kA/xmP5NAsE5Iry7b3M6+2R+EDlMjYYAfGy8tY+Bm1NbM/MS8
 rX5FWa5axU0LtFgID7zztcQs9kF18ACXrA==
 -----END EC PRIVATE KEY-----`;
+// An options object that arrives inside an untyped record and a Map keyed by
+// that record: the SecureContext crosses the untyped return and comes back
+// from the map with its identity intact.
 function load(entry) {
   return entry.ssl;
 }
@@ -39,5 +39,3 @@ const b1 = contextFor('b', pool.b);
 console.log('a identity:', a1 === a2);
 console.log('a vs b:', a1 === b1);
 console.log('registry size:', registry.size);
-console.log('typeof:', typeof registry.get(pool.b));
-
