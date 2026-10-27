@@ -4665,6 +4665,12 @@ typedef struct ScrDynClass {
    * and every other enumerating surface keeps its fence, as a stream's (which carries a far
    * larger prefix) all do. */
   unsigned char rt_root;
+  /* 1: the instances are COLLECTOR-OWNED: the class's shape is emitted with
+   * scr_cyc_alloc (a cycle header and a trace), so a dyn box may trace the
+   * instance and the collector may free it. 0: a calloc'd, plain-refcounted
+   * instance (no cycle header): a dyn box owns it by reference only and
+   * releases it through `release` as before. Appended last, like rt_root. */
+  unsigned char cyc;
 } ScrDynClass;
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
