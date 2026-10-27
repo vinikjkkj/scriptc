@@ -6931,6 +6931,40 @@ static void scr_jb_put_recv_ctor(ScrJsonBuf *b, const ScrDyn *recv) {
  * every later element, which is not what JS does. Refused loudly rather
  * than answered wrongly. Other kinds carry no own properties a delete
  * could remove, so they answer true like JS. Both borrowed. */
+/* CanonicalNumericIndexString(name): "-0", or ToString(ToNumber(name)) === name. The string must first be a
+ * StrDecimalLiteral (or Infinity / NaN) so ToNumber does not read hex, octal, or padding; then the number's
+ * ToString (scr_num_to_str_radix, radix 10) must reproduce the spelling exactly. */
+bool scr_canonical_numeric_name(const ScrStr *k) {
+  if (k->len == 2 && memcmp(k->data, "-0", 2) == 0) return true;
+  if (k->len == 0 || k->len > 400) return false;
+  char buf[402];
+  memcpy(buf, k->data, k->len);
+  buf[k->len] = '\0';
+  if (strcmp(buf, "NaN") == 0 || strcmp(buf, "Infinity") == 0 || strcmp(buf, "-Infinity") == 0) return true;
+  size_t i = 0;
+  if (buf[i] == '+' || buf[i] == '-') i++;
+  size_t digits = 0, frac = 0;
+  while (buf[i] >= '0' && buf[i] <= '9') { i++; digits++; }
+  if (buf[i] == '.') {
+    i++;
+    while (buf[i] >= '0' && buf[i] <= '9') { i++; frac++; }
+  }
+  if (digits + frac == 0) return false;
+  if (buf[i] == 'e' || buf[i] == 'E') {
+    i++;
+    if (buf[i] == '+' || buf[i] == '-') i++;
+    size_t ed = 0;
+    while (buf[i] >= '0' && buf[i] <= '9') { i++; ed++; }
+    if (ed == 0) return false;
+  }
+  if (buf[i] != '\0') return false;
+  double d = strtod(buf, NULL);
+  ScrStr *t = scr_num_to_str_radix(d, 10);
+  bool same = t != NULL && t->len == k->len && memcmp(t->data, k->data, k->len) == 0;
+  if (t != NULL) scr_str_release(t);
+  return same;
+}
+
 bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) return SCR_PX->del(recv, key);
   if (recv != NULL && recv->kind == SCR_DYN_BYTES && !recv->static_copy && recv->v.bytes->own != NULL) {
@@ -7146,13 +7180,24 @@ static bool dyn_canonical_index(const ScrStr *key, size_t *out) {
  * true in Node (Object.prototype) and false here, because this runtime
  * models no Object.prototype — the pre-existing divergence
  * estado-objmodel.md §4d named, unchanged. */
+bool scr_dyn_bytes_in(const ScrDyn *d, const char *k, size_t kl) {
+  /* `k in b`: the keyed READ answers the name (own table, index in range, length/byteLength/byteOffset/buffer,
+   * BYTES_PER_ELEMENT) or the prototype surface answers it as a method. One source of truth with the read. */
+  ScrStr *s = scr_str_new(k, kl);
+  ScrDyn *v = scr_dyn_bytes_key_get(d, s);
+  scr_str_release(s);
+  if (v != NULL) {
+    scr_dyn_release(v);
+    return true;
+  }
+  if (scr_exc_pending()) return false;
+  return scr_dyn_has_intrinsic_method(d, k, kl);
+}
+
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
   SCR_VIEW_FRESH(v);
   if (v->kind == SCR_DYN_PROXY) return SCR_PX->has((ScrDyn *)v, key);
-  if (v->kind == SCR_DYN_BYTES && v->v.bytes->own != NULL &&
-      scr_bytes_own_get(v->v.bytes, key->data, key->len) != NULL) {
-    return true;
-  }
+  if (v->kind == SCR_DYN_BYTES) return scr_dyn_bytes_in(v, key->data, key->len);
   if (v->kind == SCR_DYN_OBJ) {
     /* One walk, accessors included: an accessor IS a property, so `in`
      * answers true for it even though Object.keys skips it. */
@@ -7267,18 +7312,9 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       if (idx < recv->v.bytes->len) scr_bytes_set(recv->v.bytes, (double)idx, num);
       return;
     }
-    /* A canonical NUMERIC name (-1, 1.5, NaN, Infinity) is an integer-indexed
-     * exotic key: JS ignores the write and creates nothing. */
-    if (key->len > 0) {
-      int numeric = (key->data[0] == '-' || (key->data[0] >= '0' && key->data[0] <= '9'));
-      for (size_t i = 0; numeric && i < key->len; i++) {
-        char c = key->data[i];
-        if (!((c >= '0' && c <= '9') || c == '-' || c == '.' || c == 'e' || c == 'E' || c == '+')) numeric = 0;
-      }
-      if (numeric || (key->len == 3 && memcmp(key->data, "NaN", 3) == 0) ||
-          (key->len == 8 && memcmp(key->data, "Infinity", 8) == 0) ||
-          (key->len == 9 && memcmp(key->data, "-Infinity", 9) == 0)) return;
-    }
+    /* CanonicalNumericIndexString (ES2024 7.1.21): a name that is a canonical numeric string is an integer-indexed
+     * exotic key, and JS ignores the write and creates nothing. */
+    if (scr_canonical_numeric_name(key)) return;
     /* A non-index name is an ordinary own expando (mysql2's MockBuffer). */
     scr_bytes_own_set(recv->v.bytes, key->data, key->len, value);
     return;
