@@ -1496,6 +1496,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "strdec.next": { argTypes: [STRING, F64, BYTES_U8], result: F64 },
   "strdec.end": { argTypes: [STRING, F64], result: STRING },
   "strdec.encOf": { argTypes: [DYN], result: STRING },
+  "arrlike.from": { argTypes: [DYN], result: DYN },
   // node:readline: the interface handle is f64; the callbacks' func types
   // are program-dependent (zero-param or (answer: string) — the emitter
   // picks the adapter), so those slots are null like child.onExit's.

@@ -9129,6 +9129,7 @@ bool scr_bytes_is_plain_u8(const ScrBytes *b, const ScrStr *why);
 ScrStr *scr_strdec_write(const ScrStr *enc, double pending, const ScrBytes *chunk);
 ScrStr *scr_strdec_enc_of(const ScrDyn *v);
 ScrDyn *scr_strdec_dyn_box(const ScrStr *enc, double pending);
+ScrDyn *scr_arrlike_from(const ScrDyn *v);
 void scr_strdec_state_info(const ScrStr *enc, double pending, size_t *need, size_t *total, uint8_t last[4]);
 double scr_strdec_next(const ScrStr *enc, double pending, const ScrBytes *chunk);
 ScrStr *scr_strdec_end(const ScrStr *enc, double pending);

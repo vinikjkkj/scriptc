@@ -3199,6 +3199,33 @@ ScrDyn *scr_strdec_dyn_box(const ScrStr *enc, double pending) {
   return d;
 }
 
+/* `Array.prototype.<m>.call(recv, ...)` over a checked-dynamic receiver: the array-like
+ * the generic method reads (+1). A checked-dynamic array is SHARED (a mutator writes
+ * through, as in Node); a Buffer or typed array becomes a fresh array of its elements;
+ * a number or boolean has no elements (an empty array, as ToObject+length gives).
+ * null and undefined throw Node's TypeError. Any other object is a loud, named gap
+ * (its indexed reads are not modeled here), never a silent empty array. */
+ScrDyn *scr_arrlike_from(const ScrDyn *v) {
+  if (v->kind == SCR_DYN_ARR) return scr_dyn_retain((ScrDyn *)v);
+  if (v->kind == SCR_DYN_BYTES || v->kind == SCR_DYN_ARRBUF) {
+    const ScrBytes *b = v->v.bytes;
+    ScrDyn *d = scr_dyn_new_arr();
+    for (size_t i = 0; i < b->len; i++) scr_dyn_arr_push(d, scr_dyn_new_num((double)b->data[i]));
+    return d;
+  }
+  if (v->kind == SCR_DYN_NUM || v->kind == SCR_DYN_BOOL) return scr_dyn_new_arr();
+  if (v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) {
+    static const char msg[] = "Array.prototype method called on null or undefined";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return scr_dyn_new_arr();
+  }
+  static const char gap[] =
+      "Array.prototype.<method>.call on this receiver is not supported yet (only a Buffer, a typed array,"
+      " an array, a number or a boolean is an array-like the runtime reads here)";
+  scr_throw_error_msg(SCR_ERR_ERROR, gap, sizeof gap - 1);
+  return scr_dyn_new_arr();
+}
+
 /* ── class instances in the checked-dynamic tree (SCR_DYN_OBJINST) ────
  * The whole kind is five functions, and that is the point: the box
  * CARRIES an instance and hands it back, and every question that would

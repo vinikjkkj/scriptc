@@ -6011,6 +6011,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         lowerIteratorHelperCall(L, expr, expr.expression) ??
         lowerIteratorStaticFence(L, expr, expr.expression) ??
         lowerObjectStaticCall(L, expr, expr.expression) ??
+        lowerArrayProtoBorrowedCall(L, expr, expr.expression) ??
         lowerObjectFromEntriesCall(L, expr, expr.expression) ??
         lowerArrayFromCall(L, expr, expr.expression) ??
         L.lowerArrayMethodCall(expr, expr.expression) ??
@@ -14103,6 +14104,28 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     "append", "delete", "get", "getAll", "has", "set", "sort",
     "forEach", "keys", "values", "entries", "toString",
   ]);
+
+  /** `Array.prototype.<m>.call(recv, ...args)`: a builtin Array method borrowed
+   * through Function.prototype.call (the fence this arm sits ahead of named it as a
+   * compiled function value). Node reads the receiver as an ARRAY-LIKE, so the receiver
+   * is handed to the runtime as a checked-dynamic array (arrlike.from: a Buffer or typed
+   * array becomes its elements, a checked-dynamic array is shared so a mutator writes
+   * through), and the method then runs dynamically on that array. Only the receiver-first
+   * `.call` spelling lowers; `.apply` and `.bind` keep their fences. */
+  export function lowerArrayProtoBorrowedCall(L: Lowerer, call: ts.CallExpression, access: ts.Expression): IrExpr | null {
+    if (!ts.isPropertyAccessExpression(access) || access.name.text !== "call") return null;
+    const borrowed = access.expression;
+    if (!ts.isPropertyAccessExpression(borrowed) || !ts.isPropertyAccessExpression(borrowed.expression)) return null;
+    const proto = borrowed.expression;
+    if (!ts.isIdentifier(proto.expression) || proto.expression.text !== "Array" || proto.name.text !== "prototype") return null;
+    if (!L.isStdlibMember(borrowed)) return null;
+    if (call.arguments.length < 1 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    const loc = locOf(call);
+    const recv = L.lowerExprExpecting(call.arguments[0]!, DYN);
+    const args = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, DYN));
+    const arr: IrExpr = { kind: "libCall", fn: "arrlike.from", args: [recv], type: DYN, loc };
+    return { kind: "dynInvoke", recv: arr, method: borrowed.name.text, calleeName: borrowed.getText(), args, type: DYN, loc };
+  }
 
   export function lowerObjLitGenericMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
