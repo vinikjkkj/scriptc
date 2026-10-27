@@ -710,9 +710,16 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
     visit(d->v.proxy.target, ctx);
     visit(d->v.proxy.handler, ctx);
     break;
+  case SCR_DYN_OBJINST:
+    /* The box owns +1 on a compiled class instance, which is a cycle node
+     * (scr_cyc_alloc, rc first). Without this edge a cycle that runs through
+     * a dyn-held instance (instance -> props/field -> dyn -> instance) is
+     * invisible to the collector and leaks under the RC audit. */
+    visit(d->v.inst.o, ctx);
+    break;
   default:
-    break; /* scalars, strings, bytes, handles, promises, jsvals, bigints,
-            * boxed class instances: nothing traced (see scr_dyn_alloc) */
+    break; /* scalars, strings, bytes, handles, promises, jsvals, bigints:
+            * nothing traced (see scr_dyn_alloc) */
   }
 }
 
@@ -782,7 +789,9 @@ static void scr_dyn_gcfree(void *o) {
     scr_dyn_big_ops()->release(d->v.big);
     break;
   case SCR_DYN_OBJINST:
-    d->v.inst.cls->release(d->v.inst.o);
+    /* The instance is TRACED (scr_dyn_trace visits it), so the collector has
+     * accounted for this reference: releasing it here would double-free a
+     * white instance it is freeing itself. */
     break;
   case SCR_DYN_MAP:
     /* Owned, and NOT traced — the dyn→map edge is invisible to the
