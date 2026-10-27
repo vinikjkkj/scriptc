@@ -6284,6 +6284,15 @@ ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
     scr_dyn_check_fail(NULL, "a primitive value", d);
     return NULL;
   }
+  /* A Date handle under the NUMBER hint answers its time value: the built-in
+   * @@toPrimitive picks valueOf for "number" and toString otherwise (ES
+   * 21.4.4.45). Falling through to the string below made `d < e` over two
+   * Dates compare NaN and answer false, where Node compares the times.
+   * Through the handle's own invoke, so an own valueOf member still wins. */
+  if (d->kind == SCR_DYN_HANDLE && d->v.handle.tag == SCR_DYNH_DATE && hint == SCR_TOPRIM_NUMBER) {
+    const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
+    return ops->invoke(d->v.handle.ptr, (ScrDyn *)d, "valueOf", NULL, 0, "valueOf");
+  }
   {
     ScrStr *s = scr_dyn_to_string(d, NULL);
     if (!s) return NULL; /* pending (an OBJINST fence, a throwing member) */
