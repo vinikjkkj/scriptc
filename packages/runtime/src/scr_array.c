@@ -1081,6 +1081,34 @@ ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
   return out;
 }
 
+/* Array.prototype.join over a DYN-element array (ref slots holding ScrDyn*).
+ * An absent slot (hole) and an undefined/null element print empty; every
+ * other element is ToString'd with the object protocol, so a user toString
+ * runs and its throw propagates: NULL with the exception pending (the
+ * emitter's pending check unwinds). Borrows a and sep; +1 result. */
+ScrStr *scr_arr_join_dyn(ScrArr *a, ScrStr *sep) {
+  size_t cap = 64, len = 0;
+  char *buf = malloc(cap);
+  if (!buf) scr_arr_oom();
+  size_t n = a->len;
+  for (size_t i = 0; i < n; i++) {
+    if (i > 0) scr_join_append(&buf, &len, &cap, sep->data, sep->len);
+    /* Re-read the slot each step: a toString may have changed the array. */
+    const ScrDyn *d = i < a->len ? (const ScrDyn *)scr_slot_to_ptr(a->data[i]) : NULL;
+    if (d == NULL || scr_dyn_is_nullish(d)) continue;
+    ScrStr *s = scr_dyn_string_coerce_js(d);
+    if (s == NULL) {
+      free(buf);
+      return NULL;
+    }
+    scr_join_append(&buf, &len, &cap, s->data, s->len);
+    scr_str_release(s);
+  }
+  ScrStr *out = scr_str_new(buf, len);
+  free(buf);
+  return out;
+}
+
 /* String.raw over the template's raw literals and PRE-STRINGIFIED
  * substitutions (the frontend applies the static ToString per value):
  * raw[0] sub[0] raw[1] sub[1] ... — substitutions beyond raw.len-1 drop,

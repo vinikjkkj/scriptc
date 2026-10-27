@@ -1307,6 +1307,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Union elements route through the per-union join walker
             // (nullish arms print empty, exactly Array.prototype.join).
             const sep = E.emitExpr(e.args[0]!);
+            if (e.receiver.type.kind === "array" && e.receiver.type.elem.kind === "dyn") {
+              // Dyn elements: each slot ToString'd with the object protocol (a throw
+              // pends; the pending check unwinds). Nullish elements print empty.
+              const out = E.newTemp(e.type, `scr_arr_join_dyn(${r.name}, ${sep.name})`);
+              E.emitPendingCheck();
+              return out;
+            }
             if (e.receiver.type.kind === "array" && e.receiver.type.elem.kind === "union") {
               return E.newTemp(
                 e.type,

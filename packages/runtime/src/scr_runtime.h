@@ -1941,6 +1941,9 @@ bool scr_arr_includes_ref(ScrArr *a, void *v);
  * verbatim — with sep between. f64/bool/str element kinds only (the
  * compiler rejects the rest). Borrows both args; returns +1. */
 ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep);
+/* join over DYN-element arrays (ref slots of ScrDyn*): NULL with the
+ * exception pending when an element's toString throws. Borrows; +1. */
+ScrStr *scr_arr_join_dyn(ScrArr *a, ScrStr *sep);
 /* String.raw over the raw literals and pre-stringified substitutions
  * (both SCR_ELEM_STR): the spec's interleave — extra substitutions drop,
  * missing ones skip. Borrows both; +1 result; never throws. */
