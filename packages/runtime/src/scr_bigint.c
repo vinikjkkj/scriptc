@@ -1077,3 +1077,31 @@ void scr_big_dyn_install(void) {
   scr_dyn_big_from_bits_fn = scr_big_dyn_from_bits;
   scr_dyn_big_store_fn = scr_big_store_check;
 }
+
+/* ── BigInt64Array / BigUint64Array elements ──────────────────────────── */
+
+/* The element read: eight bytes, two's complement for BigInt64, unsigned for
+ * BigUint64. The magnitude of a negative int64 is the unsigned negation,
+ * exact for INT64_MIN as well. Fresh +1 bigint, like every bigint producer. */
+ScrBigInt *scr_bytes_get_big(const ScrBytes *b, double i) {
+  const size_t idx = scr_bytes_index_checked(b, i);
+  if (b->elem == SCR_BYTES_U64) {
+    uint64_t u;
+    memcpy(&u, b->data + idx * 8, 8);
+    return scr_big_from_u64_signed(u, 1);
+  }
+  int64_t s;
+  memcpy(&s, b->data + idx * 8, 8);
+  if (s >= 0) return scr_big_from_u64_signed((uint64_t)s, 1);
+  const uint64_t mag = (uint64_t)0 - (uint64_t)s;
+  return scr_big_from_u64_signed(mag, -1);
+}
+
+/* The element write: the value's low 64 bits. That residue IS ToBigInt64
+ * (signed reinterpretation) and ToBigUint64, so one store serves both views
+ * and out-of-range values wrap exactly as the spec's modular conversion. */
+void scr_bytes_set_big(ScrBytes *b, double i, const ScrBigInt *v) {
+  const size_t idx = scr_bytes_index_checked(b, i);
+  const uint64_t bits = scr_big_low_u64(v);
+  memcpy(b->data + idx * 8, &bits, 8);
+}

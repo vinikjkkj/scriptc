@@ -34,7 +34,7 @@ export interface SrcLoc {
  * Uint8Array` discriminate an `ArrayBuffer | Uint8Array` union arm. It has
  * no elements: element size is 1 byte and indexing is refused (TS gives
  * ArrayBuffer no index signature, so the checker refuses it first). */
-export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64" | "i8" | "i16" | "u16" | "buf" | "u8c" | "f16";
+export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64" | "i8" | "i16" | "u16" | "buf" | "u8c" | "f16" | "i64" | "u64";
 
 export type IrType =
   | { kind: "f64" }
@@ -736,6 +736,13 @@ export function bytesOf(elem: IrBytesElem): IrType {
   return { kind: "bytes", elem };
 }
 
+/** The value type of one element of a view: a bigint for the BigInt64 and
+ * BigUint64 views, a double for every other kind. Reads and writes of a
+ * view take exactly this type. */
+export function bytesValueType(elem: IrBytesElem): IrType {
+  return elem === "i64" || elem === "u64" ? BIGINT : F64;
+}
+
 /** The VIEW each bytes elem is spelled as in a diagnostic. Exhaustive by
  * construction: the chain this replaced ended in a DEFAULT arm, so a
  * Float64Array and an Int8Array both read "Float32Array" wherever a
@@ -752,6 +759,8 @@ export const BYTES_ELEM_NAMES: Readonly<Record<IrBytesElem, string>> = {
   buf: "ArrayBuffer",
   u8c: "Uint8ClampedArray",
   f16: "Float16Array",
+  i64: "BigInt64Array",
+  u64: "BigUint64Array",
 };
 
 /** BYTES_PER_ELEMENT, per element kind — the ONE table, because the
@@ -778,6 +787,8 @@ export const BYTES_ELEM_SIZE: Readonly<Record<IrBytesElem, number>> = {
   buf: 1,
   u8c: 1,
   f16: 2,
+  i64: 8,
+  u64: 8,
 };
 
 export function mapOf(key: IrType, value: IrType): IrType {

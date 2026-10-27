@@ -1443,7 +1443,7 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
 /* The ScrBytesElem ORDINALS, and the reason the runtime enum appends new
  * kinds at the end rather than beside their neighbours: these numbers are
  * emitted literally into the .ll and read by the C enum. */
-const BYTES_ELEM_NUM: Record<IrBytesElem, number> = { u8: 0, u32: 1, f32: 2, i32: 3, f64: 4, i8: 5, buf: 6, i16: 7, u16: 8, u8c: 9, f16: 10 };
+const BYTES_ELEM_NUM: Record<IrBytesElem, number> = { u8: 0, u32: 1, f32: 2, i32: 3, f64: 4, i8: 5, buf: 6, i16: 7, u16: 8, u8c: 9, f16: 10, i64: 11, u64: 12 };
 
 /** ScrBytesNumKind + littleEndian per readNum/writeNum kind token —
  * emit-types.ts's BYTES_NUM_KIND_C with the enum values spelled out
@@ -6860,6 +6860,11 @@ class LlEmitter {
         const v = this.emitExpr(s.value);
         // The write twin of the read site above -- same fast arm, same
         // answer, the full function for everything it declines.
+        if (s.value.type.kind === "bigint") {
+          this.declare(`declare void @scr_bytes_set_big(ptr, double, ptr)`);
+          B.line(`call void @scr_bytes_set_big(ptr ${arr.name}, double ${idx.name}, ptr ${v.name})`);
+          break;
+        }
         this.declare(`declare void @scr_bytes_set_fast(ptr, double, double)`);
         B.line(`call void @scr_bytes_set_fast(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
         break;
@@ -14848,6 +14853,10 @@ class LlEmitter {
         //    checked.
         //
         // This is one of exactly two sites that lower `bytes[i]` here.
+        // A bigint view's element is a fresh +1 bigint (scr_bigint.c).
+        if (e.type.kind === "bigint") {
+          return call("scr_bytes_get_big", "ptr (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, true, false);
+        }
         return call("scr_bytes_get_fast", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, false, false);
       case "slice":
         return call(

@@ -8759,6 +8759,14 @@ typedef enum ScrBytesElem {
    * inline fast paths test U8 and F64 exactly, so this kind takes the
    * function accessors. */
   SCR_BYTES_F16,
+  /* BigInt64Array and BigUint64Array, APPENDED after F16. Storage is eight
+   * bytes, two's complement. Their elements are bigints, not doubles: reads
+   * go through scr_bytes_get_big and writes through scr_bytes_set_big, both
+   * defined in the gated bigint unit (scr_bigint.c). The double accessors
+   * trap on these kinds: a double-typed access to a bigint view is a
+   * lowering bug, never a value to return. */
+  SCR_BYTES_I64,
+  SCR_BYTES_U64,
 } ScrBytesElem;
 
 /* Buffer-ness, carried by the VALUE.
@@ -8847,6 +8855,14 @@ typedef struct ScrBytes {
 } ScrBytes;
 
 size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 2, 4, 8 */
+/* The bounds-checked element index (the one every accessor uses). Traps as
+ * the element accessors do. */
+size_t scr_bytes_index_checked(const ScrBytes *b, double i);
+/* BigInt64Array / BigUint64Array element accessors (scr_bigint.c, gated).
+ * scr_bytes_get_big returns a fresh +1 bigint; scr_bytes_set_big reads the
+ * value's low 64 bits, which is ToBigInt64 / ToBigUint64 exactly. */
+ScrBigInt *scr_bytes_get_big(const ScrBytes *b, double i);
+void scr_bytes_set_big(ScrBytes *b, double i, const ScrBigInt *v);
 
 /* Own named properties of a bytes value. get: BORROWED value or NULL. set:
  * retains v (the caller keeps its reference). delete: true when an entry was
