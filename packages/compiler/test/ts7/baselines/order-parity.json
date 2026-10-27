@@ -18226,6 +18226,18 @@
     "<repo>/tests/corpus/13254-any-array-from-forof-json.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/13255-nullable-array-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/13255-nullable-array-receiver.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13256-any-array-apply-fromcharcode.ts": {
+   "order": [
+    "<repo>/tests/corpus/13256-any-array-apply-fromcharcode.ts"
+   ],
+   "diags": []
   }
  }
 }
