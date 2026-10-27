@@ -1440,7 +1440,7 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
 /* The ScrBytesElem ORDINALS, and the reason the runtime enum appends new
  * kinds at the end rather than beside their neighbours: these numbers are
  * emitted literally into the .ll and read by the C enum. */
-const BYTES_ELEM_NUM: Record<IrBytesElem, number> = { u8: 0, u32: 1, f32: 2, i32: 3, f64: 4, i8: 5, buf: 6, i16: 7, u16: 8 };
+const BYTES_ELEM_NUM: Record<IrBytesElem, number> = { u8: 0, u32: 1, f32: 2, i32: 3, f64: 4, i8: 5, buf: 6, i16: 7, u16: 8, u8c: 9 };
 
 /** ScrBytesNumKind + littleEndian per readNum/writeNum kind token —
  * emit-types.ts's BYTES_NUM_KIND_C with the enum values spelled out

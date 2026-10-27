@@ -3645,6 +3645,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // two to one type. Members lower per-member like any stdlib surface.
   if (isStdlibInterface("ArrayBuffer")) return bytesOf("buf");
   if (isStdlibInterface("Uint8Array")) return bytesOf("u8");
+  if (isStdlibInterface("Uint8ClampedArray")) return bytesOf("u8c");
   if (isStdlibInterface("Uint32Array")) return bytesOf("u32");
   // Int32Array: the signed 32-bit kind (element reads sign-extend, writes
   // ToInt32-wrap) — the Atomics.wait sleep idiom constructs one over a
