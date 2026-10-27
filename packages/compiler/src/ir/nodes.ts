@@ -34,7 +34,7 @@ export interface SrcLoc {
  * Uint8Array` discriminate an `ArrayBuffer | Uint8Array` union arm. It has
  * no elements: element size is 1 byte and indexing is refused (TS gives
  * ArrayBuffer no index signature, so the checker refuses it first). */
-export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64" | "i8" | "i16" | "u16" | "buf";
+export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64" | "i8" | "i16" | "u16" | "buf" | "u8c";
 
 export type IrType =
   | { kind: "f64" }
@@ -750,6 +750,7 @@ export const BYTES_ELEM_NAMES: Readonly<Record<IrBytesElem, string>> = {
   f32: "Float32Array",
   f64: "Float64Array",
   buf: "ArrayBuffer",
+  u8c: "Uint8ClampedArray",
 };
 
 /** BYTES_PER_ELEMENT, per element kind — the ONE table, because the
@@ -774,6 +775,7 @@ export const BYTES_ELEM_SIZE: Readonly<Record<IrBytesElem, number>> = {
   f32: 4,
   f64: 8,
   buf: 1,
+  u8c: 1,
 };
 
 export function mapOf(key: IrType, value: IrType): IrType {

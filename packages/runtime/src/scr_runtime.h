@@ -8747,6 +8747,12 @@ typedef enum ScrBytesElem {
    * residue narrowed to 16 bits, which is ToInt16/ToUint16 exactly. */
   SCR_BYTES_I16, /* Int16Array (PCM audio's element) */
   SCR_BYTES_U16, /* Uint16Array */
+  /* Uint8ClampedArray, APPENDED after U16 (the same reason the 16-bit pair
+   * is). Storage is one byte, like U8; the difference is the WRITE: ToUint8Clamp
+   * (NaN and <= 0 to 0, >= 255 to 255, otherwise round half to even). The
+   * inline fast paths test SCR_BYTES_U8 exactly, so this kind always takes
+   * the function store, where the clamp lives. */
+  SCR_BYTES_U8C,
 } ScrBytesElem;
 
 /* Buffer-ness, carried by the VALUE.
