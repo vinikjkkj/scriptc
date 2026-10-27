@@ -2809,7 +2809,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           ? null
           : lowerStaticFieldRead(L, expr);
         if (viaClass) return viaClass;
-        return lowerExpr(L, expr.name);
+        // A member the module's export table does not declare (an export object assembled at run time:
+        // `for (k in b) safer[k] = b[k]; module.exports = safer`) has no declaration to delegate to, and a
+        // same-named local of the exporter (`var Buffer = buffer.Buffer`) is not the export: the read is a
+        // member read of the binding's value, below.
+        if (!L.cjsUnexportedMemberOfBinding(expr.expression, expr.name.text)) return lowerExpr(L, expr.name);
       }
       // `module.exports` READ in a CommonJS file whose whole export IS a
       // class expression (`module.exports = class …{}`): the read answers
