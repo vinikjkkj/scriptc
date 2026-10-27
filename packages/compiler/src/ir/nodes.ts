@@ -10284,6 +10284,13 @@ export function moduleUsesBigInt(mod: IrModule): boolean {
       found = true;
       return;
     }
+    // The BigInt view renderer (scr_bigint_inspect.c) is gated on bigint AND
+    // inspect; a typed-view inspect call names a view, so it is a bigint
+    // program even when no element access reaches the IR.
+    if ((v as { kind?: unknown; fn?: unknown }).kind === "libCall" && (v as { fn?: unknown }).fn === "insp.typedBig") {
+      found = true;
+      return;
+    }
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);

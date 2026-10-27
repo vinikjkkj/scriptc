@@ -105,6 +105,11 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // The conjunction seam, scr_http_body.c's shape — split out precisely
   // so neither half pays for a program that uses only the other.
   "scr_zlib_stream.c": ["scr_stream.c", "scr_zlib.c"],
+  // The BigInt view renderer names BOTH the inspect helpers (scr_insp_*)
+  // and the bigint element reader, so it is gated on the two together
+  // (scr_cipher_key.c's shape). scr_bigint.c must not name scr_insp_*: it
+  // is linked by any program that reaches a bigint, inspect or not.
+  "scr_bigint_inspect.c": ["scr_bigint.c", "scr_inspect.c"],
 };
 
 /** The edges an SCR_DYNAMIC build ADDS (the island exists only there, and
@@ -1773,6 +1778,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     // the embedder's own stream do the framing.
     ...(opts.zlib ? ["scr_zlib.c"] : []),
     ...(opts.bigint ? ["scr_bigint.c"] : []),
+    ...(opts.bigint && opts.inspect ? ["scr_bigint_inspect.c"] : []),
     ...(opts.asym ? ["scr_asym.c"] : []),
     ...(opts.cipher ? ["scr_cipher.c", "scr_cipher_value.c"] : []),
     // The two-gate keyobj ↔ cipher bridge — see compileC's arm.
@@ -2432,6 +2438,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       ? ["-I", vendorEngineDir(), rt(join(rtDir, "scr_regex.c")), ...lreObjects]
       : []),
     ...(opts.bigint || sqlite ? [rt(join(rtDir, "scr_bigint.c"))] : []),
+    ...(opts.bigint && opts.inspect ? [rt(join(rtDir, "scr_bigint_inspect.c"))] : []),
     // The database engine: the interception unit plus the vendored
     // amalgamation's cached object. Both ride the one gate.
     ...(sqlite
