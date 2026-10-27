@@ -18549,6 +18549,84 @@
     "<repo>/tests/corpus/14052-proto-alias-two-classes.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/13900-stream-objectmode-push-data-end.ts": {
+    "order": [
+      "<repo>/tests/corpus/13900-stream-objectmode-push-data-end.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13901-stream-objectmode-for-await.ts": {
+    "order": [
+      "<repo>/tests/corpus/13901-stream-objectmode-for-await.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13902-stream-objectmode-hwm-backpressure.ts": {
+    "order": [
+      "<repo>/tests/corpus/13902-stream-objectmode-hwm-backpressure.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13903-stream-objectmode-destroy-error.ts": {
+    "order": [
+      "<repo>/tests/corpus/13903-stream-objectmode-destroy-error.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13904-stream-destroy-unknown-argument.js": {
+    "order": [
+      "<repo>/tests/corpus/13904-stream-destroy-unknown-argument.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13905-stream-objectmode-spread-options.ts": {
+    "order": [
+      "<repo>/tests/corpus/13905-stream-objectmode-spread-options.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13906-stream-objectmode-computed-options.ts": {
+    "order": [
+      "<repo>/tests/corpus/13906-stream-objectmode-computed-options.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13907-stream-destroy-nonerror-identity.js": {
+    "order": [
+      "<repo>/tests/corpus/13907-stream-destroy-nonerror-identity.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13908-stream-pipe-object-to-byte.js": {
+    "order": [
+      "<repo>/tests/corpus/13908-stream-pipe-object-to-byte.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13909-stream-byte-push-object.js": {
+    "order": [
+      "<repo>/tests/corpus/13909-stream-byte-push-object.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13910-stream-error-named-listener.ts": {
+    "order": [
+      "<repo>/tests/corpus/13910-stream-error-named-listener.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13911-stream-error-const-listener.ts": {
+    "order": [
+      "<repo>/tests/corpus/13911-stream-error-const-listener.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13912-stream-objectmode-instance-read-hook.ts": {
+    "order": [
+      "<repo>/tests/corpus/13912-stream-objectmode-instance-read-hook.ts"
+    ],
+    "diags": []
   }
  }
 }

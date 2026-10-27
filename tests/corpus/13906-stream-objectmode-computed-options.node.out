@@ -1,0 +1,2 @@
+data "text-as-object"
+data {"z":26}
