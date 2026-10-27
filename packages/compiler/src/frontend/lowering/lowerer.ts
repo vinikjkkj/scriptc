@@ -2639,6 +2639,16 @@ export class Lowerer {
       : this.bareRequireDepOf(decl.getSourceFile(), spec);
   }
 
+  /** True when `recv` is a `require` binding of a JavaScript module and `name` is a member the module's
+   * export table declares (its `module.exports.name = ...` attachment), while the binding itself is a
+   * SINGLE VALUE (`module.exports = fn`): cjsLocalModuleBindingOf answers false for that shape, so the
+   * member read or call needs this route to the exporter's own member symbol instead of a read of the
+   * plain function value (which has no such property at run time). */
+  cjsSingleValueMemberOf(recv: ts.Expression, name: string): boolean {
+    const dep = this.cjsBindingRequireDepOf(recv);
+    return dep !== null && isCjsJsFile(dep) && this.cjsModuleExportSymbol(dep, name) !== undefined;
+  }
+
   /** True when `recv` is a `require` binding of a JavaScript module whose export table does NOT declare
    * `name`: the export object was assembled at run time, so the member is a read of that object, and a
    * same-named local of the exporter is not the export. */
