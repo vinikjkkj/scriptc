@@ -10651,6 +10651,38 @@ export function moduleUsesBufferValue(mod: IrModule): boolean {
   return found;
 }
 
+/** The arrIntrinsic methods whose dyn-element form lives in scr_array_dyn.c (C and LLVM emitters). */
+const DYN_ARRAY_METHODS: ReadonlySet<string> = new Set(["pop", "shift", "join", "splice", "sort", "toSorted"]);
+/** The library calls whose lowering is scr_array_dyn.c (LLVM emitter table and the C emitter). */
+const DYN_ARRAY_LIB_FNS: ReadonlySet<string> = new Set(["array.sortDyn", "array.toSortedDyn", "array.fromDynIter", "array.toF64Dyn"]);
+
+/** True when the module holds an operation whose dyn-element form is scr_array_dyn.c (the link switch). */
+export function moduleUsesDynArrayOps(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown; method?: unknown; receiver?: { type?: { kind?: unknown; elem?: { kind?: unknown } } } };
+    if (node.kind === "libCall" && typeof node.fn === "string" && DYN_ARRAY_LIB_FNS.has(node.fn)) {
+      found = true;
+      return;
+    }
+    if (
+      node.kind === "arrIntrinsic" && typeof node.method === "string" && DYN_ARRAY_METHODS.has(node.method) &&
+      node.receiver?.type?.kind === "array" && node.receiver.type.elem?.kind === "dyn"
+    ) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 export function moduleUsesDynExt(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {

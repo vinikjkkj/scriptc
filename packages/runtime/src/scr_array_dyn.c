@@ -6,13 +6,13 @@
 #include "scr_runtime.h"
 
 /* Helpers defined in scr_array.c (file-private there until this unit needed them). */
-void scr_arr_oom(void);
-uint64_t scr_slot_from_ptr(void *p);
-void *scr_slot_to_ptr(uint64_t s);
-void *scr_elem_retain_p(const ScrArr *a, void *p);
-uint64_t scr_arr_shift_slot(ScrArr *a);
-void scr_arr_grow(ScrArr *a, size_t need);
-void scr_join_append(char **buf, size_t *len, size_t *cap, const char *bytes, size_t n);
+void scr_arr_oom_ext(void);
+uint64_t scr_slot_from_ptr_ext(void *p);
+void *scr_slot_to_ptr_ext(uint64_t s);
+void *scr_elem_retain_p_ext(const ScrArr *a, void *p);
+uint64_t scr_arr_shift_slot_ext(ScrArr *a);
+void scr_arr_grow_ext(ScrArr *a, size_t need);
+void scr_join_append_ext(char **buf, size_t *len, size_t *cap, const char *bytes, size_t n);
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,13 +23,13 @@ void scr_join_append(char **buf, size_t *len, size_t *cap, const char *bytes, si
  * element moves out as its own +1 box. */
 void *scr_arr_pop_dyn(ScrArr *a) {
   if (a->len == 0) return scr_dyn_undefined();
-  void *p = scr_slot_to_ptr(a->data[--a->len]);
+  void *p = scr_slot_to_ptr_ext(a->data[--a->len]);
   return p != NULL ? p : scr_dyn_undefined();
 }
 
 void *scr_arr_shift_dyn(ScrArr *a) {
   if (a->len == 0) return scr_dyn_undefined();
-  void *p = scr_slot_to_ptr(scr_arr_shift_slot(a));
+  void *p = scr_slot_to_ptr_ext(scr_arr_shift_slot_ext(a));
   return p != NULL ? p : scr_dyn_undefined();
 }
 
@@ -50,15 +50,15 @@ ScrArr *scr_arr_splice_ins(ScrArr *a, double start, double deleteCount, ScrArr *
   size_t m = items->len;
   /* Snapshot the items, retained (the aliasing case reads items == a). */
   uint64_t *ins = m ? malloc(m * sizeof(uint64_t)) : NULL;
-  if (m && !ins) scr_arr_oom();
+  if (m && !ins) scr_arr_oom_ext();
   for (size_t i = 0; i < m; i++) {
     uint64_t s = items->data[i];
     if (a->elem == SCR_ELEM_F64 || a->elem == SCR_ELEM_BOOL) {
       ins[i] = s;
       continue;
     }
-    void *p = scr_slot_to_ptr(s);
-    ins[i] = p == NULL ? s : scr_slot_from_ptr(scr_elem_retain_p(a, p));
+    void *p = scr_slot_to_ptr_ext(s);
+    ins[i] = p == NULL ? s : scr_slot_from_ptr_ext(scr_elem_retain_p_ext(a, p));
   }
   ScrArr *out =
       a->elem == SCR_ELEM_REF
@@ -70,10 +70,10 @@ ScrArr *scr_arr_splice_ins(ScrArr *a, double start, double deleteCount, ScrArr *
   }
   size_t tail = a->len - from - n;
   uint64_t *keep = tail ? malloc(tail * sizeof(uint64_t)) : NULL;
-  if (tail && !keep) scr_arr_oom();
+  if (tail && !keep) scr_arr_oom_ext();
   if (tail) memcpy(keep, a->data + from + n, tail * sizeof(uint64_t));
   a->len = from;
-  scr_arr_grow(a, from + m + tail);
+  scr_arr_grow_ext(a, from + m + tail);
   for (size_t i = 0; i < m; i++) a->data[a->len++] = ins[i];
   for (size_t i = 0; i < tail; i++) a->data[a->len++] = keep[i];
   free(keep);
@@ -89,19 +89,19 @@ ScrArr *scr_arr_splice_ins(ScrArr *a, double start, double deleteCount, ScrArr *
 ScrStr *scr_arr_join_dyn(ScrArr *a, ScrStr *sep) {
   size_t cap = 64, len = 0;
   char *buf = malloc(cap);
-  if (!buf) scr_arr_oom();
+  if (!buf) scr_arr_oom_ext();
   size_t n = a->len;
   for (size_t i = 0; i < n; i++) {
-    if (i > 0) scr_join_append(&buf, &len, &cap, sep->data, sep->len);
+    if (i > 0) scr_join_append_ext(&buf, &len, &cap, sep->data, sep->len);
     /* Re-read the slot each step: a toString may have changed the array. */
-    const ScrDyn *d = i < a->len ? (const ScrDyn *)scr_slot_to_ptr(a->data[i]) : NULL;
+    const ScrDyn *d = i < a->len ? (const ScrDyn *)scr_slot_to_ptr_ext(a->data[i]) : NULL;
     if (d == NULL || scr_dyn_is_nullish(d)) continue;
     ScrStr *s = scr_dyn_string_coerce_js(d);
     if (s == NULL) {
       free(buf);
       return NULL;
     }
-    scr_join_append(&buf, &len, &cap, s->data, s->len);
+    scr_join_append_ext(&buf, &len, &cap, s->data, s->len);
     scr_str_release(s);
   }
   ScrStr *out = scr_str_new(buf, len);
@@ -149,10 +149,10 @@ ScrArr *scr_arr_sort_dyn(ScrArr *a, bool copy) {
   if (n < 2) return out;
   ScrDynSortItem *v = malloc(n * sizeof *v);
   ScrDynSortItem *tmp = malloc(n * sizeof *tmp);
-  if (!v || !tmp) scr_arr_oom();
+  if (!v || !tmp) scr_arr_oom_ext();
   for (size_t i = 0; i < n; i++) {
     uint64_t s = out->data[i];
-    const ScrDyn *d = (const ScrDyn *)scr_slot_to_ptr(s);
+    const ScrDyn *d = (const ScrDyn *)scr_slot_to_ptr_ext(s);
     v[i].slot = s;
     v[i].key = NULL;
     if (d != NULL && !scr_dyn_is_nullish(d)) {
@@ -198,7 +198,7 @@ ScrArr *scr_arr_from_dyn_iter(const ScrDyn *src, const ScrStr *msg) {
 ScrArr *scr_arr_to_f64_dyn(ScrArr *a) {
   ScrArr *out = scr_arr_new(SCR_ELEM_F64, a->len ? a->len : 1);
   for (size_t i = 0; i < a->len; i++) {
-    const ScrDyn *d = (const ScrDyn *)scr_slot_to_ptr(a->data[i]);
+    const ScrDyn *d = (const ScrDyn *)scr_slot_to_ptr_ext(a->data[i]);
     scr_arr_push_f64(out, d == NULL ? NAN : scr_dyn_to_number(d));
   }
   return out;
