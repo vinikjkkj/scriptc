@@ -1251,6 +1251,31 @@ ScrStr *scr_strdec_enc_of(const ScrDyn *v) {
   return scr_str_new("utf8", 4);
 }
 
+/* The accessors of a decoder value (Node's lastNeed / lastTotal / lastChar), derived
+ * from the buffered bytes the packed pending state holds and the encoding, the way
+ * Node's native decoder derives them: utf8 totals its lead byte's sequence length,
+ * base64 and base64url buffer toward 3, utf16le holds one byte or a lead surrogate,
+ * and the stateless encodings never buffer. lastChar is the four-byte scratch the
+ * native decoder keeps: the buffered bytes, zero-filled. */
+void scr_strdec_state_info(const ScrStr *enc, double pending, size_t *need, size_t *total, uint8_t last[4]) {
+  uint8_t pend[3];
+  size_t k = scr_strdec_unpack(pending, pend);
+  *need = 0;
+  *total = 0;
+  for (size_t i = 0; i < 4; i++) last[i] = i < k ? pend[i] : 0;
+  if (k == 0) return;
+  if (scr_enc_is(enc, "base64") || scr_enc_is(enc, "base64url")) {
+    *total = 3;
+  } else if (scr_enc_is(enc, "utf16le")) {
+    *total = k == 1 ? 2 : 4; /* one byte, or a held high surrogate */
+  } else if (scr_enc_is(enc, "utf8")) {
+    if (pend[0] >= 0xc0 && pend[0] <= 0xdf) *total = 2;
+    else if (pend[0] >= 0xe0 && pend[0] <= 0xef) *total = 3;
+    else if (pend[0] >= 0xf0 && pend[0] <= 0xf7) *total = 4;
+  }
+  *need = *total > k ? *total - k : 0;
+}
+
 /* decoder.end(): the buffered partial flushes — utf8's truncated sequence
  * becomes its replacement chars (the maximal-subpart rule), base64's
  * remainder encodes (padded; unpadded for base64url), utf16le's held

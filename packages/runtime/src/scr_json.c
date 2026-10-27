@@ -3156,13 +3156,19 @@ static ScrDyn *scr_strdec_box_get(void *h, const char *key, size_t key_len) {
   (void)key_len;
   ScrStrDecBox *b = (ScrStrDecBox *)h;
   if (strcmp(key, "encoding") == 0) return scr_dyn_new_str(b->enc);
-  if (strcmp(key, "lastChar") == 0 || strcmp(key, "lastNeed") == 0 || strcmp(key, "lastTotal") == 0) {
-    char msg[200];
-    const int n = snprintf(msg, sizeof msg,
-                           "StringDecoder.%s is not supported yet (the partial-sequence fields are not modeled on a dynamic value)",
-                           key);
-    scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)n);
-    return NULL;
+  if (strcmp(key, "lastNeed") == 0 || strcmp(key, "lastTotal") == 0 || strcmp(key, "lastChar") == 0) {
+    size_t need = 0, total = 0;
+    uint8_t last[4];
+    scr_strdec_state_info(b->enc, b->pending, &need, &total, last);
+    if (strcmp(key, "lastNeed") == 0) return scr_dyn_new_num((double)need);
+    if (strcmp(key, "lastTotal") == 0) return scr_dyn_new_num((double)total);
+    /* lastChar: Node's four-byte native scratch, as a Buffer. */
+    ScrBytes *bb = scr_bytes_new(SCR_BYTES_U8, 4);
+    memcpy(bb->data, last, 4);
+    ScrBytes *st = scr_bytes_stamp_buffer(bb);
+    ScrDyn *d = scr_dyn_new_bytes_copy(st);
+    scr_bytes_release(st);
+    return d;
   }
   return NULL; /* not a modeled property: the caller answers undefined */
 }
