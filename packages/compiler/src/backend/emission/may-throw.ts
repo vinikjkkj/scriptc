@@ -363,6 +363,11 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           if (MAY_THROW_ARR_METHODS.has(rec["method"] as IrArrIntrinsicMethod)) {
             f.throws = true;
           }
+          // join over dyn elements ToStrings each element with the object
+          // protocol: a user toString that throws propagates.
+          if (rec["method"] === "join" && (rec["receiver"] as { type?: { kind?: string; elem?: { kind?: string } } })?.type?.elem?.kind === "dyn") {
+            f.throws = true;
+          }
           break;
         case "mapIntrinsic": {
           // `set` on a WeakMap over `object` (the dyn) is the ONLY map

@@ -411,7 +411,7 @@ function lowerOptionalDefaultArg(
     // included — Node returns the unchanged length); reduce/reduceRight
     // lower both declared forms (with and without an initial value).
     const arity = {
-      push: [0, Number.MAX_SAFE_INTEGER], pop: [0, 0], indexOf: [1, 1], includes: [1, 1], join: [1, 1],
+      push: [0, Number.MAX_SAFE_INTEGER], pop: [0, 0], indexOf: [1, 1], includes: [1, 1], join: [0, 1],
       fill: [1, 3],
       concat: [0, Number.MAX_SAFE_INTEGER],
       slice: [0, 2], shift: [0, 0], splice: [1, 2], at: [1, 1],
@@ -737,7 +737,7 @@ function lowerOptionalDefaultArg(
         const joined: IrExpr = { kind: "jsOp", op: "callMethod", name: "join", args: [recvJs, sepJs], type: JSVAL, loc };
         return islandPrimitiveExit(L, call, joined);
       }
-      if (elem.kind !== "f64" && elem.kind !== "string" && elem.kind !== "bool" && !joinableUnion) {
+      if (elem.kind !== "f64" && elem.kind !== "string" && elem.kind !== "bool" && elem.kind !== "dyn" && !joinableUnion) {
         L.unsupported(
           "SC1090",
           call,
@@ -745,7 +745,10 @@ function lowerOptionalDefaultArg(
         );
       }
       const receiver = L.lowerExpr(access.expression);
-      const sep = L.lowerExpr(call.arguments[0]!);
+      // join() with no separator is join(","), exactly Array.prototype.join.
+      const sep: IrExpr = call.arguments.length === 0
+        ? { kind: "strLit", value: ",", type: STRING, loc }
+        : L.lowerExpr(call.arguments[0]!);
       return { kind: "arrIntrinsic", method: "join", receiver, args: [sep], type: STRING, loc };
     }
     if (name === "map" || name === "filter" || name === "forEach") {
