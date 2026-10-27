@@ -6933,6 +6933,9 @@ static void scr_jb_put_recv_ctor(ScrJsonBuf *b, const ScrDyn *recv) {
  * could remove, so they answer true like JS. Both borrowed. */
 bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) return SCR_PX->del(recv, key);
+  if (recv != NULL && recv->kind == SCR_DYN_BYTES && !recv->static_copy && recv->v.bytes->own != NULL) {
+    if (scr_bytes_own_delete(recv->v.bytes, key->data, key->len)) return true;
+  }
   if (recv == NULL || recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) {
     ScrJsonBuf sb;
     scr_jb_init(&sb);
@@ -7146,6 +7149,10 @@ static bool dyn_canonical_index(const ScrStr *key, size_t *out) {
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
   SCR_VIEW_FRESH(v);
   if (v->kind == SCR_DYN_PROXY) return SCR_PX->has((ScrDyn *)v, key);
+  if (v->kind == SCR_DYN_BYTES && v->v.bytes->own != NULL &&
+      scr_bytes_own_get(v->v.bytes, key->data, key->len) != NULL) {
+    return true;
+  }
   if (v->kind == SCR_DYN_OBJ) {
     /* One walk, accessors included: an accessor IS a property, so `in`
      * answers true for it even though Object.keys skips it. */
@@ -7260,6 +7267,21 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       if (idx < recv->v.bytes->len) scr_bytes_set(recv->v.bytes, (double)idx, num);
       return;
     }
+    /* A canonical NUMERIC name (-1, 1.5, NaN, Infinity) is an integer-indexed
+     * exotic key: JS ignores the write and creates nothing. */
+    if (key->len > 0) {
+      int numeric = (key->data[0] == '-' || (key->data[0] >= '0' && key->data[0] <= '9'));
+      for (size_t i = 0; numeric && i < key->len; i++) {
+        char c = key->data[i];
+        if (!((c >= '0' && c <= '9') || c == '-' || c == '.' || c == 'e' || c == 'E' || c == '+')) numeric = 0;
+      }
+      if (numeric || (key->len == 3 && memcmp(key->data, "NaN", 3) == 0) ||
+          (key->len == 8 && memcmp(key->data, "Infinity", 8) == 0) ||
+          (key->len == 9 && memcmp(key->data, "-Infinity", 9) == 0)) return;
+    }
+    /* A non-index name is an ordinary own expando (mysql2's MockBuffer). */
+    scr_bytes_own_set(recv->v.bytes, key->data, key->len, value);
+    return;
   }
   if (recv->kind == SCR_DYN_OBJ) {
     /* JS's OrdinarySet is not "write the own member": it walks the chain
@@ -11291,6 +11313,11 @@ ScrDyn *scr_dyn_bytes_key_get(const ScrDyn *d, const ScrStr *k) {
   const bool dv = b->flavor == SCR_BF_DATAVIEW;
   const char *kd = k->data;
   const size_t kl = k->len;
+  /* An OWN named property shadows everything below, the prototype included. */
+  if (b->own != NULL) {
+    ScrDyn *own = scr_bytes_own_get(b, kd, kl);
+    if (own != NULL) return scr_dyn_retain(own);
+  }
   if (kl == 10 && memcmp(kd, "byteLength", 10) == 0) return scr_dyn_new_num(scr_bytes_byte_len(b));
   if (kl == 10 && memcmp(kd, "byteOffset", 10) == 0) return scr_dyn_new_num(scr_bytes_byte_offset(b));
   if (kl == 11 && memcmp(kd, "constructor", 11) == 0) return scr_dyn_bytes_constructor(d);
@@ -11952,6 +11979,14 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
         scr_dyn_arr_push(out, pair);
       }
     }
+    /* …then a bytes value's own NAMED properties, in insertion order. */
+    if (v->kind == SCR_DYN_BYTES && v->v.bytes->own != NULL) {
+      const ScrBytesOwn *t = v->v.bytes->own;
+      for (size_t i = 0; i < t->n; i++) {
+        const ScrBytesOwnEnt *e = &t->ents[i];
+        scr_dyn_objwalk_push(out, mode, e->key, e->klen, e->val);
+      }
+    }
     /* …then an array's own NAMED properties, in creation order (an exec
      * result lists index, input, groups after its elements). */
     if (v->kind == SCR_DYN_ARR) {
@@ -12260,6 +12295,10 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
   if (v->kind == SCR_DYN_HANDLE) {
     const ScrDyn *own = scr_handle_own_props(v);
     return own != NULL && scr_dyn_obj_has_own_prop(own, key->data, key->len);
+  }
+  if (v->kind == SCR_DYN_BYTES && v->v.bytes->own != NULL &&
+      scr_bytes_own_get(v->v.bytes, key->data, key->len) != NULL) {
+    return true;
   }
   if (v->kind == SCR_DYN_OBJ) {
     /* Own presence, hidden table included: `hasOwn` differs from

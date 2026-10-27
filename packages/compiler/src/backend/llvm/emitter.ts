@@ -10944,6 +10944,19 @@ class LlEmitter {
           B.br(lj);
           B.startBlock(lNotPx);
         }
+        // BYTES: the own-table presence (the C twin is in emit-exprs.ts).
+        const isBy = B.tmp();
+        B.line(`${isBy} = icmp eq i32 ${kd}, ${DK.BYTES}`);
+        const lBy = B.newLabel("dhk.by");
+        const lNotBy = B.newLabel("dhk.nby");
+        B.condBr(isBy, lBy, lNotBy);
+        B.startBlock(lBy);
+        this.declare(`declare zeroext i1 @scr_dyn_bytes_own_has(ptr, ptr, i64)`);
+        const byHas = B.tmp();
+        B.line(`${byHas} = call zeroext i1 @scr_dyn_bytes_own_has(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${Buffer.byteLength(e.key, "utf8")})`);
+        B.line(`store i1 ${byHas}, ptr ${slot}`);
+        B.br(lj);
+        B.startBlock(lNotBy);
         const isObj = B.tmp();
         B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
         B.condBr(isObj, lObj, lNotObj);
