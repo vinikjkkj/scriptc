@@ -3749,7 +3749,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
    * own array as its origin when the live view applies (arrayTypeHasLiveView). */
   function fieldDynC(E: CEmitter, t: IrType, expr: string): string {
     const conv = toDynExprC(E, t, expr);
-    if (!arrayTypeHasLiveView(t)) return conv;
+    // A RECORD field is marked too: its dyn copy cannot alias the struct,
+    // so the mark makes a write through it a NAMED refusal at run time
+    // (scr_dyn_static_copy_refuse) instead of a silent write to the copy.
+    if (!arrayTypeHasLiveView(t) && t.kind !== "record") return conv;
     const { retain, release } = vAdapters(t);
     const tk = cStringLiteral(Buffer.from(typeKey(t), "utf8"));
     return `scr_dyn_origin_mark(${conv}, (void *)${expr}, ${tk}, ${retain}, ${release})`;

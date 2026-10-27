@@ -5092,7 +5092,9 @@ export class LlDyn {
           : (() => {
               const r = B.tmp();
               B.line(`${r} = call ptr @${this.toDynHelper(row.type)}(${this.valTy(row.type)} ${v})`);
-              if (!arrayTypeHasLiveView(row.type)) return r;
+              // A record field is marked too (the C twin's fieldDynC): a write
+              // through the copy is a named refusal, not a silent one.
+              if (!arrayTypeHasLiveView(row.type) && row.type.kind !== "record") return r;
               // The array field is the SAME array the instance holds: the copy
               // records it as its origin (the C twin is fieldDynC).
               const { retain, release } = vAdapters(host, row.type);
