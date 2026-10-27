@@ -8642,6 +8642,9 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   // Its ops are installed by the emitted main() exactly when the tls surface
   // links (moduleUsesTls, cc.ts's gate).
   ["secureCtx", { tag: "SCR_DYNH_SECURE_CTX", cls: "SecureContext" }],
+  // crypto.KeyObject (createPrivateKey & co, and the tls `key` member): by
+  // reference. Its members are not modeled through unknown (scr_asym.c's ladder).
+  ["keyobj", { tag: "SCR_DYNH_KEYOBJ", cls: "KeyObject" }],
 ]);
 
 /** The bytes ELEMENT kinds that cross the checked-dynamic boundary, each

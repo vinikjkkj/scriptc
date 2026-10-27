@@ -4694,6 +4694,7 @@ typedef enum {
   SCR_DYNH_CHANNEL,      /* scr_dc.c — diagnostics_channel Channel (registry id, by identity) */
   SCR_DYNH_TRACING,      /* scr_dc.c — diagnostics_channel TracingChannel (registry id) */
   SCR_DYNH_SECURE_CTX,   /* scr_tls.c — tls.SecureContext (refcounted parsed cert/key, by reference) */
+  SCR_DYNH_KEYOBJ,       /* ScrKeyObject — crypto.KeyObject (scr_asym.c; retained, by reference) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
@@ -10317,6 +10318,9 @@ void scr_secure_ctx_release_v(void *p);
 /* Registers the SecureContext handle ops (SCR_DYNH_SECURE_CTX); emitted into main() exactly
  * when the tls surface links (moduleUsesTls, cc.ts's gate). */
 void scr_tls_dyn_install(void);
+/* Registers the KeyObject handle ops (SCR_DYNH_KEYOBJ); emitted into main()
+ * whenever the program links scr_asym.c (moduleUsesAsym). */
+void scr_keyobj_dyn_install(void);
 ScrNetServer *scr_https_create_server_sni(const char *cert, size_t cert_len, const char *key, size_t key_len, ScrClosure *sni_cb /*moves, nullable*/, void *answer_fn); /* +1 */
 void scr_tls_sni_answer(ScrClosure *self, bool has_err, ScrSecureCtx *ctx /*moves, nullable*/);
 #ifdef SCR_RC_AUDIT

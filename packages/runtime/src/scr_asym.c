@@ -13,6 +13,7 @@
  * signatures Node rejects — the two must never be mixed up. */
 #include "scr_runtime.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -284,6 +285,54 @@ bool scr_asym_is_private(const ScrKeyObject *key) {
 /* The void* adapters ScrArr/ScrMap element tables call through. */
 void *scr_keyobj_retain_v(void *k) { return scr_keyobj_retain((ScrKeyObject *)k); }
 void scr_keyobj_release_v(void *k) { scr_keyobj_release((ScrKeyObject *)k); }
+
+/* ── the checked-dynamic KeyObject handle (SCR_DYNH_KEYOBJ) ───────────────
+ * A KeyObject crosses into the checked-dynamic tree BY REFERENCE, so the
+ * identity a static KeyObject has survives the round trip. Its members are
+ * not modeled on the dynamic side: a member call or read throws the loud
+ * "not supported yet" ladder naming the member, and a write is the caller's
+ * loud fence. Nothing here answers a silent undefined. */
+static void scr_keyobj_dynh_unsupported(const char *member) {
+  char msg[240];
+  const int n = snprintf(msg, sizeof msg, "'KeyObject.%s' on a dynamic value is not supported yet", member);
+  scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)n);
+}
+
+static ScrDyn *scr_keyobj_dynh_invoke(void *h, ScrDyn *self, const char *method, ScrDyn *const *args, size_t argc,
+                                      const char *what) {
+  (void)h;
+  (void)self;
+  (void)args;
+  (void)argc;
+  (void)what;
+  scr_keyobj_dynh_unsupported(method);
+  return NULL;
+}
+
+static ScrDyn *scr_keyobj_dynh_get(void *h, const char *key, size_t key_len) {
+  (void)h;
+  char name[120];
+  const size_t n = key_len < sizeof name - 1 ? key_len : sizeof name - 1;
+  memcpy(name, key, n);
+  name[n] = '\0';
+  scr_keyobj_dynh_unsupported(name);
+  return NULL;
+}
+
+static bool scr_keyobj_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)h;
+  (void)key;
+  (void)key_len;
+  (void)value;
+  return false;
+}
+
+static const ScrDynHandleOps scr_keyobj_dynh_ops = {
+    "KeyObject", &scr_keyobj_retain_v, &scr_keyobj_release_v, &scr_keyobj_dynh_invoke, &scr_keyobj_dynh_get,
+    &scr_keyobj_dynh_set, NULL, NULL,
+};
+
+void scr_keyobj_dyn_install(void) { scr_dyn_handle_install(SCR_DYNH_KEYOBJ, &scr_keyobj_dynh_ops); }
 
 /* ------------------------------------------------------------------ */
 /* The scriptc-value layer: ScrBytes in, ScrBytes/ScrKeyObject out. All

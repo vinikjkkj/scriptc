@@ -73,7 +73,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn } from "../../ir/nodes.js";
+import { moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym } from "../../ir/nodes.js";
 import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -2095,6 +2095,7 @@ class LlEmitter {
     const usesSymbolDyn = moduleUsesSymbol(this.mod);
     // SecureContext handles (SCR_DYNH_SECURE_CTX): the tls unit's install, the C twin of emitter.ts's row.
     const usesTlsDyn = moduleUsesTls(this.mod);
+    const usesAsymDyn = moduleUsesAsym(this.mod);
     const usesDcDyn = moduleUsesDc(this.mod);
     // Child-stdio programs stamp the child-stream handle-dispatch ops so
     // `child.stdout` can cross into the checked-dynamic tree by reference.
@@ -2183,6 +2184,7 @@ class LlEmitter {
     if (usesBytesOwn) this.declare(`declare void @scr_bytes_own_install()`);
     if (usesSymbolDyn) this.declare(`declare void @scr_sym_dyn_install()`);
     if (usesTlsDyn) this.declare(`declare void @scr_tls_dyn_install()`);
+    if (usesAsymDyn) this.declare(`declare void @scr_keyobj_dyn_install()`);
     if (usesDcDyn) this.declare(`declare void @scr_dc_dyn_install()`);
     if (usesChildStream) this.declare(`declare void @scr_child_stream_dyn_install()`);
     if (usesFetch) this.declare(`declare void @scr_fetch_install()`);
@@ -2670,6 +2672,7 @@ class LlEmitter {
       ...(usesSymbolDyn ? [`  call void @scr_sym_dyn_install()`] : []),
       // The C twin's row: the SecureContext handle ops (scr_tls.c).
       ...(usesTlsDyn ? [`  call void @scr_tls_dyn_install()`] : []),
+      ...(usesAsymDyn ? [`  call void @scr_keyobj_dyn_install()`] : []),
       ...(usesDcDyn ? [`  call void @scr_dc_dyn_install()`] : []),
       ...(usesChildStream ? [`  call void @scr_child_stream_dyn_install()`] : []),
       ...(usesStream ? [`  call void @scr_stream_install()`] : []),

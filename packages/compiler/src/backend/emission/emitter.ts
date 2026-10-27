@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn } from "../../ir/nodes.js";
+import { DYN, funcOf, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
@@ -1877,6 +1877,7 @@ export class CEmitter {
       // SecureContext handles (SCR_DYNH_SECURE_CTX, scr_tls.c): installed exactly when the
       // tls surface links (moduleUsesTls, cc.ts's gate).
       ...(moduleUsesTls(this.mod) ? [`  scr_tls_dyn_install();`] : []),
+      ...(moduleUsesAsym(this.mod) ? [`  scr_keyobj_dyn_install();`] : []),
       // The Channel / TracingChannel handle ops (scr_dc.c), whenever dc.* libCalls
       // exist (cc.ts links scr_dc.c on the same predicate).
       ...(moduleUsesDc(this.mod) ? [`  scr_dc_dyn_install();`] : []),
