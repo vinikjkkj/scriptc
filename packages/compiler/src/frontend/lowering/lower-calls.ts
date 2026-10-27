@@ -6146,7 +6146,17 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         const rn = expr.expression.expression;
         // A plain read chain is probed (no side effect is duplicated); a call or `new` receiver is lowered once,
         // and only the Buffer-only arm below may answer it (anything else falls to the fence, which throws).
-        const pr = plainReadChain(rn) ? probeLower(L, rn) : ts.isCallExpression(rn) || ts.isNewExpression(rn) ? L.lowerExpr(rn) : null;
+        // A call or `new` receiver takes this route only when its checker type is a byte array (Buffer, Uint8Array);
+        // every other such receiver keeps the old path, so its diagnostics do not change.
+        const bytesTyped = (t: ts.Type): boolean => {
+          const name = t.getSymbol()?.name;
+          return name === "Buffer" || name === "Uint8Array";
+        };
+        const pr = plainReadChain(rn)
+          ? probeLower(L, rn)
+          : (ts.isCallExpression(rn) || ts.isNewExpression(rn)) && bytesTyped(L.typeOf(rn))
+            ? L.lowerExpr(rn)
+            : null;
         if (pr !== null) {
           const bo = bufOnlyDynCall(L, expr, expr.expression, pr);
           if (bo !== null) return bo;
