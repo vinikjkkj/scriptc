@@ -2521,6 +2521,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13050-any-array-holes-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/13050-any-array-holes-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13051-any-array-fill-whole.ts": {
+   "order": [
+    "<repo>/tests/corpus/13051-any-array-fill-whole.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13052-any-array-pass-and-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/13052-any-array-pass-and-return.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13053-any-array-boxed-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/13053-any-array-boxed-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13054-any-array-lru-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/13054-any-array-lru-shape.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1306-errors-runtime-instances.ts": {
    "order": [
     "<repo>/tests/corpus/1306-errors-runtime-instances.ts"
