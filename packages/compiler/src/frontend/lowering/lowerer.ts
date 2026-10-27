@@ -1571,6 +1571,10 @@ export class Lowerer {
   /** Expressions whose lowered value is overridden for one lowering (a
    * nullable array receiver narrowed to its array arm, lower-containers). */
   readonly exprOverrides = new Map<ts.Expression, IrExpr>();
+  /** The surplus effects of a zero-parameter call or construction (completeArgs):
+   * they run after the callee reference and before the call. lowerExpr wraps
+   * the lowered node in a seqExpr and removes the entry. */
+  readonly callPreludes = new Map<ts.Node, IrStmt[]>();
   /** NULLISH bindings of unmappable (generic-signature) types: `const i:
    * I<A & B> = null as any` — the binding provably holds null/undefined
    * forever (every write's RHS is nullish too), so no storage exists and
@@ -15719,7 +15723,11 @@ export class Lowerer {
     // narrowed value stands for the expression for that call only.
     const ov = this.exprOverrides.get(expr);
     if (ov !== undefined) return ov;
-    return lowerExpr(this, expr);
+    const lowered = lowerExpr(this, expr);
+    const pre = this.callPreludes.get(expr);
+    if (pre === undefined) return lowered;
+    this.callPreludes.delete(expr);
+    return { kind: "seqExpr", stmts: pre, result: lowered, type: lowered.type, loc: lowered.loc };
   }
 
   lowerIntrinsicProperty(expr: ts.PropertyAccessExpression): IrExpr | null {
