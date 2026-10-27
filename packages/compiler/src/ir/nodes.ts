@@ -8605,6 +8605,12 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   // installed by the emitted main() exactly when that unit links
   // (moduleUsesSymbol). typeof answers "symbol".
   ["symbol", { tag: "SCR_DYNH_SYMBOL", cls: "Symbol" }],
+  // A tls.SecureContext (scr_tls.c): the parsed cert/key pair is immutable and
+  // boxes by REFERENCE, so the same context comes back out of an 'unknown'
+  // slot (a Map value, a record field, an untyped return) with its identity.
+  // Its ops are installed by the emitted main() exactly when the tls surface
+  // links (moduleUsesTls, cc.ts's gate).
+  ["secureCtx", { tag: "SCR_DYNH_SECURE_CTX", cls: "SecureContext" }],
 ]);
 
 /** The bytes ELEMENT kinds that cross the checked-dynamic boundary, each
