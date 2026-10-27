@@ -8753,6 +8753,12 @@ typedef enum ScrBytesElem {
    * inline fast paths test SCR_BYTES_U8 exactly, so this kind always takes
    * the function store, where the clamp lives. */
   SCR_BYTES_U8C,
+  /* Float16Array, APPENDED after U8C. Storage is IEEE binary16 (2 bytes);
+   * reads widen to the exact double, writes round to nearest, ties to even,
+   * overflowing to infinity past 65504 (ECMA-262 Number::toFloat16). The
+   * inline fast paths test U8 and F64 exactly, so this kind takes the
+   * function accessors. */
+  SCR_BYTES_F16,
 } ScrBytesElem;
 
 /* Buffer-ness, carried by the VALUE.

@@ -22,6 +22,43 @@ static void scr_bytes_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
 
+/* IEEE binary16 <-> double (ECMA-262 Number::toFloat16 and its inverse).
+ * The read is exact: every binary16 value is a double. The write rounds the
+ * double to the nearest binary16, ties to even, computed by scaling to the
+ * target quantum (exact, a power of two) and nearbyint's default
+ * round-to-nearest-even. Overflow past the largest finite half rounds to
+ * infinity exactly where IEEE does (from 65520 up, halfway to 65536). */
+static double scr_bytes_f16_to_f64(uint16_t h) {
+  int sign = (h >> 15) & 1;
+  int exp = (h >> 10) & 31;
+  int mant = h & 1023;
+  double v;
+  if (exp == 0) v = ldexp((double)mant, -24);
+  else if (exp == 31) v = mant ? NAN : INFINITY;
+  else v = ldexp((double)(1024 + mant), exp - 25);
+  return sign ? -v : v;
+}
+
+static uint16_t scr_bytes_f64_to_f16(double v) {
+  if (v != v) return 0x7E00;
+  uint16_t sign = signbit(v) ? 0x8000 : 0;
+  double a = fabs(v);
+  if (a == 0.0) return sign;
+  if (a >= 65520.0) return sign | 0x7C00;
+  int e;
+  frexp(a, &e); /* a = m * 2^e, m in [0.5, 1): the half exponent is e - 1 */
+  int E = e - 1;
+  if (E < -14) {
+    /* subnormal: the quantum is 2^-24; the integer result is the mantissa */
+    double n = nearbyint(ldexp(a, 24));
+    return sign | (uint16_t)n; /* n == 1024 encodes the smallest normal */
+  }
+  double n = nearbyint(ldexp(a, 10 - E)); /* in [1024, 2048] */
+  if (n == 2048.0) { n = 1024.0; E++; }
+  if (E > 15) return sign | 0x7C00;
+  return sign | (uint16_t)((E + 15) << 10) | (uint16_t)(n - 1024.0);
+}
+
 /* ToUint8Clamp (ECMA-262 7.1.12): NaN and everything <= 0 to 0, everything
  * >= 255 to 255, otherwise round to the nearest integer with ties to the
  * EVEN neighbour. Used by every Uint8ClampedArray store. */
@@ -45,8 +82,8 @@ size_t scr_bytes_elem_size(ScrBytesElem elem) {
    * chain used to fall through to. The mask is one instruction and the
    * padding is seven bytes of .rodata. */
   static const unsigned char sizes[16] = { 1, 4, 4, 4, 8, 1, 1, 2, 2,
-                                           1, 1, 1, 1, 1, 1, 1 };
-  /* index 9 is SCR_BYTES_U8C (one byte, like U8). */
+                                           1, 2, 1, 1, 1, 1, 1 };
+  /* index 9 is SCR_BYTES_U8C (one byte, like U8); index 10 is SCR_BYTES_F16. */
   return sizes[(unsigned)elem & 15u];
 }
 
@@ -349,6 +386,11 @@ double scr_bytes_get(const ScrBytes *b, double i) {
     case SCR_BYTES_U8:
     case SCR_BYTES_U8C:
       return (double)b->data[idx];
+    case SCR_BYTES_F16: {
+      uint16_t h;
+      memcpy(&h, b->data + idx * 2, 2);
+      return scr_bytes_f16_to_f64(h);
+    }
     case SCR_BYTES_U32: {
       uint32_t v;
       memcpy(&v, b->data + idx * 4, 4);
@@ -431,6 +473,11 @@ void scr_bytes_set(ScrBytes *b, double i, double v) {
     case SCR_BYTES_U8C:
       b->data[idx] = scr_bytes_to_u8c(v);
       break;
+    case SCR_BYTES_F16: {
+      uint16_t h = scr_bytes_f64_to_f16(v);
+      memcpy(b->data + idx * 2, &h, 2);
+      break;
+    }
     case SCR_BYTES_U32: {
       uint32_t u = scr_bytes_to_u32(v);
       memcpy(b->data + idx * 4, &u, 4);
@@ -596,9 +643,9 @@ ScrBytes *scr_typed_view_over(ScrBytes *buf, ScrBytesElem elem) {
     char msg[96];
     static const char *const names[] = { "Uint8Array", "Uint32Array", "Float32Array", "Int32Array",
                                          "Float64Array", "Int8Array", "ArrayBuffer", "Int16Array",
-                                         "Uint16Array", "Uint8ClampedArray" };
+                                         "Uint16Array", "Uint8ClampedArray", "Float16Array" };
     const int n = snprintf(msg, sizeof msg, "byte length of %s should be a multiple of %zu",
-                           names[(unsigned)elem < 10 ? (unsigned)elem : 0], esz);
+                           names[(unsigned)elem < 11 ? (unsigned)elem : 0], esz);
     scr_throw_error_msg(SCR_ERR_RANGE, msg, (size_t)n);
     return NULL;
   }
@@ -1453,6 +1500,11 @@ ScrBytes *scr_bytes_from_arr(ScrBytesElem elem, const ScrArr *arr) {
       case SCR_BYTES_U8C:
         b->data[i] = scr_bytes_to_u8c(v);
         break;
+      case SCR_BYTES_F16: {
+        uint16_t h = scr_bytes_f64_to_f16(v);
+        memcpy(b->data + i * 2, &h, 2);
+        break;
+      }
       case SCR_BYTES_U32: {
         uint32_t u = scr_bytes_to_u32(v);
         memcpy(b->data + i * 4, &u, 4);
