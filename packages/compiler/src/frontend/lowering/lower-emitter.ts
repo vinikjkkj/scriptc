@@ -112,6 +112,12 @@ const META_EVENTS: ReadonlySet<string> = new Set(["newListener", "removeListener
 interface EventSig {
   /** The unified argument tuple, positions in emit order. */
   tuple: IrType[];
+  /** DYN event (dynamic-touch rule, orchestrator 2026-10-27): a dyn-receiver
+   * site, or a non-literal event name anywhere, touched this name. Every
+   * emit boxes its arguments into the dyn tuple, every listener registers as a
+   * dyn adapter (runtime entry keeps fnproto, so scr_emitter_emit_dyn_array
+   * reaches it), and a typed listener takes the checked-dynamic parameter path. */
+  dynEvent?: boolean;
   /** True once ANY emit site pinned the arity/types (listeners may then
    * only prefix it; without one, the longest listener defines the tuple). */
   fromEmit: boolean;
@@ -436,6 +442,12 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   let opaqueRegistration = false;
   let opaqueAt: string | null = null;
   const emittedNames = new Set<string>();
+  // DYN-touch rule (EventSig.dynEvent): literal names touched by an untyped
+  // receiver, the largest literal emit arity seen on one, and whether any
+  // non-literal name exists (then every event of the program is DYN).
+  const dynNames = new Set<string>();
+  const dynArity = new Map<string, number>();
+  let dynAll = false;
   for (const sf of L.program.getSourceFiles()) {
     if (sf.isDeclarationFile) continue;
     const walk = (node: ts.Node): void => {
@@ -484,6 +496,18 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
         }
       }
       if (!resolved || nameT === null) return; // checker trouble is the lowering's business, not the scan's
+      // DYN sites: an untyped receiver (dyn, or unmapped `any`) names an event
+      // the class scan below never sees; a non-literal name on an emitter or an
+      // untyped receiver can be any event at all.
+      const recvDyn = recvT === null || recvT.kind === "dyn";
+      if (recvDyn || (recvT?.kind === "object" && emitterRooted(L, L.classes.get(recvT.className)))) {
+        if (!nameT.isStringLiteralType()) {
+          dynAll = true;
+        } else if (recvDyn && !META_EVENTS.has(nameT.value) && nameT.value !== "error") {
+          dynNames.add(nameT.value);
+          if (isEmit) dynArity.set(nameT.value, Math.max(dynArity.get(nameT.value) ?? 0, node.arguments.length - 1));
+        }
+      }
       if (isEmit && nameT.isStringLiteralType()) emittedNames.add(nameT.value);
       if (recvT?.kind !== "object" || !emitterRooted(L, L.classes.get(recvT.className))) return;
       if (!nameT.isStringLiteralType()) {
@@ -592,6 +616,29 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       dynListener: sigs.some((x) => x.dynListener),
       listened: false,
     });
+  }
+  // DYN events (EventSig.dynEvent): every key of a touched name becomes the
+  // dyn tuple, as long as the widest emit or listener needs (the padding and
+  // the boxing both read the tuple). A DYN event has no typed conflict left.
+  const dynTouched = new Set<string>(dynAll ? [] : dynNames);
+  if (dynAll) {
+    for (const k of table.keys()) dynTouched.add(evDisplayName(k));
+    for (const n of registered) dynTouched.add(n);
+    for (const n of emittedNames) dynTouched.add(n);
+  }
+  for (const n of dynTouched) {
+    if (META_EVENTS.has(n) || n === "error") continue;
+    let arity = dynArity.get(n) ?? 0;
+    for (const site of sites) if (site.isEmit && site.name === n) arity = Math.max(arity, site.node.arguments.length - 1);
+    const bkey = `${builtinKeyPrefix}\u0000${n}`;
+    if (!table.has(bkey)) table.set(bkey, { tuple: [], fromEmit: false, conflict: null, dynListener: false, listened: false });
+    for (const [k, sig] of table) {
+      if (evDisplayName(k) !== n || k === "error") continue;
+      sig.tuple = Array.from({ length: Math.max(sig.tuple.length, arity) }, () => DYN);
+      sig.dynEvent = true;
+      sig.dynListener = true;
+      sig.conflict = null;
+    }
   }
   // The listened flag covers the builtin bucket too, so it is set last.
   for (const [key, sig] of table) sig.listened = listenedNames.has(evDisplayName(key));
@@ -1154,6 +1201,28 @@ export function lowerEmitApplyCall(L: Lowerer, call: ts.CallExpression, loc: Src
 
 export function lowerUnnamedEmitterCall(L: Lowerer, call: ts.CallExpression,
   member: string, recv: IrExpr, nameIr: IrExpr, loc: SrcLoc): IrExpr {
+  if (member === "emit") {
+    // A computed name no literal emit names (the chain over emitterEventNames
+    // already took every literal arm). It can reach a listener only when one was
+    // registered under a computed name, and the dispatch for that needs a dyn
+    // array no backend builds yet: such a program is refused at compile time.
+    // Otherwise no listener exists under any name this emit could carry: the
+    // arguments are evaluated (Node evaluates them) and emit answers false.
+    if (emitterRegistrations(L).opaque) {
+      L.noLowering(
+        "emit with a computed event name in a program that registers a listener under a computed name",
+        call,
+        "dispatching a computed name over a listener registered under a computed name needs a dynamic argument list, which the backends do not build yet",
+      );
+    }
+    return {
+      kind: "seqExpr",
+      stmts: call.arguments.slice(1).map((a) => ({ kind: "exprStmt" as const, expr: L.lowerExpr(a), loc })),
+      result: boolLit(false, loc),
+      type: BOOL,
+      loc,
+    };
+  }
   if (member === "listenerCount") {
     if (call.arguments.length !== 1) {
       L.noLowering(`listenerCount with ${call.arguments.length} arguments on a dynamic receiver`, call);
@@ -1443,6 +1512,9 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     // box as Node's second argument (programObservesMetaArgs).
     let dynFlavor = dynListenerFlavor(L, args[1]!);
     if (dynFlavor === null && registering && programObservesMetaArgs(L)) dynFlavor = "func";
+    // A DYN event (EventSig.dynEvent) takes the checked-dynamic listener path for
+    // every listener: the runtime entry keeps the box, so a dyn emit reaches it.
+    if (dynFlavor === null && sigAt(table, key)?.dynEvent === true) dynFlavor = "func";
     if (dynFlavor !== null) {
       return lowerDynListenerCall(
         L, member, name, tuple, receiver, args[1]!, dynFlavor, registering, once, prepend, loc, false,

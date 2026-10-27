@@ -6699,6 +6699,14 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       const info = L.classes.get(recv.type.className);
       if (info && !L.findMethodOn(info, access.name.text) &&
           EMITTER_API_MEMBERS.has(access.name.text) && emitterRooted(L, info)) {
+        // An untyped receiver (checker any) holding an emitter with a computed
+        // event name: the dyn-receiver spoke (every event DYN when a computed
+        // name exists), which accepts any receiver value.
+        const nameArg0 = call.arguments[0];
+        if (nameArg0 !== undefined && !ts.isStringLiteralLike(nameArg0) && (L.typeOf(access.expression).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
+          const dynArm = lowerDynEmitterReceiverCall(L, call, access, { kind: "dynFrom", value: recv, type: DYN, loc: locOf(call) });
+          if (dynArm !== null) return dynArm;
+        }
         return lowerEmitterMethodCall(L, call, access, info, undefined, recv);
       }
       return null;
@@ -6985,7 +6993,7 @@ function dynMapIterDrainContext(L: Lowerer, call: ts.CallExpression): boolean {
 /** The EventEmitter members a dyn receiver can hold an emitter under. */
 const DYN_EMITTER_RECEIVER_METHODS: ReadonlySet<string> = new Set([
   "on", "addListener", "once", "prependListener", "prependOnceListener",
-  "off", "removeListener", "listenerCount",
+  "off", "removeListener", "listenerCount", "emit",
 ]);
 
 /** `recv.m("literal", ...)` on a checked-dynamic receiver whose runtime value
@@ -7101,6 +7109,16 @@ function lowerDynEmitterReceiverCall(L: Lowerer, call: ts.CallExpression,
   if (chain === null) return null;
   for (let i = names.length - 1; i >= 0; i--) {
     const arm = probe(() => lowerEmitterMethodCall(L, call, access, info, undefined, emitterRecv, names[i]!));
+    // A computed-name EMIT whose arm for a name the program carries is refused must
+    // not fall to the dyn fallback: that answers "x.emit is not a function" at run
+    // time, a deferred throw where Node delivers the event. It is a compile refusal.
+    if (arm === null && member === "emit") {
+      L.noLowering(
+        "emit with a computed event name whose arm for '" + names[i]! + "' cannot lower",
+        call,
+        "every event name the program carries is dispatched statically; the arguments must fit that event's tuple (a computed name cannot fall back to a runtime throw)",
+      );
+    }
     if (arm === null) return null;
     chain = {
       kind: "ternary",
