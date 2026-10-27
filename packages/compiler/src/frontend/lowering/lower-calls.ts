@@ -3058,6 +3058,29 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     return internImplicitInstance(L, call, info, shapes, argTypes);
   }
 
+/** The instance of an implicit-any OVERRIDE that a generic call reaches through its receiver's
+   * runtime class (lower-classes' lowerGenericVirtualCall). Each of the override's implicit
+   * parameters takes the SAME shape and argument type the instance the call resolved on the
+   * declaring class holds at that position; positions past that instance's arity are DYN (the
+   * caller passes undefined there, as Node does). Null when the override declares a parameter
+   * that is not implicit (a typed or rest parameter): the caller fences by name. */
+  export function implicitInstanceLike(L: Lowerer, blame: ts.Node, info: GenericFnInfo,
+    likeInfo: GenericFnInfo, like: GenericInstance,): GenericInstance | null {
+    if (info.implicitParams === undefined) return null;
+    const shapes: ParamShape[] = [];
+    const argTypes = new Map<ts.Symbol, ts.Type>();
+    for (let i = 0; i < info.decl.parameters.length; i++) {
+      const sym = info.implicitParams[i];
+      if (!sym) return null;
+      const src = i < like.params.length ? like.params[i]!.type : DYN;
+      shapes.push({ type: src, mode: "required" });
+      const srcSym = likeInfo.implicitParams?.[i];
+      const t = srcSym ? like.implicitArgTypes?.get(srcSym) : undefined;
+      if (t !== undefined && i < like.params.length) argTypes.set(sym, t);
+    }
+    return internImplicitInstance(L, blame, info, shapes, argTypes);
+  }
+
 /** The all-dyn DEFAULT instance — today's compiled body exactly: what a
    * VALUE reference of an implicit-any function names (indirect calls
    * carry no per-site types to bind). */

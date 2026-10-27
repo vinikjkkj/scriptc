@@ -11,9 +11,8 @@
 // the override's, not the base's.
 //
 // Calls through a receiver whose runtime class the static type does not pin
-// are a separate matter: they REFUSE by name (SC1090, pinned in
-// tests/diagnostics/generic-override-inexact-receiver). This program only
-// drives what compiles, and byte-matches Node on all of it.
+// dispatch on the runtime class (poolish-inexact.ts). This program drives the
+// statically pinned cases, and byte-matches Node on all of it.
 import poolish from "poolish";
 
 const seen: string[] = [];
