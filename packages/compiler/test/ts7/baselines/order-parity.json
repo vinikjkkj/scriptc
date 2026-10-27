@@ -2527,6 +2527,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13300-tls-cipher-verdicts.js": {
+   "order": [
+    "<repo>/tests/corpus/13300-tls-cipher-verdicts.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13301-tls-cipher-directives.js": {
+   "order": [
+    "<repo>/tests/corpus/13301-tls-cipher-directives.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13302-tls-cipher-suites.js": {
+   "order": [
+    "<repo>/tests/corpus/13302-tls-cipher-suites.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13303-tls-cipher-empty-parts.js": {
+   "order": [
+    "<repo>/tests/corpus/13303-tls-cipher-empty-parts.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13304-tls-cipher-ssl-cache.js": {
+   "order": [
+    "<repo>/tests/corpus/13304-tls-cipher-ssl-cache.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1350-path-normalize-join.ts": {
    "order": [
     "<repo>/tests/corpus/1350-path-normalize-join.ts"
