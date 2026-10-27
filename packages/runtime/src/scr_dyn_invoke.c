@@ -1367,11 +1367,6 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
         static const char *const rem[] = { "exec", "test", "toString", "compile", NULL };
         return dyn_name_in(m, rem) || dyn_objproto_knows(m);
       }
-      if (recv->v.handle.tag == SCR_DYNH_STRDEC) {
-        /* StringDecoder.prototype: write, end, and text (Node's own method beside them). */
-        static const char *const sdm[] = { "write", "end", "text", "toString", "toLocaleString", NULL };
-        return dyn_name_in(m, sdm) || dyn_objproto_knows(m);
-      }
       if (recv->v.handle.tag == SCR_DYNH_TEXTCODEC) {
         /* TextEncoder: encode / encodeInto. TextDecoder: decode. Both
          * inherit Object.prototype's names; the read agrees with the ops
@@ -2253,6 +2248,12 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_dyn_this_pop();
       scr_dyn_release(m);
       return r;
+    }
+    /* A StringDecoder (the converter's object form, cname StringDecoder) answers its own write/end. */
+    if (m->kind == SCR_DYN_UNDEF && scr_dyn_obj_is_strdec(recv) &&
+        (strcmp(method, "write") == 0 || strcmp(method, "end") == 0)) {
+      scr_dyn_release(m);
+      return scr_strdec_obj_invoke(recv, method, args, argc, what);
     }
     bool found = m->kind != SCR_DYN_UNDEF ||
                  scr_dyn_obj_key_present(recv, method, strlen(method));

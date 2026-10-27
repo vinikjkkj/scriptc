@@ -3065,127 +3065,6 @@ static ScrDyn *scr_textcodec_box_impl(ScrStr *s) {
   return scr_dyn_new_handle(s, SCR_DYNH_TEXTCODEC);
 }
 
-/* ── StringDecoder as a checked-dynamic handle (SCR_DYNH_STRDEC) ─────────
- * A StringDecoder that crosses into the checked-dynamic tree (a `this.decoder
- * = new StringDecoder(enc)` on a function-constructor instance, whose field is
- * dyn) becomes a box that ANSWERS its members: write(buf) and end([buf]) run
- * the same strdec steps as the static lowering, and the box owns the pending
- * partial sequence the static record would have carried in its field. The
- * `encoding` read answers the canonical name. lastChar / lastNeed / lastTotal
- * are Node's decoder fields this tier does not model: they throw the loud
- * ladder rather than answer. */
-typedef struct ScrStrDecBox {
-  size_t rc;
-  ScrStr *enc; /* owned: the canonical encoding name */
-  double pending;
-} ScrStrDecBox;
-
-static void *scr_strdec_box_retain(void *h) {
-  ScrStrDecBox *b = (ScrStrDecBox *)h;
-  b->rc++;
-  return b;
-}
-
-static void scr_strdec_box_release(void *h) {
-  ScrStrDecBox *b = (ScrStrDecBox *)h;
-  if (--b->rc == 0) {
-    scr_str_release(b->enc);
-    free(b);
-  }
-}
-
-/* write(chunk): the decoded complete prefix; the pending partial re-buffers. +1. */
-static ScrStr *scr_strdec_box_write(ScrStrDecBox *b, const ScrBytes *ib) {
-  ScrStr *s = scr_strdec_write(b->enc, b->pending, ib);
-  b->pending = scr_strdec_next(b->enc, b->pending, ib);
-  return s;
-}
-
-static bool scr_strdec_box_is_bytes(const ScrDyn *d) {
-  return d->kind == SCR_DYN_BYTES || d->kind == SCR_DYN_ARRBUF;
-}
-
-static ScrDyn *scr_strdec_box_invoke(void *h, ScrDyn *self, const char *method, ScrDyn *const *args,
-                                     size_t argc, const char *what) {
-  (void)self;
-  ScrStrDecBox *b = (ScrStrDecBox *)h;
-  if (strcmp(method, "write") == 0) {
-    if (argc < 1 || !scr_strdec_box_is_bytes(args[0])) {
-      scr_dyn_arg_type_fail("buf", "an instance of Buffer, TypedArray, or DataView",
-                            argc < 1 ? scr_dyn_undefined() : args[0]);
-      return NULL;
-    }
-    ScrStr *s = scr_strdec_box_write(b, args[0]->v.bytes);
-    ScrDyn *d = scr_dyn_new_str(s);
-    scr_str_release(s);
-    return d;
-  }
-  if (strcmp(method, "end") == 0) {
-    /* end([buf]) is write(buf) followed by end(): both halves, concatenated. */
-    ScrStr *head = NULL;
-    if (argc > 0 && args[0]->kind != SCR_DYN_UNDEF) {
-      if (!scr_strdec_box_is_bytes(args[0])) {
-        scr_dyn_arg_type_fail("buf", "an instance of Buffer, TypedArray, or DataView", args[0]);
-        return NULL;
-      }
-      head = scr_strdec_box_write(b, args[0]->v.bytes);
-    }
-    ScrStr *tail = scr_strdec_end(b->enc, b->pending);
-    b->pending = 0;
-    ScrStr *out = head == NULL ? tail : scr_str_concat(head, tail);
-    if (head != NULL) {
-      scr_str_release(head);
-      scr_str_release(tail);
-    }
-    ScrDyn *d = scr_dyn_new_str(out);
-    scr_str_release(out);
-    return d;
-  }
-  if (strcmp(method, "toString") == 0 || strcmp(method, "toLocaleString") == 0) {
-    return scr_tc_new_plain_str("[object StringDecoder]");
-  }
-  if (strcmp(method, "valueOf") == 0) return scr_dyn_retain(self);
-  if (strcmp(method, "hasOwnProperty") == 0) return scr_dyn_new_bool(false);
-  char msg[160];
-  const int n = snprintf(msg, sizeof msg, "%s is not a function", what);
-  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
-  return NULL;
-}
-
-static ScrDyn *scr_strdec_box_get(void *h, const char *key, size_t key_len) {
-  (void)key_len;
-  ScrStrDecBox *b = (ScrStrDecBox *)h;
-  if (strcmp(key, "encoding") == 0) return scr_dyn_new_str(b->enc);
-  if (strcmp(key, "lastNeed") == 0 || strcmp(key, "lastTotal") == 0 || strcmp(key, "lastChar") == 0) {
-    size_t need = 0, total = 0;
-    uint8_t last[4];
-    scr_strdec_state_info(b->enc, b->pending, &need, &total, last);
-    if (strcmp(key, "lastNeed") == 0) return scr_dyn_new_num((double)need);
-    if (strcmp(key, "lastTotal") == 0) return scr_dyn_new_num((double)total);
-    /* lastChar: Node's four-byte native scratch, as a Buffer. */
-    ScrBytes *bb = scr_bytes_new(SCR_BYTES_U8, 4);
-    memcpy(bb->data, last, 4);
-    ScrBytes *st = scr_bytes_stamp_buffer(bb);
-    ScrDyn *d = scr_dyn_new_bytes_copy(st);
-    scr_bytes_release(st);
-    return d;
-  }
-  return NULL; /* not a modeled property: the caller answers undefined */
-}
-
-static bool scr_strdec_box_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
-  (void)h;
-  (void)key;
-  (void)key_len;
-  (void)value;
-  return false; /* an expando: the loud ladder every handle shares */
-}
-
-static const ScrDynHandleOps scr_strdec_box_ops = {
-  "StringDecoder", &scr_strdec_box_retain, &scr_strdec_box_release, &scr_strdec_box_invoke, &scr_strdec_box_get,
-  &scr_strdec_box_set, NULL,
-};
-
 /* new StringDecoder(enc) over a run-time value: Node's normalization. undefined
  * and null are utf8; any other value must name an encoding in Node's alias set
  * (case-insensitive), which folds to the canonical name the strdec steps
@@ -3220,17 +3099,127 @@ ScrStr *scr_strdec_enc_of(const ScrDyn *v) {
   return scr_str_new("utf8", 4);
 }
 
-/* A StringDecoder record crossing into the dyn tree (the emitters' dynFrom arm
- * for a shape the frontend built from `StringDecoder`). `enc` is borrowed. */
-ScrDyn *scr_strdec_dyn_box(const ScrStr *enc, double pending) {
-  if (scr_dynh_ops[SCR_DYNH_STRDEC] == NULL) scr_dyn_handle_install(SCR_DYNH_STRDEC, &scr_strdec_box_ops);
-  ScrStrDecBox *b = (ScrStrDecBox *)malloc(sizeof *b);
-  b->rc = 1;
-  b->enc = scr_str_new(enc->data, enc->len);
-  b->pending = pending;
-  ScrDyn *d = scr_dyn_new_handle(b, SCR_DYNH_STRDEC);
-  scr_strdec_box_release(b);
-  return d;
+/* ── StringDecoder as a checked-dynamic OBJECT (constructor name "StringDecoder") ─
+ * The record-to-dyn converter gives a StringDecoder its dyn OBJECT form, as on
+ * main: `encoding` is an ordinary key, the packed pending partial sequence is an
+ * internal slot out of band (`%pending`, the field's storage key), and the
+ * constructor name is set. On that object the decoder's own methods answer here:
+ * write(buf) and end([buf]) run the strdec steps and thread the slot, and the
+ * accessors lastNeed / lastTotal / lastChar answer from the same state. */
+bool scr_dyn_obj_is_strdec(const ScrDyn *d) {
+  return d->kind == SCR_DYN_OBJ && d->v.obj.ext != NULL && d->v.obj.ext->cname != NULL &&
+         strcmp(d->v.obj.ext->cname, "StringDecoder") == 0;
+}
+
+static bool scr_strdec_obj_is_bytes(const ScrDyn *d) {
+  return d->kind == SCR_DYN_BYTES || d->kind == SCR_DYN_ARRBUF;
+}
+
+/* The canonical encoding (the `encoding` member, +1 dyn string) and the packed pending
+ * state (the %pending slot, borrowed as a number). NULL when reading the member threw. */
+static ScrDyn *scr_strdec_obj_state(ScrDyn *recv, double *pend) {
+  ScrDyn *ev = scr_dyn_obj_key_get(recv, "encoding", 8);
+  if (ev == NULL) return NULL;
+  const ScrDyn *pv = scr_dyn_obj_slot_get(recv, "%pending", 8);
+  *pend = (pv != NULL && pv->kind == SCR_DYN_NUM) ? pv->v.num : 0;
+  return ev;
+}
+
+static void scr_strdec_obj_store(ScrDyn *recv, double pend) {
+  scr_dyn_obj_set_slot(recv, "%pending", 8, scr_dyn_new_num(pend));
+}
+
+ScrDyn *scr_strdec_obj_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc,
+                              const char *what) {
+  if (strcmp(method, "write") != 0 && strcmp(method, "end") != 0) {
+    char msg[160];
+    const int n = snprintf(msg, sizeof msg, "%s is not a function", what);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+    return NULL;
+  }
+  double pend = 0;
+  ScrDyn *ev = scr_strdec_obj_state(recv, &pend);
+  if (ev == NULL) return NULL;
+  ScrStr *utf8 = NULL;
+  const ScrStr *enc = ev->kind == SCR_DYN_STR ? ev->v.str : NULL;
+  if (enc == NULL) {
+    utf8 = scr_str_new("utf8", 4);
+    enc = utf8;
+  }
+  ScrDyn *result = NULL;
+  ScrStr *head = NULL;
+  const ScrBytes *ib = NULL;
+  if (strcmp(method, "write") == 0) {
+    if (argc < 1 || !scr_strdec_obj_is_bytes(args[0])) {
+      scr_dyn_arg_type_fail("buf", "an instance of Buffer, TypedArray, or DataView", argc < 1 ? scr_dyn_undefined() : args[0]);
+    } else {
+      ib = args[0]->v.bytes;
+      head = scr_strdec_write(enc, pend, ib);
+      scr_strdec_obj_store(recv, scr_strdec_next(enc, pend, ib));
+      result = scr_dyn_new_str(head);
+      scr_str_release(head);
+    }
+  } else {
+    /* end([buf]) is write(buf) followed by end(): both halves, concatenated. */
+    bool ok = true;
+    ScrStr *first = NULL;
+    if (argc > 0 && args[0]->kind != SCR_DYN_UNDEF) {
+      if (!scr_strdec_obj_is_bytes(args[0])) {
+        scr_dyn_arg_type_fail("buf", "an instance of Buffer, TypedArray, or DataView", args[0]);
+        ok = false;
+      } else {
+        ib = args[0]->v.bytes;
+        first = scr_strdec_write(enc, pend, ib);
+        pend = scr_strdec_next(enc, pend, ib);
+      }
+    }
+    if (ok) {
+      ScrStr *tail = scr_strdec_end(enc, pend);
+      ScrStr *out = first == NULL ? tail : scr_str_concat(first, tail);
+      if (first != NULL) {
+        scr_str_release(first);
+        scr_str_release(tail);
+      }
+      scr_strdec_obj_store(recv, 0);
+      result = scr_dyn_new_str(out);
+      scr_str_release(out);
+    }
+  }
+  if (utf8 != NULL) scr_str_release(utf8);
+  scr_dyn_release(ev);
+  return result;
+}
+
+/* lastNeed / lastTotal / lastChar of the decoder object (+1), from the same state. */
+ScrDyn *scr_strdec_obj_last(ScrDyn *recv, const char *key) {
+  double pend = 0;
+  ScrDyn *ev = scr_strdec_obj_state(recv, &pend);
+  if (ev == NULL) return NULL;
+  ScrStr *utf8 = NULL;
+  const ScrStr *enc = ev->kind == SCR_DYN_STR ? ev->v.str : NULL;
+  if (enc == NULL) {
+    utf8 = scr_str_new("utf8", 4);
+    enc = utf8;
+  }
+  size_t need = 0, total = 0;
+  uint8_t last[4];
+  scr_strdec_state_info(enc, pend, &need, &total, last);
+  ScrDyn *out = NULL;
+  if (strcmp(key, "lastNeed") == 0) {
+    out = scr_dyn_new_num((double)need);
+  } else if (strcmp(key, "lastTotal") == 0) {
+    out = scr_dyn_new_num((double)total);
+  } else {
+    /* lastChar: Node's four-byte native scratch, as a Buffer. */
+    ScrBytes *bb = scr_bytes_new(SCR_BYTES_U8, 4);
+    memcpy(bb->data, last, 4);
+    ScrBytes *st = scr_bytes_stamp_buffer(bb);
+    out = scr_dyn_new_bytes_copy(st);
+    scr_bytes_release(st);
+  }
+  if (utf8 != NULL) scr_str_release(utf8);
+  scr_dyn_release(ev);
+  return out;
 }
 
 /* `Array.prototype.<m>.call(recv, ...)` over a checked-dynamic receiver: the array-like
@@ -6615,6 +6604,9 @@ static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t 
  * reimplementing the walk, so neither can answer a property the other
  * cannot — the split estado-protochain.md §2e found the hard way. */
 ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
+  if (scr_dyn_obj_is_strdec(recv) && (strcmp(key, "lastNeed") == 0 || strcmp(key, "lastTotal") == 0 ||
+                                      strcmp(key, "lastChar") == 0))
+    return scr_strdec_obj_last(recv, key);
   ScrDyn *found = NULL;
   ScrPropKind k = scr_dyn_obj_resolve(recv, key, key_len, &found, NULL);
   if (k == SCR_PROP_DATA) return scr_dyn_retain(found);
