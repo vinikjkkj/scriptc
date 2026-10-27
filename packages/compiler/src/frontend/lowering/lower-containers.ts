@@ -7968,12 +7968,13 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       if (ts.isIdentifier(k)) return forInNames(k, k.text);
       return null;
     };
+    // A write reaches a bytes value's own table only with a NON-numeric key (an element index never names an own
+    // property), and only through a receiver that can hold a bytes value: dyn, bytes, or unmapped (conservative).
     const writeReaches = (recv: ts.Expression, key: ts.Expression): boolean => {
-      const rt = L.mapTypeOf(L.typeOf(recv));
-      if (rt === null) return false;
-      if (rt.kind === "dyn" || rt.kind === "bytes") return true;
       const kt = L.mapTypeOf(L.typeOf(key));
-      return kt === null || kt.kind !== "f64";
+      if (kt !== null && kt.kind === "f64") return false;
+      const rt = L.mapTypeOf(L.typeOf(recv));
+      return rt === null || rt.kind === "dyn" || rt.kind === "bytes";
     };
     for (const sf of L.moduleOrder) {
       if (unbounded) break;
