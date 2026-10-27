@@ -10529,6 +10529,29 @@ const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
 ]);
 /** True when the module holds a dyn.bufferValue libCall: the buffer module values and Blob/File
  * (scr_buffer_val.c, cc.ts bufferVal). Same walk as moduleUsesDynExt. */
+/** The program can write a named property onto a bytes value: it holds a dyn keyed or reflective write, a dyn
+ * defineProperty, or a dyn assign (the lowering's only sinks for non-index names). Such a program links
+ * scr_bytes_own.c and installs its ops (cc.ts / the install call). Programs without one keep their size class. */
+export function moduleUsesBytesOwn(mod: IrModule): boolean {
+  let found = false;
+  const SINKS = new Set(["dyn.keySet", "dyn.reflectSet", "dyn.reflectDefine", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll"]);
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && typeof node.fn === "string" && SINKS.has(node.fn)) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 export function moduleUsesBufferValue(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {

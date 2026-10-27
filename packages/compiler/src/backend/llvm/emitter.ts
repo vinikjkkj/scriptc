@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { moduleUsesDc, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn } from "../../ir/nodes.js";
+import { moduleUsesDc, moduleUsesBytesOwn, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn } from "../../ir/nodes.js";
 import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -2095,6 +2095,7 @@ class LlEmitter {
     const usesDate = moduleUsesDateDyn(this.mod);
     const usesDynView = moduleUsesDynView(this.mod);
     const usesBigDyn = moduleUsesBigInt(this.mod);
+    const usesBytesOwn = moduleUsesBytesOwn(this.mod);
     const usesSymbolDyn = moduleUsesSymbol(this.mod);
     const usesDcDyn = moduleUsesDc(this.mod);
     // Child-stdio programs stamp the child-stream handle-dispatch ops so
@@ -2181,6 +2182,7 @@ class LlEmitter {
     if (usesDate) this.declare(`declare void @scr_date_dyn_install()`);
     if (usesDynView) this.declare(`declare void @scr_dyn_view_install()`);
     if (usesBigDyn) this.declare(`declare void @scr_big_dyn_install()`);
+    if (usesBytesOwn) this.declare(`declare void @scr_bytes_own_install()`);
     if (usesSymbolDyn) this.declare(`declare void @scr_sym_dyn_install()`);
     if (usesDcDyn) this.declare(`declare void @scr_dc_dyn_install()`);
     if (usesChildStream) this.declare(`declare void @scr_child_stream_dyn_install()`);
@@ -2665,6 +2667,7 @@ class LlEmitter {
       ...(usesDynView ? [`  call void @scr_dyn_view_install()`] : []),
       // The C twin's row: the bigint unit's dyn-core entry pointer.
       ...(usesBigDyn ? [`  call void @scr_big_dyn_install()`] : []),
+      ...(usesBytesOwn ? [`  call void @scr_bytes_own_install()`] : []),
       ...(usesSymbolDyn ? [`  call void @scr_sym_dyn_install()`] : []),
       ...(usesDcDyn ? [`  call void @scr_dc_dyn_install()`] : []),
       ...(usesChildStream ? [`  call void @scr_child_stream_dyn_install()`] : []),

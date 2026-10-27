@@ -317,6 +317,8 @@ export interface CcOptions {
   dynExt?: boolean;
   /** The program holds a buffer module value (dyn.bufferValue): compiles scr_buffer_val.c. */
   bufferVal?: boolean;
+  /** The program can write a named own property onto a bytes value (moduleUsesBytesOwn): compiles scr_bytes_own.c. */
+  bytesOwn?: boolean;
   /** The program uses the diagnostics_channel surface (index.ts detects
    * dc.* libCalls on the IR): compiles scr_dc.c — pure data structure
    * over the checked-dynamic tree (no loop hooks, no install), cross-compiles everywhere.
@@ -2466,6 +2468,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.dynClass ? [rt(join(rtDir, "scr_dyn_class.c"))] : []),
     ...(opts.dynExt ? [rt(join(rtDir, "scr_dyn_ext.c"))] : []),
     ...(opts.bufferVal ? [rt(join(rtDir, "scr_buffer_val.c"))] : []),
+    ...(opts.bytesOwn ? [rt(join(rtDir, "scr_bytes_own.c"))] : []),
     ...(opts.dc ? [rt(join(rtDir, "scr_dc.c"))] : []),
     ...(opts.dynAsync || opts.dynInvoke || opts.dc ? [rt(join(rtDir, "scr_async_dyn.c"))] : []),
     // The zlib UNIT (scr_zlib.c) gates on zlib.* IR use; the LINK (system
