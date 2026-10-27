@@ -70,6 +70,7 @@ import {
   type StartupCrash,
   cjsExportAssignmentOf,
   cjsKeyedForEachOf,
+  cjsWholeExportAssignmentOf,
   cjsExportTargetLiteral,
   isCjsJsFile,
   cjsExportDiscardReason,
@@ -2655,7 +2656,22 @@ export class Lowerer {
    * plain function value (which has no such property at run time). */
   cjsSingleValueMemberOf(recv: ts.Expression, name: string): boolean {
     const dep = this.cjsBindingRequireDepOf(recv);
-    return dep !== null && isCjsJsFile(dep) && this.cjsModuleExportSymbol(dep, name) !== undefined;
+    if (dep === null || !isCjsJsFile(dep)) return false;
+    // Only a member the FINAL export object carries: a `module.exports.name = …` written AFTER the file's
+    // whole replacement (`module.exports = X`). A bare `exports.name = …` (or a write before the replacement)
+    // targets the old object Node discards, and reads of it are the export record's business (cjs-export-record).
+    let replaced = false;
+    for (const stmt of dep.statements) {
+      if (!replaced) {
+        if (cjsWholeExportAssignmentOf(stmt) !== null) replaced = true;
+        continue;
+      }
+      if (!ts.isExpressionStatement(stmt) || !ts.isBinaryExpression(stmt.expression)) continue;
+      if (stmt.expression.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+      const l = stmt.expression.left;
+      if (ts.isPropertyAccessExpression(l) && ts.isIdentifier(l.name) && l.name.text === name && isModuleExportsAccess(l.expression)) return true;
+    }
+    return false;
   }
 
   /** True when `recv` is a `require` binding of a JavaScript module whose export table does NOT declare
