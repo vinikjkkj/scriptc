@@ -2150,6 +2150,13 @@ const SYMBOLIC_PAIR_BUDGET = 256;
         bindings.set(tp, mapped);
         tsBindings?.set(tp, taT);
       }
+      // An explicit `any` type argument has no static value type (mapType answers null for
+      // `any`), so it bound nothing and the body's T stayed unmapped. It binds to the
+      // checked-dynamic tier: the body's (T | undefined)[] then maps as a dyn-element array.
+      else if ((taT.flags & ts.TypeFlags.Any) !== 0) {
+        bindings.set(tp, DYN);
+        tsBindings?.set(tp, taT);
+      }
     });
     unifySignatureBindings(L, info, rsig, bindings, tsBindings);
     bindDefaultTypeParams(L, info.typeParams, info.decl.typeParameters, bindings, tsBindings);
