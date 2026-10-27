@@ -7181,8 +7181,9 @@ static bool dyn_canonical_index(const ScrStr *key, size_t *out) {
  * models no Object.prototype — the pre-existing divergence
  * estado-objmodel.md §4d named, unchanged. */
 bool scr_dyn_bytes_in(const ScrDyn *d, const char *k, size_t kl) {
-  /* `k in b`: the keyed READ answers the name (own table, index in range, length/byteLength/byteOffset/buffer,
-   * BYTES_PER_ELEMENT) or the prototype surface answers it as a method. One source of truth with the read. */
+  /* `k in b`, stored half: the keyed READ answers the name (own table, index in range, length/byteLength/
+   * byteOffset/buffer, BYTES_PER_ELEMENT). The prototype surface lives in scr_dyn_invoke.c, a gated unit this
+   * file must not reference (scr_json.c is always linked), so callers OR that half in. */
   ScrStr *s = scr_str_new(k, kl);
   ScrDyn *v = scr_dyn_bytes_key_get(d, s);
   scr_str_release(s);
@@ -7190,8 +7191,7 @@ bool scr_dyn_bytes_in(const ScrDyn *d, const char *k, size_t kl) {
     scr_dyn_release(v);
     return true;
   }
-  if (scr_exc_pending()) return false;
-  return scr_dyn_has_intrinsic_method(d, k, kl);
+  return false; /* the prototype surface is the caller's (scr_dyn_has_key_full, scr_dyn_invoke.c) */
 }
 
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {

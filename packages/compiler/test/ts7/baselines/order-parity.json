@@ -18178,6 +18178,36 @@
     "<repo>/tests/corpus/13006-prototype-method-descriptor.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/13205-mockbuf-dyn-own-names.ts": {
+    "order": [
+      "<repo>/tests/corpus/13205-mockbuf-dyn-own-names.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13206-mockbuf-dyn-numeric-methods.ts": {
+    "order": [
+      "<repo>/tests/corpus/13206-mockbuf-dyn-numeric-methods.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13207-mockbuf-static-own-override-call.ts": {
+    "order": [
+      "<repo>/tests/corpus/13207-mockbuf-static-own-override-call.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13210-mockbuf-shape-noop-writes-gated/main.cjs": {
+    "order": [
+      "<repo>/tests/corpus/13210-mockbuf-shape-noop-writes-gated/main.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/13212-mockbuf-text-dyn-consumers/main.cjs": {
+    "order": [
+      "<repo>/tests/corpus/13212-mockbuf-text-dyn-consumers/main.cjs"
+    ],
+    "diags": []
   }
  }
 }
