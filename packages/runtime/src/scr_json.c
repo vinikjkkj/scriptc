@@ -3564,6 +3564,67 @@ ScrMap *scr_set_new_dynkey(void) {
   return m;
 }
 
+/* A Map whose KEYS are dyn boxes (SameValueZero over the value a box carries)
+ * with a typed value side: the static `Map<unknown, V>` the untyped
+ * constructor cannot reach. The slot API does the work (normalization, hash,
+ * retain on a new entry); these wrappers only name the key as a ScrDyn box. */
+ScrMap *scr_map_new_dyn(ScrMapValKind val_kind, void *(*val_retain)(void *),
+                        void (*val_release)(void *), ScrTraceFn val_trace) {
+  ScrMap *m = scr_map_new(SCR_MAP_KEY_DYN, val_kind, val_retain, val_release, val_trace);
+  m->key_retain = scr_dyn_retain_v;
+  m->key_release = scr_dyn_release_v;
+  m->key_hash = dm_hash_key;
+  m->key_eq = dm_eq_key;
+  return m;
+}
+
+static uint64_t dyn_key_slot(const ScrDyn *k) { return (uint64_t)(uintptr_t)k; }
+
+bool scr_map_has_dyn(const ScrMap *m, const ScrDyn *k) { return scr_map_has_slot(m, dyn_key_slot(k)); }
+
+bool scr_map_delete_dyn(ScrMap *m, const ScrDyn *k) { return scr_map_delete_slot(m, dyn_key_slot(k)); }
+
+void scr_map_set_dyn_f64(ScrMap *m, const ScrDyn *k, double v) {
+  uint64_t bits;
+  memcpy(&bits, &v, sizeof bits);
+  scr_map_set_slot(m, dyn_key_slot(k), bits);
+}
+
+void scr_map_set_dyn_bool(ScrMap *m, const ScrDyn *k, bool v) {
+  scr_map_set_slot(m, dyn_key_slot(k), v ? 1u : 0u);
+}
+
+/* The value MOVES in, as a typed ref-key set does. */
+void scr_map_set_dyn_ref(ScrMap *m, const ScrDyn *k, void *v) {
+  scr_map_set_slot(m, dyn_key_slot(k), (uint64_t)(uintptr_t)v);
+}
+
+bool scr_map_get_dyn_f64(const ScrMap *m, const ScrDyn *k, double *out) {
+  uint64_t bits;
+  if (!scr_map_get_slot(m, dyn_key_slot(k), &bits)) return false;
+  memcpy(out, &bits, sizeof *out);
+  return true;
+}
+
+bool scr_map_get_dyn_bool(const ScrMap *m, const ScrDyn *k, bool *out) {
+  uint64_t bits;
+  if (!scr_map_get_slot(m, dyn_key_slot(k), &bits)) return false;
+  *out = bits != 0;
+  return true;
+}
+
+/* +1 on a hit, NULL on a miss (scr_map_get_ref_ref's convention). */
+void *scr_map_get_dyn_ref(const ScrMap *m, const ScrDyn *k) {
+  uint64_t bits;
+  if (!scr_map_get_slot(m, dyn_key_slot(k), &bits)) return NULL;
+  return m->val_retain((void *)(uintptr_t)bits);
+}
+
+/* The key at iteration index i, +1 (scr_map_iter_key_ref's convention). */
+ScrDyn *scr_map_iter_key_dyn(const ScrMap *m, double i) {
+  return (ScrDyn *)scr_dyn_retain_v((void *)(uintptr_t)scr_map_iter_key_slot(m, i));
+}
+
 static const char scr_dynmap_tkey_map[] = "map<dyn,dyn>";
 static const char scr_dynmap_tkey_set[] = "set<dyn>";
 static const char scr_dynmap_tkey_wmap[] = "dynweakmap";

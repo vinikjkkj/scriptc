@@ -909,6 +909,10 @@ export function isSupportedMapKey(t: IrType): boolean {
   // exactly as it would here.
   return (
     t.kind === "f64" || t.kind === "string" || t.kind === "object" || t.kind === "record" ||
+    // A DYN key (`Map<unknown, V>`, a Map over a generic bound to any): the box is hashed and
+    // compared by the value it carries (SameValueZero, scr_map_new_dyn). Set elements are not
+    // admitted through this predicate (isSupportedSetElem excludes dyn).
+    t.kind === "dyn" ||
     // a Date keys by reference identity like any object (SameValueZero on an object)
     t.kind === "date" ||
     // A UNION key (`Map<string | number, V>`, `Map<string | Buffer, V>`): the
@@ -930,7 +934,7 @@ export function isSupportedMapKey(t: IrType): boolean {
  * cycle risk at all (symbols hold only strings). */
 export function isSupportedSetElem(t: IrType): boolean {
   return (
-    isSupportedMapKey(t) ||
+    (isSupportedMapKey(t) && t.kind !== "dyn") ||
     t.kind === "netServer" ||
     t.kind === "symbol" ||
     // A Date is an object: SameValueZero on one is reference identity (two Dates with equal times are two

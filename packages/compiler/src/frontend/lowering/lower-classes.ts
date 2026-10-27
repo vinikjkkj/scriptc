@@ -11282,7 +11282,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           ) {
             return { kind: "mapNew", type: weakMapOf(weakKeyIr, weakValIr), loc };
           }
-          if (!targs[0] || !weakKeyIr || !isSupportedMapKey(weakKeyIr)) {
+          if (!targs[0] || !weakKeyIr || !isSupportedMapKey(weakKeyIr) || weakKeyIr.kind === "dyn") {
             L.noLowering("new WeakMap", expr, WEAK_COLLECTION_HINTS.WeakMap, symbol);
           }
         }

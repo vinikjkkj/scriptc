@@ -18394,6 +18394,12 @@
     "<repo>/tests/corpus/13255-nullable-array-receiver.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/13351-dyn-keyed-map.ts": {
+   "order": [
+    "<repo>/tests/corpus/13351-dyn-keyed-map.ts"
+   ],
+   "diags": []
   }
  }
 }
