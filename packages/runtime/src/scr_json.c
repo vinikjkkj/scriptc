@@ -5275,11 +5275,13 @@ static const ScrDynClass *scr_dyn_error_user_class(const ScrError *e) {
  * holds the payload under one key; every dyn crossing (scr_dyn_from_error)
  * answers the payload itself, so dyn listeners and callbacks see x
  * unchanged. Typed Error reads of the wrapper see an empty Error. */
-static ScrStr *scr_nonerr_marker(void) {
-  static ScrStr *m = NULL;
-  if (m == NULL) m = scr_str_new("%nonerr", 7); /* immortal: the static owns the one ref */
-  return m;
-}
+/* The marker is a compile-time constant name, so it is an immortal literal
+ * (the layout every program's string literals use), not a heap string built
+ * on first use. A heap copy kept in a static is one live string at exit to
+ * the RC audit, and the audit fired on every program that stringified any
+ * Error through a dyn slot. */
+static const SCR_STR_LIT(8) scr_nonerr_marker_lit = {SCR_STR_IMMORTAL, 7, 7, "%nonerr"};
+static ScrStr *scr_nonerr_marker(void) { return (ScrStr *)&scr_nonerr_marker_lit; }
 
 ScrError *scr_error_wrap_nonerr(const ScrDyn *payload /*borrowed*/) {
   ScrStr *empty = scr_str_new("", 0);
