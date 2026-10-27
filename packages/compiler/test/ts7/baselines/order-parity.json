@@ -1983,6 +1983,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/12200-objclone-shallow.ts": {
+   "order": [
+    "<repo>/tests/corpus/12200-objclone-shallow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12201-objclone-pool-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/12201-objclone-pool-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12202-objclone-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/12202-objclone-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12203-objclone-null-proto-untouched.ts": {
+   "order": [
+    "<repo>/tests/corpus/12203-objclone-null-proto-untouched.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12204-objclone-branch-field.js": {
+   "order": [
+    "<repo>/tests/corpus/12204-objclone-branch-field.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/12250-strnull-template-literal.ts": {
    "order": [
     "<repo>/tests/corpus/12250-strnull-template-literal.ts"
@@ -2099,6 +2129,54 @@
    "order": [
     "<repo>/tests/corpus/12454-buffer-alias-in-function/lib.cjs",
     "<repo>/tests/corpus/12454-buffer-alias-in-function/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12550-dynclone-pool-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/12550-dynclone-pool-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12551-dynclone-plain-object.js": {
+   "order": [
+    "<repo>/tests/corpus/12551-dynclone-plain-object.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12552-dynclone-instance-methods.js": {
+   "order": [
+    "<repo>/tests/corpus/12552-dynclone-instance-methods.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12553-dynclone-key-order.js": {
+   "order": [
+    "<repo>/tests/corpus/12553-dynclone-key-order.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12554-dynclone-null-proto.js": {
+   "order": [
+    "<repo>/tests/corpus/12554-dynclone-null-proto.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12555-dynclone-chain.js": {
+   "order": [
+    "<repo>/tests/corpus/12555-dynclone-chain.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12556-dynclone-subclass.js": {
+   "order": [
+    "<repo>/tests/corpus/12556-dynclone-subclass.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12557-dynclone-declared-keys.js": {
+   "order": [
+    "<repo>/tests/corpus/12557-dynclone-declared-keys.js"
    ],
    "diags": []
   },
