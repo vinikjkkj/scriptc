@@ -1920,6 +1920,7 @@ void *scr_arr_shift_ref(ScrArr *a);
 ScrArr *scr_arr_splice(ScrArr *a, double start, double deleteCount);
 /* splice with inserted items: items is a borrowed array of the same element kind. */
 ScrArr *scr_arr_splice_ins(ScrArr *a, double start, double deleteCount, ScrArr *items);
+
 void *scr_arr_pop_dyn(ScrArr *a);
 void *scr_arr_shift_dyn(ScrArr *a);
 /* sort() / toSorted() over DYN-element arrays with no comparator (see scr_array.c). */
@@ -6080,6 +6081,11 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what);
  * compile-time source spelling), else the runtime kind wording. Borrows
  * both; NULL with the exception pending on the throw. */
 ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg);
+/* any[] helpers over dyn values (scr_array.c): iterable spread and the apply-argument copy. */
+/* An any[] (dyn elements) from a dyn iterable: a spread into an any[] literal. NULL with the exception pending. */
+ScrArr *scr_arr_from_dyn_iter(const ScrDyn *src, const ScrStr *msg);
+/* An any[] as an f64[] of ToNumber values (a fresh copy). NaN-filled with the exception pending on a throwing conversion. */
+ScrArr *scr_arr_to_f64_dyn(ScrArr *a);
 /* The for-of-over-dyn pack accessors (the emitted index loop drives them
  * over a scr_dyn_iter_pack result, which is ARR by construction).
  * scr_dyn_arr_len answers 0 for non-ARR kinds; scr_dyn_arr_at answers the

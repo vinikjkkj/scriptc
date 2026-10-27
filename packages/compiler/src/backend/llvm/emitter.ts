@@ -505,6 +505,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "buffer.concatDyn": "scr_buffer_concat_dyn",
   "array.sortDyn": "scr_arr_sort_dyn_inplace",
   "array.toSortedDyn": "scr_arr_to_sorted_dyn",
+  "array.fromDynIter": "scr_arr_from_dyn_iter",
+  "array.toF64Dyn": "scr_arr_to_f64_dyn",
   "bytes.argChk": "scr_bytes_arg_chk",
   "text.decodeDyn": "scr_text_decode_dyn",
   "text.destDyn": "scr_text_dest_dyn",
