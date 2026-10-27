@@ -2916,7 +2916,7 @@ function lowerOptionalDefaultArg(
     if (call.arguments.length === 0 || undefinedArg) {
       // The default order is a subtraction, exact only where there are no
       // NaNs and no signed zero to distinguish.
-      if (bytesT.elem === "f32" || bytesT.elem === "f64") {
+      if (bytesT.elem === "f32" || bytesT.elem === "f64" || bytesT.elem === "f16") {
         L.noLowering(
           `.${method} with no comparator on ${recvName}`,
           call,
@@ -7568,6 +7568,7 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Int16Array: "i16",
   Uint16Array: "u16",
   Uint8ClampedArray: "u8c",
+  Float16Array: "f16",
 };
 
 /** `new Uint8Array(...)` / `new Uint32Array(...)` / `new Float32Array(...)`

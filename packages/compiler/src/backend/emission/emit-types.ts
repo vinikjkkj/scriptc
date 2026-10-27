@@ -911,6 +911,7 @@ export function bytesElemKindC(elem: IrBytesElem): string {
     case "u16": return "SCR_BYTES_U16";
     case "buf": return "SCR_BYTES_BUF";
     case "u8c": return "SCR_BYTES_U8C";
+    case "f16": return "SCR_BYTES_F16";
   }
 }
 
