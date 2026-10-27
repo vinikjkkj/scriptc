@@ -34,7 +34,7 @@ import { isJsSourceFile, locOf } from "../program.js";
 import { newFnCtx, own } from "./lowerer.js";
 import { appendImplicitUndefinedReturn } from "./lower-calls.js";
 import { bufEncoding, knownBufEncoding } from "./lower-containers.js";
-import { probeLower } from "./lower-exprs.js";
+import { lowerDynObjectLiteral, probeLower } from "./lower-exprs.js";
 import { genResultRecord } from "../types.js";
 import { BOOL, DYN, F64, IrExpr, IrFunction, IrLibFn, IrStmt, IrType, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBoxFuncIntoDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
@@ -357,6 +357,13 @@ function lowerStreamCallback(
 /* ── construction ─────────────────────────────────────────────────────── */
 
 interface StreamOptions {
+  /** The readable-side objectMode literal (`objectMode: true` on a
+   * Readable): entries are whole values (readable.objectMode chains the
+   * runtime flag after construction). */
+  objectMode: boolean;
+  /** An explicit highWaterMark literal was given (objectMode's default
+   * of 16 applies only when it was not). */
+  hwmGiven: boolean;
   hwmR: IrExpr;
   hwmW: IrExpr;
   autoDestroy: IrExpr;
@@ -612,6 +619,8 @@ function parseStreamOptions(
   fallbackCb?: (name: string) => IrExpr | null,
 ): StreamOptions {
   const out: StreamOptions = {
+    objectMode: false,
+    hwmGiven: false,
     hwmR: f64Lit(-1, loc),
     hwmW: f64Lit(-1, loc),
     autoDestroy: boolLit(true, loc),
@@ -705,6 +714,7 @@ function parseStreamOptions(
         const v = L.lowerExprExpecting(value, F64);
         out.hwmR = v;
         out.hwmW = v;
+        out.hwmGiven = true;
         break;
       }
       case "readableHighWaterMark":
@@ -727,6 +737,12 @@ function parseStreamOptions(
       case "writableObjectMode": {
         // `objectMode: false` is the byte default — admit the literal.
         if (value.kind === ts.SyntaxKind.FalseKeyword) break;
+        // The READABLE class's objectMode: whole-value entries (dyn lane).
+        // Writable and duplex objectMode stay fenced until their write side is.
+        if (value.kind === ts.SyntaxKind.TrueKeyword && ctorName === "Readable" && name !== "writableObjectMode") {
+          out.objectMode = true;
+          break;
+        }
         L.noLowering(
           `${ctorName} in objectMode`,
           prop,
@@ -845,14 +861,14 @@ function parseStreamOptions(
  * (shared by `new Readable({...})` and a subclass's super(options)),
  * plus the parsed `encoding` option (applied as a follow-up setEncoding). */
 function streamCtorArgs(L: Lowerer, cls: string, arg: ts.Expression | undefined,
-  thisType: IrType, loc: SrcLoc, fallbackCb?: (name: string) => IrExpr | null): { args: IrExpr[]; encoding: string | null; badEncoding: string | null; pushEncoding: string | null } {
+  thisType: IrType, loc: SrcLoc, fallbackCb?: (name: string) => IrExpr | null): { args: IrExpr[]; encoding: string | null; badEncoding: string | null; pushEncoding: string | null; objectMode: boolean; hwmGiven: boolean } {
   const shape = streamCtorShape(cls);
   const o = parseStreamOptions(L, cls.slice(1), arg, thisType, shape.accepted, loc, fallbackCb);
   const head = shape.duplexShape
     ? [o.hwmR, o.hwmW, o.autoDestroy, o.emitClose, o.allowHalfOpen,
        boolLit(o.readableSide, loc), boolLit(o.writableSide, loc), f64Lit(o.flags, loc)]
     : [cls === "%Writable" ? o.hwmW : o.hwmR, o.autoDestroy, o.emitClose, f64Lit(o.flags, loc)];
-  return { args: [...head, ...o.cbs], encoding: o.encoding, badEncoding: o.badEncoding, pushEncoding: o.pushEncoding };
+  return { args: [...head, ...o.cbs], encoding: o.encoding, badEncoding: o.badEncoding, pushEncoding: o.pushEncoding, objectMode: o.objectMode, hwmGiven: o.hwmGiven };
 }
 
 /** `new Readable(opts?)` and friends — called from lowerNew once the
@@ -871,6 +887,18 @@ export function lowerStreamNew(L: Lowerer, expr: ts.NewExpression, info: ClassIn
     if (dynOpts !== null) {
       return { kind: "libCall", fn: `${streamCtorShape(cls).fn}.newDyn` as IrLibFn, args: [dynOpts], type: thisType, loc };
     }
+    // A literal with a SPREAD or a COMPUTED member (`{ ...options, read }`,
+    // `{ [key]: true }`): the record is built dynamically (the dyn literal
+    // fold, shallow-copying the spread's own keys in declaration order) and
+    // the runtime walks it, exactly as for a dyn options value. Callbacks
+    // ride the dyn boundary. Only the Readable class is taken here.
+    let lit: ts.Expression = args[0];
+    while (ts.isParenthesizedExpression(lit)) lit = lit.expression;
+    if (cls === "%Readable" && ts.isObjectLiteralExpression(lit) &&
+        lit.properties.some((p) => ts.isSpreadAssignment(p) ||
+          (p.name !== undefined && ts.isComputedPropertyName(p.name)))) {
+      return { kind: "libCall", fn: `${streamCtorShape(cls).fn}.newDyn` as IrLibFn, args: [lowerDynObjectLiteral(L, lit)], type: thisType, loc };
+    }
   }
   const fn = `${streamCtorShape(cls).fn}.new` as IrLibFn;
   const parsed = streamCtorArgs(L, cls, args[0], thisType, loc);
@@ -880,6 +908,12 @@ export function lowerStreamNew(L: Lowerer, expr: ts.NewExpression, info: ClassIn
     return nodeThrowExpr(1, "ERR_UNKNOWN_ENCODING", `Unknown encoding: ${parsed.badEncoding}`, thisType, loc);
   }
   let built: IrExpr = { kind: "libCall", fn, args: parsed.args, type: thisType, loc };
+  if (parsed.objectMode) {
+    // { objectMode: true }: the runtime flag (whole-value entries, Node's
+    // objectMode accounting; hwm 16 unless the options named one). The
+    // argument is 0 for an explicit hwm (already applied) and -1 for none.
+    built = { kind: "libCall", fn: "readable.objectMode", args: [built, f64Lit(parsed.hwmGiven ? 0 : -1, loc)], type: thisType, loc };
+  }
   if (parsed.pushEncoding !== null) {
     // { defaultEncoding }: chain the push-side decode default (the
     // setEncoding chaining shape — answers the receiver +1).
@@ -1065,6 +1099,9 @@ export function lowerStreamSuperCall(L: Lowerer, info: ClassInfo, base: ClassInf
     }
   }
   const parsed = streamCtorArgs(L, cls, argNodes[0], thisType, loc, fallback);
+  if (parsed.objectMode) {
+    L.noLowering(`super(options) with objectMode in a ${cls.slice(1)} subclass`, blame, "objectMode is lowered for `new Readable(options)` construction only");
+  }
   if (parsed.badEncoding !== null) {
     // super(options) with an unknown literal encoding: the state ctor
     // rejects before any initialization, Node's ladder.
@@ -1674,6 +1711,10 @@ export function lowerStreamMethodCall(L: Lowerer, call: ts.CallExpression,
       if (probed?.type.kind === "dyn") return "dyn";
       if (probed?.type.kind === "nullT") return "null";
     }
+    // push of any other value: an objectMode chunk (Node's push takes any
+    // value; a byte stream refuses a non-Buffer chunk at run time, as Node
+    // does). The dyn lane carries it; the runtime keeps it whole.
+    if (member === "push" && t !== null) return "dyn";
     L.noLowering(
       `${member} with a '${t ? L.fmt(t) : "?"}' chunk`,
       node,
@@ -1749,9 +1790,10 @@ export function lowerStreamMethodCall(L: Lowerer, call: ts.CallExpression,
     if (args.length > 1) L.noLowering(`read with ${args.length} arguments`, call);
     const receiver = L.lowerExpr(access.expression);
     const size = args[0] ? L.lowerExprExpecting(args[0], F64) : f64Lit(-1, loc);
-    const type: IrType = unionOf(L, [BYTES, { kind: "nullT" }]);
-    const read: IrExpr = { kind: "libCall", fn: "readable.read", args: [receiver, size], type, loc };
-    return L.maybeNarrow(read, call);
+    // The dyn lane: an objectMode stream answers its next value, a byte
+    // stream its chunk boxed by tag; null at EOF/empty. (The ambient
+    // Readable.read is `any`, so the checker agrees.)
+    return { kind: "libCall", fn: "readable.readDyn", args: [receiver, size], type: DYN, loc };
   }
 
   if (member === "pause" || member === "resume") {
@@ -1831,6 +1873,11 @@ export function lowerStreamMethodCall(L: Lowerer, call: ts.CallExpression,
     const receiver = L.lowerExpr(access.expression);
     if (args[0] !== undefined) {
       const err = L.lowerExpr(args[0]);
+      if (err.type.kind === "dyn") {
+        // destroy(value) with a dynamic value: Node's `if (err)` plus the
+        // error path (runtime: scr_stream_destroy_dyn).
+        return { kind: "libCall", fn: "stream.destroyDyn", args: [receiver, err], type: receiver.type, loc };
+      }
       if (!errorRootedType(L, err.type)) {
         L.noLowering(`destroy with a '${L.fmt(err.type)}' argument`, args[0], "the supported argument is an Error-hierarchy instance");
       }

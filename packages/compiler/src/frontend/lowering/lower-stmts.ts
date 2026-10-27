@@ -1180,6 +1180,30 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       // `return a, b, v;` — the returned expression is a COMMA SEQUENCE, so
       // the leading operands run for effect in real statement position and
       // only the tail is the returned value. See returnSequenceOf.
+      // `stream._read = function () { return v; }`: Node calls the instance's
+      // _read hook and IGNORES its return value (the slot is void). The value
+      // runs for effect; the hook returns nothing.
+      if (stmt.expression !== undefined && isReadHookAssignedFn(stmt)) {
+        // An object literal's value is discarded too: its member values run
+        // for effect (in source order), the literal itself is never built.
+        const effects: ts.Expression[] = [];
+        let v: ts.Expression = stmt.expression;
+        while (ts.isParenthesizedExpression(v)) v = v.expression;
+        if (ts.isObjectLiteralExpression(v)) {
+          for (const prop of v.properties) {
+            if (ts.isPropertyAssignment(prop)) effects.push(prop.initializer);
+            else if (ts.isShorthandPropertyAssignment(prop)) effects.push(prop.name as ts.Identifier);
+            else if (ts.isSpreadAssignment(prop)) effects.push(prop.expression);
+          }
+        } else {
+          effects.push(stmt.expression);
+        }
+        return {
+          kind: "block",
+          body: [...effects.map((e) => L.lowerExprStatement(e)), lowerReturnOf(L, stmt, undefined)],
+          loc: locOf(stmt),
+        };
+      }
       if (stmt.expression !== undefined) {
         const seq = returnSequenceOf(stmt.expression);
         if (seq !== null) {
@@ -3651,6 +3675,17 @@ function returnSequenceOf(
  * returned expression supplied separately: the comma split above hands in
  * the sequence's TAIL, every other caller hands in the statement's own
  * expression (undefined for a bare `return;`). */
+/** True when the return statement sits directly in a function expression
+ * that is the right-hand side of `<x>._read = ...` (the instance read hook). */
+function isReadHookAssignedFn(stmt: ts.ReturnStatement): boolean {
+  let fn: ts.Node | undefined = stmt.parent;
+  while (fn !== undefined && !ts.isFunctionLike(fn)) fn = fn.parent;
+  if (fn === undefined || !ts.isFunctionExpression(fn)) return false;
+  const p = fn.parent;
+  if (!ts.isBinaryExpression(p) || p.operatorToken.kind !== ts.SyntaxKind.EqualsToken || p.right !== fn) return false;
+  return ts.isPropertyAccessExpression(p.left) && p.left.name.text === "_read";
+}
+
 function lowerReturnOf(
   L: Lowerer,
   stmt: ts.ReturnStatement,

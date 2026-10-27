@@ -2132,6 +2132,9 @@ export class Lowerer {
   // top level, top = the innermost nested function currently lowering).
   fnStack: FnCtx[] = [];
   readonly liftedFns: IrFunction[] = [];
+  /** The dyn-parameter instances of named functions used as 'error'
+   * listeners (lower-emitter.ts): one per declaration. */
+  readonly errDynClones = new Map<ts.FunctionDeclaration, { fnName: string; type: IrType }>();
   lambdaCounter = 0;
 
   /** Statement lists currently mid-lowering, innermost last: the forward-
@@ -15039,7 +15042,8 @@ export class Lowerer {
    * to release with chainNarrowedType.delete once the literal is lowered. */
   dynParamsOf(node: ts.Node, includeAnnotated = false): ts.Node[] {
     const out: ts.Node[] = [];
-    const fn = ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isMethodDeclaration(node) ? node : null;
+    const fn = ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isMethodDeclaration(node) ||
+      ts.isFunctionDeclaration(node) ? node : null;
     if (fn === null || fn.body === undefined) return out;
     for (const p of fn.parameters) {
       if (!ts.isIdentifier(p.name) || (p.type && !includeAnnotated) || p.initializer || p.dotDotDotToken) continue;

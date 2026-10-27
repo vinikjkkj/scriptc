@@ -13110,14 +13110,14 @@ function genResultRecordOrThrow(
   return rec;
 }
 
-export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunction | null {
+export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverride?: FnSig): IrFunction | null {
     // Overload signatures and ambient declarations are type-world: they
     // share the implementation's symbol (when one exists) but have no body
     // of their own — collection skipped them and the run/discover loops do
     // too; this guard is defensive.
     if (!decl.body) return null;
     const declSymbol = declSymbolOf(L, decl);
-    const sig = declSymbol ? L.fnSigsBySymbol.get(declSymbol) : undefined;
+    const sig = sigOverride ?? (declSymbol ? L.fnSigsBySymbol.get(declSymbol) : undefined);
     if (!sig) return null; // signature collection failed
 
     const bodyReturn = sig.generator !== undefined
