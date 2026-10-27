@@ -4576,6 +4576,8 @@ function evolvedLetType(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean
 }
 
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
+    // A helper unrolled into accessors of a class (registerHelperAccessors): its body is never a value.
+    if (L.helperDecls.has(decl)) return null;
     // --provenance-sources: an elided pure-annotated dead const emits
     // nothing (collectGlobals registered no global by the same test —
     // see provenanceElidedConstDecl). Checked FIRST: the mixin/alias

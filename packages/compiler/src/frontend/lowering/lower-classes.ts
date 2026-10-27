@@ -1289,6 +1289,180 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     }
   }
 
+  /** A STATIC UNROLL of a helper that installs cached accessors over a literal name list (mysql2's
+   * column_definition.js `addString`):
+   *
+   *     const addString = function (name) {
+   *       const cacheKey = `_${name}Value`;
+   *       C.prototype[cacheKey] = undefined;
+   *       Object.defineProperty(C.prototype, name, { get: function () { ... this[cacheKey] ... } });
+   *     };
+   *     addString('catalog');
+   *
+   * Every reference to the helper is a top-level call with one string literal, so each call is one
+   * accessor of C (`get:catalog`). Its body reads the helper's locals folded to the call's literal
+   * (Lowerer.helperConsts, bound while the getter lowers, as registerAccessorFamilies binds its loop
+   * variable). The prototype-data writes name undefined-valued data of C, which the instance field
+   * layout carries (protoDataFieldNames' rule). The helper and its calls lower to nothing. Any other
+   * shape keeps its refusal: the helper plan is null and nothing is registered. */
+  interface HelperFold { sym: ts.Symbol; fold: (name: string) => string }
+  interface HelperAccessorPlan { name: string; consts: { sym: ts.Symbol; value: string }[] }
+  interface HelperUnrollPlan { decl: ts.VariableDeclaration; calls: ts.ExpressionStatement[]; getFn: ts.FunctionExpression; accessors: HelperAccessorPlan[]; protoNames: string[] }
+  const helperPlanMemo = new WeakMap<ts.ClassDeclaration, HelperUnrollPlan[]>();
+
+  function helperPlansOf(L: Lowerer, decl: ts.ClassDeclaration, classSymbol: ts.Symbol): HelperUnrollPlan[] {
+    const memo = helperPlanMemo.get(decl);
+    if (memo !== undefined) return memo;
+    const out: HelperUnrollPlan[] = [];
+    const sf = decl.getSourceFile();
+    if (isJsSourceFile(sf)) {
+      for (const stmt of sf.statements) {
+        const plan = helperPlanOf(L, sf, stmt, classSymbol);
+        if (plan !== null) out.push(plan);
+      }
+    }
+    helperPlanMemo.set(decl, out);
+    return out;
+  }
+
+  function helperPlanOf(L: Lowerer, sf: ts.SourceFile, stmt: ts.Statement, classSymbol: ts.Symbol): HelperUnrollPlan | null {
+    if (!ts.isVariableStatement(stmt) || stmt.declarationList.declarations.length !== 1 || (stmt.declarationList.flags & ts.NodeFlags.Const) === 0) return null;
+    const hdecl = stmt.declarationList.declarations[0]!;
+    if (!ts.isIdentifier(hdecl.name) || hdecl.initializer === undefined) return null;
+    const fnNode = stripParensOf(hdecl.initializer);
+    if (!ts.isFunctionExpression(fnNode) || fnNode.asteriskToken !== undefined || fnNode.parameters.length !== 1) return null;
+    const p = fnNode.parameters[0]!;
+    if (!ts.isIdentifier(p.name) || p.initializer !== undefined || p.dotDotDotToken !== undefined) return null;
+    const paramSym = L.checker.getSymbolAtLocation(p.name);
+    const helperSym = L.checker.getSymbolAtLocation(hdecl.name);
+    if (paramSym === undefined || helperSym === undefined) return null;
+    const isClassProto = (e: ts.Expression): boolean => {
+      const x = stripParensOf(e);
+      return ts.isPropertyAccessExpression(x) && x.name.text === "prototype" && ts.isIdentifier(x.expression) &&
+        L.checker.getSymbolAtLocation(x.expression) === classSymbol;
+    };
+    const folds: HelperFold[] = [];
+    const protoKeys: HelperFold[] = [];
+    let getFn: ts.FunctionExpression | null = null;
+    for (const s of fnNode.body.statements) {
+      if (ts.isVariableStatement(s)) {
+        // const key = `head${name}tail`
+        const ds = s.declarationList.declarations;
+        if (ds.length !== 1 || !ts.isIdentifier(ds[0]!.name) || ds[0]!.initializer === undefined || !ts.isTemplateExpression(ds[0]!.initializer)) return null;
+        const t = ds[0]!.initializer;
+        if (t.templateSpans.length !== 1) return null;
+        const span = t.templateSpans[0]!;
+        if (!ts.isIdentifier(span.expression) || L.checker.getSymbolAtLocation(span.expression) !== paramSym) return null;
+        const sym = L.checker.getSymbolAtLocation(ds[0]!.name);
+        if (sym === undefined) return null;
+        const head = t.head.text;
+        const tail = span.literal.text;
+        folds.push({ sym, fold: (n: string) => `${head}${n}${tail}` });
+      } else if (ts.isExpressionStatement(s)) {
+        const e = stripParensOf(s.expression);
+        if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+          // C.prototype[key] = undefined
+          const lhs = stripParensOf(e.left);
+          if (!ts.isElementAccessExpression(lhs) || !isClassProto(lhs.expression) || !ts.isIdentifier(lhs.argumentExpression)) return null;
+          const ksym = L.checker.getSymbolAtLocation(lhs.argumentExpression);
+          const key = folds.find((f) => f.sym === ksym);
+          if (key === undefined || !(ts.isIdentifier(e.right) && e.right.text === "undefined")) return null;
+          protoKeys.push(key);
+        } else if (ts.isCallExpression(e)) {
+          // Object.defineProperty(C.prototype, name, { get: function () {...} })
+          if (!ts.isPropertyAccessExpression(e.expression) || e.expression.name.text !== "defineProperty" ||
+              !ts.isIdentifier(e.expression.expression) || !L.isStdlibGlobal(e.expression.expression, "Object") ||
+              e.arguments.length !== 3 || getFn !== null) return null;
+          const [target, nameArg, desc] = [e.arguments[0]!, e.arguments[1]!, e.arguments[2]!];
+          if (!isClassProto(target) || !ts.isIdentifier(nameArg) || L.checker.getSymbolAtLocation(nameArg) !== paramSym) return null;
+          if (!ts.isObjectLiteralExpression(desc)) return null;
+          for (const pr of desc.properties) {
+            if (ts.isPropertyAssignment(pr) && ts.isIdentifier(pr.name) && pr.name.text === "get" && ts.isFunctionExpression(stripParensOf(pr.initializer))) {
+              getFn = stripParensOf(pr.initializer) as ts.FunctionExpression;
+            } else if (ts.isMethodDeclaration(pr) && ts.isIdentifier(pr.name) && pr.name.text === "get" && pr.body !== undefined && pr.asteriskToken === undefined) {
+              getFn = pr as unknown as ts.FunctionExpression;
+            } else if (ts.isPropertyAssignment(pr) && ts.isIdentifier(pr.name) && (pr.name.text === "enumerable" || pr.name.text === "configurable") &&
+                       (pr.initializer.kind === ts.SyntaxKind.TrueKeyword || pr.initializer.kind === ts.SyntaxKind.FalseKeyword)) {
+              // attributes: not observable here
+            } else {
+              return null;
+            }
+          }
+          if (getFn === null) return null;
+        } else {
+          return null;
+        }
+      } else {
+        return null;
+      }
+    }
+    if (getFn === null) return null;
+    // Every reference to the helper is a top-level call with one string literal.
+    const calls: ts.ExpressionStatement[] = [];
+    const literals: string[] = [];
+    let ok = true;
+    // An explicit stack, not recursion: this walks the whole file (a helper candidate only).
+    const stack: ts.Node[] = [sf];
+    while (stack.length > 0 && ok) {
+      const n = stack.pop()!;
+      if (n === hdecl.name) continue;
+      if (ts.isIdentifier(n) && L.checker.getSymbolAtLocation(n) === helperSym) {
+        const call = n.parent;
+        const st = call?.parent;
+        if (!ts.isCallExpression(call) || call.expression !== n || call.arguments.length !== 1 || !ts.isStringLiteral(call.arguments[0]!) ||
+            !ts.isExpressionStatement(st) || st.expression !== call || st.parent !== sf) {
+          ok = false;
+          break;
+        }
+        calls.push(st);
+        literals.push((call.arguments[0] as ts.StringLiteral).text);
+        continue;
+      }
+      n.forEachChild((c) => { stack.push(c); return undefined; });
+    }
+    if (!ok || calls.length === 0 || new Set(literals).size !== literals.length) return null;
+    const protoNames: string[] = [];
+    const accessors: HelperAccessorPlan[] = literals.map((lit) => {
+      const consts = [{ sym: paramSym, value: lit }, ...folds.map((f) => ({ sym: f.sym, value: f.fold(lit) }))];
+      for (const k of protoKeys) {
+        const kn = k.fold(lit);
+        if (!protoNames.includes(kn)) protoNames.push(kn);
+      }
+      return { name: lit, consts };
+    });
+    return { decl: hdecl, calls, getFn, accessors, protoNames };
+  }
+
+  /** Registers the helper plans of class `info` as accessors (see helperPlansOf). A name the class
+   * already declares keeps the refusal of the helper's calls. */
+  function registerHelperAccessors(L: Lowerer, info: ClassInfo, decl: ts.ClassDeclaration, classSymbol: ts.Symbol): void {
+    const ownType = L.checker.getDeclaredTypeOfSymbol(classSymbol);
+    for (const plan of helperPlansOf(L, decl, classSymbol)) {
+      // A prototype datum the class already carries a field of keeps that field (protoDataFieldNames' rule);
+      // an accessor name must be free of both fields and methods.
+      const names = plan.accessors.map((a) => a.name);
+      if (names.some((n) => info.methods.has(n) || info.methods.has(`get:${n}`) || info.methods.has(`set:${n}`) || info.fields.has(n))) continue;
+      if (plan.protoNames.some((n) => info.methods.has(n) || info.methods.has(`get:${n}`) || info.methods.has(`set:${n}`))) continue;
+      let sig: ReturnType<Lowerer["lambdaSignature"]>;
+      try {
+        sig = L.lambdaSignature(plan.getFn as unknown as ts.MethodDeclaration);
+      } catch (err) {
+        if (err instanceof PoisonError) continue;
+        throw err;
+      }
+      const bodies = L.protoClassBodies.get(info.def.name) ?? new Map<string, ts.FunctionExpression>();
+      for (const a of plan.accessors) {
+        info.methods.set(`get:${a.name}`, { params: [], ret: sig.funcType.ret });
+        bodies.set(`get:${a.name}`, plan.getFn);
+        L.helperConsts.set(`${info.def.name}.get:${a.name}`, a.consts);
+      }
+      L.protoClassBodies.set(info.def.name, bodies);
+      L.lateMethodThis.set(plan.getFn, ownType);
+      for (const c of plan.calls) L.lateMethodAssigns.add(c.expression);
+      L.helperDecls.add(plan.decl);
+    }
+  }
+
 /** The instance properties of ANOTHER class that the methods this class
    * BORROWS (`C.prototype.m = D.prototype.n`) read or write through `this`.
    * The borrowed body lowers under C's layout, so each such property is a
@@ -1705,6 +1879,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     if (!isJsSourceFile(sf)) return;
     registerDefinedStatics(L, info, decl, classSymbol);
     registerAccessorFamilies(L, info, decl, classSymbol);
+    registerHelperAccessors(L, info, decl, classSymbol);
     registerComputedPrototypeInstalls(L, info, decl, classSymbol);
     for (const stmt of sf.statements) {
       if (!ts.isExpressionStatement(stmt)) continue;
@@ -2510,9 +2685,11 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       }
       // A COMPUTED key names no member statically, so any such write is a
       // write to every name (`c[k] = undefined`).
+      // A computed prototype-data write (`C.prototype[key] = undefined`) stores the prototype's value,
+      // never an own property (the same rule as the named write above).
       if (
         ts.isBinaryExpression(n) && ts.isElementAccessExpression(n.left) &&
-        n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        n.operatorToken.kind === ts.SyntaxKind.EqualsToken && !isClassPrototypeOf(L, n.left.expression) &&
         !ts.isStringLiteralLike(n.left.argumentExpression) && rhsMayBeUndefined(n.right)
       ) {
         names.add("*");
@@ -5176,7 +5353,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // undefined until written (lower-protodata.ts). A name the class
       // already declares, or a method source, keeps its own storage.
       if (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && isJsSourceFile(decl.getSourceFile()) && classSymbolOf(L, decl) !== undefined) {
-        for (const pdName of protoDataFieldNames(L, decl, classSymbolOf(L, decl)!, (rhs) => lateMethodSourceOf(L, rhs) !== null)) {
+        const helperProtoNames = helperPlansOf(L, decl, classSymbolOf(L, decl)!).flatMap((pl) => pl.protoNames);
+        for (const pdName of [...protoDataFieldNames(L, decl, classSymbolOf(L, decl)!, (rhs) => lateMethodSourceOf(L, rhs) !== null), ...helperProtoNames]) {
           if (methods.has(pdName) || methods.has(`get:${pdName}`) || methods.has(`set:${pdName}`)) continue;
           // Unset means the property does not exist yet: enumeration skips it
           // while undefined, unless the program can store undefined under the name.
@@ -8968,12 +9146,15 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     L.activeThisFn = fn;
     const konst = L.lateMethodConst.get(`${info.def.name}.${mName}`);
     if (konst !== undefined) L.constIdents.set(konst.sym, konst.value);
+    const helperConsts = L.helperConsts.get(`${info.def.name}.${mName}`) ?? [];
+    for (const k of helperConsts) L.constIdents.set(k.sym, k.value);
     try {
       return withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, fn));
     } finally {
       L.activeThisType = prevThis;
       L.activeThisFn = prevThisFn;
       if (konst !== undefined) L.constIdents.delete(konst.sym);
+      for (const k of helperConsts) L.constIdents.delete(k.sym);
     }
   }
 

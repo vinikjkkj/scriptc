@@ -14490,6 +14490,10 @@ export class Lowerer {
    * body is lowered for (keyed `<Class>.<method name>`), and the bindings
    * active while such a body lowers. */
   readonly lateMethodConst = new Map<string, { sym: ts.Symbol; value: string }>();
+  /** Helper-unrolled accessor bindings (registerHelperAccessors): every helper local folded for one call. */
+  readonly helperConsts = new Map<string, { sym: ts.Symbol; value: string }[]>();
+  /** The declarations of helpers unrolled into accessors (lowerVarDecl lowers them to nothing). */
+  readonly helperDecls = new Set<ts.VariableDeclaration>();
   readonly constIdents = new Map<ts.Symbol, string>();
   activeThisType: ts.Type | null = null;
   /** The function whose `this` activeThisType retypes: a late method's body. Only a `this`
