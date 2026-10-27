@@ -2139,4 +2139,27 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(all).not.toContain("nothing installed resolves");
     expect(all).not.toContain("implicitly has an 'any' type");
   }, 120_000);
+
+  /* -- 13800: surplus arguments with side effects (a function and a constructor, order
+   * observable) and an absent property read on an object-literal argument inside ||
+   * chains (mysql_clear_password's shape). On base: SC1090 at the surplus sites and at
+   * the absent reads. Byte-identical to Node on both backends. */
+  test("13800: surplus arguments with side effects and absent reads on literal arguments match Node", async () => {
+    const entry = join(fixturesRoot, "npm-static/13800-surplus-args-npm-static.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["surplus13800"] });
+    expect(coverage.npmStatic).toEqual([{ package: "surplus13800", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    for (const backend of ["c", "llvm"] as const) {
+      const binary = await buildStatic(entry, ["surplus13800"], backend);
+      const [nodeRes, nativeRes] = await Promise.all([
+        runBinary("node", [entry]),
+        runBinary(binary, []),
+      ]);
+      const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      expect(native, backend).toBe(node);
+      expect(nativeRes.exitCode, backend).toBe(0);
+    }
+  }, 300_000);
 });
