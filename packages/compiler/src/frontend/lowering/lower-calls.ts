@@ -673,6 +673,13 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     return { kind: "dynArrLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: DYN, loc };
   }
 
+/** A callee reference with no effects of its own: an identifier, `this`, or
+   * a property chain over those. */
+  function plainCalleeRef(e: ts.Expression): boolean {
+    if (ts.isIdentifier(e) || e.kind === ts.SyntaxKind.ThisKeyword) return true;
+    return ts.isPropertyAccessExpression(e) && plainCalleeRef(e.expression);
+  }
+
 /** CALL-SITE COMPLETION — the frontend half of the one-signature contract
    * (enforced by ir/validate.ts): every call lowers to exactly the callee's full ABI
    * parameter list, so backends and the validator stay count-exact and no
@@ -854,6 +861,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
       // time, JS-exact; an EFFECTFUL surplus (a call, an await, an
       // assignment) has no evaluation slot in an expression-position
       // completion, so it fences by name rather than silently not running.
+      const effects: IrStmt[] = [];
       for (let i = positional.length; i < sources.length; i++) {
         const a = sources[i]!;
         if (isIr(a)) continue; // pre-lowered leading values are effect-free
@@ -869,12 +877,40 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
           v.kind !== "unitLit" && v.kind !== "numLit" && v.kind !== "strLit" &&
           v.kind !== "boolLit" && v.kind !== "varRef" && v.kind !== "closure"
         ) {
+          effects.push({ kind: "exprStmt", expr: v, loc: locOf(a) });
+        }
+      }
+      if (effects.length > 0) {
+        // The effectful surplus runs AFTER every kept argument and BEFORE the
+        // call (JS order). Arguments emit left to right, so the last kept
+        // argument hosts them: its value is captured into a hidden local, the
+        // surplus statements run after it, and the local is the argument.
+        // With no kept argument (a call to a zero-parameter function) no
+        // argument slot exists, so the call expression carries them instead:
+        // Lowerer.lowerExpr wraps the lowered call in a seqExpr, which runs
+        // after the callee reference and before the call. Only a plain callee
+        // reference is admitted ahead of the surplus effects.
+        if (out.length === 0) {
+          if ((ts.isCallExpression(blame) || ts.isNewExpression(blame)) && plainCalleeRef(blame.expression)) {
+            L.callPreludes.set(blame, effects);
+            return out;
+          }
           L.unsupported(
             "SC1090",
-            a,
-            "surplus arguments with side effects (JS evaluates surplus arguments to a function without a rest parameter, then drops them; only effect-free surplus arguments compile)",
+            blame,
+            "surplus arguments with side effects into a function with no parameters (JS evaluates them before the call and drops them; only a plain callee reference can carry them)",
           );
         }
+        const last = out.length - 1;
+        const held = out[last]!;
+        const h = L.declareHiddenLocal("%surplusHost", held.type);
+        out[last] = {
+          kind: "seqExpr",
+          stmts: [{ kind: "varDecl", localId: h.id, init: held, loc }, ...effects],
+          result: { kind: "varRef", localId: h.id, type: held.type, loc },
+          type: held.type,
+          loc,
+        };
       }
     }
     return out;
