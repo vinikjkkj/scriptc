@@ -2867,7 +2867,7 @@ function validateFunction(
         const U8_ONLY_EXTRA: ReadonlySet<string> = new Set([
           "toString", "equals", "compareBuf", "indexOf", "lastIndexOf", "includes",
           "indexOfNum", "lastIndexOfNum", "includesNum", "fill", "fillNum", "fillStr",
-          "copy", "swap16", "swap32", "swap64", "writeStr",
+          "copy", "swap16", "swap32", "swap64", "writeStr", "writeStrDyn",
         ]);
         const u8Only = U8_ONLY_EXTRA.has(e.method) || isNum || isDvGet;
         if (u8Only && recv.elem !== "u8") {
@@ -2907,6 +2907,7 @@ function validateFunction(
           swap32: { argTypes: [], minArgs: 0, result: BYTES_U8 },
           swap64: { argTypes: [], minArgs: 0, result: BYTES_U8 },
           writeStr: { argTypes: [STRING, STRING, F64, F64], minArgs: 3, result: F64 },
+          writeStrDyn: { argTypes: [STRING, STRING, F64, F64], minArgs: 3, result: F64 },
         };
         // Object.hasOwn: "toString" is a real method name here and must
         // not answer from Object.prototype.

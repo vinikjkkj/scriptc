@@ -1835,6 +1835,35 @@ double scr_bytes_write_str(ScrBytes *b, const ScrStr *s, const ScrStr *enc,
   return (double)k;
 }
 
+/* buf.write(string, offset, length?, enc) with the encoding a RUN-TIME string
+ * (the lowering's writeStrDyn). Node's Buffer#write order: the offset and an
+ * explicit length validate first; then an empty name is utf8 (`!encoding`), a
+ * name in the alias set (any case) encodes as its canonical name, and any
+ * other name throws ERR_UNKNOWN_ENCODING ("Unknown encoding: <name>"). */
+double scr_bytes_write_str_dyn(ScrBytes *b, const ScrStr *s, const ScrStr *enc,
+                               double offset, double len, bool has_len) {
+  if (!scr_bytes_validate_off("offset", offset, (double)b->len)) return 0;
+  if (has_len && !scr_bytes_validate_off("length", len, (double)b->len)) return 0;
+  const char *canon = "utf8";
+  if (enc->len > 0) {
+    canon = scr_bytes_enc_canon(enc);
+    if (canon == NULL) {
+      const char *lead = "Unknown encoding: ";
+      size_t lead_n = strlen(lead);
+      char *msg = malloc(lead_n + enc->len);
+      memcpy(msg, lead, lead_n);
+      memcpy(msg + lead_n, enc->data, enc->len);
+      scr_throw_error_msg_code(SCR_ERR_TYPE, msg, lead_n + enc->len, "ERR_UNKNOWN_ENCODING");
+      free(msg);
+      return 0;
+    }
+  }
+  ScrStr *e = scr_str_new(canon, strlen(canon));
+  double n = scr_bytes_write_str(b, s, e, offset, len, has_len);
+  scr_str_release(e);
+  return n;
+}
+
 /* Buffer.concat(list, totalLength): the same concatenation truncated or
  * zero-padded to the validated total. */
 ScrBytes *scr_bytes_concat_len(const ScrArr *list, double total) {
@@ -1877,24 +1906,32 @@ double scr_bytes_byte_length_str(ScrStr *s, const ScrStr *enc) {
   return (double)s->len; /* utf8 */
 }
 
-/* Buffer.isEncoding(name): case-insensitive over Node's alias set. */
-bool scr_bytes_is_encoding(const ScrStr *s) {
-  static const char *const names[] = {
-      "utf8", "utf-8", "ascii", "latin1", "binary",   "base64",
-      "hex",  "ucs2",  "ucs-2", "utf16le", "utf-16le", "base64url",
+/* Node's encoding alias set, case-insensitive, folded to the canonical name
+ * the encoders dispatch on (utf-8 -> utf8, binary -> latin1, ucs2/ucs-2/
+ * utf-16le -> utf16le). NULL when the name is not in the set. The one
+ * normaliser for run-time encoding names: Buffer.isEncoding, the write and
+ * byteLength dyn paths, and StringDecoder (scr_json.c) all reach it. */
+const char *scr_bytes_enc_canon(const ScrStr *s) {
+  static const char *const table[][2] = {
+      {"utf8", "utf8"},       {"utf-8", "utf8"},         {"ascii", "ascii"},     {"latin1", "latin1"},
+      {"binary", "latin1"},   {"base64", "base64"},      {"hex", "hex"},         {"ucs2", "utf16le"},
+      {"ucs-2", "utf16le"},   {"utf16le", "utf16le"},    {"utf-16le", "utf16le"}, {"base64url", "base64url"},
   };
-  if (s->len < 3 || s->len > 9) return false;
+  if (s->len < 3 || s->len > 9) return NULL;
   char low[10];
   for (size_t i = 0; i < s->len; i++) {
     char c = s->data[i];
     low[i] = c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
   }
   low[s->len] = 0;
-  for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
-    if (strlen(names[i]) == s->len && memcmp(low, names[i], s->len) == 0) return true;
+  for (size_t i = 0; i < sizeof table / sizeof table[0]; i++) {
+    if (strlen(table[i][0]) == s->len && memcmp(low, table[i][0], s->len) == 0) return table[i][1];
   }
-  return false;
+  return NULL;
 }
+
+/* Buffer.isEncoding(name): case-insensitive over Node's alias set. */
+bool scr_bytes_is_encoding(const ScrStr *s) { return scr_bytes_enc_canon(s) != NULL; }
 
 ScrBytes *scr_bytes_concat(const ScrArr *list) {
   size_t total = 0;

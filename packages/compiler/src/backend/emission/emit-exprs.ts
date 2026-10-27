@@ -1653,10 +1653,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.emitPendingCheck();
             return t;
           }
-          case "writeStr": {
+          case "writeStr":
+          case "writeStrDyn": {
+            // writeStrDyn: the encoding is a run-time string, normalised (or
+            // refused with ERR_UNKNOWN_ENCODING) inside the runtime.
+            const fn = method === "writeStr" ? "scr_bytes_write_str" : "scr_bytes_write_str_dyn";
             const t = E.newTemp(
               e.type,
-              `scr_bytes_write_str(${r.name}, ${args[0]!.name}, ${args[1]!.name}, ${args[2]!.name}, ` +
+              `${fn}(${r.name}, ${args[0]!.name}, ${args[1]!.name}, ${args[2]!.name}, ` +
                 `${args[3]?.name ?? "0"}, ${args[3] ? "true" : "false"})`,
             );
             E.emitPendingCheck();
