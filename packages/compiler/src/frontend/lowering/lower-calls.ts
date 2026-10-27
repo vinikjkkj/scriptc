@@ -11825,6 +11825,46 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * write per layout field read from a bound source. The own-property set is
    * the layout only when cloneLayoutRefusal finds nothing; every other shape
    * returns null and keeps the loud SC2020 fence on the separate pieces. */
+  /** Whether a constructor of `decl` writes `this.<name>` on every path that
+   * completes normally. Iterative where it walks nodes (the depth guard is
+   * not yet in force for these), and nested functions are not entered. */
+  function ctorDefinitelyWrites(decl: ts.ClassLikeDeclaration, name: string): boolean {
+    const ctor = decl.members.find((m): m is ts.ConstructorDeclaration =>
+      ts.isConstructorDeclaration(m) && m.body !== undefined);
+    if (ctor?.body === undefined) return false;
+    const exitsAbruptly = (root: ts.Node): boolean => {
+      const stack: ts.Node[] = [root];
+      while (stack.length > 0) {
+        const n = stack.pop()!;
+        if (ts.isReturnStatement(n) || ts.isThrowStatement(n)) return true;
+        if (ts.isFunctionLike(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n)) continue;
+        ts.forEachChild(n, (c) => { stack.push(c); return undefined; });
+      }
+      return false;
+    };
+    const writes = (s: ts.Statement): boolean => {
+      if (ts.isExpressionStatement(s)) {
+        const e = s.expression;
+        return ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isPropertyAccessExpression(e.left) && e.left.expression.kind === ts.SyntaxKind.ThisKeyword &&
+          e.left.name.text === name;
+      }
+      if (ts.isBlock(s)) return seq(s.statements);
+      if (ts.isIfStatement(s)) {
+        return s.elseStatement !== undefined && writes(s.thenStatement) && writes(s.elseStatement);
+      }
+      return false;
+    };
+    const seq = (stmts: readonly ts.Statement[]): boolean => {
+      for (const s of stmts) {
+        if (writes(s)) return true;
+        if (exitsAbruptly(s)) return false;
+      }
+      return false;
+    };
+    return seq(ctor.body.statements);
+  }
+
   function cloneLayoutRefusal(L: Lowerer, info: ClassInfo): string | null {
     const def = info.def;
     if (info.decl === null || info.protoClass === true || info.builtinError === true ||
@@ -11838,8 +11878,16 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if ((info.deferredInitFields?.size ?? 0) > 0 || (info.nullableFields?.size ?? 0) > 0) {
       return "deferred-init or pointer-nullable fields";
     }
-    if ((info.collectedFields?.size ?? 0) > 0 || (def.absentFields?.length ?? 0) > 0) {
-      return "fields a constructor assigns only in a conditional position (the property is absent until written)";
+    // A field the struct model marks absent-until-written is copied only when the
+    // constructor writes it on every path (an if/else that assigns it in both
+    // arms is present on every instance; one arm alone is not).
+    for (const name of [...(info.collectedFields ?? []), ...(def.absentFields ?? [])]) {
+      if (!ctorDefinitelyWrites(info.decl!, name)) {
+        return `field '${name}' the constructor may not assign on every path (the property can be absent)`;
+      }
+    }
+    if (new RegExp("\\bdelete\\s+this\\s*(\\.|\\[)").test(info.decl!.getText())) {
+      return "a class that deletes an own property of this";
     }
     for (const f of def.fields) {
       if (f.name.startsWith("#") || f.name.startsWith("%")) return `hidden field '${f.name}'`;
