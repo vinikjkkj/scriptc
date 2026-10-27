@@ -206,28 +206,41 @@ struct ScrSecureCtx {
   size_t rc;
   mbedtls_x509_crt cert;
   mbedtls_pk_context pk;
+  /* false: an identity-less context (createSecureContext with no cert/key —
+   * a CA-only client context). Its cert/pk are initialised and empty; the
+   * SNI answer refuses it. */
+  bool has_identity;
+  /* the `ca` PEM bundle, retained (+1) for the client trust store. */
+  ScrBytes *ca;
 };
+
 
 #ifdef SCR_RC_AUDIT
 static long scr_live_secure_ctx = 0;
 long scr_secure_ctx_live_count(void) { return scr_live_secure_ctx; }
 #endif
 
-ScrSecureCtx *scr_tls_create_secure_context(const char *cert, size_t cert_len,
-                                             const char *key, size_t key_len) {
-  scr_tls_rng_init();
+static ScrSecureCtx *scr_secure_ctx_alloc(void) {
   ScrSecureCtx *c = calloc(1, sizeof *c);
   if (!c) scr_tls_oom();
   c->rc = 1;
   mbedtls_x509_crt_init(&c->cert);
   mbedtls_pk_init(&c->pk);
+#ifdef SCR_RC_AUDIT
+  scr_live_secure_ctx++;
+#endif
+  return c;
+}
+
+ScrSecureCtx *scr_tls_create_secure_context(const char *cert, size_t cert_len,
+                                             const char *key, size_t key_len) {
+  scr_tls_rng_init();
+  ScrSecureCtx *c = scr_secure_ctx_alloc();
   int r = scr_tls_parse_crt(&c->cert, cert, cert_len);
   if (r != 0) scr_tls_bad_material("certificate", r);
   r = scr_tls_parse_key(&c->pk, key, key_len);
   if (r != 0) scr_tls_bad_material("private key", r);
-#ifdef SCR_RC_AUDIT
-  scr_live_secure_ctx++;
-#endif
+  c->has_identity = true;
   return c;
 }
 
@@ -240,6 +253,7 @@ void scr_secure_ctx_release(ScrSecureCtx *c) {
   if (!c || --c->rc != 0) return;
   mbedtls_x509_crt_free(&c->cert);
   mbedtls_pk_free(&c->pk);
+  scr_bytes_release(c->ca);
   free(c);
 #ifdef SCR_RC_AUDIT
   scr_live_secure_ctx--;
@@ -870,6 +884,8 @@ static int scr_tls_sni_collect(ScrTlsSock *t) {
  * thunk; caps[0] boxes the socket). Late, repeated, or dead-socket
  * answers are ignored — the first answer decides, like Node. */
 void scr_tls_sni_answer(ScrClosure *self, bool has_err, ScrSecureCtx *ctx /*moves, nullable*/) {
+  /* an identity-less context (no cert/key) cannot answer a handshake: the socket takes the error path */
+  if (ctx != NULL && !ctx->has_identity) has_err = true;
   ScrNetSocket *sock = (ScrNetSocket *)scr_box_get_ref(self->caps[0]);
   ScrTlsSock *t =
       sock != NULL ? (ScrTlsSock *)scr_net_sock_transport_ctx_for(sock, &SCR_TLS_OPS) : NULL;
@@ -1224,7 +1240,7 @@ static bool scr_tls_dyn_truthy(const ScrDyn *v) {
  * server here — multi-key servers fence). Returns +1 bytes, or NULL with
  * the exception pending. `what` names the fence ("a tls.createServer
  * 'cert' option"). */
-static ScrBytes *scr_tls_pem_dyn(const ScrDyn *v, const char *what, bool concat) {
+static ScrBytes *scr_tls_pem_dyn(const ScrDyn *v, const char *what, const char *prop, bool concat) {
   if (v->kind == SCR_DYN_STR) {
     ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)v->v.str->len));
     memcpy(b->data, v->v.str->data, v->v.str->len);
@@ -1255,7 +1271,7 @@ static ScrBytes *scr_tls_pem_dyn(const ScrDyn *v, const char *what, bool concat)
       if (e->kind == SCR_DYN_STR) total += e->v.str->len + 1;
       else if (e->kind == SCR_DYN_BYTES) total += e->v.bytes->len + 1;
       else {
-        scr_dyn_arg_type_fail(what, "of type string or an instance of Buffer or Uint8Array", e);
+        scr_dyn_prop_type_fail(prop, "of type string or an instance of Buffer, TypedArray, or DataView", e);
         return NULL;
       }
     }
@@ -1271,7 +1287,8 @@ static ScrBytes *scr_tls_pem_dyn(const ScrDyn *v, const char *what, bool concat)
     }
     return b;
   }
-  scr_dyn_arg_type_fail(what, "of type string or an instance of Buffer or Uint8Array", v);
+  if (prop != NULL) scr_dyn_prop_type_fail(prop, "of type string or an instance of Buffer, TypedArray, or DataView", v);
+  else scr_dyn_arg_type_fail(what, "of type string or an instance of Buffer or Uint8Array", v);
   return NULL;
 }
 
@@ -1287,7 +1304,7 @@ ScrBytes *scr_tls_pem_from_dyn(const ScrDyn *v, const char *what) {
     scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
     return NULL;
   }
-  return scr_tls_pem_dyn(v, what, false);
+  return scr_tls_pem_dyn(v, what, NULL, false);
 }
 
 /* The tls/https createServer documented keys OUTSIDE the implemented set
@@ -1421,14 +1438,19 @@ static bool scr_tls_opts_validate(const ScrDyn *opts) {
   return true;
 }
 
-/* The server-options walk. Fills the cert/key out-params (+1 each) from a
- * dyn options record; false = exception pending (partial results released).
- * Exported runtime-internally: scr_http2.c's createSecureServerDyn rides
- * the same walk (scr_http2.c always links alongside this unit). */
-bool scr_tls_srv_opts_walk(const ScrDyn *opts, const char *api, ScrBytes **cert_out,
-                            ScrBytes **key_out) {
+/* The option walk over a runtime options record (the server constructors and
+ * createSecureContext share it). Fills the cert/key/ca out-params (+1 each,
+ * NULL when absent); false = exception pending (every out released).
+ * Node's typed validations run first (scr_tls_opts_validate); then cert,
+ * key and ca take their PEM material with Node's ERR_INVALID_ARG_TYPE text
+ * (a null member reads as absent, like Node); the remaining documented
+ * members fence by name, and the undocumented ones drop like Node drops
+ * them. Presence of a pair is the caller's rule, not this walk's. */
+static bool scr_tls_opts_collect(const ScrDyn *opts, const char *api, ScrBytes **cert_out,
+                                 ScrBytes **key_out, ScrBytes **ca_out) {
   *cert_out = NULL;
   *key_out = NULL;
+  *ca_out = NULL;
   if (opts == NULL || opts->kind != SCR_DYN_OBJ) {
     scr_dyn_arg_type_fail("options", "of type object", opts ? opts : scr_dyn_undefined());
     return false;
@@ -1446,9 +1468,11 @@ bool scr_tls_srv_opts_walk(const ScrDyn *opts, const char *api, ScrBytes **cert_
     const ScrDyn *v = e->value;
     if (v->kind == SCR_DYN_UNDEF) continue; /* an undefined member reads as absent, like Node */
     if (strcmp(e->key, "cert") == 0 || strcmp(e->key, "key") == 0) {
-      char what[96];
+      if (v->kind == SCR_DYN_NULL) continue; /* null reads as absent (measured: Node accepts it) */
+      char what[96], prop[24];
       snprintf(what, sizeof what, "a %s '%s' option", api, e->key);
-      ScrBytes *b = scr_tls_pem_dyn(v, what, false);
+      snprintf(prop, sizeof prop, "options.%s", e->key);
+      ScrBytes *b = scr_tls_pem_dyn(v, what, prop, false);
       if (b == NULL) { ok = false; break; }
       ScrBytes **slot = e->key[0] == 'c' ? cert_out : key_out;
       scr_bytes_release(*slot);
@@ -1456,8 +1480,16 @@ bool scr_tls_srv_opts_walk(const ScrDyn *opts, const char *api, ScrBytes **cert_
       continue;
     }
     if (strcmp(e->key, "ca") == 0) {
-      /* the server's `ca` verifies CLIENT certificates — inert without
-       * requestCert (which fences below), so Node-observably droppable */
+      /* the CA bundle: an array of PEM members is one bundle (Node accepts
+       * any count, including none); the bytes are retained by the caller */
+      if (v->kind == SCR_DYN_NULL) continue;
+      if (v->kind == SCR_DYN_ARR && v->v.arr.len == 0) continue;
+      char what[96];
+      snprintf(what, sizeof what, "a %s 'ca' option", api);
+      ScrBytes *b = scr_tls_pem_dyn(v, what, "options.ca", true);
+      if (b == NULL) { ok = false; break; }
+      scr_bytes_release(*ca_out);
+      *ca_out = b;
       continue;
     }
     if (strcmp(e->key, "requestCert") == 0) {
@@ -1487,35 +1519,68 @@ bool scr_tls_srv_opts_walk(const ScrDyn *opts, const char *api, ScrBytes **cert_
     }
     /* anything else: an undocumented key, dropped like Node drops it */
   }
-  if (ok && (*cert_out == NULL || *key_out == NULL)) {
+  if (!ok) {
+    scr_bytes_release(*cert_out);
+    scr_bytes_release(*key_out);
+    scr_bytes_release(*ca_out);
+    *cert_out = NULL;
+    *key_out = NULL;
+    *ca_out = NULL;
+  }
+  return ok;
+}
+
+/* The server constructors' walk: the collected pair must be present in full
+ * (a listener needs its identity). */
+bool scr_tls_srv_opts_walk(const ScrDyn *opts, const char *api, ScrBytes **cert_out,
+                            ScrBytes **key_out) {
+  ScrBytes *ca = NULL;
+  if (!scr_tls_opts_collect(opts, api, cert_out, key_out, &ca)) return false;
+  scr_bytes_release(ca); /* the server's `ca` verifies client certificates: inert without requestCert (fenced) */
+  if (*cert_out == NULL || *key_out == NULL) {
     ScrJsonBuf b;
     scr_jb_init(&b);
     scr_jb_puts(&b, api);
     scr_jb_puts(&b, " without both cert and key has no static lowering — the supported options are { cert, key } (PEM strings or Buffers)");
     scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
-    ok = false;
-  }
-  if (!ok) {
     scr_bytes_release(*cert_out);
     scr_bytes_release(*key_out);
     *cert_out = NULL;
     *key_out = NULL;
+    return false;
   }
-  return ok;
+  return true;
 }
 
 /* createSecureContext over a RUNTIME options record: Node's typed
- * validations first (scr_tls_opts_validate), then the pem walk — a bag
- * that validates AND carries both cert and key builds the real context;
- * everything else met its ladder error or the walk's per-key fence.
+ * validations first, then the material. Both cert and key build the parsed
+ * identity; neither builds an identity-less context (a CA-only client
+ * context, which Node also accepts); exactly one has no static lowering.
  * +1, or NULL with the exception pending. */
 ScrSecureCtx *scr_tls_create_secure_context_dyn(const ScrDyn *opts /*borrowed*/) {
-  ScrBytes *cert, *key;
-  if (!scr_tls_srv_opts_walk(opts, "tls.createSecureContext", &cert, &key)) return NULL;
-  ScrSecureCtx *c = scr_tls_create_secure_context((const char *)cert->data, cert->len,
-                                                   (const char *)key->data, key->len);
-  scr_bytes_release(cert);
-  scr_bytes_release(key);
+  ScrBytes *cert = NULL, *key = NULL, *ca = NULL;
+  if (!scr_tls_opts_collect(opts, "tls.createSecureContext", &cert, &key, &ca)) return NULL;
+  if ((cert == NULL) != (key == NULL)) {
+    scr_bytes_release(cert);
+    scr_bytes_release(key);
+    scr_bytes_release(ca);
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "tls.createSecureContext with only one of cert and key has no static lowering — pass both, or neither");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+    return NULL;
+  }
+  scr_tls_rng_init();
+  ScrSecureCtx *c;
+  if (cert != NULL) {
+    c = scr_tls_create_secure_context((const char *)cert->data, cert->len,
+                                      (const char *)key->data, key->len);
+    scr_bytes_release(cert);
+    scr_bytes_release(key);
+  } else {
+    c = scr_secure_ctx_alloc();
+  }
+  c->ca = ca; /* moves */
   return c;
 }
 
@@ -1630,7 +1695,7 @@ ScrNetSocket *scr_tls_connect_dyn(double port, ScrStr *host /*borrowed, nullable
       }
       if (strcmp(e->key, "ca") == 0) {
         scr_bytes_release(ca);
-        ca = scr_tls_pem_dyn(v, "a tls.connect 'ca' option", true);
+        ca = scr_tls_pem_dyn(v, "a tls.connect 'ca' option", "options.ca", true);
         if (ca == NULL) ok = false;
         continue;
       }
