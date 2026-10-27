@@ -17843,6 +17843,34 @@
     "<repo>/tests/corpus/12454-buffer-alias-in-function/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/12650-assembled-top-var/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12650-assembled-top-var/lib.cjs",
+    "<repo>/tests/corpus/12650-assembled-top-var/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12651-closure-read/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12651-closure-read/lib.cjs",
+    "<repo>/tests/corpus/12651-closure-read/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12652-write-from-function/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12652-write-from-function/lib.cjs",
+    "<repo>/tests/corpus/12652-write-from-function/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12653-read-before-declaration/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12653-read-before-declaration/lib.cjs",
+    "<repo>/tests/corpus/12653-read-before-declaration/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
