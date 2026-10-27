@@ -14592,7 +14592,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // with t = 1 reads "1", with t = "1" reads "1"). A computed key that is
     // not a literal may miss the declared fields, and a miss answers
     // undefined: `dynamicKey` arms the read's type below.
-    const dynamicKey = litKey === null && (key.type.kind === "f64" || key.type.kind === "dyn");
+    const dynamicKey = litKey === null && key.type.kind === "dyn";
     if (key.type.kind === "f64" || key.type.kind === "dyn") key = L.ensureString(key, keyNode);
     if (key.type.kind !== "string") {
       L.unsupported("SC1090", keyNode, "indexing records with non-string or non-number keys");
