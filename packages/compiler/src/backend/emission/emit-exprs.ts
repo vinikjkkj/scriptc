@@ -1402,6 +1402,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           return E.newTemp(e.type, `scr_bytes_copy(${src.name})`);
         }
         if (e.source.type.kind === "array") {
+          // A bigint[] source builds a bigint view (scr_bigint.c); a number[]
+          // one the double form.
+          if (e.source.type.elem.kind === "bigint") return E.newTemp(e.type, `scr_bytes_from_bigs(${kind}, ${src.name})`);
           return E.newTemp(e.type, `scr_bytes_from_arr(${kind}, ${src.name})`);
         }
         if (e.source.type.kind === "dyn") {

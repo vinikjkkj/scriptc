@@ -1227,3 +1227,17 @@ ScrBytes *scr_bytes_sort_big(ScrBytes *b) {
   }
   return scr_bytes_retain(b);
 }
+
+/* new BigInt64Array(bigints) / set(bigints): the values of a bigint array,
+ * converted element by element (each value's low 64 bits, ToBigInt64 /
+ * ToBigUint64). The source array is only read; each element is borrowed for
+ * the store (scr_arr_get_ref answers +1, released here). Fresh +1 view. */
+ScrBytes *scr_bytes_from_bigs(ScrBytesElem elem, ScrArr *arr) {
+  ScrBytes *b = scr_bytes_new(elem, (double)arr->len);
+  for (size_t i = 0; i < arr->len; i++) {
+    ScrBigInt *v = (ScrBigInt *)scr_arr_get_ref(arr, (double)i);
+    scr_bytes_set_big(b, (double)i, v);
+    scr_big_release(v);
+  }
+  return b;
+}
