@@ -3120,6 +3120,14 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14053-proto-alias-required-base/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14053-proto-alias-required-base/base.cjs",
+    "<repo>/tests/corpus/14053-proto-alias-required-base/connection.cjs",
+    "<repo>/tests/corpus/14053-proto-alias-required-base/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1406-dataview-mp4.ts": {
    "order": [
     "<repo>/tests/corpus/1406-dataview-mp4.ts"
