@@ -16596,9 +16596,10 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
           const n: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [operand], type: F64, loc };
           return { kind: "unary", op: "-", operand: n, type: F64, loc };
         }
-        if (operand.type.kind !== "f64") L.unsupported("SC1043", expr);
-        if (operand.kind === "numLit") return { ...operand, value: -operand.value, loc };
-        return { kind: "unary", op: "-", operand, type: F64, loc };
+        const minusOperand = boolAsNumber(operand);
+        if (minusOperand.type.kind !== "f64") L.unsupported("SC1043", expr);
+        if (minusOperand.kind === "numLit") return { ...minusOperand, value: -minusOperand.value, loc };
+        return { kind: "unary", op: "-", operand: minusOperand, type: F64, loc };
       }
       case ts.SyntaxKind.PlusToken: {
         const operand = L.lowerExpr(expr.operand);
@@ -16616,8 +16617,9 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
           tonumWhy(expr, "unary-plus");
           return { kind: "libCall", fn: "dyn.toNumber", args: [operand], type: F64, loc };
         }
-        if (operand.type.kind !== "f64") L.unsupported("SC1043", expr);
-        return operand;
+        const plusOperand = boolAsNumber(operand);
+        if (plusOperand.type.kind !== "f64") L.unsupported("SC1043", expr);
+        return plusOperand;
       }
       case ts.SyntaxKind.ExclamationToken: {
         // `!x` is ToBoolean-then-negate: f64/string operands go through toBool.
@@ -16640,8 +16642,9 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
           const n: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [operand], type: F64, loc };
           return { kind: "unary", op: "~", operand: n, type: F64, loc };
         }
-        if (operand.type.kind !== "f64") L.unsupported("SC1043", expr);
-        return { kind: "unary", op: "~", operand, type: F64, loc };
+        const tildeOperand = boolAsNumber(operand);
+        if (tildeOperand.type.kind !== "f64") L.unsupported("SC1043", expr);
+        return { kind: "unary", op: "~", operand: tildeOperand, type: F64, loc };
       }
       case ts.SyntaxKind.PlusPlusToken:
       case ts.SyntaxKind.MinusMinusToken:
@@ -17106,6 +17109,23 @@ function detachedThisNullTest(L: Lowerer, expr: ts.BinaryExpression): IrExpr | n
   return negated
     ? { kind: "dynTest", test, negated: true, value: raw, type: BOOL, loc }
     : { kind: "dynTest", test, value: raw, type: BOOL, loc };
+}
+
+/** ToNumber of a static JS boolean: `true` is 1, `false` is 0. A numeric
+ * operator over a boolean (`flag | 0`, `-flag`, `flag + 1`, `flag < 2`) is
+ * a number operation on the converted operand, which is what JS does; the
+ * conversion is the one ternary node, so no runtime helper is needed. */
+function boolAsNumber(e: IrExpr): IrExpr {
+  if (e.type.kind !== "bool") return e;
+  const loc = e.loc;
+  return {
+    kind: "ternary",
+    cond: e,
+    then: { kind: "numLit", value: 1, type: F64, loc },
+    else_: { kind: "numLit", value: 0, type: F64, loc },
+    type: F64,
+    loc,
+  };
 }
 
 export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
@@ -18453,6 +18473,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             type: STRING, loc,
           };
         }
+        {
+          const nl = boolAsNumber(left);
+          const nr = boolAsNumber(right);
+          if (nl.type.kind === "f64" && nr.type.kind === "f64") {
+            return { kind: "bin", op: "+", left: nl, right: nr, type: F64, loc };
+          }
+        }
         L.unsupported("SC1043", expr);
         break;
       case ts.SyntaxKind.MinusToken:
@@ -18460,12 +18487,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       case ts.SyntaxKind.SlashToken:
       case ts.SyntaxKind.PercentToken:
       case ts.SyntaxKind.AsteriskAsteriskToken: {
-        if (!bothNum) L.unsupported("SC1043", expr);
+        const nl = boolAsNumber(left);
+        const nr = boolAsNumber(right);
+        if (nl.type.kind !== "f64" || nr.type.kind !== "f64") L.unsupported("SC1043", expr);
         const binOp = op === ts.SyntaxKind.MinusToken ? "-"
           : op === ts.SyntaxKind.AsteriskToken ? "*"
           : op === ts.SyntaxKind.SlashToken ? "/"
           : op === ts.SyntaxKind.PercentToken ? "%" : "**";
-        return { kind: "bin", op: binOp, left, right, type: F64, loc };
+        return { kind: "bin", op: binOp, left: nl, right: nr, type: F64, loc };
       }
       // The bitwise six, JS-exact: operands through ToInt32/ToUint32
       // (NaN/±Infinity → 0, truncate, wrap mod 2^32), the operation in
@@ -18477,13 +18506,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       case ts.SyntaxKind.LessThanLessThanToken:
       case ts.SyntaxKind.GreaterThanGreaterThanToken:
       case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken: {
-        if (!bothNum) L.unsupported("SC1043", expr);
+        const nl = boolAsNumber(left);
+        const nr = boolAsNumber(right);
+        if (nl.type.kind !== "f64" || nr.type.kind !== "f64") L.unsupported("SC1043", expr);
         const bitOp = op === ts.SyntaxKind.AmpersandToken ? "&"
           : op === ts.SyntaxKind.BarToken ? "|"
           : op === ts.SyntaxKind.CaretToken ? "^"
           : op === ts.SyntaxKind.LessThanLessThanToken ? "<<"
           : op === ts.SyntaxKind.GreaterThanGreaterThanToken ? ">>" : ">>>";
-        return { kind: "bin", op: bitOp, left, right, type: F64, loc };
+        return { kind: "bin", op: bitOp, left: nl, right: nr, type: F64, loc };
       }
       case ts.SyntaxKind.EqualsEqualsEqualsToken:
       case ts.SyntaxKind.ExclamationEqualsEqualsToken: {
@@ -18659,6 +18690,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           : op === ts.SyntaxKind.GreaterThanToken ? ">" : ">=";
         if (bothNum) return { kind: "bin", op: cmpOp, left, right, type: BOOL, loc };
         if (bothStr) return { kind: "strCmp", op: cmpOp, left, right, type: BOOL, loc };
+        {
+          const nl = boolAsNumber(left);
+          const nr = boolAsNumber(right);
+          if (nl.type.kind === "f64" && nr.type.kind === "f64") {
+            return { kind: "bin", op: cmpOp, left: nl, right: nr, type: BOOL, loc };
+          }
+        }
         L.unsupported("SC1043", expr);
         break;
       }
