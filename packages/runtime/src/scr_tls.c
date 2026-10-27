@@ -71,6 +71,7 @@
  * handshake failures carry a generic message where Node prints an
  * OpenSSL one. */
 #include "scr_runtime.h"
+#include "scr_tls_ciph.h"
 
 #include <errno.h>
 #include <math.h>
@@ -1324,6 +1325,286 @@ static const char *const SCR_TLS_SRV_FENCED_OPTIONS[] = {
   "sessionTimeout", "sigalgs", "ticketKeys", NULL,
 };
 
+/* ── Node's cipher-string verdict (tls.createSecureContext ciphers) ─────
+ * Node's processCiphers splits the string on ':' and sends the TLS_ parts to
+ * SSL_CTX_set_ciphersuites and the rest to SSL_CTX_set_cipher_list. The
+ * OpenSSL rule grammar is modeled from the measured oracle: the token sets
+ * are scr_tls_ciph.h (generated), the directive and character rules are
+ * the ones Node's verdicts fixed (lab fuzz: 0 mismatches on the structured
+ * vocabulary; see the report for the residual classes). Verdicts:
+ * SCR_CIPH_OK, SCR_CIPH_NO_MATCH (empty list), SCR_CIPH_INVALID_CMD (a
+ * malformed directive), SCR_CIPH_EMPTY_PARTS (only ':' separators:
+ * ERR_INVALID_ARG_VALUE). */
+typedef enum { SCR_CIPH_OK = 0, SCR_CIPH_NO_MATCH, SCR_CIPH_INVALID_CMD, SCR_CIPH_EMPTY_PARTS } ScrCiphVerdict;
+
+typedef struct { uint64_t in[SCR_CIPH_WORDS], killed[SCR_CIPH_WORDS]; } ScrCiphState;
+
+static bool scr_ciph_sep(char c) { return c == ':' || c == ' ' || c == ';' || c == ','; }
+static bool scr_ciph_op(char c) { return c == '!' || c == '-' || c == '+'; }
+static bool scr_ciph_name_char(char c) {
+  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+         c == '_' || c == '.' || c == '=' || c == '-';
+}
+
+/* The token table index for tok[0..n), or -1 (a token Node's build does not know). */
+static int scr_ciph_tok_find(const char *tok, size_t n) {
+  for (size_t k = 0; k < SCR_CIPH_TOK_COUNT; k++) {
+    const char *t = SCR_CIPH_TOKS[k].tok;
+    if (strlen(t) == n && memcmp(t, tok, n) == 0) return (int)k;
+  }
+  return -1;
+}
+
+/* A valid @-directive at s[p] ('@'): returns the index after it, or -1. */
+static long scr_ciph_directive_end(const char *s, size_t n, size_t p) {
+  size_t q;
+  if (n - p >= 9 && memcmp(s + p, "@STRENGTH", 9) == 0) q = p + 9;
+  else if (n - p >= 11 && memcmp(s + p, "@SECLEVEL=", 10) == 0 && s[p + 10] >= '0' && s[p + 10] <= '5') q = p + 11;
+  else return -1;
+  if (q < n && !(scr_ciph_sep(s[q]) || s[q] == '@' || s[q] == '!' || s[q] == '+')) return -1;
+  return (long)q;
+}
+
+static void scr_ciph_apply(ScrCiphState *st, char op, const uint64_t set[SCR_CIPH_WORDS]) {
+  for (int w = 0; w < SCR_CIPH_WORDS; w++) {
+    if (op == '-') st->in[w] &= ~set[w];
+    else if (op == '!') { st->in[w] &= ~set[w]; st->killed[w] |= set[w]; }
+    else st->in[w] |= set[w] & ~st->killed[w];
+  }
+}
+
+static bool scr_ciph_hit(const ScrCiphState *st, const uint64_t set[SCR_CIPH_WORDS]) {
+  for (int w = 0; w < SCR_CIPH_WORDS; w++) if (st->in[w] & set[w]) return true;
+  return false;
+}
+
+static bool scr_ciph_empty(const uint64_t in[SCR_CIPH_WORDS]) {
+  for (int w = 0; w < SCR_CIPH_WORDS; w++) if (in[w] != 0) return false;
+  return true;
+}
+
+/* SSL_CTX_set_cipher_list over one TLS<=1.2 list (TLS_ parts are filtered out
+ * by the caller, as Node does). */
+static ScrCiphVerdict scr_ciph_list_verdict(const char *in, size_t n) {
+  n = strnlen(in, n); /* a C string: the list ends at the first NUL */
+  /* a SUITEB prefix: never empty, and its directives are not checked */
+  if (n >= 9 && (memcmp(in, "SUITEB128", 9) == 0 || memcmp(in, "SUITEB192", 9) == 0)) return SCR_CIPH_OK;
+  static const char DEF_EXP[] = "ALL:!COMPLEMENTOFDEFAULT:!eNULL";
+  char *buf = NULL;
+  const char *s = in;
+  if (n >= 7 && memcmp(in, "DEFAULT", 7) == 0) {
+    const size_t el = sizeof DEF_EXP - 1;
+    buf = malloc(el + (n - 7) + 1);
+    if (!buf) scr_tls_oom();
+    memcpy(buf, DEF_EXP, el);
+    memcpy(buf + el, in + 7, n - 7);
+    buf[el + n - 7] = '\0';
+    s = buf;
+    n = el + n - 7;
+  }
+  static const uint64_t ZERO_SET[SCR_CIPH_WORDS] = {0};
+  ScrCiphState st;
+  memset(&st, 0, sizeof st);
+  ScrCiphVerdict verdict = SCR_CIPH_OK;
+  size_t i = 0;
+  size_t last_end = (size_t)-1; /* where the previous token ended: an infix '+' starts there */
+  while (i < n) {
+    while (i < n && scr_ciph_sep(s[i])) i++;
+    if (i >= n) break;
+    char op = 'a';
+    const size_t op_pos = i;
+    if (scr_ciph_op(s[i])) { op = s[i]; i++; }
+    const bool infix = op == '+' && op_pos == last_end;
+    if (i < n && s[i] == '@') {
+      if (op != 'a') { verdict = SCR_CIPH_INVALID_CMD; break; }
+      long e = scr_ciph_directive_end(s, n, i);
+      if (e < 0) { verdict = SCR_CIPH_INVALID_CMD; break; }
+      i = (size_t)e;
+      while (i < n && !scr_ciph_sep(s[i])) i++;
+      continue;
+    }
+    size_t j = i;
+    while (j < n && scr_ciph_name_char(s[j])) j++;
+    const size_t tl = j - i;
+    if (tl == 0) {
+      if (op != 'a') { verdict = SCR_CIPH_INVALID_CMD; break; }
+      if (i >= n || scr_ciph_sep(s[i])) continue;
+      verdict = SCR_CIPH_INVALID_CMD;
+      break;
+    }
+    const char *tok = s + i;
+    const int ti = scr_ciph_tok_find(tok, tl);
+    const bool is_default = tl == 7 && memcmp(tok, "DEFAULT", 7) == 0;
+    const bool known = ti >= 0 && !is_default; /* DEFAULT is a prefix only: mid-string it is unknown (MEASURED) */
+    const uint64_t *set = (ti >= 0 && !is_default) ? SCR_CIPH_TOKS[ti].set : ZERO_SET;
+    i = j;
+    if (i < n && !scr_ciph_sep(s[i])) {
+      /* an unknown name skips its whole token silently (operators included); a known one rejects a stray character */
+      if (!known) { while (i < n && !scr_ciph_sep(s[i])) i++; continue; }
+      if (!scr_ciph_op(s[i]) && s[i] != '@') { verdict = SCR_CIPH_INVALID_CMD; break; }
+    }
+    if (i < n && s[i] == '@') {
+      long e = scr_ciph_directive_end(s, n, i);
+      if (e < 0) {
+        if (known) { verdict = SCR_CIPH_INVALID_CMD; break; }
+        while (i < n && !scr_ciph_sep(s[i])) i++;
+        continue;
+      }
+      if (!known) { while (i < n && !scr_ciph_sep(s[i])) i++; continue; }
+      i = (size_t)e;
+      while (i < n && !scr_ciph_sep(s[i])) i++;
+    }
+    last_end = i;
+    if (op == '+') {
+      /* MEASURED: an infix '+' (no separator before it) clears the list when its operand matches nothing */
+      if (infix && !scr_ciph_hit(&st, set)) memset(st.in, 0, sizeof st.in);
+      continue;
+    }
+    scr_ciph_apply(&st, op, set);
+  }
+  free(buf);
+  if (verdict != SCR_CIPH_OK) return verdict;
+  return scr_ciph_empty(st.in) ? SCR_CIPH_NO_MATCH : SCR_CIPH_OK;
+}
+
+/* SSL_CTX_set_ciphersuites over the TLS_ parts (their own list: TLS1.3 names,
+ * '!' kills; no directives). */
+static ScrCiphVerdict scr_ciph_suites_verdict(const char *cs) {
+  /* MEASURED: set_ciphersuites is empty only when no positive known suite
+   * name is present; '!' never empties it (A:!A is OK, !A is no match) */
+  static const char *const T13[] = {
+    "TLS_AES_256_GCM_SHA384", "TLS_CHACHA20_POLY1305_SHA256", "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_128_CCM_SHA256", "TLS_AES_128_CCM_8_SHA256", NULL,
+  };
+  const char *p = cs;
+  while (*p) {
+    const char *e = strchr(p, ':');
+    const size_t plen = e ? (size_t)(e - p) : strlen(p);
+    if (plen > 0 && p[0] != '!') {
+      for (size_t k = 0; T13[k] != NULL; k++) {
+        if (strlen(T13[k]) == plen && memcmp(T13[k], p, plen) == 0) return SCR_CIPH_OK;
+      }
+    }
+    if (!e) break;
+    p = e + 1;
+  }
+  return SCR_CIPH_NO_MATCH;
+}
+
+/* Node's configSecureContext ciphers verdict for a STRING value (the
+ * caller checked the type). "" and the default list are OK. */
+static ScrCiphVerdict scr_ciph_verdict(const char *ciphers) {
+  if (ciphers[0] == '\0') return SCR_CIPH_OK;
+  const size_t len = strlen(ciphers);
+  char *cl = malloc(len + 1), *cs = malloc(len + 1);
+  if (!cl || !cs) scr_tls_oom();
+  size_t nl = 0, ns = 0, nparts = 0, nonempty = 0;
+  const char *p = ciphers;
+  for (;;) {
+    const char *e = strchr(p, ':');
+    const size_t plen = e ? (size_t)(e - p) : strlen(p);
+    nparts++;
+    if (plen > 0) {
+      nonempty++;
+      const bool tls = plen >= 4 && memcmp(p, "TLS_", 4) == 0;
+      const bool ntls = plen >= 5 && p[0] == '!' && memcmp(p + 1, "TLS_", 4) == 0;
+      char **dst = (tls || ntls) ? &cs : &cl;
+      size_t *dn = (tls || ntls) ? &ns : &nl;
+      if (*dn > 0) (*dst)[(*dn)++] = ':';
+      memcpy(*dst + *dn, p, plen);
+      *dn += plen;
+    }
+    if (!e) break;
+    p = e + 1;
+  }
+  cl[nl] = '\0';
+  cs[ns] = '\0';
+  ScrCiphVerdict v = SCR_CIPH_OK;
+  if (nonempty == 0) v = SCR_CIPH_EMPTY_PARTS;
+  else {
+    if (ns > 0) v = scr_ciph_suites_verdict(cs);
+    if (v == SCR_CIPH_OK && nl > 0) v = scr_ciph_list_verdict(cl, nl);
+  }
+  (void)nparts;
+  free(cl);
+  free(cs);
+  return v;
+}
+
+/* ERR_INVALID_ARG_VALUE for a ciphers string of only ':' separators: Node's
+ * util.inspect of the N empty parts. Up to 6 entries: one line. More: the
+ * groupArrayElements layout (columns = min(round(sqrt(2.5 N)), 12), cells
+ * "''" in columns, 100 entries shown then "... k more items"). Throws. */
+static void scr_ciph_throw_empty_parts(size_t n) {
+  char arr[2048];
+  size_t off = 0;
+#define SCR_CIPH_APPEND(...) do { int w_ = snprintf(arr + off, sizeof arr - off, __VA_ARGS__); if (w_ > 0) off += (size_t)w_; } while (0)
+  if (n <= 6) {
+    SCR_CIPH_APPEND("[ ");
+    for (size_t k = 0; k < n; k++) SCR_CIPH_APPEND(k ? ", ''" : "''");
+    SCR_CIPH_APPEND(" ]");
+  } else {
+    const size_t shown = n < 100 ? n : 100;
+    const size_t more = n - shown;
+    double cols_d = floor(sqrt(2.5 * (double)shown) + 0.5);
+    size_t cols = cols_d > 12.0 ? 12 : (size_t)cols_d;
+    SCR_CIPH_APPEND("[");
+    for (size_t i = 0; i < shown; i += cols) {
+      const size_t max = i + cols < shown ? i + cols : shown;
+      SCR_CIPH_APPEND("%s\n  ", i == 0 ? "" : ",");
+      for (size_t j = i; j < max; j++) SCR_CIPH_APPEND(j > i ? ", ''" : "''");
+    }
+    if (more > 0) SCR_CIPH_APPEND(",\n  ... %zu more item%s", more, more == 1 ? "" : "s");
+    SCR_CIPH_APPEND("\n]");
+  }
+#undef SCR_CIPH_APPEND
+  /* Node's ERR_INVALID_ARG_VALUE cuts the rendering: inspect(...) longer than
+   * 128 characters keeps its first 128 and appends "..." (measured) */
+  if (off > 128) {
+    arr[128] = '\0';
+    snprintf(arr + 128, sizeof arr - 128, "...");
+  }
+  char msg[2304];
+  const int len = snprintf(msg, sizeof msg,
+                           "The property 'options.ciphers' is invalid. Received %s", arr);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)len, "ERR_INVALID_ARG_VALUE");
+}
+
+/* The createSecureContext/createServer ciphers verdict over a PRESENT string
+ * (the ladder checked the type). Node runs it before any PEM work. false =
+ * exception pending. */
+static bool scr_tls_ciphers_check(const ScrDyn *opts) {
+  const ScrDyn *v = scr_dyn_obj_get(opts, "ciphers", 7);
+  if (v == NULL || v->kind != SCR_DYN_STR) return true;
+  char *s = malloc(v->v.str->len + 1);
+  if (!s) scr_tls_oom();
+  memcpy(s, v->v.str->data, v->v.str->len);
+  s[v->v.str->len] = '\0';
+  bool ok = true;
+  switch (scr_ciph_verdict(s)) {
+    case SCR_CIPH_OK: break;
+    case SCR_CIPH_NO_MATCH:
+      scr_throw_error_msg_code(SCR_ERR_ERROR, "error:0A0000B9:SSL routines::no cipher match", strlen("error:0A0000B9:SSL routines::no cipher match"),
+                               "ERR_SSL_NO_CIPHER_MATCH");
+      ok = false;
+      break;
+    case SCR_CIPH_INVALID_CMD:
+      scr_throw_error_msg_code(SCR_ERR_ERROR, "error:0A000118:SSL routines::invalid command", strlen("error:0A000118:SSL routines::invalid command"),
+                               "ERR_SSL_INVALID_COMMAND");
+      ok = false;
+      break;
+    case SCR_CIPH_EMPTY_PARTS: {
+      size_t parts = 1;
+      for (size_t k = 0; k < v->v.str->len; k++) if (s[k] == ':') parts++;
+      scr_ciph_throw_empty_parts(parts);
+      ok = false;
+      break;
+    }
+  }
+  free(s);
+  return ok;
+}
+
 /* ── the typed option-validation ladders (checked-dynamic lane) ────────
  * Node's configSecureContext / Server-constructor argument contracts over
  * every PRESENT validated key, run BEFORE the pem walk and its fences so
@@ -1489,6 +1770,7 @@ static bool scr_tls_opts_collect(const ScrDyn *opts, const char *api, bool ctx, 
     return false;
   }
   if (!scr_tls_opts_validate(opts)) return false; /* Node's typed errors first */
+  if (!scr_tls_ciphers_check(opts)) return false; /* Node's cipher verdict, before the material */
   /* No getter path in this walk: an option provided by an ENUMERABLE
    * ACCESSOR would read as the SLOT's undefined and be taken for absent,
    * which on a TLS options bag means a security setting silently
@@ -1563,6 +1845,9 @@ static bool scr_tls_opts_collect(const ScrDyn *opts, const char *api, bool ctx, 
       ok = false;
       continue;
     }
+    /* createSecureContext's ciphers: the verdict ran above and the list is
+     * not consumed by any handshake yet (see the report); not a fence */
+    if (ctx && strcmp(e->key, "ciphers") == 0) continue;
     for (size_t k = 0; SCR_TLS_SRV_FENCED_OPTIONS[k] != NULL; k++) {
       if (strcmp(e->key, SCR_TLS_SRV_FENCED_OPTIONS[k]) == 0) {
         scr_tls_opt_fence(api, e->key,
