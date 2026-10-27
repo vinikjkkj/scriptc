@@ -1875,6 +1875,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/12400-timer-unref-feature-detect.js": {
+    "order": [
+      "<repo>/tests/corpus/12400-timer-unref-feature-detect.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/12401-timer-feature-detect-local.js": {
+    "order": [
+      "<repo>/tests/corpus/12401-timer-feature-detect-local.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/12402-timer-and-short-circuit.js": {
+    "order": [
+      "<repo>/tests/corpus/12402-timer-and-short-circuit.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/12403-immediate-feature-detect.js": {
+    "order": [
+      "<repo>/tests/corpus/12403-immediate-feature-detect.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/12404-timer-feature-detect-loop.js": {
+    "order": [
+      "<repo>/tests/corpus/12404-timer-feature-detect-loop.js"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/1300-errors-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1300-errors-basics.ts"
