@@ -2938,6 +2938,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13950-union-strict-eq-across-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/13950-union-strict-eq-across-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13951-union-strict-eq-object-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/13951-union-strict-eq-object-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13954-union-eq-column-type-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/13954-union-eq-column-type-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13955-union-strict-eq-container-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/13955-union-strict-eq-container-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13958-union-strict-eq-nan-zero-in-mixed.ts": {
+   "order": [
+    "<repo>/tests/corpus/13958-union-strict-eq-nan-zero-in-mixed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13959-union-eq-mysql-date-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/13959-union-eq-mysql-date-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13960-union-strict-eq-different-unions.ts": {
+   "order": [
+    "<repo>/tests/corpus/13960-union-strict-eq-different-unions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13961-union-strict-eq-optional-scalars.ts": {
+   "order": [
+    "<repo>/tests/corpus/13961-union-strict-eq-optional-scalars.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/140-bitwise-operators.ts": {
    "order": [
     "<repo>/tests/corpus/140-bitwise-operators.ts"
