@@ -5844,6 +5844,9 @@ ScrDyn *scr_dyn_obj_keys(const ScrDyn *v);
  * TypeError; every other kind answers false. */
 bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key);
 bool scr_dyn_for_in_accessor(const ScrDyn *v, const ScrStr *key);
+/* The Buffer-only methods of a BYTES receiver of flavor BUFFER (scr_json.c): *known false when none. */
+ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *args, size_t argc,
+                                   const char *what, bool *known);
 /* %Buffer.prototype% (scr_buffer_val.c sets it; NULL until built). Borrowed. */
 extern ScrDyn *scr_dyn_buffer_proto_ptr;
 /* Object.assign over dyn values (+1 target back; ToObject TypeError on a
@@ -9613,6 +9616,8 @@ typedef enum {
   SCR_BN_F64,
 } ScrBytesNumKind;
 double scr_bytes_read_num(const ScrBytes *b, double offset, ScrBytesNumKind kind, bool le);
+bool scr_bytes_rw_check_pub(const ScrBytes *b, double offset, size_t width);
+extern int (*scr_dyn_big_store_fn)(const ScrDyn *v, bool is_signed, uint64_t *bits, char *shown, size_t cap);
 double scr_bytes_write_num(ScrBytes *b, double value, double offset, ScrBytesNumKind kind, bool le);
 double scr_bytes_read_var(const ScrBytes *b, double offset, double byte_length, bool sign, bool le);
 double scr_bytes_write_var(ScrBytes *b, double value, double offset, double byte_length, bool sign, bool le);

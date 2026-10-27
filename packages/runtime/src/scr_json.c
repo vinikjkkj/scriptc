@@ -3770,6 +3770,9 @@ static const ScrDynBigOps *scr_dynbig_ops = NULL;
 /* See scr_runtime.h: the one gated-unit entry the dyn core and the
  * dispatch unit reach by pointer. */
 ScrDyn *(*scr_dyn_big_from_bits_fn)(uint64_t bits, bool is_signed) = NULL;
+/* The BigInt write ladder (scr_bigint.c installs it with the bits hook): 1 with *bits set when the value
+ * fits the signed or unsigned 64-bit range, 0 with `shown` holding Node's rendering of the value. */
+int (*scr_dyn_big_store_fn)(const ScrDyn *v, bool is_signed, uint64_t *bits, char *shown, size_t cap) = NULL;
 
 ScrDyn *scr_dyn_alloc_big(ScrBigInt *b, const ScrDynBigOps *ops) {
   scr_dynbig_ops = ops;
@@ -10046,6 +10049,253 @@ static ScrDyn *tbm_copy_within(ScrDyn *recv, ScrDyn *const *args, size_t argc, c
  * is a method of this kind at ALL — false leaves the caller its own
  * is-not-a-function answer, which is JS's for a name no prototype
  * declares. */
+/* ── the Buffer-only methods of a BYTES receiver of flavor BUFFER ─────────
+ *
+ * The methods Node defines on Buffer.prototype and not on %TypedArray%: the
+ * seven fixed-encoding slices and writes, write, equals, compare, copy,
+ * swap16/32/64, and slice (a VIEW, Node's Buffer.slice = subarray, where the
+ * typed-array slice copies). Each one runs the body the static lowering runs
+ * (scr_bytes_* / scr_dyn_to_string_range_dyn / scr_bytes_write_str), so the
+ * dynamic route and the static spelling cannot answer differently.
+ * *known is false when the name is none of these; the caller then falls
+ * through to scr_dyn_bytes_method. +1 on success; NULL with an exception
+ * pending on a throw. */
+static const char *scr_bo_slice_enc(const char *m) {
+  static const char *const names[7] = {"asciiSlice", "base64Slice", "base64urlSlice", "latin1Slice",
+                                       "hexSlice", "ucs2Slice", "utf8Slice"};
+  static const char *const encs[7] = {"ascii", "base64", "base64url", "latin1", "hex", "ucs2", "utf8"};
+  for (size_t i = 0; i < 7; i++) if (strcmp(m, names[i]) == 0) return encs[i];
+  return NULL;
+}
+static const char *scr_bo_write_enc(const char *m) {
+  static const char *const names[7] = {"asciiWrite", "base64Write", "base64urlWrite", "latin1Write",
+                                       "hexWrite", "ucs2Write", "utf8Write"};
+  static const char *const encs[7] = {"ascii", "base64", "base64url", "latin1", "hex", "ucs2", "utf8"};
+  for (size_t i = 0; i < 7; i++) if (strcmp(m, names[i]) == 0) return encs[i];
+  return NULL;
+}
+static bool scr_bo_num_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt, double *out, const char *what) {
+  if (argc <= i || args[i]->kind == SCR_DYN_UNDEF) { *out = dflt; return true; }
+  if (args[i]->kind != SCR_DYN_NUM) {
+    char msg[160];
+    int n = snprintf(msg, sizeof msg, "%s: a non-number argument is not supported by this runtime yet", what);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+    return false;
+  }
+  *out = args[i]->v.num;
+  return true;
+}
+ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *args, size_t argc,
+                                   const char *what, bool *known) {
+  *known = true;
+  const ScrBytes *b = recv->v.bytes;
+  const char *enc = scr_bo_slice_enc(m);
+  if (enc != NULL) {
+    /* xSlice(start, end) is toString(enc, start, end) with Node's validation. */
+    ScrStr *encs = scr_str_new(enc, strlen(enc)); /* +1; scr_dyn_new_str retains it, so release our ref below */
+    ScrDyn *encv = scr_dyn_new_str(encs);
+    scr_str_release(encs);
+    ScrDyn *a[3];
+    a[0] = encv;
+    a[1] = argc >= 1 ? args[0] : scr_dyn_undefined();
+    a[2] = argc >= 2 ? args[1] : scr_dyn_undefined();
+    bool tk = false;
+    ScrDyn *r = scr_dyn_bytes_method(recv, "toString", a, 3, what, &tk);
+    scr_dyn_release(encv);
+    return r;
+  }
+  enc = scr_bo_write_enc(m);
+  if (enc != NULL || strcmp(m, "write") == 0) {
+    /* xWrite(string, offset, length) / write(string, offset, length, encoding) and write(string, encoding). */
+    if (argc < 1 || args[0]->kind != SCR_DYN_STR) {
+      scr_throw_error_msg(SCR_ERR_TYPE, "argument must be a string", sizeof("argument must be a string") - 1);
+      return NULL;
+    }
+    const char *e = enc != NULL ? enc : "utf8";
+    double off = 0, len = 0;
+    bool has_len = false;
+    size_t next = 1;
+    /* write(string, encoding) when offset is the encoding; write(string, offset, length, encoding) when
+     * the third argument is the encoding. The fixed xWrite names take (string, offset, length). */
+    if (enc == NULL && argc >= 2 && args[1]->kind == SCR_DYN_STR) {
+      double w = scr_bytes_write_str((ScrBytes *)b, args[0]->v.str, args[1]->v.str, 0, 0, false);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_new_num(w);
+    }
+    if (enc == NULL && argc >= 3 && args[2]->kind == SCR_DYN_STR) {
+      if (!scr_bo_num_arg(args, argc, 1, 0, &off, what)) return NULL;
+      double w = scr_bytes_write_str((ScrBytes *)b, args[0]->v.str, args[2]->v.str, off, 0, false);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_new_num(w);
+    }
+    if (!scr_bo_num_arg(args, argc, 1, 0, &off, what)) return NULL;
+    if (argc >= 3 && args[2]->kind != SCR_DYN_UNDEF) {
+      if (!scr_bo_num_arg(args, argc, 2, 0, &len, what)) return NULL;
+      has_len = true;
+    }
+    ScrStr *encs = scr_str_new(e, strlen(e)); /* +1 */
+    double w = scr_bytes_write_str((ScrBytes *)b, args[0]->v.str, encs, off, len, has_len);
+    scr_str_release(encs);
+    if (scr_exc_pending()) return NULL;
+    return scr_dyn_new_num(w);
+  }
+  if (strcmp(m, "equals") == 0) {
+    /* The checked other-argument (Node's ERR_INVALID_ARG_TYPE "otherBuffer") and the plain comparison. */
+    ScrStr *onm = scr_str_new("otherBuffer", 11);
+    ScrBytes *o = scr_bytes_arg_chk(argc >= 1 ? args[0] : scr_dyn_undefined(), onm);
+    scr_str_release(onm);
+    if (o == NULL) return NULL;
+    bool eq = scr_bytes_equals(b, o);
+    scr_bytes_release(o);
+    return scr_dyn_new_bool(eq);
+  }
+  if (strcmp(m, "compare") == 0) {
+    /* compare(target, targetStart, targetEnd, sourceStart, sourceEnd): the target is checked; the four
+     * offsets default as Node's do; the comparison core is scr_bytes_compare with nargs 4. */
+    ScrStr *tnm = scr_str_new("target", 6);
+    ScrBytes *t = scr_bytes_arg_chk(argc >= 1 ? args[0] : scr_dyn_undefined(), tnm);
+    scr_str_release(tnm);
+    if (t == NULL) return NULL;
+    double tsv = 0, tev = (double)t->len, ssv = 0, sev = (double)b->len;
+    bool ok = scr_bo_num_arg(args, argc, 1, 0, &tsv, what) && scr_bo_num_arg(args, argc, 2, (double)t->len, &tev, what) &&
+              scr_bo_num_arg(args, argc, 3, 0, &ssv, what) && scr_bo_num_arg(args, argc, 4, (double)b->len, &sev, what);
+    if (!ok) { scr_bytes_release(t); return NULL; }
+    double r = scr_bytes_compare(b, t, 4, tsv, tev, ssv, sev);
+    scr_bytes_release(t);
+    if (scr_exc_pending()) return NULL;
+    return scr_dyn_new_num(r);
+  }
+  if (strcmp(m, "copy") == 0) {
+    if (argc < 1) {
+      scr_throw_error_msg(SCR_ERR_TYPE, "argument must be a Buffer", sizeof("argument must be a Buffer") - 1);
+      return NULL;
+    }
+    ScrStr *nm = scr_str_new("target", 6); /* +1 */
+    ScrBytes *dst = scr_bytes_arg_chk(args[0], nm); /* +1 */
+    scr_str_release(nm);
+    if (dst == NULL) return NULL;
+    double ts = 0, ss = 0, se = (double)b->len;
+    bool ok = scr_bo_num_arg(args, argc, 1, 0, &ts, what) && scr_bo_num_arg(args, argc, 2, 0, &ss, what) &&
+              scr_bo_num_arg(args, argc, 3, se, &se, what);
+    if (!ok) { scr_bytes_release(dst); return NULL; }
+    double n = scr_bytes_copy_into(b, dst, (double)argc, ts, ss, se);
+    scr_bytes_release(dst);
+    if (scr_exc_pending()) return NULL;
+    return scr_dyn_new_num(n);
+  }
+  if (strcmp(m, "swap16") == 0 || strcmp(m, "swap32") == 0 || strcmp(m, "swap64") == 0) {
+    double width = m[4] == '1' ? 2 : m[4] == '3' ? 4 : 8;
+    ScrBytes *sw = scr_bytes_swap((ScrBytes *)b, width); /* +1 on the same payload */
+    if (sw == NULL) return NULL; /* exception pending */
+    scr_bytes_release(sw);
+    return scr_dyn_retain(recv); /* Node answers this */
+  }
+  if (strcmp(m, "readBigInt64LE") == 0 || strcmp(m, "readBigInt64BE") == 0 || strcmp(m, "readBigUInt64LE") == 0 ||
+      strcmp(m, "readBigUInt64BE") == 0 || strcmp(m, "readBigUint64LE") == 0 || strcmp(m, "readBigUint64BE") == 0) {
+    /* readBigXX64Y(offset = 0): eight bytes, the bigint they spell (the dyn-route hook, scr_bigint.c). */
+    bool le = m[strlen(m) - 2] == 'L';
+    bool sgn = m[7] == 'I';
+    double off = 0;
+    if (argc >= 1 && args[0]->kind != SCR_DYN_UNDEF) {
+      if (args[0]->kind != SCR_DYN_NUM) {
+        scr_throw_error_msg(SCR_ERR_TYPE, "Buffer big read: a non-number offset is not supported by this runtime yet", sizeof("Buffer big read: a non-number offset is not supported by this runtime yet") - 1);
+        return NULL;
+      }
+      off = args[0]->v.num;
+    }
+    if (!scr_bytes_rw_check_pub(b, off, 8)) return NULL;
+    uint64_t u = 0;
+    for (size_t i = 0; i < 8; i++) u |= (uint64_t)b->data[(size_t)off + (le ? i : 7 - i)] << (8 * i);
+    if (scr_dyn_big_from_bits_fn == NULL) {
+      scr_throw_error_msg(SCR_ERR_ERROR, "internal error: bigint hook not linked for a Buffer BigInt read", sizeof("internal error: bigint hook not linked for a Buffer BigInt read") - 1);
+      return NULL;
+    }
+    return scr_dyn_big_from_bits_fn(u, sgn);
+  }
+  if (strncmp(m, "writeBig", 8) == 0) {
+    /* writeBigXX64Y(value, offset = 0): range-checked as Node's checkBigInt, then the eight bytes. */
+    bool le = m[strlen(m) - 2] == 'L';
+    bool sgn = m[8] == 'I';
+    if (argc < 1 || args[0]->kind != SCR_DYN_BIG) {
+      if (argc >= 1 && args[0]->kind == SCR_DYN_NUM) {
+        scr_throw_error_msg(SCR_ERR_TYPE, "Cannot mix BigInt and other types, use explicit conversions", sizeof("Cannot mix BigInt and other types, use explicit conversions") - 1);
+        return NULL;
+      }
+      scr_throw_error_msg(SCR_ERR_TYPE, "Buffer big write: a non-bigint value is not supported by this runtime yet", sizeof("Buffer big write: a non-bigint value is not supported by this runtime yet") - 1);
+      return NULL;
+    }
+    if (scr_dyn_big_store_fn == NULL) {
+      scr_throw_error_msg(SCR_ERR_ERROR, "internal error: bigint hook not linked for a Buffer BigInt write", sizeof("internal error: bigint hook not linked for a Buffer BigInt write") - 1);
+      return NULL;
+    }
+    uint64_t bits = 0;
+    char shown[160];
+    if (!scr_dyn_big_store_fn(args[0], sgn, &bits, shown, sizeof shown)) {
+      /* shown: Node's Received rendering (digit groups and the n suffix), made by the bigint unit. */
+      char msg[400];
+      int n = snprintf(msg, sizeof msg,
+                       "The value of \"value\" is out of range. It must be >= %s and < %s. Received %s",
+                       sgn ? "-(2n ** 63n)" : "0n", sgn ? "2n ** 63n" : "2n ** 64n", shown);
+      scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+      return NULL;
+    }
+    double off = 0;
+    if (argc >= 2 && args[1]->kind != SCR_DYN_UNDEF) {
+      if (args[1]->kind != SCR_DYN_NUM) {
+        scr_throw_error_msg(SCR_ERR_TYPE, "Buffer big write: a non-number offset is not supported by this runtime yet", sizeof("Buffer big write: a non-number offset is not supported by this runtime yet") - 1);
+        return NULL;
+      }
+      off = args[1]->v.num;
+    }
+    if (!scr_bytes_rw_check_pub(b, off, 8)) return NULL;
+    uint64_t u = bits;
+    for (size_t i = 0; i < 8; i++) ((ScrBytes *)b)->data[(size_t)off + (le ? i : 7 - i)] = (uint8_t)(u >> (8 * i));
+    return scr_dyn_new_num(off + 8);
+  }
+  if (strcmp(m, "toJSON") == 0) {
+    /* { type: 'Buffer', data: [ ...bytes ] } */
+    ScrDyn *o = scr_dyn_new_obj();
+    ScrStr *tys = scr_str_new("Buffer", 6);
+    scr_dyn_obj_set(o, "type", 4, scr_dyn_new_str(tys));
+    scr_str_release(tys);
+    ScrDyn *arr = scr_dyn_new_arr();
+    for (size_t i = 0; i < b->len; i++) scr_dyn_arr_push(arr, scr_dyn_new_num((double)b->data[i]));
+    scr_dyn_obj_set(o, "data", 4, arr);
+    return o;
+  }
+  if (strcmp(m, "inspect") == 0) {
+    /* <Buffer xx xx ... N more bytes>: the first 50 bytes in hex (INSPECT_MAX_BYTES), Node's text. */
+    ScrJsonBuf jb;
+    scr_jb_init(&jb);
+    scr_jb_puts(&jb, "<Buffer ");
+    size_t shown = b->len < 50 ? b->len : 50;
+    for (size_t i = 0; i < shown; i++) {
+      static const char hx[] = "0123456789abcdef";
+      if (i > 0) scr_jb_puts(&jb, " ");
+      char two[3] = {hx[b->data[i] >> 4], hx[b->data[i] & 15], '\0'};
+      scr_jb_puts(&jb, two);
+    }
+    if (b->len > 50) {
+      char more[64];
+      int mn = snprintf(more, sizeof more, " ... %zu more bytes", b->len - 50);
+      scr_jb_write(&jb, more, (size_t)mn);
+    }
+    scr_jb_puts(&jb, ">");
+    ScrStr *inspected = scr_jb_finish(&jb);
+    ScrDyn *insp = scr_dyn_new_str(inspected);
+    scr_str_release(inspected);
+    return insp;
+  }
+  if (strcmp(m, "slice") == 0) {
+    /* Buffer.prototype.slice IS subarray (a view). */
+    bool tk = false;
+    ScrDyn *r = scr_dyn_bytes_method(recv, "subarray", args, argc, what, &tk);
+    if (tk) return r;
+  }
+  *known = false;
+  return NULL;
+}
+
 ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *args,
                              size_t argc, const char *what, bool *known) {
   ScrBytes *bytes = recv->v.bytes;
@@ -10137,7 +10387,7 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
       /* Node checks the offset and the fit together, and reports both as
        * "offset is out of bounds" — a negative offset included. */
       if (offD < 0 || srcLen + offD > (double)blen) {
-        scr_throw_error_msg(SCR_ERR_RANGE, "offset is out of bounds", 23);
+        scr_throw_error_msg(SCR_ERR_RANGE, "offset is out of bounds", sizeof("offset is out of bounds") - 1);
         return NULL;
       }
       size_t off = (size_t)offD;
@@ -10207,7 +10457,7 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
         }
       }
       if (offD < 0 || srcLen + offD > (double)blen) {
-        scr_throw_error_msg(SCR_ERR_RANGE, "offset is out of bounds", 23);
+        scr_throw_error_msg(SCR_ERR_RANGE, "offset is out of bounds", sizeof("offset is out of bounds") - 1);
         return NULL;
       }
       size_t off = (size_t)offD;

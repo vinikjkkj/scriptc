@@ -1850,6 +1850,8 @@ static bool scr_bytes_rw_check(const ScrBytes *b, double offset, size_t width) {
   }
   return true;
 }
+/* The same offset ladder for the Buffer-only dispatch (scr_json.c). */
+bool scr_bytes_rw_check_pub(const ScrBytes *b, double offset, size_t width) { return scr_bytes_rw_check(b, offset, width); }
 
 /* Node's checkInt for the integer writes: the VALUE range throws before
  * any offset check; widths past 4 bytes render the "2 ** N" range form

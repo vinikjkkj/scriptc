@@ -6142,6 +6142,16 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         mcallWhy("fence", expr.expression, expr.expression.name.text,
           () => L.checker.typeToString(L.typeOf(recvNode)));
       }
+      {
+        const rn = expr.expression.expression;
+        // A plain read chain is probed (no side effect is duplicated); a call or `new` receiver is lowered once,
+        // and only the Buffer-only arm below may answer it (anything else falls to the fence, which throws).
+        const pr = plainReadChain(rn) ? probeLower(L, rn) : ts.isCallExpression(rn) || ts.isNewExpression(rn) ? L.lowerExpr(rn) : null;
+        if (pr !== null) {
+          const bo = bufOnlyDynCall(L, expr, expr.expression, pr);
+          if (bo !== null) return bo;
+        }
+      }
       L.unsupported("SC1090", expr, `method calls like '${expr.expression.getText()}'`);
     }
 
@@ -6832,6 +6842,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // unimplemented methods throw a LOUD not-supported Error; names the
     // kind's prototype lacks throw Node's "x.y is not a function"; OBJ
     // receivers call the own member.
+    {
+      const bo = bufOnlyDynCall(L, call, access, recv);
+      if (bo !== null) return bo;
+    }
     if (DYN_DISPATCH_METHODS.has(access.name.text) && !call.questionDotToken && !access.questionDotToken) {
       if (call.arguments.some((a) => ts.isSpreadElement(a))) {
         return dynInvokeWithSpread(L, call, recv, access);
@@ -15473,3 +15487,36 @@ function fenceObservableContainerStore(
     }
   });
 }
+
+/** The Buffer-only methods of a bytes receiver (slices, writes, equals, compare, copy): the runtime's
+ * Buffer-only body (scr_dyn_buffer_only_method, scr_json.c) through the dyn method route, with the
+ * checker's result type recovered by coerceInto. swap16/32/64 and BigInt stay fenced. */
+const BUF_ONLY_RESULT: Record<string, IrType> = (() => {
+  const out: Record<string, IrType> = {};
+  for (const n of ["asciiSlice", "base64Slice", "base64urlSlice", "latin1Slice", "hexSlice", "ucs2Slice", "utf8Slice"]) out[n] = STRING;
+  for (const n of ["asciiWrite", "base64Write", "base64urlWrite", "latin1Write", "hexWrite", "ucs2Write", "utf8Write", "write", "compare", "copy"]) out[n] = F64;
+  for (const n of ["writeBigInt64LE", "writeBigInt64BE", "writeBigUInt64LE", "writeBigUInt64BE", "writeBigUint64LE", "writeBigUint64BE"]) out[n] = F64;
+  for (const n of ["readBigInt64LE", "readBigInt64BE", "readBigUInt64LE", "readBigUInt64BE", "readBigUint64LE", "readBigUint64BE"]) out[n] = BIGINT;
+  out["inspect"] = STRING;
+  out["toJSON"] = DYN;
+  out["equals"] = BOOL;
+  return out;
+})();
+function bufOnlyDynCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression, recv: IrExpr): IrExpr | null {
+  const m = access.name.text;
+  const want = BUF_ONLY_RESULT[m];
+  if (want === undefined || recv.type.kind !== "bytes" || !isJsSourceFile(call.getSourceFile()) || L.dynamic) return null;
+  if (call.questionDotToken || access.questionDotToken || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+  const loc = locOf(call);
+  const dynCall: IrExpr = {
+    kind: "dynInvoke",
+    recv: { kind: "dynFrom", value: recv, type: DYN, loc },
+    method: m,
+    calleeName: access.getText(),
+    args: call.arguments.map((x) => L.lowerExprExpecting(x, DYN)),
+    type: DYN,
+    loc,
+  };
+  return L.coerceInto(call, dynCall, want);
+}
+

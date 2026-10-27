@@ -18148,6 +18148,24 @@
     "<repo>/tests/corpus/12909-instance-slices-typeof-probe/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/12910-prototype-bigint64-read-write/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12910-prototype-bigint64-read-write/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12911-prototype-tojson-and-inspect/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12911-prototype-tojson-and-inspect/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12912-bigint-write-range-errors/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12912-bigint-write-range-errors/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
