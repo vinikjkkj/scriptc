@@ -11928,6 +11928,17 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (protoCall === null || descCall === null) return null;
     const src = unparen(protoCall.arguments[0]!);
     if (!pureSource(src) || src.getText() !== unparen(descCall.arguments[0]!).getText()) return null;
+    // An untyped source (a dyn parameter or field) is cloned by the runtime,
+    // which knows the run-time class of the value (dyn.cloneOwn). The result
+    // must stay dyn: the caller's slot is untyped too.
+    // (irTypeOf, not mapTypeOf: an untyped JS binding or a checker-`any` maps
+    // to the checked-dynamic kind only through the dynFallbackType rule.)
+    if (L.irTypeOf(src).kind === "dyn") {
+      if (L.irTypeOf(call).kind !== "dyn") return null;
+      const dynIr = L.lowerExpr(src);
+      if (dynIr.type.kind !== "dyn") return null;
+      return { kind: "libCall", fn: "dyn.cloneOwn", args: [dynIr], type: DYN, loc: locOf(call) };
+    }
     // The static type decides: a value that might be a subclass instance, a
     // union, or a non-class object keeps the fence.
     const st = L.mapTypeOf(L.typeOf(src));

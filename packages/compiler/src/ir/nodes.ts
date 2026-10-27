@@ -5605,6 +5605,12 @@ export type IrLibFn =
    * only; --dynamic keeps the fence. */
   | "dyn.objCreateDescs"
   | "dyn.objCreateNullDescs"
+  /** Object.create(getPrototypeOf(src), getOwnPropertyDescriptors(src)) over a dyn
+   * source: the clone of the instance or plain object (scr_dyn_clone_own). Borrowed
+   * argument, +1 DYN result; throws for a value no clone can hold. */
+  | "dyn.cloneOwn"
+  /** The run-time property table of a class instance, cloned (scr_cls_props_clone). */
+  | "cls.propsClone"
   /** The `Object.getOwnPropertyNames` guard (scr_json.c): the own-names
    * walk is `Object.keys` plus `length`, which is exact for a receiver
    * whose own properties are all ENUMERABLE and wrong for one that
@@ -10482,6 +10488,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
           node.fn === "dyn.proxyNew" || node.fn === "dyn.proxyRevocable" ||
           node.fn === "dyn.reflectSet" || node.fn === "dyn.reflectDelete" ||
           node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs" ||
+          node.fn === "dyn.cloneOwn" || node.fn === "cls.propsClone" ||
           // The per-instance property table of a compiled class instance
           // lives in the same unit as the property definers beside it,
           // and for the same reason: in the always-linked scr_json.c it
@@ -12993,6 +13000,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // a shape this representation would have to answer wrongly)
   "dyn.objCreateDescs",
   "dyn.objCreateNullDescs",
+  "dyn.cloneOwn",
   // the own-names walk refuses a receiver carrying non-enumerable own
   // properties rather than answering a list Node disagrees with
   "dyn.ownNamesFence",
