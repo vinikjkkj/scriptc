@@ -332,6 +332,19 @@ function lowerOptionalDefaultArg(
         receiverIr = receiver.type;
         elem = receiver.type.elem;
       }
+      // A DYN-element array (`const a = []` pushed with numbers: the static
+      // declaration is any[], the flow type number[]) under pop/shift: the
+      // lowered receiver's element is dyn, so the result is dyn. Typing it by
+      // the flow type left a dyn-element receiver with an f64 intrinsic result
+      // (the validator ICE). The consumer coerces the dyn result as usual.
+      if (
+        (name === "pop" || name === "shift") && receiver.type.kind === "array" &&
+        receiver.type.elem.kind === "dyn" && receiverIr?.kind === "array" &&
+        receiverIr.elem.kind !== "dyn"
+      ) {
+        receiverIr = receiver.type;
+        elem = receiver.type.elem;
+      }
       // The STATIC twin of the adoption above, one level in. Inside an
       // INSTANTIATED generic body the checker's element is the CONSTRAINT's
       // union while the receiver's VALUE carries the instantiation's own,
