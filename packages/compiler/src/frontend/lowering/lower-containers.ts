@@ -11,7 +11,7 @@ import { checkedArmBridge, lowerUnionContainerDispatch, captureParticipationOfPa
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { DYN_DISPATCH_METHODS, islandPrimitiveExit } from "./lower-calls.js";
-import { dynAssertionReceiver } from "./lower-exprs.js";
+import { dynAssertionReceiver, foldedStringKeyOf } from "./lower-exprs.js";
 import { typeKey } from "../types.js";
 import { dynUndefinedExpr, own, WidthLift } from "./lowerer.js";
 import { dynBuiltinHofCallback } from "./lower-fnvalue.js";
@@ -7927,21 +7927,47 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     );
   }
 
-  /** The own-table gate (mockbuf): a program is GATED when any write in it can put a NAMED own property
-   * on a bytes value, or any call can. Only then do statically typed bytes method calls check the value's own
-   * table (through the dyn method route, which answers the table and falls back to the native body). The
-   * runtime side is unconditional: a dyn write of a non-index name always lands in the table.
+  /** The own-table gate (mockbuf): which NAMES a program can write as own properties onto a bytes value.
    *
-   * A write can reach bytes when its receiver's type is dyn (any/unknown) or bytes, or when the key is not
-   * statically a number. The
-   * named calls below write through Object/Reflect; `new Proxy` can intercept a set. Residual, stated: an
-   * alias of Object.assign (`const A = Object.assign`) is not seen. The scan walks every non-declaration
-   * module of the program and is cached per lowering. */
-  const bytesOwnGateCache = new WeakMap<Lowerer, boolean>();
-  export function bytesOwnGateOn(L: Lowerer): boolean {
-    const hit = bytesOwnGateCache.get(L);
+   * A named write onto bytes lands in the value's own table (the dyn keyed write), and a call of that name
+   * on the value must see it. The compile-time answer is the set of names that some write can spell:
+   *   - a write to a bytes-reaching receiver with a folded string key contributes that name;
+   *   - a write whose key is a for-in variable (`for (const op in X) r[op] = v`) contributes X's property
+   *     names (a superset: every name the loop can visit);
+   *   - anything else (an unfolded key, Object.assign / Object.defineProperty(ies) / Reflect.set /
+   *     Reflect.defineProperty, `new Proxy`) makes the set UNBOUNDED: every method name is written.
+   * A bytes-reaching receiver is one typed dyn or bytes, or any receiver when the key is not statically a
+   * number. Only Buffer and Uint8Array receivers are checked at call sites (see lowerBytesMethodCall): a
+   * Buffer is a Uint8Array, and no other typed-array kind can be a Buffer. An empty set means no own write
+   * exists and nothing is gated. Cached per lowering. */
+  const bytesOwnNamesCache = new WeakMap<Lowerer, { names: ReadonlySet<string> | null }>();
+  export function bytesOwnWriteNames(L: Lowerer): { names: ReadonlySet<string> | null } {
+    const hit = bytesOwnNamesCache.get(L);
     if (hit !== undefined) return hit;
-    let on = false;
+    const names = new Set<string>();
+    let unbounded = false;
+    // A for-in statement's loop variable -> the names its object can enumerate (null = unknown).
+    const forInNames = (node: ts.Node, varName: string): ReadonlySet<string> | null => {
+      for (let a: ts.Node | undefined = node.parent; a !== undefined; a = a.parent) {
+        if (!ts.isForInStatement(a)) continue;
+        const init = a.initializer;
+        if (!ts.isVariableDeclarationList(init) || init.declarations.length !== 1) continue;
+        const decl = init.declarations[0]!;
+        if (!ts.isIdentifier(decl.name) || decl.name.text !== varName) continue;
+        const props = L.checker.getPropertiesOfType(L.typeOf(a.expression));
+        if (props.length === 0) return null;
+        return new Set(props.map((p) => p.name));
+      }
+      return null;
+    };
+    const keyNames = (key: ts.Expression): ReadonlySet<string> | null => {
+      const folded = foldedStringKeyOf(L, key);
+      if (folded !== null) return new Set([folded]);
+      let k: ts.Expression = key;
+      while (ts.isParenthesizedExpression(k)) k = k.expression;
+      if (ts.isIdentifier(k)) return forInNames(k, k.text);
+      return null;
+    };
     const writeReaches = (recv: ts.Expression, key: ts.Expression): boolean => {
       const rt = L.mapTypeOf(L.typeOf(recv));
       if (rt === null) return false;
@@ -7950,25 +7976,36 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       return kt === null || kt.kind !== "f64";
     };
     for (const sf of L.moduleOrder) {
-      if (on) break;
+      if (unbounded) break;
       if (sf.isDeclarationFile) continue;
       ts.walkPreorder(sf, (n) => {
-        if (on) return "stop";
+        if (unbounded) return "stop";
         if (ts.isBinaryExpression(n) && ts.isElementAccessExpression(n.left) &&
-            n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
-          if (writeReaches(n.left.expression, n.left.argumentExpression)) on = true;
+            n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+            writeReaches(n.left.expression, n.left.argumentExpression)) {
+          const ks = keyNames(n.left.argumentExpression);
+          if (ks === null) unbounded = true;
+          else for (const k of ks) names.add(k);
         }
         if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && ts.isIdentifier(n.expression.expression)) {
           const callee = `${n.expression.expression.text}.${n.expression.name.text}`;
           if (callee === "Object.assign" || callee === "Object.defineProperty" || callee === "Object.defineProperties" ||
-              callee === "Reflect.set" || callee === "Reflect.defineProperty") on = true;
+              callee === "Reflect.set" || callee === "Reflect.defineProperty") unbounded = true;
         }
-        if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "Proxy") on = true;
+        if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "Proxy") unbounded = true;
         return undefined;
       });
     }
-    bytesOwnGateCache.set(L, on);
-    return on;
+    const result = { names: unbounded ? null : names };
+    bytesOwnNamesCache.set(L, result);
+    return result;
+  }
+
+  /** Whether a call of `name` on a Buffer/Uint8Array receiver must check the value's own table. */
+  export function bytesOwnCallGated(L: Lowerer, name: string): boolean {
+    const { names } = bytesOwnWriteNames(L);
+    if (names === null) return true;
+    return names.has(name);
   }
 
   export function lowerBytesMethodCall(L: Lowerer, call: ts.CallExpression,
@@ -7980,9 +8017,9 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     if (!L.isStdlibMember(access)) return null;
     const loc = locOf(call);
     const nArgs = call.arguments.length;
-    // Gated program (see bytesOwnGateOn): the call checks the value's own table first. The dyn method route
+    // A Buffer/Uint8Array call of a name some write can own (see bytesOwnWriteNames): the call checks the value's own table first. The dyn method route
     // is the one that does that, and it answers the native body when no own name shadows the method.
-    if (bytesOwnGateOn(L) && call.arguments.every((a) => !ts.isSpreadElement(a))) {
+    if (receiverIr.elem === "u8" && bytesOwnCallGated(L, name) && call.arguments.every((a) => !ts.isSpreadElement(a))) {
       return {
         kind: "dynInvoke",
         recv: L.coerceToExpected(L.lowerExpr(access.expression), DYN),
