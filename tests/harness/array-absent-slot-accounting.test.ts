@@ -26,7 +26,7 @@ import { describe, expect, test } from "vitest";
 const repoRoot = join(import.meta.dirname, "../..");
 const read = (p: string) => readFileSync(join(repoRoot, p), "utf8");
 
-const arraySrc = read("packages/runtime/src/scr_array.c");
+const arraySrc = read("packages/runtime/src/scr_array.c") + read("packages/runtime/src/scr_array_dyn.c");
 const copySrc = read("packages/runtime/src/scr_copying.c");
 const headerSrc = read("packages/runtime/src/scr_runtime.h");
 
@@ -43,7 +43,8 @@ interface Rule {
  * argument in `why`. */
 const MECHANISM: Record<Exclude<Class, "never">, RegExp> = {
   refuses: /scr_arr_trap_absent\(/,
-  propagates: /scr_elem_retain_p\(|copying_arr_retain_slot\(|memcpy\(|memmove\(|p == NULL|== NULL \? /,
+  // `d == NULL` / `d != NULL` is the dyn-element family's spelling of the same hole test (the slot's ScrDyn* box).
+  propagates: /scr_elem_retain_p\(|copying_arr_retain_slot\(|memcpy\(|memmove\(|p == NULL|== NULL \? |d == NULL|d != NULL/,
   releases: /scr_elem_release\(|p == NULL|p != NULL/,
 };
 
@@ -111,6 +112,17 @@ const RULES: ReadonlyMap<string, Rule> = new Map([
   ["scr_elem_is_ref", { cls: "never", why: "the element-kind predicate; it never sees a slot at all" }],
   ["scr_arr_new", { cls: "never", why: "the constructor: it records the element kind and allocates; there are no slots yet" }],
   ["scr_arr_new_ref", { cls: "never", why: "the same for SCR_ELEM_REF, plus the retain/release/trace function pointers" }],
+
+  // ── the dyn-element family (scr_array_dyn.c): a hole is the immortal undefined ──
+  ["scr_arr_pop_dyn", { cls: "releases", why: "a present slot moves out as its own +1 box; an absent one owns nothing and answers the immortal undefined" }],
+  ["scr_arr_shift_dyn", { cls: "releases", why: "pop_dyn's mirror at the front, same reason" }],
+  ["scr_arr_splice_ins", { cls: "propagates", why: "memcpy/memmove of the kept and removed runs; the inserted items are snapshotted, a hole among them stays a hole" }],
+  ["scr_arr_join_dyn", { cls: "propagates", why: "an absent slot prints as the empty string (the NULL arm), not a trap" }],
+  ["scr_arr_sort_dyn", { cls: "propagates", why: "holes are undefined and sort last; the NULL arm carries them through" }],
+  ["scr_arr_to_f64_dyn", { cls: "propagates", why: "a hole is undefined, which is NaN: the NULL arm answers NAN" }],
+  ["scr_arr_from_dyn_iter", { cls: "never", why: "reads the iterator pack, never an array slot" }],
+  ["scr_dyn_sort_before", { cls: "never", why: "the sort comparator over materialised items; no array slot" }],
+  ["scr_dyn_sort_merge", { cls: "never", why: "the merge over materialised items; no array slot" }],
 ]);
 
 /** Top-level C function definitions: a signature that starts at column 0 and
