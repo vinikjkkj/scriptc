@@ -1347,6 +1347,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "readable.unshift": { argTypes: [null, BYTES_U8], result: VOID },
   "readable.unshiftStr": { argTypes: [null, STRING], result: VOID },
   "readable.read": { argTypes: [null, F64], result: VOID },
+  "readable.readDyn": { argTypes: [null, F64], result: DYN },
+  "readable.objectMode": { argTypes: [null, F64], result: VOID },
   "readable.pause": { argTypes: [null], result: VOID },
   "readable.setEncoding": { argTypes: [null, STRING], result: VOID },
   "readable.pushStrEnc": { argTypes: [null, STRING, STRING], result: BOOL },
@@ -1369,6 +1371,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "writable.uncork": { argTypes: [null], result: VOID },
   "stream.destroy": { argTypes: [null], result: VOID },
   "stream.destroyErr": { argTypes: [null, null], result: VOID },
+  "stream.destroyDyn": { argTypes: [null, DYN], result: VOID },
   "stream.prop": { argTypes: [null, STRING], result: VOID },
   "stream.errored": { argTypes: [null], result: VOID },
   // node:assert: pass/negated/deep/hasMsg are frontend-computed bools; the
@@ -5238,7 +5241,7 @@ function validateFunction(
           e.fn.startsWith("readable.") || e.fn.startsWith("writable.") ||
           e.fn.startsWith("duplex.") || e.fn.startsWith("transform.") ||
           e.fn.startsWith("passthrough.") || e.fn === "stream.destroy" ||
-          e.fn === "stream.destroyErr" || e.fn === "stream.prop" ||
+          e.fn === "stream.destroyErr" || e.fn === "stream.destroyDyn" || e.fn === "stream.prop" ||
           e.fn === "stream.errored" || e.fn === "stream.finished" ||
           e.fn === "stream.finishedDyn" || e.fn === "stream.pipeline" ||
           e.fn === "stream.pipelineDyn"
@@ -5359,7 +5362,8 @@ function validateFunction(
           if (e.fn === "readable.pause" || e.fn === "readable.resume" ||
               e.fn === "readable.unpipe" || e.fn === "writable.end" ||
               e.fn === "readable.setEncoding" || e.fn === "readable.pushEncoding" ||
-              e.fn === "stream.destroy" || e.fn === "stream.destroyErr") {
+              e.fn === "stream.destroy" || e.fn === "stream.destroyErr" ||
+              e.fn === "stream.destroyDyn" || e.fn === "readable.objectMode") {
             if (!typeEquals(e.type, e.args[0]!.type)) {
               err(`libCall ${e.fn} must return its receiver's type (the chaining 'this')`, e.loc);
             }

@@ -38,11 +38,13 @@
  * super.emit as the prototype chain). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { declSymbolOf } from "./lower-modules.js";
+import { lowerFunction, type FnSig } from "./lower-calls.js";
 import { dynFallbackType, dynUndefinedExpr, newFnCtx } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { lowerDynObjectLiteral } from "./lower-exprs.js";
-import { strandTrap, arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID, RUNTIME_EMITTER_CLASS } from "../../ir/nodes.js";
+import { funcOf, strandTrap, arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID, RUNTIME_EMITTER_CLASS } from "../../ir/nodes.js";
 import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
 import { handlerFnTypeNodeOf } from "../types.js";
 
@@ -903,6 +905,40 @@ function programObservesMetaArgs(L: Lowerer): boolean {
  * payloads — 'error' events), and the meta events (Node passes the
  * listener FUNCTION second, which has no dyn conversion — a dyn listener
  * reading it would see undefined). */
+/** The dyn-parameter instance of a top-level listener declaration whose
+ * first parameter is typed (not dyn): the same body, lowered with that
+ * parameter as checked-dynamic. Cached per declaration; null when no
+ * instance is needed (the parameter is already dyn). */
+function errDynCloneOf(L: Lowerer, decl: ts.FunctionDeclaration, loc: SrcLoc): { fnName: string; type: IrType } | null {
+  const cached = L.errDynClones.get(decl);
+  if (cached) return cached;
+  const sym = declSymbolOf(L, decl);
+  const sig = sym ? L.fnSigsBySymbol.get(sym) : undefined;
+  if (!sig) L.noLowering(`'error' listener '${decl.name?.text ?? "?"}' with no signature`, decl);
+  const p0 = sig.params[0];
+  if (p0 === undefined || p0.type.kind === "dyn") return null;
+  const fnName = `${sig.name}%errDyn`;
+  const params = sig.params.map((p, i) => (i === 0 ? { ...p, type: DYN } : p));
+  const cloneSig: FnSig = { ...sig, name: fnName, params };
+  const type = funcOf(params.map((p) => p.type), sig.returnType);
+  const undo = L.dynParamsOf(decl, true);
+  let fn: IrFunction | null;
+  try {
+    fn = lowerFunction(L, decl, cloneSig);
+  } finally {
+    for (const u of undo) {
+      L.chainNarrowedType.delete(u);
+      if (ts.isParameter(u)) L.paramIrOverrides.delete(u);
+    }
+  }
+  if (fn === null) L.noLowering(`'error' listener '${decl.name?.text ?? "?"}' whose body the compiler cannot lower`, decl);
+  L.liftedFns.push(fn!);
+  const rec = { fnName, type };
+  L.errDynClones.set(decl, rec);
+  void loc;
+  return rec;
+}
+
 function lowerDynListenerCall(
   L: Lowerer,
   member: string,
@@ -1391,6 +1427,83 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     // on readable-sided receivers register through DATA thunks that
     // unwrap the declared side (typed) or box by tag (dyn).
     const sides = streamSidesOf(L, info);
+    // An 'error' listener on a readable-sided stream with a TYPED Error
+    // parameter (`(err: Error) => ...`): the runtime may hand it any value
+    // (destroy(x) emits x unchanged, Node's behaviour). The parameter is
+    // therefore lowered as checked-dynamic, the same path an unannotated
+    // listener takes: its reads go through the dyn surface and the
+    // Error-encoded wrapper unwraps at the boundary.
+    if (name === "error" && (sides === "r" || sides === "rw")) {
+      const errTuple: IrType[] = [{ kind: "object", className: "%Error" }];
+      const unparen = (e: ts.Expression): ts.Expression => {
+        let x = e;
+        while (ts.isParenthesizedExpression(x)) x = x.expression;
+        return x;
+      };
+      // The listener expression: an inline function, or an identifier bound
+      // to a const function expression (the initializer is the body).
+      let listener: ts.Expression = unparen(args[1]!);
+      if (ts.isIdentifier(listener)) {
+        const sym = L.resolveValueSymbol(listener);
+        const decls = sym ? L.checker.declarationsOf(sym) : [];
+        const fd = decls.find((d) => ts.isFunctionDeclaration(d)) as ts.FunctionDeclaration | undefined;
+        const vd = decls.find((d) => ts.isVariableDeclaration(d)) as ts.VariableDeclaration | undefined;
+        const isConst = vd !== undefined && (vd.parent.flags & ts.NodeFlags.Const) !== 0;
+        const init = vd?.initializer ? unparen(vd.initializer) : undefined;
+        if (fd === undefined && isConst && init !== undefined && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
+          listener = init;
+        } else if (fd === undefined) {
+          // Not a function declaration nor a const function expression: the
+          // body (if any) is not resolvable here. A typed Error parameter on
+          // such a listener would receive raw non-Error payloads, so refuse.
+          const ft = L.mapTypeOf(L.typeOf(listener));
+          if (ft?.kind === "func" && ft.params.length > 0 && ft.params[0]!.kind !== "dyn") {
+            L.noLowering(
+              `'${member}' of '${name}' with the listener '${listener.text}', whose body cannot be resolved at this site`,
+              args[1]!,
+              "the listener must be a function declaration or a const bound to a function expression (its dynamic instance needs the body)",
+            );
+          }
+        }
+      }
+      if ((ts.isArrowFunction(listener) || ts.isFunctionExpression(listener)) && listener.parameters.length > 0) {
+        const undo = L.dynParamsOf(listener, true);
+        try {
+          return lowerDynListenerCall(
+            L, member, name, errTuple, receiver, listener, "func", registering, once, prepend, loc, false,
+          );
+        } finally {
+          for (const u of undo) {
+            L.chainNarrowedType.delete(u);
+            if (ts.isParameter(u)) L.paramIrOverrides.delete(u);
+          }
+        }
+      }
+      // A NAMED listener with a typed first parameter: a SECOND instance of
+      // the same body with that parameter typed dyn (monomorphisation). The
+      // original instance stays for its other call sites.
+      const declNode = ts.isIdentifier(listener) ? L.resolveValueSymbol(listener) : null;
+      const decl = declNode ? L.checker.declarationsOf(declNode).find((d) => ts.isFunctionDeclaration(d)) as ts.FunctionDeclaration | undefined : undefined;
+      if (decl !== undefined && decl.parent !== undefined && ts.isSourceFile(decl.parent)) {
+        if (!decl.body) {
+          L.noLowering(
+            `'${member}' of '${name}' with a declaration-only listener '${decl.name?.text ?? "?"}'`,
+            args[1]!,
+            "the listener's body is not available, so its dynamic instance cannot be lowered — pass a function with a body",
+          );
+        }
+        const clone = errDynCloneOf(L, decl, loc);
+        if (clone !== null) {
+          const cbDyn: IrExpr = {
+            kind: "dynFrom",
+            value: { kind: "closure", fnName: clone.fnName, captures: [], type: clone.type, loc },
+            type: DYN,
+            loc,
+          };
+          return dynListenerRegistration(L, errTuple, receiver, name, cbDyn, registering, once, prepend, false, loc);
+        }
+      }
+    }
     if (name === "data" && (sides === "r" || sides === "rw")) {
       const dynFlavor = dynListenerFlavor(L, args[1]!);
       if (dynFlavor !== null) {
