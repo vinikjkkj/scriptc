@@ -88,6 +88,21 @@ function serializeOptions(options: Ts7CompilerOptions): Record<string, unknown> 
   return out;
 }
 
+/** The TS 7 client decodes every node text and file text through its
+ * Wtf8Decoder, a TextDecoder built with the DEFAULT ignoreBOM:false. A
+ * TextDecoder drops a leading U+FEFF from each decode call, and the client
+ * makes one call per string value, so a string VALUE that begins with U+FEFF
+ * ("﻿", a literal BOM followed by text, a template) reached the compiler
+ * with that character gone (MEASURED: "﻿".length was 0, Node 1).
+ * Rebuild the same decoder class with ignoreBOM:true. A file that starts with
+ * a BOM keeps it in its text too, where the TS scanner skips it as trivia
+ * exactly as before, and where the offsets now agree with the bytes on disk. */
+function keepLeadingBom(program: object): void {
+  const holder = program as { decoder: object };
+  const Wtf8Decoder = holder.decoder.constructor as unknown as new (label: string, options: { ignoreBOM: boolean }) => object;
+  holder.decoder = new Wtf8Decoder("utf-8", { ignoreBOM: true });
+}
+
 let nextConfigId = 0;
 
 /** The desugared text (js-desugar.ts) of a plain-JS file, given the text a
@@ -233,6 +248,7 @@ export class Ts7Host {
       snapshot.dispose();
       throw new Error(`ts7 createProgram: project failed to open for ${first}`);
     }
+    keepLeadingBom(project.program);
     return new Ts7Program(project, snapshot, this, !programOwnsHost);
   }
 
