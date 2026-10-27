@@ -282,7 +282,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
   export function dynDesc(E: CEmitter, t: IrType): string {
     switch (t.kind) {
       case "f64":
-        return "number";
+        return t.timer ?? "number";
       case "string":
         return "string";
       case "bool":
@@ -1209,7 +1209,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const d: string[] = [`${sig} { /* matches ${key} */`];
     switch (t.kind) {
       case "f64":
-        d.push(`  return d->kind == SCR_DYN_NUM;`);
+        if (t.timer !== undefined) d.push(`  return scr_dyn_is_timer(d, ${t.timer === "Immediate"});`);
+        else d.push(`  return d->kind == SCR_DYN_NUM;`);
         break;
       case "string":
         // A TextEncoder/TextDecoder box is a string slot's value too (the
@@ -2206,6 +2207,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     switch (t.kind) {
       case "f64":
         if (soft) d.push(`  (void)path;`);
+        if (t.timer !== undefined) {
+          d.push(fail(`  `, "prim.f64", `!scr_dyn_is_timer(d, ${t.timer === "Immediate"})`, `0`));
+          d.push(`  return scr_dyn_timer_id(d);`);
+          break;
+        }
         d.push(fail(`  `, "prim.f64", `d->kind != SCR_DYN_NUM`, `0`));
         d.push(`  return d->v.num;`);
         break;
@@ -3160,7 +3166,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const d: string[] = [`${sig} { /* to-dyn ${key} */`];
     switch (t.kind) {
       case "f64":
-        d.push(`  return scr_dyn_new_num(v);`);
+        if (t.timer !== undefined) d.push(`  return scr_dyn_box_timer(v, ${t.timer === "Immediate"});`);
+        else d.push(`  return scr_dyn_new_num(v);`);
         break;
       case "bool":
         d.push(`  return scr_dyn_new_bool(v);`);
@@ -3689,7 +3696,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(fulfill(`scr_dyn_new_null()`));
         break;
       case "f64":
-        d.push(fulfill(`scr_dyn_new_num(scr_promise_payload_f64(src))`));
+        d.push(fulfill(inner.timer !== undefined
+          ? `scr_dyn_box_timer(scr_promise_payload_f64(src), ${inner.timer === "Immediate"})`
+          : `scr_dyn_new_num(scr_promise_payload_f64(src))`));
         break;
       case "bool":
         d.push(fulfill(`scr_dyn_new_bool(scr_promise_payload_bool(src))`));

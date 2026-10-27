@@ -11,7 +11,7 @@ import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
-import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IMMEDIATE_T, TIMEOUT_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { siblingDtsMethodReturnKind } from "../npm.js";
@@ -3759,6 +3759,22 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
     // handle and clearing it does nothing.
     if (handle.type.kind === "dyn") {
       const dynKey = `clearDyn:${fn}`;
+      const timerHandleClearStmt = (test: "timeoutHandle" | "immediateHandle", handleT: IrType): IrStmt => {
+        const dv = (): IrExpr => ({ kind: "varRef", localId: "h.0", type: DYN, loc });
+        return {
+          kind: "if",
+          cond: { kind: "dynTest", test, value: dv(), type: BOOL, loc },
+          then: [
+            {
+              kind: "exprStmt",
+              expr: { kind: "libCall", fn, args: [{ kind: "dynCheck", value: dv(), type: handleT, loc }], type: VOID, loc },
+              loc,
+            },
+          ],
+          else_: null,
+          loc,
+        };
+      };
       let dynName = L.arrHofHelpers.get(dynKey);
       if (dynName === undefined) {
         dynName = `%timers.clearDyn.${L.arrHofHelpers.size}`;
@@ -3783,6 +3799,12 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
               else_: null,
               loc,
             },
+            // A Timeout (clearTimeout/clearInterval) or Immediate (clearImmediate)
+            // handle held untyped: the same clear over the boxed handle. The other
+            // kind is a no-op, as Node's clearTimeout(Immediate) is.
+            ...(fn === "timers.clearImmediate"
+              ? [timerHandleClearStmt("immediateHandle", IMMEDIATE_T)]
+              : [timerHandleClearStmt("timeoutHandle", TIMEOUT_T)]),
           ],
           loc,
         });
@@ -3868,7 +3890,7 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
       // the same heap; only the handle form can be unref'd/cleared.
       const resultT = L.mapTypeOf(L.typeOf(expr));
       if (resultT?.kind === "f64" && !ts.isExpressionStatement(expr.parent)) {
-        return { kind: "libCall", fn: "timers.setTimeoutHandle", args: [cb, ms], type: F64, loc };
+        return { kind: "libCall", fn: "timers.setTimeoutHandle", args: [cb, ms], type: TIMEOUT_T, loc };
       }
       return { kind: "libCall", fn: "timers.setTimeout", args: [cb, ms], type: VOID, loc };
     }
@@ -3913,7 +3935,7 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
       const ms: IrExpr = expr.arguments.length >= 2
         ? L.lowerExpr(expr.arguments[1]!)
         : { kind: "numLit", value: 1, type: F64, loc };
-      return { kind: "libCall", fn: "timers.setInterval", args: [cb, ms], type: F64, loc };
+      return { kind: "libCall", fn: "timers.setInterval", args: [cb, ms], type: TIMEOUT_T, loc };
     }
     if (member === "clearInterval") {
       const noop = tolerantClearNoop(L, expr, loc);
@@ -3945,7 +3967,7 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
       const cb = expr.arguments.length > 1
         ? makeTimerArgsThunk(L, expr.arguments[0]!, expr.arguments.slice(1), "setImmediate", loc)
         : adaptZeroArgTimerCallback(L, L.lowerExpr(expr.arguments[0]!), expr.arguments[0]!, loc);
-      return { kind: "libCall", fn: "timers.setImmediate", args: [cb], type: F64, loc };
+      return { kind: "libCall", fn: "timers.setImmediate", args: [cb], type: IMMEDIATE_T, loc };
     }
     if (member === "clearImmediate") {
       const noop = tolerantClearNoop(L, expr, loc);

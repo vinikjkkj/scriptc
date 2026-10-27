@@ -3122,7 +3122,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           return E.newTemp(e.type, e.negated ? `!(${t})` : t);
         }
         const test =
-          e.test === "nullish"
+          e.test === "timeoutHandle" || e.test === "immediateHandle"
+            ? // A Timeout / Immediate handle (clearTimeout's dyn argument): the
+              // one runtime predicate both lanes call, per tag.
+              `scr_dyn_is_timer(${d.name}, ${e.test === "immediateHandle"})`
+          : e.test === "nullish"
             ? `(${d.name}->kind == SCR_DYN_UNDEF || ${d.name}->kind == SCR_DYN_NULL)`
             : e.test === "object"
               ? // `typeof v === "object"`: the runtime's ONE typeof table

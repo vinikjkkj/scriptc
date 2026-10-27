@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs";
 import * as ts from "./ts7/adapter.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isUnitType, JSVAL, mapOf, weakMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, IMMEDIATE_T, TIMEOUT_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isUnitType, JSVAL, mapOf, weakMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
 import { dynBuiltinFnType, dynBuiltinSigOfType } from "./dyn-builtin-sigs.js";
@@ -3606,11 +3606,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // methods lower over that handle (loop-liveness bookkeeping); `Timeout |
   // null` becomes `number | null`, and clearTimeout/clearInterval take the
   // handle. Provenance-checked like the other named interfaces.
-  if (isStdlibInterface("Timeout")) return F64;
+  if (isStdlibInterface("Timeout")) return TIMEOUT_T;
   // NodeJS.Immediate / the fallback `Immediate` (setImmediate's return):
   // the same numeric-handle story over the check-phase queue — its own id
   // space, so clearTimeout of an Immediate no-ops like Node.
-  if (isStdlibInterface("Immediate")) return F64;
+  if (isStdlibInterface("Immediate")) return IMMEDIATE_T;
   // TextEncoder is STATELESS — its only observable state is the constant
   // `encoding` ("utf-8"); encode() is a pure string→bytes transform. So it
   // maps to that encoding STRING, the Timeout-handle idiom (an opaque

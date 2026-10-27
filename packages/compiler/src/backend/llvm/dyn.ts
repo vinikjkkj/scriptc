@@ -499,7 +499,7 @@ export class LlDyn {
   dynDesc(t: IrType): string {
     switch (t.kind) {
       case "f64":
-        return "number";
+        return t.timer ?? "number";
       case "string":
         return "string";
       case "bool":
@@ -566,7 +566,12 @@ export class LlDyn {
     };
     switch (t.kind) {
       case "f64":
-        kindIs(DK.NUM);
+        if (t.timer !== undefined) {
+          this.host.declare(`declare zeroext i1 @scr_dyn_is_timer(ptr, i1 zeroext)`);
+          const r = B.tmp();
+          B.line(`${r} = call zeroext i1 @scr_dyn_is_timer(ptr %d, i1 zeroext ${t.timer === "Immediate" ? "true" : "false"})`);
+          B.terminate(`ret i1 ${r}`);
+        } else kindIs(DK.NUM);
         break;
       case "string": {
         // The C twin's note: a TextEncoder/TextDecoder box is a string
@@ -1171,6 +1176,24 @@ export class LlDyn {
     };
     switch (t.kind) {
       case "f64": {
+        if (t.timer !== undefined) {
+          // A timer handle: the box must be a handle of this timer's tag (the
+          // static check); its value is the id the handle carries.
+          this.host.declare(`declare zeroext i1 @scr_dyn_is_timer(ptr, i1 zeroext)`);
+          this.host.declare(`declare double @scr_dyn_timer_id(ptr)`);
+          const ok = B.tmp();
+          B.line(`${ok} = call zeroext i1 @scr_dyn_is_timer(ptr %d, i1 zeroext ${t.timer === "Immediate" ? "true" : "false"})`);
+          const lo = B.newLabel("dc.k");
+          const lf = B.newLabel("dc.f");
+          B.condBr(ok, lo, lf);
+          B.startBlock(lf);
+          failRet();
+          B.startBlock(lo);
+          const v = B.tmp();
+          B.line(`${v} = call double @scr_dyn_timer_id(ptr %d)`);
+          B.terminate(`ret double ${v}`);
+          break;
+        }
         requireKind(DK.NUM, "dc");
         const v = this.payloadOf(B, "%d", "double");
         B.terminate(`ret double ${v}`);
@@ -2447,6 +2470,13 @@ export class LlDyn {
     const B = new BlockBuilder();
     switch (t.kind) {
       case "f64": {
+        if (t.timer !== undefined) {
+          host.declare(`declare ptr @scr_dyn_box_timer(double, i1 zeroext)`);
+          const r = B.tmp();
+          B.line(`${r} = call ptr @scr_dyn_box_timer(double %v, i1 zeroext ${t.timer === "Immediate" ? "true" : "false"})`);
+          B.terminate(`ret ptr ${r}`);
+          break;
+        }
         host.declare(`declare ptr @scr_dyn_new_num(double)`);
         const r = B.tmp();
         B.line(`${r} = call ptr @scr_dyn_new_num(double %v)`);
@@ -3233,10 +3263,16 @@ export class LlDyn {
       }
       case "f64": {
         host.declare(`declare double @scr_promise_payload_f64(ptr)`);
-        host.declare(`declare ptr @scr_dyn_new_num(double)`);
         const x = B.tmp();
         const dv = B.tmp();
         B.line(`${x} = call double @scr_promise_payload_f64(ptr %src)`);
+        if (inner.timer !== undefined) {
+          host.declare(`declare ptr @scr_dyn_box_timer(double, i1 zeroext)`);
+          B.line(`${dv} = call ptr @scr_dyn_box_timer(double ${x}, i1 zeroext ${inner.timer === "Immediate" ? "true" : "false"})`);
+          fulfill(dv);
+          break;
+        }
+        host.declare(`declare ptr @scr_dyn_new_num(double)`);
         B.line(`${dv} = call ptr @scr_dyn_new_num(double ${x})`);
         fulfill(dv);
         break;

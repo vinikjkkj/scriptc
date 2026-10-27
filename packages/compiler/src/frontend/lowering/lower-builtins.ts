@@ -46,7 +46,7 @@ import { deferredCallThunk, timerStyleCallback } from "./lower-calls.js";
 import { dynBuiltinFnValueOf } from "./lower-fnvalue.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
 import { lowerDateLocaleFormat } from "./lower-numfmt.js";
-import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, IMMEDIATE_T, TIMEOUT_T, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 import { jsonModuleOfRequire } from "./lower-modules.js";
 
 
@@ -11905,7 +11905,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         : name === "unref" ? "timers.unref" : "timers.ref";
       // Returns the handle for chaining (`setTimeout(...).unref()` — Node
       // returns the Timeout/Immediate); the libCall yields the f64 back.
-      return { kind: "libCall", fn, args: [handle], type: F64, loc };
+      return { kind: "libCall", fn, args: [handle], type: isImmediate ? IMMEDIATE_T : TIMEOUT_T, loc };
     }
     if (name === "hasRef" && call.arguments.length === 0) {
       const handle = L.lowerExprExpecting(access.expression, F64);
@@ -11916,7 +11916,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       // Re-arms to now + the original delay; yields the handle back for
       // chaining, like unref/ref.
       const handle = L.lowerExprExpecting(access.expression, F64);
-      return { kind: "libCall", fn: "timers.refresh", args: [handle], type: F64, loc };
+      return { kind: "libCall", fn: "timers.refresh", args: [handle], type: TIMEOUT_T, loc };
     }
     L.noLowering(
       `${isImmediate ? "Immediate" : "Timeout"}.${name}`,

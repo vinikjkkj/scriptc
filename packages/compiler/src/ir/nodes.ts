@@ -37,7 +37,11 @@ export interface SrcLoc {
 export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64" | "i8" | "i16" | "u16" | "buf";
 
 export type IrType =
-  | { kind: "f64" }
+  /** `timer` marks a Node Timeout/Immediate handle: the same f64 id, typed so
+   * that crossing into the checked-dynamic tree boxes it as a HANDLE of its
+   * own tag (member reads, calls and `in` reach Node's surface) instead of a
+   * plain number. Every static consumer treats it as the f64 it is. */
+  | { kind: "f64"; timer?: "Timeout" | "Immediate" }
   | { kind: "string" } // heap, refcounted, UTF-8
   | { kind: "bool" }
   | { kind: "array"; elem: IrType } // heap, refcounted, monomorphic elements
@@ -608,6 +612,10 @@ export const UNION_ARM_JS_OBJECT_KINDS: ReadonlySet<string> = new Set([
 
 
 export const F64: IrType = { kind: "f64" };
+/** A Node Timeout (setTimeout/setInterval/refresh/unref results): an f64 id, boxed as a timer handle. */
+export const TIMEOUT_T: IrType = { kind: "f64", timer: "Timeout" };
+/** A Node Immediate (setImmediate result): an f64 id in the check-phase space, boxed as a timer handle. */
+export const IMMEDIATE_T: IrType = { kind: "f64", timer: "Immediate" };
 export const BYTES_U8: IrType = { kind: "bytes", elem: "u8" };
 export const STRING: IrType = { kind: "string" };
 export const BOOL: IrType = { kind: "bool" };
@@ -1083,6 +1091,7 @@ export function funcOf(params: IrType[], ret: IrType): IrType {
  * canonical) shapeId/unionId, so keys stay finite and comparable. Lives in
  * the IR (not the frontend) because both ends need it. */
 export function typeKey(t: IrType): string {
+  if (t.kind === "f64" && t.timer !== undefined) return `f64:${t.timer}`;
   switch (t.kind) {
     case "f64":
     case "string":
@@ -7651,7 +7660,7 @@ export type IrExpr =
   /** `member` (with "class" only): the instance's class table must have NO
    * member of that name, so a user override or own member keeps the call
    * (lowerDynEmitterReceiverCall's gate on the builtin emitter). */
-  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set" | "date" | "regex" | "class"; className?: string; member?: string; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set" | "date" | "regex" | "class" | "timeoutHandle" | "immediateHandle"; className?: string; member?: string; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An

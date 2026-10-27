@@ -11185,6 +11185,11 @@ class LlEmitter {
             test = orIsl(oneOf([DK.ARR]), "scr_dyn_isl_is_array");
           } else if (e.test === "function") {
             test = orIsl(oneOf([DK.FUNC]), "scr_dyn_isl_typeof_is", this.cstr("function"));
+          } else if (e.test === "timeoutHandle" || e.test === "immediateHandle") {
+            // A Timeout / Immediate handle: the same runtime predicate the C lane calls.
+            this.declare(`declare zeroext i1 @scr_dyn_is_timer(ptr, i1 zeroext)`);
+            test = B.tmp();
+            B.line(`${test} = call zeroext i1 @scr_dyn_is_timer(ptr ${d.name}, i1 zeroext ${e.test === "immediateHandle" ? "true" : "false"})`);
           } else if (e.test === "u8array") {
             // `u instanceof Uint8Array`: the DK.BYTES compare is not the
             // answer on its own, because a boxed DataView rides the same
