@@ -4707,6 +4707,7 @@ typedef enum {
   SCR_DYNH_TRACING,      /* scr_dc.c — diagnostics_channel TracingChannel (registry id) */
   SCR_DYNH_SECURE_CTX,   /* scr_tls.c — tls.SecureContext (refcounted parsed cert/key, by reference) */
   SCR_DYNH_KEYOBJ,       /* ScrKeyObject — crypto.KeyObject (scr_asym.c; retained, by reference) */
+  SCR_DYNH_STRDEC,       /* scr_json.c — a StringDecoder box (write/end over the strdec steps) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
@@ -9127,6 +9128,7 @@ bool scr_bytes_is_plain_u8(const ScrBytes *b, const ScrStr *why);
  * trailing-lead-surrogate holds. None throws. */
 ScrStr *scr_strdec_write(const ScrStr *enc, double pending, const ScrBytes *chunk);
 ScrStr *scr_strdec_enc_of(const ScrDyn *v);
+ScrDyn *scr_strdec_dyn_box(const ScrStr *enc, double pending);
 double scr_strdec_next(const ScrStr *enc, double pending, const ScrBytes *chunk);
 ScrStr *scr_strdec_end(const ScrStr *enc, double pending);
 

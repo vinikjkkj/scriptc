@@ -3065,6 +3065,134 @@ static ScrDyn *scr_textcodec_box_impl(ScrStr *s) {
   return scr_dyn_new_handle(s, SCR_DYNH_TEXTCODEC);
 }
 
+/* ── StringDecoder as a checked-dynamic handle (SCR_DYNH_STRDEC) ─────────
+ * A StringDecoder that crosses into the checked-dynamic tree (a `this.decoder
+ * = new StringDecoder(enc)` on a function-constructor instance, whose field is
+ * dyn) becomes a box that ANSWERS its members: write(buf) and end([buf]) run
+ * the same strdec steps as the static lowering, and the box owns the pending
+ * partial sequence the static record would have carried in its field. The
+ * `encoding` read answers the canonical name. lastChar / lastNeed / lastTotal
+ * are Node's decoder fields this tier does not model: they throw the loud
+ * ladder rather than answer. */
+typedef struct ScrStrDecBox {
+  size_t rc;
+  ScrStr *enc; /* owned: the canonical encoding name */
+  double pending;
+} ScrStrDecBox;
+
+static void *scr_strdec_box_retain(void *h) {
+  ScrStrDecBox *b = (ScrStrDecBox *)h;
+  b->rc++;
+  return b;
+}
+
+static void scr_strdec_box_release(void *h) {
+  ScrStrDecBox *b = (ScrStrDecBox *)h;
+  if (--b->rc == 0) {
+    scr_str_release(b->enc);
+    free(b);
+  }
+}
+
+/* write(chunk): the decoded complete prefix; the pending partial re-buffers. +1. */
+static ScrStr *scr_strdec_box_write(ScrStrDecBox *b, const ScrBytes *ib) {
+  ScrStr *s = scr_strdec_write(b->enc, b->pending, ib);
+  b->pending = scr_strdec_next(b->enc, b->pending, ib);
+  return s;
+}
+
+static bool scr_strdec_box_is_bytes(const ScrDyn *d) {
+  return d->kind == SCR_DYN_BYTES || d->kind == SCR_DYN_ARRBUF;
+}
+
+static ScrDyn *scr_strdec_box_invoke(void *h, ScrDyn *self, const char *method, ScrDyn *const *args,
+                                     size_t argc, const char *what) {
+  (void)self;
+  ScrStrDecBox *b = (ScrStrDecBox *)h;
+  if (strcmp(method, "write") == 0) {
+    if (argc < 1 || !scr_strdec_box_is_bytes(args[0])) {
+      scr_dyn_arg_type_fail("buf", "an instance of Buffer, TypedArray, or DataView",
+                            argc < 1 ? scr_dyn_undefined() : args[0]);
+      return NULL;
+    }
+    ScrStr *s = scr_strdec_box_write(b, args[0]->v.bytes);
+    ScrDyn *d = scr_dyn_new_str(s);
+    scr_str_release(s);
+    return d;
+  }
+  if (strcmp(method, "end") == 0) {
+    /* end([buf]) is write(buf) followed by end(): both halves, concatenated. */
+    ScrStr *head = NULL;
+    if (argc > 0 && args[0]->kind != SCR_DYN_UNDEF) {
+      if (!scr_strdec_box_is_bytes(args[0])) {
+        scr_dyn_arg_type_fail("buf", "an instance of Buffer, TypedArray, or DataView", args[0]);
+        return NULL;
+      }
+      head = scr_strdec_box_write(b, args[0]->v.bytes);
+    }
+    ScrStr *tail = scr_strdec_end(b->enc, b->pending);
+    b->pending = 0;
+    ScrStr *out = head == NULL ? tail : scr_str_concat(head, tail);
+    if (head != NULL) {
+      scr_str_release(head);
+      scr_str_release(tail);
+    }
+    ScrDyn *d = scr_dyn_new_str(out);
+    scr_str_release(out);
+    return d;
+  }
+  if (strcmp(method, "toString") == 0 || strcmp(method, "toLocaleString") == 0) {
+    return scr_tc_new_plain_str("[object StringDecoder]");
+  }
+  if (strcmp(method, "valueOf") == 0) return scr_dyn_retain(self);
+  if (strcmp(method, "hasOwnProperty") == 0) return scr_dyn_new_bool(false);
+  char msg[160];
+  const int n = snprintf(msg, sizeof msg, "%s is not a function", what);
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+  return NULL;
+}
+
+static ScrDyn *scr_strdec_box_get(void *h, const char *key, size_t key_len) {
+  (void)key_len;
+  ScrStrDecBox *b = (ScrStrDecBox *)h;
+  if (strcmp(key, "encoding") == 0) return scr_dyn_new_str(b->enc);
+  if (strcmp(key, "lastChar") == 0 || strcmp(key, "lastNeed") == 0 || strcmp(key, "lastTotal") == 0) {
+    char msg[200];
+    const int n = snprintf(msg, sizeof msg,
+                           "StringDecoder.%s is not supported yet (the partial-sequence fields are not modeled on a dynamic value)",
+                           key);
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)n);
+    return NULL;
+  }
+  return NULL; /* not a modeled property: the caller answers undefined */
+}
+
+static bool scr_strdec_box_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)h;
+  (void)key;
+  (void)key_len;
+  (void)value;
+  return false; /* an expando: the loud ladder every handle shares */
+}
+
+static const ScrDynHandleOps scr_strdec_box_ops = {
+  "StringDecoder", &scr_strdec_box_retain, &scr_strdec_box_release, &scr_strdec_box_invoke, &scr_strdec_box_get,
+  &scr_strdec_box_set, NULL,
+};
+
+/* A StringDecoder record crossing into the dyn tree (the emitters' dynFrom arm
+ * for a shape the frontend built from `StringDecoder`). `enc` is borrowed. */
+ScrDyn *scr_strdec_dyn_box(const ScrStr *enc, double pending) {
+  if (scr_dynh_ops[SCR_DYNH_STRDEC] == NULL) scr_dyn_handle_install(SCR_DYNH_STRDEC, &scr_strdec_box_ops);
+  ScrStrDecBox *b = (ScrStrDecBox *)malloc(sizeof *b);
+  b->rc = 1;
+  b->enc = scr_str_new(enc->data, enc->len);
+  b->pending = pending;
+  ScrDyn *d = scr_dyn_new_handle(b, SCR_DYNH_STRDEC);
+  scr_strdec_box_release(b);
+  return d;
+}
+
 /* ── class instances in the checked-dynamic tree (SCR_DYN_OBJINST) ────
  * The whole kind is five functions, and that is the point: the box
  * CARRIES an instance and hands it back, and every question that would

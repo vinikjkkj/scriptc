@@ -10676,6 +10676,17 @@ class LlEmitter {
           return this.own({ name: t, type: e.type });
         }
         const v = this.emitExpr(e.value);
+        if (v.type.kind === "record" && this.recordsById.get(v.type.shapeId)?.builtin?.ctorName === "StringDecoder") {
+          // A StringDecoder crosses as a checked-dynamic box that answers write/end (scr_json.c).
+          const ep = this.recordFieldPtr(v.name, v.type.shapeId, "encoding");
+          const ev = this.loadField(ep.ptr, ep.type);
+          const pp = this.recordFieldPtr(v.name, v.type.shapeId, "%pending");
+          const pv = this.loadField(pp.ptr, pp.type);
+          this.declare(`declare ptr @scr_strdec_dyn_box(ptr, double)`);
+          const t = B.tmp();
+          B.line(`${t} = call ptr @scr_strdec_dyn_box(ptr ${ev}, double ${pv})`);
+          return this.own({ name: t, type: e.type });
+        }
         if (v.type.kind === "func") {
           // A closure boxes as the checked-dynamic tree's function kind: retained closure +
           // the per-signature call thunk + the interned signature key. The

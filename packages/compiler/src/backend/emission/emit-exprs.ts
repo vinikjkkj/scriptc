@@ -2670,6 +2670,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           return E.newImmortalTemp(e.type, "scr_dyn_undefined()");
         }
         const v = E.emitExpr(e.value);
+        if (v.type.kind === "record" && E.recordsById.get(v.type.shapeId)?.builtin?.ctorName === "StringDecoder") {
+          // A StringDecoder crosses as a checked-dynamic box that answers write/end (scr_json.c).
+          return E.newTemp(e.type, `scr_strdec_dyn_box(${v.name}->${mangleField("encoding")}, ${v.name}->${mangleField("%pending")})`);
+        }
         if (v.type.kind === "func") {
           // A closure boxes as the checked-dynamic tree's function kind: retained closure +
           // the per-signature call thunk + the interned signature key. The

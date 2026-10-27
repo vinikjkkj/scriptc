@@ -18,3 +18,9 @@ try {
 }
 var ok = new StringDecoder(names[2]);
 console.log(JSON.stringify(ok.write(Buffer.from([0x41, 0x00]))));
+var num = 5;
+try {
+  new StringDecoder(num);
+} catch (e) {
+  console.log(e.code + " " + e.message);
+}

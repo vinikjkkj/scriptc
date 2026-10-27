@@ -1367,6 +1367,11 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
         static const char *const rem[] = { "exec", "test", "toString", "compile", NULL };
         return dyn_name_in(m, rem) || dyn_objproto_knows(m);
       }
+      if (recv->v.handle.tag == SCR_DYNH_STRDEC) {
+        /* StringDecoder.prototype: write, end, and text (Node's own method beside them). */
+        static const char *const sdm[] = { "write", "end", "text", "toString", "toLocaleString", NULL };
+        return dyn_name_in(m, sdm) || dyn_objproto_knows(m);
+      }
       if (recv->v.handle.tag == SCR_DYNH_TEXTCODEC) {
         /* TextEncoder: encode / encodeInto. TextDecoder: decode. Both
          * inherit Object.prototype's names; the read agrees with the ops

@@ -1238,12 +1238,13 @@ ScrStr *scr_strdec_enc_of(const ScrDyn *v) {
     else if (strcmp(low, "ucs2") == 0 || strcmp(low, "ucs-2") == 0 || strcmp(low, "utf-16le") == 0) canon = "utf16le";
     return scr_str_new(canon, strlen(canon));
   }
+  /* Node interpolates the value (`Unknown encoding: ${enc}`): ToString of it. */
+  ScrStr *shown = scr_dyn_string_coerce_js(v);
   ScrJsonBuf b;
   scr_jb_init(&b);
   scr_jb_puts(&b, "Unknown encoding: ");
-  if (v->kind == SCR_DYN_STR) {
-    for (size_t i = 0; i < v->v.str->len && i < 64; i++) scr_jb_putc(&b, v->v.str->data[i]);
-  }
+  for (size_t i = 0; i < shown->len; i++) scr_jb_putc(&b, shown->data[i]);
+  scr_str_release(shown);
   ScrStr *msg = scr_jb_finish(&b);
   scr_throw_error_msg_code(SCR_ERR_TYPE, msg->data, msg->len, "ERR_UNKNOWN_ENCODING");
   scr_str_release(msg);
