@@ -69,6 +69,7 @@ import {
   canonicalBuiltinModule,
   type StartupCrash,
   cjsExportAssignmentOf,
+  cjsKeyedForEachOf,
   cjsExportTargetLiteral,
   isCjsJsFile,
   cjsExportDiscardReason,
@@ -2602,6 +2603,14 @@ export class Lowerer {
       if (!(ts.isIdentifier(recv) && recv.text === "exports") && !isModuleExportsAccess(recv)) continue;
       const sym = this.checker.getSymbolAtLocation(l.name);
       if (sym !== undefined) return sym;
+    }
+    // A keyed forEach export (program.ts cjsKeyedForEachOf): the key's member symbol is the literal
+    // property that names it, and its identifier value is the alias target the registration reads.
+    for (const stmt of sf.statements) {
+      const kf = cjsKeyedForEachOf(stmt, sf);
+      if (kf === null) continue;
+      const key = kf.keys.find((k) => k.name === name);
+      if (key !== undefined) return this.resolveValueSymbol(key.valueNode) ?? undefined;
     }
     if (!isCjsTsSource(sf)) return undefined;
     // A CommonJS-style TypeScript module: tsc makes no export symbols for

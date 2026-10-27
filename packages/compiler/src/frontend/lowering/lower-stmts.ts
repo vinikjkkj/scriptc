@@ -12,7 +12,7 @@ import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
-import { cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, resolveImport, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
+import { type CjsKeyedForEach, cjsKeyedForEachOf, cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, resolveImport, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordWrite, isBareExportsAccess } from "./cjs-export-record.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibBufferVarAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
@@ -7138,6 +7138,7 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       );
     }
     if (topLevelJs && ts.isExpressionStatement(stmtNode)) {
+      { const kf = cjsKeyedForEachOf(stmtNode, stmtNode.getSourceFile()); if (kf !== null) return lowerKeyedForEach(L, kf); }
       const cjs = cjsExportAssignmentOf(stmtNode);
       if (cjs) return lowerCjsExportStatement(L, cjs);
       // The tsc CJS interop stamp — `Object.defineProperty(exports,
@@ -11846,3 +11847,63 @@ export function lowerForStatement(L: Lowerer, stmt: ts.ForStatement): IrStmt {
       L.scopes.pop();
     }
   }
+
+/** A keyed forEach export statement (program.ts cjsKeyedForEachOf): the callback body lowers once per literal
+ * key, in the key order Object.entries reports. The key parameter reads as the key's string and the value
+ * parameter as the literal's value (both substituted at their reads); the `module.exports[k] = v` write
+ * registers the members (lower-modules) and lowers to nothing. A key whose registered storage is not the
+ * literal value's own alias refuses: a read through a separate global would see a value no statement wrote. */
+export function lowerKeyedForEach(L: Lowerer, kf: CjsKeyedForEach): IrStmt {
+  const loc = locOf(kf.stmt);
+  const kSym = L.resolveValueSymbol(kf.keyParam);
+  const vSym = L.resolveValueSymbol(kf.valueParam);
+  const idents = (n: ts.Node, out: ts.Identifier[]): ts.Identifier[] => {
+    if (ts.isIdentifier(n)) out.push(n);
+    ts.forEachChild(n, (c) => { idents(c, out); });
+    return out;
+  };
+  const kRefs: ts.Identifier[] = [];
+  const vRefs: ts.Identifier[] = [];
+  for (const s of kf.body.statements) {
+    if (s === kf.exportStmt) continue;
+    for (const id of idents(s, [])) {
+      if (id.text !== kf.keyParam.text && id.text !== kf.valueParam.text) continue;
+      const sym = L.resolveValueSymbol(id);
+      if (sym !== null && sym === kSym) kRefs.push(id);
+      else if (sym !== null && sym === vSym) vRefs.push(id);
+    }
+  }
+  // The checker types the value parameter as the union of the literal's values: a read of it (a property read
+  // off it, say) would need the per-key arm, which is not lowered. Refuse at the reference, loudly.
+  for (const id of vRefs) {
+    if (L.mapTypeOf(L.typeOf(id))?.kind === "union") {
+      L.unsupported(
+        "SC1090",
+        id,
+        `the keyed value '${kf.valueParam.text}' of a forEach over the literal's keys (its type is the union of the literal's values; a per-key arm is not lowered)`,
+      );
+    }
+  }
+  const out: IrStmt[] = [];
+  for (const key of kf.keys) {
+    const strLit: IrExpr = { kind: "strLit", value: key.name, type: STRING, loc };
+    for (const id of kRefs) L.preLowered.set(id, strLit);
+    if (vRefs.length > 0) {
+      const vIr = L.lowerExpr(key.valueNode);
+      for (const id of vRefs) L.preLowered.set(id, vIr);
+    }
+    try {
+      for (const s of kf.body.statements) {
+        if (s === kf.exportStmt) continue;
+        const r = lowerStmt(L, s);
+        if (r === null) continue;
+        if (Array.isArray(r)) out.push(...r);
+        else out.push(r);
+      }
+    } finally {
+      for (const id of kRefs) L.preLowered.delete(id);
+      for (const id of vRefs) L.preLowered.delete(id);
+    }
+  }
+  return { kind: "block", body: out, loc };
+}
