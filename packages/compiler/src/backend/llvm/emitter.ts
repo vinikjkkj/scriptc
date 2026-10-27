@@ -61,7 +61,6 @@
  * the island surface (jsval/jsExit — the engine bridge).
  */
 import type {
-  IrBytesElem,
   IrExpr,
   IrFfiImport,
   IrFunction,
