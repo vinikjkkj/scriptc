@@ -5092,7 +5092,16 @@ export class LlDyn {
           : (() => {
               const r = B.tmp();
               B.line(`${r} = call ptr @${this.toDynHelper(row.type)}(${this.valTy(row.type)} ${v})`);
-              return r;
+              if (!arrayTypeHasLiveView(row.type)) return r;
+              // The array field is the SAME array the instance holds: the copy
+              // records it as its origin (the C twin is fieldDynC).
+              const { retain, release } = vAdapters(host, row.type);
+              host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
+              const m = B.tmp();
+              B.line(
+                `${m} = call ptr @scr_dyn_origin_mark(ptr ${r}, ptr ${v}, ptr ${host.cstr(typeKey(row.type))}, ptr ${retain}, ptr ${release})`,
+              );
+              return m;
             })();
         B.terminate(`ret ptr ${out}`);
         this.defs.push(
