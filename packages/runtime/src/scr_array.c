@@ -650,7 +650,27 @@ void *scr_arr_copy_ref(ScrArr *a, double i) {
 
 /* ── writes: i == len appends ──────────────────────────────────────────── */
 
+/* A write past the end of a REF array (any[] / dyn-element) grows it over the
+ * skipped indices. Those slots are NULL, the hole every ref array reads as
+ * undefined (scr_arr_get_ref refuses, the dyn read answers the immortal
+ * undefined), so `a[5] = x` on an empty array has JS's holes. A scalar array
+ * has no absent slot, so its out-of-range write still traps (a known gap,
+ * not this path). The bound keeps one wild index from allocating gigabytes;
+ * beyond it the write traps as before. */
+#define SCR_ARR_SPARSE_LIMIT 16777216.0 /* 2^24 slots */
+
+static void scr_arr_grow_holes(ScrArr *a, size_t idx) {
+  size_t holes = idx - a->len;
+  scr_arr_grow(a, idx + 1);
+  memset(a->data + a->len, 0, holes * sizeof(uint64_t));
+  a->len = idx;
+}
+
 static void scr_arr_set_slot(ScrArr *a, double i, uint64_t slot) {
+  if (scr_elem_is_ref(a->elem) && i > (double)a->len && i < (double)a->len + SCR_ARR_SPARSE_LIMIT &&
+      i == trunc(i)) {
+    scr_arr_grow_holes(a, (size_t)i);
+  }
   size_t idx = scr_arr_check_index(a, i, true);
   if (idx == a->len) {
     scr_arr_grow(a, a->len + 1);
