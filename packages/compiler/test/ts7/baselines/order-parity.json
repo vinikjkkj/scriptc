@@ -2824,6 +2824,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13606-dyn-bool-bitwise-narrowed.js": {
+   "order": [
+    "<repo>/tests/corpus/13606-dyn-bool-bitwise-narrowed.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13607-dyn-bigint-shift-untyped.ts": {
+   "order": [
+    "<repo>/tests/corpus/13607-dyn-bigint-shift-untyped.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13608-bool-numeric-operators.js": {
+   "order": [
+    "<repo>/tests/corpus/13608-bool-numeric-operators.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1361-spawn-events.ts": {
    "order": [
     "<repo>/tests/corpus/1361-spawn-events.ts"
