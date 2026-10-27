@@ -8863,6 +8863,11 @@ size_t scr_bytes_index_checked(const ScrBytes *b, double i);
  * value's low 64 bits, which is ToBigInt64 / ToBigUint64 exactly. */
 ScrBigInt *scr_bytes_get_big(const ScrBytes *b, double i);
 void scr_bytes_set_big(ScrBytes *b, double i, const ScrBigInt *v);
+/* The bigint view methods, gated with the same unit: fill (value, range),
+ * indexOf/includes by value (forwards from `from`), and the in-place sort. */
+ScrBytes *scr_bytes_fill_big(ScrBytes *b, const ScrBigInt *v, double nargs, double from, double to);
+double scr_bytes_index_of_big(const ScrBytes *b, const ScrBigInt *v, double from);
+ScrBytes *scr_bytes_sort_big(ScrBytes *b);
 
 /* Own named properties of a bytes value. get: BORROWED value or NULL. set:
  * retains v (the caller keeps its reference). delete: true when an entry was

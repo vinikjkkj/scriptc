@@ -14859,6 +14859,33 @@ class LlEmitter {
           return call("scr_bytes_get_big", "ptr (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, true, false);
         }
         return call("scr_bytes_get_fast", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, false, false);
+      case "fillBig": {
+        // The bigint view's fill: the value is borrowed; the receiver is +1.
+        const n = e.args.length - 1;
+        return call(
+          "scr_bytes_fill_big",
+          "ptr (ptr, ptr, double, double, double)",
+          `ptr ${r.name}, ptr ${args[0]!.name}, double ${f64Lit(n)}, double ${args[1]?.name ?? f64Lit(0)}, double ${args[2]?.name ?? f64Lit(0)}`,
+          true,
+          false,
+        );
+      }
+      case "indexOfBig":
+      case "includesBig": {
+        const idx = call(
+          "scr_bytes_index_of_big",
+          "double (ptr, ptr, double)",
+          `ptr ${r.name}, ptr ${args[0]!.name}, double ${args[1]?.name ?? NAN}`,
+          false,
+          false,
+        );
+        if (method !== "includesBig") return idx;
+        const t = B.tmp();
+        B.line(`${t} = fcmp one double ${idx.name}, ${f64Lit(-1)}`);
+        return { name: t, type: e.type };
+      }
+      case "sortBig":
+        return call("scr_bytes_sort_big", "ptr (ptr)", `ptr ${r.name}`, true, false);
       case "slice":
         return call(
           "scr_bytes_slice",

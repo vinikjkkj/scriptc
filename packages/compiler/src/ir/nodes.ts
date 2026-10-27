@@ -2879,6 +2879,15 @@ export type IrStrIntrinsicMethod =
  * (integer kinds by modular truncation, Float32 by double→float
  * rounding). No BIG setters exist — bigint arguments never lower. */
 export type IrBytesIntrinsicMethod =
+  /** BigInt64Array / BigUint64Array methods (scr_bigint.c): fillBig(value,
+   * start?, end?) writes the value's low 64 bits over the range and answers
+   * the receiver; indexOfBig / includesBig(value, from?) search by bigint
+   * value forwards; sortBig() sorts ascending in place and answers the
+   * receiver. */
+  | "fillBig"
+  | "indexOfBig"
+  | "includesBig"
+  | "sortBig"
   /** copyWithin(target[, start[, end]]): an OVERLAPPING in-place move
    * (memmove, not memcpy -- source and destination are one buffer),
    * slice-clamped relative indices, never throws, receiver returned. */
@@ -2991,6 +3000,7 @@ export const DV_BIG_SET_METHODS: ReadonlySet<IrBytesIntrinsicMethod> = new Set([
 const BYTES_INTRINSIC_METHOD_SET: Record<IrBytesIntrinsicMethod, true> = {
   copyWithin: true,
   length: true, byteLength: true, get: true, slice: true,
+  fillBig: true, indexOfBig: true, includesBig: true, sortBig: true,
   subarray: true, toReversed: true, with: true, join: true,
   toArray: true, setFrom: true, toString: true, readNum: true,
   writeNum: true, readNumVar: true, writeNumVar: true, equals: true,

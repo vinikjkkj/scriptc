@@ -2908,6 +2908,14 @@ function validateFunction(
             ? { argTypes: [], minArgs: 0, result: F64 }
             : e.method === "get"
               ? { argTypes: [F64], minArgs: 1, result: bytesValueType(recv.elem) }
+              : e.method === "fillBig"
+                ? { argTypes: [BIGINT_T, F64, F64], minArgs: 1, result: bytesOf(recv.elem) }
+              : e.method === "indexOfBig"
+                ? { argTypes: [BIGINT_T, F64], minArgs: 1, result: F64 }
+              : e.method === "includesBig"
+                ? { argTypes: [BIGINT_T, F64], minArgs: 1, result: BOOL }
+              : e.method === "sortBig"
+                ? { argTypes: [], minArgs: 0, result: bytesOf(recv.elem) }
               : e.method === "slice" || e.method === "subarray"
                 ? { argTypes: [F64, F64], minArgs: 0, result: bytesOf(recv.elem) }
                 : e.method === "toReversed"

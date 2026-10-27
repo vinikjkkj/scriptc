@@ -5,7 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { canConvertToDyn, strandTrap } from "../../ir/nodes.js";
-import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { checkedArmBridge, lowerUnionContainerDispatch, captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
@@ -2910,7 +2910,13 @@ function lowerOptionalDefaultArg(
       L.noLowering(`.${method} with ${call.arguments.length} arguments on ${recvName}`, call);
     }
     if (bytesT.elem === "i64" || bytesT.elem === "u64") {
-      L.noLowering(`.${method} on ${recvName}`, call, "the bigint order is not lowered yet for BigInt64Array / BigUint64Array");
+      // The default numeric order of a bigint view: an in-place sort (sortBig).
+      // A comparator, and toSorted (a copy first), are not lowered yet.
+      if (method !== "sort" || call.arguments.length > 0) {
+        L.noLowering(`.${method} on ${recvName}`, call, "toSorted and sort with a comparator on a BigInt64Array / BigUint64Array are not lowered yet (the default sort() is)");
+      }
+      const sortRecv = L.lowerExpr(access.expression);
+      return { kind: "bytesIntrinsic", method: "sortBig", receiver: sortRecv, args: [], type: bytesT, loc };
     }
     const receiver = L.lowerExpr(access.expression);
     const undefinedArg = call.arguments[0]
@@ -8131,6 +8137,12 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
         L.noLowering(`.fill with ${nArgs} arguments on typed arrays`, call);
       }
       const receiver = L.lowerExpr(access.expression);
+      if (receiverIr.elem === "i64" || receiverIr.elem === "u64") {
+        // A bigint view takes a bigint value (its low 64 bits are written).
+        const bv = L.lowerExprExpecting(call.arguments[0]!, BIGINT);
+        const bidx = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, F64));
+        return { kind: "bytesIntrinsic", method: "fillBig", receiver, args: [bv, ...bidx], type: receiverIr, loc };
+      }
       const v = L.lowerExprExpecting(call.arguments[0]!, F64);
       const idx = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, F64));
       return { kind: "bytesIntrinsic", method: "fillElem", receiver, args: [v, ...idx], type: receiverIr, loc };
@@ -8245,6 +8257,12 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     if (declOnBuffer && receiverIr.elem === "u8") {
       const bufMethod = lowerBufferInstanceMethod(L, call, access, name, loc);
       if (bufMethod) return bufMethod;
+    }
+    // indexOf / includes on a bigint view: the by-value search (sortBig's
+    // sibling), lowered in lowerBufferInstanceMethod's bigint branch.
+    if ((name === "indexOf" || name === "includes") && (receiverIr.elem === "i64" || receiverIr.elem === "u64")) {
+      const bigMethod = lowerBufferInstanceMethod(L, call, access, name, loc);
+      if (bigMethod) return bigMethod;
     }
     // The Buffer numeric read/write families — every fixed-width kind in
     // both endiannesses ("Uint" and "UInt" alike: Node aliases both), plus
@@ -8562,6 +8580,13 @@ function lowerBufferInstanceMethod(L: Lowerer, call: ts.CallExpression,
     const resultT = name === "includes" ? BOOL : F64;
     const vT = L.mapTypeOf(L.typeOf(args[0]!));
     const receiver = L.lowerExpr(access.expression);
+    if (vT?.kind === "bigint" && receiver.type.kind === "bytes" && (receiver.type.elem === "i64" || receiver.type.elem === "u64")) {
+      // A bigint needle on a bigint view: search by value, forwards.
+      if (name === "lastIndexOf") L.noLowering(".lastIndexOf on a BigInt64Array / BigUint64Array", call);
+      const bv = L.lowerExprExpecting(args[0]!, BIGINT);
+      const fromArgs = offNode ? [L.lowerExprExpecting(offNode, F64)] : [];
+      return { kind: "bytesIntrinsic", method: name === "includes" ? "includesBig" : "indexOfBig", receiver, args: [bv, ...fromArgs], type: resultT, loc };
+    }
     if (vT?.kind === "f64") {
       // A number needle wraps & 0xFF at runtime (Buffer semantics; the
       // encoding is irrelevant, like Node).
