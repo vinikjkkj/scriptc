@@ -25,7 +25,7 @@ import {
   sideEffectFreeOptionValue,
   TLS_SERVER_DOCUMENTED_OPTIONS,
 } from "./surfaces.js";
-import { conditionalSpreadOf } from "./lower-exprs.js";
+import { conditionalSpreadOf, lowerDynObjectLiteral } from "./lower-exprs.js";
 import { inNamespaceConditionalArm } from "./lower-nsvalue.js";
 import { errorRootedType } from "./lower-stream.js";
 
@@ -2732,7 +2732,9 @@ function lowerTlsServerOptions(L: Lowerer, node: ts.Expression, what: string): {
  * rides WHOLE to the walker so the typed ladders run in Node's order
  * (the static walk would fence them before validating). */
 const TLS_VALIDATED_OPTIONS: ReadonlySet<string> = new Set([
-  "ciphers", "passphrase", "ecdhCurve", "sessionIdContext",
+  // `ca` is type-checked by the runtime walk (Node's ERR_INVALID_ARG_TYPE);
+  // the static literal path would drop a wrong-typed value silently.
+  "ca", "ciphers", "passphrase", "ecdhCurve", "sessionIdContext",
   "clientCertEngine", "privateKeyEngine", "privateKeyIdentifier",
   "minVersion", "maxVersion", "handshakeTimeout", "keepAliveInitialDelay",
   "sessionTimeout", "ticketKeys",
@@ -2749,9 +2751,27 @@ function tlsLiteralNeedsRuntimeWalk(node: ts.ObjectLiteralExpression): boolean {
   );
 }
 
+/** A JS options literal whose member is untyped at the checker (any/unknown,
+ * e.g. `{ cert: ssl.cert }` over an untyped `ssl`): such a member cannot take
+ * the static cert/key lowering (its .d.ts member type would be imposed on an
+ * unknown value — the SC1100 refusal), so the literal is runtime-walked. */
+function tlsLiteralHasUntypedMember(L: Lowerer, node: ts.ObjectLiteralExpression): boolean {
+  return node.properties.some((p) =>
+    ts.isPropertyAssignment(p) &&
+    (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
+    (L.typeOf(p.initializer).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0,
+  );
+}
+
 function lowerTlsServerOptionsOrDyn(
   L: Lowerer, node: ts.Expression, what: string,
 ): { cert: IrExpr; key: IrExpr; dyn?: undefined } | { dyn: IrExpr } {
+  if (ts.isObjectLiteralExpression(node) && isJsSourceFile(node.getSourceFile()) &&
+      (tlsLiteralNeedsRuntimeWalk(node) || tlsLiteralHasUntypedMember(L, node))) {
+    // The literal is boxed member by member (each value converts to the
+    // checked-dynamic tree at its own type) and handed to the runtime walk.
+    return { dyn: lowerDynObjectLiteral(L, node) };
+  }
   if (ts.isObjectLiteralExpression(node) && !tlsLiteralNeedsRuntimeWalk(node)) {
     return lowerTlsServerOptions(L, node, what);
   }
