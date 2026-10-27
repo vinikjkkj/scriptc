@@ -458,3 +458,33 @@ console.log(\`\${register(7)}\`);
     expect(r.stderr).toBe("");
   });
 });
+
+describe("spread of a checked-dynamic operand into a typed literal (JS lane)", () => {
+  // The literal is string[] by the checker, so its spread source must drain
+  // into it. An operand whose V8 not-iterable text this compiler does not spell
+  // exactly (parenthesized, `??`, a call) keeps the compile-time refusal.
+  test("a parenthesized checked-dynamic operand into a string[] literal is refused", async () => {
+    const d = await compileRefused(
+      "spread-dyn-typed-parenthesized",
+      `const flags = [];
+flags.push("PRIMARY KEY");
+console.log(["INT", ...(flags)].join(" "));
+`,
+      "js",
+    );
+    expect(d.some((x) => /^SC1090: spreading 'unknown' into a 'string\[\]' literal /.test(x)), d.join(" | ")).toBe(true);
+  });
+
+  test("a `??` checked-dynamic operand into a string[] literal is refused", async () => {
+    const d = await compileRefused(
+      "spread-dyn-typed-nullish",
+      `const flags = [];
+flags.push("NOT NULL");
+const fallback = [];
+console.log(["INT", ...(flags ?? fallback)].join(" "));
+`,
+      "js",
+    );
+    expect(d.some((x) => /^SC1090: spreading 'unknown' into a 'string\[\]' literal /.test(x)), d.join(" | ")).toBe(true);
+  });
+});
