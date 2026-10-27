@@ -2974,6 +2974,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13750-cached-getter-template-keys.js": {
+   "order": [
+    "<repo>/tests/corpus/13750-cached-getter-template-keys.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/140-bitwise-operators.ts": {
    "order": [
     "<repo>/tests/corpus/140-bitwise-operators.ts"
