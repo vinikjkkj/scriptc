@@ -414,7 +414,7 @@ function lowerOptionalDefaultArg(
       push: [0, Number.MAX_SAFE_INTEGER], pop: [0, 0], indexOf: [1, 1], includes: [1, 1], join: [0, 1],
       fill: [1, 3],
       concat: [0, Number.MAX_SAFE_INTEGER],
-      slice: [0, 2], shift: [0, 0], splice: [1, 2], at: [1, 1],
+      slice: [0, 2], shift: [0, 0], splice: [0, Number.MAX_SAFE_INTEGER], at: [1, 1],
       unshift: [0, Number.MAX_SAFE_INTEGER], reverse: [0, 0], copyWithin: [2, 3],
       map: [1, 1], filter: [1, 1], forEach: [1, 1], find: [1, 1], findIndex: [1, 1], some: [1, 1],
       findLast: [1, 1], findLastIndex: [1, 1],
@@ -582,6 +582,11 @@ function lowerOptionalDefaultArg(
       // receiver crosses as a dyn copy -- admitted only where the element
       // type converts (canConvertToDyn), so no identity is lost on the way --
       // and the result is a number/boolean, so the checked exit is exact.
+      // A dyn-element array searches with a BOXED needle, whatever its static
+      // type (a number, undefined, a string): the same dyn invoke below.
+      if (elem.kind === "dyn" && needle.type.kind !== "dyn") {
+        needle = { kind: "dynFrom", value: needle, type: DYN, loc };
+      }
       if (needle.type.kind === "dyn" && canConvertToDyn(receiver.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
         const inv: IrExpr = {
           kind: "dynInvoke",
@@ -683,6 +688,37 @@ function lowerOptionalDefaultArg(
       // order (their ownership moves out of the receiver). Insertion
       // (3+ args) fenced by arity above.
       const receiver = L.lowerExpr(access.expression);
+      if (call.arguments.length >= 3) {
+        // The INSERTION form splice(start, deleteCount, ...items): the items
+        // ride as one array of the receiver's element type (a literal of the
+        // lowered items, or the spread source itself when it is the only
+        // rest argument). Spread mixed with other items is fenced.
+        const rest = call.arguments.slice(2);
+        let items: IrExpr;
+        if (rest.length === 1 && ts.isSpreadElement(rest[0]!)) {
+          items = L.lowerExpr(rest[0]!.expression);
+          if (!typeEquals(items.type, arrayOf(elem))) {
+            L.unsupported("SC1090", rest[0]!, `splice of '${L.fmt(items.type)}' items into '${L.fmt(receiverIr)}' (only a same-element-type array spreads)`);
+          }
+        } else if (rest.some(ts.isSpreadElement)) {
+          L.unsupported("SC1090", call, "splice with a spread among several inserted items (spread the one array, or list the items)");
+        } else {
+          items = { kind: "arrayLit", elems: rest.map((el) => L.lowerExprExpecting(el, elem)), type: arrayOf(elem), loc };
+        }
+        if (ts.isSpreadElement(call.arguments[0]!) || ts.isSpreadElement(call.arguments[1]!)) {
+          L.unsupported("SC1090", call, "splice with a spread start or deleteCount");
+        }
+        const start = checkedJsNumber(L, call.arguments[0]!, L.lowerExpr(call.arguments[0]!));
+        const count = checkedJsNumber(L, call.arguments[1]!, L.lowerExpr(call.arguments[1]!));
+        if (start === null) L.badType(call.arguments[0]!, L.typeOf(call.arguments[0]!));
+        if (count === null) L.badType(call.arguments[1]!, L.typeOf(call.arguments[1]!));
+        return { kind: "arrIntrinsic", method: "splice", receiver, args: [start!, count!, items], type: receiverIr, loc };
+      }
+      // No arguments: splice() removes nothing (start 0, deleteCount 0).
+      if (call.arguments.length === 0) {
+        const zero = (): IrExpr => ({ kind: "numLit", value: 0, type: F64, loc });
+        return { kind: "arrIntrinsic", method: "splice", receiver, args: [zero(), zero()], type: receiverIr, loc };
+      }
       const args = call.arguments.map((a) => L.lowerExpr(a));
       for (let i = 0; i < args.length; i++) {
         const n = checkedJsNumber(L, call.arguments[i]!, args[i]!);
@@ -2611,6 +2647,18 @@ function lowerOptionalDefaultArg(
     const loc = locOf(call);
     const method = access.name.text === "toSorted" ? "toSorted" : "sort";
     const copyFirst = method === "toSorted";
+    if (call.arguments.length === 0 && elem.kind === "dyn") {
+      // No comparator over dyn elements: the ToString order, undefined last
+      // (scr_arr_sort_dyn). toSorted answers a fresh copy.
+      const receiver = L.lowerExpr(access.expression);
+      return {
+        kind: "libCall",
+        fn: copyFirst ? "array.toSortedDyn" : "array.sortDyn",
+        args: [receiver],
+        type: arrT,
+        loc,
+      };
+    }
     if (call.arguments.length === 0 && elem.kind === "string") {
       const receiver = L.lowerExpr(access.expression);
       const cmp = defaultStringCmpHelper(L, loc);
@@ -8789,6 +8837,11 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         list = { kind: "arrayLit", elems, type: arrayOf(BYTES_U8), loc };
       } else {
         list = L.lowerExpr(argNode);
+        // An any[] list (dyn elements, the library's lazy any): it crosses as a
+        // dyn array and takes the same dyn-list path below.
+        if (list.type.kind === "array" && list.type.elem.kind === "dyn") {
+          list = { kind: "dynFrom", value: list, type: DYN, loc };
+        }
         if (list.type.kind === "dyn") {
           if (args.length === 2) {
             const t0 = L.lowerExpr(args[1]!);

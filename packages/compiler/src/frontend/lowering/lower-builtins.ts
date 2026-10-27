@@ -4639,6 +4639,12 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           if (helper !== null) value = { kind: "call", callee: helper, args: [value], type: want, loc };
         }
       }
+      // An any[] (dyn elements, possibly nested in arrays): the value crosses
+      // as a dyn tree and the dyn serializer walks it, exactly Node's walk.
+      const dynElemChain = (t: IrType): boolean => t.kind === "array" && (t.elem.kind === "dyn" || dynElemChain(t.elem));
+      if (dynElemChain(value.type)) {
+        value = { kind: "dynFrom", value, type: DYN, loc };
+      }
       if (!L.jsonStringifiable(value.type) && value.type.kind !== "dyn") {
         // Bare undefined-armed unions get their own wording: Node's
         // stringify of bare undefined is not a string at all — per-type

@@ -1,0 +1,23 @@
+// sort (default string comparator, comparator fn), push/pop/shift/unshift/splice on dyn elements.
+const s: any[] = [10, 9, "b", "a", 1, undefined, null];
+s.sort();
+console.log(s.join(","));
+const n: any[] = [10, 9, 100, 1];
+n.sort((x: any, y: any) => x - y);
+console.log(n.join(","));
+n.sort((x: any, y: any) => y - x);
+console.log(n.join(","));
+const m: any[] = [];
+m.push(1, "two");
+m.push(null);
+console.log(m.length, m.join("|"));
+console.log(m.pop(), m.length);
+console.log(m.shift(), m.join("|"));
+m.unshift("zero", 0);
+console.log(m.join("|"), m.length);
+const q: any[] = [1, 2, 3, 4, 5];
+const removed: any[] = q.splice(1, 2);
+console.log(removed.join(","), q.join(","));
+q.splice(1, 0, "a", "b");
+console.log(q.join(","));
+console.log(q.splice(-1).join(","), q.join(","));

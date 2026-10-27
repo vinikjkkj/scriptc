@@ -1060,6 +1060,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "buffer.isEncoding": { argTypes: [STRING], result: BOOL },
   "buffer.concatLen": { argTypes: [arrayOf(BYTES_U8), F64], result: BYTES_U8 },
   "buffer.concatDyn": { argTypes: [DYN], result: BYTES_U8 },
+  "array.sortDyn": { argTypes: [arrayOf(DYN)], result: arrayOf(DYN) },
+  "array.toSortedDyn": { argTypes: [arrayOf(DYN)], result: arrayOf(DYN) },
   "dyn.dataViewNew": { argTypes: [DYN, DYN, DYN], result: BYTES_U8 },
   "dyn.u8ViewNew": { argTypes: [DYN, DYN, DYN], result: BYTES_U8 },
   "buffer.concatDynLen": { argTypes: [DYN, DYN], result: BYTES_U8 },
@@ -3001,7 +3003,9 @@ function validateFunction(
                       : e.method === "with"
                         ? { argTypes: [F64, elem], result: e.receiver.type }
                   : e.method === "splice"
-                    ? { argTypes: [F64, F64], result: e.receiver.type }
+                    ? (e.args.length === 3
+                      ? { argTypes: [F64, F64, e.receiver.type], result: e.receiver.type }
+                      : { argTypes: [F64, F64], result: e.receiver.type })
                         : e.method === "shift"
                           ? { argTypes: [], result: e.type } // union-checked below
                           : { argTypes: [], result: F64 }; // length
@@ -3025,7 +3029,10 @@ function validateFunction(
           // misjudge JS ===; the frontend fences these.
           err(`arrIntrinsic ${e.method} on union elements (frontend must reject)`, e.loc);
         }
-        if (e.method === "shift") {
+        if (e.method === "shift" && elem.kind === "dyn") {
+          // A dyn element: the result is a dyn box (undefined included).
+          if (e.type.kind !== "dyn") err("arrIntrinsic shift on dyn elements must yield dyn", e.loc);
+        } else if (e.method === "shift") {
           // The result is the interned `elem | undefined` union (union
           // elements are frontend-fenced, so the arms never collide).
           if (elem.kind === "union") {
