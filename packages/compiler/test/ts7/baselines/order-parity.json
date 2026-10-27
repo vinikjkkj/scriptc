@@ -2788,6 +2788,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13605-dyn-relational-dates.ts": {
+   "order": [
+    "<repo>/tests/corpus/13605-dyn-relational-dates.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/13606-dyn-bool-bitwise-narrowed.js": {
    "order": [
     "<repo>/tests/corpus/13606-dyn-bool-bitwise-narrowed.js"
@@ -2806,9 +2812,21 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13609-dyn-date-number-coercion.ts": {
+   "order": [
+    "<repo>/tests/corpus/13609-dyn-date-number-coercion.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1361-spawn-events.ts": {
    "order": [
     "<repo>/tests/corpus/1361-spawn-events.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13610-jsdoc-number-param-bigint-call.js": {
+   "order": [
+    "<repo>/tests/corpus/13610-jsdoc-number-param-bigint-call.js"
    ],
    "diags": []
   },
