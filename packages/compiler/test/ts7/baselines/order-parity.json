@@ -2262,6 +2262,109 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/12800-tls-ctx-cache-identity.js": {
+   "order": [
+    "<repo>/tests/corpus/12800-tls-ctx-cache-identity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12801-tls-ctx-invalid-option-types.js": {
+   "order": [
+    "<repo>/tests/corpus/12801-tls-ctx-invalid-option-types.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12802-tls-ctx-dyn-record-map.js": {
+   "order": [
+    "<repo>/tests/corpus/12802-tls-ctx-dyn-record-map.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12803-tls-ctx-optional-members.js": {
+   "order": [
+    "<repo>/tests/corpus/12803-tls-ctx-optional-members.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12900-buffer-prototype-identity-kinds/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12900-buffer-prototype-identity-kinds/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12901-buffer-prototype-for-in-keys/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12901-buffer-prototype-for-in-keys/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12902-safer-shaped-prototype-export/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12902-safer-shaped-prototype-export/lib.cjs",
+    "<repo>/tests/corpus/12902-safer-shaped-prototype-export/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12903-prototype-numeric-methods-call/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12903-prototype-numeric-methods-call/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12904-prototype-getters-and-instanceof-links/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12904-prototype-getters-and-instanceof-links/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12905-prototype-link-instanceof-and-new/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12905-prototype-link-instanceof-and-new/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12906-prototype-slices-and-writes/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12906-prototype-slices-and-writes/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12907-prototype-equals-compare-copy-swap/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12907-prototype-equals-compare-copy-swap/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12908-prototype-write-and-slice-view/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12908-prototype-write-and-slice-view/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12909-instance-slices-typeof-probe/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12909-instance-slices-typeof-probe/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12910-prototype-bigint64-read-write/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12910-prototype-bigint64-read-write/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12911-prototype-tojson-and-inspect/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12911-prototype-tojson-and-inspect/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12912-bigint-write-range-errors/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12912-bigint-write-range-errors/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/12950-undefcmp-call-unit-neq.ts": {
    "order": [
     "<repo>/tests/corpus/12950-undefcmp-call-unit-neq.ts"
@@ -2349,6 +2452,18 @@
   "<repo>/tests/corpus/1300-errors-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1300-errors-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13005-prototype-own-names-fold.ts": {
+   "order": [
+    "<repo>/tests/corpus/13005-prototype-own-names-fold.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13006-prototype-method-descriptor.js": {
+   "order": [
+    "<repo>/tests/corpus/13006-prototype-method-descriptor.js"
    ],
    "diags": []
   },
@@ -18087,97 +18202,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/12900-buffer-prototype-identity-kinds/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12900-buffer-prototype-identity-kinds/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12901-buffer-prototype-for-in-keys/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12901-buffer-prototype-for-in-keys/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12902-safer-shaped-prototype-export/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12902-safer-shaped-prototype-export/lib.cjs",
-    "<repo>/tests/corpus/12902-safer-shaped-prototype-export/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12903-prototype-numeric-methods-call/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12903-prototype-numeric-methods-call/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12904-prototype-getters-and-instanceof-links/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12904-prototype-getters-and-instanceof-links/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12905-prototype-link-instanceof-and-new/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12905-prototype-link-instanceof-and-new/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12906-prototype-slices-and-writes/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12906-prototype-slices-and-writes/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12907-prototype-equals-compare-copy-swap/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12907-prototype-equals-compare-copy-swap/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12908-prototype-write-and-slice-view/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12908-prototype-write-and-slice-view/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12909-instance-slices-typeof-probe/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12909-instance-slices-typeof-probe/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12910-prototype-bigint64-read-write/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12910-prototype-bigint64-read-write/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12911-prototype-tojson-and-inspect/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12911-prototype-tojson-and-inspect/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/12912-bigint-write-range-errors/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/12912-bigint-write-range-errors/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/13005-prototype-own-names-fold.ts": {
-   "order": [
-    "<repo>/tests/corpus/13005-prototype-own-names-fold.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/13006-prototype-method-descriptor.js": {
-   "order": [
-    "<repo>/tests/corpus/13006-prototype-method-descriptor.js"
-   ],
-   "diags": []
   }
  }
 }
