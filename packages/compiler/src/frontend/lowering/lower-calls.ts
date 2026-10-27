@@ -11788,6 +11788,116 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     return { kind: "libCall", fn: member === "set" ? "dyn.reflectSet" : "dyn.reflectDefine", args: [target, key, value], type: BOOL, loc };
   }
 
+  /** The class-instance clone idiom (pool.js's `_createConnectionConfig`):
+   *
+   *   Object.create(Object.getPrototypeOf(x), Object.getOwnPropertyDescriptors(x))
+   *
+   * Node answers a SHALLOW CLONE that keeps the class: the prototype is the
+   * class's own prototype (instanceof holds, every method dispatches), and
+   * every own property is copied with its descriptor, so object-valued fields
+   * are SHARED while the scalar fields become independent. The lowering is
+   * that same clone in IR: a zero-filled allocation of the SAME class (no
+   * constructor runs, so no initializer side effect repeats), then one field
+   * write per layout field read from a bound source. The own-property set is
+   * the layout only when cloneLayoutRefusal finds nothing; every other shape
+   * returns null and keeps the loud SC2020 fence on the separate pieces. */
+  function cloneLayoutRefusal(L: Lowerer, info: ClassInfo): string | null {
+    const def = info.def;
+    if (info.decl === null || info.protoClass === true || info.builtinError === true ||
+        info.builtinEmitter === true || info.builtinStream !== undefined || def.runtime === true) {
+      return "a runtime-provided or prototype-synthesized class";
+    }
+    if (def.base !== undefined) return "a class with an 'extends' base (the base's fields are part of the layout)";
+    if (def.genericOf !== undefined || def.abstract === true) return "a generic instantiation or an abstract class";
+    if (info.captures !== undefined && info.captures.length > 0) return "a local class capturing enclosing bindings";
+    if (info.hasPropsTable === true) return "a class with a runtime per-instance property table";
+    if ((info.deferredInitFields?.size ?? 0) > 0 || (info.nullableFields?.size ?? 0) > 0) {
+      return "deferred-init or pointer-nullable fields";
+    }
+    if ((info.collectedFields?.size ?? 0) > 0 || (def.absentFields?.length ?? 0) > 0) {
+      return "fields a constructor assigns only in a conditional position (the property is absent until written)";
+    }
+    for (const f of def.fields) {
+      if (f.name.startsWith("#") || f.name.startsWith("%")) return `hidden field '${f.name}'`;
+    }
+    for (const m of info.methods.keys()) {
+      if (m.startsWith("#") || m.startsWith("get:#") || m.startsWith("set:#")) return "a #private member";
+    }
+    for (const [name, c] of L.classes) {
+      if (c.def.base === def.name) return `a subclass '${name}' (the runtime class of a clone-source may be the subclass)`;
+    }
+    return null;
+  }
+
+  function lowerObjectCloneIdiom(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    const unparen = (e: ts.Expression): ts.Expression => {
+      let x = e;
+      while (ts.isParenthesizedExpression(x)) x = x.expression;
+      return x;
+    };
+    // Iterative on purpose: a deep property chain must not recurse ahead of
+    // the compiler's depth guard.
+    const pureSource = (e: ts.Expression): boolean => {
+      let x = unparen(e);
+      while (ts.isPropertyAccessExpression(x)) x = unparen(x.expression);
+      return ts.isIdentifier(x) || x.kind === ts.SyntaxKind.ThisKeyword;
+    };
+    const objectStaticCall = (e: ts.Expression, name: string): ts.CallExpression | null => {
+      if (!ts.isCallExpression(e) || e.arguments.length !== 1 || ts.isSpreadElement(e.arguments[0]!)) return null;
+      const acc = e.expression;
+      if (!ts.isPropertyAccessExpression(acc) || acc.name.text !== name) return null;
+      return L.isStdlibGlobal(acc.expression, "Object") ? e : null;
+    };
+    const [protoArg, descArg] = call.arguments as unknown as [ts.Expression, ts.Expression];
+    const protoCall = objectStaticCall(unparen(protoArg), "getPrototypeOf");
+    const descCall = objectStaticCall(unparen(descArg), "getOwnPropertyDescriptors");
+    if (protoCall === null || descCall === null) return null;
+    const src = unparen(protoCall.arguments[0]!);
+    if (!pureSource(src) || src.getText() !== unparen(descCall.arguments[0]!).getText()) return null;
+    // The static type decides: a value that might be a subclass instance, a
+    // union, or a non-class object keeps the fence.
+    const st = L.mapTypeOf(L.typeOf(src));
+    if (st === null || st.kind !== "object") return null;
+    const cn = st.className;
+    const info = L.classes.get(cn);
+    if (info === undefined || cloneLayoutRefusal(L, info) !== null) return null;
+    // The checker types Object.create's result `any`, so the call's IR type
+    // is the dyn box of the same class (boxing a class object is a
+    // reference, never a copy). Any other expected type keeps the fence.
+    const want = L.irTypeOf(call);
+    const boxes = want.kind === "dyn" && L.dynConvertible(st) && canBoxClassIntoDyn(cn);
+    if (!typeEquals(want, st) && !boxes) return null;
+    const loc = locOf(call);
+    const srcIr = L.lowerExpr(src);
+    if (srcIr.type.kind !== "object" || srcIr.type.className !== cn) {
+      L.noLowering("Object.create clone of a value that is not a plain class instance", call);
+    }
+    if (srcIr.kind !== "varRef" && srcIr.kind !== "fieldGet") {
+      L.noLowering(
+        "Object.create clone whose source is not a plain variable or field read",
+        call,
+        "bind the instance to a const first, then clone it",
+      );
+    }
+    const srcT: IrType = { kind: "object", className: cn };
+    const from = L.declareHiddenLocal("%cloneSrc", srcT);
+    const into = L.declareHiddenLocal("%clone", srcT);
+    const ref = (id: string): IrExpr => ({ kind: "varRef", localId: id, type: srcT, loc });
+    const stmts: IrStmt[] = [
+      { kind: "varDecl", localId: from.id, init: srcIr, loc },
+      { kind: "varDecl", localId: into.id, init: { kind: "new", className: cn, args: [], type: srcT, allocOnly: true, loc }, loc },
+    ];
+    for (const f of info.def.fields) {
+      stmts.push({
+        kind: "fieldSet", obj: ref(into.id), className: cn, field: f.name,
+        value: { kind: "fieldGet", obj: ref(from.id), className: cn, field: f.name, type: f.type, loc },
+        loc,
+      });
+    }
+    const clone: IrExpr = { kind: "seqExpr", stmts, result: ref(into.id), type: srcT, loc };
+    return boxes && !typeEquals(want, st) ? { kind: "dynFrom", value: clone, type: DYN, loc } : clone;
+  }
+
   function lowerObjectStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
@@ -11961,6 +12071,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         L.noLowering(`Object.create with ${call.arguments.length} arguments`, call);
       }
       const loc = locOf(call);
+      // The clone idiom (see lowerObjectCloneIdiom) lowers to a same-class
+      // shallow copy; anything it declines falls through to the fences below.
+      if (!L.dynamic) {
+        const cloned = lowerObjectCloneIdiom(L, call);
+        if (cloned !== null) return cloned;
+      }
       let protoNode: ts.Expression = call.arguments[0]!;
       while (ts.isParenthesizedExpression(protoNode)) protoNode = protoNode.expression;
       const nullProto = protoNode.kind === ts.SyntaxKind.NullKeyword;
