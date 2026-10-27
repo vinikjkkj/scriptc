@@ -3195,6 +3195,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14150-js-class-declared-field-order.js": {
+   "order": [
+    "<repo>/tests/corpus/14150-js-class-declared-field-order.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1420-number-statics.ts": {
    "order": [
     "<repo>/tests/corpus/1420-number-statics.ts"

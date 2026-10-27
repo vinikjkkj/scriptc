@@ -60,6 +60,34 @@ const WEAK_COLLECTION_HINTS = {
 /** One entry of ClassInfo.methods — a method's ABI signature as the class
  * declares it. Named because the vtable-slot rules compare two of them
  * (the slot's and an override's) and needed a spelling to pass around. */
+/** NODE'S OWN-PROPERTY ORDER OF A CLASS'S FIELDS (IrClassDef.keyOrder). The
+ * layout order is not the creation order: reorderFieldsByCtorWrites moves a
+ * JS constructor's writes into the layout, so a declared field the
+ * constructor writes late would list early. Node defines the declared fields
+ * at construction, in declaration order, before the constructor body runs;
+ * assigned-only fields follow in layout order. Returns undefined when that
+ * equals the layout order. */
+function classKeyOrderNames(
+  decl: ts.ClassDeclaration | ts.ClassExpression,
+  base: ClassInfo | null | undefined,
+  fieldOrder: ClassInfo["fieldOrder"],
+): string[] | undefined {
+  const own = fieldOrder.filter((f) => f.redeclared !== true).map((f) => f.name);
+  const declared: string[] = [];
+  for (const m of decl.members) {
+    if (!ts.isPropertyDeclaration(m) || !ts.isIdentifier(m.name)) continue;
+    if ((ts.getModifiers(m) ?? []).some((x) => x.kind === ts.SyntaxKind.StaticKeyword)) continue;
+    if (own.includes(m.name.text) && !declared.includes(m.name.text)) declared.push(m.name.text);
+  }
+  const rest = own.filter((n) => !declared.includes(n));
+  const baseOrder = base ? (base.def.keyOrder ?? base.def.fields.map((f) => f.name)) : [];
+  const keep = (n: string): boolean => !n.startsWith("%") && !n.startsWith("#");
+  const all = [...new Set([...baseOrder, ...declared, ...rest])].filter(keep);
+  const layout = [...new Set([...(base?.def.fields ?? []).map((f) => f.name), ...own])].filter(keep);
+  if (all.length === layout.length && all.every((n, i) => n === layout[i])) return undefined;
+  return all;
+}
+
 export interface MethodSig {
   params: ParamShape[];
   ret: IrType;
@@ -5428,6 +5456,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       if (isJsSourceFile(decl.getSourceFile()) && ctor !== null && ctor.body !== undefined) {
         reorderFieldsByCtorWrites(ctor.body, fieldOrder);
       }
+      const keyOrder = classKeyOrderNames(decl, base, fieldOrder);
 
       const info: ClassInfo = {
         def: {
@@ -5454,6 +5483,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             ...(base?.def.fields ?? []).map((f) => (routesErrorCode && f.name === "%code" ? { ...f, name: "code" } : f)),
             ...fieldOrder.filter((f) => f.redeclared !== true).map((f) => ({ name: f.name, type: f.type })),
           ],
+          ...(keyOrder !== undefined ? { keyOrder } : {}),
           ...(methods.size > 0 ? { methods: [...methods.keys()] } : {}),
           ...(absentTrackedFields.size > 0 ? { absentFields: [...absentTrackedFields] } : {}),
           ...(abstractClass ? { abstract: true as const } : {}),

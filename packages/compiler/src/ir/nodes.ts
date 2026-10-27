@@ -1627,6 +1627,14 @@ export interface IrClassDef {
    * carry a vtable word after `rc` (backends), standalone classes are laid
    * out exactly as before inheritance existed. */
   base?: string;
+  /** Node's OWN-PROPERTY CREATION order of the fields (a subset of `fields`
+   * names, inherited included, once each): the base chain's order first,
+   * then the class's DECLARED fields in declaration order (JS defines them
+   * at construction, before the constructor body runs), then the rest in
+   * layout order. Absent when it equals the layout order. Key-order surfaces
+   * (Object.keys, for-in, util.inspect, JSON) read it; the struct layout
+   * does not move. */
+  keyOrder?: string[];
   /** ALL fields in layout order: the base chain's fields first — an
    * IDENTICAL prefix, so an upcast is a pointer reinterpret and base-field
    * offsets agree through any static type — then this class's own fields.
