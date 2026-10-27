@@ -1750,7 +1750,9 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     rsig.getParameters().forEach((p, i) => {
       const declParam = info.decl.parameters[i]!;
       const pt = L.checker.getTypeOfSymbol(p);
-      const mapped = L.mapTypeOf(pt);
+      // An `any` parameter of a generic instance has no static value type (mapTypeOf answers
+      // null); it rides the dynamic tier, as an explicit `any` type argument does.
+      const mapped = L.mapTypeOf(pt) ?? ((pt.flags & ts.TypeFlags.Any) !== 0 ? DYN : null);
       if (!mapped || mapped.kind === "void") L.badType(expr.arguments[i] ?? expr, pt);
       if (declParam.dotDotDotToken) {
         if (mapped.kind !== "array" && mapped.kind !== "dyn") L.badType(expr.arguments[i] ?? expr, pt);
@@ -1773,7 +1775,8 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       }
     });
     const retTs = L.checker.getReturnTypeOfSignature(rsig);
-    const returnType = L.mapTypeOf(retTs);
+    // An `any` return of a generic instance rides the dynamic tier too (see the parameter rule).
+    const returnType = L.mapTypeOf(retTs) ?? ((retTs.flags & ts.TypeFlags.Any) !== 0 ? DYN : null);
     if (!returnType) {
       fenceGenericSignatureResult(L, expr, retTs);
       L.badType(expr, retTs);
@@ -2223,6 +2226,9 @@ const SYMBOLIC_PAIR_BUDGET = 256;
           if (!bindings.has(sym)) {
             const mapped = L.mapTypeOf(inst);
             if (mapped) bindings.set(sym, mapped);
+            // An inferred `any` argument (an untyped JavaScript call site) binds to the dynamic tier,
+            // as an explicit `any` type argument does (inferTypeParamBindings).
+            else if ((inst.flags & ts.TypeFlags.Any) !== 0) bindings.set(sym, DYN);
           }
         }
         return;
