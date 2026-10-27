@@ -2013,7 +2013,16 @@ static bool dyn_bytes_is_buffer(const ScrBytes *b) {
  * anything not stamped with it is not a DataView. */
 bool scr_dyn_is_u8array(const ScrDyn *d) {
   return d != NULL && d->kind == SCR_DYN_BYTES && d->v.bytes != NULL &&
-         d->v.bytes->flavor != SCR_BF_DATAVIEW;
+         d->v.bytes->elem == SCR_BYTES_U8 && d->v.bytes->flavor != SCR_BF_DATAVIEW;
+}
+
+/* The element test every SCR_DYN_BYTES match and extraction makes. The
+ * kind names only "a typed view", since Uint8Array, Int8Array, the float
+ * and bigint views and their clamped twin all box as SCR_DYN_BYTES; the
+ * payload's element is what says which one. Borrowed; never throws. */
+bool scr_dyn_bytes_is(const ScrDyn *d, ScrBytesElem elem) {
+  return d != NULL && d->kind == SCR_DYN_BYTES && d->v.bytes != NULL &&
+         d->v.bytes->elem == elem;
 }
 
 ScrDyn *scr_dyn_new_bytes_copy(const ScrBytes *b) {

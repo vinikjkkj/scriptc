@@ -8876,6 +8876,8 @@ ScrArr *scr_bytes_big_array(const ScrBytes *b); /* the view as a bigint[] (rest 
 extern void (*scr_dyn_bytes_big_store_fn)(ScrBytes *b, size_t idx, const ScrDyn *v);
 extern ScrDyn *(*scr_dyn_bytes_big_load_fn)(const ScrBytes *b, size_t idx);
 bool scr_dyn_bytes_is_big(const ScrBytes *b);
+/* A SCR_DYN_BYTES box whose payload has this element (scr_json.c). */
+bool scr_dyn_bytes_is(const ScrDyn *d, ScrBytesElem elem);
 ScrDyn *scr_dyn_bytes_elem(const ScrBytes *b, size_t idx); /* a dyn element read of any view, +1 */
 /* A bigint[] source of a bigint view (new BigInt64Array([...]), set([...])). */
 ScrBytes *scr_bytes_from_bigs(ScrBytesElem elem, ScrArr *arr);

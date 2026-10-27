@@ -50,7 +50,7 @@ function enumMembers(header: string, typeName: string, prefix: string): string[]
   return [...stripped.matchAll(new RegExp(`\\b${prefix}(\\w+)\\b`, "g"))].map((m) => m[1]!);
 }
 
-const ALL_BYTES_ELEMS: readonly IrBytesElem[] = ["u8", "u32", "i32", "f32", "f64", "i8", "buf"];
+const ALL_BYTES_ELEMS: readonly IrBytesElem[] = ["u8", "u32", "i32", "f32", "f64", "i8", "i16", "u16", "buf", "u8c", "f16", "i64", "u64"];
 const bytes = (elem: IrBytesElem): IrType => ({ kind: "bytes", elem });
 const noRecords = (): undefined => undefined;
 const noUnions = (): undefined => undefined;
@@ -103,9 +103,12 @@ describe("the ArrayBuffer box and the child-stream handle", () => {
       expect(DK[dk], `bytes<${elem}>'s LLVM kind number is missing`).toBeDefined();
       expect(kind).toBe(`SCR_DYN_${dk}`);
     }
-    // The pair this change is about, spelled out so a silent shrink of
-    // the table fails here rather than in a zapo build.
-    expect([...DYN_BYTES_KINDS.keys()].sort()).toEqual(["buf", "u8"]);
+    // The whole key set, spelled out so a silent shrink of the table fails
+    // here rather than in a zapo build. Every typed view is admitted: a
+    // union arm of any of them must box, or the record holding it refuses.
+    expect([...DYN_BYTES_KINDS.keys()].sort()).toEqual([
+      "buf", "f16", "f32", "f64", "i16", "i32", "i64", "i8", "u16", "u32", "u64", "u8", "u8c",
+    ]);
   });
 
   test("u8 and buf are DIFFERENT dyn kinds — the whole safety argument", () => {

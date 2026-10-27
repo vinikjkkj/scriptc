@@ -30,7 +30,7 @@
  *               FUNC=8 HANDLE=9.
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
-import type { IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
+import type { IrBytesElem, IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
 import { arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
@@ -76,6 +76,11 @@ export function dynHandleTagNum(kind: string): number {
   return n;
 }
 
+/** ScrBytesElem (scr_runtime.h): U8, U32, F32, I32, F64, I8, BUF. */
+/* The ScrBytesElem ORDINALS, and the reason the runtime enum appends new
+ * kinds at the end rather than beside their neighbours: these numbers are
+ * emitted literally into the .ll and read by the C enum. */
+export const BYTES_ELEM_NUM: Record<IrBytesElem, number> = { u8: 0, u32: 1, f32: 2, i32: 3, f64: 4, i8: 5, buf: 6, i16: 7, u16: 8, u8c: 9, f16: 10, i64: 11, u64: 12 };
 export const DK = {
   NULL: 0,
   BOOL: 1,
@@ -611,7 +616,16 @@ export class LlDyn {
         // C twin's note has the argument.
         const bk = DYN_BYTES_KINDS.get(t.elem);
         if (!bk) throw new Error(`llvm emitter bug: dynMatch of bytes<${t.elem}>`);
-        kindIs(DK[bk.dk]);
+        if (t.elem === "buf") {
+          kindIs(DK[bk.dk]);
+          break;
+        }
+        // The element test, the C twin's scr_dyn_bytes_is: SCR_DYN_BYTES
+        // carries every view kind, so the kind alone is not the answer.
+        this.host.declare(`declare zeroext i1 @scr_dyn_bytes_is(ptr, i32)`);
+        const r = B.tmp();
+        B.line(`${r} = call zeroext i1 @scr_dyn_bytes_is(ptr %d, i32 ${BYTES_ELEM_NUM[t.elem]})`);
+        B.terminate(`ret i1 ${r}`);
         break;
       }
       case "record": {
@@ -1275,7 +1289,19 @@ export class LlDyn {
         // `u as Uint8Array` / `u as Buffer`: kind check, then the SAME
         // payload back, retained. The C twin, verbatim, including the
         // dial: see bytesAliasOnExtract and the ARRBUF arm above.
-        requireKind(DK.BYTES, "dc");
+        // The element test, the C twin's: a kind test alone would hand an
+        // Int8Array box back as a Uint8Array.
+        {
+          host.declare(`declare zeroext i1 @scr_dyn_bytes_is(ptr, i32)`);
+          const ok = B.tmp();
+          B.line(`${ok} = call zeroext i1 @scr_dyn_bytes_is(ptr %d, i32 ${BYTES_ELEM_NUM[t.elem]})`);
+          const lo = B.newLabel("dc.k");
+          const lf = B.newLabel("dc.f");
+          B.condBr(ok, lo, lf);
+          B.startBlock(lf);
+          failRet();
+          B.startBlock(lo);
+        }
         const ub = bytesAliasOnExtract() ? "scr_dyn_bytes_unbox" : "scr_dyn_bytes_copy_out";
         host.declare(`declare ptr @${ub}(ptr)`);
         const r = B.tmp();

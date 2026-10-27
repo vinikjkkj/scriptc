@@ -1258,7 +1258,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // test the correct one.
         const bk = DYN_BYTES_KINDS.get(t.elem);
         if (!bk) throw new Error(`emitter bug: dynMatch of bytes<${t.elem}>`);
-        d.push(`  return d->kind == ${bk.kind};`);
+        // The element test: SCR_DYN_BYTES carries every view kind, so the
+        // kind alone would let an Int8Array box match a Uint8Array arm.
+        d.push(
+          t.elem === "buf"
+            ? `  return d->kind == ${bk.kind};`
+            : `  return scr_dyn_bytes_is(d, SCR_BYTES_${t.elem.toUpperCase()});`,
+        );
         break;
       }
       case "record": {
@@ -2267,7 +2273,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           fail(
             `  `,
             "prim.bytes",
-            soft ? `d->kind != ${bk.kind}` : `d->kind != SCR_DYN_BYTES`,
+            `!scr_dyn_bytes_is(d, SCR_BYTES_${t.elem.toUpperCase()})`,
             `NULL`,
           ),
         );

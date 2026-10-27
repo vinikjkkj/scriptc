@@ -8676,8 +8676,22 @@ export const DYN_BYTES_KINDS: ReadonlyMap<IrBytesElem, { kind: string; dk: "BYTE
   new Map([
     ["u8", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Uint8Array" }],
     ["buf", { kind: "SCR_DYN_ARRBUF", dk: "ARRBUF", cls: "ArrayBuffer" }],
-    // The BigInt views box like the byte views: the same ScrBytes payload,
-    // whose elements are bigint boxes (scr_json.c's bigint hooks).
+    // Every other view boxes as SCR_DYN_BYTES too, with its element kind
+    // carried by the ScrBytes payload (elem). The kind alone cannot tell
+    // the flavors apart, so every match and every extraction of these
+    // arms also compares the element (scr_dyn_bytes_is): without that
+    // compare an Int8Array box answers `instanceof Uint8Array` and a
+    // Float32Array box matches the Int16Array arm of a union. The bigint
+    // views (scr_json.c's bigint hooks) take the same route.
+    ["i8", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Int8Array" }],
+    ["i16", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Int16Array" }],
+    ["u16", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Uint16Array" }],
+    ["i32", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Int32Array" }],
+    ["u32", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Uint32Array" }],
+    ["f32", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Float32Array" }],
+    ["f64", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Float64Array" }],
+    ["u8c", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Uint8ClampedArray" }],
+    ["f16", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Float16Array" }],
     ["i64", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "BigInt64Array" }],
     ["u64", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "BigUint64Array" }],
   ]);

@@ -131,7 +131,7 @@ import {
   emitClassShapes,
   type LlClassMeta,
 } from "./classes.js";
-import { DK, LlDyn } from "./dyn.js";
+import { BYTES_ELEM_NUM, DK, LlDyn } from "./dyn.js";
 import { emitNpmEmbeddingLl } from "./island.js";
 import { rcAdapters, unionKeyClasses } from "../emission/emit-types.js";
 import { resetSrcSiteCache, srcSite } from "../emission/emitter.js";
@@ -1440,11 +1440,6 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "timers.queueMicrotaskDyn", "timers.setImmediateFnValue", "timers.setTimeoutFnValue", "timers.setIntervalFnValue", "timers.immediatePromise",
 ]);
 
-/** ScrBytesElem (scr_runtime.h): U8, U32, F32, I32, F64, I8, BUF. */
-/* The ScrBytesElem ORDINALS, and the reason the runtime enum appends new
- * kinds at the end rather than beside their neighbours: these numbers are
- * emitted literally into the .ll and read by the C enum. */
-const BYTES_ELEM_NUM: Record<IrBytesElem, number> = { u8: 0, u32: 1, f32: 2, i32: 3, f64: 4, i8: 5, buf: 6, i16: 7, u16: 8, u8c: 9, f16: 10, i64: 11, u64: 12 };
 
 /** ScrBytesNumKind + littleEndian per readNum/writeNum kind token —
  * emit-types.ts's BYTES_NUM_KIND_C with the enum values spelled out
