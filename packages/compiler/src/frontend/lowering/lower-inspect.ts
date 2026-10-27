@@ -418,6 +418,7 @@ function inspectExpr(
       if (isErrorClass(L, t.className)) {
         return { kind: "libCall", fn: "insp.error", args: [value, recurse, depth], type: STRING, loc };
       }
+      L.refuseHelperFieldEnumeration(value, loc, "console.log/util.inspect");
       return { kind: "call", callee: inspectHelper(L, t, loc), args: [value, recurse, depth], type: STRING, loc };
     default:
       if (t.kind === "record") L.noteKeyEnumeration(value, loc, "console.log/util.inspect");

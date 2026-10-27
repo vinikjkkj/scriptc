@@ -565,8 +565,37 @@ export function stdlibGlobalTypeOfAnswer(L: Lowerer, canonical: string, t: ts.Ty
   return null;
 }
 
+/** Enumeration of an instance whose class carries helper-unrolled fields (registerHelperAccessors):
+ * Object.keys / values / entries / assign and object spread read its own keys in insertion order,
+ * which is not tracked for those fields. Refused at compile time (the fence). Other surfaces refuse
+ * through noteKeyEnumeration, the inspect and for-in paths. */
+function helperFieldEnumerationFence(L: Lowerer, expr: ts.Expression): void {
+  if (L.helperFieldClasses.size === 0) return;
+  const refuses = (node: ts.Expression): boolean => {
+    const t = L.mapTypeOf(L.typeOf(node));
+    return t?.kind === "object" && L.classHasHelperFields(t.className);
+  };
+  if (ts.isCallExpression(expr) && ts.isPropertyAccessExpression(expr.expression) &&
+      ts.isIdentifier(expr.expression.expression) && L.isStdlibGlobal(expr.expression.expression, "Object")) {
+    const member = expr.expression.name.text;
+    const enumerating = ["keys", "values", "entries", "assign"].includes(member);
+    const args = member === "assign" ? expr.arguments.slice(1) : expr.arguments.slice(0, 1);
+    if (enumerating && args.some((a) => refuses(a))) {
+      L.unsupported("SC1090", expr, `Object.${member} of an instance of a class with helper-unrolled fields (their own-key insertion order is not tracked yet)`);
+    }
+  }
+  if (ts.isObjectLiteralExpression(expr)) {
+    for (const p of expr.properties) {
+      if (ts.isSpreadAssignment(p) && refuses(p.expression)) {
+        L.unsupported("SC1090", p, "an object spread of an instance of a class with helper-unrolled fields (their own-key insertion order is not tracked yet)");
+      }
+    }
+  }
+}
+
 function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     const loc = locOf(expr);
+    helperFieldEnumerationFence(L, expr);
     // A loop variable of an unrolled accessor family reads as the literal it
     // is bound to in this body (registerAccessorFamilies).
     if (L.constIdents.size > 0 && ts.isIdentifier(expr)) {
