@@ -8146,7 +8146,22 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
         L.noLowering(`.set with ${nArgs} arguments on typed arrays`, call);
       }
       const receiver = L.lowerExpr(access.expression);
-      const src = L.lowerExpr(call.arguments[0]!);
+      // A plain array source (a literal, or a number[] value) copies in
+      // through a same-kind temporary: the element coercion is the one the
+      // typed array's own constructor applies, so the copy is identical to
+      // Node's per-element ToNumber + element-kind store.
+      const srcNode = call.arguments[0]!;
+      let src: IrExpr;
+      if (ts.isArrayLiteralExpression(srcNode) && !srcNode.elements.some(ts.isSpreadElement)) {
+        const elems = srcNode.elements.map((el) => L.lowerExprExpecting(el, F64));
+        const seed: IrExpr = { kind: "arrayLit", elems, type: arrayOf(F64), loc };
+        src = { kind: "bytesNew", source: seed, type: receiverIr, loc };
+      } else {
+        const lowered = L.lowerExpr(srcNode);
+        src = lowered.type.kind === "array" && lowered.type.elem.kind === "f64"
+          ? { kind: "bytesNew", source: lowered, type: receiverIr, loc }
+          : lowered;
+      }
       if (!typeEquals(src.type, receiverIr)) {
         L.noLowering(
           `.set from '${L.fmt(src.type)}' values`,
