@@ -3276,8 +3276,77 @@ bool scr_dyn_objinst_has_props(const ScrDyn *d) {
  * disagree about which instances they can enumerate -- which is the very
  * failure the gate exists to prevent, one level up. */
 bool scr_dyn_objinst_enumerable(const ScrDyn *d) {
-  return scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_has_props(d) &&
+  /* A run-time property table (expandos) is walked AFTER the members by
+   * scr_objinst_props_tbl, so it no longer fences a plain class. An
+   * emitter- or stream-rooted class keeps the fence: its own-key prefix is
+   * not modelled, and the table walk alone would be a silently short list. */
+  if (scr_dyn_objinst_has_props(d) && scr_dyn_objinst_class_of(d)->rt_root != 0) return false;
+  return (scr_dyn_objinst_has_members(d) || scr_dyn_objinst_has_props(d)) &&
          !scr_dyn_objinst_error_rooted(d);
+}
+
+/* A row of the run-time table is the five-element descriptor the table's own
+ * writers store (scr_cls_props_set / scr_cls_props_define in scr_dyn_invoke.c):
+ * [isData, value-or-getter, writable, configurable, enumerable]. Listed when
+ * enumerable; a data row reads its value, an accessor row runs its arrow getter
+ * (no receiver, as scr_cls_props_get does) and reads undefined without one. */
+static bool scr_prop_row_listed(const ScrDyn *row) {
+  return row->kind == SCR_DYN_ARR && row->v.arr.len >= 5 && scr_dyn_truthy(row->v.arr.items[4]);
+}
+static ScrDyn *scr_prop_row_value(const ScrDyn *row) { /* +1, or NULL with the getter's throw pending */
+  if (scr_dyn_truthy(row->v.arr.items[0])) return scr_dyn_retain(row->v.arr.items[1]);
+  ScrDyn *g = row->v.arr.items[1];
+  if (g->kind != SCR_DYN_FUNC) return scr_dyn_retain(scr_dyn_undefined());
+  return scr_dyn_call(g, NULL, 0, "a property getter");
+}
+/* The table's listing, the Object.keys / values / entries shape (scr_dyn_objwalk's). */
+static ScrDyn *scr_props_walk(const ScrDyn *tbl, ScrObjWalk mode) {
+  ScrDyn *out = scr_dyn_new_arr();
+  size_t *ord = scr_dyn_obj_key_order(tbl);
+  const size_t n = tbl->v.obj.len;
+  for (size_t oi = 0; oi < n; oi++) {
+    if (tbl->v.obj.len != n) break; /* a getter resized the table */
+    const ScrDynEntry *e = &tbl->v.obj.entries[ord ? ord[oi] : oi];
+    if (!scr_prop_row_listed(e->value)) continue;
+    ScrStr *k = scr_str_new(e->key, e->key_len); /* +1: a getter may delete the row */
+    if (mode == SCR_OBJWALK_KEYS) {
+      scr_dyn_objwalk_push(out, mode, k->data, k->len, NULL);
+    } else {
+      ScrDyn *val = scr_prop_row_value(e->value); /* +1 or NULL */
+      if (val == NULL) {
+        scr_str_release(k);
+        free(ord);
+        scr_dyn_release(out);
+        return NULL;
+      }
+      scr_dyn_objwalk_push(out, mode, k->data, k->len, val);
+      scr_dyn_release(val);
+    }
+    scr_str_release(k);
+  }
+  free(ord);
+  return out;
+}
+
+/* The instance's run-time property table (expandos), +1, or NULL when it has
+ * none yet. The table lives in the compiled instance's %props field, which
+ * only the emitted %dynProps row can read, so the walk asks that row. *err is
+ * set when the row threw (the exception is pending). */
+static ScrDyn *scr_objinst_props_tbl(const ScrDyn *d, bool *err) {
+  *err = false;
+  if (!scr_dyn_objinst_has_props(d)) return NULL;
+  const ScrDynClassMember *pm = scr_dyn_objinst_member(d, "%dynProps", 9);
+  if (pm == NULL || pm->call == NULL) return NULL;
+  ScrDyn *t = pm->call(d->v.inst.o, NULL, 0, "Object.keys"); /* +1 */
+  if (t == NULL) {
+    *err = true;
+    return NULL;
+  }
+  if (t->kind != SCR_DYN_OBJ) {
+    scr_dyn_release(t);
+    return NULL;
+  }
+  return t;
 }
 
 bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {
@@ -4664,6 +4733,46 @@ static bool scr_dyn_json_absent(const ScrDyn *d) {
  * the keyed entry every recursion goes through. */
 static bool scr_dyn_json_write(ScrJsonBuf *b, const ScrDyn *d, const char *key, size_t key_len);
 
+/* The expandos of a compiled instance in JSON, after its declared members:
+ * the table's enumerable entries in JS's own-key order, a getter run once
+ * (JSON runs it), an absent value dropped as a member is. `keyed` routes the
+ * value through the toJSON-keyed writer (the object-member spelling), else the
+ * plain writer. false = an exception is pending. */
+static void scr_jb_put_dyn_keyed(ScrJsonBuf *b, const ScrDyn *d, const char *key, size_t key_len);
+static bool scr_dyn_json_absent(const ScrDyn *d);
+static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d);
+static bool scr_jb_props_members(ScrJsonBuf *b, ScrDyn *pt, bool *ifirst, bool keyed) {
+  size_t *ord = scr_dyn_obj_key_order(pt);
+  const size_t n = pt->v.obj.len;
+  bool ok = true;
+  for (size_t oi = 0; ok && oi < n; oi++) {
+    if (pt->v.obj.len != n) break; /* a getter resized the table */
+    const ScrDynEntry *e = &pt->v.obj.entries[ord ? ord[oi] : oi];
+    if (!scr_prop_row_listed(e->value)) continue;
+    ScrStr *mk = scr_str_new(e->key, e->key_len); /* +1: a getter may delete the row */
+    ScrDyn *mv = scr_prop_row_value(e->value); /* +1 or NULL */
+    if (mv == NULL) {
+      scr_str_release(mk);
+      ok = false;
+      break;
+    }
+    if (!scr_dyn_json_absent(mv)) {
+      if (!*ifirst) scr_jb_putc(b, ',');
+      *ifirst = false;
+      scr_jb_put_json_str(b, mk);
+      scr_jb_putc(b, ':');
+      scr_jb_edge_key(b, mk);
+      if (keyed) scr_jb_put_dyn_keyed(b, mv, mk->data, mk->len);
+      else scr_dyn_json_write_raw(b, mv);
+    }
+    scr_dyn_release(mv);
+    scr_str_release(mk);
+    if (scr_exc_pending()) ok = false;
+  }
+  free(ord);
+  return ok;
+}
+
 static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
   switch (d->kind) {
   case SCR_DYN_UNDEF:
@@ -4864,6 +4973,16 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
       scr_str_release(mk);
       scr_dyn_release(mv);
       if (scr_exc_pending()) { scr_jb_leave(b); return true; }
+    }
+    {
+      bool perr = false;
+      ScrDyn *pt = scr_objinst_props_tbl(d, &perr);
+      if (perr) { scr_jb_leave(b); return true; }
+      if (pt != NULL) {
+        bool pok = scr_jb_props_members(b, pt, &ifirst, false);
+        scr_dyn_release(pt);
+        if (!pok) { scr_jb_leave(b); return true; }
+      }
     }
     scr_jb_putc(b, '}');
     scr_jb_leave(b);
@@ -6433,6 +6552,14 @@ bool scr_dyn_handle_has_expando(const ScrDyn *d, const char *key, size_t key_len
 }
 
 bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d->kind == SCR_DYN_OBJINST) {
+    /* A class instance answers `in` from its members and its expandos (the
+     * run-time table), exactly as scr_dyn_has_key does. */
+    ScrStr *ks = scr_str_new(key, key_len);
+    bool r = scr_dyn_has_key(d, ks);
+    scr_str_release(ks);
+    return r;
+  }
   ScrDyn *own = scr_handle_own_props(d);
   if (own != NULL && scr_dyn_obj_has_own_prop(own, key, key_len)) return true;
   ScrDyn *found = NULL;
@@ -7165,7 +7292,14 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
     if (scr_dyn_objinst_error_rooted(v) && scr_dyn_error_member_has(v, key->data, key->len)) return true;
     const ScrDynClassMember *hm = scr_dyn_objinst_member(v, key->data, key->len);
     /* a field `delete` removed is not a property any more */
-    return hm != NULL && !(hm->enumerable == 4 && scr_dyn_member_hidden(hm, v->v.inst.o));
+    if (hm != NULL) return !(hm->enumerable == 4 && scr_dyn_member_hidden(hm, v->v.inst.o));
+    /* an expando lives in the run-time table (its absence is the delete) */
+    bool perr = false;
+    ScrDyn *pt = scr_objinst_props_tbl(v, &perr);
+    if (pt == NULL) return false;
+    bool own = scr_dyn_obj_get(pt, key->data, key->len) != NULL;
+    scr_dyn_release(pt);
+    return own;
   }
   return false;
 }
@@ -7710,6 +7844,16 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
       scr_str_release(mk);
       scr_dyn_release(mv);
       if (scr_exc_pending()) { scr_jb_leave(b); return; }
+    }
+    {
+      bool perr = false;
+      ScrDyn *pt = scr_objinst_props_tbl(d, &perr);
+      if (perr) { scr_jb_leave(b); return; }
+      if (pt != NULL) {
+        bool pok = scr_jb_props_members(b, pt, &ifirst, true);
+        scr_dyn_release(pt);
+        if (!pok) { scr_jb_leave(b); return; }
+      }
     }
     scr_jb_putc(b, '}');
     scr_jb_leave(b);
@@ -11650,6 +11794,23 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
       scr_dyn_objwalk_push(out, mode, m->name, m->len, val);
       scr_dyn_release(val);
     }
+    /* The expandos, after the declared members (JS's own-key order). */
+    bool perr = false;
+    ScrDyn *pt = scr_objinst_props_tbl(v, &perr);
+    if (perr) {
+      scr_dyn_release(out);
+      return NULL;
+    }
+    if (pt != NULL) {
+      ScrDyn *more = scr_props_walk(pt, mode);
+      scr_dyn_release(pt);
+      if (more == NULL) {
+        scr_dyn_release(out);
+        return NULL;
+      }
+      for (size_t i = 0; i < more->v.arr.len; i++) scr_dyn_arr_push(out, scr_dyn_retain(more->v.arr.items[i]));
+      scr_dyn_release(more);
+    }
     return out;
   }
   if (v->kind == SCR_DYN_OBJINST && !scr_dyn_objinst_enumerable(v) && scr_dyn_class_ops != NULL &&
@@ -12028,6 +12189,19 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
      * a class carrying the run-time property table the missing name may
      * be a key that table holds, and "false" would be a confident wrong
      * answer where the fence is an honest one. */
+    {
+      /* An expando lives in the run-time table, not the member rows, and it
+       * WINS over a prototype method of the same name (`x.who = ...` shadows
+       * `who()`), so the table is asked before the member row. */
+      bool perr = false;
+      ScrDyn *pt = scr_objinst_props_tbl(v, &perr);
+      if (perr) return false; /* the row threw; the exception is pending */
+      if (pt != NULL) {
+        bool own = scr_dyn_obj_get(pt, key->data, key->len) != NULL;
+        scr_dyn_release(pt);
+        if (own) return true;
+      }
+    }
     const ScrDynClassMember *cm = scr_dyn_objinst_member(v, key->data, key->len);
     if (cm != NULL) return cm->enumerable && !(cm->get != NULL && scr_dyn_member_hidden(cm, v->v.inst.o) && cm->enumerable == 4);
     if (scr_dyn_objinst_enumerable(v)) return false;
