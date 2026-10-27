@@ -3344,6 +3344,106 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return { kind: "call", callee: name, args: [keys.priv, keys.pub, cb], type: retT, loc };
   }
 
+  /** `crypto.randomBytes(size, callback)` -- Node's CALLBACK form.
+   *
+   * Node validates `size` synchronously (the RangeError / TypeError ladder the
+   * one-argument form already reproduces through the same libCall), fills
+   * the buffer on libuv's threadpool, and calls back with `(null, buf)` on a
+   * later loop turn. A compiled binary has no threadpool: the fill runs
+   * synchronously here, and the callback is delivered through
+   * timers.setImmediate queued AT THE CALL, so it runs after synchronous code
+   * and after process.nextTick / promise jobs, and before a setImmediate that
+   * the program schedules later (the order measured against Node v24.15.0).
+   * The bytes are random, so no corpus row compares them.
+   *
+   * Null for every other shape (a non-number size, a callback the notify
+   * closure cannot receive): the caller's fence stays in place. */
+  export function lowerRandomBytesCallbackCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr | null {
+    if (expr.arguments.length !== 2 || expr.arguments.some(ts.isSpreadElement)) return null;
+    const callee = stripTypeCasts(expr.expression);
+    let bi: { module: string; member: string } | null = null;
+    if (ts.isIdentifier(callee)) bi = L.builtinImportOf(callee);
+    else if (ts.isPropertyAccessExpression(callee)) bi = L.builtinMemberOf(callee);
+    if (!bi || bi.module !== "crypto" || bi.member !== "randomBytes") return null;
+
+    const sizeNode = expr.arguments[0]!;
+    const sizeMapped = L.mapTypeOf(L.typeOf(sizeNode));
+    if (sizeMapped === null || sizeMapped === undefined || sizeMapped.kind !== "f64") return null;
+    const size = L.lowerExpr(sizeNode);
+
+    const cbNode = expr.arguments[1]!;
+    const cb = L.lowerExpr(cbNode);
+    const cbT = cb.type;
+    const notify = dhNotifyClosure(L, cbT, loc);
+    if (notify === null) {
+      L.noLowering(
+        `crypto.randomBytes with a '${L.fmt(cbT)}' callback`,
+        cbNode,
+        "the callback takes (err: Error | null, buf: Buffer) and at most those two",
+      );
+    }
+
+    const key = `rb.cb:${typeKey(cbT)}`;
+    const existing = L.arrHofHelpers.get(key);
+    const name = existing ?? `%crypto.rb.cb.${L.arrHofHelpers.size}`;
+    if (existing === undefined) {
+      L.arrHofHelpers.set(key, name);
+      const body: IrStmt[] = [
+        {
+          kind: "varDecl",
+          localId: "sec.0",
+          init: {
+            kind: "libCall",
+            fn: "crypto.randomBytes",
+            args: [{ kind: "varRef", localId: "size.0", type: F64, loc }],
+            type: BYTES_U8,
+            loc,
+          },
+          loc,
+        },
+        // Node's randomFill answers a ZERO-length fill synchronously
+        // (`if (size === 0) callback(null, buf)`); every other size runs on
+        // the threadpool, which the deferred delivery stands for.
+        {
+          kind: "if",
+          cond: {
+            kind: "bin",
+            op: "===",
+            left: { kind: "bytesIntrinsic", method: "length", receiver: { kind: "varRef", localId: "sec.0", type: BYTES_U8, loc }, args: [], type: F64, loc },
+            right: { kind: "numLit", value: 0, type: F64, loc },
+            type: BOOL,
+            loc,
+          },
+          then: [{ kind: "exprStmt", expr: { kind: "callValue", callee: dhNotifyClosure(L, cbT, loc)!, args: [], type: VOID, loc }, loc }],
+          else_: [
+            {
+              kind: "exprStmt",
+              expr: { kind: "libCall", fn: "timers.setImmediate", args: [notify], type: F64, loc },
+              loc,
+            },
+          ],
+          loc,
+        },
+      ];
+      L.liftedFns.push({
+        name,
+        params: [
+          { localId: "size.0", name: "size", type: F64 },
+          { localId: "cb.0", name: "cb", type: cbT },
+        ],
+        returnType: VOID,
+        locals: [
+          { id: "size.0", name: "size", type: F64, mutable: false },
+          { id: "cb.0", name: "cb", type: cbT, mutable: false, boxed: true },
+          { id: "sec.0", name: "sec", type: BYTES_U8, mutable: false, boxed: true },
+        ],
+        body,
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [size, cb], type: VOID, loc };
+  }
+
 /** True when `node` names crypto.diffieHellman as a promisify TARGET: the
    * import binding itself, or a one-hop const alias of it. The X25519
    * module writes
