@@ -5159,8 +5159,25 @@ export class Lowerer {
   }
 
   /** Note that this expression's own keys are enumerated. */
+  /** True when class `className` or a base carries helper-unrolled fields. */
+  classHasHelperFields(className: string): boolean {
+    for (let c: ClassInfo | null | undefined = this.classes.get(className); c; c = c.base) {
+      if (this.helperFieldClasses.has(c.def.name)) return true;
+    }
+    return false;
+  }
+
+  /** An enumeration of an instance whose class carries helper-unrolled fields is refused at compile time:
+   * their own-key insertion order is not tracked, so the answer could differ from Node's. */
+  refuseHelperFieldEnumeration(value: IrExpr | null, loc: SrcLoc, surface: string): boolean {
+    if (!value || value.type.kind !== "object" || !this.classHasHelperFields(value.type.className)) return false;
+    this.pushDiag(unsupportedDiag("SC1090", loc, `${surface} of an instance of '${value.type.className}' (a class with helper-unrolled fields: their own-key insertion order is not tracked yet)`));
+    return true;
+  }
+
   noteKeyEnumeration(value: IrExpr | null, loc: SrcLoc, surface: string): void {
     if (!value) return;
+    if (this.refuseHelperFieldEnumeration(value, loc, surface)) return;
     if (value.kind === "varRef") {
       this.keyEnumUses.push({ ref: this.keyRiskKey(value.localId), risk: null, loc, surface });
       return;
@@ -14488,6 +14505,9 @@ export class Lowerer {
   readonly helperConsts = new Map<string, { sym: ts.Symbol; value: string }[]>();
   /** The declarations of helpers unrolled into accessors (lowerVarDecl lowers them to nothing). */
   readonly helperDecls = new Set<ts.VariableDeclaration>();
+  /** Classes that carry helper-unrolled fields (registerHelperAccessors): their own-key order is not tracked,
+   * so enumerating an instance refuses (refuseHelperFieldEnumeration). */
+  readonly helperFieldClasses = new Set<string>();
   readonly constIdents = new Map<ts.Symbol, string>();
   activeThisType: ts.Type | null = null;
   /** The function whose `this` activeThisType retypes: a late method's body. Only a `this`

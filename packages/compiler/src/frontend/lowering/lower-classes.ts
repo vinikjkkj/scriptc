@@ -1450,6 +1450,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       }
       L.protoClassBodies.set(info.def.name, bodies);
       L.lateMethodThis.set(plan.getFn, ownType);
+      if (plan.protoNames.length > 0) L.helperFieldClasses.add(info.def.name);
       for (const c of plan.calls) L.lateMethodAssigns.add(c.expression);
       L.helperDecls.add(plan.decl);
     }
