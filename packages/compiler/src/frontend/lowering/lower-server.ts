@@ -2763,47 +2763,6 @@ function tlsLiteralHasUntypedMember(L: Lowerer, node: ts.ObjectLiteralExpression
   );
 }
 
-/** `ciphers` (an OpenSSL cipher list) is not modeled: the runtime cannot
- * honor a cipher list, so a createSecureContext whose options MAY carry one
- * is refused at compile time, never accepted and thrown at run time. A
- * literal may pass `ciphers: undefined` (or omit it); any other `ciphers`
- * member refuses, and so does an options value whose checker type is
- * untyped (it can hold `ciphers`) or is a typed record with a `ciphers`
- * member. */
-function refuseSecureContextCiphers(L: Lowerer, arg: ts.Expression): void {
-  const refuse = (node: ts.Node): never => L.noLowering(
-    "tls.createSecureContext option 'ciphers'",
-    node,
-    "OpenSSL cipher lists are not modeled: leave ciphers undefined (or omit it)",
-  );
-  const untyped = (t: ts.Type): boolean => (t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
-  if (ts.isObjectLiteralExpression(arg)) {
-    for (const p of arg.properties) {
-      if (ts.isSpreadAssignment(p)) {
-        const t = L.typeOf(p.expression);
-        if (untyped(t) || L.checker.getPropertyOfType(t, "ciphers") !== undefined) refuse(p);
-        continue;
-      }
-      if (!(ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p))) continue;
-      const name = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : null;
-      if (name !== "ciphers") continue;
-      const init = ts.isPropertyAssignment(p) ? p.initializer : null;
-      if (init !== null && ts.isIdentifier(init) && init.text === "undefined") continue;
-      refuse(p);
-    }
-    return;
-  }
-  const t = L.typeOf(arg);
-  if (untyped(t)) {
-    L.noLowering(
-      "tls.createSecureContext with an untyped options value",
-      arg,
-      "it may carry 'ciphers', which is not modeled: pass an object literal (its ciphers, when given, must be undefined)",
-    );
-  }
-  if (L.checker.getPropertyOfType(t, "ciphers") !== undefined) refuse(arg);
-}
-
 function lowerTlsServerOptionsOrDyn(
   L: Lowerer, node: ts.Expression, what: string,
 ): { cert: IrExpr; key: IrExpr; dyn?: undefined } | { dyn: IrExpr } {
@@ -3004,7 +2963,6 @@ function lowerTlsModuleCall(L: Lowerer, expr: ts.CallExpression,
       );
     }
     const arg = args[0]!;
-    refuseSecureContextCiphers(L, arg);
     if (ts.isObjectLiteralExpression(arg)) {
       return { kind: "libCall", fn: "tls.createSecureContextDyn", args: [lowerDynObjectLiteral(L, arg)], type: SECURECTX_T, loc };
     }
