@@ -18538,6 +18538,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14050-proto-alias-inherited-method.js": {
+   "order": [
+    "<repo>/tests/corpus/14050-proto-alias-inherited-method.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/14052-proto-alias-two-classes.js": {
    "order": [
     "<repo>/tests/corpus/14052-proto-alias-two-classes.js"

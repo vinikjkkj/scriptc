@@ -1049,10 +1049,18 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       const sym = L.resolveValueSymbol(e.expression.expression);
       const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
       if (d !== undefined && ts.isClassDeclaration(d)) {
-        for (const m of d.members) {
-          if (ts.isMethodDeclaration(m) && ts.isIdentifier(m.name) && m.name.text === e.name.text &&
-              !(ts.getModifiers(m)?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) === true)) {
-            return plain(m) as ts.MethodDeclaration | null;
+        // The method may be INHERITED: `Connection.prototype.end` where Connection
+        // extends BaseConnection, which declares end. The declarer's body is the
+        // one Node's read returns, so its declaration is the source.
+        const dinfo = sym ? L.classBySymbol.get(sym) : undefined;
+        const declarer = dinfo !== undefined ? findMethodOn(L, dinfo, e.name.text)?.declarer : undefined;
+        const declDecl = declarer !== undefined ? declarer.decl : d;
+        if (declDecl !== null && (ts.isClassDeclaration(declDecl) || ts.isClassExpression(declDecl))) {
+          for (const m of declDecl.members) {
+            if (ts.isMethodDeclaration(m) && ts.isIdentifier(m.name) && m.name.text === e.name.text &&
+                !(ts.getModifiers(m)?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) === true)) {
+              return plain(m) as ts.MethodDeclaration | null;
+            }
           }
         }
       }
