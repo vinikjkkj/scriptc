@@ -2728,6 +2728,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13500-builtin-array-method-call-over-buffer.js": {
+   "order": [
+    "<repo>/tests/corpus/13500-builtin-array-method-call-over-buffer.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/13502-stringdecoder-ctor-through-var-alias.cjs": {
    "order": [
     "<repo>/tests/corpus/13502-stringdecoder-ctor-through-var-alias.cjs"
