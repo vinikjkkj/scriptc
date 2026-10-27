@@ -1839,9 +1839,117 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/12000-bom-escape-leading.ts": {
+   "order": [
+    "<repo>/tests/corpus/12000-bom-escape-leading.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12001-bom-literal-leading.ts": {
+   "order": [
+    "<repo>/tests/corpus/12001-bom-literal-leading.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12002-bom-template-leading.ts": {
+   "order": [
+    "<repo>/tests/corpus/12002-bom-template-leading.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12003-bom-mid-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/12003-bom-mid-string.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12004-bom-compare-concat.ts": {
+   "order": [
+    "<repo>/tests/corpus/12004-bom-compare-concat.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12005-bom-typed-literal.ts": {
+   "order": [
+    "<repo>/tests/corpus/12005-bom-typed-literal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12006-bom-object-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/12006-bom-object-key.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12007-bom-switch-default.ts": {
+   "order": [
+    "<repo>/tests/corpus/12007-bom-switch-default.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12008-bom-default-param.ts": {
+   "order": [
+    "<repo>/tests/corpus/12008-bom-default-param.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12009-bom-utf8-bytes.ts": {
+   "order": [
+    "<repo>/tests/corpus/12009-bom-utf8-bytes.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1201-regex-replace.ts": {
    "order": [
     "<repo>/tests/corpus/1201-regex-replace.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12010-bom-escape-braced-and-hex.ts": {
+   "order": [
+    "<repo>/tests/corpus/12010-bom-escape-braced-and-hex.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12011-bom-join-split.ts": {
+   "order": [
+    "<repo>/tests/corpus/12011-bom-join-split.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12012-zero-width-family.ts": {
+   "order": [
+    "<repo>/tests/corpus/12012-zero-width-family.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12013-zero-width-literal-template.ts": {
+   "order": [
+    "<repo>/tests/corpus/12013-zero-width-literal-template.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12014-surrogate-pairs.ts": {
+   "order": [
+    "<repo>/tests/corpus/12014-surrogate-pairs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12015-bom-and-pairs-bytes.ts": {
+   "order": [
+    "<repo>/tests/corpus/12015-bom-and-pairs-bytes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12016-bom-file-start.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12016-bom-file-start.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12017-bom-file-start-literal.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12017-bom-file-start-literal.cjs"
    ],
    "diags": []
   },
