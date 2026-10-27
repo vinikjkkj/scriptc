@@ -1125,6 +1125,134 @@ static bool dyn_objproto_knows(const char *m) {
   return dyn_name_in(m, names);
 }
 
+
+/* ── Buffer numeric methods on a DYNAMIC receiver ──────────────────────
+ *
+ * The fixed-width and variable-width read/write family of Node's Buffer
+ * (readUInt8, writeDoubleLE, readIntBE, ...) and its Uint spellings. The
+ * static spelling lowers them to scr_bytes_read_num / write_num / read_var /
+ * write_var; a dynamic receiver (`c: any`) used to refuse them as "not a
+ * function" while `typeof c.readUInt8` said nothing. Same bodies here, same
+ * argument order: the value (writes) first, then the offset (default 0),
+ * then byteLength for the variable family. Non-number arguments refuse by
+ * name rather than coerce. Buffer receivers only (a Uint8Array has none of
+ * these in Node). */
+typedef struct DynBufNum {
+  const char *name;
+  bool write;
+  bool var;
+  ScrBytesNumKind kind; /* fixed family */
+  bool le;
+  bool sign; /* variable family */
+} DynBufNum;
+
+static const DynBufNum dyn_bufnum_rows[] = {
+  { "readUInt8", false, false, SCR_BN_U8, false, false },
+  { "readUint8", false, false, SCR_BN_U8, false, false },
+  { "readInt8", false, false, SCR_BN_I8, false, false },
+  { "readUInt16LE", false, false, SCR_BN_U16, true, false },
+  { "readUint16LE", false, false, SCR_BN_U16, true, false },
+  { "readUInt16BE", false, false, SCR_BN_U16, false, false },
+  { "readUint16BE", false, false, SCR_BN_U16, false, false },
+  { "readInt16LE", false, false, SCR_BN_I16, true, false },
+  { "readInt16BE", false, false, SCR_BN_I16, false, false },
+  { "readUInt32LE", false, false, SCR_BN_U32, true, false },
+  { "readUint32LE", false, false, SCR_BN_U32, true, false },
+  { "readUInt32BE", false, false, SCR_BN_U32, false, false },
+  { "readUint32BE", false, false, SCR_BN_U32, false, false },
+  { "readInt32LE", false, false, SCR_BN_I32, true, false },
+  { "readInt32BE", false, false, SCR_BN_I32, false, false },
+  { "readFloatLE", false, false, SCR_BN_F32, true, false },
+  { "readFloatBE", false, false, SCR_BN_F32, false, false },
+  { "readDoubleLE", false, false, SCR_BN_F64, true, false },
+  { "readDoubleBE", false, false, SCR_BN_F64, false, false },
+  { "writeUInt8", true, false, SCR_BN_U8, false, false },
+  { "writeUint8", true, false, SCR_BN_U8, false, false },
+  { "writeInt8", true, false, SCR_BN_I8, false, false },
+  { "writeUInt16LE", true, false, SCR_BN_U16, true, false },
+  { "writeUint16LE", true, false, SCR_BN_U16, true, false },
+  { "writeUInt16BE", true, false, SCR_BN_U16, false, false },
+  { "writeUint16BE", true, false, SCR_BN_U16, false, false },
+  { "writeInt16LE", true, false, SCR_BN_I16, true, false },
+  { "writeInt16BE", true, false, SCR_BN_I16, false, false },
+  { "writeUInt32LE", true, false, SCR_BN_U32, true, false },
+  { "writeUint32LE", true, false, SCR_BN_U32, true, false },
+  { "writeUInt32BE", true, false, SCR_BN_U32, false, false },
+  { "writeUint32BE", true, false, SCR_BN_U32, false, false },
+  { "writeInt32LE", true, false, SCR_BN_I32, true, false },
+  { "writeInt32BE", true, false, SCR_BN_I32, false, false },
+  { "writeFloatLE", true, false, SCR_BN_F32, true, false },
+  { "writeFloatBE", true, false, SCR_BN_F32, false, false },
+  { "writeDoubleLE", true, false, SCR_BN_F64, true, false },
+  { "writeDoubleBE", true, false, SCR_BN_F64, false, false },
+  { "readUIntLE", false, true, 0, true, false },
+  { "readUintLE", false, true, 0, true, false },
+  { "readUIntBE", false, true, 0, false, false },
+  { "readUintBE", false, true, 0, false, false },
+  { "readIntLE", false, true, 0, true, true },
+  { "readIntBE", false, true, 0, false, true },
+  { "writeUIntLE", true, true, 0, true, false },
+  { "writeUintLE", true, true, 0, true, false },
+  { "writeUIntBE", true, true, 0, false, false },
+  { "writeUintBE", true, true, 0, false, false },
+  { "writeIntLE", true, true, 0, true, true },
+  { "writeIntBE", true, true, 0, false, true },
+};
+
+static const DynBufNum *dyn_bufnum_find(const char *m) {
+  for (size_t i = 0; i < sizeof dyn_bufnum_rows / sizeof dyn_bufnum_rows[0]; i++) {
+    if (strcmp(dyn_bufnum_rows[i].name, m) == 0) return &dyn_bufnum_rows[i];
+  }
+  return NULL;
+}
+
+static bool dyn_is_buffer_recv(const ScrDyn *recv) {
+  return recv->kind == SCR_DYN_BYTES && (recv->buffer || recv->v.bytes->flavor == SCR_BF_BUFFER);
+}
+
+/* An optional numeric argument: undefined (or absent) takes `dflt`; anything
+ * else is ToNumber'd, as the static spelling's argument conversion does. */
+static double dyn_bufnum_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt, bool *bad) {
+  if (i >= argc || args[i]->kind == SCR_DYN_UNDEF) return dflt;
+  double d = scr_dyn_to_number(args[i]);
+  if (scr_exc_pending()) *bad = true;
+  return d;
+}
+
+static ScrDyn *dyn_buf_num_call(ScrDyn *recv, const DynBufNum *row, ScrDyn *const *args, size_t argc, const char *what) {
+  bool bad = false;
+  ScrBytes *b = recv->v.bytes;
+  double r;
+  if (row->var) {
+    if (row->write) {
+      double v = dyn_bufnum_arg(args, argc, 0, 0, &bad);
+      double off = dyn_bufnum_arg(args, argc, 1, 0, &bad);
+      double bl = dyn_bufnum_arg(args, argc, 2, 0, &bad);
+      if (bad) goto refuse;
+      r = scr_bytes_write_var(b, v, off, bl, row->sign, row->le);
+    } else {
+      double off = dyn_bufnum_arg(args, argc, 0, 0, &bad);
+      double bl = dyn_bufnum_arg(args, argc, 1, 0, &bad);
+      if (bad) goto refuse;
+      r = scr_bytes_read_var(b, off, bl, row->sign, row->le);
+    }
+  } else if (row->write) {
+    double v = dyn_bufnum_arg(args, argc, 0, 0, &bad);
+    double off = dyn_bufnum_arg(args, argc, 1, 0, &bad);
+    if (bad) goto refuse;
+    r = scr_bytes_write_num(b, v, off, row->kind, row->le);
+  } else {
+    double off = dyn_bufnum_arg(args, argc, 0, 0, &bad);
+    if (bad) goto refuse;
+    r = scr_bytes_read_num(b, off, row->kind, row->le);
+  }
+  if (scr_exc_pending()) return NULL;
+  return scr_dyn_new_num(r);
+refuse:
+  /* ToNumber threw (a Symbol, a throwing valueOf): the exception is pending. */
+  return NULL;
+}
+
 static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
   switch (recv->kind) {
     case SCR_DYN_STR: {
@@ -1154,6 +1282,7 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
       return dyn_name_in(m, impl) || dyn_arr_proto_unimpl(m) || dyn_objproto_knows(m);
     }
     case SCR_DYN_BYTES:
+      if (dyn_is_buffer_recv(recv) && dyn_bufnum_find(m) != NULL) return true;
       /* A DataView's surface is its accessor table plus toString, and the
        * read must agree with the call arm above name for name. */
       if (recv->v.bytes->flavor == SCR_BF_DATAVIEW) {
@@ -3004,6 +3133,10 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     /* Buffer.prototype.toLocaleString IS Buffer.prototype.toString (an
      * alias in Node), so a Buffer decodes; a plain typed array joins its
      * elements' locale answers. */
+    if (dyn_is_buffer_recv(recv)) {
+      const DynBufNum *nrow = dyn_bufnum_find(method);
+      if (nrow != NULL) return dyn_buf_num_call(recv, nrow, args, argc, what);
+    }
     if (dyn_name_is(method, "toLocaleString") && (recv->buffer || recv->v.bytes->flavor == SCR_BF_BUFFER)) {
       bool tk = false;
       ScrDyn *tr = scr_dyn_bytes_method(recv, "toString", args, argc, what, &tk);
