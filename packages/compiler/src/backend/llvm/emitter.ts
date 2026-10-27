@@ -9566,6 +9566,13 @@ class LlEmitter {
         return { name: value, type: e.type };
       }
       case "new": {
+        if (e.allocOnly) {
+          // Allocation alone (no ctor, no args): the caller writes every
+          // own field. Owned +1, nothing can throw.
+          const a = B.tmp();
+          B.line(`${a} = call ptr @${mangleClassNew(e.className)}()`);
+          return this.own({ name: a, type: e.type });
+        }
         // Allocate (fields zeroed, vt stamped), then run the ctor. The
         // ctor owns and releases its `this` param like any callee, so it
         // receives a +1 distinct from the one this expression returns.
