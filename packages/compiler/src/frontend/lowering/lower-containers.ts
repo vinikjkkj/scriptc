@@ -157,6 +157,14 @@ function lowerOptionalDefaultArg(
       }
     }
     let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    // `new Array(n).fill(v)`: the receiver's checker type is `any[]`, which maps
+    // to a dyn-element array, but the receiver LOWERS to the array its own
+    // declaration types (`const next: number[] = new Array(n).fill(0)`). The
+    // element comes from the lowered receiver, the value the array actually is.
+    if (name === "fill" && ts.isNewExpression(access.expression)) {
+      const probe = L.lowerExpr(access.expression);
+      if (probe.type.kind === "array") receiverIr = probe.type;
+    }
     // A checker-`any[]` receiver (the readonly-array Array.isArray quirk)
     // whose VALUE lowers to a real static array (maybeNarrow's isArray
     // bridge): ride the ordinary tables on the lowered element type — the
