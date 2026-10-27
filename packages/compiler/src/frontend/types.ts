@@ -3589,6 +3589,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (args.length !== 2) return null;
     const key = mapType(args[0]!, ctx);
     if (!key || !isSupportedMapKey(key)) return null;
+    // A DYN key is a Map over the dynamic tier; a WeakMap keeps its own fence (its keys must be
+    // objects, and a strong table would silently hold them).
+    if (key.kind === "dyn" && isStdlibInterface("WeakMap")) return null;
     const value = mapType(args[1]!, ctx);
     if (!value || !isSupportedMapValue(value)) return null;
     return mapOf(key, value);

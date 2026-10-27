@@ -14307,9 +14307,16 @@ class LlEmitter {
     // as emit-exprs.ts's mapNew does. Without it the keys are stored
     // borrowed and the first collection of one is a use-after-free;
     // that is what the old mapKey refusal was standing in for.
-    const kRc = mapKeyAccess(e.type.key) === "ref" ? vAdapters(this, e.type.key) : null;
+    const kRc = e.type.key.kind !== "dyn" && mapKeyAccess(e.type.key) === "ref" ? vAdapters(this, e.type.key) : null;
     const m = B.tmp();
-    if (kRc !== null && e.type.key.kind === "union") {
+    if (e.type.key.kind === "dyn") {
+      // A DYN key: the runtime hashes and compares the box by the value it carries
+      // (scr_map_new_dyn), retaining the key on a new entry (the C mapNew twin).
+      this.declare(`declare ptr @scr_map_new_dyn(i32, ptr, ptr, ptr)`);
+      B.line(
+        `${m} = call ptr @scr_map_new_dyn(i32 ${mapValKindNum(value)}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"})`,
+      );
+    } else if (kRc !== null && e.type.key.kind === "union") {
       // A UNION key: boxes compared by the value they carry; one class byte
       // per arm (scr_map_new_union, the Set-with-union twin).
       const keyUnion = this.unionsById.get(e.type.key.unionId);
@@ -14333,7 +14340,7 @@ class LlEmitter {
     const out = this.own({ name: m, type: e.type });
     // Seeded construction: set() each pair in source order — a repeated
     // key overwrites (the runtime releases the old value).
-    const kAcc = mapKeyAccess(e.type.key);
+    const kAcc = e.type.key.kind === "dyn" ? "dyn" : mapKeyAccess(e.type.key);
     const vAcc = elemAccess(value);
     for (const pair of e.seed ?? []) {
       const k = this.emitExpr(pair.key);
@@ -14344,7 +14351,7 @@ class LlEmitter {
     return out;
   }
 
-  private mapSet(m: string, kAcc: "f64" | "str" | "ref", vAcc: "f64" | "bool" | "ref", key: string, value: string): void {
+  private mapSet(m: string, kAcc: "f64" | "str" | "ref" | "dyn", vAcc: "f64" | "bool" | "ref", key: string, value: string): void {
     const kTy = kAcc === "f64" ? "double" : "ptr";
     const vTy = vAcc === "f64" ? "double" : vAcc === "bool" ? "i1" : "ptr";
     this.declare(`declare void @scr_map_set_${kAcc}_${vAcc}(ptr, ${kTy}, ${vTy === "i1" ? "i1 zeroext" : vTy})`);
@@ -14485,7 +14492,8 @@ class LlEmitter {
     if (e.receiver.type.kind === "weakmap") return this.emitWeakMapIntrinsic(e, r, e.receiver.type);
     if (e.receiver.type.kind !== "map") throw new Error("llvm emitter bug: mapIntrinsic on non-map");
     const { key, value } = e.receiver.type;
-    const kAcc = mapKeyAccess(key);
+    // A DYN key takes the `_dyn` entry points (the key is a ScrDyn box, passed as ptr).
+    const kAcc = key.kind === "dyn" ? "dyn" : mapKeyAccess(key);
     const kTy = kAcc === "f64" ? "double" : "ptr";
     const vAcc = elemAccess(value);
     const method = e.method;

@@ -2716,6 +2716,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13351-dyn-keyed-map.ts": {
+   "order": [
+    "<repo>/tests/corpus/13351-dyn-keyed-map.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1350-path-normalize-join.ts": {
    "order": [
     "<repo>/tests/corpus/1350-path-normalize-join.ts"

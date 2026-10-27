@@ -6964,6 +6964,20 @@ ScrDyn *scr_dyn_map_snapshot(const ScrDyn *d, int mode);
 /* The store half: `put` takes a borrowed key and (for a Map) value,
  * normalizing -0 to +0; a Set passes v == NULL. */
 ScrMap *scr_map_new_dynkey(void);
+/* DYN-KEYED typed maps (scr_json.c): keys are ScrDyn boxes hashed and compared
+ * by the value they carry (SameValueZero). The value side is typed like the
+ * other maps. */
+ScrMap *scr_map_new_dyn(ScrMapValKind val_kind, void *(*val_retain)(void *),
+                        void (*val_release)(void *), ScrTraceFn val_trace);
+bool scr_map_has_dyn(const ScrMap *m, const ScrDyn *k);
+bool scr_map_delete_dyn(ScrMap *m, const ScrDyn *k);
+void scr_map_set_dyn_f64(ScrMap *m, const ScrDyn *k, double v);
+void scr_map_set_dyn_bool(ScrMap *m, const ScrDyn *k, bool v);
+void scr_map_set_dyn_ref(ScrMap *m, const ScrDyn *k, void *v);
+bool scr_map_get_dyn_f64(const ScrMap *m, const ScrDyn *k, double *out);
+bool scr_map_get_dyn_bool(const ScrMap *m, const ScrDyn *k, bool *out);
+void *scr_map_get_dyn_ref(const ScrMap *m, const ScrDyn *k);
+ScrDyn *scr_map_iter_key_dyn(const ScrMap *m, double i);
 ScrMap *scr_set_new_dynkey(void);
 ScrDyn *scr_dynmap_store_key(ScrDyn *k, ScrDyn **hold);
 void scr_dynmap_put(ScrMap *m, ScrDyn *k, ScrDyn *v);
