@@ -10,7 +10,7 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsWholeExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import { cjsExportRecordOf, cjsExportRecordInit, cjsExportRecordCreate } from "./cjs-export-record.js";
 import { npmStaticDepSf7, resolveProjectImportSf7 } from "../program.js";
 import type { CycleEdge } from "../program.js";
@@ -3021,6 +3021,19 @@ function initReadsExportsMember(init: ts.Expression): boolean {
 /** A JS file-scope binding of an arrow / function expression whose strict
  * type does not map but whose checked-dynamic fallback is a FUNC (an
  * unannotated-parameter literal): it keeps a typed global slot. */
+/** True when a top-level statement of `sf` is `module.exports = <name>` (the bare
+ * identifier, optionally parenthesised): the file's export IS this binding. */
+function wholeExportsIdentifier(sf: ts.SourceFile, name: string): boolean {
+  for (const stmt of sf.statements) {
+    const assign = cjsWholeExportAssignmentOf(stmt);
+    if (assign === null) continue;
+    let r: ts.Expression = assign.right;
+    while (ts.isParenthesizedExpression(r)) r = r.expression;
+    if (ts.isIdentifier(r) && r.text === name) return true;
+  }
+  return false;
+}
+
 function jsFnLiteralSlot(L: Lowerer, decl: ts.VariableDeclaration, nameNode: ts.Identifier): boolean {
   if (!ts.isIdentifier(decl.name) || nameNode !== decl.name || decl.initializer === undefined) return false;
   let init: ts.Expression = decl.initializer;
@@ -3047,7 +3060,7 @@ function jsFnLiteralSlot(L: Lowerer, decl: ts.VariableDeclaration, nameNode: ts.
     };
     if (init.body !== undefined) {
       if (!ts.isBlock(init.body)) {
-        if (isFnLit(init.body)) return false;
+        if (isFnLit(init.body) && !wholeExportsIdentifier(nameNode.getSourceFile(), nameNode.text)) return false;
       } else {
         let factory = false;
         const walk = (n: ts.Node): void => {
@@ -3058,7 +3071,12 @@ function jsFnLiteralSlot(L: Lowerer, decl: ts.VariableDeclaration, nameNode: ts.
           });
         };
         walk(init.body);
-        if (factory) return false;
+        // EXCEPT a factory the file exports WHOLE (`module.exports = name`):
+        // importers resolve their alias to this binding's slot, and the dyn
+        // lane has none, so the importer's call refused at its own site
+        // (bindform2: a cross-module curried export). Its typed fallback
+        // (func over dyn pieces) is the slot an importer calls through.
+        if (factory && !wholeExportsIdentifier(nameNode.getSourceFile(), nameNode.text)) return false;
       }
     }
   }
