@@ -2567,6 +2567,28 @@ export class Lowerer {
     return undefined;
   }
 
+  /** The module a `const b = require(spec)` binding loads (relative or bare spec), or null.
+   * Used to ask the module's OWN export table about a member, not the names in scope. */
+  cjsBindingRequireDepOf(recv: ts.Expression): ts.SourceFile | null {
+    if (!ts.isIdentifier(recv)) return null;
+    const sym = referencedValueSymbol(this.checker, recv);
+    const decl = sym ? this.checker.declarationsOf(sym).find(ts.isVariableDeclaration) : undefined;
+    if (decl === undefined || !ts.isIdentifier(decl.name) || decl.initializer === undefined) return null;
+    const spec = requireSpecOf(decl.initializer);
+    if (spec === null) return null;
+    return isRelativeSpecifier(spec)
+      ? resolveImport(this.program, decl.getSourceFile(), spec) ?? null
+      : this.bareRequireDepOf(decl.getSourceFile(), spec);
+  }
+
+  /** True when `recv` is a `require` binding of a JavaScript module whose export table does NOT declare
+   * `name`: the export object was assembled at run time, so the member is a read of that object, and a
+   * same-named local of the exporter is not the export. */
+  cjsUnexportedMemberOfBinding(recv: ts.Expression, name: string): boolean {
+    const dep = this.cjsBindingRequireDepOf(recv);
+    return dep !== null && isCjsJsFile(dep) && this.cjsModuleExportSymbol(dep, name) === undefined;
+  }
+
   /** The CommonJS module a `const x = require("./m")` binding names when that
    * module's whole export is a class (cjsExportEqClassSymbol): the receiver
    * of `x.member` then reads the class's statics first, and the module's own
