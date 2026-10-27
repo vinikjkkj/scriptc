@@ -18537,6 +18537,24 @@
     "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/14000-buffer-write-runtime-encoding.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14000-buffer-write-runtime-encoding.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14001-buffer-write-runtime-partial.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14001-buffer-write-runtime-partial.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14003-buffer-write-runtime-bytelength-agree.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14003-buffer-write-runtime-bytelength-agree.cjs"
+   ],
+   "diags": []
   }
  }
 }
