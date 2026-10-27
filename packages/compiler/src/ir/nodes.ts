@@ -7191,8 +7191,14 @@ export type IrExpr =
     }
   /** `new C(args)`: allocate (fields zeroed), then call `%C.constructor`
    * with the new object as arg 0 (retained — the ctor owns and releases its
-   * `this` param like any callee). Result is owned (+1). */
-  | { kind: "new"; className: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
+   * `this` param like any callee). Result is owned (+1).
+   *
+   * `allocOnly: true` is the ALLOCATION ALONE: no constructor runs, `args`
+   * is empty, and the result is the same zero-filled, vtable-stamped object.
+   * Only a caller that writes every own field itself may use it (the
+   * Object.create(Object.getPrototypeOf(x), Object.getOwnPropertyDescriptors(x))
+   * clone in lower-calls.ts copies each layout field from the source). */
+  | { kind: "new"; className: string; args: IrExpr[]; type: IrType; allocOnly?: true; loc: SrcLoc }
   /** The class itself as a value: a pointer to `className`'s immortal
    * class object (type `classval:className`, +1 — a no-op retain on the
    * immortal, kept for the uniform owned-temp discipline, the regexLit
