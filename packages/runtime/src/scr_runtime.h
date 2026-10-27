@@ -8838,15 +8838,18 @@ size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 2, 4, 8 */
 /* Own named properties of a bytes value. get: BORROWED value or NULL. set:
  * retains v (the caller keeps its reference). delete: true when an entry was
  * removed. free: releases every value; called by scr_bytes_release. */
-ScrDyn *scr_bytes_own_get(const ScrBytes *b, const char *k, size_t kl);
-void scr_bytes_own_set(ScrBytes *b, const char *k, size_t kl, ScrDyn *v);
-bool scr_bytes_own_delete(ScrBytes *b, const char *k, size_t kl);
-void scr_bytes_own_free(ScrBytes *b);
-extern void (*scr_bytes_own_release_fn)(void *v); /* installed by the dyn unit (scr_json.c) before its first own store */
+/* The own named-property ops of a bytes value (scr_bytes_own.c, a gated unit). NULL until the program's install call
+ * (scr_bytes_own_install) runs; a value only gets an own table through set, which the install call precedes. */
+typedef struct ScrBytesOwnOps {
+  ScrDyn *(*get)(const ScrBytes *b, const char *k, size_t kl); /* BORROWED value or NULL */
+  void (*set)(ScrBytes *b, const char *k, size_t kl, ScrDyn *v); /* retains v; ignores canonical numeric names */
+  bool (*del)(ScrBytes *b, const char *k, size_t kl);
+  void (*free)(ScrBytes *b); /* releases every value and the table */
+} ScrBytesOwnOps;
+extern const ScrBytesOwnOps *scr_bytes_own_ops;
+void scr_bytes_own_install(void);
 /* `k in d` for a BYTES d (the literal-key `in` arm of both lanes; scr_json.c). */
 bool scr_dyn_bytes_in(const ScrDyn *d, const char *k, size_t kl);
-/* CanonicalNumericIndexString(name) (ES2024 7.1.21): see scr_json.c. */
-bool scr_canonical_numeric_name(const ScrStr *k);
 
 /* ── WeakMap ───────────────────────────────────────────────────────────
  * Reference-identity keys held WEAKLY: the table does not retain a key and
