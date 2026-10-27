@@ -6,7 +6,7 @@ import { protoDataAssignStmt } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
-import { BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
@@ -1967,6 +1967,9 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
             if (el.initializer) {
               L.unsupported("SC1031", el, "defaults on rest elements");
             }
+            if (srcType.elem === "i64" || srcType.elem === "u64") {
+              L.unsupported("SC1090", el, "rest destructuring of a BigInt64Array / BigUint64Array (its elements are bigints; the rest array is not lowered yet)");
+            }
             const all: IrExpr = {
               kind: "bytesIntrinsic",
               method: "toArray",
@@ -1991,7 +1994,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
             method: "get",
             receiver: srcRef(),
             args: [{ kind: "numLit", value: i, type: F64, loc }],
-            type: F64,
+            type: bytesValueType(srcType.elem),
             loc,
           };
           if (el.initializer) {
@@ -9498,7 +9501,7 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
           method: "get",
           receiver: tmpRef(),
           args: [{ kind: "numLit", value: i, type: F64, loc: locOf(at) }],
-          type: F64,
+          type: bytesValueType(srcType.elem),
           loc: locOf(at),
         };
       }
@@ -10188,7 +10191,7 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
           method: "get",
           receiver: sourceRef(),
           args: [indexRef()],
-          type: F64,
+          type: bytesValueType(sourceT.kind === "bytes" ? sourceT.elem : "u8"),
           loc,
         };
     const one: IrExpr = { kind: "numLit", value: 1, type: F64, loc };
@@ -10196,10 +10199,13 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     L.scopes.push(new Map());
     try {
       const varTarget = exprTarget ?? (decl ? forOfVarTarget(L, decl) : null);
+      // The element's value type: a bigint for the BigInt64/BigUint64 views,
+      // a double for every other source.
+      const valT: IrType = sourceT.kind === "bytes" ? bytesValueType(sourceT.elem) : F64;
       const value = varTarget
-        ? L.declareHiddenLocal("%numiterValue", F64)
-        : L.declareLocal(decl!.name as ts.Identifier, (decl!.name as ts.Identifier).text, F64, isLet);
-      const valueRef: IrExpr = ref(value.id, F64);
+        ? L.declareHiddenLocal("%numiterValue", valT)
+        : L.declareLocal(decl!.name as ts.Identifier, (decl!.name as ts.Identifier).text, valT, isLet);
+      const valueRef: IrExpr = ref(value.id, valT);
       const blame: ts.Node = decl?.name ?? exprTargetNode ?? stmt.initializer;
       const head: IrStmt[] = [
         {
