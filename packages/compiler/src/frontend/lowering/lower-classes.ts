@@ -5190,9 +5190,23 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // is an ordinary own property in JS and the class cannot know at layout
       // time which of its instances an untyped slot will reach. Declared fields
       // keep their native slots; the table holds only the expandos.
+      // Reachability gate (expando, 2026-10-27): the table is laid out only on a class a
+      // dyn value can hold, i.e. one the discovery pass boxed (`%C.%dynset` is reachable,
+      // which also marks its whole chain). Every other class keeps the zero-cost layout.
+      // Error-, runtime- and ambient-rooted classes keep their existing paths.
+      const extendsClause = decl.heritageClauses?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword);
+      const runtimeRootedBase = (b: ClassInfo | null): boolean => {
+        for (let a: ClassInfo | null = b; a; a = a.base) {
+          if (a.def.runtime === true || a.builtinEmitter === true || RUNTIME_ERROR_CLASSES.has(a.def.name)) return true;
+        }
+        return false;
+      };
+      const ambientOrRuntimeBase = extendsClause !== undefined && (base === null || runtimeRootedBase(base));
       const ownPropsTable =
         L.definePropStringTable(decl) ||
-        (!mixin && !familyMode && ts.isClassDeclaration(decl));
+        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && implicitMonoFile(decl.getSourceFile())) ||
+        (!mixin && !familyMode && ts.isClassDeclaration(decl) && !ambientOrRuntimeBase &&
+          L.reachable?.has(`%${className}.%dynset`) === true);
       const hasPropsTable = ownPropsTable || base?.hasPropsTable === true;
       if (ownPropsTable && !fields.has(CLASS_PROPS_FIELD)) {
         fields.set(CLASS_PROPS_FIELD, DYN);
