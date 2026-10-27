@@ -249,30 +249,50 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
   }, 120_000);
 
-  // poolish's NEGATIVE control, and the reason admitting the override is
-  // not a licence to guess. An untyped method owns no vtable slot, so a
-  // call resolves on the receiver's STATIC class; where a subclass
-  // redeclares the name and the static type does not pin the runtime
-  // class, there is nothing to sort the two bodies out at run time. The
-  // call must refuse BY NAME rather than quietly running the base body —
-  // Node prints the override's answer here, and a silent base call would
-  // print a different string at exit 0.
-  //
-  // The refusal is a DEFERRED fence (the npm-static contract: an
-  // unlowerable statement in an opted-in package becomes a runtime throw),
-  // so the program builds and then stops loudly at the named site.
-  test("a receiver whose runtime class may override an untyped method refuses by name", () => {
+  // poolish's dispatch control: the call goes through a receiver whose static
+  // type is the base and whose runtime class is the override. A generic
+  // method owns no vtable slot, so the call dispatches on the receiver's
+  // RUNTIME class (lowerGenericVirtualCall): the override answers, as Node's
+  // does, and the compiled program prints exactly Node's output.
+  test("a receiver whose runtime class may override an untyped method dispatches to it", async () => {
     const entry = join(pilotRoot, "poolish-inexact.ts");
     const { coverage } = analyze(entry, { npmStatic: ["poolish"] });
     expect(coverage.preflightFailed).toBe(false);
     expect(coverage.npmStatic).toEqual([{ package: "poolish", status: "static" }]);
-    // A BUILD refusal: no deferred fence, no binary that links and then
-    // stops at the named site.
-    const refusals = coverage.diagnostics.filter((d) =>
-      /generic method 'end' through a receiver whose runtime class may override it/.test(d.message),
-    );
-    expect(refusals).toHaveLength(1);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["poolish"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nodeRes.stdout.toString("utf8")).toContain("Pooled.end[Base.end<p9>]");
+    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
   }, 120_000);
+
+  // The mysql2 dispatch shape, generalized (corpus 12500-12504): a base method
+  // calls `this.end(...)` with differently typed arguments, subclasses redeclare
+  // the untyped method (one with another arity, one forwarding through super),
+  // and the receivers are base-typed bindings the static type does not pin.
+  // Each entry must build clean and print exactly Node's output.
+  test("generic overrides dispatch on the runtime class (corpus 12500-12504)", async () => {
+    const dir = pilotRoot;
+    const names = globSync("1250[0-4]-*.ts", { cwd: dir }).sort();
+    expect(names).toHaveLength(5);
+    for (const name of names) {
+      const entry = join(dir, name);
+      const pkg = `virt${name.split("-")[0]}`;
+      const { coverage } = analyze(entry, { npmStatic: [pkg] });
+      expect(coverage.diagnostics, name).toHaveLength(0);
+      const binary = await buildStatic(entry, [pkg]);
+      const [nodeRes, nativeRes] = await Promise.all([
+        runBinary("node", [entry]),
+        runBinary(binary, []),
+      ]);
+      expect(nativeRes.stdout.toString("utf8"), name).toBe(nodeRes.stdout.toString("utf8"));
+      expect(nativeRes.exitCode, name).toBe(nodeRes.exitCode);
+    }
+  }, 600_000);
 
   // poolish's ORDER control, and the second reason admitting the override
   // is not a licence to guess. `genericOverrideBelow` reads the subclass

@@ -9,7 +9,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
-import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
+import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitInstanceLike, implicitMonoFile, omittedArgFor, type GenericFnInfo, type GenericInstance, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
@@ -7673,6 +7673,9 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     if (genericOverrideBelow(L, recvInfo, name)) {
       const exact = exactInstanceClassOf(L, access.expression);
       const refound = exact ? findGenericMethodOn(L, exact, name) : null;
+      if (!refound && info.implicitParams !== undefined) {
+        return lowerGenericVirtualCall(L, call, access, recvInfo, declarer, info, recvIr);
+      }
       if (!refound) {
         L.unsupported(
           "SC1090",
@@ -7701,6 +7704,106 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         : upcastTo(L, receiver, declarer.def.name);
     const args = L.completeArgs(call.arguments, instance.params, loc, call);
     return { kind: "call", callee: instance.name, args: [thisArg, ...args], type: instance.returnType, loc };
+  }
+
+/** A JS (implicit-any) generic method called through a receiver whose runtime class may
+   * override it. Generic methods own no vtable slot, so the call dispatches on the receiver's
+   * RUNTIME class: a helper tests each strict descendant of the static class that re-declares the
+   * method, deepest first (the instanceOf chain of emitDispatch), and calls that class's instance
+   * for the SAME argument types; the declarer's instance answers every other class. Node's
+   * `this.m(...)` reaches the most-derived override, and this helper does the same.
+   *
+   * A call whose value is discarded (an expression statement) dispatches as a VOID helper: the
+   * overrides may return different types (mysql2's Connection.end returns the quit command,
+   * PoolConnection.end returns nothing), and nothing reads the value. A value-producing call needs
+   * every instance to answer one return type, else it fences by name. */
+  function lowerGenericVirtualCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,
+    recvInfo: ClassInfo,
+    declarer: ClassInfo,
+    info: GenericFnInfo,
+    recvIr?: IrExpr,): IrExpr {
+    const name = access.name.text;
+    const loc = locOf(call);
+    const discarded = ts.isExpressionStatement(call.parent);
+    const instance = implicitCallInstance(L, call, info);
+    const receiver = recvIr ?? L.lowerExpr(access.expression);
+    const thisArg = upcastTo(L, receiver, declarer.def.name);
+    const args = L.completeArgs(call.arguments, instance.params, loc, call);
+    const overrides: { cls: ClassInfo; depth: number }[] = [];
+    const walk = (c: ClassInfo, depth: number): void => {
+      for (const s of c.subclasses) {
+        if (s.genericMethods?.has(name) === true) overrides.push({ cls: s, depth });
+        walk(s, depth + 1);
+      }
+    };
+    walk(recvInfo, 1);
+    overrides.sort((a, b) => b.depth - a.depth);
+    const targets: { cls: ClassInfo; inst: GenericInstance | null }[] = [];
+    for (const { cls } of overrides) {
+      const dInfo = cls.genericMethods!.get(name)!;
+      const inst = dInfo.implicitParams === undefined
+        ? null
+        : implicitInstanceLike(L, call, dInfo, info, instance);
+      if (inst === null) {
+        L.unsupported(
+          "SC1090",
+          call,
+          `calling the generic method '${name}' through a receiver whose runtime class may override it (the override in '${cls.def.name.replace(/^%|^%m\d+\\./, "")}' declares a parameter that is not implicit-any — generic overrides dispatch by the receiver's runtime class only when every parameter is an untyped one, as in the base)`,
+        );
+      }
+      if (!discarded && !typeEquals(inst.returnType, instance.returnType)) {
+        L.unsupported(
+          "SC1090",
+          call,
+          `calling the generic method '${name}' through a receiver whose runtime class may override it (the override in '${cls.def.name.replace(/^%|^%m\d+\\./, "")}' returns a different type than the base instance, and this call's value is used — a discarded call (an expression statement) dispatches over the differing returns, a used one needs a single return type)`,
+        );
+      }
+      targets.push({ cls, inst });
+    }
+    const retT: IrType = discarded ? VOID : instance.returnType;
+    const key = `genDispatch:${instance.name}:${discarded ? "void" : "value"}`;
+    let helper = L.arrHofHelpers.get(key);
+    if (!helper) {
+      helper = `%genDispatch.${L.arrHofHelpers.size}`;
+      L.arrHofHelpers.set(key, helper);
+      const recvT = thisArg.type;
+      const params: IrParam[] = [
+        { localId: "r.0", name: "r", type: recvT },
+        ...instance.params.map((p, i) => ({ localId: `a${i}.0`, name: `a${i}`, type: p.type })),
+      ];
+      const locals: IrLocal[] = params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false }));
+      const rRef = (): IrExpr => ({ kind: "varRef", localId: "r.0", type: recvT, loc });
+      const argRef = (i: number): IrExpr => ({ kind: "varRef", localId: `a${i}.0`, type: instance.params[i]!.type, loc });
+      const argRefs = (): IrExpr[] => instance.params.map((_, i) => argRef(i));
+      // The statement form for a VOID helper, the value form otherwise.
+      const answer = (value: IrExpr): IrStmt[] => discarded
+        ? [{ kind: "exprStmt", expr: value, loc }, { kind: "return", value: null, loc }]
+        : [{ kind: "return", value, loc }];
+      const body: IrStmt[] = [];
+      for (const { cls, inst } of targets) {
+        const target = inst ?? instance;
+        const dArgs: IrExpr[] = target.params.map((_, j) => (j < instance.params.length ? argRef(j) : dynUndefinedExpr(loc)));
+        L.noteEdge(target.name);
+        body.push({
+          kind: "if",
+          cond: { kind: "instanceOf", value: rRef(), className: cls.def.name, type: BOOL, loc },
+          then: answer({
+            kind: "call",
+            callee: target.name,
+            args: [{ kind: "downcast", value: rRef(), type: { kind: "object", className: cls.def.name }, loc }, ...dArgs],
+            type: target.returnType,
+            loc,
+          }),
+          else_: null,
+          loc,
+        });
+      }
+      L.noteEdge(instance.name);
+      body.push(...answer({ kind: "call", callee: instance.name, args: [rRef(), ...argRefs()], type: instance.returnType, loc }));
+      L.liftedFns.push({ name: helper, params, returnType: retT, locals, body, loc });
+    }
+    return { kind: "call", callee: helper, args: [thisArg, ...args], type: retT, loc };
   }
 
 /** Wraps a derived-class expression in an upcast when the target base
