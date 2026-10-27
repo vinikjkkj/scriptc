@@ -1983,6 +1983,114 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/12250-strnull-template-literal.ts": {
+   "order": [
+    "<repo>/tests/corpus/12250-strnull-template-literal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12251-strnull-concat-both-sides.ts": {
+   "order": [
+    "<repo>/tests/corpus/12251-strnull-concat-both-sides.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12252-strnull-string-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/12252-strnull-string-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12253-strnull-nullable-union-param.ts": {
+   "order": [
+    "<repo>/tests/corpus/12253-strnull-nullable-union-param.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12254-strnull-nullable-local-runtime.ts": {
+   "order": [
+    "<repo>/tests/corpus/12254-strnull-nullable-local-runtime.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12255-strnull-unit-typed-param.ts": {
+   "order": [
+    "<repo>/tests/corpus/12255-strnull-unit-typed-param.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12256-strnull-nullish-only-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/12256-strnull-nullish-only-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12257-strnull-mysql-parser-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/12257-strnull-mysql-parser-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12258-strnull-null-call-side-effect.ts": {
+   "order": [
+    "<repo>/tests/corpus/12258-strnull-null-call-side-effect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12750-dyn-field-push-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/12750-dyn-field-push-string.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12751-dyn-field-pop-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/12751-dyn-field-pop-string.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12752-dyn-field-splice-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/12752-dyn-field-splice-string.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12753-dyn-field-sort-reverse-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/12753-dyn-field-sort-reverse-string.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12754-dyn-field-length-set-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/12754-dyn-field-length-set-string.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12755-dyn-field-push-number.ts": {
+   "order": [
+    "<repo>/tests/corpus/12755-dyn-field-push-number.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12756-dyn-field-handle-sees-native-push.ts": {
+   "order": [
+    "<repo>/tests/corpus/12756-dyn-field-handle-sees-native-push.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12757-dyn-field-nested-array-push.ts": {
+   "order": [
+    "<repo>/tests/corpus/12757-dyn-field-nested-array-push.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12758-dyn-field-two-classes-array-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/12758-dyn-field-two-classes-array-write.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1300-errors-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1300-errors-basics.ts"
@@ -17093,84 +17201,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/fixtures/node-types/argv-env.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/argv-env.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/child-stdio.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/import-fences.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/import-fences.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC1010",
-     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
-     "loc": {
-      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
-      "start": 422,
-      "end": 461
-     },
-     "milestone": "M4",
-     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
-    }
-   ]
-  },
-  "<repo>/tests/fixtures/node-types/path-os.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/path-os.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/server-address-states.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stream-capture.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/streams.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts"
@@ -17725,57 +17755,81 @@
     }
    ]
   },
-  "<repo>/tests/corpus/12250-strnull-template-literal.ts": {
+  "<repo>/tests/fixtures/node-types/argv-env.ts": {
    "order": [
-    "<repo>/tests/corpus/12250-strnull-template-literal.ts"
+    "<repo>/tests/fixtures/node-types/argv-env.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/12251-strnull-concat-both-sides.ts": {
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
    "order": [
-    "<repo>/tests/corpus/12251-strnull-concat-both-sides.ts"
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/12252-strnull-string-call.ts": {
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
    "order": [
-    "<repo>/tests/corpus/12252-strnull-string-call.ts"
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/12253-strnull-nullable-union-param.ts": {
+  "<repo>/tests/fixtures/node-types/fenced.ts": {
    "order": [
-    "<repo>/tests/corpus/12253-strnull-nullable-union-param.ts"
+    "<repo>/tests/fixtures/node-types/fenced.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/12254-strnull-nullable-local-runtime.ts": {
+  "<repo>/tests/fixtures/node-types/import-fences.ts": {
    "order": [
-    "<repo>/tests/corpus/12254-strnull-nullable-local-runtime.ts"
+    "<repo>/tests/fixtures/node-types/import-fences.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1010",
+     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
+      "start": 422,
+      "end": 461
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/fixtures/node-types/path-os.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/path-os.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/12255-strnull-unit-typed-param.ts": {
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
    "order": [
-    "<repo>/tests/corpus/12255-strnull-unit-typed-param.ts"
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/12256-strnull-nullish-only-union.ts": {
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
    "order": [
-    "<repo>/tests/corpus/12256-strnull-nullish-only-union.ts"
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/12257-strnull-mysql-parser-shape.js": {
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
    "order": [
-    "<repo>/tests/corpus/12257-strnull-mysql-parser-shape.js"
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/12258-strnull-null-call-side-effect.ts": {
+  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
    "order": [
-    "<repo>/tests/corpus/12258-strnull-null-call-side-effect.ts"
+    "<repo>/tests/fixtures/node-types/stream-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/streams.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
   }
