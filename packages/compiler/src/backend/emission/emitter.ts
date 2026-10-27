@@ -2860,6 +2860,9 @@ export class CEmitter {
     }
     if (elem.kind === "f64") return "0";
     if (elem.kind === "bool") return "false";
+    // A dyn slot's hole reads as JS undefined: the runtime's immortal
+    // undefined node (scr_json.c), so pushing it and releasing it owe nothing.
+    if (elem.kind === "dyn") return "scr_dyn_undefined()";
     return "NULL";
   }
 

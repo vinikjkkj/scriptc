@@ -3836,6 +3836,15 @@ class LlEmitter {
   absentElemLl(elem: IrType): string {
     const tag = this.undefinedArmTag(elem);
     if (tag >= 0 && elem.kind === "union") return this.unitInstanceRef(elem.unionId, tag);
+    // A dyn slot's hole is JS undefined: the runtime's immortal undefined
+    // node, materialised as a call in the current block (the operand must
+    // dominate its use; every caller emits it straight-line before the loop).
+    if (elem.kind === "dyn") {
+      this.declare(`declare ptr @scr_dyn_undefined()`);
+      const t = this.B.tmp();
+      this.B.line(`${t} = call ptr @scr_dyn_undefined()`);
+      return t;
+    }
     const acc = elemAccess(elem);
     return acc === "f64" ? f64Lit(0) : acc === "bool" ? "false" : "null";
   }
