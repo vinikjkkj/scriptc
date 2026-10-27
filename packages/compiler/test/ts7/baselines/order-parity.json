@@ -18451,6 +18451,14 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/types.cjs",
+    "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/typed.cjs",
+    "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
