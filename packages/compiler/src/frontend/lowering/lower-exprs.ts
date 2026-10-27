@@ -5989,8 +5989,26 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
     }
     // Non-union operand: it can never hold undefined/null at runtime (the
     // checker narrowed it to a concrete arm), so `=== unit` is false and
-    // `!== unit` is true.
-    return { kind: "boolLit", value: negated, type: BOOL, loc };
+    // `!== unit` is true. JS still evaluates the operand first (`f() !==
+    // undefined` calls f), so a non-droppable one keeps its evaluation.
+    return foldedAnswerKeepingOperand(other, { kind: "boolLit", value: negated, type: BOOL, loc });
+  }
+
+/** The constant answer of a comparison or test whose operand JS still
+   * evaluates. A droppable operand (no call, write, trap or allocation
+   * observable) folds to the bare answer, which keeps every fold's cost.
+   * Anything else runs for effect exactly once, in order, as the first
+   * half of a seqExpr whose result is the answer: `f() !== undefined`
+   * calls f, `(x++) !== undefined` increments x. */
+  export function foldedAnswerKeepingOperand(operand: IrExpr, answer: IrExpr): IrExpr {
+    if (droppableStatic(operand)) return answer;
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: operand, loc: answer.loc }],
+      result: answer,
+      type: answer.type,
+      loc: answer.loc,
+    };
   }
 
 /** The runtime answer for a unit comparison whose operand is an
@@ -6061,7 +6079,7 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
     }
     if (isUnitType(other.type)) {
       // `null == null`, `undefined == null`: units are mutually loose-equal.
-      return { kind: "boolLit", value: !negated, type: BOOL, loc };
+      return foldedAnswerKeepingOperand(other, { kind: "boolLit", value: !negated, type: BOOL, loc });
     }
     if (other.type.kind === "dyn") {
       // `v != null` on unknown: one dyn kind test covers both units.
@@ -6085,7 +6103,7 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
         // fold below).
         const atWidth = unitTestAtDynWidth(L, other, "nullish", negated, loc);
         if (atWidth) return atWidth;
-        return { kind: "boolLit", value: negated, type: BOOL, loc };
+        return foldedAnswerKeepingOperand(other, { kind: "boolLit", value: negated, type: BOOL, loc });
       }
       const isTag = (tag: number): IrExpr => ({
         kind: "unionIsTag", unionId: ut.unionId, tag, negated, value: other, type: BOOL, loc,
@@ -6163,8 +6181,9 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
       }
     }
     // A non-nullable operand (tsc allows the comparison as a guard):
-    // `== null` is statically false, `!= null` statically true.
-    return { kind: "boolLit", value: negated, type: BOOL, loc };
+    // `== null` is statically false, `!= null` statically true. The operand
+    // still evaluates (`g() == null` calls g).
+    return foldedAnswerKeepingOperand(other, { kind: "boolLit", value: negated, type: BOOL, loc });
   }
 
 /** Safe to EMIT twice: plain reads with no side effects — local/global
@@ -20568,7 +20587,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         answers.push({ tag, has: arm.className === declName || L.isSubclassOf(arm.className, declName) });
       }
       if (staticAnswers) {
-        const pureRecv = recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet";
+        const pureRecv = pureReemittable(recv);
         const isTag = (tag: number, negated: boolean): IrExpr => ({
           kind: "unionIsTag",
           unionId,
@@ -20893,7 +20912,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // inherited by every instance: `'name' in o` is true whether or not an
     // own value exists.
     if (key !== null && protoDataHasKey(L, expr.right, key)) {
-      return { kind: "boolLit", value: true, type: BOOL, loc };
+      // The receiver still evaluates (`'name' in f()` calls f).
+      return foldedAnswerKeepingOperand(L.lowerExpr(expr.right), { kind: "boolLit", value: true, type: BOOL, loc });
     }
     if (key === null) {
       // A RUNTIME string key over an INDEX-SIGNATURE record receiver (the
@@ -21069,7 +21089,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       {
         const members = classInMemberNames(L, recv.type.className);
         if (members) {
-          if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {
+          {
             // A DECLARED name still folds to the constant true. Anything
             // else no longer folds to false on a class that carries the
             // run-time property table: `Object.defineProperty(o, "plug",
@@ -21096,10 +21116,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
               // stance 55's own recorded divergence and not a new one.
               const armed = undefinedArmedInAnswer(L, recv, recv.type.className, key, loc);
               if (armed) return armed;
-              return { kind: "boolLit", value: true, type: BOOL, loc };
+              return foldedAnswerKeepingOperand(recv, { kind: "boolLit", value: true, type: BOOL, loc });
             }
             const cinfo = L.classes.get(recv.type.className);
-            if (cinfo?.hasPropsTable !== true) return { kind: "boolLit", value: false, type: BOOL, loc };
+            if (cinfo?.hasPropsTable !== true) {
+              return foldedAnswerKeepingOperand(recv, { kind: "boolLit", value: false, type: BOOL, loc });
+            }
             return {
               kind: "libCall",
               fn: "cls.propsHas",
@@ -21111,7 +21133,6 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
               loc,
             };
           }
-          L.unsupported("SC1090", expr, "statically-decided 'in' on computed receivers (bind the value to a variable first)");
         }
       }
     }
@@ -21229,7 +21250,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         console.error(`INWHY ${loc.file}:${line} key='${key}' arms=${arms.length} taken=${answers.length} stopped-at=${stopper} static=${staticAnswers} armwise=${armWise} recv=${recv.kind} [${verdicts.join(",")}]`);
       }
       if (staticAnswers) {
-        const pureRecv = recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode;
+        const pureRecv = pureReemittable(recv) || pureRecvNode;
         const isTag = (tag: number, negated: boolean): IrExpr => ({
           kind: "unionIsTag",
           unionId,
@@ -21286,7 +21307,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // so only side-effect-free receivers qualify — the OR-chain rule
       // above. An impure one falls through to the fence it met before.
       if (armWise) {
-        const pureRecv = recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode;
+        const pureRecv = pureReemittable(recv) || pureRecvNode;
         if (pureRecv) {
           const isTag = (tag: number): IrExpr => ({ kind: "unionIsTag", unionId, tag, negated: false, value: recv, type: BOOL, loc });
           const falseLit = (): IrExpr => ({ kind: "boolLit", value: false, type: BOOL, loc });
@@ -21395,7 +21416,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // answer is constant, so only a receiver read with nothing to preserve
     // may drop the evaluation.
     if (recv.type.kind === "f64" && stdlibHandleDeclaresMember(key) && stdlibHandleObjectTypeOf(L, expr.right) !== null) {
-      if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {
+      if (pureReemittable(recv) || pureRecvNode) {
         return { kind: "boolLit", value: true, type: BOOL, loc };
       }
       return {
@@ -21435,7 +21456,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // the instance instead. Safe to re-read the receiver here for the
       // same reason the fold was safe to drop it — this branch only runs
       // for a pure one.
-      if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {
+      if (pureReemittable(recv) || pureRecvNode) {
         const node: IrExpr = { kind: "boolLit", value: true, type: BOOL, loc };
         const shapeId = recv.type.shapeId;
         L.noteSlotFilledGuard(shapeId, key, {
@@ -21445,16 +21466,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         });
         return node;
       }
-      L.unsupported("SC1090", expr, "statically-decided 'in' on computed receivers (bind the value to a variable first)");
+      // An effectful receiver (`'a' in g().rec`) cannot be re-read by the
+      // slot-filled guard, so it keeps the constant and evaluates once.
+      return foldedAnswerKeepingOperand(recv, { kind: "boolLit", value: true, type: BOOL, loc });
     }
     // Accessor properties answer `in` as own members (Node: true, getter
     // NOT invoked) — statically true under the same purity discipline as
     // declared non-optional fields.
     if (shape.fields.some((f) => f.name === `%get:${key}` || f.name === `%set:${key}`)) {
-      if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {
-        return { kind: "boolLit", value: true, type: BOOL, loc };
-      }
-      L.unsupported("SC1090", expr, "statically-decided 'in' on computed receivers (bind the value to a variable first)");
+      return foldedAnswerKeepingOperand(recv, { kind: "boolLit", value: true, type: BOOL, loc });
     }
     if (shape.indexValue) {
       // A LITERAL key over an index-signature shape is the same question
@@ -21467,10 +21487,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       if (lIn) return lIn;
       L.unsupported("SC1090", expr, "'in' over index-signature keys (read the key and test '!== undefined' instead)");
     }
-    if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {
-      return { kind: "boolLit", value: false, type: BOOL, loc };
-    }
-    L.unsupported("SC1090", expr, "statically-decided 'in' on computed receivers (bind the value to a variable first)");
+    return foldedAnswerKeepingOperand(recv, { kind: "boolLit", value: false, type: BOOL, loc });
   }
 
 /** The runtime-key `in` (see lowerInExpression): `k in r` where k is a
