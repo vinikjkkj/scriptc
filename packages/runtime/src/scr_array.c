@@ -1241,6 +1241,32 @@ ScrArr *scr_arr_sort_dyn(ScrArr *a, bool copy) {
 ScrArr *scr_arr_sort_dyn_inplace(ScrArr *a) { return scr_arr_sort_dyn(a, false); }
 ScrArr *scr_arr_to_sorted_dyn(ScrArr *a) { return scr_arr_sort_dyn(a, true); }
 
+/* A dyn iterable spread into an any[] literal: the iterator pack's elements, in order,
+ * as dyn boxes (an array hole is the undefined singleton). NULL with the exception
+ * pending when the source is not iterable (scr_dyn_iter_pack's own TypeError). */
+ScrArr *scr_arr_from_dyn_iter(const ScrDyn *src, const ScrStr *msg) {
+  ScrDyn *pack = scr_dyn_iter_pack(src, msg);
+  if (pack == NULL) return NULL;
+  size_t n = (size_t)scr_dyn_arr_len(pack);
+  ScrArr *out = scr_arr_new_ref(scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v, n ? n : 1);
+  for (size_t i = 0; i < n; i++) scr_arr_push_ref(out, scr_dyn_arr_at(pack, (double)i));
+  scr_dyn_release(pack);
+  return out;
+}
+
+/* An any[] (dyn elements) as an f64[] of its ToNumber values, a fresh copy: the
+ * argument list of an apply() whose callee reads numbers (String.fromCharCode).
+ * Each element converts once, in order; a hole is undefined, which is NaN. NaN
+ * with the exception pending when an object element's conversion throws. */
+ScrArr *scr_arr_to_f64_dyn(ScrArr *a) {
+  ScrArr *out = scr_arr_new(SCR_ELEM_F64, a->len ? a->len : 1);
+  for (size_t i = 0; i < a->len; i++) {
+    const ScrDyn *d = (const ScrDyn *)scr_slot_to_ptr(a->data[i]);
+    scr_arr_push_f64(out, d == NULL ? NAN : scr_dyn_to_number(d));
+  }
+  return out;
+}
+
 /* String.raw over the template's raw literals and PRE-STRINGIFIED
  * substitutions (the frontend applies the static ToString per value):
  * raw[0] sub[0] raw[1] sub[1] ... — substitutions beyond raw.len-1 drop,

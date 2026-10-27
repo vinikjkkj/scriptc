@@ -6480,6 +6480,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_bytes_concat_len(${arg(0)}, ${arg(1)})`);
           case "array.sortDyn":
             return finish(`scr_arr_sort_dyn_inplace(${arg(0)})`);
+          case "array.toF64Dyn":
+            return finish(`scr_arr_to_f64_dyn(${arg(0)})`);
+          case "array.fromDynIter":
+            return finish(`scr_arr_from_dyn_iter(${arg(0)}, ${arg(1)})`);
           case "array.toSortedDyn":
             return finish(`scr_arr_to_sorted_dyn(${arg(0)})`);
           case "buffer.concatDyn":

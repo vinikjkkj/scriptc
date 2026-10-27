@@ -8694,6 +8694,17 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
           const w = L.widthCoerce(src, type);
           if (w) src = w;
         }
+        // A dyn iterable (an `arguments` object, an any value) spread into an any[]
+        // literal: its iterator pack as dyn boxes (array.fromDynIter).
+        if (src.type.kind === "dyn" && type.elem.kind === "dyn") {
+          src = {
+            kind: "libCall",
+            fn: "array.fromDynIter",
+            args: [src, { kind: "strLit", value: el.getText(), type: STRING, loc: locOf(el) }],
+            type: arrayOf(DYN),
+            loc: locOf(el),
+          };
+        }
         if (!typeEquals(src.type, type)) {
           L.unsupported(
             "SC1090",
