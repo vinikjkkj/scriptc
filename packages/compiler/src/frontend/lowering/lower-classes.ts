@@ -10855,9 +10855,19 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         // declaration fallback) — length/index/method uses then ride the
         // keyed-dyn paths that already carry them.
         const staticArr = ((): (IrType & { kind: "array" }) | null => {
-          let t = L.mapTypeOf(L.typeOf(expr));
+          // An `any[]` expression maps to a DYN-element array (the item's
+          // representation), which is not a TYPED slot: the declaration types
+          // the elements instead, exactly as it did while `any[]` had no
+          // static mapping. So a dyn-element expression type defers to the
+          // contextual array (for `new Array(n).fill(v)` the declaration of the
+          // fill call), and falls through to the fill inference otherwise.
+          const exprArr = L.mapTypeOf(L.typeOf(expr));
+          let t = exprArr?.kind === "array" && exprArr.elem.kind !== "dyn" ? exprArr : null;
           if (t?.kind !== "array") {
-            const ctx = L.checker.getContextualType(expr);
+            const fillCall = wholeFillCallOf(expr);
+            const ctx =
+              (fillCall !== null ? L.checker.getContextualType(fillCall) : undefined) ??
+              L.checker.getContextualType(expr);
             const ctxMapped = ctx ? L.mapTypeOf(ctx) : null;
             if (ctxMapped?.kind === "array") t = ctxMapped;
             else if (ctx !== undefined && ctx.isUnionType()) {
@@ -10929,6 +10939,12 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           }
           return t?.kind === "array" ? t : null;
         })();
+        // The dyn-element array an `any[]` expression maps to: the fallback
+        // when no typed home (declaration or counting-loop writes) answers.
+        const dynExprArr = ((): (IrType & { kind: "array" }) | null => {
+          const x = L.mapTypeOf(L.typeOf(expr));
+          return x?.kind === "array" && x.elem.kind === "dyn" ? x : null;
+        })();
         if (
           staticArr === null &&
           (isJsSourceFile(expr.getSourceFile()) || L.mapTypeOf(L.typeOf(expr))?.kind === "dyn")
@@ -10989,23 +11005,22 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             staticArr === null && !isJsSourceFile(expr.getSourceFile()) && L.checkerAnyArray(expr)
               ? newArrayFillElemType(L, expr)
               : null;
-          if (staticArr === null && inferred === null) L.badType(expr, L.typeOf(expr));
-          const arrT = staticArr ?? inferred!;
+          const arrT = staticArr ?? inferred ?? dynExprArr;
+          if (arrT === null) L.badType(expr, L.typeOf(expr));
           const elem = arrT.elem;
           // `new Array(n).fill(v)` is a COMPOSED form: the whole-range
           // fill writes every slot before anything can read one, so a
           // union WITHOUT an undefined arm (`(T | null)[]`, the shape this
           // idiom is written for) needs no readable absent value. Only the
           // range-less fill qualifies — a start/end narrows the write and
-          // would leave slots unwritten. Scalars stay fenced regardless:
-          // arrayNewLen itself is only defined over refcounted elements.
+          // would leave slots unwritten.
+          // The whole-range fill proves every slot is written before any read,
+          // so a SCALAR element (`const next: number[] = new Array(n).fill(0)`)
+          // rides it too: its zero placeholder is overwritten before it can
+          // be observed, and the validator admits scalars only on that proof.
           const filledWhole =
-            isRefCounted(elem) &&
-            ts.isPropertyAccessExpression(expr.parent) &&
-            expr.parent.name.text === "fill" &&
-            ts.isCallExpression(expr.parent.parent) &&
-            expr.parent.parent.expression === expr.parent &&
-            expr.parent.parent.arguments.length === 1;
+            (isRefCounted(elem) || elem.kind === "f64" || elem.kind === "bool") &&
+            wholeFillCallOf(expr) !== null;
           // The prefix-fill proof is asked LAST on purpose: it is the only
           // disjunct whose instrument is meant to read "sites that would have
           // fenced without me", so it must not run for an element kind that
@@ -11030,8 +11045,8 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         // annotation when one exists (the new Map() stance) — staticArr
         // consulted both, and the checked-dynamic build above already
         // answered the two slots that have no static home.
-        if (staticArr === null) L.badType(expr, L.typeOf(expr));
-        const t = staticArr;
+        const t = staticArr ?? dynExprArr;
+        if (t === null) L.badType(expr, L.typeOf(expr));
         const elems = args.map((a) => L.lowerExprExpecting(a, t.elem));
         return { kind: "arrayLit", elems, type: t, loc };
       }
@@ -12330,6 +12345,14 @@ function noteFillLoopProof(expr: ts.NewExpression): void {
   }
 }
 
+/** The `.fill(v)` call a `new Array(n)` is the WHOLE-RANGE receiver of (the
+ * one-argument form, nothing narrowing the write), or null. */
+function wholeFillCallOf(expr: ts.NewExpression): ts.CallExpression | null {
+  if (!ts.isPropertyAccessExpression(expr.parent) || expr.parent.name.text !== "fill") return null;
+  if (!ts.isCallExpression(expr.parent.parent) || expr.parent.parent.expression !== expr.parent) return null;
+  return expr.parent.parent.arguments.length === 1 ? expr.parent.parent : null;
+}
+
 /** The element type of an UNANNOTATED `new Array(n)` that the counting-loop
  * proof admits, read off the writes the proof already collected.
  *
@@ -12362,6 +12385,7 @@ function noteFillLoopProof(expr: ts.NewExpression): void {
  * `absent` gate runs after this and keeps the ratified stance (SEMANTICS.md
  * 46). This decides only WHICH element type, never whether holes are
  * readable. */
+
 function newArrayFillElemType(L: Lowerer, expr: ts.NewExpression): (IrType & { kind: "array" }) | null {
   const writes = fullFillLoopWrites(expr);
   if (writes === null || writes.length === 0) return null;
