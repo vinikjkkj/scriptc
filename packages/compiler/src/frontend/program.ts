@@ -4577,3 +4577,105 @@ function hasWholeExportReplacement(sf: ts.SourceFile): boolean {
   });
   return found;
 }
+
+/** A top-level `Object.entries(<const object literal>).forEach(([k, v]) => { … module.exports[k] = v; … })`
+ * (mysql2's packets index: one export per key of a literal whose keys are the whole key set). Each key is
+ * a member export keyed by the literal's property (its checker symbol names the member, the identifier
+ * value is the alias target), and the callback body lowers once per key with `k`/`v` substituted. Null for
+ * every other shape: a non-literal source, a computed or spread key, a non-identifier value, a `return`
+ * (which would leave the module body), or a body without exactly one `module.exports[k] = v` statement. */
+export interface CjsKeyedForEach {
+  readonly stmt: ts.ExpressionStatement;
+  readonly keyParam: ts.Identifier;
+  readonly valueParam: ts.Identifier;
+  readonly body: ts.Block;
+  /** The one `module.exports[k] = v` statement of the body (registers the members; lowers to nothing). */
+  readonly exportStmt: ts.Statement;
+  readonly keys: readonly { readonly name: string; readonly nameNode: ts.Identifier | ts.StringLiteral; readonly valueNode: ts.Identifier }[];
+}
+
+export function cjsKeyedForEachOf(stmt: ts.Statement, sf: ts.SourceFile): CjsKeyedForEach | null {
+  if (!ts.isExpressionStatement(stmt)) return null;
+  const call = stmt.expression;
+  if (!ts.isCallExpression(call) || call.arguments.length !== 1) return null;
+  const forEach = call.expression;
+  if (!ts.isPropertyAccessExpression(forEach) || forEach.name.text !== "forEach" || forEach.questionDotToken) return null;
+  const entries = forEach.expression;
+  if (!ts.isCallExpression(entries) || entries.arguments.length !== 1 || !ts.isIdentifier(entries.arguments[0]!)) return null;
+  const oe = entries.expression;
+  if (!ts.isPropertyAccessExpression(oe) || !ts.isIdentifier(oe.expression) || oe.expression.text !== "Object" || oe.name.text !== "entries") return null;
+  const srcName = (entries.arguments[0] as ts.Identifier).text;
+  const fn = call.arguments[0]!;
+  if (!ts.isArrowFunction(fn) || fn.body === undefined || !ts.isBlock(fn.body) || fn.parameters.length !== 1) return null;
+  const p = fn.parameters[0]!;
+  if (p.dotDotDotToken || p.initializer || !ts.isArrayBindingPattern(p.name) || p.name.elements.length !== 2) return null;
+  const kEl = p.name.elements[0];
+  const vEl = p.name.elements[1];
+  if (kEl === undefined || vEl === undefined) return null;
+  if (kEl.dotDotDotToken || vEl.dotDotDotToken || kEl.initializer || vEl.initializer || kEl.propertyName || vEl.propertyName) return null;
+  const kName: ts.Node | undefined = kEl.name;
+  const vName: ts.Node | undefined = vEl.name;
+  if (kName === undefined || vName === undefined) return null;
+  if (!ts.isIdentifier(kName) || !ts.isIdentifier(vName)) return null;
+  const keyParam: ts.Identifier = kName;
+  const valueParam: ts.Identifier = vName;
+  // The source: a top-level `const <name> = { … }` whose properties all have static keys and identifier values.
+  let literal: ts.ObjectLiteralExpression | null = null;
+  for (const s of sf.statements) {
+    if (!ts.isVariableStatement(s) || (s.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
+    for (const d of s.declarationList.declarations) {
+      if (ts.isIdentifier(d.name) && d.name.text === srcName && d.initializer !== undefined && ts.isObjectLiteralExpression(d.initializer)) literal = d.initializer;
+    }
+  }
+  if (literal === null) return null;
+  const keys: { name: string; nameNode: ts.Identifier | ts.StringLiteral; valueNode: ts.Identifier }[] = [];
+  const seen = new Set<string>();
+  for (const prop of literal.properties) {
+    let name: ts.Identifier | ts.StringLiteral | null = null;
+    let valueNode: ts.Identifier | null = null;
+    if (ts.isShorthandPropertyAssignment(prop)) {
+      const sn: ts.Node = prop.name;
+      if (ts.isIdentifier(sn)) {
+        name = sn;
+        valueNode = sn;
+      }
+    } else if (ts.isPropertyAssignment(prop)) {
+      const pn: ts.Node = prop.name;
+      const init: ts.Node = prop.initializer;
+      if ((ts.isIdentifier(pn) || ts.isStringLiteral(pn)) && ts.isIdentifier(init)) {
+        name = pn;
+        valueNode = init;
+      }
+    }
+    if (name === null || valueNode === null) return null;
+    if (seen.has(name.text)) return null;
+    seen.add(name.text);
+    keys.push({ name: name.text, nameNode: name, valueNode });
+  }
+  // The body: exactly one `module.exports[k] = v`, no `return` (it would leave the module body).
+  let exportStmt: ts.Statement | null = null;
+  let exportCount = 0;
+  for (const s of fn.body.statements) {
+    if (ts.isExpressionStatement(s) && ts.isBinaryExpression(s.expression) && s.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const l = s.expression.left;
+      const r = s.expression.right;
+      if (ts.isElementAccessExpression(l) && isModuleExportsAccess(l.expression) && ts.isIdentifier(l.argumentExpression) &&
+          l.argumentExpression.text === keyParam.text && ts.isIdentifier(r) && r.text === valueParam.text) {
+        exportStmt = s;
+        exportCount++;
+      }
+    }
+  }
+  if (exportCount !== 1 || exportStmt === null) return null;
+  let hasReturn = false;
+  const walk = (n: ts.Node): void => {
+    ts.forEachChild(n, (c) => {
+      if (hasReturn || ts.isFunctionLike(c)) return;
+      if (ts.isReturnStatement(c)) hasReturn = true;
+      walk(c);
+    });
+  };
+  walk(fn.body);
+  if (hasReturn) return null;
+  return { stmt, keyParam, valueParam, body: fn.body, exportStmt, keys };
+}

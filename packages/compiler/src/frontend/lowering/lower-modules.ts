@@ -10,7 +10,7 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsWholeExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsKeyedForEachOf, cjsWholeExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import { cjsExportRecordOf, cjsExportRecordInit, cjsExportRecordCreate } from "./cjs-export-record.js";
 import { npmStaticDepSf7, resolveProjectImportSf7 } from "../program.js";
 import type { CycleEdge } from "../program.js";
@@ -2066,6 +2066,20 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // diagnostic recorded; the statement lowering poisons too.
           }
         };
+        // A keyed forEach export (program.ts cjsKeyedForEachOf): one member per literal key, registered
+        // against the literal's own property (an identifier value is the alias target, as in a table).
+        {
+          const kf = cjsKeyedForEachOf(stmt, sf);
+          if (kf !== null) {
+            for (const key of kf.keys) {
+              // A class value is alias plumbing (no storage): importers resolve to the class declaration.
+              const vd = L.resolveValueSymbol(key.valueNode);
+              if (vd !== null && L.checker.declarationsOf(vd).some(ts.isClassDeclaration)) continue;
+              registerExport(key.nameNode, key.name, key.valueNode);
+            }
+            continue;
+          }
+        }
         if (cjs?.kind === "member" && cjs.text !== null) {
           // `exports.C = C` naming a CLASS declaration: alias plumbing —
           // no storage (a class VALUE global would fence for
