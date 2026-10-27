@@ -2830,8 +2830,10 @@ function validateFunction(
               err(`bytesNew copy source elem mismatch`, e.loc);
             }
           } else if (sk.kind === "array") {
-            if (sk.elem.kind !== "f64") {
-              err(`bytesNew array source must hold f64, got ${sk.elem.kind}`, e.loc);
+            // A bigint view's source holds bigints; every other view's, doubles.
+            const wantSrc = e.type.kind === "bytes" && (e.type.elem === "i64" || e.type.elem === "u64") ? "bigint" : "f64";
+            if (sk.elem.kind !== wantSrc) {
+              err(`bytesNew array source must hold ${wantSrc}, got ${sk.elem.kind}`, e.loc);
             }
           } else if (sk.kind !== "f64" && sk.kind !== "dyn") {
             // dyn: the runtime tag dispatch (scr_bytes_from_dyn) — the

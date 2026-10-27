@@ -9964,6 +9964,11 @@ class LlEmitter {
           return this.own({ name: t, type: e.type });
         }
         if (e.source.type.kind === "array") {
+          if (e.source.type.elem.kind === "bigint") {
+            this.declare(`declare ptr @scr_bytes_from_bigs(i32, ptr)`);
+            B.line(`${t} = call ptr @scr_bytes_from_bigs(i32 ${kind}, ptr ${src.name})`);
+            return this.own({ name: t, type: e.type });
+          }
           this.declare(`declare ptr @scr_bytes_from_arr(i32, ptr)`);
           B.line(`${t} = call ptr @scr_bytes_from_arr(i32 ${kind}, ptr ${src.name})`);
           return this.own({ name: t, type: e.type });

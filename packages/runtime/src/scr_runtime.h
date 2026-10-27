@@ -8846,6 +8846,8 @@ void scr_bytes_set_big(ScrBytes *b, double i, const ScrBigInt *v);
 ScrBytes *scr_bytes_fill_big(ScrBytes *b, const ScrBigInt *v, double nargs, double from, double to);
 double scr_bytes_index_of_big(const ScrBytes *b, const ScrBigInt *v, double from);
 ScrBytes *scr_bytes_sort_big(ScrBytes *b);
+/* A bigint[] source of a bigint view (new BigInt64Array([...]), set([...])). */
+ScrBytes *scr_bytes_from_bigs(ScrBytesElem elem, ScrArr *arr);
 
 /* ── WeakMap ───────────────────────────────────────────────────────────
  * Reference-identity keys held WEAKLY: the table does not retain a key and

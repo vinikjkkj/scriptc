@@ -7720,8 +7720,11 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     if (args.length === 1 && !ts.isSpreadElement(args[0]!)) {
       const argNode = args[0]!;
       if (ts.isArrayLiteralExpression(argNode) && !argNode.elements.some(ts.isSpreadElement)) {
-        const elems = argNode.elements.map((el) => L.lowerExprExpecting(el, F64));
-        const seed: IrExpr = { kind: "arrayLit", elems, type: arrayOf(F64), loc };
+        // A bigint view takes a bigint[] literal (each element is a bigint).
+        const bigSeed = type.kind === "bytes" && (type.elem === "i64" || type.elem === "u64");
+        const elemT = bigSeed ? BIGINT : F64;
+        const elems = argNode.elements.map((el) => L.lowerExprExpecting(el, elemT));
+        const seed: IrExpr = { kind: "arrayLit", elems, type: arrayOf(elemT), loc };
         return markFlavor({ kind: "bytesNew", source: seed, type, loc }, "plain", loc);
       }
       // The SYNTACTIC `new T(new ArrayBuffer(n))` and `new T(new
@@ -8075,12 +8078,15 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       const srcNode = call.arguments[0]!;
       let src: IrExpr;
       if (ts.isArrayLiteralExpression(srcNode) && !srcNode.elements.some(ts.isSpreadElement)) {
-        const elems = srcNode.elements.map((el) => L.lowerExprExpecting(el, F64));
-        const seed: IrExpr = { kind: "arrayLit", elems, type: arrayOf(F64), loc };
+        const bigSeed = receiverIr.elem === "i64" || receiverIr.elem === "u64";
+        const elemT = bigSeed ? BIGINT : F64;
+        const elems = srcNode.elements.map((el) => L.lowerExprExpecting(el, elemT));
+        const seed: IrExpr = { kind: "arrayLit", elems, type: arrayOf(elemT), loc };
         src = { kind: "bytesNew", source: seed, type: receiverIr, loc };
       } else {
         const lowered = L.lowerExpr(srcNode);
-        src = lowered.type.kind === "array" && lowered.type.elem.kind === "f64"
+        const wantElem = receiverIr.elem === "i64" || receiverIr.elem === "u64" ? "bigint" : "f64";
+        src = lowered.type.kind === "array" && lowered.type.elem.kind === wantElem
           ? { kind: "bytesNew", source: lowered, type: receiverIr, loc }
           : lowered;
       }
