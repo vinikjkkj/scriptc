@@ -18166,6 +18166,18 @@
     "<repo>/tests/corpus/12912-bigint-write-range-errors/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/13005-prototype-own-names-fold.ts": {
+   "order": [
+    "<repo>/tests/corpus/13005-prototype-own-names-fold.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13006-prototype-method-descriptor.js": {
+   "order": [
+    "<repo>/tests/corpus/13006-prototype-method-descriptor.js"
+   ],
+   "diags": []
   }
  }
 }
