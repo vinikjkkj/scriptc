@@ -219,7 +219,7 @@ void scr_bytes_own_set(ScrBytes *b, const char *k, size_t kl, ScrDyn *v) {
   ScrDyn *nv = scr_dyn_retain(v);
   if (b->own == NULL) {
     b->own = calloc(1, sizeof(ScrBytesOwn));
-    if (b->own == NULL) scr_bytes_io_oom();
+    if (b->own == NULL) scr_bytes_oom();
   }
   ScrBytesOwn *t = b->own;
   for (size_t i = 0; i < t->n; i++) {
@@ -234,13 +234,13 @@ void scr_bytes_own_set(ScrBytes *b, const char *k, size_t kl, ScrDyn *v) {
   if (t->n == t->cap) {
     size_t cap = t->cap ? t->cap * 2 : 4;
     ScrBytesOwnEnt *ne = realloc(t->ents, cap * sizeof(ScrBytesOwnEnt));
-    if (ne == NULL) scr_bytes_io_oom();
+    if (ne == NULL) scr_bytes_oom();
     t->ents = ne;
     t->cap = cap;
   }
   ScrBytesOwnEnt *e = &t->ents[t->n++];
   e->key = malloc(kl + 1);
-  if (e->key == NULL) scr_bytes_io_oom();
+  if (e->key == NULL) scr_bytes_oom();
   memcpy(e->key, k, kl);
   e->key[kl] = '\0';
   e->klen = kl;
