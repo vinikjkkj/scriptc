@@ -105,7 +105,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) || dynEnumerationFenced(meta) ? "true" : "false"}, ${opaque ? "true" : "false"}, ${errorRooted ? "true" : "false"}, ` +
         `${statics === null ? "NULL, 0" : `${statics.sym}, ${statics.count}`}, ${staticsOpaque ? "true" : "false"}, ` +
         `${meta.base === null ? "NULL" : cStringLiteral(Buffer.from(dynClassDisplayName(meta.base.def), "utf8"))}, ` +
-        `${dynRuntimeRoot(meta)} }; ` +
+        `${dynRuntimeRoot(meta)}, ${E.tracedShapes.has(`object:${className}`) ? 1 : 0} }; ` +
         `/* dyn box: class ${className} */`,
     );
     // A base-typed box can hold a DERIVED instance, and the registry resolves
