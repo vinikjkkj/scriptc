@@ -826,6 +826,21 @@ static uint64_t scr_arr_shift_slot(ScrArr *a) {
   return s;
 }
 
+/* pop/shift over DYN-element arrays: an empty array or an ABSENT slot is
+ * undefined, which is the immortal dyn undefined (never freed), and a present
+ * element moves out as its own +1 box. */
+void *scr_arr_pop_dyn(ScrArr *a) {
+  if (a->len == 0) return scr_dyn_undefined();
+  void *p = scr_slot_to_ptr(a->data[--a->len]);
+  return p != NULL ? p : scr_dyn_undefined();
+}
+
+void *scr_arr_shift_dyn(ScrArr *a) {
+  if (a->len == 0) return scr_dyn_undefined();
+  void *p = scr_slot_to_ptr(scr_arr_shift_slot(a));
+  return p != NULL ? p : scr_dyn_undefined();
+}
+
 double scr_arr_shift_f64(ScrArr *a) { return scr_slot_to_f64(scr_arr_shift_slot(a)); }
 
 bool scr_arr_shift_bool(ScrArr *a) { return scr_arr_shift_slot(a) != 0; }
@@ -862,6 +877,54 @@ ScrArr *scr_arr_splice(ScrArr *a, double start, double deleteCount) {
     memmove(a->data + from, a->data + from + n, (a->len - from - n) * sizeof(uint64_t));
     a->len -= n;
   }
+  return out;
+}
+
+/* splice(start, deleteCount, ...items) with the inserted items as an ARRAY
+ * (same element kind; borrowed). The removed elements come back as a fresh
+ * +1 array exactly as scr_arr_splice (moved out). The inserted items are
+ * RETAINED into the receiver: a snapshot of them is taken before the
+ * receiver is touched, so `a.splice(0, 0, ...a)` inserts JS's pre-call copy.
+ * Borrows a and items. */
+ScrArr *scr_arr_splice_ins(ScrArr *a, double start, double deleteCount, ScrArr *items) {
+  double len = (double)a->len;
+  double s0 = isnan(start) ? 0 : trunc(start);
+  if (s0 < 0) s0 += len;
+  size_t from = s0 <= 0 ? 0 : s0 >= len ? a->len : (size_t)s0;
+  double avail = len - (double)from;
+  double d0 = isnan(deleteCount) ? 0 : trunc(deleteCount);
+  size_t n = d0 <= 0 ? 0 : d0 >= avail ? (size_t)avail : (size_t)d0;
+  size_t m = items->len;
+  /* Snapshot the items, retained (the aliasing case reads items == a). */
+  uint64_t *ins = m ? malloc(m * sizeof(uint64_t)) : NULL;
+  if (m && !ins) scr_arr_oom();
+  for (size_t i = 0; i < m; i++) {
+    uint64_t s = items->data[i];
+    if (a->elem == SCR_ELEM_F64 || a->elem == SCR_ELEM_BOOL) {
+      ins[i] = s;
+      continue;
+    }
+    void *p = scr_slot_to_ptr(s);
+    ins[i] = p == NULL ? s : scr_slot_from_ptr(scr_elem_retain_p(a, p));
+  }
+  ScrArr *out =
+      a->elem == SCR_ELEM_REF
+          ? scr_arr_new_ref(a->elem_retain, a->elem_release, a->elem_trace, n ? n : 1)
+          : scr_arr_new(a->elem, n ? n : 1);
+  if (n > 0) {
+    memcpy(out->data, a->data + from, n * sizeof(uint64_t));
+    out->len = n;
+  }
+  size_t tail = a->len - from - n;
+  uint64_t *keep = tail ? malloc(tail * sizeof(uint64_t)) : NULL;
+  if (tail && !keep) scr_arr_oom();
+  if (tail) memcpy(keep, a->data + from + n, tail * sizeof(uint64_t));
+  a->len = from;
+  scr_arr_grow(a, from + m + tail);
+  for (size_t i = 0; i < m; i++) a->data[a->len++] = ins[i];
+  for (size_t i = 0; i < tail; i++) a->data[a->len++] = keep[i];
+  free(keep);
+  free(ins);
   return out;
 }
 
@@ -1108,6 +1171,75 @@ ScrStr *scr_arr_join_dyn(ScrArr *a, ScrStr *sep) {
   free(buf);
   return out;
 }
+
+/* Array.prototype.sort() with no comparator over DYN-element arrays: the
+ * elements compare by ToString (UTF-16 code units, the string sort's
+ * order), undefined elements (holes included) sort LAST and are never
+ * converted. The sort is stable (merge sort, as JS's TimSort is). Each
+ * element's string is converted ONCE before the sort. `copy` sorts a fresh
+ * copy instead (toSorted). Returns +1; NULL with the exception pending when
+ * an element's toString throws. In place: returns the receiver, retained. */
+typedef struct {
+  ScrStr *key;   /* NULL for an undefined element (sorts last) */
+  uint64_t slot; /* the element's slot, moved, never retained here */
+} ScrDynSortItem;
+
+static int scr_dyn_sort_before(const ScrDynSortItem *x, const ScrDynSortItem *y) {
+  if (x->key == NULL) return 0;          /* undefined vs undefined: equal */
+  if (y->key == NULL) return -1;         /* undefined sorts last */
+  return scr_str_cmp_u16(x->key, y->key);
+}
+
+static void scr_dyn_sort_merge(ScrDynSortItem *v, ScrDynSortItem *tmp, size_t n) {
+  if (n < 2) return;
+  size_t h = n / 2;
+  scr_dyn_sort_merge(v, tmp, h);
+  scr_dyn_sort_merge(v + h, tmp, n - h);
+  size_t i = 0, j = h, k = 0;
+  while (i < h && j < n) {
+    /* Take from the right only when strictly before: equal keys keep order. */
+    if (scr_dyn_sort_before(&v[j], &v[i]) < 0) tmp[k++] = v[j++];
+    else tmp[k++] = v[i++];
+  }
+  while (i < h) tmp[k++] = v[i++];
+  while (j < n) tmp[k++] = v[j++];
+  memcpy(v, tmp, n * sizeof *v);
+}
+
+ScrArr *scr_arr_sort_dyn(ScrArr *a, bool copy) {
+  ScrArr *out = copy ? scr_arr_slice(a, 0, INFINITY) : scr_arr_retain(a);
+  size_t n = out->len;
+  if (n < 2) return out;
+  ScrDynSortItem *v = malloc(n * sizeof *v);
+  ScrDynSortItem *tmp = malloc(n * sizeof *tmp);
+  if (!v || !tmp) scr_arr_oom();
+  for (size_t i = 0; i < n; i++) {
+    uint64_t s = out->data[i];
+    const ScrDyn *d = (const ScrDyn *)scr_slot_to_ptr(s);
+    v[i].slot = s;
+    v[i].key = NULL;
+    if (d != NULL && !scr_dyn_is_nullish(d)) {
+      v[i].key = scr_dyn_string_coerce_js(d);
+      if (v[i].key == NULL) {
+        /* An element's toString threw: release what was converted. */
+        for (size_t j = 0; j < i; j++) scr_str_release(v[j].key);
+        free(v);
+        free(tmp);
+        scr_arr_release(out);
+        return NULL;
+      }
+    }
+  }
+  scr_dyn_sort_merge(v, tmp, n);
+  for (size_t i = 0; i < n; i++) out->data[i] = v[i].slot;
+  for (size_t i = 0; i < n; i++) scr_str_release(v[i].key);
+  free(v);
+  free(tmp);
+  return out;
+}
+
+ScrArr *scr_arr_sort_dyn_inplace(ScrArr *a) { return scr_arr_sort_dyn(a, false); }
+ScrArr *scr_arr_to_sorted_dyn(ScrArr *a) { return scr_arr_sort_dyn(a, true); }
 
 /* String.raw over the template's raw literals and PRE-STRINGIFIED
  * substitutions (the frontend applies the static ToString per value):

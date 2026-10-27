@@ -1918,6 +1918,14 @@ void *scr_arr_shift_ref(ScrArr *a);
  * to the end). Returns the removed elements in order as a fresh +1 array,
  * ownership MOVED out of the receiver. Borrows a. */
 ScrArr *scr_arr_splice(ScrArr *a, double start, double deleteCount);
+/* splice with inserted items: items is a borrowed array of the same element kind. */
+ScrArr *scr_arr_splice_ins(ScrArr *a, double start, double deleteCount, ScrArr *items);
+void *scr_arr_pop_dyn(ScrArr *a);
+void *scr_arr_shift_dyn(ScrArr *a);
+/* sort() / toSorted() over DYN-element arrays with no comparator (see scr_array.c). */
+ScrArr *scr_arr_sort_dyn(ScrArr *a, bool copy);
+ScrArr *scr_arr_sort_dyn_inplace(ScrArr *a);
+ScrArr *scr_arr_to_sorted_dyn(ScrArr *a);
 
 /* indexOf: first index whose element strictly equals (JS ===) the needle,
  * or -1. Per element kind: f64 by value (NaN never matches — NaN !== NaN;
