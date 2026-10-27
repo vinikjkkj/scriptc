@@ -223,7 +223,17 @@ export function dynMemberTable(
     }
   };
   pushShadows("");
-  for (const f of cls.def.fields) {
+  // Node's creation order (IrClassDef.keyOrder) rules the rows; the layout
+  // order answers for any field keyOrder does not name.
+  const keyOrdered = ((): typeof cls.def.fields => {
+    const ko = cls.def.keyOrder;
+    if (ko === undefined) return cls.def.fields;
+    const byName = new Map(cls.def.fields.map((f) => [f.name, f] as const));
+    const first = ko.map((n) => byName.get(n)).filter((f): f is (typeof cls.def.fields)[number] => f !== undefined);
+    const named = new Set(ko);
+    return [...first, ...cls.def.fields.filter((f) => !named.has(f.name))];
+  })();
+  for (const f of keyOrdered) {
     // The internal '%'-prefixed slots (%props and its family): no program
     // can spell one, so answering for it would invent a key Node does not
     // have.

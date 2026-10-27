@@ -18549,6 +18549,12 @@
     "<repo>/tests/corpus/14052-proto-alias-two-classes.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/14150-js-class-declared-field-order.js": {
+    "order": [
+      "<repo>/tests/corpus/14150-js-class-declared-field-order.js"
+    ],
+    "diags": []
   }
  }
 }
