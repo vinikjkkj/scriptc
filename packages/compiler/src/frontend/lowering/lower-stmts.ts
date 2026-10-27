@@ -11898,6 +11898,22 @@ export function lowerKeyedForEach(L: Lowerer, kf: CjsKeyedForEach): IrStmt {
   }
   // The checker types the value parameter as the union of the literal's values: a read of it (a property read
   // off it, say) would need the per-key arm, which is not lowered. Refuse at the reference, loudly.
+  // A value reference that REPLACES a prototype method (`ctor.prototype.m = fn`, the conditional
+  // install of mysql2's packets/index.js): the previous method is read and called with old.call(this)
+  // by the replacement, which needs a dispatch slot a run-time write re-points. Named precisely.
+  for (const id of vRefs) {
+    const p1 = id.parent;
+    if (!ts.isPropertyAccessExpression(p1) || p1.expression !== id || p1.name.text !== "prototype") continue;
+    const p2 = p1.parent;
+    if (!ts.isPropertyAccessExpression(p2) || p2.expression !== p1) continue;
+    const p3 = p2.parent;
+    if (!ts.isBinaryExpression(p3) || p3.left !== p2 || p3.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+    L.unsupported(
+      "SC1090",
+      p3,
+      `replacing the prototype method '${p2.name.text}' of the keyed class '${kf.valueParam.text}' at run time (a run-time write re-points the method; the class vtables are static constants, so the replacement and its old.call(this) have no lowering)`,
+    );
+  }
   for (const id of vRefs) {
     if (L.mapTypeOf(L.typeOf(id))?.kind === "union") {
       L.unsupported(
