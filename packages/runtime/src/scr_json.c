@@ -3186,6 +3186,40 @@ static const ScrDynHandleOps scr_strdec_box_ops = {
   &scr_strdec_box_set, NULL,
 };
 
+/* new StringDecoder(enc) over a run-time value: Node's normalization. undefined
+ * and null are utf8; any other value must name an encoding in Node's alias set
+ * (case-insensitive), which folds to the canonical name the strdec steps
+ * dispatch on. Anything else throws Node's ERR_UNKNOWN_ENCODING TypeError and
+ * the result is a placeholder the pending check discards. +1. */
+ScrStr *scr_strdec_enc_of(const ScrDyn *v) {
+  if (v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) return scr_str_new("utf8", 4);
+  if (v->kind == SCR_DYN_STR && scr_bytes_is_encoding(v->v.str)) {
+    char low[10];
+    size_t n = v->v.str->len;
+    for (size_t i = 0; i < n; i++) {
+      char c = v->v.str->data[i];
+      low[i] = c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
+    }
+    low[n] = 0;
+    const char *canon = low;
+    if (strcmp(low, "utf-8") == 0) canon = "utf8";
+    else if (strcmp(low, "binary") == 0) canon = "latin1";
+    else if (strcmp(low, "ucs2") == 0 || strcmp(low, "ucs-2") == 0 || strcmp(low, "utf-16le") == 0) canon = "utf16le";
+    return scr_str_new(canon, strlen(canon));
+  }
+  /* Node interpolates the value (`Unknown encoding: ${enc}`): ToString of it. */
+  ScrStr *shown = scr_dyn_string_coerce_js(v);
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, "Unknown encoding: ");
+  for (size_t i = 0; i < shown->len; i++) scr_jb_putc(&b, shown->data[i]);
+  scr_str_release(shown);
+  ScrStr *msg = scr_jb_finish(&b);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg->data, msg->len, "ERR_UNKNOWN_ENCODING");
+  scr_str_release(msg);
+  return scr_str_new("utf8", 4);
+}
+
 /* A StringDecoder record crossing into the dyn tree (the emitters' dynFrom arm
  * for a shape the frontend built from `StringDecoder`). `enc` is borrowed. */
 ScrDyn *scr_strdec_dyn_box(const ScrStr *enc, double pending) {
