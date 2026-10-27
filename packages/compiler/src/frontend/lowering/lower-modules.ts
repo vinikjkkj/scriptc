@@ -1687,6 +1687,17 @@ function jsDynHoldableInitializer(L: Lowerer, init: ts.Expression | undefined): 
   while (ts.isParenthesizedExpression(e)) e = e.expression;
   if (e.kind === ts.SyntaxKind.NullKeyword) return true;
   if (ts.isIdentifier(e) && e.text === "undefined") return true;
+  // A member read off a CommonJS module's export object (`var Buffer =
+  // __sc_r0.Buffer` after the require is hoisted: safer-buffer, iconv-lite's
+  // shape). The checker types the read as the object the module assembled at
+  // run time (`{ prototype: any }`), which maps nowhere, so without a dyn global
+  // every function body that reads the binding fences on its own reference.
+  // The VALUE is the checked-dynamic read of that export object, which is what
+  // the global holds (the statement lowering assigns it at the declaration).
+  if (ts.isPropertyAccessExpression(e) && e.questionDotToken === undefined) {
+    const dep = L.cjsBindingRequireDepOf(e.expression);
+    if (dep !== null && isCjsJsFile(dep)) return true;
+  }
   // `new Proxy(...)`: a checked-dynamic PROXY value whatever its checker type.
   if (ts.isNewExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "Proxy" &&
       L.isStdlibGlobal(e.expression, "Proxy")) return true;
