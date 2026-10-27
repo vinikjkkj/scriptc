@@ -2950,6 +2950,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13952-constructor-of-primitives.ts": {
+   "order": [
+    "<repo>/tests/corpus/13952-constructor-of-primitives.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13953-constructor-of-instances.ts": {
+   "order": [
+    "<repo>/tests/corpus/13953-constructor-of-instances.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/13954-union-eq-column-type-shape.ts": {
    "order": [
     "<repo>/tests/corpus/13954-union-eq-column-type-shape.ts"
@@ -2959,6 +2971,18 @@
   "<repo>/tests/corpus/13955-union-strict-eq-container-arms.ts": {
    "order": [
     "<repo>/tests/corpus/13955-union-strict-eq-container-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13956-union-constructor-of-nullable-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/13956-union-constructor-of-nullable-instance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13957-constructor-of-string-keyed-dispatch.ts": {
+   "order": [
+    "<repo>/tests/corpus/13957-constructor-of-string-keyed-dispatch.ts"
    ],
    "diags": []
   },
@@ -2983,6 +3007,12 @@
   "<repo>/tests/corpus/13961-union-strict-eq-optional-scalars.ts": {
    "order": [
     "<repo>/tests/corpus/13961-union-strict-eq-optional-scalars.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13962-constructor-of-static-primitive.ts": {
+   "order": [
+    "<repo>/tests/corpus/13962-constructor-of-static-primitive.ts"
    ],
    "diags": []
   },
