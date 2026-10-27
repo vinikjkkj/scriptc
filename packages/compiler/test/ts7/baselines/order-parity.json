@@ -17808,6 +17808,41 @@
     "<repo>/tests/corpus/12258-strnull-null-call-side-effect.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/12450-safer-verbatim/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12450-safer-verbatim/safer.cjs",
+    "<repo>/tests/corpus/12450-safer-verbatim/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12451-safer-call-refusal.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12450-safer-verbatim/safer.cjs",
+    "<repo>/tests/corpus/12451-safer-call-refusal.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12452-export-local-shadow/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12452-export-local-shadow/exporter.cjs",
+    "<repo>/tests/corpus/12452-export-local-shadow/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12453-export-assembled-identity/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12453-export-assembled-identity/assembled.cjs",
+    "<repo>/tests/corpus/12453-export-assembled-identity/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12454-buffer-alias-in-function/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12454-buffer-alias-in-function/lib.cjs",
+    "<repo>/tests/corpus/12454-buffer-alias-in-function/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
