@@ -19,6 +19,7 @@ import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCa
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
+import { unboundMethodThunk } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -11745,6 +11746,126 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * length, name, then arguments and caller for sloppy plain functions, then
    * prototype (plain functions, generators, classes), then a class's static
    * members in definition order. Null when it cannot be proven. */
+  /** Layer 1 static fold: the own-name list of `K.prototype` for a class K
+   * declared once in the program, in Node's order (`constructor` first,
+   * then the instance methods and accessors in declaration order). Null
+   * (keep the existing fence) for anything the fold cannot prove: a
+   * generic or decorated class, computed/numeric/private member names, or
+   * ANY other reference to `K.prototype` in the program (a write, an alias,
+   * a second reader), since those make the prototype's key set dynamic.
+   * Known residual gap: a prototype reached without the name (e.g.
+   * Object.getPrototypeOf(new K())) is not walked here. */
+  const classProtoNamesCache = new WeakMap<ts.ClassDeclaration, string[] | null>();
+  /** Layer 1 descriptor: `Object.getOwnPropertyDescriptor(K.prototype, "m")`
+   * for a JS-source program class K whose `m` is a plain (non-accessor,
+   * non-static, non-constructor) method. The descriptor is Node's data
+   * descriptor {value, writable: true, enumerable: false, configurable: true}
+   * built as a null-prototype dyn object (dyn.objCreateNullProto + dyn.keySet
+   * per member, in a seqExpr over a hidden local). `value` is the detached
+   * prototype method (unboundMethodThunk, the interned closure K.prototype.m
+   * yields). Everything else keeps the existing fence. */
+  function protoMethodDescriptorOf(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    const protoArg = call.arguments[0];
+    const keyArg = call.arguments[1];
+    if (protoArg === undefined || keyArg === undefined || call.arguments.length !== 2) return null;
+    if (ts.isSpreadElement(protoArg) || ts.isSpreadElement(keyArg)) return null;
+    if (!ts.isStringLiteral(keyArg)) return null;
+    if (!isJsSourceFile(call.getSourceFile())) return null;
+    const name = keyArg.text;
+    if (name === "constructor") return null;
+    let p: ts.Expression = protoArg;
+    while (ts.isParenthesizedExpression(p)) p = p.expression;
+    if (!ts.isPropertyAccessExpression(p) || p.name.text !== "prototype" || !ts.isIdentifier(p.expression)) return null;
+    const names = classPrototypeOwnNamesOf(L, protoArg);
+    if (names === null || !names.includes(name)) return null;
+    const sym = L.resolveValueSymbol(p.expression);
+    if (!sym) return null;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length !== 1 || !ts.isClassDeclaration(decls[0]!)) return null;
+    const cls = decls[0] as ts.ClassDeclaration;
+    const same = cls.members.filter((m): m is ts.MethodDeclaration =>
+      ts.isMethodDeclaration(m) && m.name !== undefined && (ts.isIdentifier(m.name) || ts.isStringLiteral(m.name)) && m.name.text === name &&
+      !(ts.getModifiers(m) ?? []).some((x) => x.kind === ts.SyntaxKind.StaticKeyword));
+    if (same.length !== 1) return null;
+    const recvT = L.mapTypeOf(L.checker.getDeclaredTypeOfSymbol(sym));
+    if (recvT?.kind !== "object") return null;
+    const info = L.classes.get(recvT.className) ?? null;
+    if (info === null || info.builtinError) return null;
+    const found = L.findMethodOn(info, name);
+    if (found === null || found.sig.abstract === true) return null;
+    if (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable")) return null;
+    const loc = locOf(call);
+    const value = unboundMethodThunk(L, info, name, found, loc, true);
+    const tmp = L.declareHiddenLocal("%propDesc", DYN);
+    const ref: IrExpr = { kind: "varRef", localId: tmp.id, type: DYN, loc };
+    const setKey = (k: string, v: IrExpr): IrStmt => ({
+      kind: "exprStmt",
+      expr: { kind: "libCall", fn: "dyn.keySet", args: [ref, { kind: "strLit", value: k, type: STRING, loc }, { kind: "dynFrom", value: v, type: DYN, loc }], type: VOID, loc },
+      loc,
+    });
+    const stmts: IrStmt[] = [
+      { kind: "varDecl", localId: tmp.id, init: { kind: "libCall", fn: "dyn.objCreateNullProto", args: [], type: DYN, loc }, loc },
+      setKey("value", value),
+      setKey("writable", { kind: "boolLit", value: true, type: BOOL, loc }),
+      setKey("enumerable", { kind: "boolLit", value: false, type: BOOL, loc }),
+      setKey("configurable", { kind: "boolLit", value: true, type: BOOL, loc }),
+    ];
+    return { kind: "seqExpr", stmts, result: ref, type: DYN, loc };
+  }
+
+  function classPrototypeOwnNamesOf(L: Lowerer, arg: ts.Expression): string[] | null {
+    let e = arg;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isPropertyAccessExpression(e) || e.name.text !== "prototype" || !ts.isIdentifier(e.expression)) return null;
+    const sym = L.resolveValueSymbol(e.expression);
+    if (!sym) return null;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length !== 1 || !ts.isClassDeclaration(decls[0]!)) return null;
+    const cls = decls[0] as ts.ClassDeclaration;
+    const cached = classProtoNamesCache.get(cls);
+    if (cached !== undefined) return cached;
+    const result = classPrototypeOwnNamesInner(L, cls, sym);
+    classProtoNamesCache.set(cls, result);
+    return result;
+  }
+
+  function classPrototypeOwnNamesInner(L: Lowerer, cls: ts.ClassDeclaration, sym: ts.Symbol): string[] | null {
+    if (cls.typeParameters) return null;
+    if (((cls as { modifiers?: readonly ts.Node[] }).modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.Decorator)) return null;
+    const names: string[] = ["constructor"];
+    const seen = new Set<string>(names);
+    for (const m of cls.members) {
+      if (!(ts.isMethodDeclaration(m) || ts.isGetAccessorDeclaration(m) || ts.isSetAccessorDeclaration(m))) continue;
+      if ((ts.getModifiers(m) ?? []).some((x) => x.kind === ts.SyntaxKind.StaticKeyword)) continue;
+      if (m.name === undefined || !(ts.isIdentifier(m.name) || ts.isStringLiteral(m.name))) return null;
+      const text = m.name.text;
+      if (/^\d+$/.test(text)) return null;
+      if (!seen.has(text)) { seen.add(text); names.push(text); }
+    }
+    // Every reference to K.prototype must be the read this fold answers.
+    // (The one allowed reader is a getOwnPropertyNames/getOwnPropertyDescriptor
+    // argument; checked by its parent call.)
+    for (const sf of L.program.getSourceFiles()) {
+      let bad = false;
+      ts.walkPreorder(sf, (n) => {
+        if (bad) return "stop";
+        if (!ts.isPropertyAccessExpression(n) || n.name.text !== "prototype" || !ts.isIdentifier(n.expression)) return undefined;
+        if (L.resolveValueSymbol(n.expression) !== sym) return undefined;
+        let p: ts.Node = n;
+        while (p.parent && ts.isParenthesizedExpression(p.parent)) p = p.parent;
+        const call = p.parent;
+        const isReadArg = call !== undefined && ts.isCallExpression(call) && call.arguments[0] === p &&
+          ts.isPropertyAccessExpression(call.expression) &&
+          L.isStdlibGlobal(call.expression.expression, "Object") &&
+          (call.expression.name.text === "getOwnPropertyNames" || call.expression.name.text === "getOwnPropertyDescriptor");
+        if (!isReadArg) bad = true;
+        return undefined;
+      });
+      if (bad) return null;
+    }
+    return names;
+  }
+
   function functionOwnKeysOf(L: Lowerer, arg: ts.Expression): string[] | null {
     let e = arg;
     while (ts.isParenthesizedExpression(e)) e = e.expression;
@@ -12038,6 +12159,24 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       access.name.text === "ownKeys" && call.arguments.length === 1 && L.isStdlibGlobal(access.expression, "Reflect");
     if (!reflectOwnKeys && !L.isStdlibGlobal(access.expression, "Object")) return null;
     const member = reflectOwnKeys ? "getOwnPropertyNames" : access.name.text;
+    if (member === "getOwnPropertyDescriptor") {
+      const desc = protoMethodDescriptorOf(L, call);
+      if (desc !== null) return desc;
+    }
+    // Layer 1 static fold: Object.getOwnPropertyNames(K.prototype) for a
+    // program class K is its own-name list, a constant (see classPrototypeOwnNamesOf).
+    if (member === "getOwnPropertyNames" && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
+      const protoNames = classPrototypeOwnNamesOf(L, call.arguments[0]!);
+      if (protoNames !== null) {
+        const ploc = locOf(call);
+        return {
+          kind: "arrayLit",
+          elems: protoNames.map((k): IrExpr => ({ kind: "strLit", value: k, type: STRING, loc: ploc })),
+          type: arrayOf(STRING),
+          loc: ploc,
+        };
+      }
+    }
     if (member === "defineProperty") {
       const slot = lowerDefinePropHiddenSlot(L, call);
       if (slot) return slot;
