@@ -34,7 +34,7 @@ function wsResolvable(): boolean {
 const enabled = process.env.RUN_WS_INTEROP === "1" && wsResolvable();
 
 const SOURCES = [
-  "scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_map.c",
+  "scr_number.c", "scr_string.c", "scr_array.c", "scr_array_dyn.c", "scr_bytes.c", "scr_map.c",
   "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c",
   "scr_console.c", "scr_lib.c", "scr_json.c", "scr_async.c", "scr_child.c",
   "scr_cycle.c", "scr_net.c", "scr_url.c", "scr_path.c", "scr_dyn_handle.c",

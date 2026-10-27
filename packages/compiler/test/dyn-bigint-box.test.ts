@@ -187,6 +187,7 @@ describe("the bigint unit stays GATED", () => {
     "scr_bytes.c",
     "scr_string.c",
     "scr_array.c",
+    "scr_array_dyn.c",
     "scr_object.c",
     "scr_lib.c",
     "scr_console.c",

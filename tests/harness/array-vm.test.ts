@@ -76,6 +76,7 @@ describe.skipIf(!armable)("large array data is reservation-backed", () => {
   const key = createHash("sha256")
     .update(readFileSync(src))
     .update(readFileSync(join(repoRoot, "packages/runtime/src/scr_array.c")))
+    .update(readFileSync(join(repoRoot, "packages/runtime/src/scr_array_dyn.c")))
     .digest("hex")
     .slice(0, 16);
   const dir = join(cacheDir, `array-vm-${key}`);
