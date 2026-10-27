@@ -18081,7 +18081,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // Also intercepted BEFORE the operands lower: a bare `.constructor`
         // read has no value form (no constructor objects exist here), so
         // the comparison has to be seen whole.
-        lowerBytesCtorTest(L, expr, loc);
+        lowerBytesCtorTest(L, expr, loc) ??
+        lowerCtorEqTest(L, expr, loc);
       if (test) return test;
     }
 
@@ -19270,6 +19271,104 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
   }
   return false;
 }
+
+  /** `x.constructor === Y` / `x.constructor !== Y` where x's static type is
+   * a primitive (string | number | boolean) or a union of primitive arms and
+   * PROGRAM-class instance arms. Y is one of the wrapper constructors
+   * (`String`, `Number`, `Boolean`: a primitive's constructor IS its wrapper,
+   * `'abc'.constructor === String` is true, and the same identity the
+   * `String` value answers) or a program class value (`classval`).
+   *
+   * The answer is per ARM. A primitive arm's constructor is the wrapper of
+   * its tag, a constant, so its term is `unionIsTag` (or a literal when the
+   * receiver is not a union). A program-class instance arm's constructor is
+   * the class value of the instance it ACTUALLY is (a derived instance answers
+   * its own class), so against a class value it reads dynamically: the
+   * narrowed arm boxed, `.constructor` read through the dyn box (the same read
+   * an instance's own `.constructor` already lowers to), compared with the
+   * class value boxed. A program instance is never a wrapper, so it is never
+   * `=== String`. Any other arm (null, undefined, containers, runtime classes),
+   * an effectful receiver, or a Y that is neither keeps its fence. */
+  export function lowerCtorEqTest(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr | null {
+    const negated = expr.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+    for (const [a, b] of [
+      [expr.left, expr.right],
+      [expr.right, expr.left],
+    ] as const) {
+      if (!ts.isPropertyAccessExpression(a) || a.name.text !== "constructor" || a.questionDotToken) continue;
+      const recvT = L.mapTypeOf(L.typeOf(a.expression));
+      if (recvT?.kind !== "union" && recvT?.kind !== "string" && recvT?.kind !== "f64" && recvT?.kind !== "bool") continue;
+      let wrapper: "String" | "Number" | "Boolean" | null = null;
+      if (ts.isIdentifier(b) && (b.text === "String" || b.text === "Number" || b.text === "Boolean")) {
+        if (L.isStdlibSymbol(L.checker.getSymbolAtLocation(b))) wrapper = b.text;
+      }
+      const yIsClass = wrapper === null && L.mapTypeOf(L.typeOf(b))?.kind === "classval";
+      if (wrapper === null && !yIsClass) continue;
+      const value = L.lowerExpr(a.expression);
+      if (value.type.kind !== recvT.kind) continue;
+      if (!pureReemittable(value)) continue;
+      let yValue: IrExpr | null = null;
+      if (yIsClass) {
+        yValue = L.lowerExpr(b);
+        if (yValue.type.kind !== "classval") continue;
+      }
+      const isUnion = value.type.kind === "union";
+      const unionId = value.type.kind === "union" ? value.type.unionId : "";
+      const arms: IrType[] = value.type.kind === "union" ? (L.unions.get(unionId)?.arms ?? []) : [value.type];
+      if (value.type.kind === "union" && arms.length === 0) continue;
+      const wrapperOf = (t: IrType): "String" | "Number" | "Boolean" | null =>
+        t.kind === "string" ? "String" : t.kind === "f64" ? "Number" : t.kind === "bool" ? "Boolean" : null;
+      const terms: IrExpr[] = [];
+      let fenced = false;
+      arms.forEach((arm, tag) => {
+        const w = wrapperOf(arm);
+        if (w !== null) {
+          if (wrapper !== null && w === wrapper) {
+            terms.push(isUnion ? { kind: "unionIsTag", unionId, tag, negated: false, value, type: BOOL, loc } : { kind: "boolLit", value: true, type: BOOL, loc });
+          }
+          return;
+        }
+        if (arm.kind === "object" && isProgramClassInstanceName(L, arm.className)) {
+          if (yValue === null || !isUnion) return; // a program instance is never a wrapper
+          const narrowed: IrExpr = { kind: "unionNarrow", unionId, tag, value, type: arm, loc };
+          const ctor: IrExpr = {
+            kind: "dynKeyGet",
+            key: { kind: "strLit", value: "constructor", type: STRING, loc },
+            value: { kind: "dynFrom", value: narrowed, type: DYN, loc },
+            type: DYN,
+            loc,
+          };
+          const same: IrExpr = {
+            kind: "dynScalarEq",
+            left: ctor,
+            right: { kind: "dynFrom", value: yValue, type: DYN, loc },
+            type: BOOL,
+            loc,
+          };
+          terms.push({
+            kind: "logical",
+            op: "&&",
+            left: { kind: "unionIsTag", unionId, tag, negated: false, value, type: BOOL, loc },
+            right: same,
+            type: BOOL,
+            loc,
+          });
+          return;
+        }
+        fenced = true;
+      });
+      if (fenced) continue;
+      if (!isUnion) {
+        // A primitive receiver: the answer is a constant.
+        return { kind: "boolLit", value: terms.length > 0 !== negated, type: BOOL, loc };
+      }
+      if (terms.length === 0) return { kind: "boolLit", value: negated, type: BOOL, loc };
+      let acc = terms[0]!;
+      for (const t of terms.slice(1)) acc = { kind: "logical", op: "||", left: acc, right: t, type: BOOL, loc };
+      return negated ? { kind: "unary", op: "!", operand: acc, type: BOOL, loc } : acc;
+    }
+    return null;
+  }
 
   /** A program class instance: a class the program declares, with no runtime-
    * provided class anywhere in its chain (the rule `x.constructor` on an
