@@ -249,6 +249,46 @@ void scr_secure_ctx_release(ScrSecureCtx *c) {
 void *scr_secure_ctx_retain_v(void *p) { return scr_secure_ctx_retain((ScrSecureCtx *)p); }
 void scr_secure_ctx_release_v(void *p) { scr_secure_ctx_release((ScrSecureCtx *)p); }
 
+/* ── SecureContext in the checked-dynamic tree (SCR_DYNH_SECURE_CTX) ──────
+ * A context is an opaque handle: it boxes by REFERENCE (retain the one
+ * parsed pair, so the same context comes back out of an 'unknown' slot
+ * with its identity intact). Node's SecureContext has no public member
+ * surface in JS beyond its internal `context`, so every member call answers
+ * Node's "is not a function" and no property is modeled. */
+static ScrDyn *scr_secure_ctx_dynh_invoke(void *h, ScrDyn *self, const char *method,
+                                          ScrDyn *const *args, size_t argc, const char *what) {
+  (void)h; (void)self; (void)method; (void)args; (void)argc;
+  char msg[160];
+  const int n = snprintf(msg, sizeof msg, "%s is not a function", what);
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+  return NULL;
+}
+
+static ScrDyn *scr_secure_ctx_dynh_get(void *h, const char *key, size_t key_len) {
+  (void)h; (void)key; (void)key_len;
+  return NULL; /* no modeled property: the caller answers undefined */
+}
+
+static bool scr_secure_ctx_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)h; (void)key; (void)key_len; (void)value;
+  return false;
+}
+
+static const ScrDynHandleOps scr_secure_ctx_dynh_ops = {
+  "SecureContext",
+  &scr_secure_ctx_retain_v,
+  &scr_secure_ctx_release_v,
+  &scr_secure_ctx_dynh_invoke,
+  &scr_secure_ctx_dynh_get,
+  &scr_secure_ctx_dynh_set,
+  NULL, /* no pipe destination */
+  NULL, /* no expandos: a SecureContext takes no JS own properties */
+};
+
+void scr_tls_dyn_install(void) {
+  scr_dyn_handle_install(SCR_DYNH_SECURE_CTX, &scr_secure_ctx_dynh_ops);
+}
+
 /* ── the server config (one per created server, rc'd) ────────────────── */
 
 typedef struct ScrTlsSrv {

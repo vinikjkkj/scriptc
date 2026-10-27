@@ -57,6 +57,8 @@ export const DYN_HANDLE_TAG_NUM: Record<string, number> = {
   childStream: 9,
   date: 10,
   symbol: 11,
+  // SCR_DYNH_SECURE_CTX (scr_runtime.h: after SCR_DYNH_TRACING).
+  secureCtx: 15,
 };
 
 /** The tag's numeric value, or the LLVM lane's honest miss.
