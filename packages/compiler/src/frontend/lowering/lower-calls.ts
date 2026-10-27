@@ -48,6 +48,15 @@ import { provenancePackageOfFile } from "../provenance-registry.js";
  * function value's own signature differs from the checker's spelling of
  * it and the declaration rule that reconciles the two (lowerVarDecl and
  * collectGlobals) must not drift from this ABI. */
+function tableOwnedElsewhere(L: Lowerer, tabled: readonly ClassInfo[]): boolean {
+  for (const c of tabled) {
+    for (let a: ClassInfo | null = c; a; a = a.base) {
+      if (a.decl !== null && (L.definePropStringTable(a.decl) || implicitMonoFile(a.decl.getSourceFile()))) return true;
+    }
+  }
+  return false;
+}
+
 export function isIslandRestParam(L: Lowerer, param: ts.ParameterDeclaration): boolean {
   if (param.dotDotDotToken === undefined || !L.dynamic) return false;
   if (!isJsSourceFile(param.getSourceFile())) return false;
@@ -12529,14 +12538,16 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // A CLASS INSTANCE: its own enumerable keys are the fields of the class
       // the instance really is (a base-typed value may hold a subclass), which
       // the dyn box's member table answers through the preorder registry.
-      // A program with a per-instance property table (a run-time-keyed
-      // defineProperty on an instance) keeps the refusal: the box's member
-      // walk does not read that table, so the answer would silently omit
-      // its keys (tests/harness/class-runtime-property-table.test.ts).
+      // The box's walk reads a class instance's run-time property table after
+      // its members (the %dynProps row, scr_props_walk), so a class that carries
+      // expandos answers exactly through the same box.
       const isInst =
         objMember === "keys" && probed?.type.kind === "object" && L.classes.has(probed.type.className) &&
         canBoxClassIntoDyn(probed.type.className) && L.dynConvertible(probed.type) &&
-        ![...L.classes.values()].some((c) => c.hasPropsTable === true);
+        // A program-wide defineProperty or npm-static property table keeps the refusal (its box walk
+        // is pinned by tests/harness/class-runtime-property-table.test.ts). An expando-only table is
+        // read by the box's walk (%dynProps), so it lists exactly.
+        !tableOwnedElsewhere(L, [...L.classes.values()].filter((c) => c.hasPropsTable === true));
       if (isDyn || isUnit || isArr || isInst) {
         const fn = objMember === "keys" ? "dyn.objKeys" : objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
         let v = L.lowerExpr(argNode);
