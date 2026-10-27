@@ -177,7 +177,10 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
           `${E.link}ScrDyn *${sym}(void *o) { /* member get ${className}.${row.name} */`,
           // BORROWED: every toDyn walker retains or copies, and the
           // instance stays owned by the box the caller is holding.
-          `  return ${toDynExprC(E, row.type, `((${struct} *)o)->${mangleField(row.name)}`)};`,
+          // An array field the view can write back is the SAME array the
+          // instance holds, so its copy records that origin (the union
+          // arm's twin): a write through the dyn copy reaches the field.
+          `  return ${fieldDynC(E, row.type, `((${struct} *)o)->${mangleField(row.name)}`)};`,
           `}`,
           ``,
         );
@@ -3742,6 +3745,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
    * result uniformly), funcs box (anonymous — the static name is gone by
    * the time a value flows through an adapter; SEMANTICS.md), everything
    * else rides the toDyn converter. `expr` is BORROWED in every arm. */
+  /** A class FIELD read as dyn: the converter's copy, marked with the field's
+   * own array as its origin when the live view applies (arrayTypeHasLiveView). */
+  function fieldDynC(E: CEmitter, t: IrType, expr: string): string {
+    const conv = toDynExprC(E, t, expr);
+    if (!arrayTypeHasLiveView(t)) return conv;
+    const { retain, release } = vAdapters(t);
+    const tk = cStringLiteral(Buffer.from(typeKey(t), "utf8"));
+    return `scr_dyn_origin_mark(${conv}, (void *)${expr}, ${tk}, ${retain}, ${release})`;
+  }
   function toDynExprC(E: CEmitter, t: IrType, expr: string): string {
     if (t.kind === "dyn") return `scr_dyn_retain(${expr})`;
     if (t.kind === "func") return `${E.dynFuncBoxHelper(t)}(${expr}, NULL, NULL)`;

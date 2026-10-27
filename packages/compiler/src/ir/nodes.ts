@@ -11135,6 +11135,13 @@ function dynViewScan(mod: IrModule): boolean {
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod.functions);
+  // A class instance that crosses into dyn reads its fields through the
+  // member getters (emit-walkers / llvm dyn.ts), which mark a live array
+  // field's copy with that field as origin: a boxable class with such a
+  // field needs the view unit too.
+  if (!found && moduleUsesDynClass(mod)) {
+    found = (mod.classes ?? []).some((c) => c.fields.some((f) => reaches(f.type, 0)));
+  }
   return found;
 }
 
