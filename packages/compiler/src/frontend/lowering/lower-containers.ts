@@ -7162,8 +7162,17 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         `a function replacement value declaring ${arity} parameters over a pattern with ${part.captureCount} capture group(s) (the trailing offset/subject/groups parameters have no lowering — declare only the match and its groups)`,
       );
     }
+    // An untyped JS replacer (checked-dynamic parameters, e.g. a `function (chunk)`
+    // reached through `.bind(this)`, whose result is `any`) takes the match and its
+    // capture groups: Node always passes those as strings, so the parameter is adapted
+    // to a string signature at the boundary (adaptStringReplacer). Offset and input
+    // parameters have no lowering here and keep the fence.
+    const groupsMax = part?.captureCount ?? 0;
+    const dynAt: boolean[] = [];
     for (let i = 0; i < arity; i++) {
-      if (fnT.params[i]!.kind !== "string") {
+      const adaptable = fnT.params[i]!.kind === "dyn" && i <= groupsMax;
+      dynAt.push(adaptable);
+      if (fnT.params[i]!.kind !== "string" && !adaptable) {
         fence(
           `a function replacement value whose parameter ${i + 1} is '${L.fmt(fnT.params[i]!)}' (the match and its capture groups are strings — annotate them 'string')`,
         );
@@ -7182,7 +7191,60 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     // helper never caps (and never needs the flags): `once` is always false.
     const once = false;
     const helper = strReplaceFnHelper(L, arity, once, loc);
-    return { kind: "call", callee: helper, args: [receiver, re, fnIr], type: STRING, loc };
+    const replFn = dynAt.some(Boolean) ? adaptStringReplacer(L, fnIr, dynAt, loc) : fnIr;
+    return { kind: "call", callee: helper, args: [receiver, re, replFn], type: STRING, loc };
+  }
+
+/** A string-signature closure over an untyped replacer: the replace drain calls it
+   * with the match and its groups as strings; each parameter the replacer declares as
+   * checked-dynamic receives its string boxed (dynFrom), which is the value Node
+   * passes. Interned per replacer type and dyn mask. */
+  function adaptStringReplacer(L: Lowerer, fn: IrExpr, dynAt: boolean[], loc: SrcLoc): IrExpr {
+    const ft = fn.type as Extract<IrType, { kind: "func" }>;
+    const params: IrParam[] = ft.params.map((_, i) => ({ localId: `p.${i}`, name: `p${i}`, type: STRING }));
+    const key = `strReplAdapt:${typeKey(ft)}:${dynAt.map((d) => (d ? 1 : 0)).join("")}`;
+    const existing = L.widthHelpers.get(key);
+    const name = existing ?? `%str.repl.adapt.${L.widthHelpers.size}`;
+    if (!existing) {
+      L.widthHelpers.set(key, name);
+      const callArgs: IrExpr[] = params.map((p, i) => {
+        const v: IrExpr = { kind: "varRef", localId: p.localId, type: STRING, loc };
+        return dynAt[i] ? { kind: "dynFrom", value: v, type: DYN, loc } : v;
+      });
+      const call: IrExpr = {
+        kind: "callValue",
+        callee: { kind: "varRef", localId: "tf.0", type: ft, loc },
+        args: callArgs,
+        type: ft.ret,
+        loc,
+      };
+      const capParams: IrParam[] = [{ localId: "tf.0", name: "tf", type: ft }];
+      L.liftedFns.push({
+        name,
+        params,
+        returnType: ft.ret,
+        captures: capParams,
+        locals: [
+          ...capParams.map((c) => ({ id: c.localId, name: c.name, type: c.type, mutable: false, boxed: true as const })),
+          ...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        ],
+        body: [{ kind: "return", value: call, loc }],
+        loc,
+      });
+    }
+    const ctx = L.ctx;
+    const n = ctx.localCounters.get("%bind") ?? 0;
+    ctx.localCounters.set("%bind", n + 1);
+    const id = `%bind.${n}`;
+    ctx.locals.push({ id, name: "%bind", type: fn.type, mutable: false, boxed: true });
+    const outT = funcOf(params.map(() => STRING), ft.ret);
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: id, init: fn, loc }],
+      result: { kind: "closure", fnName: name, captures: [id], type: outT, loc },
+      type: outT,
+      loc,
+    };
   }
 
 /** Interned synthetic loop function for one (arity, once) combo. Named
