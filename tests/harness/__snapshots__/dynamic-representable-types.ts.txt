@@ -1,12 +1,3 @@
-dynamic-representable-types.ts:10:5 - error SC2011: values of type 'any[]' have no static representation but run in the embedded dynamic engine, which this build does not include
-
-   9 | const arr: any[] = [1, "x"];
-  10 | var evolving = []; // never used — the tsc-clean evolving-array shape
-     |     ^~~~~~~~
-  11 | const rec = { workItem: {} as any, width: "10px" };
-
-  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
-
 dynamic-representable-types.ts:11:7 - error SC2011: values of type '{ workItem: any; width: string; }' have no static representation but run in the embedded dynamic engine, which this build does not include
 
   10 | var evolving = []; // never used — the tsc-clean evolving-array shape
