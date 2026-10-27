@@ -1,0 +1,4 @@
+chunk {"k":"a"}
+chunk 42
+chunk ["x",1]
+done
