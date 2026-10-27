@@ -1899,6 +1899,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/12204-objclone-branch-field.js": {
+   "order": [
+    "<repo>/tests/corpus/12204-objclone-branch-field.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1300-errors-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1300-errors-basics.ts"
