@@ -2854,7 +2854,9 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     elemT: IrType,
     out: IrStmt[],): IrExpr {
     const name = el.name!; // callers skip nameless elisions
-    const bodyT = patternBindingType(L, name);
+    // An any[] element binds as the dyn tier whatever the checker spells
+    // (`any` has no static mapping, so patternBindingType would refuse it).
+    const bodyT = elemT.kind === "dyn" ? DYN : patternBindingType(L, name);
     if (!bodyT || bodyT.kind === "void") L.badType(name, L.typeOf(name));
     return arrayPositionDefaultValue(L, name, el.initializer!, read, srcRef, index, elemT, bodyT, out);
   }
@@ -2901,6 +2903,27 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       type: BOOL,
       loc,
     };
+    if (elemT.kind === "dyn") {
+      // A dyn element: out of range reads undefined, and so does an undefined
+      // element; either takes the default (the dyn undefined test).
+      const tmp = L.declareHiddenLocal("%delem", DYN);
+      out.push({
+        kind: "varDecl",
+        localId: tmp.id,
+        init: { kind: "ternary", cond: inRange, then: read, else_: dynUndefinedExpr(loc), type: DYN, loc },
+        loc,
+      });
+      const ref: IrExpr = { kind: "varRef", localId: tmp.id, type: DYN, loc };
+      const dflt = L.lowerExprExpecting(init, DYN);
+      return {
+        kind: "ternary",
+        cond: { kind: "dynTest", test: "undefined", value: ref, type: BOOL, loc },
+        then: dflt,
+        else_: ref,
+        type: DYN,
+        loc,
+      };
+    }
     const undefTag = elemT.kind === "union" ? L.armTag(elemT.unionId, UNDEFINED_T) : -1;
     if (elemT.kind === "union" && undefTag >= 0) {
       const wrapped = L.wrappedUndefined(elemT, loc);

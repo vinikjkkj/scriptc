@@ -503,6 +503,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "rsa.publicEncryptLabel": "scr_rsa_public_encrypt",
   "crypto.inputBytes": "scr_crypto_input_bytes",
   "buffer.concatDyn": "scr_buffer_concat_dyn",
+  "array.sortDyn": "scr_arr_sort_dyn_inplace",
+  "array.toSortedDyn": "scr_arr_to_sorted_dyn",
   "bytes.argChk": "scr_bytes_arg_chk",
   "text.decodeDyn": "scr_text_decode_dyn",
   "text.destDyn": "scr_text_dest_dyn",
@@ -14091,6 +14093,13 @@ class LlEmitter {
         return { name: t, type: e.type };
       }
       case "pop": {
+        if (e.receiver.type.kind === "array" && e.receiver.type.elem.kind === "dyn") {
+          // A dyn element pops to a dyn box; an empty array answers undefined.
+          this.declare(`declare ptr @scr_arr_pop_dyn(ptr)`);
+          const td = B.tmp();
+          B.line(`${td} = call ptr @scr_arr_pop_dyn(ptr ${r.name})`);
+          return this.own({ name: td, type: e.type });
+        }
         // Ownership of a refcounted element moves OUT of the array to
         // this temp (+1 to us, the runtime does not release it).
         this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @scr_arr_pop_${acc}(ptr)`);
@@ -14190,6 +14199,15 @@ class LlEmitter {
         // array, ownership MOVED out of the receiver. An omitted count
         // removes to the end (+Infinity, the slice convention).
         const start = this.emitExpr(e.args[0]!);
+        if (e.args.length === 3) {
+          // Insertion: splice(start, deleteCount, ...items), items an array.
+          const cnt = this.emitExpr(e.args[1]!);
+          const items = this.emitExpr(e.args[2]!);
+          this.declare(`declare ptr @scr_arr_splice_ins(ptr, double, double, ptr)`);
+          const ti = B.tmp();
+          B.line(`${ti} = call ptr @scr_arr_splice_ins(ptr ${r.name}, double ${start.name}, double ${cnt.name}, ptr ${items.name})`);
+          return this.own({ name: ti, type: e.type });
+        }
         const cnt = e.args[1] ? this.emitExpr(e.args[1]).name : F64_INF;
         this.declare(`declare ptr @scr_arr_splice(ptr, double, double)`);
         const t = B.tmp();
@@ -14197,6 +14215,12 @@ class LlEmitter {
         return this.own({ name: t, type: e.type });
       }
       case "shift": {
+        if (e.type.kind === "dyn") {
+          this.declare(`declare ptr @scr_arr_shift_dyn(ptr)`);
+          const td = B.tmp();
+          B.line(`${td} = call ptr @scr_arr_shift_dyn(ptr ${r.name})`);
+          return this.own({ name: td, type: e.type });
+        }
         // JS shift: undefined on an empty array, else the first element
         // out (ref ownership moves into the union box) with the tail
         // sliding down. Union construction is type-directed here.

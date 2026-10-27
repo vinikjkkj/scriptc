@@ -14131,6 +14131,8 @@ export class Lowerer {
    * miss (process.env reads). "undefined" sorts last among all arm typeKeys,
    * so the sorted pair is always [t, undefined]. */
   withUndefinedArm(t: IrType): IrType {
+    // A dyn value already carries undefined: no union arm can hold a dyn.
+    if (t.kind === "dyn") return t;
     const arms = [t, UNDEFINED_T].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
     return { kind: "union", unionId: this.unions.intern(arms) };
   }

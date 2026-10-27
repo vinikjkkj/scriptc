@@ -4766,6 +4766,11 @@ export type IrLibFn =
    * ERR_INVALID_ARG_TYPE ladder, then the static concatenation (concatDynLen
    * adds the totalLength truncate or zero-pad). Borrows; may throw. */
   | "buffer.concatDyn"
+  /** sort() / toSorted() with no comparator over a dyn-element array: the
+   * ToString order (UTF-16), undefined last, stable. Borrows; +1 (the
+   * receiver itself for sort). May throw (a toString). */
+  | "array.sortDyn"
+  | "array.toSortedDyn"
   | "buffer.concatDynLen"
   /** `new DataView(buffer, off?, len?)` / `new Uint8Array(buffer, off?,
    * len?)` over a checked-dynamic first argument (the ArrayBuffer box an
@@ -13222,6 +13227,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "buffer.concatLen",
   "buffer.concatDyn",
   "buffer.concatDynLen",
+  "array.sortDyn",
+  "array.toSortedDyn",
   "dyn.dataViewNew",
   "dyn.u8ViewNew",
   "buffer.byteLenDyn",

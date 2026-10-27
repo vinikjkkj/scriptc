@@ -1287,6 +1287,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return E.newTemp(e.type, `scr_arr_len(${r.name})`);
           }
           case "pop":
+            // A dyn element pops to a dyn box; an empty array answers undefined.
+            if (e.receiver.type.elem.kind === "dyn") return E.newTemp(e.type, `scr_arr_pop_dyn(${r.name})`);
             // Ownership of a refcounted element moves OUT of the array to
             // this temp (+1 to us, the runtime does not release it).
             return E.newTemp(e.type, `scr_arr_pop_${acc}(${r.name})`);
@@ -1357,10 +1359,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // (no retain/release churn). An omitted count removes to the
             // end (+Infinity, the slice convention).
             const start = E.emitExpr(e.args[0]!);
+            if (e.args.length === 3) {
+              // Insertion: splice(start, deleteCount, ...items), items an array.
+              const cnt = E.emitExpr(e.args[1]!);
+              const items = E.emitExpr(e.args[2]!);
+              return E.newTemp(e.type, `scr_arr_splice_ins(${r.name}, ${start.name}, ${cnt.name}, ${items.name})`);
+            }
             const cnt = e.args[1] ? E.emitExpr(e.args[1]).name : "INFINITY";
             return E.newTemp(e.type, `scr_arr_splice(${r.name}, ${start.name}, ${cnt})`);
           }
           case "shift": {
+            if (e.type.kind === "dyn") return E.newTemp(e.type, `scr_arr_shift_dyn(${r.name})`);
             // JS shift: undefined on an empty array, else the first
             // element out (ref ownership moves into the union box) with
             // the tail sliding down. Union construction is type-directed
@@ -6501,6 +6510,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_bytes_concat(${arg(0)})`);
           case "buffer.concatLen":
             return finish(`scr_bytes_concat_len(${arg(0)}, ${arg(1)})`);
+          case "array.sortDyn":
+            return finish(`scr_arr_sort_dyn_inplace(${arg(0)})`);
+          case "array.toSortedDyn":
+            return finish(`scr_arr_to_sorted_dyn(${arg(0)})`);
           case "buffer.concatDyn":
             return finish(`scr_buffer_concat_dyn(${arg(0)})`);
           case "dyn.dataViewNew":
