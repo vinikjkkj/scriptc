@@ -26,20 +26,33 @@ import { cjsExportsBagOf } from "./lower-exprs.js";
 
 const liveMemo = new WeakMap<ts.SourceFile, boolean>();
 
-/** True when `n` (an `exports` identifier or a `module.exports` access) is read as a
- * VALUE: not the object of a property/element access, not a property name, not
- * the target of an assignment. */
+/** True when `n` (an `exports` identifier or a `module.exports` access) is read as a VALUE: not the
+ * object of a property or element access, not a property name, not the target of an assignment.
+ * Decided on the source text around the node, not on parent pointers (the adapter's parents do not
+ * always name the property access that owns the identifier). */
 export function isValueUse(n: ts.Node): boolean {
-  const p = n.parent;
-  if (ts.isPropertyAccessExpression(p) && (p.expression === n || p.name === n)) return false;
-  if (ts.isElementAccessExpression(p) && p.expression === n) return false;
-  if (ts.isPropertyAssignment(p) && p.name === n) return false;
-  if (ts.isBinaryExpression(p) && p.left === n && p.operatorToken.kind === ts.SyntaxKind.EqualsToken) return false;
+  const text = n.getSourceFile().text;
+  let i = n.getStart() - 1;
+  while (i >= 0 && /\s/.test(text[i]!)) i--;
+  if (text[i] === ".") return false;
+  let j = n.end;
+  while (j < text.length && /\s/.test(text[j]!)) j++;
+  const c = text[j];
+  if (c === "." || c === "[") return false;
+  if (c === "?" && text[j + 1] === ".") return false;
+  // `Object.defineProperty(exports, "K", {...})` (and Reflect's): the accessor/value definition the
+  // export-accessor machinery answers (cjsExportsGetterDefineOf). The object does not escape.
+  const par = n.parent;
+  if (par !== undefined && ts.isCallExpression(par) && par.arguments[0] === n) {
+    const callee = par.expression;
+    if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) &&
+        (callee.expression.text === "Object" || callee.expression.text === "Reflect") &&
+        (callee.name.text === "defineProperty" || callee.name.text === "defineProperties")) return false;
+  }
+  if (c === "=" && text[j + 1] !== "=" && text[j + 1] !== ">") return false;
   return true;
 }
 
-/** True when no function between `n` and its declaration shadows the free name `n` (context-free:
- * runs during global collection, before any function context exists). */
 function unshadowed(L: Lowerer, n: ts.Identifier): boolean {
   const sym = L.checker.getSymbolAtLocation(n);
   if (sym === undefined) return true;
@@ -61,7 +74,9 @@ function computeLive(L: Lowerer, sf: ts.SourceFile): boolean {
   const stack: ts.Node[] = [sf];
   while (stack.length > 0) {
     const n = stack.pop()!;
-    if (ts.isIdentifier(n) && n.text === "exports" && isValueUse(n) && unshadowed(L, n)) return true;
+    if (ts.isIdentifier(n) && n.text === "exports" && isValueUse(n) && unshadowed(L, n)) {
+      return true;
+    }
     if (isModuleExportsAccess(n as ts.Expression) && isValueUse(n)) {
       const m = (n as ts.PropertyAccessExpression).expression;
       if (ts.isIdentifier(m) && unshadowed(L, m)) return true;
