@@ -822,6 +822,11 @@ export function elemKindC(elem: IrType): string {
     // elemTraceC answers null and the element CLASS is plain REF.
     case "rtcPeerConnection":
     case "rtcDataChannel":
+    // A dyn ELEMENT (`any[]` in a program or provenance source): one
+    // refcounted ScrDyn* per slot, scr_dyn_retain_v/release_v (rcAdapters),
+    // and scr_dyn_trace_v through traceAdapterC for cycle-capable arrays.
+    // Holes hold the immortal undefined (absentElemC).
+    case "dyn":
       return "SCR_ELEM_REF";
     case "url":
     case "searchParams":
@@ -840,7 +845,6 @@ export function elemKindC(elem: IrType): string {
     case "sqliteStmt":
     case "childStream":
     case "procStream":
-    case "dyn":
     case "caught":
     case "generator":
     case "asyncGenerator":
