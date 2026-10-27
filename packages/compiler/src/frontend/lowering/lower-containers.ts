@@ -7927,6 +7927,50 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     );
   }
 
+  /** The own-table gate (mockbuf): a program is GATED when any write in it can put a NAMED own property
+   * on a bytes value, or any call can. Only then do statically typed bytes method calls check the value's own
+   * table (through the dyn method route, which answers the table and falls back to the native body). The
+   * runtime side is unconditional: a dyn write of a non-index name always lands in the table.
+   *
+   * A write can reach bytes when its receiver's type is dyn (any/unknown) or bytes, or when the key is not
+   * statically a number. The
+   * named calls below write through Object/Reflect; `new Proxy` can intercept a set. Residual, stated: an
+   * alias of Object.assign (`const A = Object.assign`) is not seen. The scan walks every non-declaration
+   * module of the program and is cached per lowering. */
+  const bytesOwnGateCache = new WeakMap<Lowerer, boolean>();
+  export function bytesOwnGateOn(L: Lowerer): boolean {
+    const hit = bytesOwnGateCache.get(L);
+    if (hit !== undefined) return hit;
+    let on = false;
+    const writeReaches = (recv: ts.Expression, key: ts.Expression): boolean => {
+      const rt = L.mapTypeOf(L.typeOf(recv));
+      if (rt === null) return false;
+      if (rt.kind === "dyn" || rt.kind === "bytes") return true;
+      const kt = L.mapTypeOf(L.typeOf(key));
+      return kt === null || kt.kind !== "f64";
+    };
+    for (const sf of L.moduleOrder) {
+      if (on) break;
+      if (sf.isDeclarationFile) continue;
+      ts.walkPreorder(sf, (n) => {
+        if (on) return "stop";
+        if (ts.isBinaryExpression(n) && ts.isElementAccessExpression(n.left) &&
+            n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+          if (writeReaches(n.left.expression, n.left.argumentExpression)) on = true;
+        }
+        if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && ts.isIdentifier(n.expression.expression)) {
+          const callee = `${n.expression.expression.text}.${n.expression.name.text}`;
+          if (callee === "Object.assign" || callee === "Object.defineProperty" || callee === "Object.defineProperties" ||
+              callee === "Reflect.set" || callee === "Reflect.defineProperty") on = true;
+        }
+        if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "Proxy") on = true;
+        return undefined;
+      });
+    }
+    bytesOwnGateCache.set(L, on);
+    return on;
+  }
+
   export function lowerBytesMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
@@ -7936,6 +7980,19 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     if (!L.isStdlibMember(access)) return null;
     const loc = locOf(call);
     const nArgs = call.arguments.length;
+    // Gated program (see bytesOwnGateOn): the call checks the value's own table first. The dyn method route
+    // is the one that does that, and it answers the native body when no own name shadows the method.
+    if (bytesOwnGateOn(L) && call.arguments.every((a) => !ts.isSpreadElement(a))) {
+      return {
+        kind: "dynInvoke",
+        recv: L.coerceToExpected(L.lowerExpr(access.expression), DYN),
+        method: name,
+        calleeName: access.getText(),
+        args: call.arguments.map((a) => L.coerceToExpected(L.lowerExpr(a), DYN)),
+        type: DYN,
+        loc,
+      };
+    }
     if (receiverIr.elem === "u8" && name === "toSorted") {
       return lowerBytesToSortedCall(L, call, access, receiverIr, "toSorted");
     }
