@@ -8,7 +8,7 @@ import { protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { strandTrap, BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExportRecordReadDyn, cjsExportRecordRef, isBareExportsAccess } from "./cjs-export-record.js";
@@ -8294,6 +8294,19 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     }
     if (kind === "bytes") {
       const loc = locOf(expr);
+      // BYTES_PER_ELEMENT is a per-KIND constant (ECMA-262 23.2.7.1 and the
+      // per-constructor prototype property). An ArrayBuffer has none, so
+      // only the view kinds answer. A receiver that can have effects is
+      // still evaluated first, exactly as the member read would evaluate it.
+      if (name === "BYTES_PER_ELEMENT") {
+        const bt = L.mapTypeOf(L.typeOf(expr.expression));
+        if (bt !== null && bt.kind === "bytes" && bt.elem !== "buf") {
+          const size: IrExpr = { kind: "numLit", value: BYTES_ELEM_SIZE[bt.elem], type: F64, loc };
+          if (ts.isIdentifier(expr.expression) || expr.expression.kind === ts.SyntaxKind.ThisKeyword) return size;
+          const effect = L.lowerExpr(expr.expression);
+          return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: effect, loc }], result: size, type: F64, loc };
+        }
+      }
       if (name === "length" || name === "byteLength") {
         const receiver = L.lowerExpr(expr.expression);
         // An island handle behind a typed-array .d.ts surface: the engine
