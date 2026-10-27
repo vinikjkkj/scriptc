@@ -505,6 +505,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "crypto.inputBytes": "scr_crypto_input_bytes",
   "buffer.concatDyn": "scr_buffer_concat_dyn",
   "bytes.argChk": "scr_bytes_arg_chk",
+  "text.decodeDyn": "scr_text_decode_dyn",
+  "text.destDyn": "scr_text_dest_dyn",
   "buffer.concat": "scr_bytes_concat",
   "buffer.concatLen": "scr_bytes_concat_len",
   "dyn.dataViewNew": "scr_dyn_dataview_new",

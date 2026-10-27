@@ -12708,6 +12708,30 @@ ScrBytes *scr_crypto_input_bytes(const ScrDyn *v) {
   }
 }
 
+/* TextDecoder.prototype.decode(x) over a checked-dynamic x. Node's decode: undefined is "" (and a
+ * missing argument), a view or an ArrayBuffer decodes its bytes, anything else throws the one message
+ * Node's decoder gives for every other value (its validator names the argument "list"). +1 string, or NULL
+ * with the exception pending. */
+ScrStr *scr_text_decode_dyn(const ScrDyn *v) {
+  if (v->kind == SCR_DYN_UNDEF) return scr_str_new("", 0);
+  if ((v->kind == SCR_DYN_BYTES || v->kind == SCR_DYN_ARRBUF) && v->v.bytes != NULL) {
+    return scr_text_decode(v->v.bytes);
+  }
+  const char *m = "The \"list\" argument must be an instance of SharedArrayBuffer, ArrayBuffer or ArrayBufferView.";
+  scr_throw_error_msg_code(SCR_ERR_TYPE, m, strlen(m), "ERR_INVALID_ARG_TYPE");
+  return NULL;
+}
+
+/* TextEncoder.prototype.encodeInto(src, dest) over a checked-dynamic dest: a Uint8Array (or Buffer) is the
+ * destination's shared payload, +1; anything else throws Node's ERR_INVALID_ARG_TYPE naming "dest". */
+ScrBytes *scr_text_dest_dyn(const ScrDyn *v) {
+  if (v->kind == SCR_DYN_BYTES && v->v.bytes->elem == SCR_BYTES_U8 && v->v.bytes->flavor != SCR_BF_DATAVIEW) {
+    return scr_bytes_retain(v->v.bytes);
+  }
+  scr_dyn_arg_type_fail("dest", "an instance of Uint8Array", v);
+  return NULL;
+}
+
 /* A checked-dynamic Buffer/Uint8Array argument (`buf.copy(target)`): the same
  * shared payload, +1. Anything else throws ERR_INVALID_ARG_TYPE naming `name`. */
 ScrBytes *scr_bytes_arg_chk(const ScrDyn *v, const ScrStr *name) {

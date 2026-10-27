@@ -9419,7 +9419,9 @@ ScrStr *scr_dyn_to_string_range_dyn(const struct ScrDyn *d, const struct ScrDyn 
 ScrBytes *scr_buffer_from_dyn_enc(const struct ScrDyn *v, const struct ScrDyn *enc); /* Buffer.from(value, encoding) over untyped operands: +1 bytes, NULL with the exception pending (scr_json.c) */
 ScrBytes *scr_buffer_from_dyn(const struct ScrDyn *v); /* Buffer.from(dyn): +1 u8 bytes (scr_json.c) */
 ScrBytes *scr_bytes_arg_chk(const struct ScrDyn *v, const ScrStr *name); /* checked Uint8Array argument: +1 same payload, throws ERR_INVALID_ARG_TYPE (scr_json.c) */
-ScrBytes *scr_crypto_input_bytes(const struct ScrDyn *v); /* hash/hmac update input: +1 u8 bytes, throws ERR_INVALID_ARG_TYPE (scr_json.c) */
+ScrBytes *scr_crypto_input_bytes(const struct ScrDyn *v);
+ScrStr *scr_text_decode_dyn(const ScrDyn *v); /* TextDecoder.decode over a checked-dynamic value (scr_json.c): +1 string, or NULL with the exception pending */
+ScrBytes *scr_text_dest_dyn(const ScrDyn *v); /* encodeInto's dest over a checked-dynamic value (scr_json.c): +1 u8 bytes, or NULL with the exception pending */ /* hash/hmac update input: +1 u8 bytes, throws ERR_INVALID_ARG_TYPE (scr_json.c) */
 
 /* Buffer.byteLength(string, enc) — enc NORMALIZED like from_str — and
  * Buffer.isEncoding(name) (case-insensitive over Node's alias set).
