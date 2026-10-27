@@ -18087,6 +18087,67 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/12900-buffer-prototype-identity-kinds/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12900-buffer-prototype-identity-kinds/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12901-buffer-prototype-for-in-keys/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12901-buffer-prototype-for-in-keys/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12902-safer-shaped-prototype-export/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12902-safer-shaped-prototype-export/lib.cjs",
+    "<repo>/tests/corpus/12902-safer-shaped-prototype-export/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12903-prototype-numeric-methods-call/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12903-prototype-numeric-methods-call/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12904-prototype-getters-and-instanceof-links/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12904-prototype-getters-and-instanceof-links/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12905-prototype-link-instanceof-and-new/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12905-prototype-link-instanceof-and-new/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12906-prototype-slices-and-writes/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12906-prototype-slices-and-writes/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12907-prototype-equals-compare-copy-swap/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12907-prototype-equals-compare-copy-swap/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12908-prototype-write-and-slice-view/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12908-prototype-write-and-slice-view/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12909-instance-slices-typeof-probe/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/12909-instance-slices-typeof-probe/main.cjs"
+   ],
+   "diags": []
   }
  }
 }

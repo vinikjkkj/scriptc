@@ -2444,17 +2444,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           return { kind: "boolLit", value: false, type: BOOL, loc };
         }
       }
-      // `Buffer.prototype` has no object in a static build (the Buffer methods are the bytes methods).
-      // Answering a fresh empty object would make `for (k in Buffer.prototype)` visit nothing where Node
-      // visits the methods, so the read refuses by name.
+      // `Buffer.prototype` as a value: the process object Node's Buffer instances inherit from (its 95
+      // enumerable keys in Node's order, its methods as function values; scr_bvp_build, scr_buffer_val.c).
       if (expr.name.text === "prototype" && !L.dynamic && isJsSourceFile(expr.getSourceFile()) &&
           stdlibGlobalNameOf(L, expr.expression) === "Buffer") {
-        L.unsupported(
-          "SC1090",
-          expr,
-          "Buffer.prototype as a value (the class has no prototype object in a static build: its methods are the bytes methods)",
-        );
-        return bufferValueOf(0, loc);
+        return bufferValueOf(15, loc);
       }
       // `require('buffer').Buffer` / `buffer.<member>` read as a value (JavaScript): the class and the
       // module's held members, as the runtime's values (scr_dyn_buffer_value).
@@ -20152,6 +20146,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const left = L.lowerExpr(expr.left);
         const line = expr.getSourceFile().getLineAndCharacterOfPosition(expr.getStart()).line + 1;
         const why: IrExpr = { kind: "strLit", value: `Buffer at ${loc.file}:${line}`, type: STRING, loc };
+        // A JavaScript object-typed left operand may hold %Buffer.prototype% on its [[Prototype]] chain
+        // (`W.prototype = Buffer.prototype; new W() instanceof Buffer` is true in Node): the flavor test
+        // cannot see that, so the operand takes the run-time prototype walk against %Buffer%.
+        if (isJsSourceFile(expr.getSourceFile()) && !L.dynamic && left.type.kind !== "bytes") {
+          return { kind: "libCall", fn: "dyn.instanceOf", args: [{ kind: "dynFrom", value: left, type: DYN, loc }, bufferValueOf(0, loc)], type: BOOL, loc };
+        }
         return lowerBufferFlavorTest(L, left, expr.left, why, loc, "instanceof Buffer");
       }
       // `x instanceof Uint8Array` / `instanceof ArrayBuffer` -- the test

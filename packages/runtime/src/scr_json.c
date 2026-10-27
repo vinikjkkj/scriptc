@@ -8949,6 +8949,12 @@ ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn) {
     scr_dyn_release(table);
     return r;
   }
+  /* A NON-ENUMERABLE prototype (the Buffer constructor's, scr_buffer_val.c) is a hidden data property. */
+  if (scr_dyn_obj_hidden_attrs(table, "prototype", 9, NULL, NULL, NULL, NULL)) {
+    ScrDyn *r = scr_dyn_obj_key_get(table, "prototype", 9); /* +1 */
+    scr_dyn_release(table);
+    return r;
+  }
   ScrDyn *proto = scr_dyn_new_obj(); /* +1 */
   /* The constructor NAME rides on the prototype object so instances can
    * copy it for util.inspect ("F { a: 1 }"). It is the FUNC box's static
@@ -9024,6 +9030,11 @@ static bool scr_dyn_is_object_kind(const ScrDyn *d) {
  * The right operand's prototype object is DEMANDED (minted if this is
  * the first time anyone asked), because otherwise the answer would
  * depend on whether some earlier read happened to mint it. */
+/* The %Buffer.prototype% singleton (scr_buffer_val.c sets it when it is built; NULL until then, and
+ * then no Buffer instance can have been asked about it). Always linked, so this unit never names
+ * the gated buffer-value unit. Borrowed. */
+ScrDyn *scr_dyn_buffer_proto_ptr = NULL;
+
 bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn) {
   /* An engine-held right operand IS callable to the engine — answering
    * false, or claiming it is not an object, would both be wrong. The
@@ -9066,7 +9077,10 @@ bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn) {
    * kind has an empty chain and answers false — which is the right
    * answer for the constructors this route can name (a user function),
    * since nothing links an array or a Buffer to one. */
-  const ScrDyn *p = v->kind == SCR_DYN_OBJ ? scr_dyn_ext(v)->proto : NULL;
+  /* A Buffer's chain starts at %Buffer.prototype% (its own [[Prototype]]), then the Uint8Array chain. */
+  const ScrDyn *p = NULL;
+  if (v->kind == SCR_DYN_OBJ) p = scr_dyn_ext(v)->proto;
+  else if (v->kind == SCR_DYN_BYTES && v->v.bytes->flavor == SCR_BF_BUFFER) p = scr_dyn_buffer_proto_ptr;
   for (size_t steps = 0; p != NULL && steps < SCR_PROTO_MAX_DEPTH; steps++) {
     if (p == proto) { found = true; break; }
     if (p->kind != SCR_DYN_OBJ) break;
@@ -11971,6 +11985,15 @@ ScrDyn *scr_dyn_assign_all(ScrDyn *target, const ScrDyn *sources) {
   return scr_dyn_retain(target);
 }
 
+/* The for-in visit guard's accessor arm (lower-stmts.ts lowerForInDyn): true when `key` is an own
+ * ENUMERABLE accessor of a dyn object. Node's for-in lists such a name without running its getter, so
+ * the value test (which would run it, and skip an undefined answer) must not decide it. */
+bool scr_dyn_for_in_accessor(const ScrDyn *v, const ScrStr *key) {
+  if (v == NULL || v->kind != SCR_DYN_OBJ) return false;
+  bool is_data = true, enumerable = false;
+  if (!scr_dyn_obj_hidden_attrs(v, key->data, key->len, &is_data, NULL, NULL, &enumerable)) return false;
+  return !is_data && enumerable;
+}
 bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
   SCR_VIEW_FRESH(v);
   if (v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) {

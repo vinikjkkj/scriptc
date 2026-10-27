@@ -11479,11 +11479,20 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       kind: "logical",
       op: "&&",
       left: { kind: "libCall", fn: "dyn.hasOwn", args: [dRef(), kRef], type: BOOL, loc },
+      // The value arm, or an own enumerable ACCESSOR key (Node visits it without running its getter; its
+      // value would be the getter's answer, which may be undefined).
       right: {
-        kind: "dynTest",
-        test: "undefined",
-        negated: true,
-        value: { kind: "dynKeyGet", key: kRef, value: dRef(), type: DYN, loc },
+        kind: "logical",
+        op: "||",
+        left: { kind: "libCall", fn: "dyn.forInAccessor", args: [dRef(), kRef], type: BOOL, loc },
+        right: {
+          kind: "dynTest",
+          test: "undefined",
+          negated: true,
+          value: { kind: "dynKeyGet", key: kRef, value: dRef(), type: DYN, loc },
+          type: BOOL,
+          loc,
+        },
         type: BOOL,
         loc,
       },

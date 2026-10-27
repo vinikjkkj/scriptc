@@ -5463,6 +5463,8 @@ export type IrLibFn =
    * ("Cannot convert undefined or null to object"). */
   | "dyn.objKeys"
   | "dyn.hasOwn"
+  /** The for-in visit guard's accessor arm: an own enumerable accessor key of a dyn object (no getter runs). */
+  | "dyn.forInAccessor"
   /** Object.prototype.toString.call(v) over a dyn operand: "[object Tag]". */
   | "dyn.objectToString"
   | "dyn.assign"
