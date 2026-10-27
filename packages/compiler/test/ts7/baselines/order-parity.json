@@ -1893,6 +1893,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/12203-objclone-null-proto-untouched.ts": {
+   "order": [
+    "<repo>/tests/corpus/12203-objclone-null-proto-untouched.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1300-errors-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1300-errors-basics.ts"
