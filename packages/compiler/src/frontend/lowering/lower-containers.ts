@@ -7567,6 +7567,7 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Int8Array: "i8",
   Int16Array: "i16",
   Uint16Array: "u16",
+  Uint8ClampedArray: "u8c",
 };
 
 /** `new Uint8Array(...)` / `new Uint32Array(...)` / `new Float32Array(...)`

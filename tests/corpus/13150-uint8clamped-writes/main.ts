@@ -1,0 +1,31 @@
+// Uint8ClampedArray: writes clamp to 0..255 and round half to even (ToUint8Clamp).
+const c = new Uint8ClampedArray(12);
+c[0] = 300;
+c[1] = -5;
+c[2] = 1.5;
+c[3] = 2.5;
+c[4] = 0.5;
+c[5] = 254.5;
+c[6] = 255.5;
+c[7] = NaN;
+c[8] = Infinity;
+c[9] = -Infinity;
+c[10] = 3.49;
+c[11] = 3.51;
+console.log(c.length, c.byteLength);
+console.log(c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11]);
+
+const src = new Uint8ClampedArray([10, 300, -1, 127.5]);
+console.log(src[0], src[1], src[2], src[3]);
+const sub = src.subarray(1, 3);
+console.log(sub.length, sub[0], sub[1]);
+sub[0] = 999;
+console.log(src[1]);
+const sl = src.slice(0, 2);
+console.log(sl[0], sl[1], sl.length);
+src.fill(42.7);
+console.log(src[0], src[3]);
+const u = new Uint8ClampedArray(4);
+u.set(new Uint8ClampedArray([1.4, 1.6, 300, -3]));
+console.log(u[0], u[1], u[2], u[3]);
+console.log(c instanceof Uint8ClampedArray, c instanceof Uint8Array);

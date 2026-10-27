@@ -22,6 +22,18 @@ static void scr_bytes_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
 
+/* ToUint8Clamp (ECMA-262 7.1.12): NaN and everything <= 0 to 0, everything
+ * >= 255 to 255, otherwise round to the nearest integer with ties to the
+ * EVEN neighbour. Used by every Uint8ClampedArray store. */
+static uint8_t scr_bytes_to_u8c(double v) {
+  if (!(v > 0.0)) return 0;
+  if (v >= 255.0) return 255;
+  double f = floor(v);
+  if (f + 0.5 < v) return (uint8_t)(f + 1.0);
+  if (v < f + 0.5) return (uint8_t)f;
+  return ((uint8_t)f % 2 == 0) ? (uint8_t)f : (uint8_t)(f + 1.0);
+}
+
 size_t scr_bytes_elem_size(ScrBytesElem elem) {
   /* A TABLE, not a comparison chain, and the reason is size: this TU is in
    * RUNTIME_SOURCES and the win32 link line carries no -ffunction-sections
@@ -34,6 +46,7 @@ size_t scr_bytes_elem_size(ScrBytesElem elem) {
    * padding is seven bytes of .rodata. */
   static const unsigned char sizes[16] = { 1, 4, 4, 4, 8, 1, 1, 2, 2,
                                            1, 1, 1, 1, 1, 1, 1 };
+  /* index 9 is SCR_BYTES_U8C (one byte, like U8). */
   return sizes[(unsigned)elem & 15u];
 }
 
@@ -329,6 +342,7 @@ double scr_bytes_get(const ScrBytes *b, double i) {
   size_t idx = scr_bytes_check_index(b, i);
   switch (b->elem) {
     case SCR_BYTES_U8:
+    case SCR_BYTES_U8C:
       return (double)b->data[idx];
     case SCR_BYTES_U32: {
       uint32_t v;
@@ -408,6 +422,9 @@ void scr_bytes_set(ScrBytes *b, double i, double v) {
   switch (b->elem) {
     case SCR_BYTES_U8:
       b->data[idx] = (uint8_t)scr_bytes_to_u32(v);
+      break;
+    case SCR_BYTES_U8C:
+      b->data[idx] = scr_bytes_to_u8c(v);
       break;
     case SCR_BYTES_U32: {
       uint32_t u = scr_bytes_to_u32(v);
@@ -574,9 +591,9 @@ ScrBytes *scr_typed_view_over(ScrBytes *buf, ScrBytesElem elem) {
     char msg[96];
     static const char *const names[] = { "Uint8Array", "Uint32Array", "Float32Array", "Int32Array",
                                          "Float64Array", "Int8Array", "ArrayBuffer", "Int16Array",
-                                         "Uint16Array" };
+                                         "Uint16Array", "Uint8ClampedArray" };
     const int n = snprintf(msg, sizeof msg, "byte length of %s should be a multiple of %zu",
-                           names[(unsigned)elem < 9 ? (unsigned)elem : 0], esz);
+                           names[(unsigned)elem < 10 ? (unsigned)elem : 0], esz);
     scr_throw_error_msg(SCR_ERR_RANGE, msg, (size_t)n);
     return NULL;
   }
@@ -1427,6 +1444,9 @@ ScrBytes *scr_bytes_from_arr(ScrBytesElem elem, const ScrArr *arr) {
     switch (elem) {
       case SCR_BYTES_U8:
         b->data[i] = (uint8_t)scr_bytes_to_u32(v);
+        break;
+      case SCR_BYTES_U8C:
+        b->data[i] = scr_bytes_to_u8c(v);
         break;
       case SCR_BYTES_U32: {
         uint32_t u = scr_bytes_to_u32(v);
