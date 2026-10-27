@@ -204,6 +204,11 @@ void scr_bytes_release(ScrBytes *b) {
   }
 }
 
+/* The release of an own table's value. scr_bytes.c must not name the dyn unit (it is link-gated); a dyn
+ * value can only be stored here by the dyn unit, which installs this hook before its first store
+ * (scr_bytes_own_set's caller, scr_json.c). NULL until then, and no entry exists before that. */
+void (*scr_bytes_own_release_fn)(void *v) = NULL;
+
 /* ── own named properties (ScrBytesOwn) ─────────────────────────────── */
 
 ScrDyn *scr_bytes_own_get(const ScrBytes *b, const char *k, size_t kl) {
@@ -227,7 +232,7 @@ void scr_bytes_own_set(ScrBytes *b, const char *k, size_t kl, ScrDyn *v) {
     if (e->klen == kl && memcmp(e->key, k, kl) == 0) {
       ScrDyn *old = e->val;
       e->val = nv; /* after the retain: v may BE old */
-      scr_dyn_release(old);
+      scr_bytes_own_release_fn(old);
       return;
     }
   }
@@ -257,7 +262,7 @@ bool scr_bytes_own_delete(ScrBytes *b, const char *k, size_t kl) {
     free(e->key);
     memmove(&t->ents[i], &t->ents[i + 1], (t->n - i - 1) * sizeof(ScrBytesOwnEnt));
     t->n--;
-    scr_dyn_release(old);
+    scr_bytes_own_release_fn(old);
     return true;
   }
   return false;
@@ -268,7 +273,7 @@ void scr_bytes_own_free(ScrBytes *b) {
   b->own = NULL;
   for (size_t i = 0; i < t->n; i++) {
     free(t->ents[i].key);
-    scr_dyn_release(t->ents[i].val);
+    scr_bytes_own_release_fn(t->ents[i].val);
   }
   free(t->ents);
   free(t);

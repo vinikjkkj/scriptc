@@ -8842,6 +8842,7 @@ ScrDyn *scr_bytes_own_get(const ScrBytes *b, const char *k, size_t kl);
 void scr_bytes_own_set(ScrBytes *b, const char *k, size_t kl, ScrDyn *v);
 bool scr_bytes_own_delete(ScrBytes *b, const char *k, size_t kl);
 void scr_bytes_own_free(ScrBytes *b);
+extern void (*scr_bytes_own_release_fn)(void *v); /* installed by the dyn unit (scr_json.c) before its first own store */
 /* `k in d` for a BYTES d (the literal-key `in` arm of both lanes; scr_json.c). */
 bool scr_dyn_bytes_in(const ScrDyn *d, const char *k, size_t kl);
 /* CanonicalNumericIndexString(name) (ES2024 7.1.21): see scr_json.c. */
