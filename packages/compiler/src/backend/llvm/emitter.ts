@@ -14875,6 +14875,17 @@ class LlEmitter {
           false,
         );
       }
+      case "toArrayBig":
+        return call("scr_bytes_big_array", "ptr (ptr)", `ptr ${r.name}`, true, false);
+      case "lastIndexOfBig": {
+        return call(
+          "scr_bytes_last_index_of_big",
+          "double (ptr, ptr, double)",
+          `ptr ${r.name}, ptr ${args[0]!.name}, double ${args[1]?.name ?? NAN}`,
+          false,
+          false,
+        );
+      }
       case "indexOfBig":
       case "includesBig": {
         const idx = call(

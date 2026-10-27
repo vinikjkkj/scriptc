@@ -2912,11 +2912,14 @@ function lowerOptionalDefaultArg(
     if (bytesT.elem === "i64" || bytesT.elem === "u64") {
       // The default numeric order of a bigint view: an in-place sort (sortBig).
       // A comparator, and toSorted (a copy first), are not lowered yet.
-      if (method !== "sort" || call.arguments.length > 0) {
-        L.noLowering(`.${method} on ${recvName}`, call, "toSorted and sort with a comparator on a BigInt64Array / BigUint64Array are not lowered yet (the default sort() is)");
+      if (call.arguments.length === 0) {
+        const sortRecv = L.lowerExpr(access.expression);
+        // toSorted is the default sort of a copy: the receiver is untouched.
+        const sortTarget: IrExpr = method === "toSorted"
+          ? { kind: "bytesIntrinsic", method: "slice", receiver: sortRecv, args: [], type: bytesT, loc }
+          : sortRecv;
+        return { kind: "bytesIntrinsic", method: "sortBig", receiver: sortTarget, args: [], type: bytesT, loc };
       }
-      const sortRecv = L.lowerExpr(access.expression);
-      return { kind: "bytesIntrinsic", method: "sortBig", receiver: sortRecv, args: [], type: bytesT, loc };
     }
     const receiver = L.lowerExpr(access.expression);
     const undefinedArg = call.arguments[0]
@@ -2972,10 +2975,11 @@ function lowerOptionalDefaultArg(
     }
     const argNode = call.arguments[0]!;
     const fnArg = L.lowerExpr(argNode);
+    const paramKind = bytesT.elem === "i64" || bytesT.elem === "u64" ? "bigint" : "f64";
     if (
       fnArg.type.kind !== "func" ||
       fnArg.type.params.length > 2 ||
-      !fnArg.type.params.every((p) => p.kind === "f64") ||
+      !fnArg.type.params.every((p) => p.kind === paramKind) ||
       fnArg.type.ret.kind !== "f64"
     ) {
       L.badType(argNode, L.typeOf(argNode));
@@ -3020,7 +3024,11 @@ function lowerOptionalDefaultArg(
     inPlace: boolean,
     loc: SrcLoc,
   ): IrFunction {
-    const fnT = funcOf([F64, F64].slice(0, arity), F64);
+    // A bigint view orders bigint values (the comparator takes bigints and
+    // the default order is big.cmp); every other view orders doubles.
+    const bigElem = bytesT.elem === "i64" || bytesT.elem === "u64";
+    const vt: IrType = bigElem ? BIGINT : F64;
+    const fnT = funcOf([vt, vt].slice(0, arity), F64);
     const ref = (localId: string, type: IrType): IrExpr => ({
       kind: "varRef",
       localId,
@@ -3039,7 +3047,7 @@ function lowerOptionalDefaultArg(
       method: "get",
       receiver: ref("a.0", bytesT),
       args: [index],
-      type: F64,
+      type: vt,
       loc,
     });
     const jPlus1: IrExpr = {
@@ -3054,15 +3062,17 @@ function lowerOptionalDefaultArg(
       ? {
           kind: "callValue",
           callee: ref("f.0", fnT),
-          args: [at(j), ref("v.0", F64)].slice(0, arity),
+          args: [at(j), ref("v.0", vt)].slice(0, arity),
           type: F64,
           loc,
         }
-      : {
+      : bigElem
+        ? { kind: "libCall", fn: "big.cmp", args: [at(j), ref("v.0", vt)], type: F64, loc }
+        : {
           kind: "bin",
           op: "-",
           left: at(j),
-          right: ref("v.0", F64),
+          right: ref("v.0", vt),
           type: F64,
           loc,
         };
@@ -3128,7 +3138,7 @@ function lowerOptionalDefaultArg(
         : []),
       { id: "n.0", name: "n", type: F64, mutable: false },
       { id: "i.0", name: "i", type: F64, mutable: true },
-      { id: "v.0", name: "v", type: F64, mutable: false },
+      { id: "v.0", name: "v", type: vt, mutable: false },
       { id: "j.0", name: "j", type: F64, mutable: true },
       // `sort` keeps the receiver (o) beside the working copy (a): the
       // sorted values are blitted back into o at the end and o is the
@@ -3226,7 +3236,7 @@ function lowerOptionalDefaultArg(
             kind: "bytesSet",
             arr: ref("a.0", bytesT),
             index: jPlus1,
-            value: ref("v.0", F64),
+            value: ref("v.0", vt),
             loc,
           },
         ],
@@ -3271,7 +3281,7 @@ function lowerOptionalDefaultArg(
                     method: "get" as const,
                     receiver: ref("a.0", bytesT),
                     args: [ref("k.0", F64)],
-                    type: F64,
+                    type: vt,
                     loc,
                   },
                   loc,
@@ -8047,13 +8057,13 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
         loc,
       };
     }
-    if (receiverIr.elem === "u8" && name === "toSorted") {
+    if ((receiverIr.elem === "u8" || receiverIr.elem === "i64" || receiverIr.elem === "u64") && name === "toSorted") {
       return lowerBytesToSortedCall(L, call, access, receiverIr, "toSorted");
     }
     // `.sort(cmp?)` at EVERY typed-array width — the SC2020 group-A
     // member behind zapo's phash (`ORDER.subarray(0, n).sort(cmp)` on a
-    // Uint32Array). `toSorted` stays u8-only: nothing asks for the copying
-    // form at another width, and widening it is a separate claim. `buf`
+    // Uint32Array). `toSorted` takes the u8 and bigint views only: nothing
+    // asks for the copying form at another width, and widening it is a separate claim. `buf`
     // is excluded because an ArrayBuffer has no elements to order.
     if (name === "sort" && receiverIr.elem !== "buf") {
       return lowerBytesToSortedCall(L, call, access, receiverIr, "sort");
@@ -8266,7 +8276,7 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     }
     // indexOf / includes on a bigint view: the by-value search (sortBig's
     // sibling), lowered in lowerBufferInstanceMethod's bigint branch.
-    if ((name === "indexOf" || name === "includes") && (receiverIr.elem === "i64" || receiverIr.elem === "u64")) {
+    if ((name === "indexOf" || name === "includes" || name === "lastIndexOf") && (receiverIr.elem === "i64" || receiverIr.elem === "u64")) {
       const bigMethod = lowerBufferInstanceMethod(L, call, access, name, loc);
       if (bigMethod) return bigMethod;
     }
@@ -8588,10 +8598,10 @@ function lowerBufferInstanceMethod(L: Lowerer, call: ts.CallExpression,
     const receiver = L.lowerExpr(access.expression);
     if (vT?.kind === "bigint" && receiver.type.kind === "bytes" && (receiver.type.elem === "i64" || receiver.type.elem === "u64")) {
       // A bigint needle on a bigint view: search by value, forwards.
-      if (name === "lastIndexOf") L.noLowering(".lastIndexOf on a BigInt64Array / BigUint64Array", call);
       const bv = L.lowerExprExpecting(args[0]!, BIGINT);
       const fromArgs = offNode ? [L.lowerExprExpecting(offNode, F64)] : [];
-      return { kind: "bytesIntrinsic", method: name === "includes" ? "includesBig" : "indexOfBig", receiver, args: [bv, ...fromArgs], type: resultT, loc };
+      const bigMethod = name === "includes" ? "includesBig" : name === "lastIndexOf" ? "lastIndexOfBig" : "indexOfBig";
+      return { kind: "bytesIntrinsic", method: bigMethod, receiver, args: [bv, ...fromArgs], type: resultT, loc };
     }
     if (vT?.kind === "f64") {
       // A number needle wraps & 0xFF at runtime (Buffer semantics; the

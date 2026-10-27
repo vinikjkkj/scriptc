@@ -1490,6 +1490,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               `scr_bytes_fill_big(${r.name}, ${args[0]!.name}, ${n}, ${args[1]?.name ?? "0"}, ${args[2]?.name ?? "0"})`,
             );
           }
+          case "toArrayBig":
+            return E.newTemp(e.type, `scr_bytes_big_array(${r.name})`);
+          case "lastIndexOfBig":
+            return E.newTemp(e.type, `scr_bytes_last_index_of_big(${r.name}, ${args[0]!.name}, ${args[1]?.name ?? "NAN"})`);
           case "indexOfBig":
           case "includesBig": {
             const call = `scr_bytes_index_of_big(${r.name}, ${args[0]!.name}, ${args[1]?.name ?? "NAN"})`;
