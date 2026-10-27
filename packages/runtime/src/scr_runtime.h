@@ -2917,6 +2917,10 @@ ScrStream *scr_stream_set_push_encoding(ScrStream *s, ScrStr *enc);
 bool scr_stream_push_null(ScrStream *s);
 void scr_stream_unshift(ScrStream *s, ScrBytes *chunk);
 void scr_stream_unshift_str(ScrStream *s, ScrStr *str);
+ScrDyn *scr_stream_read_dyn(ScrStream *s, double size); /* +1: the next objectMode value, or the byte/string chunk boxed; null at EOF/empty */
+ScrStream *scr_stream_set_objmode(ScrStream *s, double explicit_hwm); /* readable objectMode: dyn entries, hwm 16 unless explicit (<0 = none); chains the receiver */
+ScrStream *scr_stream_destroy_dyn(ScrStream *s, ScrDyn *d); /* destroy(dyn): falsy -> plain, Error -> its ScrError, other truthy -> non-Error wrapper (scr_inspect.c) */
+ScrDyn *scr_stream_data_dyn_cur(void); /* BORROWED objectMode payload of the 'data' emission in flight, else NULL */
 ScrBytes *scr_stream_read(ScrStream *s, double size); /* +1 or NULL; size < 0 = all/first; throws once encoded (the static type is Buffer|null) */
 /* setEncoding(enc): string-chunk mode — pushes decode through the
  * StringDecoder, 'data' delivers strings (the emit ABI carries both
@@ -6246,6 +6250,11 @@ ScrDyn *scr_dyn_from_error(const ScrError *e);
  * out-and-back crossings compare reference-equal); alien %error objects
  * rebuild once and enter the cache. Borrows d. */
 ScrError *scr_error_from_dyn(const ScrDyn *d); /* scr_async_dyn.c (gated) */
+/* A non-Error payload carried through an Error slot (see scr_json.c):
+ * wrap (+1 result, borrows payload), test, and the payload (borrowed). */
+ScrError *scr_error_wrap_nonerr(const ScrDyn *payload);
+bool scr_error_is_nonerr(const ScrError *e);
+ScrDyn *scr_error_nonerr_payload(const ScrError *e);
 /* The cache's runtime-internal access pair (scr_json.c owns the storage;
  * the gated extraction reads/writes through these). */
 ScrError *scr_errdyn_err_of(const ScrDyn *d); /* +1 or NULL */

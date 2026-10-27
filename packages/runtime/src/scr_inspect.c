@@ -1812,3 +1812,19 @@ ScrStr *scr_insp_format(ScrDyn *arr) {
   }
   return ib_take(&out);
 }
+
+/* Node's ERR_UNHANDLED_ERROR for a non-Error 'error' payload: the message is
+ * "Unhandled error. (" + util.inspect(value) + ")" (depth 2). */
+ScrError *scr_insp_unhandled_nonerr(const ScrDyn *payload) {
+  ScrStr *ins = scr_insp_dyn((ScrDyn *)payload, 0, 2);
+  ScrStr *pre = scr_str_new("Unhandled error. (", 18);
+  ScrStr *cl = scr_str_new(")", 1);
+  ScrStr *t1 = scr_str_concat(pre, ins);
+  ScrStr *ms = scr_str_concat(t1, cl);
+  scr_str_release(pre); scr_str_release(ins); scr_str_release(cl); scr_str_release(t1);
+  ScrError *u = scr_error_new(SCR_ERR_ERROR, ms);
+  scr_str_release(ms);
+  u->code = scr_str_new("ERR_UNHANDLED_ERROR", 19);
+  return u;
+}
+
