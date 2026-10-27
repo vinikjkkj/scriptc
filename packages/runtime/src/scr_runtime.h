@@ -9565,7 +9565,8 @@ ScrStr *scr_insp_f64(double x);   /* JS ToString, except -0 → "-0" */
 ScrStr *scr_insp_str(ScrStr *s);  /* the quoting ladder + line splitting */
 ScrStr *scr_insp_regex(ScrRegex *re);  /* /source/flags */
 ScrStr *scr_insp_buffer(ScrBytes *b);  /* <Buffer aa bb ...>, 50-byte cap */
-ScrStr *scr_insp_typed(ScrBytes *b, ScrStr *name); /* Name(n) [ ... ], any non-Buffer view */
+ScrStr *scr_insp_typed(ScrBytes *b, ScrStr *name); /* Name(n) [ ... ], any non-Buffer double view */
+ScrStr *scr_insp_typed_big(ScrBytes *b, ScrStr *name); /* BigInt64/BigUint64 view, gated (scr_bigint.c) */
 /* The stackless error form: [Name: message] / [Name], plus the stamped
  * code slot as its one extra property ({ code: 'X' }); [Name] beyond
  * depth when a code makes it composite. */

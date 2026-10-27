@@ -6020,6 +6020,7 @@ export type IrLibFn =
   | "insp.date"
   | "insp.buffer"
   | "insp.typed"
+  | "insp.typedBig"
   | "insp.error"
   | "insp.dyn"
   | "insp.dynS"
@@ -10256,6 +10257,14 @@ export function moduleUsesBigInt(mod: IrModule): boolean {
       return;
     }
     if ((v as { kind?: unknown }).kind === "bigint") {
+      found = true;
+      return;
+    }
+    // A bigint VIEW is a bigint program even before it indexes an element:
+    // its console.log form and its element accesses both live in the gated
+    // unit (scr_insp_typed_big, scr_bytes_get_big).
+    const asBytes = v as { kind?: unknown; elem?: unknown };
+    if (asBytes.kind === "bytes" && (asBytes.elem === "i64" || asBytes.elem === "u64")) {
       found = true;
       return;
     }

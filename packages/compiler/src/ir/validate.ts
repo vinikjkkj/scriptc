@@ -1421,6 +1421,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.date": { argTypes: [DATE_T], result: STRING },
   "insp.buffer": { argTypes: [BYTES_U8], result: STRING },
   "insp.typed": { argTypes: [null, STRING], result: STRING },
+  "insp.typedBig": { argTypes: [null, STRING], result: STRING },
   "insp.error": { argTypes: [null, F64, F64], result: STRING },
   "insp.dyn": { argTypes: [DYN, F64, F64], result: STRING },
   "insp.dynS": { argTypes: [DYN, F64], result: STRING },
