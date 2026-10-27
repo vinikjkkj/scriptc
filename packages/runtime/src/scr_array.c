@@ -22,7 +22,7 @@ long scr_arr_live_count(void) { return scr_live_arrays; }
 #endif
 #define SCR_ARR_COLD_TRAP SCR_ARR_COLD _Noreturn
 
-SCR_ARR_COLD_TRAP void scr_arr_oom(void) {
+SCR_ARR_COLD_TRAP static void scr_arr_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
 
@@ -130,9 +130,9 @@ static double scr_slot_to_f64(uint64_t s) {
   return v;
 }
 
-uint64_t scr_slot_from_ptr(void *p) { return (uint64_t)(uintptr_t)p; }
+static uint64_t scr_slot_from_ptr(void *p) { return (uint64_t)(uintptr_t)p; }
 
-void *scr_slot_to_ptr(uint64_t s) { return (void *)(uintptr_t)s; }
+static void *scr_slot_to_ptr(uint64_t s) { return (void *)(uintptr_t)s; }
 
 static bool scr_elem_is_ref(ScrElemKind k) {
   return k == SCR_ELEM_STR || k == SCR_ELEM_ARR || k == SCR_ELEM_BYTES ||
@@ -153,7 +153,7 @@ static void scr_elem_release(const ScrArr *a, uint64_t slot) {
  * inline ladder, and only two of the five had the NULL guard an ABSENT slot
  * needs. Copies PROPAGATE absence — a hole survives a slice or a spread in
  * JS too; only a READ refuses it. */
-void *scr_elem_retain_p(const ScrArr *a, void *p) {
+static void *scr_elem_retain_p(const ScrArr *a, void *p) {
   if (p == NULL) return NULL; /* an ABSENT slot copies as absent */
   if (a->elem == SCR_ELEM_STR) return scr_str_retain((ScrStr *)p);
   if (a->elem == SCR_ELEM_ARR) return scr_arr_retain((ScrArr *)p);
@@ -390,7 +390,7 @@ static void scr_arr_vm_release(void *base) {
 
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
 
-void scr_arr_grow(ScrArr *a, size_t need) {
+static void scr_arr_grow(ScrArr *a, size_t need) {
   if (need <= a->cap) return;
   size_t cap = a->cap ? a->cap : 4;
   while (cap < need) {
@@ -836,7 +836,7 @@ void *scr_arr_pop_ref(ScrArr *a) {
  * array (JS answers undefined there — the `elem | undefined` union), so
  * an empty receiver here is an internal error, pop's discipline. Ref
  * ownership moves out to the caller (no retain). */
-uint64_t scr_arr_shift_slot(ScrArr *a) {
+static uint64_t scr_arr_shift_slot(ScrArr *a) {
   if (a->len == 0) {
     scr_trap("scriptc: internal error: shift() on an empty array\n");
   }
@@ -948,7 +948,7 @@ bool scr_arr_includes_ref(ScrArr *a, void *v) {
 static long long scr_join_grows, scr_join_moved;
 #endif
 
-void scr_join_append(char **buf, size_t *len, size_t *cap,
+static void scr_join_append(char **buf, size_t *len, size_t *cap,
                              const char *bytes, size_t n) {
   if (*len + n > *cap) {
 #ifdef SCR_ARRCEN_ON
@@ -1202,4 +1202,17 @@ void scr_arr_truncate(ScrArr *a, double n) {
     uint64_t slot = a->data[--a->len];
     if (scr_elem_is_ref(a->elem)) scr_elem_release(a, slot);
   }
+}
+
+/* Entry points for scr_array_dyn.c (the dyn-element operations, linked only
+ * when a program uses them). The helpers above stay file-private, so this
+ * unit keeps their inlining. */
+void scr_arr_oom_ext(void) { scr_arr_oom(); }
+uint64_t scr_slot_from_ptr_ext(void *p) { return scr_slot_from_ptr(p); }
+void *scr_slot_to_ptr_ext(uint64_t s) { return scr_slot_to_ptr(s); }
+void *scr_elem_retain_p_ext(const ScrArr *a, void *p) { return scr_elem_retain_p(a, p); }
+uint64_t scr_arr_shift_slot_ext(ScrArr *a) { return scr_arr_shift_slot(a); }
+void scr_arr_grow_ext(ScrArr *a, size_t need) { scr_arr_grow(a, need); }
+void scr_join_append_ext(char **buf, size_t *len, size_t *cap, const char *bytes, size_t n) {
+  scr_join_append(buf, len, cap, bytes, n);
 }
