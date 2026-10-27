@@ -93,6 +93,49 @@ export function liveBagRef(L: Lowerer, sf: ts.SourceFile, loc: SrcLoc): IrExpr {
 export function liveDepOfBinding(L: Lowerer, recv: ts.Expression): ts.SourceFile | null {
   if (!ts.isIdentifier(recv) || !L.cjsLocalModuleBindingOf(recv)) return null;
   const dep = L.cjsBindingRequireDepOf(recv);
-  if (dep === null || !liveExportsOf(L, dep)) return null;
-  return dep;
+  if (dep === null) return null;
+  return liveTwinOf(L, dep);
+}
+
+/** The LIVE compiled module a requirer's binding resolves to: the module itself when it is a
+ * live CommonJS JS file, or its compiled twin when the binding resolved to the module's
+ * declaration (`.d.ts`) and that twin is live. Null otherwise. */
+export function liveTwinOf(L: Lowerer, sf: ts.SourceFile): ts.SourceFile | null {
+  if (!sf.isDeclarationFile) return liveExportsOf(L, sf) ? sf : null;
+  const twin = L.declTwinSourceOf(sf);
+  return twin !== null && liveExportsOf(L, twin) ? twin : null;
+}
+
+/** The live module a NAMED import binding (`import { getDecoder } from "m"`, or a value
+ * destructured from a declaration) names, read through the declaration's compiled twin. */
+export function liveNamedTwinOf(L: Lowerer, sym: ts.Symbol): ts.SourceFile | null {
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length === 0) return null;
+  const sf = decls[0]!.getSourceFile();
+  if (!sf.isDeclarationFile) return null;
+  return liveTwinOf(L, sf);
+}
+
+/** True when `init` evaluates to a live export object: the module's own `exports` / `module.exports`
+ * (in a live file), or a requirer's namespace binding over a live module. */
+export function isLiveExportValue(L: Lowerer, init: ts.Expression): boolean {
+  let e: ts.Expression = init;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (ts.isIdentifier(e) && e.text === "exports" && isCjsJsFile(e.getSourceFile()) && unshadowed(L, e)) {
+    return liveExportsOf(L, e.getSourceFile());
+  }
+  if (isModuleExportsAccess(e)) {
+    const m = e.expression as ts.Identifier;
+    return isCjsJsFile(e.getSourceFile()) && unshadowed(L, m) && liveExportsOf(L, e.getSourceFile());
+  }
+  if (ts.isIdentifier(e)) return liveDepOfBinding(L, e) !== null;
+  return false;
+}
+
+/** A binding name whose initializer is a live export object: its storage is the DYN bag reference
+ * (`var alias = module.exports`), not the checker's record of the export object. */
+export function isLiveAliasName(L: Lowerer, name: ts.Identifier): boolean {
+  const d = name.parent;
+  if (!ts.isVariableDeclaration(d) || d.name !== name || d.initializer === undefined) return false;
+  return isLiveExportValue(L, d.initializer);
 }

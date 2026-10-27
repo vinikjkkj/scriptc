@@ -11,7 +11,7 @@ import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
-import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse } from "./cjs-live-exports.js";
+import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf } from "./cjs-live-exports.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExportRecordReadDyn, cjsExportRecordRef, isBareExportsAccess } from "./cjs-export-record.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
@@ -1948,6 +1948,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const twinSym = L.resolveValueSymbol(expr);
         const twinG = twinSym ? declTwinGlobalOf(L, twinSym) : undefined;
         if (twinG) return { kind: "varRef", localId: twinG.id, type: twinG.type, loc };
+        // A named import whose compiled twin is a LIVE export object (cjs-live-exports.ts): the
+        // member is the bag's, read through the declaration's name.
+        const liveTwin = twinSym ? liveNamedTwinOf(L, twinSym) : null;
+        if (liveTwin !== null) return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.text, type: STRING, loc }, optional: true, value: liveBagRef(L, liveTwin, loc), type: DYN, loc };
         // ...and the same binding when the twin is NOT compiled: the
         // declaration module claims a value whose implementation this
         // build never saw. That is precisely what the method-call fence

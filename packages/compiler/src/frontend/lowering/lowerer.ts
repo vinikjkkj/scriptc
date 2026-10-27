@@ -16,6 +16,7 @@ import { appendFileSync } from "node:fs";
 import { isRelativeSpecifier } from "../shared.js";
 import type { RequireThrowCtx } from "../require-throws.js";
 import type { CjsExportRecord } from "./cjs-export-record.js";
+import { isLiveAliasName } from "./cjs-live-exports.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
 import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
@@ -6452,6 +6453,8 @@ export class Lowerer {
   };
 
   irTypeOf(node: ts.Node): IrType {
+    // A binding whose value is a live export object is the DYN bag reference (cjs-live-exports.ts).
+    if (ts.isIdentifier(node) && isLiveAliasName(this, node)) return DYN;
     const t = this.typeOf(node);
     // A never-tainted JS type (neverTaintedJsType) maps — never rides as
     // f64 — but must not: pre-empt the mapping so the JS fallback below
