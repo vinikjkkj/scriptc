@@ -2758,6 +2758,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13700-exports-passed-writes-member-later/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13700-exports-passed-writes-member-later/lib.cjs",
+    "<repo>/tests/corpus/13700-exports-passed-writes-member-later/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13702-iconv-merge-into-exports/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13702-iconv-merge-into-exports/merge.cjs",
+    "<repo>/tests/corpus/13702-iconv-merge-into-exports/part1.cjs",
+    "<repo>/tests/corpus/13702-iconv-merge-into-exports/part2.cjs",
+    "<repo>/tests/corpus/13702-iconv-merge-into-exports/enc.cjs",
+    "<repo>/tests/corpus/13702-iconv-merge-into-exports/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13703-exports-value-into-ctor-lazy-read/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13703-exports-value-into-ctor-lazy-read/lib.cjs",
+    "<repo>/tests/corpus/13703-exports-value-into-ctor-lazy-read/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1351-path-parts.ts": {
    "order": [
     "<repo>/tests/corpus/1351-path-parts.ts"

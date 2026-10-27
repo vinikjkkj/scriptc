@@ -11,6 +11,7 @@ import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
+import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse } from "./cjs-live-exports.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExportRecordReadDyn, cjsExportRecordRef, isBareExportsAccess } from "./cjs-export-record.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
@@ -1340,6 +1341,9 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // {q: 3}); exports.q` printed undefined where Node prints 3). Refuse instead.
       // An element-access base (`exports[k]`) keeps the generic element fence: this
       // identifier is not the value that fence names, so its refusal would relabel it.
+      if (ts.isIdentifier(expr) && expr.text === "exports" && isCjsJsFile(expr.getSourceFile()) && liveExportsOf(L, expr.getSourceFile()) && isValueUse(expr) && L.resolveLocal(expr) === null) {
+        return liveBagRef(L, expr.getSourceFile(), loc);
+      }
       if (ts.isIdentifier(expr) && expr.text === "exports" && !ts.isElementAccessExpression(expr.parent) && isCjsJsFile(expr.getSourceFile()) && L.resolveLocal(expr) === null) {
         const recV = cjsExportRecordOf(L, expr.getSourceFile());
         if (recV !== null) return cjsExportRecordRef(recV, loc);
@@ -1612,6 +1616,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // the namespace object has no representation — members lower at
       // their access sites only. The CommonJS namespace binding
       // (`const lib = require("./lib.js")`) gets the same fence.
+      if (liveDepOfBinding(L, expr) !== null) return liveBagRef(L, liveDepOfBinding(L, expr)!, locOf(expr));
       if (L.builtinNamespaceModuleOf(expr) !== null || L.cjsLocalModuleBindingOf(expr)) {
         if (ts.isIdentifier(expr) && L.builtinNamespaceModuleOf(expr) === null) {
           const tableValue = cjsRequireBindingValueOf(L, expr);
@@ -2817,6 +2822,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // are the document's own (jsonRequireTypeOverride): the record read
       // below answers them, not the module-namespace delegation. A whole-class
       // require binding delegates to the module's export member first.
+      // A live requirer binding (`m.x` where m = require(M), M a live module): the member is the bag's.
+      if (!expr.questionDotToken && ts.isIdentifier(expr.expression) && liveDepOfBinding(L, expr.expression) !== null) {
+        const ld = liveDepOfBinding(L, expr.expression)!;
+        return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr) }, optional: true, value: liveBagRef(L, ld, locOf(expr)), type: DYN, loc: locOf(expr) };
+      }
       if (!expr.questionDotToken && ((L.cjsLocalModuleBindingOf(expr.expression) && jsonRequireTypeOverride(L, expr.expression) === null) || L.cjsWholeClassRequireDepOf(expr.expression) !== null)) {
         // A binding whose dep is a class-expression WHOLE export
         // (`module.exports = class {…}`): the member surface is the
@@ -2851,6 +2861,9 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // resolve unconditionally — they run after the module evaluated,
       // the same approximation identifier exports already make. Every
       // other module.exports read keeps its existing story.
+      if (!expr.questionDotToken && isModuleExportsAccess(expr) && isCjsJsFile(expr.getSourceFile()) && liveExportsOf(L, expr.getSourceFile()) && isValueUse(expr)) {
+        return liveBagRef(L, expr.getSourceFile(), locOf(expr));
+      }
       if (!expr.questionDotToken && isModuleExportsAccess(expr) && isCjsJsFile(expr.getSourceFile())) {
         const whole = cjsClassExprWholeExportOf(expr.getSourceFile());
         if (whole) {
@@ -23076,6 +23089,8 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
    * that is alias plumbing (an identifier export) is NOT bag material. */
   export function cjsMemberOnlyInFunctions(L: Lowerer, sym: ts.Symbol | undefined): boolean {
     if (sym === undefined) return true;
+    // A live export object keeps every member in its bag (cjs-live-exports.ts).
+    if (L.checker.declarationsOf(sym).some((d) => liveExportsOf(L, d.getSourceFile()))) return true;
     if (L.cjsExportValueSymbol(sym) !== null) return false;
     const decls = L.checker.declarationsOf(sym);
     if (decls.length === 0) return true;

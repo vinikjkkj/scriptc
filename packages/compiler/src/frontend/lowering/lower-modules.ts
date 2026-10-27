@@ -12,6 +12,8 @@ import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
 import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsKeyedForEachOf, cjsWholeExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import { cjsExportRecordOf, cjsExportRecordInit, cjsExportRecordCreate } from "./cjs-export-record.js";
+import { liveExportsOf } from "./cjs-live-exports.js";
+import { cjsExportsBagOf } from "./lower-exprs.js";
 import { npmStaticDepSf7, resolveProjectImportSf7 } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
@@ -1994,6 +1996,8 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           ? (cjsExportAssignmentOf(stmt) ?? commaWholeExportRecordOf(stmt))
           : null;
         const registerExport = (nameNode: ts.Node, name: string, typeNode: ts.Node): void => {
+          // A live export object (cjs-live-exports.ts) holds every member in its bag: no static global.
+          if (liveExportsOf(L, sf)) return;
           try {
             // tsgo answers no symbol at the attachment site's NAME (no
             // expando synthesis); the module symbol's exports table still
@@ -4071,6 +4075,8 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
       // (cjsExportsBagOf) exists before any statement can read or write it:
       // an empty object, created right after the run-once guard.
       {
+        // A live export object is a bag from init on, even when no statement creates it lazily.
+        if (liveExportsOf(L, sf)) cjsExportsBagOf(L, sf);
         const bagId = L.cjsExportBags.get(sf);
         if (bagId !== undefined) {
           body.splice(header.length, 0, {
