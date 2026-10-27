@@ -10951,9 +10951,9 @@ class LlEmitter {
         const lNotBy = B.newLabel("dhk.nby");
         B.condBr(isBy, lBy, lNotBy);
         B.startBlock(lBy);
-        this.declare(`declare zeroext i1 @scr_dyn_bytes_own_has(ptr, ptr, i64)`);
+        this.declare(`declare zeroext i1 @scr_dyn_bytes_in(ptr, ptr, i64)`);
         const byHas = B.tmp();
-        B.line(`${byHas} = call zeroext i1 @scr_dyn_bytes_own_has(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${Buffer.byteLength(e.key, "utf8")})`);
+        B.line(`${byHas} = call zeroext i1 @scr_dyn_bytes_in(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${Buffer.byteLength(e.key, "utf8")})`);
         B.line(`store i1 ${byHas}, ptr ${slot}`);
         B.br(lj);
         B.startBlock(lNotBy);

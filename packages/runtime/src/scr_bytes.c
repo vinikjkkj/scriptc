@@ -263,10 +263,6 @@ bool scr_bytes_own_delete(ScrBytes *b, const char *k, size_t kl) {
   return false;
 }
 
-bool scr_dyn_bytes_own_has(const ScrDyn *d, const char *k, size_t kl) {
-  return d->v.bytes->own != NULL && scr_bytes_own_get(d->v.bytes, k, kl) != NULL;
-}
-
 void scr_bytes_own_free(ScrBytes *b) {
   ScrBytesOwn *t = b->own;
   b->own = NULL;

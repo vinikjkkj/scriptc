@@ -8842,8 +8842,10 @@ ScrDyn *scr_bytes_own_get(const ScrBytes *b, const char *k, size_t kl);
 void scr_bytes_own_set(ScrBytes *b, const char *k, size_t kl, ScrDyn *v);
 bool scr_bytes_own_delete(ScrBytes *b, const char *k, size_t kl);
 void scr_bytes_own_free(ScrBytes *b);
-/* `k in d` for a BYTES d: the own-table presence (the literal-key `in` arm of both lanes). */
-bool scr_dyn_bytes_own_has(const ScrDyn *d, const char *k, size_t kl);
+/* `k in d` for a BYTES d (the literal-key `in` arm of both lanes; scr_json.c). */
+bool scr_dyn_bytes_in(const ScrDyn *d, const char *k, size_t kl);
+/* CanonicalNumericIndexString(name) (ES2024 7.1.21): see scr_json.c. */
+bool scr_canonical_numeric_name(const ScrStr *k);
 
 /* ── WeakMap ───────────────────────────────────────────────────────────
  * Reference-identity keys held WEAKLY: the table does not retain a key and
