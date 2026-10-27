@@ -9516,6 +9516,7 @@ ScrBytes *scr_text_dest_dyn(const ScrDyn *v); /* encodeInto's dest over a checke
  * Borrow; never throw. */
 double scr_bytes_byte_length_str(ScrStr *s, const ScrStr *enc);
 bool scr_bytes_is_encoding(const ScrStr *s);
+const char *scr_bytes_enc_canon(const ScrStr *s); /* canonical name, or NULL: the one run-time encoding normaliser (scr_bytes.c) */
 ScrStr *scr_error_message_dyn(const struct ScrDyn *v); /* new Error(m) over an untyped m: "" for undefined, else JS ToString; NULL with the exception pending (scr_dyn_ext.c) */
 double scr_buffer_byte_length_dyn(const struct ScrDyn *v, const struct ScrDyn *enc); /* Buffer.byteLength over an untyped value (scr_dyn_ext.c) */
 bool scr_buffer_is_encoding_dyn(const struct ScrDyn *v); /* Buffer.isEncoding over an untyped value (scr_dyn_ext.c) */
@@ -9595,6 +9596,10 @@ double scr_bytes_copy_into(const ScrBytes *src, ScrBytes *dst, double nargs,
 ScrBytes *scr_bytes_swap(ScrBytes *b, double width);
 double scr_bytes_write_str(ScrBytes *b, const ScrStr *s, const ScrStr *enc,
                            double offset, double len, bool has_len);
+/* buf.write with a RUN-TIME encoding string: the offset/length validate, then the
+ * name normalises (scr_bytes_enc_canon) or throws ERR_UNKNOWN_ENCODING. Borrows. */
+double scr_bytes_write_str_dyn(ScrBytes *b, const ScrStr *s, const ScrStr *enc,
+                               double offset, double len, bool has_len);
 ScrBytes *scr_bytes_concat_len(const ScrArr *list, double total);
 
 /* Buffer.concat(list): list is a SCR_ELEM_BYTES array of u8 bytes values;

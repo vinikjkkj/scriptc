@@ -2932,7 +2932,9 @@ export type IrBytesIntrinsicMethod =
    * RECEIVER (+1, chaining), THROW; `copy` [bytes target, 0-3 f64s] →
    * f64 copied count, THROWS; `swap16/32/64` [] → the receiver (+1,
    * in-place), THROW; `writeStr` [string, strLit enc, f64 offset, f64
-   * length?] → f64 bytes written, THROWS. */
+   * length?] → f64 bytes written, THROWS; `writeStrDyn` [string, string
+   * enc (run-time), f64 offset, f64 length?] → f64 bytes written, THROWS
+   * (ERR_UNKNOWN_ENCODING for a name outside the alias set). */
   | "equals"
   | "compareBuf"
   | "indexOf"
@@ -2956,6 +2958,7 @@ export type IrBytesIntrinsicMethod =
   | "swap32"
   | "swap64"
   | "writeStr"
+  | "writeStrDyn"
   | "byteOffset"
   | "dataViewNew"
   | "dvGetUint8"
@@ -3013,7 +3016,7 @@ const BYTES_INTRINSIC_METHOD_SET: Record<IrBytesIntrinsicMethod, true> = {
   compareBuf: true, indexOf: true, lastIndexOf: true, includes: true,
   indexOfNum: true, lastIndexOfNum: true, includesNum: true, fill: true,
   fillNum: true, fillStr: true, fillElem: true, copy: true,
-  swap16: true, swap32: true, swap64: true, writeStr: true,
+  swap16: true, swap32: true, swap64: true, writeStr: true, writeStrDyn: true,
   byteOffset: true, dataViewNew: true, dvGetUint8: true, dvGetInt8: true,
   dvGetUint16: true, dvGetInt16: true, dvGetUint32: true, dvGetInt32: true,
   dvGetFloat32: true, dvGetFloat64: true, dvGetBigUint64Number: true, dvGetBigInt64Number: true,
@@ -3043,6 +3046,7 @@ export const MAY_THROW_BYTES_METHODS: ReadonlySet<IrBytesIntrinsicMethod> = new 
   "swap32",
   "swap64",
   "writeStr",
+  "writeStrDyn",
   "dataViewNew",
   "dvGetUint8",
   "dvGetInt8",

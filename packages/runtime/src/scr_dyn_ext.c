@@ -707,23 +707,8 @@ ScrStr *scr_error_message_dyn(const ScrDyn *v) {
  * else throws the catchable ERR_INVALID_ARG_TYPE. */
 static const char *scr_dyn_norm_encoding(const ScrDyn *enc) {
   if (enc == NULL || enc->kind != SCR_DYN_STR) return "utf8";
-  const ScrStr *s = enc->v.str;
-  if (s->len < 3 || s->len > 9) return "utf8";
-  char low[10];
-  for (size_t i = 0; i < s->len; i++) {
-    char c = s->data[i];
-    low[i] = c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
-  }
-  low[s->len] = 0;
-  static const char *const table[][2] = {
-      {"utf8", "utf8"},       {"utf-8", "utf8"},     {"hex", "hex"},          {"base64", "base64"},
-      {"base64url", "base64url"}, {"latin1", "latin1"}, {"binary", "latin1"}, {"ascii", "ascii"},
-      {"utf16le", "utf16le"}, {"utf-16le", "utf16le"}, {"ucs2", "utf16le"},   {"ucs-2", "utf16le"},
-  };
-  for (size_t i = 0; i < sizeof table / sizeof table[0]; i++) {
-    if (strcmp(low, table[i][0]) == 0) return table[i][1];
-  }
-  return "utf8";
+  const char *canon = scr_bytes_enc_canon(enc->v.str);
+  return canon != NULL ? canon : "utf8";
 }
 
 double scr_buffer_byte_length_dyn(const ScrDyn *v, const ScrDyn *enc) {

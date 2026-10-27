@@ -8864,13 +8864,27 @@ function lowerBufferInstanceMethod(L: Lowerer, call: ts.CallExpression,
       idxNodes = idxNodes.slice(0, -1);
     }
     if (idxNodes.length > 2) L.noLowering(`.write with ${nArgs} arguments`, call);
-    const encName = encNode ? bufEncoding(L, "Buffer.write", encNode) : "utf8";
+    // A string-typed encoding that is NOT a literal (a run-time name, e.g. a
+    // field holding "hex") rides the writeStrDyn form: the runtime normalises
+    // it with Node's alias set and refuses an unknown name (ERR_UNKNOWN_ENCODING).
+    // A literal spelled outside the lowered table ("BASE64", any case) is a
+    // run-time-normalised name too: Node folds the case, so it takes the same form.
+    const encT = encNode !== undefined ? L.typeOf(encNode) : undefined;
+    const encIsLiteral =
+      encT !== undefined && encT.isStringLiteralType() && own(BUF_ENCODINGS, encT.value) !== undefined;
     const s = L.lowerExprExpecting(args[0]!, STRING);
-    const enc: IrExpr = { kind: "strLit", value: encName, type: STRING, loc };
     const offset: IrExpr = idxNodes[0]
       ? L.lowerExprExpecting(idxNodes[0], F64)
       : { kind: "numLit", value: 0, type: F64, loc };
-    const writeArgs = [s, enc, offset, ...(idxNodes[1] ? [L.lowerExprExpecting(idxNodes[1], F64)] : [])];
+    const lenArgs = idxNodes[1] ? [L.lowerExprExpecting(idxNodes[1], F64)] : [];
+    if (encNode !== undefined && !encIsLiteral) {
+      const encDyn = L.lowerExprExpecting(encNode, STRING);
+      const receiver = L.lowerExpr(access.expression);
+      return { kind: "bytesIntrinsic", method: "writeStrDyn", receiver, args: [s, encDyn, offset, ...lenArgs], type: F64, loc };
+    }
+    const encName = encNode ? bufEncoding(L, "Buffer.write", encNode) : "utf8";
+    const enc: IrExpr = { kind: "strLit", value: encName, type: STRING, loc };
+    const writeArgs = [s, enc, offset, ...lenArgs];
     const receiver = L.lowerExpr(access.expression);
     return { kind: "bytesIntrinsic", method: "writeStr", receiver, args: writeArgs, type: F64, loc };
   }

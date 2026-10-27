@@ -15150,8 +15150,9 @@ class LlEmitter {
         return call("scr_bytes_swap", "ptr (ptr, double)", `ptr ${r.name}, double ${f64Lit(w)}`, true, true);
       }
       case "writeStr":
+      case "writeStrDyn":
         return call(
-          "scr_bytes_write_str",
+          method === "writeStr" ? "scr_bytes_write_str" : "scr_bytes_write_str_dyn",
           "double (ptr, ptr, ptr, double, double, i1 zeroext)",
           `ptr ${r.name}, ptr ${args[0]!.name}, ptr ${args[1]!.name}, double ${args[2]!.name}, double ${args[3]?.name ?? f64Lit(0)}, i1 ${args[3] ? "true" : "false"}`,
           false,

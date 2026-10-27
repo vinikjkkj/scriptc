@@ -3072,20 +3072,8 @@ static ScrDyn *scr_textcodec_box_impl(ScrStr *s) {
  * the result is a placeholder the pending check discards. +1. */
 ScrStr *scr_strdec_enc_of(const ScrDyn *v) {
   if (v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) return scr_str_new("utf8", 4);
-  if (v->kind == SCR_DYN_STR && scr_bytes_is_encoding(v->v.str)) {
-    char low[10];
-    size_t n = v->v.str->len;
-    for (size_t i = 0; i < n; i++) {
-      char c = v->v.str->data[i];
-      low[i] = c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
-    }
-    low[n] = 0;
-    const char *canon = low;
-    if (strcmp(low, "utf-8") == 0) canon = "utf8";
-    else if (strcmp(low, "binary") == 0) canon = "latin1";
-    else if (strcmp(low, "ucs2") == 0 || strcmp(low, "ucs-2") == 0 || strcmp(low, "utf-16le") == 0) canon = "utf16le";
-    return scr_str_new(canon, strlen(canon));
-  }
+  const char *canon = v->kind == SCR_DYN_STR ? scr_bytes_enc_canon(v->v.str) : NULL;
+  if (canon != NULL) return scr_str_new(canon, strlen(canon));
   /* Node interpolates the value (`Unknown encoding: ${enc}`): ToString of it. */
   ScrStr *shown = scr_dyn_string_coerce_js(v);
   ScrJsonBuf b;
