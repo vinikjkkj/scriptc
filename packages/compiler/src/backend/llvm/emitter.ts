@@ -699,6 +699,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "process.stdoutWriteBytes": "scr_process_stdout_write_bytes",
   "process.stderrWriteBytes": "scr_process_stderr_write_bytes",
   "insp.buffer": "scr_insp_buffer",
+  "insp.typed": "scr_insp_typed",
   // JSON.stringify over a checked-dynamic value: one borrowed argument, a
   // +1 string, and it throws on a cycle (the generic pending check).
   "insp.jsonDyn": "scr_dyn_format_j",
