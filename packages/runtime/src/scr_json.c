@@ -5269,7 +5269,50 @@ static const ScrDynClass *scr_dyn_error_user_class(const ScrError *e) {
   return NULL;
 }
 
+/* A NON-Error value carried through the Error-typed 'error' slot (Node's
+ * destroy(x) with a truthy non-Error x emits x itself). The wrapper is a
+ * ScrError whose name is the immortal marker below and whose props bag
+ * holds the payload under one key; every dyn crossing (scr_dyn_from_error)
+ * answers the payload itself, so dyn listeners and callbacks see x
+ * unchanged. Typed Error reads of the wrapper see an empty Error. */
+static ScrStr *scr_nonerr_marker(void) {
+  static ScrStr *m = NULL;
+  if (m == NULL) m = scr_str_new("%nonerr", 7); /* immortal: the static owns the one ref */
+  return m;
+}
+
+ScrError *scr_error_wrap_nonerr(const ScrDyn *payload /*borrowed*/) {
+  ScrStr *empty = scr_str_new("", 0);
+  ScrError *w = scr_error_new(SCR_ERR_ERROR, empty);
+  scr_str_release(empty);
+  if (w->name) scr_str_release(w->name);
+  w->name = scr_str_retain(scr_nonerr_marker());
+  ScrDyn *bag = scr_dyn_new_obj();
+  scr_dyn_obj_set(bag, "%nonerr", 7, scr_dyn_retain((ScrDyn *)payload)); /* moves in */
+  w->props = bag;
+  return w;
+}
+
+/* Node's ERR_UNHANDLED_ERROR text for a non-Error payload, installed by the
+ * dyn-destroy unit (scr_stream_dyn.c) when a non-Error wrapper is first made;
+ * NULL until then. The emitter reads it. */
+ScrError *(*scr_nonerr_unhandled_fn)(const ScrDyn *payload) = NULL;
+
+bool scr_error_is_nonerr(const ScrError *e) {
+  return e != NULL && e->name == scr_nonerr_marker();
+}
+
+/* The payload a wrapper carries (BORROWED from its bag), or NULL. */
+ScrDyn *scr_error_nonerr_payload(const ScrError *e) {
+  if (!scr_error_is_nonerr(e) || e->props == NULL) return NULL;
+  return scr_dyn_obj_get(e->props, "%nonerr", 7);
+}
+
 ScrDyn *scr_dyn_from_error(const ScrError *e) {
+  if (scr_error_is_nonerr(e)) {
+    ScrDyn *pl = scr_error_nonerr_payload(e);
+    return pl != NULL ? scr_dyn_retain(pl) : scr_dyn_retain(scr_dyn_undefined());
+  }
   for (size_t i = 0; i < scr_errdyn_n; i++) {
     if (scr_errdyn_cache[i].err == e) return scr_dyn_retain(scr_errdyn_cache[i].dyn);
   }
