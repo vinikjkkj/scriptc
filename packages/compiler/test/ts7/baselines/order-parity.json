@@ -2758,37 +2758,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/13701-module-exports-aliased-mutated/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/13701-module-exports-aliased-mutated/a.cjs",
-    "<repo>/tests/corpus/13701-module-exports-aliased-mutated/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/13700-exports-passed-writes-member-later/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/13700-exports-passed-writes-member-later/lib.cjs",
-    "<repo>/tests/corpus/13700-exports-passed-writes-member-later/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/13702-iconv-merge-into-exports/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/13702-iconv-merge-into-exports/merge.cjs",
-    "<repo>/tests/corpus/13702-iconv-merge-into-exports/part1.cjs",
-    "<repo>/tests/corpus/13702-iconv-merge-into-exports/part2.cjs",
-    "<repo>/tests/corpus/13702-iconv-merge-into-exports/enc.cjs",
-    "<repo>/tests/corpus/13702-iconv-merge-into-exports/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/13703-exports-value-into-ctor-lazy-read/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/13703-exports-value-into-ctor-lazy-read/lib.cjs",
-    "<repo>/tests/corpus/13703-exports-value-into-ctor-lazy-read/main.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/1351-path-parts.ts": {
    "order": [
     "<repo>/tests/corpus/1351-path-parts.ts"
@@ -2959,6 +2928,37 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13700-exports-passed-writes-member-later/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13700-exports-passed-writes-member-later/lib.cjs",
+    "<repo>/tests/corpus/13700-exports-passed-writes-member-later/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13701-module-exports-aliased-mutated/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13701-module-exports-aliased-mutated/a.cjs",
+    "<repo>/tests/corpus/13701-module-exports-aliased-mutated/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13702-iconv-merge-into-exports/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13702-iconv-merge-into-exports/merge.cjs",
+    "<repo>/tests/corpus/13702-iconv-merge-into-exports/part1.cjs",
+    "<repo>/tests/corpus/13702-iconv-merge-into-exports/part2.cjs",
+    "<repo>/tests/corpus/13702-iconv-merge-into-exports/enc.cjs",
+    "<repo>/tests/corpus/13702-iconv-merge-into-exports/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13703-exports-value-into-ctor-lazy-read/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13703-exports-value-into-ctor-lazy-read/lib.cjs",
+    "<repo>/tests/corpus/13703-exports-value-into-ctor-lazy-read/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1371-union-template-tostring.ts": {
    "order": [
     "<repo>/tests/corpus/1371-union-template-tostring.ts"
@@ -3106,6 +3106,24 @@
   "<repo>/tests/corpus/1400-typedarray-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1400-typedarray-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14000-buffer-write-runtime-encoding.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14000-buffer-write-runtime-encoding.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14001-buffer-write-runtime-partial.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14001-buffer-write-runtime-partial.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14003-buffer-write-runtime-bytelength-agree.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14003-buffer-write-runtime-bytelength-agree.cjs"
    ],
    "diags": []
   },
