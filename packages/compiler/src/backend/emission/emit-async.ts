@@ -1205,8 +1205,13 @@ export function streamDataThunkFor(E: CEmitter, cbT: IrType): string {
   } else if (p.kind === "bytes") {
     body.push(
       `  if (!sc_b) {`,
-      `    static const char sc_m[] = "a 'data' listener declaring a Buffer chunk received a string (the stream has an encoding set)";`,
-      `    scr_throw_error_msg(SCR_ERR_TYPE, sc_m, sizeof sc_m - 1);`,
+      `    if (scr_stream_data_dyn_cur() != NULL) {`,
+      `      static const char sc_m[] = "a 'data' listener declaring a Buffer chunk received an object (the stream is in objectMode)";`,
+      `      scr_throw_error_msg(SCR_ERR_TYPE, sc_m, sizeof sc_m - 1);`,
+      `    } else {`,
+      `      static const char sc_m[] = "a 'data' listener declaring a Buffer chunk received a string (the stream has an encoding set)";`,
+      `      scr_throw_error_msg(SCR_ERR_TYPE, sc_m, sizeof sc_m - 1);`,
+      `    }`,
       `    return;`,
       `  }`,
     );
@@ -1214,15 +1219,21 @@ export function streamDataThunkFor(E: CEmitter, cbT: IrType): string {
   } else if (p.kind === "string") {
     body.push(
       `  if (!sc_s) {`,
-      `    static const char sc_m[] = "a 'data' listener declaring a string chunk received a Buffer (call setEncoding, or declare the chunk as a Buffer)";`,
-      `    scr_throw_error_msg(SCR_ERR_TYPE, sc_m, sizeof sc_m - 1);`,
+      `    if (scr_stream_data_dyn_cur() != NULL) {`,
+      `      static const char sc_m[] = "a 'data' listener declaring a string chunk received an object (the stream is in objectMode)";`,
+      `      scr_throw_error_msg(SCR_ERR_TYPE, sc_m, sizeof sc_m - 1);`,
+      `    } else {`,
+      `      static const char sc_m[] = "a 'data' listener declaring a string chunk received a Buffer (call setEncoding, or declare the chunk as a Buffer)";`,
+      `      scr_throw_error_msg(SCR_ERR_TYPE, sc_m, sizeof sc_m - 1);`,
+      `    }`,
       `    return;`,
       `  }`,
     );
     passed.push("scr_str_retain(sc_s)");
   } else {
     // dyn: box by runtime tag — the JS lane's adapter parameter.
-    body.push(`  ScrDyn *sc_d = sc_b ? scr_dyn_new_buffer_copy(sc_b) : scr_dyn_new_str(sc_s);`);
+    body.push(`  ScrDyn *sc_d = sc_b ? scr_dyn_new_buffer_copy(sc_b) : sc_s ? scr_dyn_new_str(sc_s)`,
+      `    : scr_stream_data_dyn_cur() ? scr_dyn_retain(scr_stream_data_dyn_cur()) : scr_dyn_new_null();`);
     passed.push("sc_d");
   }
   const sigParams = ["ScrClosure *", ...cbT.params.map((q) => cType(q).trim())].join(", ");

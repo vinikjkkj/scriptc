@@ -7867,6 +7867,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "stream.destroyErr":
             E.usesTimers = true;
             return finish(`(${cType(e.type).trim()})scr_stream_destroy((ScrStream *)${arg(0)}, ${arg(1)})`);
+          case "stream.destroyDyn":
+            E.usesTimers = true;
+            return finish(`(${cType(e.type).trim()})scr_stream_destroy_dyn((ScrStream *)${arg(0)}, ${arg(1)})`);
+          case "readable.objectMode":
+            E.usesTimers = true;
+            return finish(`(${cType(e.type).trim()})scr_stream_set_objmode((ScrStream *)${arg(0)}, ${arg(1)})`);
+          case "readable.readDyn":
+            E.usesTimers = true;
+            return finish(`scr_stream_read_dyn((ScrStream *)${arg(0)}, ${arg(1)})`);
           case "stream.prop": {
             // The property NAME is a compile-time literal; args[1]'s
             // emitted temp is unused (released with the statement's frame).

@@ -1045,6 +1045,9 @@ const LIB_FN_SYMS: Record<string, string> = {
   "readable.pushEncoding": "scr_stream_set_push_encoding",
   "readable.pushNull": "scr_stream_push_null",
   "readable.pushDyn": "scr_stream_push_dyn",
+  "readable.objectMode": "scr_stream_set_objmode",
+  "readable.readDyn": "scr_stream_read_dyn",
+  "stream.destroyDyn": "scr_stream_destroy_dyn",
   "readable.unshift": "scr_stream_unshift",
   "readable.unshiftStr": "scr_stream_unshift_str",
   "readable.pause": "scr_stream_pause",
@@ -1411,7 +1414,8 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "readable.pipe", "readable.unpipe", "http.clientPipeFrom", "http.reqBodyStream",
   "writable.write", "writable.writeStr", "writable.writeU", "writable.writeDyn",
   "writable.end", "writable.uncork",
-  "stream.destroy", "stream.destroyErr",
+  "stream.destroy", "stream.destroyErr", "stream.destroyDyn",
+  "readable.objectMode", "readable.readDyn",
   "stream.setRead", "stream.setWrite", "stream.setFinal", "stream.setDestroy",
   "stream.setTransform", "stream.setFlush",
   "process.activeResources", "zlib.cbDyn",
@@ -13340,10 +13344,24 @@ class LlEmitter {
         : "a 'data' listener declaring a string chunk received a Buffer (call setEncoding, or declare the chunk as a Buffer)";
       const slot = p.kind === "bytes" ? "%a0" : "%a1";
       this.declare(`declare void @scr_throw_error_msg(i32, ptr, i64)`);
+      // An objectMode payload (no bytes/string slot, the dyn cur set) gets
+      // the object message; the C thunk's emit-async.ts text is identical.
+      const objMsg = p.kind === "bytes"
+        ? "a 'data' listener declaring a Buffer chunk received an object (the stream is in objectMode)"
+        : "a 'data' listener declaring a string chunk received an object (the stream is in objectMode)";
+      this.declare(`declare ptr @scr_stream_data_dyn_cur()`);
       d.push(
         `  %miss = icmp eq ptr ${slot}, null`,
         `  br i1 %miss, label %bad, label %ok`,
         `bad:`,
+        `  %curd = call ptr @scr_stream_data_dyn_cur()`,
+        `  %isobj = icmp ne ptr %curd, null`,
+        `  br i1 %isobj, label %badobj, label %badstr`,
+        `badobj:`,
+        `  call void @scr_throw_error_msg(i32 1, ptr ${this.cstr(objMsg)}, i64 ${Buffer.byteLength(objMsg, "utf8")})`,
+        `  call void @scr_closure_release(ptr %orig)`,
+        `  ret void`,
+        `badstr:`,
         `  call void @scr_throw_error_msg(i32 1, ptr ${this.cstr(msg)}, i64 ${Buffer.byteLength(msg, "utf8")})`,
         `  call void @scr_closure_release(ptr %orig)`,
         `  ret void`,
@@ -13356,6 +13374,9 @@ class LlEmitter {
       // dyn: box by runtime tag — the JS lane's adapter parameter.
       this.declare(`declare ptr @scr_dyn_new_buffer_copy(ptr)`);
       this.declare(`declare ptr @scr_dyn_new_str(ptr)`);
+      this.declare(`declare ptr @scr_dyn_new_null()`);
+      this.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
+      this.declare(`declare ptr @scr_stream_data_dyn_cur()`);
       d.push(
         `  %dslot = alloca ptr`,
         `  %isb = icmp ne ptr %a0, null`,
@@ -13365,8 +13386,23 @@ class LlEmitter {
         `  store ptr %db, ptr %dslot`,
         `  br label %go`,
         `str:`,
+        `  %iss = icmp ne ptr %a1, null`,
+        `  br i1 %iss, label %strv, label %objv`,
+        `strv:`,
         `  %ds = call ptr @scr_dyn_new_str(ptr %a1)`,
         `  store ptr %ds, ptr %dslot`,
+        `  br label %go`,
+        `objv:`,
+        `  %cur = call ptr @scr_stream_data_dyn_cur()`,
+        `  %curn = icmp ne ptr %cur, null`,
+        `  br i1 %curn, label %objr, label %nullv`,
+        `objr:`,
+        `  %dr = call ptr @scr_dyn_retain_v(ptr %cur)`,
+        `  store ptr %dr, ptr %dslot`,
+        `  br label %go`,
+        `nullv:`,
+        `  %dn = call ptr @scr_dyn_new_null()`,
+        `  store ptr %dn, ptr %dslot`,
         `  br label %go`,
         `go:`,
         `  %dv = load ptr, ptr %dslot`,

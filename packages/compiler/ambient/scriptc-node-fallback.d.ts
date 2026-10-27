@@ -3589,9 +3589,9 @@ declare module "stream" {
     _read(size: number): void;
     _destroy(error: Error | null, callback: (error?: Error | null) => void): void;
     [Symbol.asyncIterator](): AsyncIterableIterator<any>;
-    push(chunk: Buffer | string | null, encoding?: string): boolean;
+    push(chunk: any, encoding?: string): boolean;
     unshift(chunk: Buffer | string, encoding?: string): void;
-    read(size?: number): Buffer | null;
+    read(size?: number): any;
     pause(): this;
     resume(): this;
     isPaused(): boolean;

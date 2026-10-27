@@ -5901,6 +5901,9 @@ export type IrLibFn =
   | "readable.unshift"
   | "readable.unshiftStr"
   | "readable.read"
+  | "readable.readDyn"
+  | "readable.objectMode"
+  | "stream.destroyDyn"
   | "readable.pause"
   | "readable.resume"
   | "readable.setEncoding"
@@ -10901,6 +10904,26 @@ export function moduleUsesEngineFn(mod: IrModule): boolean {
   return found;
 }
 
+/** stream.destroyDyn on the IR: the dyn destroy unit (scr_stream_dyn.c). */
+export function moduleUsesDestroyDyn(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "stream.destroyDyn") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 export function moduleUsesInspect(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {
@@ -10910,7 +10933,8 @@ export function moduleUsesInspect(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("insp.")) {
+    if (node.kind === "libCall" && typeof node.fn === "string" &&
+        (node.fn.startsWith("insp.") || node.fn === "stream.destroyDyn")) {
       found = true;
       return;
     }
@@ -13021,6 +13045,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "writable.uncork",
   "stream.destroy",
   "stream.destroyErr",
+  "stream.destroyDyn",
+  "readable.readDyn",
+  "readable.objectMode",
   // setMaxListeners(n) throws Node's ERR_OUT_OF_RANGE RangeError for
   // negative/NaN arguments; the static form's default-max write validates
   // identically (Node's validateNumber(n, "setMaxListeners", 0)).

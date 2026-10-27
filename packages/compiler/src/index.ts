@@ -24,7 +24,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
+import { moduleUsesDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
   moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -806,6 +806,7 @@ function programNativeFeatures(
     // also pulls scr_stream.c, so a gunzipSync program keeps its exact
     // link line.
     zlibStream: moduleUsesZlibStream(mod),
+    streamDyn: moduleUsesDestroyDyn(mod),
     // The link switch for scr_assert.c: assert.* libCalls on the IR (the
     // regex switch also pulls it — scr_regex.c calls the assert helpers).
     assert: moduleUsesAssert(mod),
