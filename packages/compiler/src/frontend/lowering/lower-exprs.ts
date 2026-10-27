@@ -13980,7 +13980,14 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       // exit primitives eagerly): the engine element read, exiting at the
       // declared number type.
       if (recv.type.kind === "jsval") return islandElementRead(L, expr, recv);
-      const index = checkedJsNumber(L, expr.argumentExpression, L.lowerExpr(expr.argumentExpression));
+      const keyIr = L.lowerExpr(expr.argumentExpression);
+      // A STRING key (`b[name]`) is a named read, not an element index: the
+      // dyn keyed read answers the own table, the element if the string spells an
+      // index, and the surface otherwise.
+      if (keyIr.type.kind === "string") {
+        return { kind: "dynKeyGet", key: keyIr, value: L.coerceToExpected(recv, DYN), type: DYN, loc: locOf(expr) };
+      }
+      const index = checkedJsNumber(L, expr.argumentExpression, keyIr);
       if (index === null) {
         L.unsupported("SC1090", expr.argumentExpression, "indexing with non-number keys");
       }
@@ -15113,6 +15120,29 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
           );
         }
         return { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [dynRecv, key, value], type: VOID, loc }, loc };
+      }
+    }
+    // A STRING-keyed write onto a bytes receiver (`buf[name] = v`): the key
+    // is not statically an element index (a string key that spells one, "0",
+    // is still an element write, and the dyn keyed write answers that too),
+    // so the write goes through the dyn keyed write, which stores a non-index
+    // name in the value's own table (scr_bytes_own_set) and an index into the
+    // element. The receiver is boxed by reference, so the store lands on the
+    // same bytes value. Gated programs' calls on that value read the table.
+    {
+      const bytesRecv = L.mapTypeOf(L.typeOf(target.expression));
+      if (bytesRecv?.kind === "bytes" && bytesRecv.elem !== "buf") {
+        const keyT = L.mapTypeOf(L.typeOf(target.argumentExpression));
+        if (keyT?.kind === "string") {
+          const loc = locOf(expr);
+          const recvD = L.coerceToExpected(L.lowerExpr(target.expression), DYN);
+          const key = L.lowerExpr(target.argumentExpression);
+          const value = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+          if (recvD.type.kind !== "dyn" || value.type.kind !== "dyn") {
+            L.unsupported("SC1090", expr, "a named write onto a bytes value whose operand cannot box into the checked-dynamic tree");
+          }
+          return { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [recvD, key, value], type: VOID, loc }, loc };
+        }
       }
     }
     let receiverIr = L.mapTypeOf(L.typeOf(target.expression));
@@ -21427,6 +21457,18 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         kind: "seqExpr",
         stmts: [{ kind: "exprStmt", expr: recv, loc }],
         result: { kind: "boolLit", value: true, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      };
+    }
+    // `'name' in b` on a bytes value: the same presence answer the dyn
+    // keyed read gives (own named properties, the indices, the typed-array
+    // surface). Literal names only; a runtime key keeps the fence below.
+    if (recv.type.kind === "bytes" && key !== null) {
+      return {
+        kind: "libCall",
+        fn: "dyn.hasKey",
+        args: [L.coerceToExpected(recv, DYN), { kind: "strLit", value: key, type: STRING, loc }],
         type: BOOL,
         loc,
       };
