@@ -716,7 +716,7 @@ export function arrayOf(elem: IrType): IrType {
  * tree compiles today. Anything not named below is representable, and the
  * ONE authority for the names is elemKindC's own throw list. */
 const NO_ARRAY_ELEM_KINDS: ReadonlySet<IrType["kind"]> = new Set([
-  "void", "dyn", "caught", "generator", "asyncGenerator", "undefinedT", "nullT",
+  "void", "caught", "generator", "asyncGenerator", "undefinedT", "nullT",
   "url", "searchParams", "stats", "fileHandle", "spawnRes", "netSocket",
   "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq", "secureCtx",
   "fsWatcher", "sqliteDb", "sqliteStmt", "childStream", "procStream",

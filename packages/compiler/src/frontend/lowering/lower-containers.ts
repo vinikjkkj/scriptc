@@ -1379,19 +1379,7 @@ function lowerOptionalDefaultArg(
       const recv: IrExpr = receiver.type.kind === "dyn" ? receiver : { kind: "dynFrom", value: receiver, type: DYN, loc };
       return { kind: "dynInvoke", recv, method: "map", calleeName: access.getText(), args: [boxed], type: DYN, loc };
     }
-    if (method === "map" && fnRet.kind === "dyn") {
-      // A checked-dynamic callback return would make the result a
-      // dyn-element STATIC array, which has no backend representation
-      // (dynFallbackType's rule: an unmappable element makes the WHOLE
-      // value dyn — but map's fresh array is built here, not by a
-      // declaration, so the honest answer is the fence). FIRST, so this
-      // kind keeps its own advice rather than the generic one below.
-      L.unsupported(
-        "SC1090",
-        call,
-        "'.map()' with a callback returning 'unknown'-typed values (the result array has no static element type — annotate the callback's return)",
-      );
-    }
+    // A dyn-returning callback maps to an any[] result (dyn elements are an array element kind).
     if (method === "map" && !canBeArrayElem(fnRet)) {
       // The result would be an array of an element kind ScrArr has no
       // home for (mapTypeOf's own array exclusions) — the callback return
@@ -2069,6 +2057,11 @@ function lowerOptionalDefaultArg(
     // already have answered the receiver's own reads with the union's array
     // constituent, which fixes the receiver without reaching the call tsc
     // typed from its own `any[]` view of it.
+    if (elem.kind === "dyn" && (method === "find" || method === "findLast")) {
+      // A dyn-element find: the element or undefined, both dyn (no union arm).
+      const helper = findHelper(L, elem, DYN, null, null, -1, fnRet, arity, last, loc);
+      return { kind: "call", callee: helper, args: [receiver, fnArg], type: DYN, loc };
+    }
     const callT = L.typeOf(call);
     const resultT =
       (callT.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 &&
@@ -2158,7 +2151,7 @@ function lowerOptionalDefaultArg(
   }
 
   function findHelper(L: Lowerer, elem: IrType,
-    resultT: IrType & { kind: "union" },
+    resultT: IrType,
     foundTag: number | null,
     retag: string | null,
     undefTag: number,
@@ -2176,20 +2169,26 @@ function lowerOptionalDefaultArg(
     const fnT = funcOf([elem, F64, arrT].slice(0, arity), fnRet);
     const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
     const v = ref("v.0", elem);
+    // A dyn result (an any[] find): the element itself, or the dyn undefined.
     const found: IrExpr =
-      retag !== null
-        ? { kind: "call", callee: retag, args: [v], type: resultT, loc }
-        : foundTag === null
-          ? v
-          : { kind: "unionWrap", unionId: resultT.unionId, tag: foundTag, value: v, type: resultT, loc };
-    const miss: IrExpr = {
-      kind: "unionWrap",
-      unionId: resultT.unionId,
-      tag: undefTag,
-      value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
-      type: resultT,
-      loc,
-    };
+      resultT.kind === "dyn"
+        ? v
+        : retag !== null
+          ? { kind: "call", callee: retag, args: [v], type: resultT, loc }
+          : foundTag === null
+            ? v
+            : { kind: "unionWrap", unionId: (resultT as { unionId: string }).unionId, tag: foundTag, value: v, type: resultT, loc };
+    const miss: IrExpr =
+      resultT.kind === "dyn"
+        ? dynUndefinedExpr(loc)
+        : {
+          kind: "unionWrap",
+          unionId: (resultT as { unionId: string }).unionId,
+          tag: undefTag,
+          value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+          type: resultT,
+          loc,
+        };
     const body: IrStmt[] = [
       readLenStmt(arrT, loc),
       (last ? reverseCountedForLoop : countedForLoop)(loc, [
@@ -3508,7 +3507,7 @@ function lowerOptionalDefaultArg(
       const found: IrExpr =
         foundTag === null
           ? v
-          : { kind: "unionWrap", unionId: resultT.unionId, tag: foundTag, value: v, type: resultT, loc };
+          : { kind: "unionWrap", unionId: (resultT as { unionId: string }).unionId, tag: foundTag, value: v, type: resultT, loc };
       const miss: IrExpr = {
         kind: "unionWrap",
         unionId: resultT.unionId,
