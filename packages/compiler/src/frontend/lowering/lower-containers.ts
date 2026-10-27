@@ -5,7 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { canConvertToDyn, strandTrap } from "../../ir/nodes.js";
-import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { checkedArmBridge, lowerUnionContainerDispatch, captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
@@ -2908,6 +2908,9 @@ function lowerOptionalDefaultArg(
     const recvName = bytesT.elem === "u8" ? "Uint8Array" : `${L.fmt(bytesT)}`;
     if (call.arguments.length > 1 || call.arguments.some(ts.isSpreadElement)) {
       L.noLowering(`.${method} with ${call.arguments.length} arguments on ${recvName}`, call);
+    }
+    if (bytesT.elem === "i64" || bytesT.elem === "u64") {
+      L.noLowering(`.${method} on ${recvName}`, call, "the bigint order is not lowered yet for BigInt64Array / BigUint64Array");
     }
     const receiver = L.lowerExpr(access.expression);
     const undefinedArg = call.arguments[0]
@@ -5959,7 +5962,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     proj: "keys" | "entries",): IrStmt {
     const loc = locOf(stmt);
     const arrT = iterable.type;
-    const elemT = arrT.kind === "array" ? arrT.elem : F64;
+    const elemT = arrT.kind === "array" ? arrT.elem : bytesValueType(arrT.elem);
     const yieldsPair = proj === "entries";
     if (!ts.isVariableDeclarationList(stmt.initializer)) {
       L.unsupported(
@@ -5997,7 +6000,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
               method: "get",
               receiver: ref(arr.id, arrT),
               args: [ref(i.id, F64)],
-              type: F64,
+              type: elemT,
               loc,
             };
 
