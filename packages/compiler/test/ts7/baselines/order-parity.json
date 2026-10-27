@@ -17008,6 +17008,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/helper-unrolled-field-enumeration.js": {
+   "order": [
+    "<repo>/tests/diagnostics/helper-unrolled-field-enumeration.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/http-client-signal.ts": {
    "order": [
     "<repo>/tests/diagnostics/http-client-signal.ts"
