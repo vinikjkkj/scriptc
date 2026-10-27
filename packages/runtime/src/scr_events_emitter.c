@@ -755,8 +755,29 @@ bool scr_emitter_emit_dyn_array(ScrEmitter *em, ScrDyn *arr) {
 /* emit('error', err) — Node's special event: with no 'error' listener the
  * payload THROWS (catchable; uncaught exits 1 with the error report).
  * err is borrowed; the throw takes its own +1. */
+extern ScrError *(*scr_nonerr_unhandled_fn)(const ScrDyn *payload);  /* scr_json.c; set by scr_stream_dyn.c */
+
 bool scr_emitter_emit_error(ScrEmitter *em, ScrStr *name, ScrError *err) {
   if (!scr_ee_has(em->reg, "error")) {
+    if (scr_error_is_nonerr(err)) {
+      /* Node: an unhandled 'error' whose value is not an Error throws
+       * ERR_UNHANDLED_ERROR, "Unhandled error. (<inspect(value)>)". */
+      /* The text is util.inspect(value) (depth 2), rendered by the inspect
+       * unit, which installs this hook when it links (it is linked exactly
+       * when a non-Error wrapper can exist: stream.destroyDyn). */
+      ScrError *u = scr_nonerr_unhandled_fn != NULL
+          ? scr_nonerr_unhandled_fn(scr_error_nonerr_payload(err))
+          : NULL;
+      if (u == NULL) {
+        ScrStr *fm = scr_str_new("Unhandled error.", 16);
+        u = scr_error_new(SCR_ERR_ERROR, fm);
+        scr_str_release(fm);
+        u->code = scr_str_new("ERR_UNHANDLED_ERROR", 19);
+      }
+      scr_throw_obj(scr_error_retain(u), &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
+      scr_error_release(u);
+      return false;
+    }
     scr_throw_obj(scr_error_retain(err), &scr_error_retain_v, &scr_error_release_v,
                   scr_error_trace_arg());
     return false;
