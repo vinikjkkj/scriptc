@@ -17832,6 +17832,30 @@
     "<repo>/tests/corpus/12803-tls-ctx-optional-members.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/12804-tls-ctx-versions.js": {
+   "order": [
+    "<repo>/tests/corpus/12804-tls-ctx-versions.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12805-tls-ctx-material-shapes.js": {
+   "order": [
+    "<repo>/tests/corpus/12805-tls-ctx-material-shapes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12806-tls-ctx-passphrase.js": {
+   "order": [
+    "<repo>/tests/corpus/12806-tls-ctx-passphrase.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12807-tls-ctx-bad-pem.js": {
+   "order": [
+    "<repo>/tests/corpus/12807-tls-ctx-bad-pem.js"
+   ],
+   "diags": []
   }
  }
 }
