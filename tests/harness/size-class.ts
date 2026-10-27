@@ -1851,7 +1851,23 @@ export const STATIC_CLASS_RECORDED = platform === "win32" ? 116_736 : null;
  * into it. Cause of the regex program's unit: the always-linked dyn string/JSON paths now test for a Symbol handle. */
 /* RE-RECORDED 2026-10-23 (refusedops): 211,968 -> 212,992 (+1,024, two alignment units for the +496 bytes of .text
  * recorded above). Same cross build and program; the static hello-world stayed at 116,736. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 212_992 : null;
+/* RE-RECORDED 2026-10-27 (typed-array growth): 212,992 -> 217,088 (+4,096, one page). WHAT THE BYTES BOUGHT, measured by
+ * building the test's own regex program with the zig windows-gnu cross build (SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu,
+ * the RECORDED_LANE above), four trees, the same flags, file size and PE section sizes:
+ *
+ *   tree                                         file size   .text      .rdata (delta vs the one before)
+ *   cc21b109b  (the green base the anchor followed)   216,576   0x20a66    0x12524
+ *   17bbae41a  (main: + bufproto, Buffer BigInt)      216,576   0x20a66    0x125a4  (+0x80, main's own growth)
+ *   5d4be0d26  (+ Uint8ClampedArray, Float16Array,
+ *               inspect and gap commits)              216,576   0x20a66    0x125b4  (+0x10)
+ *   eb5fd414e  (+ BigInt64Array / BigUint64Array)     217,088   0x20a66    0x12644  (+0x90)
+ *
+ * .text is byte-identical across all four, so no code grew in the regex program's units: the growth is read-only data, and it is
+ * CUMULATIVE. Main's +0x80 and the typed-array +0x10 and +0x90 are each under a page alone; together they cross the 4,096-byte
+ * file-size granule, which is why the file size moved one page while no single commit moved it past one. The anchor was already
+ * 3,584 below the cc21b109b tree before the typed-array work (212,992 against 216,576 measured here), so the 212,992 figure was
+ * recorded on a different zig build. The 217,088 figure is the one this branch's CI reports for the regex program. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 217_088 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
