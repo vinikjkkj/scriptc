@@ -1305,7 +1305,7 @@ export function lowerConsoleInspectArg(
     if (!(t.elem === "u8" && isBuffer)) {
       return {
         kind: "libCall",
-        fn: "insp.typed",
+        fn: t.elem === "i64" || t.elem === "u64" ? "insp.typedBig" : "insp.typed",
         args: [value, { kind: "strLit", value: BYTES_ELEM_NAMES[t.elem], type: STRING, loc }],
         type: STRING,
         loc,
@@ -1480,7 +1480,7 @@ function lowerInspectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrE
       }
       return {
         kind: "libCall",
-        fn: "insp.typed",
+        fn: value.type.elem === "i64" || value.type.elem === "u64" ? "insp.typedBig" : "insp.typed",
         args: [value, { kind: "strLit", value: BYTES_ELEM_NAMES[value.type.elem], type: STRING, loc }],
         type: STRING,
         loc,
