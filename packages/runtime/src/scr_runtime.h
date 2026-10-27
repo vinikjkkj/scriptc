@@ -8782,6 +8782,23 @@ typedef enum ScrBytesFlavor {
   SCR_BF_DATAVIEW = 3,
 } ScrBytesFlavor;
 
+/* OWN named properties of one bytes value (mysql2's MockBuffer writes a
+ * noop over every Buffer.prototype method key of ONE buffer). Created on the
+ * first non-index string write; NULL for every other value, so a buffer that
+ * never takes one pays a single NULL test. Entries keep insertion order, which
+ * is the order Object.keys and for-in report them in. Values are retained. */
+typedef struct ScrBytesOwnEnt {
+  char *key;
+  size_t klen;
+  ScrDyn *val;
+} ScrBytesOwnEnt;
+
+typedef struct ScrBytesOwn {
+  size_t n;
+  size_t cap;
+  ScrBytesOwnEnt *ents;
+} ScrBytesOwn;
+
 typedef struct ScrBytes {
   size_t rc;
   size_t len; /* ELEMENT count, fixed at construction */
@@ -8811,9 +8828,23 @@ typedef struct ScrBytes {
    * window clears it when it dies. NULL until `.buffer` is first read.
    * APPENDED after `backing`, so no offset the LLVM lane hardcodes moves. */
   struct ScrBytes *abuf;
+  /* OWN named properties (see ScrBytesOwn). APPENDED last: no offset the LLVM
+   * lane hardcodes moves, and NULL is the state of every value that never took
+   * a named write. */
+  struct ScrBytesOwn *own;
 } ScrBytes;
 
 size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 2, 4, 8 */
+
+/* Own named properties of a bytes value. get: BORROWED value or NULL. set:
+ * retains v (the caller keeps its reference). delete: true when an entry was
+ * removed. free: releases every value; called by scr_bytes_release. */
+ScrDyn *scr_bytes_own_get(const ScrBytes *b, const char *k, size_t kl);
+void scr_bytes_own_set(ScrBytes *b, const char *k, size_t kl, ScrDyn *v);
+bool scr_bytes_own_delete(ScrBytes *b, const char *k, size_t kl);
+void scr_bytes_own_free(ScrBytes *b);
+/* `k in d` for a BYTES d: the own-table presence (the literal-key `in` arm of both lanes). */
+bool scr_dyn_bytes_own_has(const ScrDyn *d, const char *k, size_t kl);
 
 /* ── WeakMap ───────────────────────────────────────────────────────────
  * Reference-identity keys held WEAKLY: the table does not retain a key and

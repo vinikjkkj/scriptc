@@ -40,7 +40,7 @@ size_t scr_bytes_elem_size(ScrBytesElem elem) {
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
 
 static ScrBytes *scr_bytes_alloc(ScrBytesElem elem, size_t len) {
-  ScrBytes *b = malloc(sizeof(ScrBytes));
+  ScrBytes *b = calloc(1, sizeof(ScrBytes)) /* own = NULL */;
   if (!b) scr_bytes_oom();
   b->rc = 1;
   b->len = len;
@@ -196,11 +196,86 @@ void scr_bytes_release(ScrBytes *b) {
     } else {
       free(b->data);
     }
+    if (b->own != NULL) scr_bytes_own_free(b);
 #ifdef SCR_RC_AUDIT
     scr_live_bytes--;
 #endif
     free(b);
   }
+}
+
+/* ── own named properties (ScrBytesOwn) ─────────────────────────────── */
+
+ScrDyn *scr_bytes_own_get(const ScrBytes *b, const char *k, size_t kl) {
+  if (b->own == NULL) return NULL;
+  for (size_t i = 0; i < b->own->n; i++) {
+    const ScrBytesOwnEnt *e = &b->own->ents[i];
+    if (e->klen == kl && memcmp(e->key, k, kl) == 0) return e->val;
+  }
+  return NULL;
+}
+
+void scr_bytes_own_set(ScrBytes *b, const char *k, size_t kl, ScrDyn *v) {
+  ScrDyn *nv = scr_dyn_retain(v);
+  if (b->own == NULL) {
+    b->own = calloc(1, sizeof(ScrBytesOwn));
+    if (b->own == NULL) scr_bytes_io_oom();
+  }
+  ScrBytesOwn *t = b->own;
+  for (size_t i = 0; i < t->n; i++) {
+    ScrBytesOwnEnt *e = &t->ents[i];
+    if (e->klen == kl && memcmp(e->key, k, kl) == 0) {
+      ScrDyn *old = e->val;
+      e->val = nv; /* after the retain: v may BE old */
+      scr_dyn_release(old);
+      return;
+    }
+  }
+  if (t->n == t->cap) {
+    size_t cap = t->cap ? t->cap * 2 : 4;
+    ScrBytesOwnEnt *ne = realloc(t->ents, cap * sizeof(ScrBytesOwnEnt));
+    if (ne == NULL) scr_bytes_io_oom();
+    t->ents = ne;
+    t->cap = cap;
+  }
+  ScrBytesOwnEnt *e = &t->ents[t->n++];
+  e->key = malloc(kl + 1);
+  if (e->key == NULL) scr_bytes_io_oom();
+  memcpy(e->key, k, kl);
+  e->key[kl] = '\0';
+  e->klen = kl;
+  e->val = nv;
+}
+
+bool scr_bytes_own_delete(ScrBytes *b, const char *k, size_t kl) {
+  if (b->own == NULL) return false;
+  ScrBytesOwn *t = b->own;
+  for (size_t i = 0; i < t->n; i++) {
+    ScrBytesOwnEnt *e = &t->ents[i];
+    if (e->klen != kl || memcmp(e->key, k, kl) != 0) continue;
+    ScrDyn *old = e->val;
+    free(e->key);
+    memmove(&t->ents[i], &t->ents[i + 1], (t->n - i - 1) * sizeof(ScrBytesOwnEnt));
+    t->n--;
+    scr_dyn_release(old);
+    return true;
+  }
+  return false;
+}
+
+bool scr_dyn_bytes_own_has(const ScrDyn *d, const char *k, size_t kl) {
+  return d->v.bytes->own != NULL && scr_bytes_own_get(d->v.bytes, k, kl) != NULL;
+}
+
+void scr_bytes_own_free(ScrBytes *b) {
+  ScrBytesOwn *t = b->own;
+  b->own = NULL;
+  for (size_t i = 0; i < t->n; i++) {
+    free(t->ents[i].key);
+    scr_dyn_release(t->ents[i].val);
+  }
+  free(t->ents);
+  free(t);
 }
 
 void *scr_bytes_retain_v(void *b) { return scr_bytes_retain((ScrBytes *)b); }
@@ -531,7 +606,7 @@ ScrBytes *scr_bytes_subarray(ScrBytes *b, double start, double end) {
   size_t e = scr_bytes_rel_index(end, b->len);
   size_t count = e > s ? e - s : 0;
   ScrBytes *owner = b->backing ? b->backing : b;
-  ScrBytes *v = malloc(sizeof(ScrBytes));
+  ScrBytes *v = calloc(1, sizeof(ScrBytes)) /* own = NULL */;
   if (!v) scr_bytes_oom();
   v->rc = 1;
   v->len = count;
@@ -580,7 +655,7 @@ ScrBytes *scr_typed_view_over(ScrBytes *buf, ScrBytesElem elem) {
     scr_throw_error_msg(SCR_ERR_RANGE, msg, (size_t)n);
     return NULL;
   }
-  ScrBytes *v = malloc(sizeof(ScrBytes));
+  ScrBytes *v = calloc(1, sizeof(ScrBytes)) /* own = NULL */;
   if (!v) scr_bytes_oom();
   v->rc = 1;
   v->len = bytes / esz;
@@ -601,7 +676,7 @@ ScrBytes *scr_bytes_array_buffer(ScrBytes *b) {
   /* An owner that already IS an ArrayBuffer answers itself. */
   if (owner->elem == SCR_BYTES_BUF) return scr_bytes_retain(owner);
   if (owner->abuf != NULL) return scr_bytes_retain(owner->abuf);
-  ScrBytes *w = malloc(sizeof(ScrBytes));
+  ScrBytes *w = calloc(1, sizeof(ScrBytes)) /* own = NULL */;
   if (!w) scr_bytes_oom();
   w->rc = 1;
   w->len = owner->len * scr_bytes_elem_size(owner->elem); /* an ArrayBuffer counts BYTES */
@@ -653,7 +728,7 @@ ScrBytes *scr_dataview_new(ScrBytes *src, double byte_off, bool has_len, double 
   } else {
     len = buf_bytes - off;
   }
-  ScrBytes *v = malloc(sizeof(ScrBytes));
+  ScrBytes *v = calloc(1, sizeof(ScrBytes)) /* own = NULL */;
   if (!v) scr_bytes_oom();
   v->rc = 1;
   v->len = (size_t)len; /* elem u8 — len IS the byte length */

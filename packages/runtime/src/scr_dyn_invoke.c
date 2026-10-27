@@ -2970,6 +2970,12 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     return dyn_object_proto_method(recv, method, args, argc, what);
   }
 
+  /* An OWN named property of a bytes value (mysql2's MockBuffer) is called
+   * instead of the native method of the same name. */
+  if (recv->kind == SCR_DYN_BYTES && recv->v.bytes->own != NULL) {
+    ScrDyn *own = scr_bytes_own_get(recv->v.bytes, method, strlen(method));
+    if (own != NULL) return scr_dyn_call(own, args, argc, what);
+  }
   if (recv->kind == SCR_DYN_BYTES && recv->v.bytes->flavor == SCR_BF_DATAVIEW) {
     /* A DataView answers its accessors and NOTHING of the typed-array
      * surface (no at/slice/subarray/fill/...): the name is a DataView
