@@ -544,7 +544,7 @@ describe("a compiled class instance's run-time property table", () => {
     }
   });
 
-  test("the table costs nothing on a class no define names", () => {
+  test("every class carries the table, so an expando on any instance has a home", () => {
     // C lane only: the emitted struct is the artifact that carries the
     // answer, and the LLVM lane writes no .c. Both lanes build the layout
     // from the SAME ClassInfo, so one reading settles it.
@@ -557,11 +557,14 @@ describe("a compiled class instance's run-time property table", () => {
     const plain = /struct sc_o_Plain \{[^}]*\}/.exec(noneC)?.[0] ?? "";
     const tabled = /struct sc_o_Tabled \{[^}]*\}/.exec(someC)?.[0] ?? "";
     expect(plain, "the no-table program's class struct was not found").toContain("sc_fld_a");
+    // EXTENSION (2026-10-26, expando slice): every program class declaration
+    // now carries the table, because `(x as any).k = v` on ANY instance must
+    // store an own property (Node adds it). Cost: one 8-byte field and a traced
+    // edge per instance. Declared fields keep their native slots.
     expect(
       plain,
-      "a class NO defineProperty site names grew the run-time property table anyway — " +
-        "the field is 8 bytes and a traced edge per instance, on every class in the program",
-    ).not.toContain("props");
+      "a class NO defineProperty site names must still carry the expando table (see the expando change)",
+    ).toContain("props");
     expect(
       tabled,
       "the class a defineProperty site DOES name is missing the table field",
