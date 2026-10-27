@@ -2138,6 +2138,20 @@ function interfaceRetypingClassInstance(
   return baseInstance;
 }
 
+/** True when `t` is a type parameter bound (through the instantiation) to `any`, or a union of
+ * such parameters beside undefined. Plain `any` is NOT this case. */
+function elemViaTypeParamAny(t: ts.Type, ctx: TypeMapperCtx): boolean {
+  const bound = (x: ts.Type): boolean => {
+    if ((x.flags & ts.TypeFlags.TypeParameter) === 0) return false;
+    const b = ctx.resolveTypeParamTs?.(x) ?? null;
+    return b !== null && (b.flags & ts.TypeFlags.Any) !== 0;
+  };
+  if (bound(t)) return true;
+  if (!t.isUnionType()) return false;
+  const parts = ts.constituentTypes(t).filter((c) => (c.flags & ts.TypeFlags.Undefined) === 0);
+  return parts.length > 0 && parts.every(bound);
+}
+
 function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (process.env["SCRIPTC_INNER_WHY"] !== undefined && ctx.checker.typeToString(type).includes("keyof EvMap")) {
     console.error(`[innerwhy] enter: ${ctx.checker.typeToString(type).slice(0, 90)}`);
@@ -2592,7 +2606,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // immortal undefined, element writes box the compiled value, and the
     // array releases its elements. The dyn-element rule further down still
     // answers `unknown[]` (and `object[]`) with the whole-array dyn value.
-    const anyDynElems = elem === null && (elemTs.flags & ts.TypeFlags.Any) !== 0 && !ctx.dynamic;
+    // A static dyn-element array only where the element is `any` THROUGH a generic binding
+    // (`(K | undefined)[]` with K bound to any): TypeScript collapses that to any[] at the
+    // instance. A plain any[] keeps its established mapping (a whole dyn array in JS sources,
+    // a refusal in TypeScript): the global static rule regressed 16 corpus programs vs main.
+    const anyDynElems = (elem === null || elem.kind === "dyn") && !ctx.dynamic && elemViaTypeParamAny(elemTs, ctx);
     if (anyDynElems) elem = DYN;
     // `undefined[]` (sparse literals — `[,]` — and explicit annotations):
     // the element rides the unit-only union like a record field would; the
