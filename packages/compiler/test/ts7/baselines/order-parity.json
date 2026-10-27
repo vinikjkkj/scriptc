@@ -2262,6 +2262,90 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/12950-undefcmp-call-unit-neq.ts": {
+   "order": [
+    "<repo>/tests/corpus/12950-undefcmp-call-unit-neq.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12951-undefcmp-call-string-object-unit.ts": {
+   "order": [
+    "<repo>/tests/corpus/12951-undefcmp-call-string-object-unit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12952-undefcmp-incdec-assign-unit.ts": {
+   "order": [
+    "<repo>/tests/corpus/12952-undefcmp-incdec-assign-unit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12953-undefcmp-getter-unit.ts": {
+   "order": [
+    "<repo>/tests/corpus/12953-undefcmp-getter-unit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12954-undefcmp-new-unit.ts": {
+   "order": [
+    "<repo>/tests/corpus/12954-undefcmp-new-unit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12955-undefcmp-void-number-sides.ts": {
+   "order": [
+    "<repo>/tests/corpus/12955-undefcmp-void-number-sides.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12956-undefcmp-union-nounit-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/12956-undefcmp-union-nounit-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12957-undefcmp-template-concat-unit.ts": {
+   "order": [
+    "<repo>/tests/corpus/12957-undefcmp-template-concat-unit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12958-undefcmp-stdout-write-unit.ts": {
+   "order": [
+    "<repo>/tests/corpus/12958-undefcmp-stdout-write-unit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12959-undefcmp-loose-null-calls.ts": {
+   "order": [
+    "<repo>/tests/corpus/12959-undefcmp-loose-null-calls.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12960-undefcmp-typeof-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/12960-undefcmp-typeof-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12961-undefcmp-dyn-unit-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/12961-undefcmp-dyn-unit-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12962-undefcmp-in-record-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/12962-undefcmp-in-record-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12963-undefcmp-in-class-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/12963-undefcmp-in-class-call.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1300-errors-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1300-errors-basics.ts"
