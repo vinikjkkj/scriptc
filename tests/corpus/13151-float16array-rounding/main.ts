@@ -1,0 +1,32 @@
+// Float16Array: IEEE binary16 storage. Writes round to nearest, ties to even;
+// overflow goes to infinity from 65520 up; subnormals and -0 are preserved.
+const h = new Float16Array(16);
+h[0] = 1;
+h[1] = 1.5;
+h[2] = 0.1;
+h[3] = 65504;
+h[4] = 65519.9;
+h[5] = 65520;
+h[6] = 1e10;
+h[7] = -0;
+h[8] = 5.960464477539063e-8;
+h[9] = 2.9802322387695312e-8;
+h[10] = 1e-9;
+h[11] = NaN;
+h[12] = Infinity;
+h[13] = -Infinity;
+h[14] = 1 + 2 ** -11;
+h[15] = 1 + 3 * 2 ** -11;
+console.log(h.length, h.byteLength);
+for (let i = 0; i < 16; i++) console.log(i, h[i], Object.is(h[i], -0));
+
+const f = new Float16Array([0.333, 2048, 2049, -7.25]);
+console.log(f[0], f[1], f[2], f[3]);
+const sub = f.subarray(1, 3);
+sub[0] = 3.14159;
+console.log(f[1], sub.length);
+const sl = f.slice(2);
+console.log(sl[0], sl.length);
+f.fill(0.1);
+console.log(f[0], f[3]);
+console.log(f instanceof Float16Array, f instanceof Float32Array);
