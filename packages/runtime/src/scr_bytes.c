@@ -196,7 +196,7 @@ void scr_bytes_release(ScrBytes *b) {
     } else {
       free(b->data);
     }
-    if (b->own != NULL) scr_bytes_own_free(b);
+    if (b->own != NULL) scr_bytes_own_ops->free(b);
 #ifdef SCR_RC_AUDIT
     scr_live_bytes--;
 #endif
@@ -204,80 +204,9 @@ void scr_bytes_release(ScrBytes *b) {
   }
 }
 
-/* The release of an own table's value. scr_bytes.c must not name the dyn unit (it is link-gated); a dyn
- * value can only be stored here by the dyn unit, which installs this hook before its first store
- * (scr_bytes_own_set's caller, scr_json.c). NULL until then, and no entry exists before that. */
-void (*scr_bytes_own_release_fn)(void *v) = NULL;
-
-/* ── own named properties (ScrBytesOwn) ─────────────────────────────── */
-
-ScrDyn *scr_bytes_own_get(const ScrBytes *b, const char *k, size_t kl) {
-  if (b->own == NULL) return NULL;
-  for (size_t i = 0; i < b->own->n; i++) {
-    const ScrBytesOwnEnt *e = &b->own->ents[i];
-    if (e->klen == kl && memcmp(e->key, k, kl) == 0) return e->val;
-  }
-  return NULL;
-}
-
-void scr_bytes_own_set(ScrBytes *b, const char *k, size_t kl, ScrDyn *v) {
-  ScrDyn *nv = scr_dyn_retain(v);
-  if (b->own == NULL) {
-    b->own = calloc(1, sizeof(ScrBytesOwn));
-    if (b->own == NULL) scr_bytes_oom();
-  }
-  ScrBytesOwn *t = b->own;
-  for (size_t i = 0; i < t->n; i++) {
-    ScrBytesOwnEnt *e = &t->ents[i];
-    if (e->klen == kl && memcmp(e->key, k, kl) == 0) {
-      ScrDyn *old = e->val;
-      e->val = nv; /* after the retain: v may BE old */
-      scr_bytes_own_release_fn(old);
-      return;
-    }
-  }
-  if (t->n == t->cap) {
-    size_t cap = t->cap ? t->cap * 2 : 4;
-    ScrBytesOwnEnt *ne = realloc(t->ents, cap * sizeof(ScrBytesOwnEnt));
-    if (ne == NULL) scr_bytes_oom();
-    t->ents = ne;
-    t->cap = cap;
-  }
-  ScrBytesOwnEnt *e = &t->ents[t->n++];
-  e->key = malloc(kl + 1);
-  if (e->key == NULL) scr_bytes_oom();
-  memcpy(e->key, k, kl);
-  e->key[kl] = '\0';
-  e->klen = kl;
-  e->val = nv;
-}
-
-bool scr_bytes_own_delete(ScrBytes *b, const char *k, size_t kl) {
-  if (b->own == NULL) return false;
-  ScrBytesOwn *t = b->own;
-  for (size_t i = 0; i < t->n; i++) {
-    ScrBytesOwnEnt *e = &t->ents[i];
-    if (e->klen != kl || memcmp(e->key, k, kl) != 0) continue;
-    ScrDyn *old = e->val;
-    free(e->key);
-    memmove(&t->ents[i], &t->ents[i + 1], (t->n - i - 1) * sizeof(ScrBytesOwnEnt));
-    t->n--;
-    scr_bytes_own_release_fn(old);
-    return true;
-  }
-  return false;
-}
-
-void scr_bytes_own_free(ScrBytes *b) {
-  ScrBytesOwn *t = b->own;
-  b->own = NULL;
-  for (size_t i = 0; i < t->n; i++) {
-    free(t->ents[i].key);
-    scr_bytes_own_release_fn(t->ents[i].val);
-  }
-  free(t->ents);
-  free(t);
-}
+/* The own named-property ops (ScrBytesOwn, scr_bytes_own.c). NULL unless the program's install call ran (the
+ * compiler emits it when the program holds a dyn keyed write, which is the only way a value gets an own table). */
+const ScrBytesOwnOps *scr_bytes_own_ops = NULL;
 
 void *scr_bytes_retain_v(void *b) { return scr_bytes_retain((ScrBytes *)b); }
 void scr_bytes_release_v(void *b) { scr_bytes_release((ScrBytes *)b); }

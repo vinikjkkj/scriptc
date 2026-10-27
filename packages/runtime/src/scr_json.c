@@ -6931,44 +6931,10 @@ static void scr_jb_put_recv_ctor(ScrJsonBuf *b, const ScrDyn *recv) {
  * every later element, which is not what JS does. Refused loudly rather
  * than answered wrongly. Other kinds carry no own properties a delete
  * could remove, so they answer true like JS. Both borrowed. */
-/* CanonicalNumericIndexString(name): "-0", or ToString(ToNumber(name)) === name. The string must first be a
- * StrDecimalLiteral (or Infinity / NaN) so ToNumber does not read hex, octal, or padding; then the number's
- * ToString (scr_num_to_str_radix, radix 10) must reproduce the spelling exactly. */
-bool scr_canonical_numeric_name(const ScrStr *k) {
-  if (k->len == 2 && memcmp(k->data, "-0", 2) == 0) return true;
-  if (k->len == 0 || k->len > 400) return false;
-  char buf[402];
-  memcpy(buf, k->data, k->len);
-  buf[k->len] = '\0';
-  if (strcmp(buf, "NaN") == 0 || strcmp(buf, "Infinity") == 0 || strcmp(buf, "-Infinity") == 0) return true;
-  size_t i = 0;
-  if (buf[i] == '+' || buf[i] == '-') i++;
-  size_t digits = 0, frac = 0;
-  while (buf[i] >= '0' && buf[i] <= '9') { i++; digits++; }
-  if (buf[i] == '.') {
-    i++;
-    while (buf[i] >= '0' && buf[i] <= '9') { i++; frac++; }
-  }
-  if (digits + frac == 0) return false;
-  if (buf[i] == 'e' || buf[i] == 'E') {
-    i++;
-    if (buf[i] == '+' || buf[i] == '-') i++;
-    size_t ed = 0;
-    while (buf[i] >= '0' && buf[i] <= '9') { i++; ed++; }
-    if (ed == 0) return false;
-  }
-  if (buf[i] != '\0') return false;
-  double d = strtod(buf, NULL);
-  ScrStr *t = scr_num_to_str_radix(d, 10);
-  bool same = t != NULL && t->len == k->len && memcmp(t->data, k->data, k->len) == 0;
-  if (t != NULL) scr_str_release(t);
-  return same;
-}
-
 bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) return SCR_PX->del(recv, key);
   if (recv != NULL && recv->kind == SCR_DYN_BYTES && !recv->static_copy && recv->v.bytes->own != NULL) {
-    if (scr_bytes_own_delete(recv->v.bytes, key->data, key->len)) return true;
+    if (scr_bytes_own_ops->del(recv->v.bytes, key->data, key->len)) return true;
   }
   if (recv == NULL || recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) {
     ScrJsonBuf sb;
@@ -7314,10 +7280,9 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     }
     /* CanonicalNumericIndexString (ES2024 7.1.21): a name that is a canonical numeric string is an integer-indexed
      * exotic key, and JS ignores the write and creates nothing. */
-    if (scr_canonical_numeric_name(key)) return;
     /* A non-index name is an ordinary own expando (mysql2's MockBuffer). */
-    scr_bytes_own_release_fn = scr_dyn_release_v; /* the hook before the first store */
-    scr_bytes_own_set(recv->v.bytes, key->data, key->len, value);
+    if (scr_bytes_own_ops == NULL) scr_trap("internal error: bytes own-table unit not installed\n");
+    scr_bytes_own_ops->set(recv->v.bytes, key->data, key->len, value);
     return;
   }
   if (recv->kind == SCR_DYN_OBJ) {
@@ -11352,7 +11317,7 @@ ScrDyn *scr_dyn_bytes_key_get(const ScrDyn *d, const ScrStr *k) {
   const size_t kl = k->len;
   /* An OWN named property shadows everything below, the prototype included. */
   if (b->own != NULL) {
-    ScrDyn *own = scr_bytes_own_get(b, kd, kl);
+    ScrDyn *own = scr_bytes_own_ops->get(b, kd, kl);
     if (own != NULL) return scr_dyn_retain(own);
   }
   if (kl == 10 && memcmp(kd, "byteLength", 10) == 0) return scr_dyn_new_num(scr_bytes_byte_len(b));
@@ -12334,7 +12299,7 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
     return own != NULL && scr_dyn_obj_has_own_prop(own, key->data, key->len);
   }
   if (v->kind == SCR_DYN_BYTES && v->v.bytes->own != NULL &&
-      scr_bytes_own_get(v->v.bytes, key->data, key->len) != NULL) {
+      scr_bytes_own_ops->get(v->v.bytes, key->data, key->len) != NULL) {
     return true;
   }
   if (v->kind == SCR_DYN_OBJ) {
