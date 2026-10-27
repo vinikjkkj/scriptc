@@ -1,7 +1,3 @@
-// Optional members the mysql2 ssl config leaves unset (undefined) build the
-// same context as the cert and key alone; a set ca is accepted at the
-// boundary (the walk's inert-on-server rule), and a wrong ca type throws
-// Node's ERR_INVALID_ARG_TYPE.
 import tls from 'tls';
 const CERT = `-----BEGIN CERTIFICATE-----
 MIIB0jCCAXigAwIBAgIUQ5nO7P8omev2Wtrf+4VkXVcHca8wCgYIKoZIzj0EAwIw
@@ -20,9 +16,14 @@ MHcCAQEEIBRbyFqnFoJ1Ptp+e85J1kZdfXOgZC3AVhuknG4vCdFHoAoGCCqGSM49
 AwEHoUQDQgAE+Q5kA/xmP5NAsE5Iry7b3M6+2R+EDlMjYYAfGy8tY+Bm1NbM/MS8
 rX5FWa5axU0LtFgID7zztcQs9kF18ACXrA==
 -----END EC PRIVATE KEY-----`;
-const config = { ca: undefined, cert: CERT, ciphers: undefined, key: KEY, passphrase: undefined, minVersion: undefined, maxVersion: undefined };
+// Optional members left unset (undefined, null) build the same context as the
+// cert and key alone; a wrong-typed ca throws Node's ERR_INVALID_ARG_TYPE.
+const config = { ca: undefined, cert: CERT, key: KEY, passphrase: undefined, minVersion: undefined, maxVersion: undefined };
 const ctx = tls.createSecureContext(config);
 console.log('built:', ctx !== undefined);
+const nulls = JSON.parse(JSON.stringify({ cert: CERT, key: KEY }));
+tls.createSecureContext({ ca: null, cert: nulls.cert, key: nulls.key, passphrase: null, minVersion: undefined });
+console.log('null members: ok');
 try {
   tls.createSecureContext({ ca: 42, cert: CERT, key: KEY });
   console.log('ca number: ok');
