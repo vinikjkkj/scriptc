@@ -8678,7 +8678,24 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       }
       L.badType(expr, tsType);
     }
-    const type = mapped as IrType & { kind: "array" };
+    // A spread whose source is checked-dynamic (`unknown`/any: an array of
+    // a JS-built list, a parsed value) has no static element type to copy
+    // into, so the WHOLE literal becomes a dyn-element array and the source
+    // iterates by its run-time kind (array.fromDynIter below). Sources are
+    // lowered once, here, and reused by the element walk; a conditional
+    // source keeps its own expected-type lowering (lowerTernary) and never
+    // decides the literal's shape.
+    const spreadSrcs = new Map<ts.SpreadElement, IrExpr>();
+    for (const el of expr.elements) {
+      if (!ts.isSpreadElement(el)) continue;
+      let srcNode: ts.Expression = el.expression;
+      while (ts.isParenthesizedExpression(srcNode)) srcNode = srcNode.expression;
+      if (ts.isConditionalExpression(srcNode)) continue;
+      spreadSrcs.set(el, L.lowerExpr(el.expression));
+    }
+    const dynSpread = [...spreadSrcs.values()].some((s) => s.type.kind === "dyn");
+    const dynElems = dynSpread && (mapped as IrType & { kind: "array" }).elem.kind !== "dyn";
+    const type = (dynElems ? arrayOf(DYN) : mapped) as IrType & { kind: "array" };
     const spreads: number[] = [];
     const elems = expr.elements.map((el, i) => {
       if (ts.isSpreadElement(el)) {
@@ -8693,7 +8710,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         while (ts.isParenthesizedExpression(srcNode)) srcNode = srcNode.expression;
         let src = ts.isConditionalExpression(srcNode)
           ? lowerTernary(L, srcNode, type)
-          : L.lowerExpr(el.expression);
+          : spreadSrcs.get(el) ?? L.lowerExpr(el.expression);
         // `[...someSet]`: a same-element Set drains into a fresh array in
         // insertion order (setIntrinsic toArray); the spread machinery
         // then copies like any array source.
@@ -8759,11 +8776,26 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         }
         // A dyn iterable (an `arguments` object, an any value) spread into an any[]
         // literal: its iterator pack as dyn boxes (array.fromDynIter).
+        // A checked-dynamic source whose not-iterable text is not one V8
+        // spells exactly (an identifier or a dotted chain) keeps the
+        // compile-time refusal this literal always had: a run-time throw
+        // with a different message would be a silent divergence.
+        if (src.type.kind === "dyn" && dynElems && dynSpreadNotIterableText(el.expression) === "") {
+          L.unsupported(
+            "SC1090",
+            el,
+            `spreading '${L.fmt(src.type)}' into a '${L.fmt(mapped as IrType)}' literal (only a same-element-type array spreads)`,
+          );
+        }
         if (src.type.kind === "dyn" && type.elem.kind === "dyn") {
+          // The not-iterable message names the source the way V8's call
+          // printer does for a plain identifier or a dotted property chain
+          // (`nul is not iterable`, `o.a is not iterable`); any other source
+          // passes "" and the runtime wording names the value's kind.
           src = {
             kind: "libCall",
             fn: "array.fromDynIter",
-            args: [src, { kind: "strLit", value: el.getText(), type: STRING, loc: locOf(el) }],
+            args: [src, { kind: "strLit", value: dynElems ? dynSpreadNotIterableText(el.expression) : el.getText(), type: STRING, loc: locOf(el) }],
             type: arrayOf(DYN),
             loc: locOf(el),
           };
@@ -8814,6 +8846,15 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
             }
           }
         }
+      }
+      // In a dyn-element literal (a checked-dynamic spread forced it) each
+      // element boxes through the usual dyn boundary, raw values intact.
+      if (dynElems) {
+        const boxed = L.coerceToExpected(L.lowerExpr(el), DYN);
+        if (boxed.type.kind !== "dyn") {
+          L.unsupported("SC1101", el, `holding '${L.fmt(boxed.type)}' values in a dynamic (unknown[]) array literal`);
+        }
+        return boxed;
       }
       // Elements flow into the element slot like an assignment: union
       // elements wrap plain arm values (`[1, "a"]` as (number | string)[]),
@@ -25670,6 +25711,25 @@ function everyArmIsTuple(L: Lowerer, t: ts.Type): boolean {
  * that answers a TypeError for a spread Node completes. The ITERATED text
  * variant (`what: null`) is the right one here: a literal's spread always
  * drives the real iterator protocol. */
+/** The TypeError text of a dyn spread source that is not iterable, as V8
+ * prints it at an array-literal spread: `nul is not iterable` for an
+ * identifier, `o.a.b is not iterable` for a dotted property chain (V8's
+ * call printer spells both from the source). Any other source returns ""
+ * and the runtime's kind wording (`object null is not iterable (cannot read
+ * property Symbol(Symbol.iterator))`) is the message. */
+function dynSpreadNotIterableText(node: ts.Expression): string {
+  const chainText = (x: ts.Expression): string | null => {
+    if (ts.isIdentifier(x)) return x.text;
+    if (ts.isPropertyAccessExpression(x) && ts.isIdentifier(x.name)) {
+      const base = chainText(x.expression);
+      return base === null ? null : `${base}.${x.name.text}`;
+    }
+    return null;
+  };
+  const text = chainText(node);
+  return text === null ? "" : `${text} is not iterable`;
+}
+
 function lowerDynLiteralSpread(
   L: Lowerer,
   el: ts.SpreadElement,
