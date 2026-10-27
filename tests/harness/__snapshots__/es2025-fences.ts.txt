@@ -70,24 +70,6 @@ es2025-fences.ts:23:16 - error SC2020: 'Atomics.waitAsync' is part of the standa
 
   hint: Atomics.wait(int32Array, idx, expected, timeoutMs) is the supported Atomics surface (scriptc has no threads — wait is the synchronous-sleep idiom, and nothing else has anyone to race)
 
-es2025-fences.ts:26:7 - error SC2020: 'Float16Array<ArrayBuffer>' is part of the standard library types but has no scriptc lowering yet
-
-  25 | // Float16 (ES2025): the typed array, Math.f16round, DataView accessors.
-  26 | const f16 = new Float16Array(4);
-     |       ^~~
-  27 | console.log(Math.f16round(1.337));
-
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
-
-es2025-fences.ts:26:13 - error SC2020: 'new Float16Array' is part of the standard library types but has no scriptc lowering yet
-
-  25 | // Float16 (ES2025): the typed array, Math.f16round, DataView accessors.
-  26 | const f16 = new Float16Array(4);
-     |             ^~~~~~~~~~~~~~~~~~~
-  27 | console.log(Math.f16round(1.337));
-
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
-
 es2025-fences.ts:27:13 - error SC2020: 'Math.f16round' is part of the standard library types but has no scriptc lowering yet
 
   26 | const f16 = new Float16Array(4);
