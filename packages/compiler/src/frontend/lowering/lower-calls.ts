@@ -2841,7 +2841,12 @@ const SYMBOLIC_PAIR_BUDGET = 256;
    * checked-dynamic story until the corpus is re-baselined). */
   export function implicitMonoFile(sf: ts.SourceFile): boolean {
     if (!isJsSourceFile(sf)) return false;
-    if (npmStaticPackageOfPath(sf.fileName) !== null) return true;
+    if (npmStaticPackageOfPath(sf.fileName) !== null) {
+      if (process.env["SCRIPTC_MONO_WHY"] !== undefined) {
+        process.stderr.write(`MONOWHY path-on ${npmStaticPackageOfPath(sf.fileName)} ${sf.fileName}\n`);
+      }
+      return true;
+    }
     /* THE AUTHORED-JS LANE READ THIS GATE OFF FOR A PACKAGE THAT IS IN THE
      * SET. npmStaticPackageOfPath answers by PATH: the innermost
      * node_modules segment, else a registered workspace realpath
