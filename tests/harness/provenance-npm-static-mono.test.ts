@@ -49,7 +49,7 @@ import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ScrDiagnostic } from "@scriptc/compiler";
 import { analyze, compile, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
@@ -131,13 +131,31 @@ function byFile(r: ReturnType<typeof analyze>): Record<string, string> {
   return out;
 }
 
-/* The two sites the gate's absence produces, spelled once: every arm either
- * carries exactly these or exactly none. */
-// `switch (param)` over an untyped parameter compiles now (switch on unknown), so
-// the table read is the one site the gate's absence still produces.
-const FENCED = [
-  'SC1090 attested-src/monoarg/index.js:24 "channel"',
-];
+/* The mono gate's DECISION, read from its own trace (SCRIPTC_MONO_WHY, printed
+ * by implicitMonoFile in lower-calls.ts): one `MONOWHY <verdict> <pkg|-> <file>`
+ * per file asked. Fences cannot carry this: dyn lowering closed the one
+ * fence the gate-off arms used to produce, so the arms differ only in the
+ * decision itself. Returns the decisions for monoarg's index.js (both copies). */
+async function gateDecisions<T>(run: () => Promise<T> | T): Promise<{ value: T; monoarg: string[] }> {
+  const lines: string[] = [];
+  const prior = process.env["SCRIPTC_MONO_WHY"];
+  process.env["SCRIPTC_MONO_WHY"] = "1";
+  const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+    for (const l of String(chunk).split("\n")) if (l.startsWith("MONOWHY ")) lines.push(l);
+    return true;
+  });
+  try {
+    const value = await run();
+    return { value, monoarg: lines.filter((l) => /\/monoarg\/index\.js$/.test(l)) };
+  } finally {
+    spy.mockRestore();
+    restore("SCRIPTC_MONO_WHY", prior);
+  }
+}
+/** The gate's decision for every monoarg file, as one verdict. */
+const decisionsAre = (lines: string[], verdict: "on" | "off"): boolean =>
+  lines.length > 0 &&
+  lines.every((l) => (verdict === "on" ? /^MONOWHY (prov-on|path-on) /.test(l) : /^MONOWHY off /.test(l)));
 
 describe("provenance + npm-static: the mono gate answers by package identity", () => {
   test("the route: the lowered file is the ATTESTED copy, byte-identical and node_modules-free", async () => {
@@ -166,7 +184,8 @@ describe("provenance + npm-static: the mono gate answers by package identity", (
 
   /* ARM A -- THE PIN. This is the one that moves. */
   test("A: a package named in --npm-static monomorphizes through the provenance route", async () => {
-    const r = await arm(["monoarg"]);
+    const { value: r, monoarg } = await gateDecisions(() => arm(["monoarg"]));
+    expect(decisionsAre(monoarg, "on")).toBe(true);
     expect(r.coverage.preflightFailed).toBe(false);
     expect(r.coverage.npmStatic).toEqual([{ package: "monoarg", status: "static" }]);
     expect(r.coverage.diagnostics).toEqual([]);
@@ -188,29 +207,38 @@ describe("provenance + npm-static: the mono gate answers by package identity", (
 
   /* ARM B -- SCOPE. Provenance alone must not switch the gate on. */
   test("B: a provenance package nobody opted into keeps the gate OFF", async () => {
-    const r = await arm();
+    const { value: r, monoarg } = await gateDecisions(() => arm());
+    expect(decisionsAre(monoarg, "off")).toBe(true);
     expect(r.coverage.npmStatic).toBeUndefined();
-    expect(fenceSites(r)).toEqual(FENCED);
-    expect(byFile(r)["attested-src/monoarg/index.js"]).toBe("8/1/0");
+    expect(fenceSites(r)).toEqual([]);
+    /* Gate off: the same 8 statements as the gate on, none failing. Dyn lowering
+     * closed the one statement this used to fail (the table read), so the
+     * counts no longer tell the arms apart; the decision above does. */
+    expect(byFile(r)["attested-src/monoarg/index.js"]).toBe("8/0/0");
   });
 
   /* ARM C -- LEAK. The predicate must consult the NAME, not merely that
    * provenance owns the file: a fallback stopping at "provenance knows this
    * file" passes arm A and fails here. */
   test("C: naming a DIFFERENT package does not switch it on for this one", async () => {
-    const r = await arm(["some-other-pkg"]);
+    const { value: r, monoarg } = await gateDecisions(() => arm(["some-other-pkg"]));
+    expect(decisionsAre(monoarg, "off")).toBe(true);
     expect(r.coverage.npmStatic).toEqual([{ package: "some-other-pkg", status: "static" }]);
-    expect(fenceSites(r)).toEqual(FENCED);
-    expect(byFile(r)["attested-src/monoarg/index.js"]).toBe("8/1/0");
+    expect(fenceSites(r)).toEqual([]);
+    /* Gate off: the same 8 statements as the gate on, none failing. Dyn lowering
+     * closed the one statement this used to fail (the table read), so the
+     * counts no longer tell the arms apart; the decision above does. */
+    expect(byFile(r)["attested-src/monoarg/index.js"]).toBe("8/0/0");
   });
 
   /* ARM D -- ROUTE. The ordinary --npm-static lane was never the broken one.
    * If this ever fences, the fences above are about implicit-any in general
    * and arm A proves nothing about package identity. */
-  test("D: the ordinary --npm-static route (no provenance) was never broken", () => {
+  test("D: the ordinary --npm-static route (no provenance) was never broken", async () => {
     delete process.env["SCRIPTC_PROVENANCE_MANIFEST"];
     setProvenanceSources(null);
-    const r = analyze(entry, { npmStatic: ["monoarg"] });
+    const { value: r, monoarg } = await gateDecisions(() => analyze(entry, { npmStatic: ["monoarg"] }));
+    expect(decisionsAre(monoarg, "on")).toBe(true);
     expect(r.coverage.provenance?.packages ?? []).toEqual([]);
     expect(r.coverage.npmStatic).toEqual([{ package: "monoarg", status: "static" }]);
     expect(fenceSites(r)).toEqual([]);
