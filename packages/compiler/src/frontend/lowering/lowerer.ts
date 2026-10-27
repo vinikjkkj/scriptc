@@ -7479,6 +7479,32 @@ export class Lowerer {
         };
       }
     }
+    // A STATIC dyn-element array (an `any[]` of checked boxes: a JS `[]` a provenance
+    // package fills, read back through a declared `string[]` overload) flowing into a
+    // JSON-safe typed array slot in a JS source: box the whole array (dynFrom) and check
+    // it into the slot (dynCheck), the same checked boundary a whole dyn array takes.
+    // TypeScript keeps its exact-shape fence.
+    const dynCheckTarget =
+      expected.kind === "union"
+        ? (() => {
+            const def = this.unions.get(expected.unionId);
+            return def !== undefined && def.arms.every((arm) => arm.kind === "undefinedT" || this.jsonSafe(arm));
+          })()
+        : expected.kind === "array" && this.jsonSafe(expected);
+    if (
+      (expected.kind === "array" || expected.kind === "union") && expr.type.kind === "array" && expr.type.elem.kind === "dyn" &&
+      !typeEquals(expr.type, expected) && dynCheckTarget
+    ) {
+      const sf = this.program.getSourceFile(expr.loc.file);
+      if (sf !== undefined && isJsSourceFile(sf)) {
+        return {
+          kind: "dynCheck",
+          value: { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc },
+          type: expected,
+          loc: expr.loc,
+        };
+      }
+    }
     // A spawnSync-runner value (`defaultRunner` — its inferred return is
     // the opaque spawnRes) flowing into a slot whose signature returns
     // the structural result record tsc accepted: the interned adapter
