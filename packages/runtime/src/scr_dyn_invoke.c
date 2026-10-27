@@ -1232,6 +1232,15 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
       return dyn_name_in(m, abm) || dyn_objproto_knows(m);
     }
     case SCR_DYN_HANDLE:
+      if (recv->v.handle.tag == SCR_DYNH_TIMEOUT || recv->v.handle.tag == SCR_DYNH_IMMEDIATE) {
+        /* Timeout / Immediate: the members the handle's ops answer (ref,
+         * unref, hasRef; refresh and close on a Timeout), plus Object.prototype.
+         * The read and `in` agree name for name with the ops table. */
+        static const char *const tmr[] = { "ref", "unref", "hasRef", "refresh", "close", NULL };
+        static const char *const imr[] = { "ref", "unref", "hasRef", NULL };
+        const bool tm = recv->v.handle.tag == SCR_DYNH_TIMEOUT;
+        return dyn_name_in(m, tm ? tmr : imr) || dyn_objproto_knows(m);
+      }
       if (recv->v.handle.tag == SCR_DYNH_REGEX) {
         /* RegExp.prototype: the three methods the ops answer (exec, test,
          * toString) and compile, which they fence loudly by name. */

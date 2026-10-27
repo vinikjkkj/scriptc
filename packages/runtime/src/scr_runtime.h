@@ -4687,6 +4687,8 @@ typedef enum {
   SCR_DYNH_TEXTCODEC,    /* the immortal TextEncoder/TextDecoder values (scr_json.c; ops install lazily) */
   SCR_DYNH_CHANNEL,      /* scr_dc.c — diagnostics_channel Channel (registry id, by identity) */
   SCR_DYNH_TRACING,      /* scr_dc.c — diagnostics_channel TracingChannel (registry id) */
+  SCR_DYNH_TIMEOUT,      /* scr_async.c — a Node Timeout (the timer id is the handle), ref/unref/hasRef/refresh/close */
+  SCR_DYNH_IMMEDIATE,    /* scr_async.c — a Node Immediate (the check-phase id), ref/unref/hasRef */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
@@ -6626,6 +6628,14 @@ const ScrDynHandleOps *scr_dyn_handle_ops_of(const ScrDyn *d);
  * The tag MUST be installed — emitted programs install a unit's ops
  * whenever they can box its handles. */
 ScrDyn *scr_dyn_new_handle(void *h, ScrDynHandleTag tag);
+
+/* Timer handles in the checked-dynamic tree (scr_async.c). A static Timeout or
+ * Immediate is an f64 id; these box and unbox it as a SCR_DYNH_TIMEOUT or
+ * SCR_DYNH_IMMEDIATE handle, so its member reads, calls, `in` and typeof answer
+ * Node's surface. imm selects the Immediate tag. */
+ScrDyn *scr_dyn_box_timer(double id, bool imm);
+bool scr_dyn_is_timer(const ScrDyn *d, bool imm);
+double scr_dyn_timer_id(const ScrDyn *d);
 extern ScrDyn *(*scr_dyn_date_box_hook)(double ms); /* see scr_json.c */
 /* `new TextEncoder()` / `new TextDecoder()` evaluate to one of two IMMORTAL
  * strings (scr_json.c) instead of a fresh "utf-8", and scr_dyn_new_str

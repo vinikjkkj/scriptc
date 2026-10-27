@@ -6058,3 +6058,151 @@ void scr_gen_resume_throw(ScrGen *g) {
   }
   }
 }
+
+/* ── checked-dynamic timer handles (SCR_DYNH_TIMEOUT / SCR_DYNH_IMMEDIATE) ──
+ * A static Timeout or Immediate is an f64 id. Crossing into the checked-
+ * dynamic tree it boxes as a HANDLE of its own tag, the id is the pointer, so
+ * typeof answers "object", `in` and member reads see Node's surface, and the
+ * calls reach the same loop-liveness entry points the static lowerings use
+ * (scr_timer_unref / scr_immediate_unref and friends). Ids are never freed
+ * through the box: the retain/release pair is a no-op, as for the channel
+ * registry ids. The ops install at the first box, because a tag must be
+ * registered before any unbox, get or call can reach it. */
+static void *tmr_dynh_retain(void *h) { return h; }
+static void tmr_dynh_release(void *h) { (void)h; }
+
+static void tmr_dynh_not_fn(const char *what) {
+  char msg[160];
+  const int n = snprintf(msg, sizeof msg, "%s is not a function", what);
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+}
+
+/* A member read as a BOUND function over a fresh box of the same id, the
+ * scr_dyn_intrinsic_method_get stance: typeof, the read-then-call and the
+ * direct call all run one body, scr_dyn_invoke. Node hands out ONE shared
+ * prototype function per method, so `t.unref === u.unref` is true there and
+ * false here (a recorded divergence, shared with the other bound reads). */
+static ScrDyn *tmr_dynh_call(double id, bool imm, ScrDyn *self, const char *method,
+                             const char *what);
+
+static ScrDyn *tmr_dynh_bound_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrDyn *recv = (ScrDyn *)scr_box_get_ref(clo->caps[0]); /* +1 */
+  ScrDyn *name = (ScrDyn *)scr_box_get_ref(clo->caps[1]); /* +1 */
+  /* The timer ops directly (not scr_dyn_invoke, which lives in the gated
+   * scr_dyn_invoke.c): this thunk only ever sees a timer handle box. */
+  (void)args; (void)argc;
+  ScrDyn *r = tmr_dynh_call(scr_dyn_timer_id(recv), recv->v.handle.tag == SCR_DYNH_IMMEDIATE, recv,
+                            name->v.str->data, "a bound method");
+  scr_dyn_release(recv);
+  scr_dyn_release(name);
+  return r;
+}
+
+static ScrDyn *tmr_dynh_bound(double id, bool imm, const char *key, size_t key_len) {
+  ScrClosure *clo = scr_closure_new((void *)tmr_dynh_bound_thunk, 2);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], scr_dyn_box_timer(id, imm)); /* +1 */
+  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  ScrStr *ks = scr_str_new(key, key_len);
+  ScrDyn *nameBox = scr_dyn_new_str(ks); /* retains ks */
+  scr_str_release(ks);
+  scr_box_set_ref(clo->caps[1], nameBox); /* takes the +1 */
+  return scr_dyn_new_func(clo, tmr_dynh_bound_thunk, 0, "()", "bound");
+}
+
+static ScrDyn *tmr_dynh_call(double id, bool imm, ScrDyn *self, const char *method,
+                             const char *what) {
+  if (strcmp(method, "unref") == 0) {
+    if (imm) scr_immediate_unref(id); else scr_timer_unref(id);
+    return scr_dyn_retain(self); /* chains: Node returns the handle */
+  }
+  if (strcmp(method, "ref") == 0) {
+    if (imm) scr_immediate_ref(id); else scr_timer_ref(id);
+    return scr_dyn_retain(self);
+  }
+  if (strcmp(method, "hasRef") == 0) {
+    return scr_dyn_new_bool(imm ? scr_immediate_has_ref(id) : scr_timer_has_ref(id));
+  }
+  if (!imm && strcmp(method, "refresh") == 0) {
+    scr_timer_refresh(id);
+    return scr_dyn_retain(self);
+  }
+  if (!imm && strcmp(method, "close") == 0) {
+    scr_clear_interval(id);
+    return scr_dyn_retain(self);
+  }
+  tmr_dynh_not_fn(what);
+  return NULL;
+}
+
+static ScrDyn *tmr_dynh_timeout_invoke(void *h, ScrDyn *self, const char *method,
+                                       ScrDyn *const *args, size_t argc, const char *what) {
+  (void)args; (void)argc;
+  return tmr_dynh_call((double)(uintptr_t)h, false, self, method, what);
+}
+
+static ScrDyn *tmr_dynh_immediate_invoke(void *h, ScrDyn *self, const char *method,
+                                         ScrDyn *const *args, size_t argc, const char *what) {
+  (void)args; (void)argc;
+  return tmr_dynh_call((double)(uintptr_t)h, true, self, method, what);
+}
+
+static bool tmr_dynh_member(const char *key, size_t key_len, bool imm) {
+  static const char *const tm[] = { "ref", "unref", "hasRef", "refresh", "close", NULL };
+  static const char *const im[] = { "ref", "unref", "hasRef", NULL };
+  const char *const *names = imm ? im : tm;
+  for (size_t i = 0; names[i] != NULL; i++) {
+    if (strlen(names[i]) == key_len && memcmp(names[i], key, key_len) == 0) return true;
+  }
+  return false;
+}
+
+static ScrDyn *tmr_dynh_timeout_get(void *h, const char *key, size_t key_len) {
+  if (!tmr_dynh_member(key, key_len, false)) return NULL; /* undefined, as Node for an unknown name */
+  return tmr_dynh_bound((double)(uintptr_t)h, false, key, key_len);
+}
+
+static ScrDyn *tmr_dynh_immediate_get(void *h, const char *key, size_t key_len) {
+  if (!tmr_dynh_member(key, key_len, true)) return NULL;
+  return tmr_dynh_bound((double)(uintptr_t)h, true, key, key_len);
+}
+
+/* An expando on a timer handle has no static equivalent: the caller's loud
+ * ladder (false), never a silent write to a box that is recreated per read. */
+static bool tmr_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)h; (void)key; (void)key_len; (void)value;
+  return false;
+}
+
+static const ScrDynHandleOps tmr_timeout_dynh_ops = {
+  "Timeout", &tmr_dynh_retain, &tmr_dynh_release, &tmr_dynh_timeout_invoke,
+  &tmr_dynh_timeout_get, &tmr_dynh_set, NULL, NULL,
+};
+
+static const ScrDynHandleOps tmr_immediate_dynh_ops = {
+  "Immediate", &tmr_dynh_retain, &tmr_dynh_release, &tmr_dynh_immediate_invoke,
+  &tmr_dynh_immediate_get, &tmr_dynh_set, NULL, NULL,
+};
+
+static bool tmr_dynh_installed = false;
+
+static void tmr_dynh_install(void) {
+  if (tmr_dynh_installed) return;
+  tmr_dynh_installed = true;
+  scr_dyn_handle_install(SCR_DYNH_TIMEOUT, &tmr_timeout_dynh_ops);
+  scr_dyn_handle_install(SCR_DYNH_IMMEDIATE, &tmr_immediate_dynh_ops);
+}
+
+ScrDyn *scr_dyn_box_timer(double id, bool imm) {
+  tmr_dynh_install();
+  return scr_dyn_new_handle((void *)(uintptr_t)id, imm ? SCR_DYNH_IMMEDIATE : SCR_DYNH_TIMEOUT);
+}
+
+bool scr_dyn_is_timer(const ScrDyn *d, bool imm) {
+  return d != NULL && d->kind == SCR_DYN_HANDLE &&
+         d->v.handle.tag == (imm ? SCR_DYNH_IMMEDIATE : SCR_DYNH_TIMEOUT);
+}
+
+double scr_dyn_timer_id(const ScrDyn *d) {
+  return (double)(uintptr_t)d->v.handle.ptr;
+}
