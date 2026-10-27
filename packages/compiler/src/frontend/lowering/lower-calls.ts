@@ -3,6 +3,7 @@
  * function/lambda lowering and signature collection, and monomorphizing
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
 import * as ts from "../ts7/adapter.js";
+import { liveBagRef, liveDepOfBinding, liveExportsOf } from "./cjs-live-exports.js";
 import { engineFunctionApply } from "./lower-engine-fn.js";
 import { applyEnumRefill, registerEnumRefill } from "./ir-patch.js";
 import type { EnumRefill } from "./ir-patch.js";
@@ -4261,6 +4262,22 @@ export function lowerFfiCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null
 
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
+    // A live requirer binding's member call (`m.f(x)`, m = require(M), M live): a dynamic call of the
+    // bag's member. Spread arguments keep their own fence.
+    if (ts.isPropertyAccessExpression(expr.expression) && !expr.expression.questionDotToken && ts.isIdentifier(expr.expression.expression) && !expr.arguments.some(ts.isSpreadElement)) {
+      const ld = liveDepOfBinding(L, expr.expression.expression);
+      if (ld !== null) {
+        const loc = locOf(expr);
+        return {
+          kind: "dynCall",
+          callee: { kind: "dynKeyGet", key: { kind: "strLit", value: expr.expression.name.text, type: STRING, loc }, optional: true, value: liveBagRef(L, ld, loc), type: DYN, loc },
+          calleeName: expr.expression.getText(),
+          args: expr.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
+          type: DYN,
+          loc,
+        };
+      }
+    }
     // Function.apply(null, <string[]>): the engine route (lower-engine-fn.ts).
     {
       const ea = engineFunctionApply(L, expr, loc);
@@ -12840,7 +12857,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // exactly (a class, a generic function, an aggregate whose identity a
     // copy would break) has no representation to hand back. They keep the
     // fence, which is the loud direction.
-    if (objMember === "keys" && ts.isIdentifier(argNode)) {
+    if (objMember === "keys" && ts.isIdentifier(argNode) && liveDepOfBinding(L, argNode) === null) {
       const nsSf = moduleNsSourceFileOf(L, argNode);
       if (nsSf !== null) {
         const own = moduleNsOwnKeys(L, nsSf, isRequireBindingIdent(L, argNode));
@@ -12901,7 +12918,13 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         objMember === "keys" && probed?.type.kind === "object" && L.classes.has(probed.type.className) &&
         canBoxClassIntoDyn(probed.type.className) && L.dynConvertible(probed.type) &&
         ![...L.classes.values()].some((c) => c.hasPropsTable === true);
-      if (isDyn || isUnit || isArr || isInst) {
+      // A live export object (a requirer's namespace binding, or the module's own `exports` /
+      // `module.exports`): its own keys are the bag's, not the static member table's.
+      const liveArg =
+        (ts.isIdentifier(argNode) && liveDepOfBinding(L, argNode) !== null) ||
+        (ts.isIdentifier(argNode) && argNode.text === "exports" && isCjsJsFile(argNode.getSourceFile()) && liveExportsOf(L, argNode.getSourceFile())) ||
+        (isModuleExportsAccess(argNode) && liveExportsOf(L, argNode.getSourceFile()));
+      if (isDyn || isUnit || isArr || isInst || liveArg) {
         const fn = objMember === "keys" ? "dyn.objKeys" : objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
         let v = L.lowerExpr(argNode);
         if (v.type.kind !== "dyn") v = { kind: "dynFrom", value: v, type: DYN, loc: locOf(call) };
