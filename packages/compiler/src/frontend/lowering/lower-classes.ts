@@ -5192,7 +5192,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // keep their native slots; the table holds only the expandos.
       const ownPropsTable =
         L.definePropStringTable(decl) ||
-        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl));
+        (!mixin && !familyMode && ts.isClassDeclaration(decl));
       const hasPropsTable = ownPropsTable || base?.hasPropsTable === true;
       if (ownPropsTable && !fields.has(CLASS_PROPS_FIELD)) {
         fields.set(CLASS_PROPS_FIELD, DYN);
