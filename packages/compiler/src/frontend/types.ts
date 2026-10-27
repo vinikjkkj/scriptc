@@ -2585,6 +2585,15 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // lazy `any`, one array layer out, reads as the checked-dynamic array
     // exactly like `unknown[]` does (dyn). See ctx.declMember.
     if (elem === null && ctx.declMember === true && (elemTs.flags & ts.TypeFlags.Any) !== 0) return DYN;
+    // `any[]` in a program or provenance source (no library member, no
+    // --dynamic build): a STATIC array of checked dyn boxes. Each element is
+    // one refcounted ScrDyn* (scr_dyn_retain_v/release_v, the same adapters
+    // a dyn promise payload uses), so `new Array(n)` holes read as the
+    // immortal undefined, element writes box the compiled value, and the
+    // array releases its elements. The dyn-element rule further down still
+    // answers `unknown[]` (and `object[]`) with the whole-array dyn value.
+    const anyDynElems = elem === null && (elemTs.flags & ts.TypeFlags.Any) !== 0 && !ctx.dynamic;
+    if (anyDynElems) elem = DYN;
     // `undefined[]` (sparse literals — `[,]` — and explicit annotations):
     // the element rides the unit-only union like a record field would; the
     // VOID mapping is a return-position artifact, not a value.
@@ -2645,7 +2654,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // element kind). This is dynFallbackType's JS stance promoted into
     // the mapping itself; construction sites build dynArrLit (the checked-dynamic tree
     // array literal) and typed sources convert per element at the slot.
-    if (elem.kind === "dyn") return DYN;
+    if (elem.kind === "dyn" && !anyDynElems) return DYN;
     // ChildProcess[] (the running-apps list) and Server[] (the [...set]
     // drain of the auxiliary-server registries): handles are ordinary
     // refcounted REF elements (their `_v` adapters, no trace — both drop
