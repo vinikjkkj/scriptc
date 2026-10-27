@@ -2644,6 +2644,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13650-randombytes-callback-form.ts": {
+   "order": [
+    "<repo>/tests/corpus/13650-randombytes-callback-form.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/13206-mockbuf-dyn-numeric-methods.ts": {
    "order": [
     "<repo>/tests/corpus/13206-mockbuf-dyn-numeric-methods.ts"
