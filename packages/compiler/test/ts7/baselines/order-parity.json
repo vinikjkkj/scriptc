@@ -3237,6 +3237,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14250-spread-unknown-into-typed-literal.js": {
+   "order": [
+    "<repo>/tests/corpus/14250-spread-unknown-into-typed-literal.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1426-stdin-read.ts": {
    "order": [
     "<repo>/tests/corpus/1426-stdin-read.ts"
