@@ -2644,12 +2644,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/13650-randombytes-callback-form.ts": {
-   "order": [
-    "<repo>/tests/corpus/13650-randombytes-callback-form.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/13206-mockbuf-dyn-numeric-methods.ts": {
    "order": [
     "<repo>/tests/corpus/13206-mockbuf-dyn-numeric-methods.ts"
@@ -2728,42 +2722,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/13850-any-length-shrink-field.ts": {
-   "order": [
-    "<repo>/tests/corpus/13850-any-length-shrink-field.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/13851-any-length-minus-nested.ts": {
-   "order": [
-    "<repo>/tests/corpus/13851-any-length-minus-nested.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/13852-any-length-bitwise-nested.ts": {
-   "order": [
-    "<repo>/tests/corpus/13852-any-length-bitwise-nested.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/13853-any-length-invalid-nested.ts": {
-   "order": [
-    "<repo>/tests/corpus/13853-any-length-invalid-nested.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/13854-any-length-grow-nested.ts": {
-   "order": [
-    "<repo>/tests/corpus/13854-any-length-grow-nested.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/13855-number-array-length-compound-regression.ts": {
-   "order": [
-    "<repo>/tests/corpus/13855-number-array-length-compound-regression.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/1350-path-normalize-join.ts": {
    "order": [
     "<repo>/tests/corpus/1350-path-normalize-join.ts"
@@ -2827,6 +2785,14 @@
   "<repo>/tests/corpus/1355-url-parse.ts": {
    "order": [
     "<repo>/tests/corpus/1355-url-parse.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/types.cjs",
+    "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/typed.cjs",
+    "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/main.cjs"
    ],
    "diags": []
   },
@@ -2926,6 +2892,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13650-randombytes-callback-form.ts": {
+   "order": [
+    "<repo>/tests/corpus/13650-randombytes-callback-form.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1366-union-equality.ts": {
    "order": [
     "<repo>/tests/corpus/1366-union-equality.ts"
@@ -2980,6 +2952,90 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13850-any-length-shrink-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/13850-any-length-shrink-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13851-any-length-minus-nested.ts": {
+   "order": [
+    "<repo>/tests/corpus/13851-any-length-minus-nested.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13852-any-length-bitwise-nested.ts": {
+   "order": [
+    "<repo>/tests/corpus/13852-any-length-bitwise-nested.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13853-any-length-invalid-nested.ts": {
+   "order": [
+    "<repo>/tests/corpus/13853-any-length-invalid-nested.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13854-any-length-grow-nested.ts": {
+   "order": [
+    "<repo>/tests/corpus/13854-any-length-grow-nested.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13855-number-array-length-compound-regression.ts": {
+   "order": [
+    "<repo>/tests/corpus/13855-number-array-length-compound-regression.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13950-union-strict-eq-across-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/13950-union-strict-eq-across-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13951-union-strict-eq-object-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/13951-union-strict-eq-object-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13954-union-eq-column-type-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/13954-union-eq-column-type-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13955-union-strict-eq-container-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/13955-union-strict-eq-container-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13958-union-strict-eq-nan-zero-in-mixed.ts": {
+   "order": [
+    "<repo>/tests/corpus/13958-union-strict-eq-nan-zero-in-mixed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13959-union-eq-mysql-date-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/13959-union-eq-mysql-date-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13960-union-strict-eq-different-unions.ts": {
+   "order": [
+    "<repo>/tests/corpus/13960-union-strict-eq-different-unions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13961-union-strict-eq-optional-scalars.ts": {
+   "order": [
+    "<repo>/tests/corpus/13961-union-strict-eq-optional-scalars.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/140-bitwise-operators.ts": {
    "order": [
     "<repo>/tests/corpus/140-bitwise-operators.ts"
@@ -3019,6 +3075,18 @@
   "<repo>/tests/corpus/1405-bytes-unions-arrays.ts": {
    "order": [
     "<repo>/tests/corpus/1405-bytes-unions-arrays.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14050-proto-alias-inherited-method.js": {
+   "order": [
+    "<repo>/tests/corpus/14050-proto-alias-inherited-method.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14052-proto-alias-two-classes.js": {
+   "order": [
+    "<repo>/tests/corpus/14052-proto-alias-two-classes.js"
    ],
    "diags": []
   },
@@ -18541,26 +18609,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/types.cjs",
-    "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/typed.cjs",
-    "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/14050-proto-alias-inherited-method.js": {
-   "order": [
-    "<repo>/tests/corpus/14050-proto-alias-inherited-method.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/14052-proto-alias-two-classes.js": {
-   "order": [
-    "<repo>/tests/corpus/14052-proto-alias-two-classes.js"
-   ],
-   "diags": []
   }
  }
 }

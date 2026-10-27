@@ -18604,6 +18604,33 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         }
         const unitTest = L.lowerUnitComparison(left, right, negated, loc);
         if (unitTest) return unitTest;
+        // A union against a scalar that NONE of its arms is (`null | undefined`
+        // against a number, `Query | null` against a string): every arm is a
+        // different JS type, so strict equality is false for every tag, and
+        // `!==` is true. The union operand is dropped, so it must be a pure
+        // read; an effectful one keeps the fence.
+        if (unionNeverEqualsScalar(L, left, right)) return { kind: "boolLit", value: negated, type: BOOL, loc };
+        // Two DIFFERENT unions whose arms the dyn box carries exactly (scalars,
+        // units, program class instances: a scalar by value, an instance by
+        // node identity): the runtime's whole-dyn strict equality answers the
+        // static question, arm for arm. The same-union case below keeps its
+        // tag-by-tag lowering.
+        if (
+          left.type.kind === "union" &&
+          right.type.kind === "union" &&
+          !typeEquals(left.type, right.type) &&
+          dynIdentityUnion(L, left.type.unionId) &&
+          dynIdentityUnion(L, right.type.unionId)
+        ) {
+          return {
+            kind: "dynScalarEq",
+            left: { kind: "dynFrom", value: left, type: DYN, loc },
+            right: { kind: "dynFrom", value: right, type: DYN, loc },
+            ...(negated ? { negated: true as const } : {}),
+            type: BOOL,
+            loc,
+          };
+        }
         if (left.type.kind === "union" || right.type.kind === "union") {
           // JS strict equality of the ARM values, per union tag (a
           // per-union helper): equal tags compare payloads (f64 ==, string
@@ -19209,6 +19236,49 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       return negated ? { kind: "unary", op: "!", operand: flavor, type: BOOL, loc } : flavor;
     }
     return null;
+  }
+
+/** A union whose arms are all scalars, units, or PROGRAM class instances:
+ * the dyn box carries each by value or by object identity, so the dyn strict
+ * equality of two such unions answers the static one. Arrays, records,
+ * containers, dyn, jsval and runtime classes keep their fence. */
+function dynIdentityUnion(L: Lowerer, unionId: string): boolean {
+  const def = L.unions.get(unionId);
+  if (!def || def.arms.length === 0) return false;
+  return def.arms.every(
+    (a) =>
+      a.kind === "string" || a.kind === "f64" || a.kind === "bool" || a.kind === "bigint" ||
+      a.kind === "undefinedT" || a.kind === "nullT" ||
+      (a.kind === "object" && isProgramClassInstanceName(L, a.className)),
+  );
+}
+
+/** True when `u` is a union and `p` a scalar (f64, string, bool) that no arm of
+ * `u` has the type of, and no arm can hold a dyn value. Strict equality
+ * between values of different JS types is false, so the answer is a constant. */
+function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolean {
+  for (const [u, p] of [
+    [left, right],
+    [right, left],
+  ] as const) {
+    if (u.type.kind !== "union") continue;
+    if (p.type.kind !== "f64" && p.type.kind !== "string" && p.type.kind !== "bool") continue;
+    const def = L.unions.get(u.type.unionId);
+    if (!def || def.arms.length === 0) return false;
+    if (!pureReemittable(u)) return false;
+    if (def.arms.every((a) => a.kind !== p.type.kind && a.kind !== "dyn" && a.kind !== "jsval")) return true;
+  }
+  return false;
+}
+
+  /** A program class instance: a class the program declares, with no runtime-
+   * provided class anywhere in its chain (the rule `x.constructor` on an
+   * instance already applies). */
+  function isProgramClassInstanceName(L: Lowerer, className: string): boolean {
+    const info: ClassInfo | null | undefined = L.classes.get(className);
+    if (info === undefined) return false;
+    for (let a: ClassInfo | null = info; a; a = a.base) if (a.def.runtime === true || a.builtinError === true) return false;
+    return true;
   }
 
 /** `typeof v === "lit"` / `typeof v !== "lit"` where v is UNION-typed: the
