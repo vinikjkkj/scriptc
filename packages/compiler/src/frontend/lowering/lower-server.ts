@@ -2763,6 +2763,47 @@ function tlsLiteralHasUntypedMember(L: Lowerer, node: ts.ObjectLiteralExpression
   );
 }
 
+/** `ciphers` (an OpenSSL cipher list) is not modeled: the runtime cannot
+ * honor a cipher list, so a createSecureContext whose options MAY carry one
+ * is refused at compile time, never accepted and thrown at run time. A
+ * literal may pass `ciphers: undefined` (or omit it); any other `ciphers`
+ * member refuses, and so does an options value whose checker type is
+ * untyped (it can hold `ciphers`) or is a typed record with a `ciphers`
+ * member. */
+function refuseSecureContextCiphers(L: Lowerer, arg: ts.Expression): void {
+  const refuse = (node: ts.Node): never => L.noLowering(
+    "tls.createSecureContext option 'ciphers'",
+    node,
+    "OpenSSL cipher lists are not modeled: leave ciphers undefined (or omit it)",
+  );
+  const untyped = (t: ts.Type): boolean => (t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+  if (ts.isObjectLiteralExpression(arg)) {
+    for (const p of arg.properties) {
+      if (ts.isSpreadAssignment(p)) {
+        const t = L.typeOf(p.expression);
+        if (untyped(t) || L.checker.getPropertyOfType(t, "ciphers") !== undefined) refuse(p);
+        continue;
+      }
+      if (!(ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p))) continue;
+      const name = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : null;
+      if (name !== "ciphers") continue;
+      const init = ts.isPropertyAssignment(p) ? p.initializer : null;
+      if (init !== null && ts.isIdentifier(init) && init.text === "undefined") continue;
+      refuse(p);
+    }
+    return;
+  }
+  const t = L.typeOf(arg);
+  if (untyped(t)) {
+    L.noLowering(
+      "tls.createSecureContext with an untyped options value",
+      arg,
+      "it may carry 'ciphers', which is not modeled: pass an object literal (its ciphers, when given, must be undefined)",
+    );
+  }
+  if (L.checker.getPropertyOfType(t, "ciphers") !== undefined) refuse(arg);
+}
+
 function lowerTlsServerOptionsOrDyn(
   L: Lowerer, node: ts.Expression, what: string,
 ): { cert: IrExpr; key: IrExpr; dyn?: undefined } | { dyn: IrExpr } {
@@ -2951,22 +2992,35 @@ function lowerTlsModuleCall(L: Lowerer, expr: ts.CallExpression,
     }
   }
   if (bi.member === "createSecureContext") {
-    // createSecureContext({ cert, key }) → the opaque SecureContext handle
-    // an SNI callback answers with. The minimal honest form: exactly the
-    // cert/key pair (PEM strings or Buffers — the createServer options
-    // walk, reused); ca/ciphers/etc. fence by name there.
-    if (args.length !== 1) {
+    // createSecureContext(options) → the opaque SecureContext handle. Every
+    // form goes through the runtime option walk (Node's typed validations,
+    // then the PEM material), so the options are checked the same way for a
+    // literal, a typed record and an untyped value.
+    if (args.length !== 1 || args.some(ts.isSpreadElement)) {
       L.noLowering(
         `createSecureContext with ${args.length} arguments`,
         expr,
-        "the supported form is createSecureContext({ cert, key })",
+        "the supported form is createSecureContext(options)",
       );
     }
-    const opts = lowerTlsServerOptionsOrDyn(L, args[0]!, "tls.createSecureContext");
-    if (opts.dyn !== undefined) {
-      return { kind: "libCall", fn: "tls.createSecureContextDyn", args: [opts.dyn], type: SECURECTX_T, loc };
+    const arg = args[0]!;
+    refuseSecureContextCiphers(L, arg);
+    if (ts.isObjectLiteralExpression(arg)) {
+      return { kind: "libCall", fn: "tls.createSecureContextDyn", args: [lowerDynObjectLiteral(L, arg)], type: SECURECTX_T, loc };
     }
-    return { kind: "libCall", fn: "tls.createSecureContext", args: [opts.cert, opts.key], type: SECURECTX_T, loc };
+    const v = L.lowerExpr(arg);
+    if (v.type.kind === "dyn") {
+      return { kind: "libCall", fn: "tls.createSecureContextDyn", args: [v], type: SECURECTX_T, loc };
+    }
+    if (canConvertToDyn(v.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+      const dynV: IrExpr = { kind: "dynFrom", value: v, type: DYN, loc: locOf(arg) };
+      return { kind: "libCall", fn: "tls.createSecureContextDyn", args: [dynV], type: SECURECTX_T, loc };
+    }
+    L.noLowering(
+      "tls.createSecureContext with a non-object options argument",
+      arg,
+      "pass the options as an object literal or an object value",
+    );
   }
   // The CA-store introspection pair (scr_tls_ca.c — its own link gate, no
   // mbedTLS): getCACertificates(type?) answers the per-type cached PEM
