@@ -17779,5 +17779,102 @@
    ],
    "diags": []
   }
+,
+  "<repo>/tests/corpus/12700-dyn-timer-member-typeof.js": {
+   "order": [
+    "<repo>/tests/corpus/12700-dyn-timer-member-typeof.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12701-dyn-timer-bang-ref.js": {
+   "order": [
+    "<repo>/tests/corpus/12701-dyn-timer-bang-ref.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12702-dyn-timer-in-operator.js": {
+   "order": [
+    "<repo>/tests/corpus/12702-dyn-timer-in-operator.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12703-dyn-timer-chain-unref.js": {
+   "order": [
+    "<repo>/tests/corpus/12703-dyn-timer-chain-unref.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12704-dyn-timer-hasref-toggle.js": {
+   "order": [
+    "<repo>/tests/corpus/12704-dyn-timer-hasref-toggle.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12705-dyn-timer-refresh.js": {
+   "order": [
+    "<repo>/tests/corpus/12705-dyn-timer-refresh.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12706-dyn-timer-exit-unref.js": {
+   "order": [
+    "<repo>/tests/corpus/12706-dyn-timer-exit-unref.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12707-dyn-immediate-unref-exit.js": {
+   "order": [
+    "<repo>/tests/corpus/12707-dyn-immediate-unref-exit.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12708-dyn-clear-timeout.js": {
+   "order": [
+    "<repo>/tests/corpus/12708-dyn-clear-timeout.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12709-dyn-timer-identity.js": {
+   "order": [
+    "<repo>/tests/corpus/12709-dyn-timer-identity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12710-dyn-timer-call-through-fn.js": {
+   "order": [
+    "<repo>/tests/corpus/12710-dyn-timer-call-through-fn.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12711-static-timer-regression.js": {
+   "order": [
+    "<repo>/tests/corpus/12711-static-timer-regression.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12712-dyn-timer-interval-cancel.js": {
+   "order": [
+    "<repo>/tests/corpus/12712-dyn-timer-interval-cancel.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12713-dyn-timer-after-fire.js": {
+   "order": [
+    "<repo>/tests/corpus/12713-dyn-timer-after-fire.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12714-dyn-immediate-chain.js": {
+   "order": [
+    "<repo>/tests/corpus/12714-dyn-immediate-chain.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12715-dyn-timer-untyped-param-clear.js": {
+   "order": [
+    "<repo>/tests/corpus/12715-dyn-timer-untyped-param-clear.js"
+   ],
+   "diags": []
+  }
  }
 }
