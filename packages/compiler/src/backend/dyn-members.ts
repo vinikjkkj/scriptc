@@ -131,11 +131,16 @@ export function dynRuntimeRoot(cls: DynMemberClass): number {
   let emitter = false;
   // An Error-rooted instance has its own walk (errorRooted), whatever its property table holds.
   for (let c: DynMemberClass | null = cls; c !== null; c = c.base) if (RUNTIME_ERROR_CLASSES.has(c.def.name)) return 0;
+  let props = false;
   for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
-    // A run-time property table holds keys no row names: the key list is not a fact of the class.
-    if (RUNTIME_STREAM_CLASSES.has(c.def.name) || c.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) return 2;
+    if (RUNTIME_STREAM_CLASSES.has(c.def.name)) return 2;
+    // A run-time property table holds keys no row names. Its keys are listed by the
+    // %dynProps row (after the members), so a plain class answers its key set exactly;
+    // an emitter-rooted one has the three-key prefix the table walk does not model, so it keeps the fence.
+    if (c.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) props = true;
     if (c.def.name === RUNTIME_EMITTER_CLASS) emitter = true;
   }
+  if (emitter && props) return 2;
   return emitter ? 1 : 0;
 }
 

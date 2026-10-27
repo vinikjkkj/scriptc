@@ -5183,9 +5183,16 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           if (absentOk) absentTrackedFields.add(pdName);
         }
       }
+      // EXPANDOS (extension of the table's reach, 2026-10-26): every program
+      // class declaration carries the run-time property table, because a
+      // write of a new property onto an instance through an untyped view
+      // (`(cfg as any).pool = p`, `this.config.connectionConfig.pool = this`)
+      // is an ordinary own property in JS and the class cannot know at layout
+      // time which of its instances an untyped slot will reach. Declared fields
+      // keep their native slots; the table holds only the expandos.
       const ownPropsTable =
         L.definePropStringTable(decl) ||
-        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && implicitMonoFile(decl.getSourceFile()));
+        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl));
       const hasPropsTable = ownPropsTable || base?.hasPropsTable === true;
       if (ownPropsTable && !fields.has(CLASS_PROPS_FIELD)) {
         fields.set(CLASS_PROPS_FIELD, DYN);
@@ -8057,6 +8064,34 @@ function errorPrefixCells(info: ClassInfo): Set<string> | null {
   return null;
 }
 
+/** The EXPANDO read-out of the same box: `%C.%dynProps(this): dyn`, listed as
+ * `%dynProps`. It returns the instance's run-time property table (the
+ * `%props` field: undefined until the first expando is written), which the
+ * runtime's enumerating surfaces walk after the declared members, so
+ * Object.keys, for-in, JSON.stringify, spread and Object.hasOwn see expandos
+ * in JS's own order. A class without the table has no such row. */
+export function dynPropsFn(L: Lowerer, info: ClassInfo): IrFunction | null {
+  const className = info.def.name;
+  const loc = info.decl !== null ? locOf(info.decl) : info.def.loc;
+  const thisType: IrType = { kind: "object", className };
+  const locals: IrLocal[] = [{ id: "this.0", name: "this", type: thisType, mutable: false }];
+  if (info.hasPropsTable !== true || errorPrefixCells(info) !== null) return null;
+  return {
+    name: `%${className}.%dynProps`,
+    params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+    returnType: DYN,
+    locals,
+    body: [
+      {
+        kind: "return",
+        value: { kind: "fieldGet", obj: { kind: "varRef", localId: locals[0]!.id, type: thisType, loc }, className, field: CLASS_PROPS_FIELD, type: DYN, loc },
+        loc,
+      },
+    ],
+    loc,
+  };
+}
+
 /** The DELETE half of the same box: `%C.%dynDel(this, key): boolean`, listed
  * as `%dynDel`. A class instance has a fixed layout, so the one removal it
  * can take is a field whose slot ADMITS undefined (a checked-dynamic slot,
@@ -8357,6 +8392,11 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         if (delFn !== null) {
           out.push(delFn);
           info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynDel", fn: delFn.name }];
+        }
+        const propsFn = dynPropsFn(L, info);
+        if (propsFn !== null) {
+          out.push(propsFn);
+          info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynProps", fn: propsFn.name }];
         }
         // ...and the static side (dynStaticFns): the class value's table.
         const stat = L.reachable?.has(`%${className}.%dynclass`) === true ? dynStaticFns(L, info) : null;
