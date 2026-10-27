@@ -7316,6 +7316,7 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
      * exotic key, and JS ignores the write and creates nothing. */
     if (scr_canonical_numeric_name(key)) return;
     /* A non-index name is an ordinary own expando (mysql2's MockBuffer). */
+    scr_bytes_own_release_fn = scr_dyn_release_v; /* the hook before the first store */
     scr_bytes_own_set(recv->v.bytes, key->data, key->len, value);
     return;
   }
