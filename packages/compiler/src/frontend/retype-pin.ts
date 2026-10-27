@@ -37,6 +37,9 @@ export interface RetypePin {
   /** The initializer's own text, so the re-serve can verify its offsets. */
   readonly text: string;
   readonly why: string;
+  /** A JSDoc type pin: the text at [start, end) is replaced by this instead
+   * of being wrapped in an `any` cast (see jsdocBigintPins). */
+  readonly replacement?: string;
 }
 
 type Kind = "s" | "n" | "b" | "bi" | "null" | "undef" | "obj";
@@ -208,6 +211,69 @@ function expandoPins(checker: ts.TypeChecker, sf: ts.SourceFile): RetypePin[] {
   return out;
 }
 
+/** The JSDoc `@param {number} name` type of a function declared in `sf`, as a
+ * pin that rewrites `number` to `any`. The comment is the one that ends just
+ * before the function, or before the statement that assigns it (an expando
+ * `Long.fromBigInt = function fromBigInt(...)` carries its JSDoc there).
+ * Returns null when the function has no such tag or its type is not exactly
+ * `number`. */
+function jsdocNumberParamPin(sf: ts.SourceFile, fn: ts.Node, param: string, why: string): RetypePin | null {
+  let host: ts.Node = fn;
+  for (let p: ts.Node | undefined = fn.parent; p !== undefined; p = p.parent) {
+    if (ts.isExpressionStatement(p) || ts.isVariableStatement(p)) {
+      host = p;
+      break;
+    }
+  }
+  let i = host.getStart(sf);
+  while (i > 0 && /\s/.test(sf.text[i - 1]!)) i--;
+  if (sf.text.slice(i - 2, i) !== "*/") return null;
+  const open = sf.text.lastIndexOf("/**", i - 2);
+  if (open < 0) return null;
+  const re = /@param\s+\{([^}]*)\}\s+(\[?)([A-Za-z_$][\w$]*)/g;
+  const comment = sf.text.slice(open, i);
+  for (let m = re.exec(comment); m !== null; m = re.exec(comment)) {
+    if (m[3] !== param || m[1] !== "number") continue;
+    const start = open + m.index + m[0].indexOf("{") + 1;
+    return { start, end: start + m[1].length, text: m[1], why, replacement: "any" };
+  }
+  return null;
+}
+
+/** RETYPE PIN, bigint arm. A JavaScript function whose JSDoc says a parameter
+ * is `number` is the author's claim; a call in the same file that passes a
+ * BIGINT there proves the claim false for that call. The compiled slot is
+ * f64, so the operator on it (`value >> BigInt(32)`) has no lowering (SC1043),
+ * and a direct call with a bigint is refused (SC1090). The repair re-serves
+ * the file with that one JSDoc type read `any`, the checked-dynamic slot every
+ * unannotated JavaScript parameter already has: a number still answers as a
+ * number, and the bigint operator runs on the bigint the call really passed.
+ * The call's callee is resolved by the checker (signatureDeclaration), so an
+ * expando `Obj.m = function m(...)` counts. Same-file calls only. */
+function jsdocBigintPins(checker: ts.TypeChecker, sf: ts.SourceFile): RetypePin[] {
+  const out: RetypePin[] = [];
+  ts.walkPreorder(sf, (n) => {
+    if (!ts.isCallExpression(n)) return undefined;
+    const sig = checker.getResolvedSignature(n);
+    const decl = sig === undefined ? undefined : checker.signatureDeclaration(sig);
+    if (decl === undefined || !(ts.isFunctionDeclaration(decl) || ts.isFunctionExpression(decl) || ts.isArrowFunction(decl))) {
+      return undefined;
+    }
+    if (decl.getSourceFile() !== sf) return undefined;
+    n.arguments.forEach((arg, i) => {
+      const param = decl.parameters[i];
+      if (param === undefined || !ts.isIdentifier(param.name)) return;
+      const kinds = kindsOf(checker, checker.getTypeAtLocation(arg));
+      if (kinds === null || kinds.size !== 1 || !kinds.has("bi")) return;
+      const why = `JSDoc @param {number} '${param.name.text}' receives a bigint argument`;
+      const pin = jsdocNumberParamPin(sf, decl, param.name.text, why);
+      if (pin !== null && !out.some((o) => o.start === pin.start)) out.push(pin);
+    });
+    return undefined;
+  });
+  return out;
+}
+
 export function computeRetypePins(program: ts.Program): Map<string, RetypePin[]> {
   const checker = program.getTypeChecker();
   const out = new Map<string, RetypePin[]>();
@@ -233,8 +299,10 @@ export function computeRetypePins(program: ts.Program): Map<string, RetypePin[]>
       return undefined;
     });
     const expando = expandoPins(checker, sf);
+    const bigintPins = jsdocBigintPins(checker, sf);
     if (decls.length === 0 || assigns.length === 0) {
-      if (expando.length > 0) out.set(sf.fileName, expando);
+      const early = [...expando, ...bigintPins];
+      if (early.length > 0) out.set(sf.fileName, early);
       continue;
     }
     const byName = new Map<string, ts.BinaryExpression[]>();
@@ -273,7 +341,7 @@ export function computeRetypePins(program: ts.Program): Map<string, RetypePin[]>
       const end = init.getEnd();
       pins.push({ start, end, text: sf.text.slice(start, end), why });
     }
-    for (const e of expando) if (!pins.some((p) => p.start === e.start)) pins.push(e);
+    for (const e of [...expando, ...bigintPins]) if (!pins.some((p) => p.start === e.start)) pins.push(e);
     if (pins.length > 0) out.set(sf.fileName, pins);
   }
   return out;
@@ -287,7 +355,8 @@ export function applyRetypePins(text: string, pins: readonly RetypePin[]): strin
   let out = text;
   for (const p of sorted) {
     if (out.slice(p.start, p.end) !== p.text) return null;
-    out = `${out.slice(0, p.start)}/** @type {any} */ (${p.text})${out.slice(p.end)}`;
+    if (p.replacement !== undefined) out = `${out.slice(0, p.start)}${p.replacement}${out.slice(p.end)}`;
+    else out = `${out.slice(0, p.start)}/** @type {any} */ (${p.text})${out.slice(p.end)}`;
   }
   return out;
 }
@@ -313,6 +382,6 @@ export function shiftRetypePins(
   return pins.map((pin) => {
     const start = move(pin.start, false);
     const end = move(pin.end, true);
-    return { start, end, text: pinnedText === null ? pin.text : pinnedText.slice(start, end), why: pin.why };
+    return { ...pin, start, end, text: pinnedText === null ? pin.text : pinnedText.slice(start, end) };
   });
 }
