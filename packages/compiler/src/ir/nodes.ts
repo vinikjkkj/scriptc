@@ -6006,6 +6006,7 @@ export type IrLibFn =
   | "insp.regex"
   | "insp.date"
   | "insp.buffer"
+  | "insp.typed"
   | "insp.error"
   | "insp.dyn"
   | "insp.dynS"
