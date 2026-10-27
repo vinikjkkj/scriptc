@@ -6611,6 +6611,33 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * or type alias contributes NO value, so it cannot make the binding name
    * a different class — only the value declarations can, and there must
    * still be exactly one of those. */
+  /** The stdlib symbol a constructor identifier names: the symbol itself when
+   * it is a stdlib symbol, or the stdlib member a never-reassigned single-
+   * declaration `var`/`const` binds to (`var X = require('m').Member`). Null
+   * for anything else. */
+  export function stdlibAliasSymbolOf(L: Lowerer, symbol: ts.Symbol | null | undefined): ts.Symbol | null {
+    if (!symbol) return null;
+    if (L.isStdlibSymbol(symbol)) return symbol;
+    const decls = L.checker.declarationsOf(symbol);
+    if (decls.length !== 1) return null;
+    const decl = decls[0];
+    if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return null;
+    if (!bindingNeverReassigned(L, symbol, decl)) return null;
+    let init: ts.Expression = decl.initializer;
+    while (
+      ts.isParenthesizedExpression(init) ||
+      ts.isAsExpression(init) ||
+      ts.isSatisfiesExpression(init) ||
+      ts.isTypeAssertion(init)
+    ) {
+      init = init.expression;
+    }
+    if (!ts.isPropertyAccessExpression(init)) return null;
+    const raw = L.checker.getSymbolAtLocation(init.name);
+    const target = raw && raw.flags & ts.SymbolFlags.Alias ? L.checker.getAliasedSymbol(raw) : raw;
+    return target && L.isStdlibSymbol(target) ? target : null;
+  }
+
   export function castAliasedClassInfoOf(L: Lowerer, symbol: ts.Symbol | null | undefined): ClassInfo | null {
     if (!symbol) return null;
     const decls = L.checker
@@ -10760,7 +10787,11 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       // the packed-f64 pending state starting at 0 (nothing buffered).
       // The encoding must be a literal (Node's alias set); omitted means
       // utf8, Node's default.
-      if (symbol && symbol.name === "StringDecoder" && L.isStdlibSymbol(symbol)) {
+      // `var X = require('string_decoder').StringDecoder; new X(...)`: a never-
+      // reassigned binding whose initializer names a stdlib member constructs
+      // the stdlib class (the same as spelling the member at the `new`).
+      const decoderSym = stdlibAliasSymbolOf(L, symbol);
+      if (decoderSym && decoderSym.name === "StringDecoder") {
         const args = expr.arguments ?? [];
         if (args.length > 1) {
           L.noLowering("new StringDecoder with 2 arguments", expr, undefined, symbol);
