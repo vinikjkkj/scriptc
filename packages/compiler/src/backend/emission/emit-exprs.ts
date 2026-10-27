@@ -6457,6 +6457,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_buffer_from_dyn(${arg(0)})`);
           case "crypto.inputBytes":
             return finish(`scr_crypto_input_bytes(${arg(0)})`);
+          case "text.decodeDyn":
+            // TextDecoder.decode over a checked-dynamic value (scr_json.c): +1 string, NULL with the TypeError pending.
+            return finish(`scr_text_decode_dyn(${arg(0)})`);
+          case "text.destDyn":
+            // encodeInto dest over a checked-dynamic value (scr_json.c): +1 bytes, NULL with the TypeError pending.
+            return finish(`scr_text_dest_dyn(${arg(0)})`);
           case "bytes.argChk":
             return finish(`scr_bytes_arg_chk(${arg(0)}, ${arg(1)})`);
           case "buffer.concat":

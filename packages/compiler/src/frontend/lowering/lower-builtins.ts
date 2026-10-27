@@ -9679,6 +9679,12 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       }
       const argNode = call.arguments[0]!;
       const arg = L.lowerExpr(argNode);
+      // A checked-dynamic input (an untyped value, or a Buffer whose call result the
+      // program made dynamic): Node's decode rules, undefined is "" and anything but a
+      // view or an ArrayBuffer throws (text.decodeDyn, scr_json.c).
+      if (arg.type.kind === "dyn") {
+        return { kind: "libCall", fn: "text.decodeDyn", args: [arg], type: STRING, loc };
+      }
       if (!(arg.type.kind === "bytes" && arg.type.elem === "u8")) {
         L.noLowering(
           `TextDecoder.decode of '${L.fmt(arg.type)}' values`,
@@ -9760,7 +9766,12 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     }
     const src = L.lowerExprExpecting(call.arguments[0]!, STRING);
     const destNode = call.arguments[1]!;
-    const dest = L.lowerExpr(destNode);
+    const destRaw = L.lowerExpr(destNode);
+    // A checked-dynamic destination: a Uint8Array/Buffer is accepted at runtime, anything else throws
+    // Node's ERR_INVALID_ARG_TYPE (text.destDyn, scr_json.c). It then writes through the same payload.
+    const dest: IrExpr = destRaw.type.kind === "dyn"
+      ? { kind: "libCall", fn: "text.destDyn", args: [destRaw], type: BYTES_U8, loc: destRaw.loc }
+      : destRaw;
     if (!(dest.type.kind === "bytes" && dest.type.elem === "u8")) {
       L.noLowering(
         `TextEncoder.encodeInto into '${L.fmt(dest.type)}' values`,

@@ -4723,6 +4723,8 @@ export type IrLibFn =
    * payload +1 when it is a Uint8Array, ERR_INVALID_ARG_TYPE naming the string
    * argument otherwise. May throw. */
   | "bytes.argChk"
+  | "text.decodeDyn"
+  | "text.destDyn"
   | "buffer.concat"
   /** Buffer.byteLength(string, enc) — enc a NORMALIZED literal like
    * fromStr's — and Buffer.isEncoding(name) over a runtime string
@@ -13135,6 +13137,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "buffer.fromDyn",
   "crypto.inputBytes",
   "bytes.argChk",
+  "text.decodeDyn",
+  "text.destDyn",
   "bytes.equalsChk",
   "bytes.compareChk",
   // Reading the Buffer-ness of a value whose producer nobody classified:
