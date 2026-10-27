@@ -7220,6 +7220,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // prototype (+1); a primitive argument throws Node's
             // catchable TypeError (may-throw seed set).
             return finish(`scr_dyn_obj_create_proto(${arg(0)})`);
+          case "dyn.cloneOwn":
+            // Object.create(getPrototypeOf(x), getOwnPropertyDescriptors(x)) over a dyn x:
+            // borrowed in, +1 out; a class instance answers its own %dynClone member.
+            return finish(`scr_dyn_clone_own(${arg(0)})`);
+          case "cls.propsClone":
+            // The field's current property table borrowed, the copy +1 (undefined stays undefined).
+            return finish(`scr_cls_props_clone(${arg(0)})`);
           case "dyn.objCreateDescs":
             // Object.create(<proto>, <descriptors>): create, then run
             // ObjectDefineProperties over the map through the EXACT

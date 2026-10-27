@@ -3636,6 +3636,74 @@ ScrDyn *scr_cls_props_ensure(ScrDyn *cur) {
   return scr_dyn_new_obj();
 }
 
+/* ── clones: Object.create(Object.getPrototypeOf(x), Object.getOwnPropertyDescriptors(x))
+ * over a dyn x (the dyn half of lowerObjectCloneIdiom).
+ *
+ * A copy of an OBJ table: every entry in order, the VALUES shared (+1 each),
+ * and each descriptor row copied one level (a fresh ARR of the same items),
+ * so a later defineProperty on the copy rewrites the copy's row and not the
+ * source's. `src` is borrowed; the copy is +1. */
+static ScrDyn *dyn_clone_rows_copy(const ScrDyn *v, bool rows) {
+  if (rows && v->kind == SCR_DYN_ARR) {
+    ScrDyn *r = scr_dyn_new_arr();
+    for (size_t j = 0; j < v->v.arr.len; j++) scr_dyn_arr_push(r, scr_dyn_retain(v->v.arr.items[j]));
+    return r;
+  }
+  return scr_dyn_retain((ScrDyn *)v);
+}
+
+static ScrDyn *dyn_clone_table(const ScrDyn *tbl, bool rows) {
+  ScrDyn *o = scr_dyn_new_obj();
+  for (size_t i = 0; i < tbl->v.obj.len; i++) {
+    const ScrDynEntry *e = &tbl->v.obj.entries[i];
+    scr_dyn_obj_set(o, e->key, e->key_len, dyn_clone_rows_copy(e->value, rows));
+  }
+  return o;
+}
+
+/* A class instance's run-time property table (%props): the expandos and the
+ * defineProperty rows. Undefined stays undefined (the field was never minted). */
+ScrDyn *scr_cls_props_clone(ScrDyn *bag) {
+  if (bag == NULL || bag->kind != SCR_DYN_OBJ) return scr_dyn_undefined();
+  return dyn_clone_table(bag, true);
+}
+
+/* Object.create over a dyn source: the instance of a compiled class asks its
+ * own `%dynClone` member (one per class, so a subclass copies as itself); a
+ * plain object copies its entries, its [[Prototype]] link and its null-proto
+ * flag. Everything else keeps a loud refusal: an unmeasured clone is never
+ * answered with a guess. */
+ScrDyn *scr_dyn_clone_own(ScrDyn *src) {
+  if (src == NULL || src->kind == SCR_DYN_NULL || src->kind == SCR_DYN_UNDEF) {
+    scr_throw_error_msg(SCR_ERR_TYPE, "Cannot convert undefined or null to object", 39);
+    return NULL;
+  }
+  if (src->kind == SCR_DYN_OBJINST) {
+    const ScrDynClassMember *m = scr_dyn_objinst_member(src, "%dynClone", 9);
+    if (m != NULL && m->call != NULL) return m->call(src->v.inst.o, NULL, 0, "Object.create");
+    scr_dyn_objinst_fence(src, "Object.create of a class instance");
+    return NULL;
+  }
+  if (src->kind != SCR_DYN_OBJ) {
+    scr_throw_error_msg(SCR_ERR_ERROR, "Object.create clone of a non-object dynamic value is not supported yet", 75);
+    return NULL;
+  }
+  if (src->v.obj.ext != NULL && src->v.obj.ext->slots != NULL) {
+    scr_throw_error_msg(SCR_ERR_ERROR, "Object.create clone of an object with internal slots is not supported yet", 79);
+    return NULL;
+  }
+  ScrDyn *o = dyn_clone_table(src, false);
+  o->null_proto = src->null_proto;
+  if (src->v.obj.ext != NULL) {
+    if (src->v.obj.ext->proto != NULL) scr_dyn_obj_set_proto(o, src->v.obj.ext->proto);
+    if (src->v.obj.ext->hidden != NULL) {
+      ScrDyn *h = dyn_clone_table(src->v.obj.ext->hidden, true);
+      scr_dyn_ext_w(o)->hidden = h;
+    }
+  }
+  return o;
+}
+
 bool scr_cls_props_has(const ScrDyn *tbl, const ScrStr *key) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ || key == NULL) return false;
   return scr_dyn_obj_get(tbl, key->data, key->len) != NULL;

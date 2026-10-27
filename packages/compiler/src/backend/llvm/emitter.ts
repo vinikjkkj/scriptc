@@ -1262,6 +1262,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.u8Of": "scr_dyn_uint8array_of",
   "dyn.objCreateProto": "scr_dyn_obj_create_proto",
   "dyn.objCreateDescs": "scr_dyn_obj_create_descs",
+  "dyn.cloneOwn": "scr_dyn_clone_own",
+  "cls.propsClone": "scr_cls_props_clone",
   "dyn.objCreateNullDescs": "scr_dyn_obj_create_null_descs",
   "dyn.ownNamesFence": "scr_dyn_own_names_fence",
   "dyn.ownNamesCtor": "scr_dyn_own_names_ctor",

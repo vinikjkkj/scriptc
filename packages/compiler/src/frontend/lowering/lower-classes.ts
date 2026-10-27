@@ -6,7 +6,7 @@
 import { protoDataFieldNames, registerProtoData } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
 import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitInstanceLike, implicitMonoFile, omittedArgFor, type GenericFnInfo, type GenericInstance, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
@@ -8057,6 +8057,84 @@ function errorPrefixCells(info: ClassInfo): Set<string> | null {
   return null;
 }
 
+/** The CLONE half of a boxed class instance: `%C.%dynClone(this): dyn`, listed as
+ * `%dynClone`. `Object.create(getPrototypeOf(x), getOwnPropertyDescriptors(x))`
+ * over an untyped x reaches it through the runtime (scr_dyn_clone_own, which
+ * asks the instance's OWN class, so a subclass copies as itself). It makes a new
+ * instance of THIS class (allocation only, no constructor), copies every layout
+ * field (object-valued fields are shared, as in the static clone), and copies the
+ * run-time property table with its descriptor rows (the expandos).
+ *
+ * Null when the class has a part a plain field copy cannot carry: a base chain,
+ * a private or hidden field, an Error-rooted or runtime-provided class, deferred
+ * or nullable slots, or a generic/abstract/capturing class. Such a class keeps
+ * the runtime's refusal, and only for its own instances. */
+export function dynCloneFn(L: Lowerer, info: ClassInfo): IrFunction | null {
+  const className = info.def.name;
+  if (info.decl === null || info.def.genericOf !== undefined || info.def.abstract === true) return null;
+  if (!canBoxClassIntoDyn(className)) return null;
+  // The chain: the instance's own class, then each base. Every link must be a
+  // program class whose layout a field copy can carry.
+  const chain: ClassInfo[] = [];
+  for (let c: ClassInfo | null = info; c; c = c.base) {
+    if (c.decl === null || c.protoClass === true || c.builtinError === true || c.builtinEmitter === true ||
+        c.builtinStream !== undefined || c.def.runtime === true || c.def.genericOf !== undefined) return null;
+    if (c.captures !== undefined && c.captures.length > 0) return null;
+    if ((c.deferredInitFields?.size ?? 0) > 0 || (c.nullableFields?.size ?? 0) > 0) return null;
+    if (errorPrefixCells(c) !== null || !canBoxClassIntoDyn(c.def.name)) return null;
+    chain.push(c);
+  }
+  const loc = locOf(info.decl);
+  const thisType: IrType = { kind: "object", className };
+  const thisLocal: IrLocal = { id: "this.0", name: "this", type: thisType, mutable: false };
+  const cloneLocal: IrLocal = { id: "clone.0", name: "%clone", type: thisType, mutable: false };
+  const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: l.type, loc });
+  // A field of a base class is read and written as that class (an upcast view of the instance).
+  const viewAs = (l: IrLocal, owner: string): IrExpr =>
+    owner === className ? ref(l) : { kind: "upcast", value: ref(l), type: { kind: "object", className: owner }, loc };
+  const body: IrStmt[] = [
+    { kind: "varDecl", localId: cloneLocal.id, init: { kind: "new", className, args: [], type: thisType, allocOnly: true, loc }, loc },
+  ];
+  const seen = new Set<string>();
+  let propsOwner: string | null = null;
+  for (const c of chain) {
+    for (const f of c.def.fields) {
+      if (f.name === CLASS_PROPS_FIELD) {
+        propsOwner = c.def.name;
+        continue;
+      }
+      if (f.name.startsWith("%") || f.name.startsWith("#")) return null;
+      if (seen.has(f.name)) continue;
+      seen.add(f.name);
+      body.push({
+        kind: "fieldSet", obj: viewAs(cloneLocal, c.def.name), className: c.def.name, field: f.name,
+        value: { kind: "fieldGet", obj: viewAs(thisLocal, c.def.name), className: c.def.name, field: f.name, type: f.type, loc },
+        loc,
+      });
+    }
+  }
+  if (propsOwner !== null) {
+    body.push({
+      kind: "fieldSet", obj: viewAs(cloneLocal, propsOwner), className: propsOwner, field: CLASS_PROPS_FIELD,
+      value: {
+        kind: "libCall", fn: "cls.propsClone",
+        args: [{ kind: "fieldGet", obj: viewAs(thisLocal, propsOwner), className: propsOwner, field: CLASS_PROPS_FIELD, type: DYN, loc }],
+        type: DYN, loc,
+      },
+      loc,
+    });
+  }
+  body.push({ kind: "return", value: { kind: "dynFrom", value: ref(cloneLocal), type: DYN, loc }, loc });
+  return {
+    name: `%${className}.%dynClone`,
+    params: [{ localId: thisLocal.id, name: thisLocal.name, type: thisLocal.type }],
+    returnType: DYN,
+    locals: [thisLocal, cloneLocal],
+    body,
+    loc,
+  };
+}
+
 /** The DELETE half of the same box: `%C.%dynDel(this, key): boolean`, listed
  * as `%dynDel`. A class instance has a fixed layout, so the one removal it
  * can take is a field whose slot ADMITS undefined (a checked-dynamic slot,
@@ -8352,6 +8430,12 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         if (setFn !== null) {
           out.push(setFn);
           info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynSet", fn: setFn.name }];
+        }
+        // The clone half (dynCloneFn): the runtime's Object.create over a dyn source.
+        const cloneFn = dynCloneFn(L, info);
+        if (cloneFn !== null) {
+          out.push(cloneFn);
+          info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynClone", fn: cloneFn.name }];
         }
         const delFn = dynDelFn(L, info);
         if (delFn !== null) {

@@ -1244,6 +1244,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.u8Of": { argTypes: [], result: DYN },
   "dyn.objCreateProto": { argTypes: [DYN], result: DYN },
   "dyn.objCreateDescs": { argTypes: [DYN, DYN], result: DYN },
+  "dyn.cloneOwn": { argTypes: [DYN], result: DYN },
+  "cls.propsClone": { argTypes: [DYN], result: DYN },
   "dyn.objCreateNullDescs": { argTypes: [DYN], result: DYN },
   "dyn.ownNamesFence": { argTypes: [DYN], result: VOID },
   "dyn.ownNamesCtor": { argTypes: [DYN, DYN], result: VOID },

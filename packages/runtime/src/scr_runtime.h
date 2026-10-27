@@ -5732,6 +5732,8 @@ ScrDyn *scr_dyn_obj_own_enum_read(ScrDyn *recv, const char *key, size_t key_len)
  * ENUMERABLE key — `k: [Getter]`, which is what Node prints for an
  * accessor it will not call. */
 ScrDyn *scr_cls_props_ensure(ScrDyn *cur);
+/* Object.create clone of a class instance's property table (borrowed bag, +1). */
+ScrDyn *scr_cls_props_clone(ScrDyn *bag);
 bool scr_cls_props_define(ScrDyn *tbl, const ScrStr *key, ScrDyn *desc,
                           bool declared, const ScrStr *cname);
 bool scr_cls_props_has(const ScrDyn *tbl, const ScrStr *key);
@@ -6445,6 +6447,8 @@ void scr_dyn_capture_stack(ScrDyn *target);
  * but the throw. Both arguments borrowed; the created object comes back
  * +1, or NULL with a pending catchable throw. */
 ScrDyn *scr_dyn_obj_create_descs(ScrDyn *proto, ScrDyn *descs);
+/* Object.create(getPrototypeOf(src), getOwnPropertyDescriptors(src)) over a dyn src (borrowed, +1). */
+ScrDyn *scr_dyn_clone_own(ScrDyn *src);
 ScrDyn *scr_dyn_obj_create_null_descs(ScrDyn *descs);
 /* The two non-source answers Function.prototype.toString can truthfully
  * give, as SENTINEL addresses in the `src` slot (never dereferenced —
