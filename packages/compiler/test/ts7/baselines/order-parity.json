@@ -18166,6 +18166,30 @@
     "<repo>/tests/corpus/12912-bigint-write-range-errors/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/12800-tls-ctx-cache-identity.js": {
+   "order": [
+    "<repo>/tests/corpus/12800-tls-ctx-cache-identity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12801-tls-ctx-invalid-option-types.js": {
+   "order": [
+    "<repo>/tests/corpus/12801-tls-ctx-invalid-option-types.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12802-tls-ctx-dyn-record-map.js": {
+   "order": [
+    "<repo>/tests/corpus/12802-tls-ctx-dyn-record-map.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12803-tls-ctx-optional-members.js": {
+   "order": [
+    "<repo>/tests/corpus/12803-tls-ctx-optional-members.js"
+   ],
+   "diags": []
   }
  }
 }
