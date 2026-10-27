@@ -2728,6 +2728,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13850-any-length-shrink-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/13850-any-length-shrink-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13851-any-length-minus-nested.ts": {
+   "order": [
+    "<repo>/tests/corpus/13851-any-length-minus-nested.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13852-any-length-bitwise-nested.ts": {
+   "order": [
+    "<repo>/tests/corpus/13852-any-length-bitwise-nested.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13853-any-length-invalid-nested.ts": {
+   "order": [
+    "<repo>/tests/corpus/13853-any-length-invalid-nested.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13854-any-length-grow-nested.ts": {
+   "order": [
+    "<repo>/tests/corpus/13854-any-length-grow-nested.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13855-number-array-length-compound-regression.ts": {
+   "order": [
+    "<repo>/tests/corpus/13855-number-array-length-compound-regression.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1350-path-normalize-join.ts": {
    "order": [
     "<repo>/tests/corpus/1350-path-normalize-join.ts"

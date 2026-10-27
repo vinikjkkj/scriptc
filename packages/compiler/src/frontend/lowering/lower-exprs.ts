@@ -24961,6 +24961,55 @@ function arrayLengthCompoundParts(
     }),
   };
 }
+/** `x.length op= e` on a DYN receiver that is not a plain name (`this._list.length >>>= 1`:
+ * the ring buffer's shrink, reached through an any-typed field). The receiver is evaluated
+ * ONCE into a hidden local (JS evaluates the member's object once); the read is the dyn
+ * member read, the combine runs under the operator's own conversion, and the write is the
+ * dyn keyed store. The runtime's keyed store on a dyn array truncates or grows on a
+ * `length` key and throws Node's RangeError for an invalid length (scr_dyn_key_set), so
+ * the lowering needs no operator-specific rule: every operator is a read-combine-write.
+ * Simple receivers keep their own dyn arm below; a typed receiver keeps its own arms. */
+function dynLengthCompoundParts(
+  L: Lowerer,
+  access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  op: CompoundOp,
+  rhsNode: ts.Expression | null,
+  loc: SrcLoc,
+): CompoundParts | null {
+  if (!ts.isPropertyAccessExpression(access)) return null;
+  if (access.questionDotToken !== undefined) return null;
+  if (access.name.text !== "length") return null;
+  if (ts.isIdentifier(access.expression) || access.expression.kind === ts.SyntaxKind.ThisKeyword) return null;
+  if (access.expression.kind === ts.SyntaxKind.SuperKeyword) return null;
+  // Only a receiver the checker leaves untyped (any, or a JS field) can be dyn here; a
+  // statically typed receiver is decided by the array arms, never probed twice.
+  const mapped = L.mapTypeOf(L.typeOf(access.expression));
+  if (mapped !== null && mapped.kind !== "dyn") return null;
+  const recv = probeLower(L, access.expression);
+  if (recv === null || recv.type.kind !== "dyn") return null;
+  const slot = L.declareHiddenLocal("%dynLenRecv", DYN);
+  const recvRef = (): IrExpr => ({ kind: "varRef", localId: slot.id, type: DYN, loc });
+  const pre: IrStmt[] = [{ kind: "varDecl", localId: slot.id, init: recv, loc }];
+  const key: IrExpr = { kind: "strLit", value: "length", type: STRING, loc, };
+  const read: IrExpr = { kind: "dynKeyGet", key, value: recvRef(), type: DYN, loc };
+  const rhs: IrExpr = rhsNode ? L.lowerExpr(rhsNode) : { kind: "numLit", value: 1, type: F64, loc };
+  const combined = compoundCombine(L, op, read, rhs, DYN, access, access, rhsNode ?? access, loc, rhsNode === null);
+  if (!combined) L.unsupported("SC1043", access);
+  return {
+    pre,
+    natural: combined.natural,
+    ...(combined.numericRead ? { numericRead: combined.numericRead } : {}),
+    write: (v) => ({
+      kind: "exprStmt",
+      expr: {
+        kind: "libCall", fn: "dyn.keySet",
+        args: [recvRef(), { ...key }, combined.toSlot(v)],
+        type: VOID, loc,
+      },
+      loc,
+    }),
+  };
+}
 
 /** `obj.f op= e` (and `obj.f++` with rhs null ≡ 1) — the element spelling
    * `obj[k] op= e` included when k is a declared symbol-keyed field, split
@@ -24988,6 +25037,9 @@ function arrayLengthCompoundParts(
     {
       const len = arrayLengthCompoundParts(L, access, op, rhsNode, loc);
       if (len) return len;
+      // An any-typed receiver that is not a plain name (`this._list.length >>>= 1`).
+      const dynLen = dynLengthCompoundParts(L, access, op, rhsNode, loc);
+      if (dynLen) return dynLen;
     }
     /* A receiver that is neither an identifier nor `this` used to refuse
      * here, and the reason was never that the SHAPE could not be emitted -- it
