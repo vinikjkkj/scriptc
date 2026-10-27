@@ -17724,6 +17724,60 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/12250-strnull-template-literal.ts": {
+   "order": [
+    "<repo>/tests/corpus/12250-strnull-template-literal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12251-strnull-concat-both-sides.ts": {
+   "order": [
+    "<repo>/tests/corpus/12251-strnull-concat-both-sides.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12252-strnull-string-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/12252-strnull-string-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12253-strnull-nullable-union-param.ts": {
+   "order": [
+    "<repo>/tests/corpus/12253-strnull-nullable-union-param.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12254-strnull-nullable-local-runtime.ts": {
+   "order": [
+    "<repo>/tests/corpus/12254-strnull-nullable-local-runtime.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12255-strnull-unit-typed-param.ts": {
+   "order": [
+    "<repo>/tests/corpus/12255-strnull-unit-typed-param.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12256-strnull-nullish-only-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/12256-strnull-nullish-only-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12257-strnull-mysql-parser-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/12257-strnull-mysql-parser-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/12258-strnull-null-call-side-effect.ts": {
+   "order": [
+    "<repo>/tests/corpus/12258-strnull-null-call-side-effect.ts"
+   ],
+   "diags": []
   }
  }
 }
