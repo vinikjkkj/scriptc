@@ -1568,6 +1568,9 @@ export class Lowerer {
    * root's throw, no storage exists, and references lower to the same
    * trap shape (never reached — sound whatever the type). */
   readonly trapBindings = new Set<ts.Symbol>();
+  /** Expressions whose lowered value is overridden for one lowering (a
+   * nullable array receiver narrowed to its array arm, lower-containers). */
+  readonly exprOverrides = new Map<ts.Expression, IrExpr>();
   /** NULLISH bindings of unmappable (generic-signature) types: `const i:
    * I<A & B> = null as any` — the binding provably holds null/undefined
    * forever (every write's RHS is nullish too), so no storage exists and
@@ -15686,6 +15689,10 @@ export class Lowerer {
   /* ── expressions ──────────────────────────────────────────────────── */
 
   lowerExpr(expr: ts.Expression): IrExpr {
+    // A receiver narrowed for one array-method call (exprOverrides): the
+    // narrowed value stands for the expression for that call only.
+    const ov = this.exprOverrides.get(expr);
+    if (ov !== undefined) return ov;
     return lowerExpr(this, expr);
   }
 
