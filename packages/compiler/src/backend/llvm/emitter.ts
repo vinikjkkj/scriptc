@@ -10933,8 +10933,14 @@ class LlEmitter {
           B.br(lj);
           B.startBlock(lNotPx);
         }
+        // A class instance (OBJINST) answers through the same presence call: its
+        // members and its run-time expando table (scr_dyn_obj_key_present).
+        const isObj0 = B.tmp();
+        B.line(`${isObj0} = icmp eq i32 ${kd}, ${DK.OBJ}`);
+        const isObj1 = B.tmp();
+        B.line(`${isObj1} = icmp eq i32 ${kd}, ${DK.OBJINST}`);
         const isObj = B.tmp();
-        B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
+        B.line(`${isObj} = or i1 ${isObj0}, ${isObj1}`);
         B.condBr(isObj, lObj, lNotObj);
         B.startBlock(lObj);
         // `in` walks the PROTOTYPE CHAIN (`"m" in new F()` is true where
