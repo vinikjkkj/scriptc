@@ -1243,6 +1243,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // (catchable SyntaxError) — all may-throw generics over the checked-dynamic tree.
   "dyn.objKeys": "scr_dyn_obj_keys",
   "dyn.hasOwn": "scr_dyn_has_own",
+  "dyn.forInAccessor": "scr_dyn_for_in_accessor",
   "dyn.objectToString": "scr_dyn_object_to_string",
   "dyn.assign": "scr_dyn_assign",
   // variadic Object.assign: the source pack (push never throws; the

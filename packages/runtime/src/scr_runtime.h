@@ -5843,6 +5843,9 @@ ScrDyn *scr_dyn_obj_keys(const ScrDyn *v);
  * bounds ("length" included); nullish receivers throw Node's ToObject
  * TypeError; every other kind answers false. */
 bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key);
+bool scr_dyn_for_in_accessor(const ScrDyn *v, const ScrStr *key);
+/* %Buffer.prototype% (scr_buffer_val.c sets it; NULL until built). Borrowed. */
+extern ScrDyn *scr_dyn_buffer_proto_ptr;
 /* Object.assign over dyn values (+1 target back; ToObject TypeError on a
  * nullish target). Sources copy their own enumerable keys exactly as
  * Object.keys lists them: OBJ members, ARR/STR/BYTES index keys; nullish

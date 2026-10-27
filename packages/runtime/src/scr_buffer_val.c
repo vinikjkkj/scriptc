@@ -927,12 +927,414 @@ ScrDyn *scr_dyn_buffer_module(void) {
   return obj;
 }
 
+/* ── %Buffer.prototype% as a VALUE ─────────────────────────────────────────
+ *
+ * `Buffer.prototype` read as a value is the prototype object Node's Buffer
+ * instances inherit from: its own enumerable keys are the 95 names of
+ * Node's for-in (93 functions, parent/offset getters), in Node's order; its
+ * prototype is %Uint8Array.prototype% and its constructor is %Buffer%. A
+ * key Node points at ONE function object (the 19 lowercase/toLocaleString
+ * spellings) is ONE box here too, so `P.readUint8 === P.readUInt8` holds.
+ *
+ * What a method DOES is implemented where the runtime already has the body:
+ * the fixed-width numeric reads and writes (scr_bytes_read_num /
+ * scr_bytes_write_num, Node's own range errors) and the variable-width
+ * family (scr_bytes_read_var / scr_bytes_write_var). Every other method is a
+ * LOUD refusal when it is called as a value: a named TypeError, never the
+ * is-not-a-function that would read as Node's absence. The numeric
+ * methods read the receiver as a byte array (Node's readUInt8 reads any
+ * Uint8Array-shaped this). A non-number argument refuses by name (Node
+ * coerces it; this tier does not yet). */
+
+#define BVP_N 95
+
+typedef struct {
+  const char *key;
+  int canon;
+  int getter;
+  ScrDynThunk fn;
+  uint32_t arity;
+  const char *name;
+} BvpRow;
+
+/* Refuses a method of %Buffer.prototype% that this tier does not answer yet. Returns NULL with the
+ * TypeError pending. */
+static ScrDyn *scr_bvp_refuse(const char *name, const char *why) {
+  ScrJsonBuf jb;
+  scr_jb_init(&jb);
+  scr_jb_puts(&jb, "Buffer.prototype.");
+  scr_jb_puts(&jb, name);
+  scr_jb_puts(&jb, " (");
+  scr_jb_puts(&jb, why);
+  scr_jb_puts(&jb, ") is not implemented as a value in scriptc yet");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&jb));
+  return NULL;
+}
+
+/* The receiver: a BYTES box (borrowed from self). */
+static ScrDyn *scr_bvp_recv(ScrDyn *self, const char *name) {
+  if (self == NULL || self->kind != SCR_DYN_BYTES) {
+    scr_bvp_refuse(name, "receiver is not a byte array");
+    return NULL;
+  }
+  return self;
+}
+
+static ScrDyn *scr_bvp_rd(const char *name, ScrBytesNumKind kind, bool le, ScrDyn *const *args, size_t argc) {
+  ScrDyn *self = scr_dyn_this_get();
+  ScrDyn *recv = scr_bvp_recv(self, name);
+  double off = 0;
+  if (recv != NULL && argc >= 1 && args[0]->kind != SCR_DYN_UNDEF) {
+    if (args[0]->kind != SCR_DYN_NUM) {
+      scr_bvp_refuse(name, "non-number offset");
+      recv = NULL;
+    } else {
+      off = args[0]->v.num;
+    }
+  }
+  double r = 0;
+  if (recv != NULL) r = scr_bytes_read_num(recv->v.bytes, off, kind, le);
+  if (self != NULL) scr_dyn_release(self);
+  if (recv == NULL || scr_exc_pending()) return NULL;
+  return scr_dyn_new_num(r);
+}
+
+static ScrDyn *scr_bvp_wr(const char *name, ScrBytesNumKind kind, bool le, ScrDyn *const *args, size_t argc) {
+  ScrDyn *self = scr_dyn_this_get();
+  ScrDyn *recv = scr_bvp_recv(self, name);
+  double v = 0, off = 0;
+  if (recv != NULL && (argc < 1 || args[0]->kind != SCR_DYN_NUM)) {
+    scr_bvp_refuse(name, "non-number value");
+    recv = NULL;
+  } else if (recv != NULL) {
+    v = args[0]->v.num;
+    if (argc >= 2 && args[1]->kind != SCR_DYN_UNDEF) {
+      if (args[1]->kind != SCR_DYN_NUM) {
+        scr_bvp_refuse(name, "non-number offset");
+        recv = NULL;
+      } else {
+        off = args[1]->v.num;
+      }
+    }
+  }
+  double r = 0;
+  if (recv != NULL) r = scr_bytes_write_num(recv->v.bytes, v, off, kind, le);
+  if (self != NULL) scr_dyn_release(self);
+  if (recv == NULL || scr_exc_pending()) return NULL;
+  return scr_dyn_new_num(r);
+}
+
+/* readUIntLE(offset = 0, byteLength) / readIntLE: byteLength is required here. */
+static ScrDyn *scr_bvp_rdv(const char *name, bool sign, bool le, ScrDyn *const *args, size_t argc) {
+  ScrDyn *self = scr_dyn_this_get();
+  ScrDyn *recv = scr_bvp_recv(self, name);
+  double off = 0, blen = 0;
+  if (recv != NULL && (argc < 2 || args[1]->kind != SCR_DYN_NUM)) {
+    scr_bvp_refuse(name, "byteLength is not a number");
+    recv = NULL;
+  } else if (recv != NULL) {
+    blen = args[1]->v.num;
+    if (argc >= 1 && args[0]->kind != SCR_DYN_UNDEF) {
+      if (args[0]->kind != SCR_DYN_NUM) {
+        scr_bvp_refuse(name, "non-number offset");
+        recv = NULL;
+      } else {
+        off = args[0]->v.num;
+      }
+    }
+  }
+  double r = 0;
+  if (recv != NULL) r = scr_bytes_read_var(recv->v.bytes, off, blen, sign, le);
+  if (self != NULL) scr_dyn_release(self);
+  if (recv == NULL || scr_exc_pending()) return NULL;
+  return scr_dyn_new_num(r);
+}
+
+/* writeUIntLE(value, offset = 0, byteLength): byteLength is required here. */
+static ScrDyn *scr_bvp_wrv(const char *name, bool sign, bool le, ScrDyn *const *args, size_t argc) {
+  ScrDyn *self = scr_dyn_this_get();
+  ScrDyn *recv = scr_bvp_recv(self, name);
+  double v = 0, off = 0, blen = 0;
+  if (recv != NULL && (argc < 3 || args[0]->kind != SCR_DYN_NUM || args[2]->kind != SCR_DYN_NUM)) {
+    scr_bvp_refuse(name, "non-number value or byteLength");
+    recv = NULL;
+  } else if (recv != NULL) {
+    v = args[0]->v.num;
+    blen = args[2]->v.num;
+    if (args[1]->kind != SCR_DYN_UNDEF) {
+      if (args[1]->kind != SCR_DYN_NUM) {
+        scr_bvp_refuse(name, "non-number offset");
+        recv = NULL;
+      } else {
+        off = args[1]->v.num;
+      }
+    }
+  }
+  double r = 0;
+  if (recv != NULL) r = scr_bytes_write_var(recv->v.bytes, v, off, blen, sign, le);
+  if (self != NULL) scr_dyn_release(self);
+  if (recv == NULL || scr_exc_pending()) return NULL;
+  return scr_dyn_new_num(r);
+}
+
+#define BVP_RD(fn, nm, kind, le) \
+  static ScrDyn *fn(ScrClosure *clo, ScrDyn *const *args, size_t argc) { \
+    (void)clo; return scr_bvp_rd(nm, kind, le, args, argc); }
+#define BVP_WR(fn, nm, kind, le) \
+  static ScrDyn *fn(ScrClosure *clo, ScrDyn *const *args, size_t argc) { \
+    (void)clo; return scr_bvp_wr(nm, kind, le, args, argc); }
+#define BVP_RDV(fn, nm, sign, le) \
+  static ScrDyn *fn(ScrClosure *clo, ScrDyn *const *args, size_t argc) { \
+    (void)clo; return scr_bvp_rdv(nm, sign, le, args, argc); }
+#define BVP_WRV(fn, nm, sign, le) \
+  static ScrDyn *fn(ScrClosure *clo, ScrDyn *const *args, size_t argc) { \
+    (void)clo; (void)args; (void)argc; return scr_bvp_wrv(nm, sign, le, args, argc); }
+#define BVP_NYI(fn, nm) \
+  static ScrDyn *fn(ScrClosure *clo, ScrDyn *const *args, size_t argc) { \
+    (void)clo; (void)args; (void)argc; return scr_bvp_refuse(nm, "body not mapped"); }
+
+/* parent / offset: Node answers undefined for a receiver that is not a Buffer (the prototype
+ * itself). A byte-array receiver would read its buffer/byteOffset, which this tier does not map. */
+static ScrDyn *scr_bvp_getter(const char *name) {
+  ScrDyn *self = scr_dyn_this_get();
+  bool bytes = self != NULL && self->kind == SCR_DYN_BYTES;
+  if (self != NULL) scr_dyn_release(self);
+  if (bytes) {
+    scr_bvp_refuse(name, "getter on a byte array");
+    return NULL;
+  }
+  return scr_dyn_undefined();
+}
+static ScrDyn *scr_bvp_get_parent(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  return scr_bvp_getter("parent");
+}
+static ScrDyn *scr_bvp_get_offset(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  return scr_bvp_getter("offset");
+}
+
+BVP_NYI(bvp_readBigUInt64LE, "readBigUInt64LE")
+BVP_NYI(bvp_readBigUInt64BE, "readBigUInt64BE")
+BVP_NYI(bvp_readBigInt64LE, "readBigInt64LE")
+BVP_NYI(bvp_readBigInt64BE, "readBigInt64BE")
+BVP_NYI(bvp_writeBigUInt64LE, "writeBigUInt64LE")
+BVP_NYI(bvp_writeBigUInt64BE, "writeBigUInt64BE")
+BVP_NYI(bvp_writeBigInt64LE, "writeBigInt64LE")
+BVP_NYI(bvp_writeBigInt64BE, "writeBigInt64BE")
+BVP_RDV(bvp_readUIntLE, "readUIntLE", 0, 1)
+BVP_RD(bvp_readUInt32LE, "readUInt32LE", SCR_BN_U32, 1)
+BVP_RD(bvp_readUInt16LE, "readUInt16LE", SCR_BN_U16, 1)
+BVP_RD(bvp_readUInt8, "readUInt8", SCR_BN_U8, 0)
+BVP_RDV(bvp_readUIntBE, "readUIntBE", 0, 0)
+BVP_RD(bvp_readUInt32BE, "readUInt32BE", SCR_BN_U32, 0)
+BVP_RD(bvp_readUInt16BE, "readUInt16BE", SCR_BN_U16, 0)
+BVP_RDV(bvp_readIntLE, "readIntLE", 1, 1)
+BVP_RD(bvp_readInt32LE, "readInt32LE", SCR_BN_I32, 1)
+BVP_RD(bvp_readInt16LE, "readInt16LE", SCR_BN_I16, 1)
+BVP_RD(bvp_readInt8, "readInt8", SCR_BN_I8, 0)
+BVP_RDV(bvp_readIntBE, "readIntBE", 1, 0)
+BVP_RD(bvp_readInt32BE, "readInt32BE", SCR_BN_I32, 0)
+BVP_RD(bvp_readInt16BE, "readInt16BE", SCR_BN_I16, 0)
+BVP_WRV(bvp_writeUIntLE, "writeUIntLE", 0, 1)
+BVP_WR(bvp_writeUInt32LE, "writeUInt32LE", SCR_BN_U32, 1)
+BVP_WR(bvp_writeUInt16LE, "writeUInt16LE", SCR_BN_U16, 1)
+BVP_WR(bvp_writeUInt8, "writeUInt8", SCR_BN_U8, 0)
+BVP_WRV(bvp_writeUIntBE, "writeUIntBE", 0, 0)
+BVP_WR(bvp_writeUInt32BE, "writeUInt32BE", SCR_BN_U32, 0)
+BVP_WR(bvp_writeUInt16BE, "writeUInt16BE", SCR_BN_U16, 0)
+BVP_WRV(bvp_writeIntLE, "writeIntLE", 1, 1)
+BVP_WR(bvp_writeInt32LE, "writeInt32LE", SCR_BN_I32, 1)
+BVP_WR(bvp_writeInt16LE, "writeInt16LE", SCR_BN_I16, 1)
+BVP_WR(bvp_writeInt8, "writeInt8", SCR_BN_I8, 0)
+BVP_WRV(bvp_writeIntBE, "writeIntBE", 1, 0)
+BVP_WR(bvp_writeInt32BE, "writeInt32BE", SCR_BN_I32, 0)
+BVP_WR(bvp_writeInt16BE, "writeInt16BE", SCR_BN_I16, 0)
+BVP_RD(bvp_readFloatLE, "readFloatLE", SCR_BN_F32, 1)
+BVP_RD(bvp_readFloatBE, "readFloatBE", SCR_BN_F32, 0)
+BVP_RD(bvp_readDoubleLE, "readDoubleLE", SCR_BN_F64, 1)
+BVP_RD(bvp_readDoubleBE, "readDoubleBE", SCR_BN_F64, 0)
+BVP_WR(bvp_writeFloatLE, "writeFloatLE", SCR_BN_F32, 1)
+BVP_WR(bvp_writeFloatBE, "writeFloatBE", SCR_BN_F32, 0)
+BVP_WR(bvp_writeDoubleLE, "writeDoubleLE", SCR_BN_F64, 1)
+BVP_WR(bvp_writeDoubleBE, "writeDoubleBE", SCR_BN_F64, 0)
+BVP_NYI(bvp_asciiSlice, "asciiSlice")
+BVP_NYI(bvp_base64Slice, "base64Slice")
+BVP_NYI(bvp_base64urlSlice, "base64urlSlice")
+BVP_NYI(bvp_latin1Slice, "latin1Slice")
+BVP_NYI(bvp_hexSlice, "hexSlice")
+BVP_NYI(bvp_ucs2Slice, "ucs2Slice")
+BVP_NYI(bvp_utf8Slice, "utf8Slice")
+BVP_NYI(bvp_asciiWrite, "asciiWrite")
+BVP_NYI(bvp_base64Write, "base64Write")
+BVP_NYI(bvp_base64urlWrite, "base64urlWrite")
+BVP_NYI(bvp_latin1Write, "latin1Write")
+BVP_NYI(bvp_hexWrite, "hexWrite")
+BVP_NYI(bvp_ucs2Write, "ucs2Write")
+BVP_NYI(bvp_utf8Write, "utf8Write")
+BVP_NYI(bvp_copy, "copy")
+BVP_NYI(bvp_toString, "toString")
+BVP_NYI(bvp_equals, "equals")
+BVP_NYI(bvp_inspect, "inspect")
+BVP_NYI(bvp_compare, "compare")
+BVP_NYI(bvp_indexOf, "indexOf")
+BVP_NYI(bvp_lastIndexOf, "lastIndexOf")
+BVP_NYI(bvp_includes, "includes")
+BVP_NYI(bvp_fill, "fill")
+BVP_NYI(bvp_write, "write")
+BVP_NYI(bvp_toJSON, "toJSON")
+BVP_NYI(bvp_subarray, "subarray")
+BVP_NYI(bvp_slice, "slice")
+BVP_NYI(bvp_swap16, "swap16")
+BVP_NYI(bvp_swap32, "swap32")
+BVP_NYI(bvp_swap64, "swap64")
+
+/* key, canon (row of the shared function box, -1 for own), getter, thunk, Node length, Node name */
+static const BvpRow bvp_rows[BVP_N] = {
+  { "readBigUInt64LE", -1, 0, bvp_readBigUInt64LE, 0, "readBigUInt64LE" },
+  { "readBigUInt64BE", -1, 0, bvp_readBigUInt64BE, 0, "readBigUInt64BE" },
+  { "readBigUint64LE", 0, 0, NULL, 0, "readBigUInt64LE" },
+  { "readBigUint64BE", 1, 0, NULL, 0, "readBigUInt64BE" },
+  { "readBigInt64LE", -1, 0, bvp_readBigInt64LE, 0, "readBigInt64LE" },
+  { "readBigInt64BE", -1, 0, bvp_readBigInt64BE, 0, "readBigInt64BE" },
+  { "writeBigUInt64LE", -1, 0, bvp_writeBigUInt64LE, 1, "writeBigUInt64LE" },
+  { "writeBigUInt64BE", -1, 0, bvp_writeBigUInt64BE, 1, "writeBigUInt64BE" },
+  { "writeBigUint64LE", 6, 0, NULL, 1, "writeBigUInt64LE" },
+  { "writeBigUint64BE", 7, 0, NULL, 1, "writeBigUInt64BE" },
+  { "writeBigInt64LE", -1, 0, bvp_writeBigInt64LE, 1, "writeBigInt64LE" },
+  { "writeBigInt64BE", -1, 0, bvp_writeBigInt64BE, 1, "writeBigInt64BE" },
+  { "readUIntLE", -1, 0, bvp_readUIntLE, 2, "readUIntLE" },
+  { "readUInt32LE", -1, 0, bvp_readUInt32LE, 1, "" },
+  { "readUInt16LE", -1, 0, bvp_readUInt16LE, 1, "" },
+  { "readUInt8", -1, 0, bvp_readUInt8, 1, "" },
+  { "readUIntBE", -1, 0, bvp_readUIntBE, 2, "readUIntBE" },
+  { "readUInt32BE", -1, 0, bvp_readUInt32BE, 1, "" },
+  { "readUInt16BE", -1, 0, bvp_readUInt16BE, 1, "" },
+  { "readUintLE", 12, 0, NULL, 2, "readUIntLE" },
+  { "readUint32LE", 13, 0, NULL, 1, "" },
+  { "readUint16LE", 14, 0, NULL, 1, "" },
+  { "readUint8", 15, 0, NULL, 1, "" },
+  { "readUintBE", 16, 0, NULL, 2, "readUIntBE" },
+  { "readUint32BE", 17, 0, NULL, 1, "" },
+  { "readUint16BE", 18, 0, NULL, 1, "" },
+  { "readIntLE", -1, 0, bvp_readIntLE, 2, "readIntLE" },
+  { "readInt32LE", -1, 0, bvp_readInt32LE, 1, "" },
+  { "readInt16LE", -1, 0, bvp_readInt16LE, 1, "" },
+  { "readInt8", -1, 0, bvp_readInt8, 1, "" },
+  { "readIntBE", -1, 0, bvp_readIntBE, 2, "readIntBE" },
+  { "readInt32BE", -1, 0, bvp_readInt32BE, 1, "" },
+  { "readInt16BE", -1, 0, bvp_readInt16BE, 1, "" },
+  { "writeUIntLE", -1, 0, bvp_writeUIntLE, 3, "writeUIntLE" },
+  { "writeUInt32LE", -1, 0, bvp_writeUInt32LE, 1, "writeUInt32LE" },
+  { "writeUInt16LE", -1, 0, bvp_writeUInt16LE, 1, "writeUInt16LE" },
+  { "writeUInt8", -1, 0, bvp_writeUInt8, 1, "writeUInt8" },
+  { "writeUIntBE", -1, 0, bvp_writeUIntBE, 3, "writeUIntBE" },
+  { "writeUInt32BE", -1, 0, bvp_writeUInt32BE, 1, "writeUInt32BE" },
+  { "writeUInt16BE", -1, 0, bvp_writeUInt16BE, 1, "writeUInt16BE" },
+  { "writeUintLE", 33, 0, NULL, 3, "writeUIntLE" },
+  { "writeUint32LE", 34, 0, NULL, 1, "writeUInt32LE" },
+  { "writeUint16LE", 35, 0, NULL, 1, "writeUInt16LE" },
+  { "writeUint8", 36, 0, NULL, 1, "writeUInt8" },
+  { "writeUintBE", 37, 0, NULL, 3, "writeUIntBE" },
+  { "writeUint32BE", 38, 0, NULL, 1, "writeUInt32BE" },
+  { "writeUint16BE", 39, 0, NULL, 1, "writeUInt16BE" },
+  { "writeIntLE", -1, 0, bvp_writeIntLE, 3, "writeIntLE" },
+  { "writeInt32LE", -1, 0, bvp_writeInt32LE, 1, "writeInt32LE" },
+  { "writeInt16LE", -1, 0, bvp_writeInt16LE, 1, "writeInt16LE" },
+  { "writeInt8", -1, 0, bvp_writeInt8, 1, "writeInt8" },
+  { "writeIntBE", -1, 0, bvp_writeIntBE, 3, "writeIntBE" },
+  { "writeInt32BE", -1, 0, bvp_writeInt32BE, 1, "writeInt32BE" },
+  { "writeInt16BE", -1, 0, bvp_writeInt16BE, 1, "writeInt16BE" },
+  { "readFloatLE", -1, 0, bvp_readFloatLE, 0, "readFloatForwards" },
+  { "readFloatBE", -1, 0, bvp_readFloatBE, 0, "readFloatBackwards" },
+  { "readDoubleLE", -1, 0, bvp_readDoubleLE, 0, "readDoubleForwards" },
+  { "readDoubleBE", -1, 0, bvp_readDoubleBE, 0, "readDoubleBackwards" },
+  { "writeFloatLE", -1, 0, bvp_writeFloatLE, 1, "writeFloatForwards" },
+  { "writeFloatBE", -1, 0, bvp_writeFloatBE, 1, "writeFloatBackwards" },
+  { "writeDoubleLE", -1, 0, bvp_writeDoubleLE, 1, "writeDoubleForwards" },
+  { "writeDoubleBE", -1, 0, bvp_writeDoubleBE, 1, "writeDoubleBackwards" },
+  { "asciiSlice", -1, 0, bvp_asciiSlice, 2, "" },
+  { "base64Slice", -1, 0, bvp_base64Slice, 2, "" },
+  { "base64urlSlice", -1, 0, bvp_base64urlSlice, 2, "" },
+  { "latin1Slice", -1, 0, bvp_latin1Slice, 2, "" },
+  { "hexSlice", -1, 0, bvp_hexSlice, 2, "" },
+  { "ucs2Slice", -1, 0, bvp_ucs2Slice, 2, "" },
+  { "utf8Slice", -1, 0, bvp_utf8Slice, 2, "" },
+  { "asciiWrite", -1, 0, bvp_asciiWrite, 3, "" },
+  { "base64Write", -1, 0, bvp_base64Write, 3, "" },
+  { "base64urlWrite", -1, 0, bvp_base64urlWrite, 3, "" },
+  { "latin1Write", -1, 0, bvp_latin1Write, 3, "" },
+  { "hexWrite", -1, 0, bvp_hexWrite, 3, "" },
+  { "ucs2Write", -1, 0, bvp_ucs2Write, 3, "" },
+  { "utf8Write", -1, 0, bvp_utf8Write, 3, "" },
+  { "parent", -1, 1, NULL, 0, "get parent" },
+  { "offset", -1, 1, NULL, 0, "get offset" },
+  { "copy", -1, 0, bvp_copy, 4, "copy" },
+  { "toString", -1, 0, bvp_toString, 3, "toString" },
+  { "equals", -1, 0, bvp_equals, 1, "equals" },
+  { "inspect", -1, 0, bvp_inspect, 2, "inspect" },
+  { "compare", -1, 0, bvp_compare, 5, "compare" },
+  { "indexOf", -1, 0, bvp_indexOf, 3, "indexOf" },
+  { "lastIndexOf", -1, 0, bvp_lastIndexOf, 3, "lastIndexOf" },
+  { "includes", -1, 0, bvp_includes, 3, "includes" },
+  { "fill", -1, 0, bvp_fill, 4, "fill" },
+  { "write", -1, 0, bvp_write, 4, "write" },
+  { "toJSON", -1, 0, bvp_toJSON, 0, "toJSON" },
+  { "subarray", -1, 0, bvp_subarray, 2, "subarray" },
+  { "slice", -1, 0, bvp_slice, 2, "slice" },
+  { "swap16", -1, 0, bvp_swap16, 0, "swap16" },
+  { "swap32", -1, 0, bvp_swap32, 0, "swap32" },
+  { "swap64", -1, 0, bvp_swap64, 0, "swap64" },
+  { "toLocaleString", 79, 0, NULL, 3, "toString" },
+};
+/* MEASURED 95 rows: 74 function boxes, 19 aliases, 2 getters. */
+
+/* The process value of %Buffer.prototype%: built on first read, kept by the cache (scr_bv_values[15]).
+ * +1. Its rows are the generated table below (lab/gen-proto.js). */
+static ScrDyn *scr_bvp_build(void) {
+  ScrDyn *p = scr_dyn_new_obj(); /* +1 */
+  ScrDyn *u8p = scr_dyn_uint8array_prototype(); /* +1 */
+  scr_dyn_obj_set_proto(p, u8p);
+  scr_dyn_release(u8p);
+  ScrDyn *boxes[BVP_N];
+  for (int i = 0; i < BVP_N; i++) {
+    const BvpRow *r = &bvp_rows[i];
+    size_t klen = strlen(r->key);
+    boxes[i] = NULL;
+    if (r->getter) {
+      ScrDynThunk gt = strcmp(r->key, "parent") == 0 ? scr_bvp_get_parent : scr_bvp_get_offset;
+      ScrDyn *g = scr_dyn_new_func(scr_closure_new((void *)gt, 0), gt, 0, "()", r->name); /* +1 */
+      scr_dyn_obj_define_accessor(p, r->key, klen, g, scr_dyn_undefined(), true, true);
+      scr_dyn_release(g);
+      continue;
+    }
+    if (r->canon >= 0) {
+      boxes[i] = boxes[r->canon]; /* borrowed: the canonical row's box */
+    } else {
+      boxes[i] = scr_dyn_new_func(scr_closure_new((void *)r->fn, 0), r->fn, r->arity, "()", r->name); /* +1, released below */
+    }
+    scr_dyn_obj_set(p, r->key, klen, scr_dyn_retain(boxes[i])); /* the object takes this +1 */
+  }
+  for (int i = 0; i < BVP_N; i++) {
+    if (bvp_rows[i].canon < 0 && !bvp_rows[i].getter) scr_dyn_release(boxes[i]);
+  }
+  ScrDyn *ctor = scr_dyn_buffer_ctor(); /* +1 */
+  scr_dyn_obj_define_hidden_data(p, "constructor", 11, ctor, true, true); /* borrowed */
+  ScrDyn *ctab = scr_dyn_fn_props(ctor); /* +1: %Buffer%.prototype, non-enumerable */
+  scr_dyn_obj_define_hidden_data(ctab, "prototype", 9, p, false, false); /* borrowed */
+  scr_dyn_release(ctab);
+  scr_dyn_release(ctor);
+  scr_dyn_buffer_proto_ptr = p; /* borrowed by instanceof; the cache owns p */
+  return p;
+}
+
 /* Each member is ONE process value, built on first read and kept (the cache holds
  * the box), so every read of `buffer.<member>` is the same object as Node's:
  * `b.transcode === b.transcode`, `b.constants === b.constants`. */
-static ScrDyn *scr_bv_values[15];
+static ScrDyn *scr_bv_values[16];
 static void scr_bv_values_teardown(void) {
-  for (size_t i = 0; i < 15; i++) {
+  scr_dyn_buffer_proto_ptr = NULL;
+  for (size_t i = 0; i < 16; i++) {
     scr_dyn_release(scr_bv_values[i]);
     scr_bv_values[i] = NULL;
   }
@@ -940,7 +1342,7 @@ static void scr_bv_values_teardown(void) {
 
 ScrDyn *scr_dyn_buffer_value(double which) {
   int i = (int)which;
-  if (i < 0 || i > 14 || (double)i != which) {
+  if (i < 0 || i > 15 || (double)i != which) {
     static const char msg[] = "internal: unknown buffer module member";
     scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
     return NULL;
@@ -948,8 +1350,13 @@ ScrDyn *scr_dyn_buffer_value(double which) {
   if (scr_bv_values[i] == NULL) {
     if (i == 0) {
       scr_bv_values[0] = scr_dyn_buffer_ctor(); /* +1 kept by the cache */
+      /* %Buffer%.prototype must exist with the constructor, or a read of it would mint a fresh object. */
+      ScrDyn *pp = scr_dyn_buffer_value(15);
+      scr_dyn_release(pp);
     } else if (i == 14) {
       scr_bv_values[14] = scr_dyn_buffer_module();
+    } else if (i == 15) {
+      scr_bv_values[15] = scr_bvp_build();
     } else {
       scr_bv_values[i] = scr_bv_build_value(i);
       if (scr_bv_values[i] == NULL) return NULL;
