@@ -2914,6 +2914,10 @@ function validateFunction(
                 ? { argTypes: [BIGINT_T, F64], minArgs: 1, result: F64 }
               : e.method === "includesBig"
                 ? { argTypes: [BIGINT_T, F64], minArgs: 1, result: BOOL }
+              : e.method === "toArrayBig"
+                ? { argTypes: [], minArgs: 0, result: arrayOf(BIGINT_T) }
+              : e.method === "lastIndexOfBig"
+                ? { argTypes: [BIGINT_T, F64], minArgs: 1, result: F64 }
               : e.method === "sortBig"
                 ? { argTypes: [], minArgs: 0, result: bytesOf(recv.elem) }
               : e.method === "slice" || e.method === "subarray"

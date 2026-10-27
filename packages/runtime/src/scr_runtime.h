@@ -8846,6 +8846,15 @@ void scr_bytes_set_big(ScrBytes *b, double i, const ScrBigInt *v);
 ScrBytes *scr_bytes_fill_big(ScrBytes *b, const ScrBigInt *v, double nargs, double from, double to);
 double scr_bytes_index_of_big(const ScrBytes *b, const ScrBigInt *v, double from);
 ScrBytes *scr_bytes_sort_big(ScrBytes *b);
+double scr_bytes_last_index_of_big(const ScrBytes *b, const ScrBigInt *v, double from);
+ScrArr *scr_bytes_big_array(const ScrBytes *b); /* the view as a bigint[] (rest destructuring), +1 */
+/* Keyed access to a dynamic typed array's elements (scr_json.c). A bigint
+ * view's elements are bigint boxes: its store converts with ToBigInt (the
+ * gated unit installs both hooks in scr_big_dyn_install). */
+extern void (*scr_dyn_bytes_big_store_fn)(ScrBytes *b, size_t idx, const ScrDyn *v);
+extern ScrDyn *(*scr_dyn_bytes_big_load_fn)(const ScrBytes *b, size_t idx);
+bool scr_dyn_bytes_is_big(const ScrBytes *b);
+ScrDyn *scr_dyn_bytes_elem(const ScrBytes *b, size_t idx); /* a dyn element read of any view, +1 */
 /* A bigint[] source of a bigint view (new BigInt64Array([...]), set([...])). */
 ScrBytes *scr_bytes_from_bigs(ScrBytesElem elem, ScrArr *arr);
 

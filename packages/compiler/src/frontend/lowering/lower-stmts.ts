@@ -6,7 +6,7 @@ import { protoDataAssignStmt } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
-import { BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
@@ -1967,15 +1967,13 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
             if (el.initializer) {
               L.unsupported("SC1031", el, "defaults on rest elements");
             }
-            if (srcType.elem === "i64" || srcType.elem === "u64") {
-              L.unsupported("SC1090", el, "rest destructuring of a BigInt64Array / BigUint64Array (its elements are bigints; the rest array is not lowered yet)");
-            }
+            const bigView = srcType.elem === "i64" || srcType.elem === "u64";
             const all: IrExpr = {
               kind: "bytesIntrinsic",
-              method: "toArray",
+              method: bigView ? "toArrayBig" : "toArray",
               receiver: srcRef(),
               args: [],
-              type: arrayOf(F64),
+              type: arrayOf(bigView ? BIGINT : F64),
               loc,
             };
             const value: IrExpr = {
@@ -1983,7 +1981,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
               method: "slice",
               receiver: all,
               args: [{ kind: "numLit", value: i, type: F64, loc }],
-              type: arrayOf(F64),
+              type: arrayOf(bigView ? BIGINT : F64),
               loc,
             };
             L.bindPatternTarget(el.name, value, isLet, out);

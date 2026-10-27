@@ -2887,6 +2887,8 @@ export type IrBytesIntrinsicMethod =
   | "fillBig"
   | "indexOfBig"
   | "includesBig"
+  | "lastIndexOfBig"
+  | "toArrayBig"
   | "sortBig"
   /** copyWithin(target[, start[, end]]): an OVERLAPPING in-place move
    * (memmove, not memcpy -- source and destination are one buffer),
@@ -3000,7 +3002,7 @@ export const DV_BIG_SET_METHODS: ReadonlySet<IrBytesIntrinsicMethod> = new Set([
 const BYTES_INTRINSIC_METHOD_SET: Record<IrBytesIntrinsicMethod, true> = {
   copyWithin: true,
   length: true, byteLength: true, get: true, slice: true,
-  fillBig: true, indexOfBig: true, includesBig: true, sortBig: true,
+  fillBig: true, indexOfBig: true, includesBig: true, lastIndexOfBig: true, toArrayBig: true, sortBig: true,
   subarray: true, toReversed: true, with: true, join: true,
   toArray: true, setFrom: true, toString: true, readNum: true,
   writeNum: true, readNumVar: true, writeNumVar: true, equals: true,
@@ -8666,6 +8668,10 @@ export const DYN_BYTES_KINDS: ReadonlyMap<IrBytesElem, { kind: string; dk: "BYTE
   new Map([
     ["u8", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Uint8Array" }],
     ["buf", { kind: "SCR_DYN_ARRBUF", dk: "ARRBUF", cls: "ArrayBuffer" }],
+    // The BigInt views box like the byte views: the same ScrBytes payload,
+    // whose elements are bigint boxes (scr_json.c's bigint hooks).
+    ["i64", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "BigInt64Array" }],
+    ["u64", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "BigUint64Array" }],
   ]);
 
 /** The dyn->static extraction of a `bytes` value: `true` (the default)

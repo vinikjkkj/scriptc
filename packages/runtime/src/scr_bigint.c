@@ -1073,9 +1073,14 @@ static int scr_big_store_check(const ScrDyn *v, bool is_signed, uint64_t *bits, 
   return 0;
 }
 
+static void scr_big_dyn_store(ScrBytes *b, size_t idx, const ScrDyn *v);
+static ScrDyn *scr_big_dyn_load(const ScrBytes *b, size_t idx);
+
 void scr_big_dyn_install(void) {
   scr_dyn_big_from_bits_fn = scr_big_dyn_from_bits;
   scr_dyn_big_store_fn = scr_big_store_check;
+  scr_dyn_bytes_big_store_fn = scr_big_dyn_store;
+  scr_dyn_bytes_big_load_fn = scr_big_dyn_load;
 }
 
 /* ── BigInt64Array / BigUint64Array elements ──────────────────────────── */
@@ -1240,4 +1245,84 @@ ScrBytes *scr_bytes_from_bigs(ScrBytesElem elem, ScrArr *arr) {
     scr_big_release(v);
   }
   return b;
+}
+
+/* lastIndexOf by value: from the end, or from `from` (NaN = the last index).
+ * Node: a negative `from` counts from the end; -Infinity finds nothing. */
+double scr_bytes_last_index_of_big(const ScrBytes *b, const ScrBigInt *v, double from) {
+  const size_t len = b->len;
+  if (len == 0) return -1.0;
+  double k;
+  if (from != from) {
+    k = (double)len - 1.0;
+  } else {
+    double t = trunc(from);
+    if (t == -INFINITY) return -1.0;
+    k = t >= 0 ? (t < (double)len - 1.0 ? t : (double)len - 1.0) : (double)len + t;
+  }
+  for (double i = k; i >= 0.0; i -= 1.0) {
+    ScrBigInt *e = scr_bytes_get_big(b, i);
+    const bool same = scr_big_eq(e, v);
+    scr_big_release(e);
+    if (same) return i;
+  }
+  return -1.0;
+}
+
+/* The whole view as a bigint[] (rest destructuring of a bigint view): each
+ * element is a fresh bigint whose ownership moves into the array. */
+ScrArr *scr_bytes_big_array(const ScrBytes *b) {
+  ScrArr *a = scr_arr_new_ref(scr_big_retain_v, scr_big_release_v, NULL, b->len);
+  for (size_t i = 0; i < b->len; i++) scr_arr_push_ref(a, scr_bytes_get_big(b, (double)i));
+  return a;
+}
+
+/* ── BigInt views in the checked-dynamic tree ─────────────────────────── */
+
+/* ToBigInt for a typed-array store (ECMA-262 7.1.13): a bigint as is, a
+ * boolean as 0n / 1n, a string parsed, and a number, undefined or null a
+ * TypeError. NULL with the exception pending when it throws. */
+static ScrBigInt *scr_big_to_store(const ScrDyn *v) {
+  switch (v->kind) {
+    case SCR_DYN_BIG:
+      return scr_big_retain(v->v.big);
+    case SCR_DYN_BOOL:
+      return v->v.b ? scr_big_from_f64(1.0) : scr_big_zero();
+    case SCR_DYN_STR:
+      return scr_big_from_str(v->v.str);
+    default:
+      break;
+  }
+  char msg[96];
+  int n;
+  if (v->kind == SCR_DYN_NUM) {
+    char num[64];
+    const size_t nl = scr_f64_to_str(v->v.num, num); /* JS ToString; scr_number.c is always linked */
+    n = snprintf(msg, sizeof msg, "Cannot convert %.*s to a BigInt", (int)nl, num);
+  } else if (v->kind == SCR_DYN_NULL) {
+    n = snprintf(msg, sizeof msg, "Cannot convert null to a BigInt");
+  } else {
+    n = snprintf(msg, sizeof msg, "Cannot convert undefined to a BigInt");
+  }
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+  return NULL;
+}
+
+/* A keyed store into a bigint view: ToBigInt FIRST (a bad value throws even
+ * out of range), then the element when the index is in bounds. */
+static void scr_big_dyn_store(ScrBytes *b, size_t idx, const ScrDyn *v) {
+  ScrBigInt *x = scr_big_to_store(v);
+  if (x == NULL) return;
+  if (idx < b->len) scr_bytes_set_big(b, (double)idx, x);
+  scr_big_release(x);
+}
+
+/* A keyed read of a bigint view: the element as a bigint box. */
+static ScrDyn *scr_big_dyn_load(const ScrBytes *b, size_t idx) {
+  /* The box retains its own reference (scr_dyn_alloc_big), so the element's
+   * +1 is released here, after boxing. */
+  ScrBigInt *x = scr_bytes_get_big(b, (double)idx);
+  ScrDyn *d = scr_dyn_from_big(x);
+  scr_big_release(x);
+  return d;
 }

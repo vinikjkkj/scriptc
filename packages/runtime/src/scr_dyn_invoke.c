@@ -434,7 +434,7 @@ static ScrDyn **dyn_list_from_array_like(ScrDyn *list, size_t *out_len) {
     if (list->kind == SCR_DYN_BYTES) {
       /* Past the end of a typed array every index reads undefined, which
        * is what a `length` bigger than the payload means in JS too. */
-      v = i < list->v.bytes->len ? scr_dyn_new_num(scr_bytes_get(list->v.bytes, (double)i))
+      v = i < list->v.bytes->len ? scr_dyn_bytes_elem(list->v.bytes, i)
                                  : scr_dyn_retain(scr_dyn_undefined());
     } else {
       char key[24];
@@ -1783,7 +1783,7 @@ static ScrDyn *dyn_seq_snapshot(ScrDyn *recv, int mode) {
   size_t n = recv->kind == SCR_DYN_ARR ? recv->v.arr.len : (size_t)scr_bytes_len(recv->v.bytes);
   for (size_t i = 0; i < n; i++) {
     ScrDyn *el = recv->kind == SCR_DYN_ARR ? scr_dyn_retain(recv->v.arr.items[i])
-                                           : scr_dyn_new_num(scr_bytes_get(recv->v.bytes, (double)i));
+                                           : scr_dyn_bytes_elem(recv->v.bytes, i);
     if (mode == 2) {
       scr_dyn_arr_push(out, el);
     } else if (mode == 1) {

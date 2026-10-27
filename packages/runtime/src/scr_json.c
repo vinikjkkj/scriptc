@@ -3774,6 +3774,22 @@ ScrDyn *(*scr_dyn_big_from_bits_fn)(uint64_t bits, bool is_signed) = NULL;
  * fits the signed or unsigned 64-bit range, 0 with `shown` holding Node's rendering of the value. */
 int (*scr_dyn_big_store_fn)(const ScrDyn *v, bool is_signed, uint64_t *bits, char *shown, size_t cap) = NULL;
 
+/* The bigint view hooks (scr_bigint.c installs them with its unit). A
+ * bigint view's dynamic element is a bigint box, so every keyed access that
+ * can reach one goes through these, not the double accessors. */
+void (*scr_dyn_bytes_big_store_fn)(ScrBytes *b, size_t idx, const ScrDyn *v) = NULL;
+ScrDyn *(*scr_dyn_bytes_big_load_fn)(const ScrBytes *b, size_t idx) = NULL;
+
+bool scr_dyn_bytes_is_big(const ScrBytes *b) { return b->elem == SCR_BYTES_I64 || b->elem == SCR_BYTES_U64; }
+
+ScrDyn *scr_dyn_bytes_elem(const ScrBytes *b, size_t idx) {
+  if (scr_dyn_bytes_is_big(b)) {
+    if (scr_dyn_bytes_big_load_fn == NULL) scr_trap_fmt("scriptc: internal error: a BigInt view read without its bigint unit\n");
+    return scr_dyn_bytes_big_load_fn(b, idx);
+  }
+  return scr_dyn_new_num(scr_bytes_get(b, (double)idx));
+}
+
 ScrDyn *scr_dyn_alloc_big(ScrBigInt *b, const ScrDynBigOps *ops) {
   scr_dynbig_ops = ops;
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_BIG);
@@ -7253,6 +7269,11 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     for (size_t i = 0; is_index && i < key->len; i++) {
       if (key->data[i] < '0' || key->data[i] > '9') is_index = 0;
       else idx = idx * 10 + (size_t)(key->data[i] - '0');
+    }
+    if (is_index && scr_dyn_bytes_is_big(recv->v.bytes)) {
+      if (scr_dyn_bytes_big_store_fn == NULL) scr_trap_fmt("scriptc: internal error: a BigInt view written without its bigint unit\n");
+      scr_dyn_bytes_big_store_fn(recv->v.bytes, idx, value);
+      return;
     }
     if (is_index) {
       double num = scr_dyn_to_number(value);
@@ -11313,7 +11334,7 @@ ScrDyn *scr_dyn_bytes_key_get(const ScrDyn *d, const ScrStr *k) {
       if (kd[i] < '0' || kd[i] > '9' || idx > (SIZE_MAX - 9) / 10) return NULL;
       idx = idx * 10 + (size_t)(kd[i] - '0');
     }
-    if (idx < b->len) return scr_dyn_new_num(scr_bytes_get(b, (double)idx));
+    if (idx < b->len) return scr_dyn_bytes_elem(b, idx);
   }
   return NULL;
 }
