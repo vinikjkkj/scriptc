@@ -676,6 +676,40 @@ ScrStr *scr_insp_buffer(ScrBytes *b) {
  * `code` slot renders as the one extra own property Node would show:
  * `[Error: m] { code: 'X' }`, `[Error]` beyond depth. Message newlines
  * indent like Node's formatError tail. */
+/* A non-Buffer typed array, Node's formatTypedArray: `Name(n) [ ... ]`, the
+ * elements formatted as numbers, with the array grid and the "... N more
+ * items" tail (Node's formatList, which treats typed arrays as array
+ * extras). `name` is the constructor's name, spelled by the compiler. */
+ScrStr *scr_insp_typed(ScrBytes *b, ScrStr *name) {
+  const size_t n = b->len;
+  InspBuf head = {0};
+  ib_str(&head, name);
+  char lenbuf[40];
+  int ln = snprintf(lenbuf, sizeof lenbuf, "(%zu) [", n);
+  ib_bytes(&head, lenbuf, (size_t)ln);
+  ScrStr *b0 = ib_take(&head);
+  ScrStr *b1 = scr_str_new("]", 1);
+  ScrStr *base = scr_str_new("", 0);
+  scr_insp_begin(1);
+  const size_t shown = n < 100 ? n : 100;
+  for (size_t i = 0; i < shown; i++) {
+    ScrStr *s = scr_insp_f64(scr_bytes_get(b, (double)i));
+    scr_insp_entry(s, true);
+    scr_str_release(s);
+  }
+  const bool more = n > 100;
+  if (more) {
+    ScrStr *m = scr_insp_more_items((double)(n - 100));
+    scr_insp_entry(m, true);
+    scr_str_release(m);
+  }
+  ScrStr *out = scr_insp_end(base, b0, b1, 1, true, shown + (more ? 1 : 0) > 100);
+  scr_str_release(base);
+  scr_str_release(b0);
+  scr_str_release(b1);
+  return out;
+}
+
 ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
   double ext_errno = 0;
   const ScrStr *ext_syscall = NULL, *ext_path = NULL, *ext_dest = NULL;

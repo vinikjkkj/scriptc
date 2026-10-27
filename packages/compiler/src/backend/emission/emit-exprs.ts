@@ -7936,6 +7936,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_date(${arg(0)})`);
           case "insp.buffer":
             return finish(`scr_insp_buffer(${arg(0)})`);
+          case "insp.typed":
+            return finish(`scr_insp_typed(${arg(0)}, ${arg(1)})`);
           case "insp.error":
             // The receiver may be a user subclass struct — its ScrError
             // prefix carries the name/message/code slots (the error.code

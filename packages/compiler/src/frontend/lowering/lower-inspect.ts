@@ -37,7 +37,7 @@ import * as ts from "../ts7/adapter.js";
 import type { NullProtoPatch } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { BOOL, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
+import { BOOL, BYTES_ELEM_NAMES, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { dynRestPack } from "./lower-calls.js";
@@ -1294,12 +1294,22 @@ export function lowerConsoleInspectArg(
     const tname = L.checker.typeToString(L.checker.getBaseTypeOfLiteralType(L.typeOf(node)));
     const isBuffer =
       tname === "Buffer" || tname === "NonSharedBuffer" || tname.startsWith("Buffer<") || tname.startsWith("NonSharedBuffer<");
-    if (t.elem !== "u8" || !isBuffer) {
+    if (t.elem === "buf") {
       L.unsupported(
         "SC1090",
         node,
-        `${surface} of '${tname}' values (Buffer's <Buffer ..> form is the lowered typed-array rendering; other typed arrays fence)`,
+        `${surface} of '${tname}' values (an ArrayBuffer's own rendering is not lowered)`,
       );
+    }
+    // Node's typed-array form for every view but a Buffer: `Name(n) [ ... ]`.
+    if (!(t.elem === "u8" && isBuffer)) {
+      return {
+        kind: "libCall",
+        fn: "insp.typed",
+        args: [value, { kind: "strLit", value: BYTES_ELEM_NAMES[t.elem], type: STRING, loc }],
+        type: STRING,
+        loc,
+      };
     }
     return inspectExpr(L, t, value, num(0, loc), num(2, loc), loc);
   }
@@ -1455,12 +1465,26 @@ function lowerInspectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrE
     // into shapes).
     const tname = L.checker.typeToString(L.checker.getBaseTypeOfLiteralType(L.typeOf(valueNode)));
     const isBuffer = tname === "Buffer" || tname === "NonSharedBuffer" || tname.startsWith("Buffer<") || tname.startsWith("NonSharedBuffer<");
-    if (value.type.elem !== "u8" || !isBuffer) {
-      L.noLowering(
-        `util.inspect of '${tname}' values`,
-        valueNode,
-        "Buffer's <Buffer ..> form is the lowered typed-array rendering; other typed arrays fence",
-      );
+    if (value.type.elem === "buf") {
+      L.noLowering(`util.inspect of '${tname}' values`, valueNode, "an ArrayBuffer's own rendering is not lowered");
+    }
+    if (!(value.type.elem === "u8" && isBuffer)) {
+      // The typed-array form takes no options here: a depth or showHidden
+      // request would change the rendering, so those calls fence.
+      if (expr.arguments.length > 1) {
+        L.noLowering(
+          `util.inspect options on '${tname}' values`,
+          valueNode,
+          "the typed-array rendering is lowered without options; pass util.inspect(value) alone",
+        );
+      }
+      return {
+        kind: "libCall",
+        fn: "insp.typed",
+        args: [value, { kind: "strLit", value: BYTES_ELEM_NAMES[value.type.elem], type: STRING, loc }],
+        type: STRING,
+        loc,
+      };
     }
     const bufDepth = parseInspectOptions(L, expr.arguments[1], false);
     void bufDepth; // Buffers render fully at any depth (custom inspect)
