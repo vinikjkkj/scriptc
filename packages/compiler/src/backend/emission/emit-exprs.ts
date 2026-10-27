@@ -2206,6 +2206,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // The running closure itself (env is borrowed; the result is owned).
         return E.newTemp(e.type, retainCallC(e.type, "sc_env"));
       case "new": {
+        if (e.allocOnly) {
+          // Allocation alone (no ctor, no args): the caller writes every
+          // own field. Owned +1, nothing can throw.
+          return E.newTemp(e.type, `${mangleClassNew(e.className)}()`);
+        }
         // Allocate (fields zeroed), then run the ctor. The ctor owns and
         // releases its `this` param like any callee, so it receives a +1
         // distinct from the one this expression returns.

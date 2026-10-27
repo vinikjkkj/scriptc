@@ -408,7 +408,8 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           break;
         }
         case "new":
-          f.callees.push(`%${rec["className"] as string}.constructor`);
+          // An allocation alone runs no constructor, so it reaches none.
+          if (rec["allocOnly"] !== true) f.callees.push(`%${rec["className"] as string}.constructor`);
           break;
         case "newValue": {
           // Construction through a class VALUE reaches the static class's

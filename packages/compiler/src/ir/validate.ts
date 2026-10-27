@@ -3376,6 +3376,14 @@ function validateFunction(
           err(`new of undeclared class "${e.className}"`, e.loc);
           break;
         }
+        if (e.allocOnly) {
+          // Allocation alone: no constructor, so no arguments and no ctor check.
+          if (e.args.length !== 0) err(`new ${e.className} (allocOnly) takes no arguments`, e.loc);
+          if (!typeEquals(e.type, { kind: "object", className: e.className })) {
+            err(`new ${e.className} must have that object type`, e.loc);
+          }
+          break;
+        }
         const ctor = functions.get(`%${e.className}.constructor`);
         if (!ctor) {
           err(`new ${e.className}: missing constructor function`, e.loc);
