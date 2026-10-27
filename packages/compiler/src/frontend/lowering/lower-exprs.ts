@@ -8228,6 +8228,41 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       }
       return null;
     }
+    if (kind === "f64" && !expr.questionDotToken && stdlibHandleDeclaresMember(name) && stdlibHandleObjectTypeOf(L, expr.expression) !== null) {
+      // `t.unref` / `t.ref` / `t.hasRef` / `t.refresh` on a Timeout handle,
+      // read as a value and tested for truthiness (`if (t.unref) t.unref()`:
+      // pg's and pg-pool's own feature detection). Node's member is always
+      // a function, which is truthy, so a read whose value is ONLY tested
+      // answers the constant true. The fold is exact only where the member's
+      // value is not observed: a condition (if/while/do/for/?:), the operand
+      // of `!`, or the LEFT operand of `&&` (a truthy left yields the right).
+      // Any other use, including `||` and assignment, keeps the fence.
+      let node: ts.Node = expr;
+      while (ts.isParenthesizedExpression(node.parent)) node = node.parent;
+      const p = node.parent;
+      const truthOnly =
+        ((ts.isIfStatement(p) || ts.isWhileStatement(p) || ts.isDoStatement(p)) && p.expression === node) ||
+        (ts.isForStatement(p) && p.condition === node) ||
+        (ts.isConditionalExpression(p) && p.condition === node) ||
+        (ts.isPrefixUnaryExpression(p) && p.operator === ts.SyntaxKind.ExclamationToken) ||
+        (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && p.left === node);
+      if (truthOnly) {
+        const loc = locOf(expr);
+        const recv = L.lowerExpr(expr.expression);
+        if (recv.type.kind === "f64") {
+          if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet") {
+            return { kind: "boolLit", value: true, type: BOOL, loc };
+          }
+          return {
+            kind: "seqExpr",
+            stmts: [{ kind: "exprStmt", expr: recv, loc }],
+            result: { kind: "boolLit", value: true, type: BOOL, loc },
+            type: BOOL,
+            loc,
+          };
+        }
+      }
+    }
     if (kind === "f64") {
       // The only ambient members on numbers are island-backed methods; a
       // bare reference has no value form regardless of --dynamic.
