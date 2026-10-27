@@ -1047,7 +1047,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const instT = bufSym ? L.checker.getDeclaredTypeOfSymbol(bufSym) : L.typeOf(expr.expression.expression);
         const prop = L.checker.getPropertyOfType(instT, expr.expression.name.text);
         const callable = prop !== undefined && prop !== null && L.checker.getCallSignatures(L.checker.getTypeOfSymbol(prop)).length > 0;
-        return { kind: "strLit", value: callable ? "function" : "undefined", type: STRING, loc };
+        // Node's 93 function-valued Buffer.prototype keys (measured, lab/keys.js); the runtime value (scr_buffer_val.c)
+        // answers the same names with function values.
+        const bufProtoFnKeys = new Set(["readBigUInt64LE","readBigUInt64BE","readBigUint64LE","readBigUint64BE","readBigInt64LE","readBigInt64BE","writeBigUInt64LE","writeBigUInt64BE","writeBigUint64LE","writeBigUint64BE","writeBigInt64LE","writeBigInt64BE","readUIntLE","readUInt32LE","readUInt16LE","readUInt8","readUIntBE","readUInt32BE","readUInt16BE","readUintLE","readUint32LE","readUint16LE","readUint8","readUintBE","readUint32BE","readUint16BE","readIntLE","readInt32LE","readInt16LE","readInt8","readIntBE","readInt32BE","readInt16BE","writeUIntLE","writeUInt32LE","writeUInt16LE","writeUInt8","writeUIntBE","writeUInt32BE","writeUInt16BE","writeUintLE","writeUint32LE","writeUint16LE","writeUint8","writeUintBE","writeUint32BE","writeUint16BE","writeIntLE","writeInt32LE","writeInt16LE","writeInt8","writeIntBE","writeInt32BE","writeInt16BE","readFloatLE","readFloatBE","readDoubleLE","readDoubleBE","writeFloatLE","writeFloatBE","writeDoubleLE","writeDoubleBE","asciiSlice","base64Slice","base64urlSlice","latin1Slice","hexSlice","ucs2Slice","utf8Slice","asciiWrite","base64Write","base64urlWrite","latin1Write","hexWrite","ucs2Write","utf8Write","copy","toString","equals","inspect","compare","indexOf","lastIndexOf","includes","fill","write","toJSON","subarray","slice","swap16","swap32","swap64","toLocaleString"]);
+        const isFn = bufProtoFnKeys.has(expr.expression.name.text) || callable;
+        return { kind: "strLit", value: isFn ? "function" : "undefined", type: STRING, loc };
       }
       // `typeof dc.tracingChannel` / `typeof dc?.tracingChannel` over a builtin module
       // member whose call form has a lowering row: the member is a function the binary has

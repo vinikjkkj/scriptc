@@ -10222,6 +10222,8 @@ export function moduleUsesBigInt(mod: IrModule): boolean {
   // pointer. Measured cost is the unit's size, in the programs that already
   // carry the dynamic dispatch.
   if (moduleUsesDynInvoke(mod)) return true;
+  // The %Buffer.prototype% value (scr_buffer_val.c) answers the BigInt read/write names by the same hook.
+  if (moduleUsesBufferValue(mod)) return true;
   let found = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;

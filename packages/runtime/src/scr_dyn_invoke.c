@@ -3010,6 +3010,13 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_str_release(ls);
       return ld;
     }
+    /* The Buffer-only methods (slices, writes, equals, compare, copy, swap, slice = subarray)
+     * of a Buffer receiver: the bodies scr_json.c shares with the static spelling. */
+    if (recv->buffer || recv->v.bytes->flavor == SCR_BF_BUFFER) {
+      bool bk = false;
+      ScrDyn *br = scr_dyn_buffer_only_method(recv, method, args, argc, what, &bk);
+      if (bk) return br;
+    }
     bool known = false;
     ScrDyn *r = scr_dyn_bytes_method(recv, method, args, argc, what, &known);
     if (known) return r;

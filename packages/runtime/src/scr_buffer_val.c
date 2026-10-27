@@ -971,6 +971,25 @@ static ScrDyn *scr_bvp_refuse(const char *name, const char *why) {
   return NULL;
 }
 
+/* The prototype thunks of the names the byte-array dispatch answers (scr_json.c): the receiver's own
+ * Buffer-only body first, then the typed-array body, both shared with the dynamic and static spellings. */
+static ScrDyn *scr_bvp_dyn(const char *name, ScrDyn *const *args, size_t argc) {
+  ScrDyn *self = scr_dyn_this_get();
+  if (self == NULL || self->kind != SCR_DYN_BYTES) {
+    if (self != NULL) scr_dyn_release(self);
+    return scr_bvp_refuse(name, "receiver is not a byte array");
+  }
+  bool known = false;
+  ScrDyn *r = scr_dyn_buffer_only_method(self, name, args, argc, "Buffer.prototype", &known);
+  if (!known) r = scr_dyn_bytes_method(self, name, args, argc, "Buffer.prototype", &known);
+  scr_dyn_release(self);
+  if (!known) return scr_bvp_refuse(name, "not a method of a byte array");
+  return r;
+}
+#define BVP_DYN(fn, nm) \
+  static ScrDyn *fn(ScrClosure *clo, ScrDyn *const *args, size_t argc) { \
+    (void)clo; return scr_bvp_dyn(nm, args, argc); }
+
 /* The receiver: a BYTES box (borrowed from self). */
 static ScrDyn *scr_bvp_recv(ScrDyn *self, const char *name) {
   if (self == NULL || self->kind != SCR_DYN_BYTES) {
@@ -1114,14 +1133,14 @@ static ScrDyn *scr_bvp_get_offset(ScrClosure *clo, ScrDyn *const *args, size_t a
   return scr_bvp_getter("offset");
 }
 
-BVP_NYI(bvp_readBigUInt64LE, "readBigUInt64LE")
-BVP_NYI(bvp_readBigUInt64BE, "readBigUInt64BE")
-BVP_NYI(bvp_readBigInt64LE, "readBigInt64LE")
-BVP_NYI(bvp_readBigInt64BE, "readBigInt64BE")
-BVP_NYI(bvp_writeBigUInt64LE, "writeBigUInt64LE")
-BVP_NYI(bvp_writeBigUInt64BE, "writeBigUInt64BE")
-BVP_NYI(bvp_writeBigInt64LE, "writeBigInt64LE")
-BVP_NYI(bvp_writeBigInt64BE, "writeBigInt64BE")
+BVP_DYN(bvp_readBigUInt64LE, "readBigUInt64LE")
+BVP_DYN(bvp_readBigUInt64BE, "readBigUInt64BE")
+BVP_DYN(bvp_readBigInt64LE, "readBigInt64LE")
+BVP_DYN(bvp_readBigInt64BE, "readBigInt64BE")
+BVP_DYN(bvp_writeBigUInt64LE, "writeBigUInt64LE")
+BVP_DYN(bvp_writeBigUInt64BE, "writeBigUInt64BE")
+BVP_DYN(bvp_writeBigInt64LE, "writeBigInt64LE")
+BVP_DYN(bvp_writeBigInt64BE, "writeBigInt64BE")
 BVP_RDV(bvp_readUIntLE, "readUIntLE", 0, 1)
 BVP_RD(bvp_readUInt32LE, "readUInt32LE", SCR_BN_U32, 1)
 BVP_RD(bvp_readUInt16LE, "readUInt16LE", SCR_BN_U16, 1)
@@ -1158,36 +1177,36 @@ BVP_WR(bvp_writeFloatLE, "writeFloatLE", SCR_BN_F32, 1)
 BVP_WR(bvp_writeFloatBE, "writeFloatBE", SCR_BN_F32, 0)
 BVP_WR(bvp_writeDoubleLE, "writeDoubleLE", SCR_BN_F64, 1)
 BVP_WR(bvp_writeDoubleBE, "writeDoubleBE", SCR_BN_F64, 0)
-BVP_NYI(bvp_asciiSlice, "asciiSlice")
-BVP_NYI(bvp_base64Slice, "base64Slice")
-BVP_NYI(bvp_base64urlSlice, "base64urlSlice")
-BVP_NYI(bvp_latin1Slice, "latin1Slice")
-BVP_NYI(bvp_hexSlice, "hexSlice")
-BVP_NYI(bvp_ucs2Slice, "ucs2Slice")
-BVP_NYI(bvp_utf8Slice, "utf8Slice")
-BVP_NYI(bvp_asciiWrite, "asciiWrite")
-BVP_NYI(bvp_base64Write, "base64Write")
-BVP_NYI(bvp_base64urlWrite, "base64urlWrite")
-BVP_NYI(bvp_latin1Write, "latin1Write")
-BVP_NYI(bvp_hexWrite, "hexWrite")
-BVP_NYI(bvp_ucs2Write, "ucs2Write")
-BVP_NYI(bvp_utf8Write, "utf8Write")
-BVP_NYI(bvp_copy, "copy")
-BVP_NYI(bvp_toString, "toString")
-BVP_NYI(bvp_equals, "equals")
-BVP_NYI(bvp_inspect, "inspect")
-BVP_NYI(bvp_compare, "compare")
-BVP_NYI(bvp_indexOf, "indexOf")
-BVP_NYI(bvp_lastIndexOf, "lastIndexOf")
-BVP_NYI(bvp_includes, "includes")
-BVP_NYI(bvp_fill, "fill")
-BVP_NYI(bvp_write, "write")
-BVP_NYI(bvp_toJSON, "toJSON")
-BVP_NYI(bvp_subarray, "subarray")
-BVP_NYI(bvp_slice, "slice")
-BVP_NYI(bvp_swap16, "swap16")
-BVP_NYI(bvp_swap32, "swap32")
-BVP_NYI(bvp_swap64, "swap64")
+BVP_DYN(bvp_asciiSlice, "asciiSlice")
+BVP_DYN(bvp_base64Slice, "base64Slice")
+BVP_DYN(bvp_base64urlSlice, "base64urlSlice")
+BVP_DYN(bvp_latin1Slice, "latin1Slice")
+BVP_DYN(bvp_hexSlice, "hexSlice")
+BVP_DYN(bvp_ucs2Slice, "ucs2Slice")
+BVP_DYN(bvp_utf8Slice, "utf8Slice")
+BVP_DYN(bvp_asciiWrite, "asciiWrite")
+BVP_DYN(bvp_base64Write, "base64Write")
+BVP_DYN(bvp_base64urlWrite, "base64urlWrite")
+BVP_DYN(bvp_latin1Write, "latin1Write")
+BVP_DYN(bvp_hexWrite, "hexWrite")
+BVP_DYN(bvp_ucs2Write, "ucs2Write")
+BVP_DYN(bvp_utf8Write, "utf8Write")
+BVP_DYN(bvp_copy, "copy")
+BVP_DYN(bvp_toString, "toString")
+BVP_DYN(bvp_equals, "equals")
+BVP_DYN(bvp_inspect, "inspect")
+BVP_DYN(bvp_compare, "compare")
+BVP_DYN(bvp_indexOf, "indexOf")
+BVP_DYN(bvp_lastIndexOf, "lastIndexOf")
+BVP_DYN(bvp_includes, "includes")
+BVP_DYN(bvp_fill, "fill")
+BVP_DYN(bvp_write, "write")
+BVP_DYN(bvp_toJSON, "toJSON")
+BVP_DYN(bvp_subarray, "subarray")
+BVP_DYN(bvp_slice, "slice")
+BVP_DYN(bvp_swap16, "swap16")
+BVP_DYN(bvp_swap32, "swap32")
+BVP_DYN(bvp_swap64, "swap64")
 
 /* key, canon (row of the shared function box, -1 for own), getter, thunk, Node length, Node name */
 static const BvpRow bvp_rows[BVP_N] = {

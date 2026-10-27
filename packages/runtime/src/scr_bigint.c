@@ -1043,4 +1043,37 @@ static ScrDyn *scr_big_dyn_from_bits(uint64_t bits, bool is_signed) {
   return d;
 }
 
-void scr_big_dyn_install(void) { scr_dyn_big_from_bits_fn = scr_big_dyn_from_bits; }
+/* The BigInt write ladder for a Buffer (scr_json.c, scr_dyn_big_store_fn): the 64-bit two's-complement bits
+ * when the value fits the signed or unsigned range, else Node's Received rendering in `shown` (digit groups
+ * of three with _, then the n suffix). */
+static int scr_big_store_check(const ScrDyn *v, bool is_signed, uint64_t *bits, char *shown, size_t cap) {
+  if (v == NULL || v->kind != SCR_DYN_BIG) return 0;
+  const ScrBigInt *b = v->v.big;
+  ScrBigInt *fit = scr_big_as_n(b, 64, is_signed);
+  bool ok = scr_big_eq(fit, b);
+  scr_big_release(fit);
+  if (ok) {
+    *bits = scr_big_low_u64(b);
+    return 1;
+  }
+  ScrStr *s = scr_big_to_str(b, 10);
+  const char *dp = s->data;
+  size_t dl = s->len;
+  bool neg = dl > 0 && dp[0] == '-';
+  if (neg) { dp++; dl--; }
+  size_t g = 0;
+  if (neg && g + 1 < cap) shown[g++] = '-';
+  for (size_t i = 0; i < dl && g + 2 < cap; i++) {
+    if (i > 0 && (dl - i) % 3 == 0 && g + 2 < cap) shown[g++] = '_';
+    shown[g++] = dp[i];
+  }
+  if (g + 1 < cap) shown[g++] = 'n';
+  shown[g] = '\0';
+  scr_str_release(s);
+  return 0;
+}
+
+void scr_big_dyn_install(void) {
+  scr_dyn_big_from_bits_fn = scr_big_dyn_from_bits;
+  scr_dyn_big_store_fn = scr_big_store_check;
+}
