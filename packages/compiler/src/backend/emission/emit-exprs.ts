@@ -1475,6 +1475,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // everything else, which is the same answer either way (see
             // scr_runtime.h). This is one of exactly two sites that lower
             // `bytes[i]` on this lane.
+            // A bigint view's element is a fresh +1 bigint (scr_bigint.c).
+            if (e.type.kind === "bigint") return E.newTemp(e.type, `scr_bytes_get_big(${r.name}, ${args[0]!.name})`);
             return E.newTemp(e.type, `scr_bytes_get_inl(${r.name}, ${args[0]!.name})`);
           case "slice":
             // Omitted relative indices default like string slice: start 0,

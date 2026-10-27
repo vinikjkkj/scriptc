@@ -8,7 +8,7 @@ import { protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExportRecordReadDyn, cjsExportRecordRef, isBareExportsAccess } from "./cjs-export-record.js";
@@ -13997,7 +13997,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       if (index === null) {
         L.unsupported("SC1090", expr.argumentExpression, "indexing with non-number keys");
       }
-      return { kind: "bytesIntrinsic", method: "get", receiver: recv, args: [index], type: F64, loc: locOf(expr) };
+      return { kind: "bytesIntrinsic", method: "get", receiver: recv, args: [index], type: bytesValueType(receiverIr.elem), loc: locOf(expr) };
     }
     // Tuple element read `t[0]`: a positional-field read of the tuple's
     // record shape — LITERAL indices only (the checker's per-index types
@@ -15219,7 +15219,7 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
       if (index === null) {
         L.unsupported("SC1090", target.argumentExpression, "indexing with non-number keys");
       }
-      const value = L.lowerExprExpecting(expr.right, F64);
+      const value = L.lowerExprExpecting(expr.right, bytesValueType(receiverIr.elem));
       return { kind: "bytesSet", arr: recv, index, value, loc: locOf(expr) };
     }
     // Tuple element write `t[0] = v`: a positional-field write (recordSet)

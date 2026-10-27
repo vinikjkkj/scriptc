@@ -82,8 +82,9 @@ size_t scr_bytes_elem_size(ScrBytesElem elem) {
    * chain used to fall through to. The mask is one instruction and the
    * padding is seven bytes of .rodata. */
   static const unsigned char sizes[16] = { 1, 4, 4, 4, 8, 1, 1, 2, 2,
-                                           1, 2, 1, 1, 1, 1, 1 };
-  /* index 9 is SCR_BYTES_U8C (one byte, like U8); index 10 is SCR_BYTES_F16. */
+                                           1, 2, 8, 8, 1, 1, 1 };
+  /* index 9 is SCR_BYTES_U8C (one byte, like U8); 10 is F16; 11 and 12 are
+   * the BigInt64 and BigUint64 views (eight bytes each). */
   return sizes[(unsigned)elem & 15u];
 }
 
@@ -342,6 +343,21 @@ static size_t scr_bytes_check_index(const ScrBytes *b, double i) {
   return scr_bytes_check_index_slow(b, i);
 }
 
+/* The double-typed view of a bigint element is a lowering bug: the compiler
+ * routes every bigint view's element access through scr_bytes_get_big and
+ * scr_bytes_set_big, so reaching this arm means a site built a double
+ * access for a bigint view. Loud, never a made-up number. */
+SCR_BYTES_COLD static void scr_bytes_bigint_as_double(const char *op, size_t idx, size_t len) {
+  scr_trap_fmt("scriptc: internal error: %s at index %zu on a BigInt typed array "
+               "(length %zu) -- its elements are bigints, so a double access is a "
+               "lowering bug\n", op, idx, len);
+}
+
+/* The exported element index check (the gated bigint unit calls it). */
+size_t scr_bytes_index_checked(const ScrBytes *b, double i) {
+  return scr_bytes_check_index(b, i);
+}
+
 /* ToUint32: NaN/±Infinity → 0, truncate toward zero, wrap mod 2^32.
  * ToUint8 is its low byte (2^8 divides 2^32, so the residues agree). */
 SCR_BYTES_COLD static uint32_t scr_bytes_to_u32_slow(double v) {
@@ -417,6 +433,10 @@ double scr_bytes_get(const ScrBytes *b, double i) {
       memcpy(&v, b->data + idx * 2, 2);
       return b->elem == SCR_BYTES_I16 ? (double)(int16_t)v : (double)v;
     }
+    case SCR_BYTES_I64:
+    case SCR_BYTES_U64:
+      scr_bytes_bigint_as_double("element read", idx, b->len);
+      return 0;
     case SCR_BYTES_BUF:
       /* An ArrayBuffer has no index signature, so no CORRECT program
        * reaches this arm and the type world never emits an element read
@@ -511,6 +531,10 @@ void scr_bytes_set(ScrBytes *b, double i, double v) {
       memcpy(b->data + idx * 4, &s, 4);
       break;
     }
+    case SCR_BYTES_I64:
+    case SCR_BYTES_U64:
+      scr_bytes_bigint_as_double("element write", idx, b->len);
+      break;
     case SCR_BYTES_BUF:
       /* The write twin of the read arm above, and the worse half: a
        * silent no-op here loses the caller's data instead of merely
@@ -638,9 +662,10 @@ ScrBytes *scr_typed_view_over(ScrBytes *buf, ScrBytesElem elem) {
     char msg[96];
     static const char *const names[] = { "Uint8Array", "Uint32Array", "Float32Array", "Int32Array",
                                          "Float64Array", "Int8Array", "ArrayBuffer", "Int16Array",
-                                         "Uint16Array", "Uint8ClampedArray", "Float16Array" };
+                                         "Uint16Array", "Uint8ClampedArray", "Float16Array",
+                                         "BigInt64Array", "BigUint64Array" };
     const int n = snprintf(msg, sizeof msg, "byte length of %s should be a multiple of %zu",
-                           names[(unsigned)elem < 11 ? (unsigned)elem : 0], esz);
+                           names[(unsigned)elem < 13 ? (unsigned)elem : 0], esz);
     scr_throw_error_msg(SCR_ERR_RANGE, msg, (size_t)n);
     return NULL;
   }
@@ -1500,6 +1525,10 @@ ScrBytes *scr_bytes_from_arr(ScrBytesElem elem, const ScrArr *arr) {
         memcpy(b->data + i * 2, &h, 2);
         break;
       }
+      case SCR_BYTES_I64:
+      case SCR_BYTES_U64:
+        scr_bytes_bigint_as_double("array fill", i, arr->len);
+        break;
       case SCR_BYTES_U32: {
         uint32_t u = scr_bytes_to_u32(v);
         memcpy(b->data + i * 4, &u, 4);
