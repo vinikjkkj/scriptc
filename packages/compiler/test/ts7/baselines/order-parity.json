@@ -18537,6 +18537,12 @@
     "<repo>/tests/corpus/13550-record-dynamic-key-miss-undefined/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/14052-proto-alias-two-classes.js": {
+   "order": [
+    "<repo>/tests/corpus/14052-proto-alias-two-classes.js"
+   ],
+   "diags": []
   }
  }
 }

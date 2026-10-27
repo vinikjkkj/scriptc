@@ -14478,6 +14478,8 @@ export class Lowerer {
   /** `class.name` of a prototype datum fenced at collection, with the reason (reads and writes refuse). */
   readonly protoDataFenced = new Map<string, string>();
   readonly lateMethodThis = new Map<ts.Node, ts.Type>();
+  /** The same `this` type keyed by `<Class>.<method name>`: one body node can be the late method of several classes (an inherited method aliased from two subclasses). */
+  readonly lateMethodThisOf = new Map<string, ts.Type>();
   /** `<Class>.<method name>` members of a class BODY that a late definition
    * replaced (the class's own declaration no longer lowers). */
   readonly shadowedMembers = new Set<string>();

@@ -1740,6 +1740,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       // written against a different one.
       const ownType = L.checker.getDeclaredTypeOfSymbol(classSymbol);
       L.lateMethodThis.set(fn, ownType);
+      L.lateMethodThisOf.set(`${info.def.name}.${m}`, ownType);
       if (!L.lateMethodOwner.has(fn)) L.lateMethodOwner.set(fn, { info, mName: m });
     }
   }
@@ -8955,7 +8956,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     fn: ts.FunctionExpression,): IrFunction | null {
     const prevThis = L.activeThisType;
     const prevThisFn = L.activeThisFn;
-    L.activeThisType = L.lateMethodThis.get(fn) ?? null;
+    L.activeThisType = L.lateMethodThisOf.get(`${info.def.name}.${mName}`) ?? L.lateMethodThis.get(fn) ?? null;
     L.activeThisFn = fn;
     const konst = L.lateMethodConst.get(`${info.def.name}.${mName}`);
     if (konst !== undefined) L.constIdents.set(konst.sym, konst.value);
