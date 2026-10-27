@@ -54,6 +54,11 @@ export function emitterRooted(L: Lowerer, info: ClassInfo | undefined | null): b
   return false;
 }
 
+/** A class whose emitter API is grafted on by applyMixin(Y, EventEmitter) (lower-emitter-mixin.ts): its emit and listener sites feed the event tables like an emitter-rooted class. */
+export function emitterRootedOrGrafted(L: Lowerer, info: ClassInfo | undefined | null): boolean {
+  return emitterRooted(L, info) || info?.emitterMixin === true;
+}
+
 /** Event tables are keyed by (declaring emitter class, event name): two classes
  * that each extend EventEmitter may both emit 'end' with different arguments
  * (Connection's `end` takes none, Query's takes the results), and the
@@ -468,7 +473,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
         // `client.on.bind(client)`), dyn, and everything unresolved all
         // count as a registration.
         const notAnEmitter =
-          resolved && recvT?.kind === "object" && !emitterRooted(L, L.classes.get(recvT.className));
+          resolved && recvT?.kind === "object" && !emitterRootedOrGrafted(L, L.classes.get(recvT.className));
         if (!notAnEmitter) {
           if (resolved && nameT !== null && nameT.isStringLiteralType()) {
             registered.add(nameT.value);
@@ -485,7 +490,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       }
       if (!resolved || nameT === null) return; // checker trouble is the lowering's business, not the scan's
       if (isEmit && nameT.isStringLiteralType()) emittedNames.add(nameT.value);
-      if (recvT?.kind !== "object" || !emitterRooted(L, L.classes.get(recvT.className))) return;
+      if (recvT?.kind !== "object" || !emitterRootedOrGrafted(L, L.classes.get(recvT.className))) return;
       if (!nameT.isStringLiteralType()) {
         // A computed emit contributes its payload to every name it can carry
         // (see computedEmitNames); resolved after the registration walk.

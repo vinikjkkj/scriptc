@@ -2,6 +2,7 @@
  * declarations including destructuring patterns, scoped blocks, control
  * flow (if/while/for/for-of/do, switch, try/catch, jumps with the
  * finally-crossing fence), and blocked-binding poisoning. */
+import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
 import { protoDataAssignStmt } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
@@ -1117,6 +1118,8 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       if (first && ts.getCombinedModifierFlags(first) & ts.ModifierFlags.Ambient) return null;
       return L.lowerVarStatement(stmt);
     }
+    // The recognised applyMixin(Y, EventEmitter) graft: Y already carries the emitter slot (lower-emitter-mixin.ts).
+    if (isEmitterMixinStatement(L, stmt)) return null;
     if (ts.isExpressionStatement(stmt)) return L.lowerExprStatement(stmt.expression);
     // `export default <expr>` (top-level only — preflight admitted it):
     // the assignment of the module's pre-registered `default` global.
