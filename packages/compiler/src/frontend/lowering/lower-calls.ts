@@ -11830,6 +11830,9 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
   }
 
   function lowerObjectCloneIdiom(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    // Only the two-argument form can be the idiom: Object.create(null) and
+    // Object.create(proto) keep their own lowerings.
+    if (call.arguments.length !== 2 || call.arguments.some((x) => ts.isSpreadElement(x))) return null;
     const unparen = (e: ts.Expression): ts.Expression => {
       let x = e;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
