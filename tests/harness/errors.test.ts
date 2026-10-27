@@ -217,13 +217,11 @@ describe("checked catch-binding casts", () => {
     );
   });
 
-  test("an EFFECTFUL surplus argument is refused at build time (JS lane)", async () => {
-    // Effect-free surplus args drop at compile time, JS-exact (corpus
-    // 1760 — the test-string-decoder writeSequences shape). An effectful
-    // one has no evaluation slot in the completed call, so instead of
-    // silently not running it the build defers a named SC1090 to the
-    // call site. JS-only: tsc's arity errors gate the TS lane.
-    const d = await compileRefused(
+  test("an EFFECTFUL surplus argument runs before the call, then is dropped (JS lane)", async () => {
+    // JS evaluates every argument before dropping the surplus, so the effect
+    // of loud() runs first (corpus 13800 pins the ordering against Node on
+    // both backends). JS-only: tsc's arity errors gate the TS lane.
+    const r = await compileAndRun(
       "surplus-args-effectful",
       `'use strict';
 function two(a, b) {
@@ -237,7 +235,8 @@ console.log(two(1, 2, loud()));
 `,
       "cjs",
     );
-    expect(d.some((x) => /^SC1090: surplus arguments with side effects .* are not supported yet$/.test(x)), d.join(" | ")).toBe(true);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("side effect JS would run\n3\n");
   });
 
   test("extending a property-assigned class ABOVE its assignment is refused at build time (JS lane)", async () => {
