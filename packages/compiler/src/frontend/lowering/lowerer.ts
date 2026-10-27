@@ -312,6 +312,64 @@ export interface FnCtx {
  * symbol there, not the binding it reads: `{ LocalDate }` over a
  * `const LocalDate = require(...)` must resolve to that const, which is what
  * getShorthandAssignmentValueSymbol names. */
+/** What a CommonJS module's source says about its own export object, from the whole file:
+ * `names` = every member name a syntactic export form declares (`exports.n = `, `module.exports.n = `,
+ * `Object.defineProperty(exports, "n", …)`, and every key of a `module.exports = { … }` literal, getters
+ * and methods included); `dynamic` = the export is assigned or extended in a form this reading cannot
+ * see into (`module.exports = require(…)` or any other call, a computed `exports[k] =`, a non-literal
+ * defineProperty name, a spread in the literal). Iterative walk (an explicit stack), cached per file. */
+const cjsExportSurfaceByFile = new WeakMap<ts.SourceFile, { names: Set<string>; dynamic: boolean }>();
+function cjsExportSurfaceOf(sf: ts.SourceFile): { names: Set<string>; dynamic: boolean } {
+  const cached = cjsExportSurfaceByFile.get(sf);
+  if (cached) return cached;
+  const names = new Set<string>();
+  let dynamic = false;
+  const isExportsRef = (e: ts.Expression): boolean =>
+    (ts.isIdentifier(e) && e.text === "exports") ||
+    (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "module" && e.name.text === "exports");
+  const keyText = (n: ts.PropertyName): string | null =>
+    ts.isIdentifier(n) || ts.isStringLiteral(n) || ts.isNumericLiteral(n) ? n.text : null;
+  const stack: ts.Node[] = [sf];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const l = n.left;
+      let r: ts.Expression = n.right;
+      while (ts.isParenthesizedExpression(r)) r = r.expression;
+      if (ts.isPropertyAccessExpression(l) && isExportsRef(l.expression)) {
+        names.add(l.name.text);
+      } else if (ts.isElementAccessExpression(l) && isExportsRef(l.expression)) {
+        dynamic = true;
+      } else if (
+        ts.isPropertyAccessExpression(l) && ts.isIdentifier(l.expression) && l.expression.text === "module" && l.name.text === "exports"
+      ) {
+        if (ts.isObjectLiteralExpression(r)) {
+          for (const p of r.properties) {
+            if (ts.isSpreadAssignment(p)) { dynamic = true; continue; }
+            const k = p.name === undefined ? null : keyText(p.name);
+            if (k === null) dynamic = true;
+            else names.add(k);
+          }
+        } else if (!ts.isIdentifier(r)) {
+          // `module.exports = require(…)` or a call: the exported object is another value.
+          dynamic = true;
+        }
+      }
+    }
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+        ts.isIdentifier(n.expression.expression) && n.expression.expression.text === "Object" &&
+        n.expression.name.text === "defineProperty" && n.arguments.length >= 2 && isExportsRef(n.arguments[0]!)) {
+      const k = n.arguments[1]!;
+      if (ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k)) names.add(k.text);
+      else dynamic = true;
+    }
+    ts.forEachChild(n, (c) => { stack.push(c); });
+  }
+  const out = { names, dynamic };
+  cjsExportSurfaceByFile.set(sf, out);
+  return out;
+}
+
 export function referencedValueSymbol(checker: ts.TypeChecker, expr: ts.Identifier): ts.Symbol | undefined {
   const parent = expr.parent;
   if (parent !== undefined && ts.isShorthandPropertyAssignment(parent) && parent.name === expr) {
@@ -2586,7 +2644,11 @@ export class Lowerer {
    * same-named local of the exporter is not the export. */
   cjsUnexportedMemberOfBinding(recv: ts.Expression, name: string): boolean {
     const dep = this.cjsBindingRequireDepOf(recv);
-    return dep !== null && isCjsJsFile(dep) && this.cjsModuleExportSymbol(dep, name) === undefined;
+    if (dep === null || !isCjsJsFile(dep) || this.cjsModuleExportSymbol(dep, name) !== undefined) return false;
+    // Only a name NO export form declares, in a module whose export object is not built in a form this
+    // reading cannot see: a getter, method or re-export the export table omits is the static member's (lowered there).
+    const surface = cjsExportSurfaceOf(dep);
+    return !surface.dynamic && !surface.names.has(name);
   }
 
   /** The CommonJS module a `const x = require("./m")` binding names when that
