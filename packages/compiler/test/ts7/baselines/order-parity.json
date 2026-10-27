@@ -2728,6 +2728,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13255-nullable-array-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/13255-nullable-array-receiver.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/13256-any-array-apply-fromcharcode.ts": {
+   "order": [
+    "<repo>/tests/corpus/13256-any-array-apply-fromcharcode.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/13300-tls-cipher-verdicts.js": {
    "order": [
     "<repo>/tests/corpus/13300-tls-cipher-verdicts.js"
