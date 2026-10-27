@@ -13,7 +13,7 @@ import { isJsSourceFile, locOf } from "../program.js";
 import { DYN_DISPATCH_METHODS, islandPrimitiveExit } from "./lower-calls.js";
 import { dynAssertionReceiver } from "./lower-exprs.js";
 import { typeKey } from "../types.js";
-import { dynUndefinedExpr, own, WidthLift } from "./lowerer.js";
+import { dynUndefinedExpr, nodeThrowExpr, own, WidthLift } from "./lowerer.js";
 import { dynBuiltinHofCallback } from "./lower-fnvalue.js";
 
 /** The nine in-place Array.prototype methods — `scr_dyn_invoke.c`'s own
@@ -113,11 +113,53 @@ function lowerOptionalDefaultArg(
    * direct call of a synthetic loop function (see lowerArrayHofCall and
    * friends). Null when this isn't an ambient array method call. tsc has
    * already checked arity and argument types against ambient/scriptc.d.ts. */
+  /** A pure receiver path: an identifier, `this`, or a property chain over one (read twice by a guard). */
+  function isPureReceiverPath(e: ts.Expression): boolean {
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (e.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(e)) return true;
+    return ts.isPropertyAccessExpression(e) && e.questionDotToken === undefined && isPureReceiverPath(e.expression);
+  }
+
   export function lowerArrayMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
     if (!ARRAY_METHODS.has(name) && name !== "sort" && name !== "shift" && name !== "splice") return null;
+    // A NULLABLE array receiver (`any[] | null`, `T[] | undefined`, a field
+    // that is null until assigned): Node throws a TypeError exactly when the
+    // value IS the nil at run time, and otherwise runs the method on the array.
+    // The guard tests the nil arm, and the call lowers against the narrowed
+    // array arm (exprOverrides). Only a pure receiver path (identifiers and
+    // this/property chains) is read twice, so only those take the guard.
+    if (!L.exprOverrides.has(access.expression) && isPureReceiverPath(access.expression)) {
+      const recvMap = L.mapTypeOf(L.typeOf(access.expression));
+      const arms = recvMap?.kind === "union" ? (L.unions.get(recvMap.unionId)?.arms ?? []) : [];
+      const arrArms = arms.filter((a) => a.kind === "array");
+      const nilArms = arms.filter((a) => a.kind === "nullT" || a.kind === "undefinedT");
+      if (recvMap?.kind === "union" && arrArms.length === 1 && nilArms.length === 1 && arms.length === 2) {
+        const unionId = recvMap.unionId;
+        const nilArm = nilArms[0]!;
+        const nilWord = nilArm.kind === "nullT" ? "null" : "undefined";
+        const nilTag = L.armTag(unionId, nilArm);
+        const arrTag = L.armTag(unionId, arrArms[0]!);
+        if (nilTag >= 0 && arrTag >= 0) {
+          const loc = locOf(call);
+          const value = L.lowerExpr(access.expression);
+          const narrowed: IrExpr = { kind: "unionNarrow", unionId, tag: arrTag, value, type: arrArms[0]!, loc };
+          L.exprOverrides.set(access.expression, narrowed);
+          let inner: IrExpr | null;
+          try {
+            inner = lowerArrayMethodCall(L, call, access);
+          } finally {
+            L.exprOverrides.delete(access.expression);
+          }
+          if (inner === null) return null;
+          const cond: IrExpr = { kind: "unionIsTag", unionId, tag: nilTag, negated: false, value, type: BOOL, loc };
+          const thrown = nodeThrowExpr(1, "", `Cannot read properties of ${nilWord} (reading '${name}')`, inner.type, loc);
+          return { kind: "ternary", cond, then: thrown, else_: inner, type: inner.type, loc };
+        }
+      }
+    }
     // An IN-PLACE array method whose receiver is an ASSERTION over a
     // checked-dynamic value — `(u as number[]).push(x)`, `.sort()`,
     // `.splice(i, n)`.  Recovering `number[]` first builds a FRESH ScrArr
@@ -156,7 +198,7 @@ function lowerOptionalDefaultArg(
         };
       }
     }
-    let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    let receiverIr = L.exprOverrides.get(access.expression)?.type ?? L.mapTypeOf(L.typeOf(access.expression));
     // `new Array(n).fill(v)`: the receiver's checker type is `any[]`, which maps
     // to a dyn-element array, but the receiver LOWERS to the array its own
     // declaration types (`const next: number[] = new Array(n).fill(0)`). The
