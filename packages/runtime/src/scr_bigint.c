@@ -1162,3 +1162,68 @@ ScrStr *scr_insp_typed_big(ScrBytes *b, ScrStr *name) {
   scr_str_release(b1);
   return out;
 }
+
+/* ── BigInt64Array / BigUint64Array methods (fill, search, sort) ───────── */
+
+/* ToIntegerOrInfinity then the relative clamp Node's TypedArray methods use:
+ * a negative value counts from the end, the result stays in [0, len]. NaN is
+ * zero (the omitted argument arrives as NaN from the emitters). */
+static size_t scr_big_rel(double x, size_t len) {
+  if (x != x) return 0;
+  double t = trunc(x);
+  if (t < 0) {
+    t += (double)len;
+    if (t < 0) return 0;
+  }
+  if (t > (double)len) return len;
+  return (size_t)t;
+}
+
+/* fill(value, start?, end?): every element in [start, end) takes the value's
+ * low 64 bits. `nargs` is how many of start/end were passed (0, 1 or 2). The
+ * receiver answers +1 for chaining, as the other fills do. */
+ScrBytes *scr_bytes_fill_big(ScrBytes *b, const ScrBigInt *v, double nargs, double from, double to) {
+  const size_t len = b->len;
+  const size_t start = nargs >= 1 ? scr_big_rel(from, len) : 0;
+  const size_t end = nargs >= 2 ? scr_big_rel(to, len) : len;
+  const uint64_t bits = scr_big_low_u64(v);
+  for (size_t i = start; i < end; i++) memcpy(b->data + i * 8, &bits, 8);
+  return scr_bytes_retain(b);
+}
+
+/* indexOf / includes by value, from `from` (NaN = 0), forwards. Returns the
+ * index or -1. Equality is the bigint value (both views' elements are exact
+ * 64-bit values, so the boxed compare is the strict/SameValueZero one). */
+double scr_bytes_index_of_big(const ScrBytes *b, const ScrBigInt *v, double from) {
+  const size_t len = b->len;
+  for (size_t i = scr_big_rel(from, len); i < len; i++) {
+    ScrBigInt *e = scr_bytes_get_big(b, (double)i);
+    const bool same = scr_big_eq(e, v);
+    scr_big_release(e);
+    if (same) return (double)i;
+  }
+  return -1.0;
+}
+
+static int scr_big_cmp_i64(const void *pa, const void *pb) {
+  int64_t a, b;
+  memcpy(&a, pa, 8);
+  memcpy(&b, pb, 8);
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+static int scr_big_cmp_u64(const void *pa, const void *pb) {
+  uint64_t a, b;
+  memcpy(&a, pa, 8);
+  memcpy(&b, pb, 8);
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/* sort() on a bigint view: ascending by value, in place (the signed view
+ * orders as int64, the unsigned as uint64). Answers the receiver +1. */
+ScrBytes *scr_bytes_sort_big(ScrBytes *b) {
+  if (b->len > 1) {
+    qsort(b->data, b->len, 8, b->elem == SCR_BYTES_U64 ? scr_big_cmp_u64 : scr_big_cmp_i64);
+  }
+  return scr_bytes_retain(b);
+}

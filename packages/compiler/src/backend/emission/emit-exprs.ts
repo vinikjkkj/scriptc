@@ -1478,6 +1478,22 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // A bigint view's element is a fresh +1 bigint (scr_bigint.c).
             if (e.type.kind === "bigint") return E.newTemp(e.type, `scr_bytes_get_big(${r.name}, ${args[0]!.name})`);
             return E.newTemp(e.type, `scr_bytes_get_inl(${r.name}, ${args[0]!.name})`);
+          case "fillBig": {
+            // A bigint view's fill: the value is BORROWED; the receiver
+            // answers +1 for chaining (scr_bigint.c).
+            const n = e.args.length - 1;
+            return E.newTemp(
+              e.type,
+              `scr_bytes_fill_big(${r.name}, ${args[0]!.name}, ${n}, ${args[1]?.name ?? "0"}, ${args[2]?.name ?? "0"})`,
+            );
+          }
+          case "indexOfBig":
+          case "includesBig": {
+            const call = `scr_bytes_index_of_big(${r.name}, ${args[0]!.name}, ${args[1]?.name ?? "NAN"})`;
+            return E.newTemp(e.type, method === "includesBig" ? `(${call} != -1)` : call);
+          }
+          case "sortBig":
+            return E.newTemp(e.type, `scr_bytes_sort_big(${r.name})`);
           case "slice":
             // Omitted relative indices default like string slice: start 0,
             // end +Infinity (math.h is always included). Fresh copy, +1.
