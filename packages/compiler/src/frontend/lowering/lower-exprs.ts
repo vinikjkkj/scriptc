@@ -15783,13 +15783,31 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
       };
     }
     if (isUnitType(e.type)) {
-      // `${undefined}` / "" + null: Node prints "undefined"/"null", but
-      // these only arise spelled literally — reject rather than special-case.
-      L.unsupported(
-        "SC1090",
-        node,
-        `string conversions of '${e.type.kind === "undefinedT" ? "undefined" : "null"}' values`,
-      );
+      // `${undefined}` / "" + null / String(n): the unit's text is fixed by
+      // the type (JS: ToString(undefined) = "undefined", ToString(null) =
+      // "null"), so the conversion is a constant. A unit literal has no
+      // effect to keep; any other unit-typed operand is evaluated for its
+      // effects first, as the conversion would, then answers the text.
+      const text = e.type.kind === "undefinedT" ? "undefined" : "null";
+      const answer: IrExpr = { kind: "strLit", value: text, type: STRING, loc: e.loc };
+      // The effects of the operand, with its unit VALUE dropped: a bare
+      // unitLit has no runtime value to evaluate (the IR has no slot for
+      // one outside a unionWrap), and a comma expression `(a, null)` is a
+      // seqExpr whose result is that unitLit, so its statements are kept and
+      // its result is looked through to the same test.
+      const effects: IrStmt[] = [];
+      const collect = (x: IrExpr): void => {
+        if (x.kind === "unitLit") return;
+        if (x.kind === "seqExpr") {
+          effects.push(...x.stmts);
+          collect(x.result);
+          return;
+        }
+        effects.push({ kind: "exprStmt", expr: x, loc: x.loc });
+      };
+      collect(e);
+      if (effects.length === 0) return answer;
+      return { kind: "seqExpr", stmts: effects, result: answer, type: STRING, loc: e.loc };
     }
     if (e.type.kind === "array") {
       // `${[1,2,3]}` / String(arr): Array.prototype.toString IS join(",")
