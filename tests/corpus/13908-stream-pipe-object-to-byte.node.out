@@ -1,0 +1,3 @@
+W error ERR_INVALID_ARG_TYPE "The \"chunk\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received an instance of Object" TypeError
+W close
+after R destroyed false paused true W destroyed true

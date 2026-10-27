@@ -1,0 +1,6 @@
+push1 true
+push2 false
+push3 false
+length 3
+first {"n":1}
+length 2

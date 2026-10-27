@@ -1,0 +1,21 @@
+str destroyed true
+num destroyed true
+obj destroyed true
+fn destroyed true
+arr destroyed true
+zero destroyed true
+null destroyed true
+undef destroyed true
+str error string plain
+str close
+num error number 42
+num close
+obj error object { code: 'X', n: 1 }
+obj close
+fn error function [Function: foo]
+fn close
+arr error object [ 1 ]
+arr close
+zero close
+null close
+undef close
