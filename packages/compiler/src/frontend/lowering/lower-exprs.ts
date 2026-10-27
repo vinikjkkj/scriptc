@@ -14513,7 +14513,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // const, a keyof-constrained type parameter bound to a literal inside
     // a generic instance) is the same static read — identifier evaluation
     // is pure, so skipping it matches JS exactly.
-    const litKey = recordKeyLiteralText(keyNode) ?? recordKeyTypeLiteralText(L, keyNode) ?? wellKnownSymbolFieldIn(L, keyNode, shape);
+    const litKey = keyLiteralWithFolds(L, keyNode) ?? recordKeyTypeLiteralText(L, keyNode) ?? wellKnownSymbolFieldIn(L, keyNode, shape);
     // The receiver lowers FIRST (both branches below read it, and JS
     // evaluates the receiver before the key).
     const obj = L.lowerExpr(expr.expression);
@@ -14685,6 +14685,15 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     if (ts.isStringLiteral(node)) return node.text;
     if (ts.isNumericLiteral(node)) return String(Number(node.text));
     return null;
+  }
+
+  /** A key written as a literal, or an identifier folded to one by a static unroll (Lowerer.constIdents,
+   * registerHelperAccessors' helper locals). */
+  export function keyLiteralWithFolds(L: Lowerer, node: ts.Expression): string | null {
+    const lit = recordKeyLiteralText(node);
+    if (lit !== null || !ts.isIdentifier(node) || L.constIdents.size === 0) return lit;
+    const sym = L.checker.getSymbolAtLocation(node);
+    return sym !== undefined ? (L.constIdents.get(sym) ?? null) : null;
   }
 
   /** The compile-time key an IDENTIFIER's TYPE proves: a key variable whose
@@ -15076,6 +15085,22 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
    * assignment, produce no value in our subset). */
   export function lowerElementWrite(L: Lowerer, expr: ts.BinaryExpression): IrStmt {
     const target = expr.left as ts.ElementAccessExpression;
+    // `this[key] = v` where the identifier key is folded to a literal by a static unroll
+    // (Lowerer.constIdents): the field write of that literal name on a program class instance, as
+    // `this.<name> = v` lowers (fieldTarget's class arm). Any other receiver keeps the paths below.
+    if (ts.isIdentifier(target.argumentExpression) && L.constIdents.size > 0 && !target.questionDotToken) {
+      const folded = keyLiteralWithFolds(L, target.argumentExpression);
+      const recvT = folded !== null ? L.mapTypeOf(L.typeOf(target.expression)) : null;
+      const info = recvT?.kind === "object" ? L.classes.get(recvT.className) : undefined;
+      const fieldType = info?.fields.get(folded!);
+      if (folded !== null && recvT?.kind === "object" && fieldType !== undefined) {
+        const obj = L.lowerExpr(target.expression);
+        if (obj.type.kind === "object") {
+          const value = L.lowerExprExpecting(expr.right, fieldType);
+          return L.fieldSetStmt({ container: "class", obj, className: recvT.className, field: folded!, fieldType }, value, locOf(expr), target);
+        }
+      }
+    }
     // `process.env[key] = v` — the computed twin of the dotted env write:
     // setenv(3), string keys and string values only.
     if (L.isProcessEnv(target.expression) && !target.questionDotToken) {
@@ -15286,7 +15311,7 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
         // open, so no declared-field collision analysis applies.
         if (obj.type.kind === "dyn") {
           const loc = locOf(expr);
-          const litKey = recordKeyLiteralText(target.argumentExpression);
+          const litKey = keyLiteralWithFolds(L, target.argumentExpression);
           let key: IrExpr =
             litKey !== null
               ? { kind: "strLit", value: litKey, type: STRING, loc: locOf(target.argumentExpression) }
@@ -15352,7 +15377,7 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
         // a keyof-constrained type parameter bound to a literal inside a
         // generic instance — `set(o, "a", v)`'s body writing `o[k] = v`)
         // is the same static field write.
-        const litKey = recordKeyLiteralText(target.argumentExpression) ??
+        const litKey = keyLiteralWithFolds(L, target.argumentExpression) ??
           recordKeyTypeLiteralText(L, target.argumentExpression);
         if (litKey !== null) {
           const field = shape.fields.find((f) => f.name === litKey);
@@ -15475,7 +15500,7 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
       const obj = receiverIr !== null ? L.lowerExpr(target.expression) : probeLower(L, target.expression);
       if (obj !== null && obj.type.kind === "dyn") {
         const loc = locOf(expr);
-        const litKey = recordKeyLiteralText(target.argumentExpression);
+        const litKey = keyLiteralWithFolds(L, target.argumentExpression);
         let key: IrExpr =
           litKey !== null
             ? { kind: "strLit", value: litKey, type: STRING, loc: locOf(target.argumentExpression) }
@@ -20886,7 +20911,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * undefined-armed UNION (undefArmedFieldType's ordinary result) and the
    * checked-dynamic box (its result for an implicit-`any` field, where
    * `undefined` is a dyn KIND rather than a union arm). */
-  function undefinedArmedInAnswer(
+  export function undefinedArmedInAnswer(
     L: Lowerer,
     recv: IrExpr,
     className: string,

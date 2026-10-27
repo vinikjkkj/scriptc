@@ -19,7 +19,7 @@ import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCa
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
-import { unboundMethodThunk } from "./lower-exprs.js";
+import { unboundMethodThunk, undefinedArmedInAnswer } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -5992,6 +5992,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // hasOwnProperty on a program class CONSTRUCTOR — own statics are
         // compile-time-known, so a literal key folds to a constant.
         lowerClassHasOwnPropertyCall(L, expr, expr.expression) ??
+        lowerInstanceHasOwnPropertyCall(L, expr, expr.expression) ??
         L.lowerIslandMethodCall(expr, expr.expression) ??
         // Dyn receivers (JSON.parse-derived `unknown`/`any` values) —
         // validated-extract, then the static machinery. After the island
@@ -8064,6 +8065,58 @@ const inliningPredicates = new Set<ts.Symbol>();
    * the base, not here) plus the function-object trio prototype/name/
    * length — so a literal key folds to a constant. Builtin classes and
    * non-literal keys keep the fence. */
+  /** `o.hasOwnProperty('name')` on a program class INSTANCE whose name is a collected field: an own
+   * property exactly when the field holds a value (undefinedArmedInAnswer: an undefined-armed slot is
+   * absent until written). A method or accessor lives on the prototype and answers false. Any other
+   * name keeps the fence (an own name the class does not carry could be a dynamic write). */
+  function lowerInstanceHasOwnPropertyCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(call, access)) return null;
+    if (access.name.text !== "hasOwnProperty" || call.arguments.length !== 1) return null;
+    if (!ts.isIdentifier(access.expression)) return null;
+    const argNode = call.arguments[0]!;
+    if (!ts.isStringLiteralLike(argNode)) return null;
+    if (!L.isStdlibMember(access)) return null;
+    const recvT = L.mapTypeOf(L.typeOf(access.expression));
+    if (recvT?.kind !== "object") return null;
+    const info = L.classes.get(recvT.className);
+    if (!info || !info.decl) return null;
+    const key = argNode.text;
+    const loc = locOf(call);
+    if (info.methods.has(key) || info.methods.has(`get:${key}`) || info.methods.has(`set:${key}`)) {
+      return { kind: "boolLit", value: false, type: BOOL, loc };
+    }
+    if (!info.fields.has(key)) return null;
+    const recvIr = L.lowerExpr(access.expression);
+    if (recvIr.type.kind !== "object") return null;
+    const rTmp = L.declareHiddenLocal("%hopRecv", recvIr.type);
+    const rRef: IrExpr = { kind: "varRef", localId: rTmp.id, type: recvIr.type, loc };
+    // A collected field answers through undefinedArmedInAnswer. A field that is absent until written
+    // (a prototype datum's instance slot, or a helper-unrolled cache: absentTrackedFields) is an own
+    // property exactly when it holds a value. undefinedArmedInAnswer stays the `in` rule, which
+    // answers true for a prototype name before any write.
+    const fieldT = info.fields.get(key);
+    let presence: IrExpr | null;
+    if (info.collectedFields?.has(key) === true) {
+      presence = undefinedArmedInAnswer(L, rRef, recvT.className, key, loc);
+    } else if (info.absentTrackedFields?.has(key) === true && fieldT !== undefined && fieldT.kind === "dyn") {
+      presence = { kind: "dynTest", test: "undefined", negated: true, value: { kind: "fieldGet", obj: rRef, className: recvT.className, field: key, type: fieldT, loc }, type: BOOL, loc };
+    } else if (info.absentTrackedFields?.has(key) === true && fieldT !== undefined && fieldT.kind === "union" &&
+               L.armTag(fieldT.unionId, UNDEFINED_T) >= 0) {
+      presence = { kind: "unionIsTag", unionId: fieldT.unionId, tag: L.armTag(fieldT.unionId, UNDEFINED_T), negated: true, value: { kind: "fieldGet", obj: rRef, className: recvT.className, field: key, type: fieldT, loc }, type: BOOL, loc };
+    } else {
+      return null;
+    }
+    const answer: IrExpr = presence ?? { kind: "boolLit", value: true, type: BOOL, loc };
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: rTmp.id, init: recvIr, loc }],
+      result: answer,
+      type: BOOL,
+      loc,
+    };
+  }
+
   function lowerClassHasOwnPropertyCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
