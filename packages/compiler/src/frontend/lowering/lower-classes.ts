@@ -17,7 +17,7 @@ import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from ".
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerDateNumArg, lowerSearchParamsNew } from "./lower-builtins.js";
-import { requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
+import { requiresDynamicPackageDiag, requiresDynamicTypeDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { lowerSqliteNew } from "./lower-sqlite.js";
 import { lowerWrtcNew } from "./lower-wrtc.js";
 import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStreamNew, lowerStreamSuperCall, streamCtorShape } from "./lower-stream.js";
@@ -10945,6 +10945,17 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           const x = L.mapTypeOf(L.typeOf(expr));
           return x?.kind === "array" && x.elem.kind === "dyn" ? x : null;
         })();
+        // A contextual union with TWO OR MORE array arms (`number[] | string[]`)
+        // is the ambiguous case the adoption walk above declines. The any[]
+        // fallback must decline it too: the dyn-element array it would build
+        // is an unknown[] the union cannot represent, and that surfaces as a
+        // runtime throw instead of the build-time SC2011 refusal.
+        const ambiguousArrayCtx = ((): boolean => {
+          const c = L.checker.getContextualType(expr);
+          if (c === undefined || !c.isUnionType()) return false;
+          return ts.constituentTypes(c).filter((a) => L.mapTypeOf(a)?.kind === "array").length >= 2;
+        })();
+        const dynFallbackArr = ambiguousArrayCtx ? null : dynExprArr;
         if (
           staticArr === null &&
           (isJsSourceFile(expr.getSourceFile()) || L.mapTypeOf(L.typeOf(expr))?.kind === "dyn")
@@ -11005,7 +11016,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             staticArr === null && !isJsSourceFile(expr.getSourceFile()) && L.checkerAnyArray(expr)
               ? newArrayFillElemType(L, expr)
               : null;
-          const arrT = staticArr ?? inferred ?? dynExprArr;
+          const arrT = staticArr ?? inferred ?? dynFallbackArr;
           if (arrT === null) L.badType(expr, L.typeOf(expr));
           const elem = arrT.elem;
           // `new Array(n).fill(v)` is a COMPOSED form: the whole-range
@@ -11045,7 +11056,11 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         // annotation when one exists (the new Map() stance) — staticArr
         // consulted both, and the checked-dynamic build above already
         // answered the two slots that have no static home.
-        const t = staticArr ?? dynExprArr;
+        if (staticArr === null && ambiguousArrayCtx) {
+          L.pushDiag(requiresDynamicTypeDiag("any[]", locOf(expr)));
+          throw new PoisonError();
+        }
+        const t = staticArr ?? dynFallbackArr;
         if (t === null) L.badType(expr, L.typeOf(expr));
         const elems = args.map((a) => L.lowerExprExpecting(a, t.elem));
         return { kind: "arrayLit", elems, type: t, loc };
