@@ -2764,6 +2764,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/13701-module-exports-aliased-mutated/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/13701-module-exports-aliased-mutated/a.cjs",
+    "<repo>/tests/corpus/13701-module-exports-aliased-mutated/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/13700-exports-passed-writes-member-later/main.cjs": {
    "order": [
     "<repo>/tests/corpus/13700-exports-passed-writes-member-later/lib.cjs",
