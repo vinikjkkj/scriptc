@@ -8,7 +8,7 @@ import { protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf } from "./cjs-live-exports.js";
@@ -2473,6 +2473,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (ts.isElementAccessExpression(expr)) return L.lowerElementAccess(expr);
     if (ts.isConditionalExpression(expr)) return lowerTernary(L, expr);
 
+    // `module.exports` as a VALUE after its whole-export statement (pg's index.js:
+    // `Object.defineProperty(module.exports, …)` after `module.exports = new PG(…)`).
+    // The read is the export global that statement filled, and only where that is
+    // provably the export object at this point: see moduleExportsGlobalRead.
+    if (isModuleExportsAccess(expr)) {
+      const whole = moduleExportsGlobalRead(L, expr);
+      if (whole !== null) return whole;
+    }
     if (ts.isPropertyAccessExpression(expr)) {
       // A prototype DATUM of a paired class, read through a value whose checker type does
       // not declare it (the declaration file names no `isPoint`): the lowering would answer
@@ -2854,7 +2862,21 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // `for (k in b) safer[k] = b[k]; module.exports = safer`) has no declaration to delegate to, and a
         // same-named local of the exporter (`var Buffer = buffer.Buffer`) is not the export: the read is a
         // member read of the binding's value, below.
-        if (!L.cjsUnexportedMemberOfBinding(expr.expression, expr.name.text)) return lowerExpr(L, expr.name);
+        if (!L.cjsUnexportedMemberOfBinding(expr.expression, expr.name.text)) {
+          // A member the export object gets at RUN time (`Object.defineProperty(module.exports,
+          // 'native', …)`) is a declared name to the checker but has no value global. When the
+          // binding is the whole export object held as a DYN global, the read is the dyn read:
+          // the keyed get a dyn value answers, so an accessor runs its getter.
+          const msym = L.checker.getSymbolAtLocation(expr.name);
+          const valueForm = msym !== undefined && (L.globalsBySymbol.has(msym) || L.classBySymbol.has(msym) || L.fnSigsBySymbol.has(msym));
+          if (!valueForm && ts.isIdentifier(expr.expression) && !expr.questionDotToken) {
+            const recv = L.lowerExpr(expr.expression);
+            if (recv.type.kind === "dyn") {
+              return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc }, value: recv, type: DYN, loc };
+            }
+          }
+          return lowerExpr(L, expr.name);
+        }
       }
       // `module.exports` READ in a CommonJS file whose whole export IS a
       // class expression (`module.exports = class …{}`): the read answers
@@ -25855,4 +25877,43 @@ function lowerDynLiteralSpread(
   const src = dynSpreadSource(L, el, L.lowerExpr(el.expression), "a dynamic (unknown[]) array literal");
   spreads.push({ at, what: null });
   return L.coerceInto(el.expression, src, DYN);
+}
+
+/** `module.exports` read as a value, answered by the export global of the
+   * file's own whole-export statement `module.exports = X` (registered by
+   * lower-modules.ts's export-global branch). Exact only where that global IS the
+   * export object at the read:
+   *   - the read is TEXTUALLY after the statement (a top-level statement runs once,
+   *     in order, so every such read runs after it);
+   *   - every enclosing function starts after the statement and is not a hoisted
+   *     FunctionDeclaration, so no function that could run before the assignment
+   *     contains the read;
+   *   - `module` is not shadowed.
+   * Anything else returns null and the caller's fence stands. */
+function moduleExportsGlobalRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+  const sf = expr.getSourceFile();
+  if (!isCjsJsFile(sf)) return null;
+  if (L.resolveLocal(expr.expression as ts.Identifier) !== null) return null;
+  let stmtEnd = -1;
+  let g: IrGlobal | undefined;
+  for (const st of sf.statements) {
+    if (!ts.isExpressionStatement(st)) continue;
+    let e: ts.Expression = st.expression;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+    if (!isModuleExportsAccess(e.left)) continue;
+    const reg = L.globalsByDeclNode.get(e);
+    if (reg === undefined) continue;
+    if (g !== undefined) return null; // two whole-export statements: the order question is not answered here
+    g = reg;
+    stmtEnd = st.getEnd();
+  }
+  if (g === undefined || expr.getStart(sf) < stmtEnd) return null;
+  for (let p: ts.Node | undefined = expr.parent; p !== undefined && p.kind !== ts.SyntaxKind.SourceFile; p = p.parent) {
+    if (ts.isFunctionLike(p)) {
+      if (ts.isFunctionDeclaration(p) || p.getStart(sf) < stmtEnd) return null;
+    }
+    if (ts.isClassDeclaration(p) && p.getStart(sf) < stmtEnd) return null;
+  }
+  return { kind: "varRef", localId: g.id, type: g.type, loc: locOf(expr) };
 }
