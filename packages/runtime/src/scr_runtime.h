@@ -4932,7 +4932,11 @@ typedef struct {
   char *key;
   uint32_t key_len;
   uint32_t key_static; /* the bytes are a compiler-emitted literal: never freed */
-  ScrDyn *value; /* owned */
+  /* the value is a NON-OWNING back-reference (scr_dyn_obj_set_borrowed): no
+   * reference is held, so the holder's release, the cycle walk and an
+   * overwrite all skip it. */
+  uint32_t value_borrowed;
+  ScrDyn *value; /* owned unless value_borrowed */
 } ScrDynEntry;
 
 /* A STATIC pointer stored as a signed 32-bit offset from scr_cyc_base().
@@ -6151,6 +6155,10 @@ ScrArr *scr_arr_to_f64_dyn(ScrArr *a);
 double scr_dyn_arr_len(const ScrDyn *d);
 ScrDyn *scr_dyn_arr_at(const ScrDyn *d, double i);
 void scr_dyn_obj_set(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value);
+/* A non-owning member (value_borrowed): `value` is held WITHOUT a reference, so
+ * the holder's release skips it. Only for a back-reference to the holder itself,
+ * reachable only through a live holder (scr_tls.c's peer certificate). */
+void scr_dyn_obj_set_borrowed(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value);
 /* The PRESENCE-GATED store the record→dyn converters use for an
  * undefined-armed field: identical to scr_dyn_obj_set except that an
  * UNDEFINED value creates no key. An optional field a record does not hold
@@ -10325,6 +10333,7 @@ bool scr_tls_sock_authorized(ScrNetSocket *s);
  * (tls.connect's `session`). getSession answers +1 bytes or NULL (undefined). */
 bool scr_tls_sock_session_reused(ScrNetSocket *s);
 ScrBytes *scr_tls_sock_get_session(ScrNetSocket *s);
+
 ScrStr *scr_tls_sock_auth_error(ScrNetSocket *s); /* +1 or NULL */
 void scr_tls_sock_on_secure_connect(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once);
 void scr_tls_sock_on_session(ScrNetSocket *s, ScrClosure *cb /*moves*/, void *fn, bool once);
