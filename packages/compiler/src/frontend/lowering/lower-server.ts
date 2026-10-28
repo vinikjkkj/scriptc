@@ -2801,6 +2801,21 @@ function lowerTlsServerOptionsOrDyn(
  * fence for other documented members (the divergence-66 stance). The
  * callback (and 'secureConnect'/'connect' listeners) fires
  * post-handshake — Node's secureConnect timing. */
+/** Options-record keys that tls.connect's OWN implementation provably ignores,
+ * so a literal may carry one the @types record does not declare and it is
+ * dropped (lower-exprs.ts). Each entry is verified against the pinned CI Node
+ * (v24.15.0); test 14457 pins the behaviour, so a Node change fails it.
+ *   isServer: lib/internal/tls/wrap.js, connect(): the TLSSocket is built with
+ *   its own `isServer: false` (extracted source, `isServer: false,` in the
+ *   tlssock = new TLSSocket(...) call); the caller's value is not read, and a
+ *   probe (lab isserver-probe) shows a client with isServer: true connects as a
+ *   client under $NODE_CI. */
+export const TLS_CONNECT_IGNORED_KEYS: ReadonlySet<string> = new Set(["isServer"]);
+
+/** Literal -> the ignored-key set of the call that takes it. Keyed by the
+ * object literal node, so only the literal of a verified callee is affected. */
+export const LITERAL_IGNORED_KEYS = new WeakMap<ts.Node, ReadonlySet<string>>();
+
 function lowerTlsConnectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr {
   const args = expr.arguments;
   const FORMS_HINT =
@@ -2849,6 +2864,7 @@ function lowerTlsConnectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): 
   // directly; a typed record that converts boxes into the checked-dynamic tree.
   let opts: IrExpr;
   if (optsNode !== null) {
+    LITERAL_IGNORED_KEYS.set(optsNode, TLS_CONNECT_IGNORED_KEYS);
     const o = L.lowerExpr(optsNode);
     if (o.type.kind === "dyn") {
       opts = o;
