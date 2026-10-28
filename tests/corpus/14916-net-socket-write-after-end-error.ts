@@ -2,7 +2,7 @@
 // ERR_STREAM_WRITE_AFTER_END error, delivered after 'finish'.
 import { Socket, createServer } from 'net'
 const srv = createServer((c) => { c.on('error', () => {}); c.on('data', (d: Buffer) => c.end('echo:' + d)) })
-srv.listen(49916, '127.0.0.1', () => {
+srv.listen(17916, '127.0.0.1', () => {
   const G = new Socket()
   G.on('finish', () => console.log('G finish'))
   G.on('error', (e: NodeJS.ErrnoException) => console.log('G error', e.code, e.message))

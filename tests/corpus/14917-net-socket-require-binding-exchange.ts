@@ -8,4 +8,4 @@ function run(port: number) {
   s.on('data', (d: Buffer) => console.log('got', String(d)))
   s.on('close', () => { console.log('closed'); srv.close(() => console.log('srv closed')) })
 }
-srv.listen(49917, '127.0.0.1', () => run(49917))
+srv.listen(17917, '127.0.0.1', () => run(17917))
