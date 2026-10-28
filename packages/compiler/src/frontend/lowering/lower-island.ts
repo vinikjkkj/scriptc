@@ -1473,7 +1473,16 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
       ? resolveImport(L.program, decl.getSourceFile(), spec)
       : npmStaticDepSf7(L.program, decl.getSourceFile(), spec);
     if (!dep) return null;
-    const loc = locOf(expr);
+    return requireDepValueOf(L, dep, locOf(expr));
+  }
+
+  /** The value a `require(spec)` answers when its specifier names a compiled
+   * program module `dep`: the module's `module.exports` (the snapshot's
+   * `default` key for an `export =` module). The snapshot builder RUNS the
+   * module's init first, so the value is produced where the require is
+   * evaluated, and only then. Null when the dep has no builder (async init,
+   * no init name), which keeps the caller's fence. */
+  export function requireDepValueOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"]): IrExpr | null {
     const builder = staticDynNsBuilderOf(L, dep, loc, true);
     if (builder === null) return null;
     // A CommonJS module WITHOUT `export =` has no `default` key in its

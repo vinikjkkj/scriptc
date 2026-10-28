@@ -48,6 +48,7 @@ import { registerHttpClientFnBinding } from "./lower-server.js";
 import { lowerDateLocaleFormat } from "./lower-numfmt.js";
 import { STATS_TYPE_INDEX, KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 import { jsonModuleOfRequire } from "./lower-modules.js";
+import { requireDepValueOf } from "./lower-island.js";
 
 
 
@@ -541,6 +542,19 @@ import { jsonModuleOfRequire } from "./lower-modules.js";
           if (init !== null) {
             return { kind: "seqExpr", stmts: [init], result: dynUndefinedExpr(loc), type: DYN, loc };
           }
+        }
+      }
+      // A compiled program module named by a literal, used as an EXPRESSION
+      // operand (`opts.Client || require('pg').Client`). The statement hoist
+      // (js-desugar) leaves a require under a `||`/`&&`/`??` right operand or
+      // a conditional where it stands, so it reaches here: the same snapshot
+      // the statement-level `const m = require(lit)` reads, produced by the
+      // module's own init at THIS evaluation point (requireDepValueOf).
+      {
+        const edge = canonicalBuiltinModule(spec) === null ? L.requireDepOf(spec, call) : null;
+        if (edge !== null) {
+          const v = requireDepValueOf(L, edge, loc);
+          if (v !== null) return v;
         }
       }
       // A JSON document read as a value: the one baked global of that file.
