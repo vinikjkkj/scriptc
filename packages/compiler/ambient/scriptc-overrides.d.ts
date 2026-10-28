@@ -102,3 +102,11 @@ declare namespace NodeJS {
     hostname?: string;
   }
 }
+
+/* node:dns lookup answers, as the lowering reads them (lower-dgram.ts): the
+ * address is a string on success, null for an empty name, undefined on a
+ * failure; the family is 4/6 on success and undefined on a failure. The
+ * declared lookup overloads keep @types/node's spelling, so these aliases are
+ * the one place the answer's real union is written. */
+type ScriptcDnsAddress = string | null | undefined;
+type ScriptcDnsFamily = number | undefined;

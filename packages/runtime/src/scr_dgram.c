@@ -61,6 +61,9 @@
  * holds the loop like an in-flight request. */
 #include "scr_platform.h"
 #include "scr_runtime.h"
+#ifdef _WIN32
+#include <process.h>
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -363,11 +366,30 @@ typedef struct ScrDnsPending {
   ScrStr *errmsg; /* +1 or NULL (success) */
   ScrStr *addr;   /* +1 ("" on failure) */
   double family;
-  bool literal; /* an IP literal: answered without the resolver */
+  bool literal; /* an IP literal (or the empty name): answered without the resolver */
+  bool warn_empty; /* the first empty-hostname lookup prints DEP0118 at delivery */
   struct ScrDnsPending *next;
 } ScrDnsPending;
 
 static ScrDnsPending *scr_dns_pending = NULL;
+static bool scr_dns_empty_warned = false; /* DEP0118 fires once per process */
+
+/* Node's DEP0118 report, byte for byte: the "(node:pid) [CODE] Name: message"
+ * line, then the one-time trace hint. Stderr, at delivery (Node defers the
+ * warning through nextTick). */
+static void scr_dns_print_empty_warning(void) {
+  static bool hinted = false;
+  fflush(stdout);
+#ifdef _WIN32
+  fprintf(stderr, "(node:%ld) [DEP0118] DeprecationWarning: The provided hostname \"\" is not a valid hostname, and is supported in the dns module solely for compatibility.\n", (long)_getpid());
+#else
+  fprintf(stderr, "(node:%ld) [DEP0118] DeprecationWarning: The provided hostname \"\" is not a valid hostname, and is supported in the dns module solely for compatibility.\n", (long)getpid());
+#endif
+  if (!hinted) {
+    hinted = true;
+    fputs("(Use `node --trace-deprecation ...` to show where the warning was created)\n", stderr);
+  }
+}
 
 /* ── RC ──────────────────────────────────────────────────────────────── */
 
@@ -907,7 +929,19 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
   p->fn = fn;
   p->family = 4;
   unsigned char lit[16];
-  if (inet_pton(AF_INET, hostname->data, lit) == 1) {
+  if (hostname->len == 0) {
+    /* Node's lib/dns.js: an empty name is not a lookup at all. It answers
+     * null (the address slot, NULL here) with the requested family's
+     * default (6 for family 6, else 4) on nextTick, and warns DEP0118 once
+     * per process. */
+    p->family = family == 6 ? 6 : 4;
+    p->literal = true;
+    p->addr = NULL;
+    if (!scr_dns_empty_warned) {
+      scr_dns_empty_warned = true;
+      p->warn_empty = true;
+    }
+  } else if (inet_pton(AF_INET, hostname->data, lit) == 1) {
     p->family = 4;
     p->literal = true;
     p->addr = scr_str_new(hostname->data, strlen(hostname->data));
@@ -948,7 +982,7 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
       char msg[192];
       snprintf(msg, sizeof msg, "getaddrinfo %s %s", code, hostname->data);
       p->errmsg = scr_str_new(msg, strlen(msg));
-      p->addr = scr_str_new("", 0);
+      p->addr = NULL; /* Node passes undefined here */
     }
     if (res) freeaddrinfo(res);
   }
@@ -1052,6 +1086,7 @@ static void scr_dgram_sweep(void) {
   while (scr_dns_pending) {
     ScrDnsPending *p = scr_dns_pending;
     scr_dns_pending = p->next;
+    if (p->warn_empty) scr_dns_print_empty_warning();
     if (!scr_exc_pending()) p->fn(p->cb, p->errmsg, p->addr, p->family);
     scr_closure_release(p->cb);
     scr_str_release(p->errmsg);

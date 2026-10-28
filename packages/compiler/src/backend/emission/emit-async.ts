@@ -534,31 +534,72 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
     if (cbT.kind !== "func") throw new Error("emitter bug: dns.lookup callback not a func");
     const nparams = cbT.params.length;
     if (nparams === 0) return "scr_dns_thunk0";
+    // The shape the runtime signals (scr_dgram.c): an errmsg is the failure
+    // path (err set; address and family undefined); a NULL address with no
+    // errmsg is Node's null answer for an empty name; otherwise the answer.
     const errT = cbT.params[0]!;
-    if (errT.kind !== "union") throw new Error("emitter bug: dns.lookup err param not a union");
-    const key = `${errT.unionId}/${nparams}`;
+    const addrT = cbT.params[1];
+    const famT = cbT.params[2];
+    if (errT.kind !== "union" || (nparams >= 2 && addrT?.kind !== "union") || (nparams === 3 && famT?.kind !== "union")) {
+      throw new Error("emitter bug: dns.lookup callback slots are not unions (frontend must type them)");
+    }
+    const errU = errT.unionId;
+    const addrU = addrT?.kind === "union" ? addrT.unionId : "-";
+    const famU = famT?.kind === "union" ? famT.unionId : "-";
+    const key = `dns:${errU}/${addrU}/${famU}/${nparams}`;
     let sym = E.dnsLookupThunks.get(key);
     if (!sym) {
       sym = mangleDnsLookupThunk(E.dnsLookupThunks.size);
       E.dnsLookupThunks.set(key, sym);
-      const def = E.unionsById.get(errT.unionId);
-      const errTag = def ? def.arms.findIndex((a) => a.kind === "object") : -1;
-      const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
-      if (errTag < 0 || nullTag < 0) {
-        throw new Error("emitter bug: dns.lookup err union lacks its arms");
+      const armOf = (unionId: string, kind: string): number => {
+        const def = E.unionsById.get(unionId);
+        const tag = def ? def.arms.findIndex((a) => a.kind === kind) : -1;
+        if (tag < 0) throw new Error(`emitter bug: dns.lookup union ${unionId} lacks a ${kind} arm`);
+        return tag;
+      };
+      const errTag = armOf(errU, "object");
+      const nullErrTag = armOf(errU, "nullT");
+      const strTag = addrU !== "-" ? armOf(addrU, "string") : -1;
+      const addrNullTag = addrU !== "-" ? armOf(addrU, "nullT") : -1;
+      const addrUndefTag = addrU !== "-" ? armOf(addrU, "undefinedT") : -1;
+      const famNumTag = famU !== "-" ? armOf(famU, "f64") : -1;
+      const famUndefTag = famU !== "-" ? armOf(famU, "undefinedT") : -1;
+      const unit = (unionId: string, tag: number): string => E.unitInstanceRef(unionId, tag);
+      const lines: string[] = [
+        `  ScrUnion *sc_u = sc_err`,
+        `      ? scr_union_new_ref(${errTag}, scr_dns_error_new(sc_err), &scr_error_retain_v, &scr_error_release_v, NULL)`,
+        `      : ${unit(errU, nullErrTag)};`,
+      ];
+      const callArgs = ["sc_cb", "sc_u"];
+      const callSig = ["ScrClosure *", "ScrUnion *"];
+      if (nparams >= 2) {
+        lines.push(
+          `  ScrUnion *sc_a = sc_err`,
+          `      ? ${unit(addrU, addrUndefTag)}`,
+          `      : sc_addr`,
+          `          ? scr_union_new_ref(${strTag}, scr_str_retain(sc_addr), &scr_str_retain_v, &scr_str_release_v, NULL)`,
+          `          : ${unit(addrU, addrNullTag)};`,
+        );
+        callArgs.push("sc_a");
+        callSig.push("ScrUnion *");
       }
-      const callSig = ["ScrClosure *", "ScrUnion *", ...(nparams >= 2 ? ["ScrStr *"] : []), ...(nparams >= 3 ? ["double"] : [])].join(", ");
-      const callArgs = ["sc_cb", "sc_u", ...(nparams >= 2 ? ["scr_str_retain(sc_addr)"] : []), ...(nparams >= 3 ? ["sc_family"] : [])].join(", ");
+      if (nparams >= 3) {
+        lines.push(
+          `  ScrUnion *sc_f = sc_err`,
+          `      ? ${unit(famU, famUndefTag)}`,
+          `      : scr_union_new_f64(${famNumTag}, sc_family);`,
+        );
+        callArgs.push("sc_f");
+        callSig.push("ScrUnion *");
+      }
       E.walkerProtos.push(
         `${E.link}void ${sym}(ScrClosure *sc_cb, ScrStr *sc_err, ScrStr *sc_addr, double sc_family);`,
       );
       E.walkerDefs.push(
         `${E.link}void ${sym}(ScrClosure *sc_cb, ScrStr *sc_err, ScrStr *sc_addr, double sc_family) {`,
         `  (void)sc_addr; (void)sc_family;`,
-        `  ScrUnion *sc_u = sc_err`,
-        `      ? scr_union_new_ref(${errTag}, scr_dns_error_new(sc_err), &scr_error_retain_v, &scr_error_release_v, NULL)`,
-        `      : ${E.unitInstanceRef(errT.unionId, nullTag)};`,
-        `  ((void (*)(${callSig}))sc_cb->fn)(${callArgs});`,
+        ...lines,
+        `  ((void (*)(${callSig.join(", ")}))sc_cb->fn)(${callArgs.join(", ")});`,
         `}`,
       );
     }
