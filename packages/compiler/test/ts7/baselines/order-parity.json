@@ -19476,6 +19476,12 @@
       "<repo>/tests/corpus/15145-lru-hole-reads.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/15146-lru-min-resize-evict.ts": {
+    "order": [
+      "<repo>/tests/corpus/15146-lru-min-resize-evict.ts"
+    ],
+    "diags": []
   }
  }
 }
