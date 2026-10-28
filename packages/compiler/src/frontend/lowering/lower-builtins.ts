@@ -10592,7 +10592,9 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       // present so every path of the async body returns the payload type.
       body.push(retT.inner.kind === "void"
         ? { kind: "return", value: null, loc }
-        : { kind: "return", value: { kind: "arrayNewLen", length: { kind: "numLit", value: 0, type: F64, loc }, type: retT.inner, loc }, loc });
+        : { kind: "return", value: retT.inner.kind === "dyn"
+          ? L.coerceToExpected({ kind: "arrayNewLen", length: { kind: "numLit", value: 0, type: F64, loc }, type: arrayOf(DYN), loc }, DYN)
+          : { kind: "arrayNewLen", length: { kind: "numLit", value: 0, type: F64, loc }, type: retT.inner, loc }, loc });
       const ctx = L.ctx;
       L.liftedFns.push({
         name,
@@ -10679,7 +10681,13 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     elemT: IrType,
     loc: SrcLoc,
   ): IrExpr | null {
+    // `packed`: the argument is ONE checked-dynamic array (the driver packs
+    // it and reads it through dyn.arrAt / dyn.arrLen). `dyn` alone says the
+    // ENTRIES are checked-dynamic values, which a static array of dyn boxes
+    // (`arrayOf(DYN)`, the element type of `Promise<any[]>`'s payload and of
+    // a Set of any) also is; that array is read with static indexing.
     const dyn = entryT.kind === "dyn";
+    const packed = entries.type.kind === "dyn";
     if (!dyn && entryT.kind !== "promise") return null;
     const innerT: IrType = dyn ? DYN : entryT.inner;
     if (mode === "values" && innerT.kind === "void") return null;
@@ -10689,9 +10697,16 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       if (!settleArms) return null;
     }
     const storeT: IrType = mode === "settled" ? elemT : mode === "values" ? innerT : VOID;
-    const outT: IrType = mode === "void" ? VOID : arrayOf(storeT);
-    const psT: IrType = dyn ? DYN : arrayOf(entryT);
-    const key = `countdown:${mode}:${typeKey(entryT)}:${typeKey(storeT)}`;
+    // The VALUES storage is always a static array; the PAYLOAD collapses to
+    // the checked-dynamic array when its elements are dyn (`unknown[]` and
+    // `any[]` are DYN in this mapping: types.ts' collapse, the same type a
+    // Promise<any[]> payload maps to), so the resolved value is the one the
+    // mapper gives the combined result.
+    const collapse = mode === "values" && innerT.kind === "dyn";
+    const valuesT: IrType = arrayOf(storeT);
+    const outT: IrType = mode === "void" ? VOID : collapse ? DYN : valuesT;
+    const psT: IrType = packed ? DYN : arrayOf(entryT);
+    const key = `countdown:${mode}:${typeKey(entryT)}:${typeKey(storeT)}:${packed ? "packed" : "static"}`;
     const retT: IrType = { kind: "promise", inner: outT };
     const resolveT: IrType = { kind: "func", params: mode === "void" ? [] : [outT], ret: VOID };
     const rejectT: IrType = { kind: "func", params: [DYN], ret: VOID };
@@ -10715,7 +10730,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       step = `%promise.countstep.${L.retagHelpers.size}`;
       L.retagHelpers.set(stepSettledKey, step);
       const pT: IrType = dyn ? DYN : entryT;
-      const stepParamTs: IrType[] = [pT, F64, ...(withValues ? [outT] : []), arrayOf(F64), resolveT, ...(mode === "settled" ? [] : [rejectT])];
+      const stepParamTs: IrType[] = [pT, F64, ...(withValues ? [valuesT] : []), arrayOf(F64), resolveT, ...(mode === "settled" ? [] : [rejectT])];
       const stepFnT: IrType & { kind: "func" } = { kind: "func", params: stepParamTs, ret: VOID };
       const fnCtx = newFnCtx(true, null, stepFnT, VOID);
       fnCtx.isAsync = true;
@@ -10723,7 +10738,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       try {
         const pLocal = L.declareHiddenLocal("p", pT);
         const iLocal = L.declareHiddenLocal("i", F64);
-        const valuesLocal = withValues ? L.declareHiddenLocal("values", outT) : null;
+        const valuesLocal = withValues ? L.declareHiddenLocal("values", valuesT) : null;
         const cntLocal = L.declareHiddenLocal("cnt", arrayOf(F64));
         const doneLocal = L.declareHiddenLocal("done", resolveT);
         const failLocal = mode === "settled" ? null : L.declareHiddenLocal("fail", rejectT);
@@ -10733,7 +10748,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
         const cntRef: IrExpr = { kind: "varRef", localId: cntLocal.id, type: arrayOf(F64), loc };
         const doneRef: IrExpr = { kind: "varRef", localId: doneLocal.id, type: resolveT, loc };
-        const valuesRef: IrExpr | null = valuesLocal ? { kind: "varRef", localId: valuesLocal.id, type: outT, loc } : null;
+        const valuesRef: IrExpr | null = valuesLocal ? { kind: "varRef", localId: valuesLocal.id, type: valuesT, loc } : null;
         const failRef: IrExpr | null = failLocal ? { kind: "varRef", localId: failLocal.id, type: rejectT, loc } : null;
         const eRef: IrExpr = { kind: "varRef", localId: eLocal.id, type: CAUGHT, loc };
         const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
@@ -10762,7 +10777,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
             },
             then: [{
               kind: "exprStmt",
-              expr: { kind: "callValue", callee: doneRef, args: valuesRef ? [valuesRef] : [], type: VOID, loc },
+              expr: { kind: "callValue", callee: doneRef, args: valuesRef ? [collapse ? L.coerceToExpected(valuesRef, DYN) : valuesRef] : [], type: VOID, loc },
               loc,
             }],
             else_: null,
@@ -10861,7 +10876,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       const packLocal = L.declareHiddenLocal("pack", DYN);
       packLocal.mutable = true;
       const nLocal = L.declareHiddenLocal("n", F64);
-      const valuesLocal = withValues ? L.declareHiddenLocal("values", outT) : null;
+      const valuesLocal = withValues ? L.declareHiddenLocal("values", valuesT) : null;
       const cntLocal = L.declareHiddenLocal("cnt", arrayOf(F64));
       const iLocal = L.declareHiddenLocal("i", F64);
       iLocal.mutable = true;
@@ -10869,20 +10884,20 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       const wRef: IrExpr = { kind: "varRef", localId: wLocal.id, type: wT, loc };
       const packRef: IrExpr = { kind: "varRef", localId: packLocal.id, type: DYN, loc };
       const nRef: IrExpr = { kind: "varRef", localId: nLocal.id, type: F64, loc };
-      const valuesRef: IrExpr | null = valuesLocal ? { kind: "varRef", localId: valuesLocal.id, type: outT, loc } : null;
+      const valuesRef: IrExpr | null = valuesLocal ? { kind: "varRef", localId: valuesLocal.id, type: valuesT, loc } : null;
       const cntRef: IrExpr = { kind: "varRef", localId: cntLocal.id, type: arrayOf(F64), loc };
       const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
       const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
       const resolveOf: IrExpr = { kind: "recordGet", obj: wRef, shapeId: wShapeId, field: "resolve", type: resolveT, loc };
       const rejectOf: IrExpr = { kind: "recordGet", obj: wRef, shapeId: wShapeId, field: "reject", type: rejectT, loc };
-      const elemOf: IrExpr = dyn
+      const elemOf: IrExpr = packed
         ? { kind: "libCall", fn: "dyn.arrAt", args: [packRef, iRef], type: DYN, loc }
         : { kind: "arrayGet", arr: psRef, index: iRef, type: entryT, loc };
-      const lenOf: IrExpr = dyn
+      const lenOf: IrExpr = packed
         ? { kind: "libCall", fn: "dyn.arrLen", args: [packRef], type: F64, loc }
         : { kind: "arrIntrinsic", method: "length", receiver: psRef, args: [], type: F64, loc };
       const body: IrStmt[] = [];
-      if (dyn) {
+      if (packed) {
         body.push(
           { kind: "varDecl", localId: packLocal.id, init: dynUndefinedExpr(loc), loc },
           ...dynPackStmts(L, psRef, packLocal, retT as IrType & { kind: "promise" }, loc),
@@ -10891,12 +10906,12 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       body.push(
         { kind: "varDecl", localId: wLocal.id, init: { kind: "promiseWithResolvers", type: wT, loc }, loc },
         { kind: "varDecl", localId: nLocal.id, init: lenOf, loc },
-        ...(valuesLocal ? [{ kind: "varDecl" as const, localId: valuesLocal.id, init: { kind: "arrayNewLen" as const, length: nRef, type: outT, loc }, loc }] : []),
+        ...(valuesLocal ? [{ kind: "varDecl" as const, localId: valuesLocal.id, init: { kind: "arrayNewLen" as const, length: nRef, type: valuesT, loc }, loc }] : []),
         { kind: "varDecl", localId: cntLocal.id, init: { kind: "arrayLit", elems: [nRef], type: arrayOf(F64), loc }, loc },
         {
           kind: "if",
           cond: { kind: "bin", op: "===", left: nRef, right: zero, type: BOOL, loc },
-          then: [{ kind: "exprStmt", expr: { kind: "callValue", callee: resolveOf, args: valuesRef ? [valuesRef] : [], type: VOID, loc }, loc }],
+          then: [{ kind: "exprStmt", expr: { kind: "callValue", callee: resolveOf, args: valuesRef ? [collapse ? L.coerceToExpected(valuesRef, DYN) : valuesRef] : [], type: VOID, loc }, loc }],
           else_: null,
           loc,
         },
@@ -11516,7 +11531,18 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           "the entries must share ONE promise type — Promise.all([p, q]) lowers when p and q are the same Promise<T>",
         );
       }
-      const entries = L.lowerExpr(argNode);
+      let entries = L.lowerExpr(argNode);
+      // A SET of promises (`Promise.all(preparations)` over a `Set` the
+      // caller filled with `add(promise)`): Promise.all reads the set's
+      // values in insertion order at the call, the same snapshot `[...s]`
+      // and Array.from(s) take, so it lowers as the array form over that
+      // drain. Element types that are not promises keep the fence below.
+      if (entries.type.kind === "set" && (entries.type.elem.kind === "promise" || entries.type.elem.kind === "dyn")) {
+        entries = {
+          kind: "setIntrinsic", method: "toArray", receiver: entries, args: [],
+          type: arrayOf(entries.type.elem), loc,
+        };
+      }
       // A NON-literal island argument (`Promise.all(plugins.map((p) =>
       // loadPlugin(p)))` — the loadPlugins shape, where the checker
       // spells `any[]`): the ENGINE's own Promise.all runs over the
@@ -11545,6 +11571,19 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       }
       if (entries.type.kind === "dyn" && allResultIsDiscarded(call)) {
         const built = dynAllOverArray(L, entries, loc);
+        if (built) return built;
+      }
+      // Promise.all over checked-dynamic entries whose combined result is
+      // USED (`Promise<any[]>`: a JS array or Set of promises the checker
+      // types any): each entry is awaited as a checked-dynamic value, the
+      // same settlement turn the promise countdown gives every entry, and
+      // the payload is the array of those values. The whole dyn array and
+      // a static array of dyn boxes both ride the countdown.
+      if (
+        entries.type.kind === "dyn" ||
+        (entries.type.kind === "array" && entries.type.elem.kind === "dyn")
+      ) {
+        const built = valuesCountdown(L, entries, DYN, loc);
         if (built) return built;
       }
       if (entries.type.kind !== "array" || entries.type.elem.kind !== "promise") {
@@ -11602,6 +11641,14 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           type: { kind: "promise", inner: VOID },
           loc,
         };
+      }
+      // A checked-dynamic payload with the combined result USED (`Promise<any[]>`
+      // bound to a name, returned, or chained): the values countdown, whose
+      // payload collapses to the checked-dynamic array the mapping gives
+      // `Promise<any[]>` (see countdown's `collapse`).
+      if (inner.kind === "dyn") {
+        const collapsed = valuesCountdown(L, entries, entries.type.elem, loc);
+        if (collapsed) return collapsed;
       }
       const resultT: IrType | null =
         inner.kind === "void"
