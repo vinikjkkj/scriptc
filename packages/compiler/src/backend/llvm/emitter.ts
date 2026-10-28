@@ -627,6 +627,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "tlsca.getDyn": "scr_tls_ca_get_dyn",
   "tls.checkServerIdentity": "scr_tls_check_server_identity_dyn",
   "tls.sockSessionReused": "scr_tls_sock_session_reused",
+  "tls.sockPeerCert": "scr_tls_sock_peer_cert",
   "tlsca.set": "scr_tls_ca_set_default",
   // ── node:tls's runtime-options slice and node:dgram: the rows that
   // were the whole of this tier's enumerated refusal list except the two
