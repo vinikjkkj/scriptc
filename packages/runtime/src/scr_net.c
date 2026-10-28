@@ -2052,6 +2052,28 @@ ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/) {
   return first; /* the preferred family's first address: the old answer */
 }
 
+/* NETDBG tlsdbg experiment: bind the unbound socket to the wildcard before connect (libuv does this for ConnectEx) */
+static void scr_net_w32_prebind(int fd, int family) {
+#ifdef _WIN32
+  int rc;
+  if (family == AF_INET6) {
+    struct sockaddr_in6 a6;
+    memset(&a6, 0, sizeof a6);
+    a6.sin6_family = AF_INET6;
+    rc = scr_w32_bind(fd, (struct sockaddr *)&a6, sizeof a6);
+  } else {
+    struct sockaddr_in a4;
+    memset(&a4, 0, sizeof a4);
+    a4.sin_family = AF_INET;
+    rc = scr_w32_bind(fd, (struct sockaddr *)&a4, sizeof a4);
+  }
+  fprintf(stdout, "NETDBG prebind fd=%d family=%d rc=%d\n", fd, family, rc);
+#else
+  (void)fd;
+  (void)family;
+#endif
+}
+
 /* The dial itself (peer_ip/peer_port already set): the sockaddr arms,
  * socket(), and the nonblocking connect(). Shared by the immediate dial
  * (scr_net_connect) and the DEFERRED one (the http agent's maxSockets
@@ -2097,6 +2119,7 @@ static void scr_net_sock_dial_peer(ScrNetSocket *s) {
   int one = 1;
   setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
   s->fd = fd;
+  scr_net_w32_prebind(fd, sa->sa_family);
   int rc = connect(fd, sa, salen);
   if (rc == 0) {
     /* Immediate success (loopback can): still async — the write filter
@@ -2576,6 +2599,7 @@ static bool scr_net_sock_dial_ip(ScrNetSocket *s, const ScrStr *ip) {
   scr_net_nonblock(fd);
   int one = 1;
   setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+  scr_net_w32_prebind(fd, sa->sa_family);
   int rc = connect(fd, sa, salen);
   fprintf(stdout, "NETDBG dial_ip_async t=%.1f fd=%d rc=%d errno=%d ip=%s port=%d\n", scr_now_ms(), (int)fd, rc, rc == 0 ? 0 : errno, h, s->peer_port);
   if (rc == 0) scr_net_dial_log_clear(s); /* connected at once: no failed attempt to report */
