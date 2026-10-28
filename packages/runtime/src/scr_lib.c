@@ -5587,7 +5587,8 @@ bool scr_num_same_value(double a, double b) {
   return a == b;
 }
 
-bool scr_num_is_nan(double x) { return isnan(x) != 0; }
+/* Number.isNaN: the NaN-marked undefined is not a Number (Node: Number.isNaN(undefined) is false). */
+bool scr_num_is_nan(double x) { return isnan(x) != 0 && !scr_num_is_marker(x); }
 
 bool scr_num_is_integer(double x) { return isfinite(x) && trunc(x) == x; }
 

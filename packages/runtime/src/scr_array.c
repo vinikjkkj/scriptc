@@ -1066,8 +1066,11 @@ ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
     if (i > 0) scr_join_append(&buf, &len, &cap, sep->data, sep->len);
     switch (a->elem) {
       case SCR_ELEM_F64: {
+        double x = scr_slot_to_f64(a->data[i]);
+        /* join prints undefined (and a hole) as the empty string, Node's rule. */
+        if (scr_num_is_marker(x)) break;
         char nb[32];
-        size_t n = scr_f64_to_str(scr_slot_to_f64(a->data[i]), nb);
+        size_t n = scr_f64_to_str(x, nb);
         scr_join_append(&buf, &len, &cap, nb, n);
         break;
       }

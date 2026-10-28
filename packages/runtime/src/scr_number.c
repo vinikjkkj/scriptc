@@ -88,6 +88,7 @@ ScrStr *scr_num_to_str_radix(double x, double radix_d) {
     size_t n = scr_f64_to_str(x, b);
     return scr_str_new(b, n);
   }
+  if (scr_num_is_marker(x)) return scr_str_new("undefined", 9);
   if (isnan(x)) return scr_str_new("NaN", 3);
   if (isinf(x)) return x < 0 ? scr_str_new("-Infinity", 9) : scr_str_new("Infinity", 8);
   if (x == 0) return scr_str_new("0", 1); /* covers -0 */
@@ -414,7 +415,11 @@ size_t scr_f64_to_str(double x, char *buf) {
   const uint64_t mag = bits << 1; /* sign shifted out */
   if (mag == 0) return (size_t)(stpcpy(buf, "0") - buf); /* covers -0 */
   if (mag >= 0xffe0000000000000ull) {
-    if (mag > 0xffe0000000000000ull) return (size_t)(stpcpy(buf, "NaN") - buf);
+    if (mag > 0xffe0000000000000ull) {
+      /* The NaN-marked undefined prints as Node's undefined (scr_runtime.h). */
+      if (bits == SCR_NUM_UNDEF_BITS || bits == SCR_NUM_HOLE_BITS) return (size_t)(stpcpy(buf, "undefined") - buf);
+      return (size_t)(stpcpy(buf, "NaN") - buf);
+    }
     return (size_t)(stpcpy(buf, (bits >> 63) != 0 ? "-Infinity" : "Infinity") - buf);
   }
 
