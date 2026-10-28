@@ -1566,6 +1566,10 @@ class LlEmitter {
   /** Declared functions referenced as values: each needs an env-signature
    * wrapper + an interned immortal closure (so `f === f` holds). */
   private readonly fnValues = new Set<string>();
+  /** A function whose interned closure a dyn member table names (dyn.ts classMemberTable). */
+  noteFnValue(name: string): void {
+    this.fnValues.add(name);
+  }
   /** Emitted closure ENTRY POINT symbol -> the interned cstr holding the
    * JS `Function.prototype.name` of the value it backs. The C twin's
    * `fnNames` (emitter.ts) — filled at the closure creation sites so the
@@ -2414,7 +2418,7 @@ class LlEmitter {
       // scr_runtime.h) — what `x.get()` and `x.v` read through once the
       // instance is in a dyn slot. The trailing `bool` is an i8 with 7
       // bytes of tail padding, the descriptor above's own rule.
-      `%ScrDynClassMember = type { ptr, i64, ptr, ptr, i8, i8 }`,
+      `%ScrDynClassMember = type { ptr, i64, ptr, ptr, i8, i8, ptr }`,
       // One row of the function-name table { fn, name } — the closure
       // entry point and the JS name of the value it backs (ScrFnName in
       // scr_runtime.h). main() installs the array; walker-built boxes

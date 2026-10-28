@@ -141,7 +141,7 @@ import { lowerAssertModuleCall, lowerAssertDirectCall } from "./lower-assert.js"
 import { lowerUtilModuleCall } from "./lower-inspect.js";
 import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueToIr } from "./lower-comptime.js";
 import { lowerDeleteValue, lowerElemValuePosition, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
-import { recordKeyResultOk, narrowBridgeDyn, FieldTarget, bufferValueIndexOf, bufferValueOf, lowerDynObjectLiteral, lowerDynSpreadObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, numberConvAtDynWidth, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
+import { unboundMethodThunk, recordKeyResultOk, narrowBridgeDyn, FieldTarget, bufferValueIndexOf, bufferValueOf, lowerDynObjectLiteral, lowerDynSpreadObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, numberConvAtDynWidth, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
 import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type ExpandoMember } from "./lower-expando.js";
 import { lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch, throwOnlyValueType } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
@@ -4325,7 +4325,16 @@ export class Lowerer {
       // The unit names, taken from the SAME two sources discover()
       // registers units from — a third spelling of "the class's methods"
       // is how the two drift.
-      for (const { mName } of this.classMethodMembers(c)) this.noteEdge(`%${c.def.name}.${mName}`);
+      for (const { mName } of this.classMethodMembers(c)) {
+        this.noteEdge(`%${c.def.name}.${mName}`);
+        // The method's interned unbound thunk: the value a dyn member read of it answers
+        // (emit-walkers' method row `value`), the same closure the static `x.m` read names,
+        // so `o[k] === x.m` holds. Built here, so the thunk exists whenever the row does.
+        const found = this.findMethodOn(c, mName);
+        if (found === null || found.sig.abstract === true) continue;
+        if (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable")) continue;
+        unboundMethodThunk(this, c, mName, found, { file: c.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 }, true);
+      }
       for (const sh of c.shadowFields ?? []) this.noteEdge(`%${c.def.name}.${sh}`);
       for (const [mName] of this.protoClassBodies.get(c.def.name) ?? []) {
         this.noteEdge(`%${c.def.name}.${mName}`);
