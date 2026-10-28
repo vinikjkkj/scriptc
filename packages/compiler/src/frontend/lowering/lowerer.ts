@@ -63,6 +63,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
+import { GRAFTED_EMITTER_CLASSES } from "../../ir/nodes.js";
 import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
@@ -2318,6 +2319,8 @@ export class Lowerer {
     readonly dynamic: boolean,
     mode: LowererMode = {},
   ) {
+    // The grafted-emitter set is per lowering (see GRAFTED_EMITTER_CLASSES).
+    GRAFTED_EMITTER_CLASSES.clear();
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();
