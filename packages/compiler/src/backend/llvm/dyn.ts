@@ -5128,7 +5128,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3, i8 0, ptr null }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3, i8 ${row.ordk}, ptr null }`);
         continue;
       }
       if (row.kind === "field") {

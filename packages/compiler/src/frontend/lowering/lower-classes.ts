@@ -114,6 +114,13 @@ function classOrderedNames(
     if (f.name.startsWith("%") || f.name.startsWith("#")) continue;
     if (!out.includes(f.name)) out.push(f.name);
   }
+  // An own-shadow flag (`#__sc_own$<method>$...`, js-desugar.ts) is written on the shadowed
+  // property's first write, so it takes the inferred-field ordinal of that key.
+  for (const m of decl.members) {
+    if (ts.isPropertyDeclaration(m) && ts.isPrivateIdentifier(m.name) && m.name.text.startsWith("#__sc_own$") && !out.includes(m.name.text)) {
+      out.push(m.name.text);
+    }
+  }
   return out;
 }
 
@@ -9594,7 +9601,9 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         });
         continue;
       }
-      if (!f.initializer) continue;
+      // An own-shadow flag starts false by the zero of its slot; its initializer would note the
+      // flag in the instance order at construction, before any key the program wrote.
+      if (!f.initializer || f.name.startsWith("#__sc_own$")) continue;
       L.stats.statementsTotal++;
       L.bumpFileStat(locOf(f.initializer).file, "total");
       try {
