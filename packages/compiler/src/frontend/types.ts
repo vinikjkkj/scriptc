@@ -5231,7 +5231,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const ret =
       retT.flags & ts.TypeFlags.Never
         ? VOID
-        : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral || libraryAnyReturn || (!ctx.dynamic && spellsAnyReturn(sigDeclForRet))) && (retT.flags & ts.TypeFlags.Any) !== 0
+        : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral || libraryAnyReturn || (!ctx.dynamic && spellsAnyReturn(sigDeclForRet)) || (!ctx.dynamic && truthinessCallbackReturn(sigDeclForRet))) && (retT.flags & ts.TypeFlags.Any) !== 0
           ? DYN
           : mapType(retT, ctx);
     if (!ret) {
@@ -8305,6 +8305,23 @@ function spellsAnyReturn(decl: ts.Node | undefined): boolean {
   let tn: ts.TypeNode | undefined = decl.type;
   while (tn !== undefined && ts.isParenthesizedTypeNode(tn)) tn = tn.type;
   return tn !== undefined && tn.kind === ts.SyntaxKind.AnyKeyword;
+}
+
+/** An UNANNOTATED arrow or function expression that is the callback of an
+ * array predicate whose result is only ever TESTED for truthiness (find,
+ * findIndex, findLast, findLastIndex, some, every, filter). Its `any` return is the
+ * value the predicate's ToBoolean reads, and the find-like lowering takes
+ * the ToBoolean of a dyn result (a dynTest truthy, JS-exact for every kind),
+ * so the callback maps with a DYN return instead of refusing its `any`. A
+ * body that is itself a static value is boxed to dyn at its return. */
+const TRUTHINESS_CALLBACK_METHODS = new Set(["find", "findIndex", "findLast", "findLastIndex", "some", "every", "filter"]);
+function truthinessCallbackReturn(decl: ts.Node | undefined): boolean {
+  if (decl === undefined || !(ts.isArrowFunction(decl) || ts.isFunctionExpression(decl))) return false;
+  if (decl.type !== undefined) return false;
+  const call = decl.parent;
+  if (!ts.isCallExpression(call) || call.arguments[0] !== decl) return false;
+  const callee = call.expression;
+  return ts.isPropertyAccessExpression(callee) && TRUTHINESS_CALLBACK_METHODS.has(callee.name.text);
 }
 
 // Only the ARRAY spellings (`any[]`, `Array<any>`): a program-authored bare `any` member keeps its refusal

@@ -1455,7 +1455,10 @@ function lowerOptionalDefaultArg(
         `'.map()' with a callback returning '${L.fmt(fnRet)}' values (arrays of this element kind have no representation — store the values individually)`,
       );
     }
-    if (method === "filter" && fnRet.kind !== "bool") L.badType(argNode, L.typeOf(argNode));
+    // filter keeps an element whose predicate is truthy: a bool passes
+    // through, a dyn (the callback's admitted `any` return) takes the
+    // dynTest truthy in the helper below.
+    if (method === "filter" && fnRet.kind !== "bool" && fnRet.kind !== "dyn") L.badType(argNode, L.typeOf(argNode));
     const helper = arrayHofHelper(L, method, elem, fnRet, arity, loc);
     const resultType: IrType =
       method === "map" ? arrayOf(fnRet) : method === "filter" ? arrayOf(elem) : VOID;
@@ -2022,7 +2025,7 @@ function lowerOptionalDefaultArg(
           { kind: "varDecl", localId: "v.0", init: getElem, loc },
           {
             kind: "if",
-            cond: callF(ref("v.0", elem)),
+            cond: predToBool(callF(ref("v.0", elem))),
             then: [push(arrT, ref("v.0", elem))],
             else_: null,
             loc,
@@ -2066,7 +2069,7 @@ function lowerOptionalDefaultArg(
     // returns the index read's `string | undefined`).
     const fnRet = fnArg.type.ret;
     const truthyRet =
-      fnRet.kind === "bool" || fnRet.kind === "f64" || fnRet.kind === "string" ||
+      fnRet.kind === "bool" || fnRet.kind === "f64" || fnRet.kind === "string" || fnRet.kind === "dyn" ||
       (fnRet.kind === "union" &&
         (L.unions.get(fnRet.unionId)?.arms ?? []).every((a) => a.kind !== "dyn" && a.kind !== "caught" && a.kind !== "jsval"));
     if (!truthyRet) L.badType(argNode, L.typeOf(argNode));
@@ -2168,6 +2171,10 @@ function lowerOptionalDefaultArg(
    * truthy-answerable unions via toBool). */
   function predToBool(e: IrExpr): IrExpr {
     if (e.type.kind === "bool") return e;
+    // A dyn result (the callback's `any` return, admitted by the type mapper
+    // for truthiness-tested callbacks): JS ToBoolean over the tagged value,
+    // the same truthy test `if (dynValue)` lowers to.
+    if (e.type.kind === "dyn") return { kind: "dynTest", test: "truthy", value: e, type: BOOL, loc: e.loc };
     return { kind: "toBool", operand: e, type: BOOL, loc: e.loc };
   }
 
