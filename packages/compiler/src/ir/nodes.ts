@@ -4129,6 +4129,7 @@ export type IrLibFn =
    * exactly Node's split. */
   | "net.serverOnSecureConnection"
   | "net.connect"
+  | "net.sockNew"
   /** connect with a validated autoSelectFamilyAttemptTimeout option (the
    * budget runs Node's validateInt32-from-1 ladder and is then inert —
    * the single dial has nothing to time). May-throw. */
@@ -4447,8 +4448,15 @@ export type IrLibFn =
   | "net.sockPause"
   | "net.sockResume"
   | "net.sockSetNoDelay"
+  | "net.sockConnect"
+  | "net.sockConnectCb"
+  | "net.sockSetKeepAlive"
+  | "net.sockRef"
+  | "net.sockUnref"
   | "net.sockDestroySoon"
   | "net.sockBytesWritten"
+  | "net.serverRef"
+  | "net.serverUnref"
   | "net.sockReadable"
   /** socket.on('finish', cb) / end(cb): fires once when the FIN goes out
    * (sweep-deferred, never the registering stack). */
@@ -13163,6 +13171,7 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
+  "net.sockConnect", "net.sockConnectCb",
   // crypto.publicEncrypt, RSA-OAEP/SHA-1 only (scr_rsa_pubenc.c). The RSA
   // key is a REMOTE peer's, not local configuration -- bad/unparseable key
   // material, a non-RSA key, or an OAEP-too-long input throws a catchable

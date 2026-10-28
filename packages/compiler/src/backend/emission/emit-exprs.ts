@@ -4955,6 +4955,27 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_net_sock_pause(${arg(0)})`);
           case "net.sockResume":
             return finish(`scr_net_sock_resume(${arg(0)})`);
+          case "net.sockNew":
+            return finish(`scr_net_sock_idle_new()`);
+          case "net.sockConnect":
+            E.usesTimers = true; // a dialed socket holds the loop open
+            return finish(`scr_net_sock_connect(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "net.sockConnectCb": {
+            E.usesTimers = true;
+            const cb = args[3]!;
+            E.moveTemp(cb);
+            return finish(`scr_net_sock_connect_cb(${arg(0)}, ${arg(1)}, ${arg(2)}, ${cb.name})`);
+          }
+          case "net.sockSetKeepAlive":
+            return finish(`scr_net_sock_set_keepalive(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "net.sockRef":
+            return finish(`scr_net_sock_ref(${arg(0)})`);
+          case "net.sockUnref":
+            return finish(`scr_net_sock_unref(${arg(0)})`);
+          case "net.serverRef":
+            return finish(`scr_net_server_ref(${arg(0)})`);
+          case "net.serverUnref":
+            return finish(`scr_net_server_unref(${arg(0)})`);
           case "net.sockSetNoDelay":
             return finish(`scr_net_sock_set_nodelay(${arg(0)}, ${arg(1)})`);
           case "net.sockDestroySoon":
@@ -4967,7 +4988,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "net.sockOnFinish": {
             const cb = args[1]!;
             E.moveTemp(cb);
-            E.line(`scr_net_sock_on_finish(${arg(0)}, ${cb.name});${E.srcComment(e.loc)}`);
+            E.line(`scr_net_sock_on_finish_opt(${arg(0)}, ${cb.name}, ${arg(2)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           }
           case "net.sockPipe":
