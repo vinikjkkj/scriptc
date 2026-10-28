@@ -19710,6 +19710,48 @@
       "<repo>/tests/diagnostics/grown-number-array-spread.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/15040-instof-stream-named/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15040-instof-stream-named/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15041-instof-stream-namespace/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15041-instof-stream-namespace/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15042-instof-stream-require/main.js": {
+   "order": [
+    "<repo>/tests/corpus/15042-instof-stream-require/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15043-instof-stream-stdio-typed/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15043-instof-stream-stdio-typed/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15044-instof-stream-stamp-free/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15044-instof-stream-stamp-free/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15045-instof-error-buffer-dyn/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15045-instof-error-buffer-dyn/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15046-instof-passthrough-dyn/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15046-instof-passthrough-dyn/main.ts"
+   ],
+   "diags": []
   }
  }
 }
