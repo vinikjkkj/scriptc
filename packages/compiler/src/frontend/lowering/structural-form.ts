@@ -236,6 +236,9 @@ function structuralFormOfShape(
     out += `|index<${structuralForm(shape.indexValue, shapes, unions, next, cache)}>`;
   }
   if (shape.declaredOrder !== undefined) out += `|order${J(shape.declaredOrder)}`;
+  // The full key order of an accessor shape IS identity (two literals with
+  // the same members in another order enumerate differently): see keyOf.
+  if (shape.keyOrder !== undefined) out += `|keyorder${J(shape.keyOrder)}`;
   if (shape.tostr === true) out += "|tostr";
   if (shape.builtin !== undefined) out += `|builtin${J(shape.builtin)}`;
   // ownmask / reqabsent / srcproto are NOT here, deliberately: see the

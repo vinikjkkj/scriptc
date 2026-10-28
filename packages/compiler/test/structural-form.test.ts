@@ -16,7 +16,7 @@ import {
   type ShapeLookup,
   type UnionLookup,
 } from "../src/frontend/lowering/structural-form.js";
-import { BOOL, F64, STRING, type IrRecordShape, type IrType, type IrUnionDef } from "../src/ir/nodes.js";
+import { BOOL, F64, STRING, funcOf, type IrRecordShape, type IrType, type IrUnionDef } from "../src/ir/nodes.js";
 
 function lookups(shapes: IrRecordShape[], unions: IrUnionDef[] = []): [ShapeLookup, UnionLookup] {
   const s = new Map(shapes.map((x) => [x.id, x]));
@@ -70,6 +70,12 @@ describe("structural form", () => {
     expect(structuralForm(rec("r0"), sT, uT)).not.toBe(structuralForm(rec("r0"), sP, uP));
     const [sO, uO] = lookups([{ ...plain, declaredOrder: ["a"] }]);
     expect(structuralForm(rec("r0"), sO, uO)).not.toBe(structuralForm(rec("r0"), sP, uP));
+    // An accessor shape's key order is identity too: the same members in
+    // another order enumerate differently, so they must not share a form.
+    const acc = { id: "r0", fields: [{ name: "%get:a", type: funcOf([], F64) }, { name: "b", type: F64 }] };
+    const [sK1, uK1] = lookups([{ ...acc, keyOrder: ["a", "b"] }]);
+    const [sK2, uK2] = lookups([{ ...acc, keyOrder: ["b", "a"] }]);
+    expect(structuralForm(rec("r0"), sK1, uK1)).not.toBe(structuralForm(rec("r0"), sK2, uK2));
   });
 
   it("classifies every shape and union field, with the later-pass ones excluded", () => {
@@ -80,7 +86,7 @@ describe("structural form", () => {
     expect([...structuralIdentityFields.shapeExcluded].sort())
       .toEqual(["id", "ownmask", "reqabsent", "srcproto"]);
     expect([...structuralIdentityFields.shape].sort())
-      .toEqual(["builtin", "declaredOrder", "fields", "indexValue", "tostr", "tuple"]);
+      .toEqual(["builtin", "declaredOrder", "fields", "indexValue", "keyOrder", "tostr", "tuple"]);
     expect([...structuralIdentityFields.unionExcluded].sort()).toEqual(["id"]);
   });
 
