@@ -1240,7 +1240,6 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
     const table = cjsKeptExportTableOf(dep);
     // The declaration twin of a package resolves to its compiled module (cjs-live-exports.ts liveTwinOf).
     const liveSf = liveTwinOf(L, dep);
-    const liveDep = liveSf !== null;
     if (table === null) {
       L.unsupported("SC1090", dep, `${what} whose \`module.exports\` is not a static export table`, why);
     }
