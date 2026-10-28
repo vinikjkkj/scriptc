@@ -3287,6 +3287,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14151-js-class-inferred-field-order.js": {
+   "order": [
+    "<repo>/tests/corpus/14151-js-class-inferred-field-order.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14152-ee-subclass-for-in-keys.js": {
+   "order": [
+    "<repo>/tests/corpus/14152-ee-subclass-for-in-keys.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1420-number-statics.ts": {
    "order": [
     "<repo>/tests/corpus/1420-number-statics.ts"
@@ -3419,6 +3431,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/1431-caught-tostring.ts": {
+   "order": [
+    "<repo>/tests/corpus/1431-caught-tostring.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/14310-accessor-hasown-in-json.ts": {
    "order": [
     "<repo>/tests/corpus/14310-accessor-hasown-in-json.ts"
@@ -3446,12 +3464,6 @@
   "<repo>/tests/corpus/14314-accessor-unrelated-data-cast.ts": {
    "order": [
     "<repo>/tests/corpus/14314-accessor-unrelated-data-cast.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/1431-caught-tostring.ts": {
-   "order": [
-    "<repo>/tests/corpus/1431-caught-tostring.ts"
    ],
    "diags": []
   },
@@ -3593,9 +3605,75 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14470-oob-annotated-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/14470-oob-annotated-return.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14471-oob-union-param.ts": {
+   "order": [
+    "<repo>/tests/corpus/14471-oob-union-param.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14472-oob-boolean-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/14472-oob-boolean-return.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14473-oob-nullish-default.ts": {
+   "order": [
+    "<repo>/tests/corpus/14473-oob-nullish-default.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14474-oob-annotated-return-twice.ts": {
+   "order": [
+    "<repo>/tests/corpus/14474-oob-annotated-return-twice.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1448-stream-columns.ts": {
    "order": [
     "<repo>/tests/corpus/1448-stream-columns.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14490-str-index-eq-in-range.ts": {
+   "order": [
+    "<repo>/tests/corpus/14490-str-index-eq-in-range.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14491-str-index-eq-out-of-range.ts": {
+   "order": [
+    "<repo>/tests/corpus/14491-str-index-eq-out-of-range.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14492-str-index-eq-surrogate.ts": {
+   "order": [
+    "<repo>/tests/corpus/14492-str-index-eq-surrogate.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14493-str-index-eq-tz.ts": {
+   "order": [
+    "<repo>/tests/corpus/14493-str-index-eq-tz.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14494-str-index-eq-fractional.ts": {
+   "order": [
+    "<repo>/tests/corpus/14494-str-index-eq-fractional.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14495-str-index-eq-parens.ts": {
+   "order": [
+    "<repo>/tests/corpus/14495-str-index-eq-parens.ts"
    ],
    "diags": []
   },
@@ -3638,6 +3716,12 @@
   "<repo>/tests/corpus/1460-console-error-warn.ts": {
    "order": [
     "<repo>/tests/corpus/1460-console-error-warn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14600-dyn-method-identity.js": {
+   "order": [
+    "<repo>/tests/corpus/14600-dyn-method-identity.js"
    ],
    "diags": []
   },
@@ -3728,6 +3812,60 @@
   "<repo>/tests/corpus/1475-readline-closed-stdin.ts": {
    "order": [
     "<repo>/tests/corpus/1475-readline-closed-stdin.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14750-new-array-negative-length-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/14750-new-array-negative-length-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14751-new-array-invalid-length-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/14751-new-array-invalid-length-forms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14752-new-array-valid-lengths.ts": {
+   "order": [
+    "<repo>/tests/corpus/14752-new-array-valid-lengths.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14753-new-array-string-invalid-length.ts": {
+   "order": [
+    "<repo>/tests/corpus/14753-new-array-string-invalid-length.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14754-new-array-length-error-is-catchable-per-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/14754-new-array-length-error-is-catchable-per-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14755-ctor-field-filled-at-construction-site.ts": {
+   "order": [
+    "<repo>/tests/corpus/14755-ctor-field-filled-at-construction-site.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14756-ctor-field-negative-count-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/14756-ctor-field-negative-count-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14757-ctor-field-two-classes-two-params.ts": {
+   "order": [
+    "<repo>/tests/corpus/14757-ctor-field-two-classes-two-params.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14758-ctor-field-fractional-count-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/14758-ctor-field-fractional-count-throws.ts"
    ],
    "diags": []
   },
@@ -16875,6 +17013,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/accessor-crossing-cast-into-data-record-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/accessor-crossing-cast-into-data-record-refused.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/accessors.ts": {
    "order": [
     "<repo>/tests/diagnostics/accessors.ts"
@@ -16884,12 +17028,6 @@
   "<repo>/tests/diagnostics/ambient-extends.ts": {
    "order": [
     "<repo>/tests/diagnostics/ambient-extends.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/accessor-crossing-cast-into-data-record-refused.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/accessor-crossing-cast-into-data-record-refused.ts"
    ],
    "diags": []
   },
@@ -18938,120 +19076,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/14470-oob-annotated-return.ts": {
-    "order": [
-      "<repo>/tests/corpus/14470-oob-annotated-return.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14471-oob-union-param.ts": {
-    "order": [
-      "<repo>/tests/corpus/14471-oob-union-param.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14472-oob-boolean-return.ts": {
-    "order": [
-      "<repo>/tests/corpus/14472-oob-boolean-return.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14473-oob-nullish-default.ts": {
-    "order": [
-      "<repo>/tests/corpus/14473-oob-nullish-default.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14474-oob-annotated-return-twice.ts": {
-    "order": [
-      "<repo>/tests/corpus/14474-oob-annotated-return-twice.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14490-str-index-eq-in-range.ts": {
-    "order": [
-      "<repo>/tests/corpus/14490-str-index-eq-in-range.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14491-str-index-eq-out-of-range.ts": {
-    "order": [
-      "<repo>/tests/corpus/14491-str-index-eq-out-of-range.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14492-str-index-eq-surrogate.ts": {
-    "order": [
-      "<repo>/tests/corpus/14492-str-index-eq-surrogate.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14493-str-index-eq-tz.ts": {
-    "order": [
-      "<repo>/tests/corpus/14493-str-index-eq-tz.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14494-str-index-eq-fractional.ts": {
-    "order": [
-      "<repo>/tests/corpus/14494-str-index-eq-fractional.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14495-str-index-eq-parens.ts": {
-    "order": [
-      "<repo>/tests/corpus/14495-str-index-eq-parens.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14750-new-array-negative-length-throws.ts": {
-    "order": [
-      "<repo>/tests/corpus/14750-new-array-negative-length-throws.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14751-new-array-invalid-length-forms.ts": {
-    "order": [
-      "<repo>/tests/corpus/14751-new-array-invalid-length-forms.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14752-new-array-valid-lengths.ts": {
-    "order": [
-      "<repo>/tests/corpus/14752-new-array-valid-lengths.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14753-new-array-string-invalid-length.ts": {
-    "order": [
-      "<repo>/tests/corpus/14753-new-array-string-invalid-length.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14754-new-array-length-error-is-catchable-per-call.ts": {
-    "order": [
-      "<repo>/tests/corpus/14754-new-array-length-error-is-catchable-per-call.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14151-js-class-inferred-field-order.js": {
-    "order": [
-      "<repo>/tests/corpus/14151-js-class-inferred-field-order.js"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14152-ee-subclass-for-in-keys.js": {
-    "order": [
-      "<repo>/tests/corpus/14152-ee-subclass-for-in-keys.js"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14600-dyn-method-identity.js": {
-    "order": [
-      "<repo>/tests/corpus/14600-dyn-method-identity.js"
-    ],
-    "diags": []
   }
  }
 }

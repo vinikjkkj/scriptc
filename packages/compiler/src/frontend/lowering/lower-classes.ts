@@ -6,6 +6,7 @@
 import { protoDataFieldNames, registerProtoData } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { ctorFieldFillProven } from "./ctor-fill-proof.js";
 import { BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
@@ -11377,7 +11378,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           // fenced without me", so it must not run for an element kind that
           // already carries an absent value.
           const absent =
-            filledWhole || fullFillLoopFollows(expr) ||
+            filledWhole || fullFillLoopFollows(expr) || ctorFieldFillProven(L, expr) ||
             (elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem)) ||
             prefixFillTruncateFollows(expr);
           if (!absent) {
