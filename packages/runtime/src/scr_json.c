@@ -5940,6 +5940,39 @@ ScrStr *scr_rec_tostr(ScrClosure *slot) {
   return s != NULL ? s : scr_str_new("", 0);
 }
 
+/* "[object Tag]" for an OBJ whose well-known toStringTag member is a string
+ * (own enumerable, or hidden as a converted record's symbol member), else
+ * "[object Object]". Object.prototype.toString's own rule, kept beside its one
+ * caller so this unit links without scr_copying.c. */
+static ScrStr *scr_json_obj_tag_string(const ScrDyn *d) {
+  for (int pass = 0; pass < 2; pass++) {
+    const ScrDyn *src = d;
+    if (pass == 1) {
+      if (scr_dyn_ext(d)->hidden == NULL) break;
+      src = scr_dyn_ext(d)->hidden;
+    }
+    for (size_t i = 0; i < src->v.obj.len; i++) {
+      const ScrDynEntry *e = &src->v.obj.entries[i];
+      const ScrDyn *val = e->value;
+      if (pass == 1) {
+        if (val->kind != SCR_DYN_ARR || val->v.arr.len < 2) continue;
+        val = val->v.arr.items[1];
+      }
+      if (e->key_len > 15 && memcmp(e->key, "__@toStringTag@", 15) == 0 && val->kind == SCR_DYN_STR) {
+        const ScrStr *t = val->v.str;
+        ScrStr *out = scr_str_alloc_raw(t->len + 9, t->len + 9);
+        memcpy(out->data, "[object ", 8);
+        memcpy(out->data + 8, t->data, t->len);
+        out->data[8 + t->len] = ']';
+        out->len = (uint32_t)(t->len + 9);
+        out->data[out->len] = '\0';
+        return out;
+      }
+    }
+  }
+  return scr_str_new("[object Object]", 15);
+}
+
 ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
   switch (d->kind) {
   case SCR_DYN_BYTES:
@@ -5998,8 +6031,12 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
      * OWN toString through the encoding's [[Prototype]] link, which is
      * how JS reaches it too. A hand-built object carrying a "%error" key
      * therefore renders "[object Object]" again, which is Node's answer;
-     * it used to render "Error: <its own name field>". */
-    return scr_str_new("[object Object]", 15);
+     * it used to render "Error: <its own name field>".
+     *
+     * The tag: Object.prototype.toString reads the well-known toStringTag
+     * member first (scr_dyn_object_to_string), so String() of a value that
+     * carries one (a WebCrypto CryptoKey, SubtleCrypto) answers its tag too. */
+    return scr_json_obj_tag_string(d);
   }
   case SCR_DYN_HANDLE:
     /* IncomingMessage/ServerResponse/Socket inherit
