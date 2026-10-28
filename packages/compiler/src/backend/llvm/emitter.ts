@@ -13971,8 +13971,16 @@ class LlEmitter {
         return call("scr_str_to_lower", "ptr (ptr)", `ptr ${r.name}`, "ptr", true);
       case "toUpperCase":
         return call("scr_str_to_upper", "ptr (ptr)", `ptr ${r.name}`, "ptr", true);
-      case "normalize":
-        return call("scr_str_normalize", "ptr (ptr, ptr)", `ptr ${r.name}, ptr ${args[0]!.name}`, "ptr", true);
+      case "normalize": {
+        // Catchable RangeError for an invalid form: the pending check
+        // follows the call, as the C emitter's fallibleTemp does.
+        this.declare(`declare ptr @scr_str_normalize(ptr, ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_str_normalize(ptr ${r.name}, ptr ${args[0]!.name})`);
+        const out = this.own({ name: t, type: e.type });
+        this.emitPendingCheck();
+        return out;
+      }
       // The well-formedness pair: no-ops over well-formed storage
       // (constant true / retained identity; scr_string.c).
       case "isWellFormed":

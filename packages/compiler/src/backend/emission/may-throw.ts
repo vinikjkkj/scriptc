@@ -364,6 +364,11 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // catchable RangeError (scr_arr_length_gate), before allocation.
           if (rec["checked"] === true) f.throws = true;
           break;
+        case "strIntrinsic":
+          // normalize(form) throws Node's catchable RangeError for a form
+          // other than NFC/NFD/NFKC/NFKD (scr_str_normalize, exception cell).
+          if (rec["method"] === "normalize") f.throws = true;
+          break;
         case "arrIntrinsic":
           if (MAY_THROW_ARR_METHODS.has(rec["method"] as IrArrIntrinsicMethod)) {
             f.throws = true;

@@ -1391,7 +1391,8 @@ ScrStr *scr_str_to_upper(const ScrStr *s);
 
 /* normalize(form): ECMA-262 String.prototype.normalize via libunicode's
  * unicode_normalize, in scr_regex.c with the case conversion (the lre link
- * flag). form is NFC/NFD/NFKC/NFKD (anything else traps, as RangeError).
+ * flag). form is NFC/NFD/NFKC/NFKD; anything else throws Node's catchable RangeError
+ * (exception cell) and answers NULL.
  * Borrow s and form; +1. */
 ScrStr *scr_str_normalize(const ScrStr *s, const ScrStr *form);
 
