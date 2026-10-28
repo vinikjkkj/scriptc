@@ -2400,7 +2400,17 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
  * key_delete, objwalk, to_string, fn_get, construct, instanceof: 40-100 bytes each at -Os, the call and its argument setup),
  * plus the absent marker (13) and the registry accessor (23). An inline wrapper through the ops table was tried for the
  * error-rooted test and saved only 39 bytes. Not gated further because (1) is the brief's own defect class for class-free code. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_526 : null;
+/* 2026-10-28 (tlssess): RE-RECORDED 133_526 -> 133_782 (+256 against the old record).
+ * Measured on the tlsident base d1854f673 (zig 0.16.0 x86_64-windows-gnu, --backend c, the same lane): the base's regex .text is
+ * 133,750 (inside tolerance of 133,526 already, from the tlsident series) and the tip's is 133,782 (+32 over the base).
+ * What the 32 bytes buy, all in always-linked units the regex program carries (scr_json.c, scr_inspect.c, scr_net.c, and the
+ * ScrDynEntry layout): the dyn object writer's enter/leave bracket and edge naming (a cycle in a user value throws V8's
+ * "Converting circular structure to JSON" instead of overflowing the stack, a defect in every program with dyn objects, so it
+ * cannot be gated by link); the inspector's circular check and ref wrap for dyn objects (Node's [Circular *N]/<ref *N>); and
+ * the per-socket first-dial test plus the transport's after-connect hook (scr_net.c, the TLS session event). The wider
+ * ScrDynEntry (value_borrowed, a non-owning member for the certificate's self-link) is part of the layout, not extra code.
+ * Inherent to the defect fixes, so the figure is re-recorded rather than gated. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_782 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
