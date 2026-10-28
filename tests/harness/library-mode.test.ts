@@ -892,7 +892,7 @@ describe.each(EMISSIONS)("K14: determinism fences, %s emission", (emission) => {
 
   test("a code-keyed teachings entry rides a non-fence refusal as the attributed note", async () => {
     const diags = await refusal(
-      `export function f(): number { return "abc".normalize().length; }\n`,
+      `export function f(): number { return "abc".codePointAt(0)!; }\n`,
       {
         exports: [{ export: "f", symbol: "kx_f", params: [], returns: "f64" }],
         determinism: { teachings: { SC2020: "host strings arrive normalized; never renormalize in a core" } },

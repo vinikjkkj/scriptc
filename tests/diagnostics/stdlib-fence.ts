@@ -41,7 +41,7 @@ const sqrt2 = Math.SQRT2;
 // fences any more; `Math.SQRT2` above is the Math member that still does.)
 const entries = [1, 2].entries();
 const arrAt = [1, 2].at(0);
-const norm = "abc".normalize();
+const norm = "abc".codePointAt(0);
 const limited = "a,b,c".split(",", 2); // the string-separator split lowers; the limit form stays fenced
 const fixed = (1.5).toFixed(); // digit-free toFixed lowers now (the static ties-up integer)
 
