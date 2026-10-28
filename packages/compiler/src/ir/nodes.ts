@@ -10769,6 +10769,27 @@ export function moduleUsesDc(mod: IrModule): boolean {
   return found;
 }
 
+/** True when the module reads WebCrypto (globalThis.crypto, require('crypto').webcrypto,
+ * the SubtleCrypto surface): the dyn.webCrypto libCall links scr_webcrypto.c. */
+export function moduleUsesWebCrypto(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "dyn.webCrypto") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module registers an 'uncaughtException' listener. */
 export function moduleUsesUncaughtListener(mod: IrModule): boolean {
   let found = false;
