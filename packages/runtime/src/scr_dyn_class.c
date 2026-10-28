@@ -541,3 +541,75 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }
+
+
+/* ── for-in over an EventEmitter subclass: the inherited enumerable keys ────────
+ * ECMAScript EnumerateObjectProperties visits an instance's own enumerable keys,
+ * then the enumerable keys of each prototype up the chain, once per name. For an
+ * EventEmitter subclass the chain reaches EventEmitter.prototype, whose enumerable
+ * string keys are the 15 below, in Node's order (for (k in EventEmitter.prototype)
+ * on the pinned Node, v24.15.0). Object.keys, JSON and util.inspect do NOT walk the
+ * chain, so only for-in uses this. A subclass member of the same name shadows the
+ * prototype key (JS skips a shadowed name, enumerable or not).
+ * packages/compiler/test/runtime-proto-keys.test.ts fails if Node's list changes. */
+static const char *const SCR_EE_PROTO_KEYS[] = {
+  /* the first three are the emitter's own state (the prototype carries them too): an instance
+   * lists them as its own keys, so the appended walk skips them (scr_dyn_forin_keys). */
+  "_events", "_eventsCount", "_maxListeners",
+  "setMaxListeners", "getMaxListeners", "emit", "addListener", "on", "prependListener", "once",
+  "prependOnceListener", "removeListener", "off", "removeAllListeners", "listeners", "rawListeners",
+  "listenerCount", "eventNames",
+};
+#define SCR_EE_PROTO_KEY_COUNT (sizeof SCR_EE_PROTO_KEYS / sizeof SCR_EE_PROTO_KEYS[0])
+
+static bool ee_proto_key_index(const char *s, size_t n, size_t *idx) {
+  for (size_t i = 0; i < SCR_EE_PROTO_KEY_COUNT; i++) {
+    if (strlen(SCR_EE_PROTO_KEYS[i]) == n && memcmp(SCR_EE_PROTO_KEYS[i], s, n) == 0) {
+      *idx = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+/* True for an instance whose chain is rooted in the runtime's EventEmitter. */
+static bool ee_rooted_instance(const ScrDyn *v) {
+  return v != NULL && v->kind == SCR_DYN_OBJINST && scr_dyn_objinst_class_of(v)->rt_root == 1;
+}
+
+ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
+  ScrDyn *keys = scr_dyn_obj_keys(v);
+  if (keys == NULL || !ee_rooted_instance(v)) return keys;
+  for (size_t i = 3; i < SCR_EE_PROTO_KEY_COUNT; i++) { /* [0..2] are the emitter's own keys, listed already */
+    const char *name = SCR_EE_PROTO_KEYS[i];
+    const size_t len = strlen(name);
+    if (scr_dyn_objinst_member(v, name, len) != NULL) continue; /* shadowed by a member */
+    scr_dyn_arr_push(keys, dyn_cls_objwalk_key(name, len));
+  }
+  return keys;
+}
+
+/* A key for-in visits WITHOUT a value check, on an EventEmitter-rooted instance: one of the
+ * emitter's own keys (_events, _eventsCount, _maxListeners: created by its constructor, so
+ * Node visits them even when undefined), a visible member, or an inherited EventEmitter.prototype
+ * key that no member shadows. */
+bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key) {
+  if (!ee_rooted_instance(v) || key == NULL) return false;
+  const char *s = key->data;
+  const size_t n = key->len;
+  static const char *const own_pre[] = {"_events", "_eventsCount", "_maxListeners"};
+  for (size_t i = 0; i < 3; i++) {
+    if (strlen(own_pre[i]) == n && memcmp(own_pre[i], s, n) == 0) return true;
+  }
+  const ScrDynClassMember *m = scr_dyn_objinst_member(v, s, n);
+  if (m != NULL) return !scr_dyn_member_hidden(m, v->v.inst.o);
+  size_t idx = 0;
+  return ee_proto_key_index(s, n, &idx);
+}
+
+/* for-in's own-key test for every receiver that is NOT EventEmitter-rooted (the same answer
+ * Object.hasOwn gives). EventEmitter-rooted instances answer through scr_dyn_forin_certain. */
+bool scr_dyn_forin_plain(const ScrDyn *v, const ScrStr *key) {
+  if (ee_rooted_instance(v)) return false;
+  return scr_dyn_has_own(v, key);
+}

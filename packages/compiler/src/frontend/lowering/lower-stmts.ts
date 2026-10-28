@@ -6,7 +6,7 @@ import { protoDataAssignStmt } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
-import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
@@ -11001,7 +11001,8 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
   function classEnumerableForIn(L: Lowerer, className: string): boolean {
     for (let info: ClassInfo | null | undefined = L.classes.get(className); info; info = info.base) {
       const n = info.def.name;
-      if (RUNTIME_STREAM_CLASSES.has(n) || n === RUNTIME_EMITTER_CLASS || RUNTIME_ERROR_CLASSES.has(n)) return false;
+      // EventEmitter roots are modelled (scr_dyn_forin_keys walks EventEmitter.prototype's keys).
+      if (RUNTIME_STREAM_CLASSES.has(n) || RUNTIME_ERROR_CLASSES.has(n)) return false;
       if (info.hasPropsTable === true) return false;
     }
     return true;
@@ -11516,7 +11517,7 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     // dyn-to-typed read takes, not a special case that skips one.
     const keys = L.coerceInto(
       stmt.expression,
-      { kind: "libCall", fn: "dyn.objKeys", args: [dRef()], type: DYN, loc },
+      { kind: "libCall", fn: "dyn.forInKeys", args: [dRef()], type: DYN, loc },
       arrayOf(STRING),
     );
     // Two conditions per visit, and the second one is an APPROXIMATION whose
@@ -11561,19 +11562,29 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     // pinning it would pin an answer Node disagrees with.
     const guard = (kRef: IrExpr): IrExpr => ({
       kind: "logical",
-      op: "&&",
-      left: { kind: "libCall", fn: "dyn.hasOwn", args: [dRef(), kRef], type: BOOL, loc },
-      // The value arm, or an own enumerable ACCESSOR key (Node visits it without running its getter; its
-      // value would be the getter's answer, which may be undefined).
+      op: "||",
+      // An inherited enumerable key of an EventEmitter-rooted instance (EventEmitter.prototype's keys):
+      // visited as long as no member shadows it. These keys are not own properties, so the own-key
+      // checks below do not apply to them.
+      left: { kind: "libCall", fn: "dyn.forInCertain", args: [dRef(), kRef], type: BOOL, loc },
       right: {
         kind: "logical",
-        op: "||",
-        left: { kind: "libCall", fn: "dyn.forInAccessor", args: [dRef(), kRef], type: BOOL, loc },
+        op: "&&",
+        left: { kind: "libCall", fn: "dyn.forInPlain", args: [dRef(), kRef], type: BOOL, loc },
+        // The value arm, or an own enumerable ACCESSOR key (Node visits it without running its getter; its
+        // value would be the getter's answer, which may be undefined).
         right: {
-          kind: "dynTest",
-          test: "undefined",
-          negated: true,
-          value: { kind: "dynKeyGet", key: kRef, value: dRef(), type: DYN, loc },
+          kind: "logical",
+          op: "||",
+          left: { kind: "libCall", fn: "dyn.forInAccessor", args: [dRef(), kRef], type: BOOL, loc },
+          right: {
+            kind: "dynTest",
+            test: "undefined",
+            negated: true,
+            value: { kind: "dynKeyGet", key: kRef, value: dRef(), type: DYN, loc },
+            type: BOOL,
+            loc,
+          },
           type: BOOL,
           loc,
         },

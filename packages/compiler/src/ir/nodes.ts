@@ -2181,7 +2181,12 @@ export function orderRecordPlanOf(classes: readonly IrClassDef[]): OrdPlan {
     let cur = byName.get(name);
     if (cur === undefined) { rootMemo.set(name, null); return null; }
     let guard = 0;
-    while (cur.base !== undefined && byName.has(cur.base) && guard++ < 1000) cur = byName.get(cur.base)!;
+    // The root is the first EMITTED class of the chain: a runtime-provided base (EventEmitter,
+    // the stream and error classes) has its own struct, and the record lives after its prefix
+    // in the first program class below it.
+    while (cur.base !== undefined && byName.has(cur.base) && byName.get(cur.base)!.runtime !== true && guard++ < 1000) {
+      cur = byName.get(cur.base)!;
+    }
     rootMemo.set(name, cur.name);
     return cur.name;
   };
@@ -5629,6 +5634,12 @@ export type IrLibFn =
   | "dyn.hasOwn"
   /** The for-in visit guard's accessor arm: an own enumerable accessor key of a dyn object (no getter runs). */
   | "dyn.forInAccessor"
+  /** for-in's key list over a dyn object: Object.keys, plus an EventEmitter-rooted instance's inherited enumerable keys. */
+  | "dyn.forInKeys"
+  /** for-in's visit guard: a key visited without a value check (an EventEmitter-rooted instance's own/inherited key). */
+  | "dyn.forInCertain"
+  /** for-in's visit guard: the own-key test for every other receiver. */
+  | "dyn.forInPlain"
   /** Object.prototype.toString.call(v) over a dyn operand: "[object Tag]". */
   | "dyn.objectToString"
   | "dyn.assign"
@@ -13281,6 +13292,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.looseEq",
   // the dyn Object walks throw on null/undefined receivers
   "dyn.objKeys",
+  "dyn.forInKeys",
   "dyn.hasOwn",
   "dyn.assign",
   // variadic Object.assign: spread flattening throws V8's spread-call
