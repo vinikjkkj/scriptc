@@ -3195,6 +3195,14 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14100-proto-alias-three-module-chain/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14100-proto-alias-three-module-chain/a.cjs",
+    "<repo>/tests/corpus/14100-proto-alias-three-module-chain/b.cjs",
+    "<repo>/tests/corpus/14100-proto-alias-three-module-chain/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/14150-js-class-declared-field-order.js": {
    "order": [
     "<repo>/tests/corpus/14150-js-class-declared-field-order.js"
