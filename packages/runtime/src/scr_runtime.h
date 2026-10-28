@@ -5874,6 +5874,13 @@ size_t *scr_dyn_obj_key_order(const ScrDyn *v);
  * member nodes. null/undefined receivers throw Node's catchable
  * TypeError. */
 ScrDyn *scr_dyn_obj_keys(const ScrDyn *v);
+/* for-in's own key list: scr_dyn_obj_keys, plus the EventEmitter prototype's
+ * enumerable keys for an EventEmitter-rooted instance (see scr_dyn_class.c). */
+ScrDyn *scr_dyn_forin_keys(const ScrDyn *v);
+/* for-in's visit tests (scr_dyn_class.c): certain = visited without a value check on an
+ * EventEmitter-rooted instance; plain = the own-key test for every other receiver. */
+bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key);
+bool scr_dyn_forin_plain(const ScrDyn *v, const ScrStr *key);
 /* Object.hasOwn over a dyn receiver: OBJ member presence, ARR index
  * bounds ("length" included); nullish receivers throw Node's ToObject
  * TypeError; every other kind answers false. */

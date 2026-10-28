@@ -1258,6 +1258,9 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.objKeys": "scr_dyn_obj_keys",
   "dyn.hasOwn": "scr_dyn_has_own",
   "dyn.forInAccessor": "scr_dyn_for_in_accessor",
+  "dyn.forInKeys": "scr_dyn_forin_keys",
+  "dyn.forInCertain": "scr_dyn_forin_certain",
+  "dyn.forInPlain": "scr_dyn_forin_plain",
   "dyn.objectToString": "scr_dyn_object_to_string",
   "dyn.assign": "scr_dyn_assign",
   // variadic Object.assign: the source pack (push never throws; the
