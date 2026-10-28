@@ -11125,6 +11125,8 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     "dc.chanBindStore", "dc.chanUnbindStore", "dc.chanRunStores",
     // Blob and File are promise-returning classes (text, arrayBuffer, bytes): their values link scr_async_dyn.c.
     "dyn.bufferValue",
+    // WebCrypto (globalThis.crypto.subtle): the subtle members answer promises of the dyn tree (scr_lib.c).
+    "dyn.webCrypto",
     // dns.lookup's empty-name DEP0118 goes through the warning channel (scr_dgram.c).
     "dns.lookup",
   ]);

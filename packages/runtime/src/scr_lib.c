@@ -6113,6 +6113,21 @@ static const char *scr_wc_hash_name(WcHash h) {
   }
 }
 
+/* Node's ExperimentalWarning for a SHA-3 Web Crypto algorithm, once per name
+ * per process, at the call that normalises the hash (the warning dispatch
+ * prints Node's report and its one-time trace hint). */
+static void scr_wc_warn_sha3(WcHash h) {
+  static bool warned[7];
+  if (h < WC_SHA3_256 || warned[h]) return;
+  warned[h] = true;
+  char msg[160];
+  snprintf(msg, sizeof msg, "The %s Web Crypto API algorithm is an experimental feature and might change at any time",
+           scr_wc_hash_name(h));
+  ScrStr *text = scr_str_new(msg, strlen(msg)); /* scr_emit_warning retains the message: drop ours */
+  scr_emit_warning("ExperimentalWarning", NULL, text);
+  scr_str_release(text);
+}
+
 /* A key's internal slots: "%kind" (0 HMAC, 1 PBKDF2), "%hash", "%key" (bytes),
  * and the four CryptoKey members kept for the inspect rendering. */
 enum { WC_KEY_HMAC = 0, WC_KEY_PBKDF2 = 1 };
@@ -6270,6 +6285,7 @@ static ScrDyn *scr_wc_subtle_digest(ScrClosure *clo, ScrDyn *const *args, size_t
   WcHash h = WC_SHA256;
   bool ok = name != NULL && scr_wc_hash_name_of(name, &h);
   if (name != NULL) scr_str_release(name);
+  if (ok) scr_wc_warn_sha3(h);
   if (!ok) return scr_wc_reject_later(WC_ERR_DOM, "NotSupportedError", "Unrecognized algorithm name");
   unsigned char d[64];
   size_t n = wc_hash(h, dp, dn, d);
@@ -6322,6 +6338,7 @@ static ScrDyn *scr_wc_subtle_import_key(ScrClosure *clo, ScrDyn *const *args, si
     ScrStr *hn = scr_wc_alg_name(hd, &missing);
     bool okh = hn != NULL && scr_wc_hash_name_of(hn, &h);
     if (hn != NULL) scr_str_release(hn);
+    if (okh) scr_wc_warn_sha3(h);
     if (!okh) return scr_wc_reject_later(WC_ERR_DOM, "NotSupportedError", "Only SHA hashes are supported in HmacImportParams");
     /* HmacImportParams.length (measured against Node): the conversion, then zero, then a
      * multiple of 8; usage; a zero key; a mismatch with the key's bits; then empty usages. */
@@ -6426,6 +6443,7 @@ static ScrDyn *scr_wc_subtle_derive_bits(ScrClosure *clo, ScrDyn *const *args, s
   WcHash h = WC_SHA256;
   bool okh = hn != NULL && scr_wc_hash_name_of(hn, &h);
   if (hn != NULL) scr_str_release(hn);
+  if (okh) scr_wc_warn_sha3(h);
   if (!okh) return scr_wc_reject_later(WC_ERR_DOM, "NotSupportedError", "Only SHA hashes are supported in Pbkdf2Params");
   const ScrDyn *itd = obj ? scr_dyn_obj_get(alg, "iterations", 10) : NULL;
   if (itd == NULL) {
