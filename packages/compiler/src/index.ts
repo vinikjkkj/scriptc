@@ -817,10 +817,13 @@ function programNativeFeatures(
     engine: moduleUsesEngineFn(mod),
     // The link switch for scr_dyn_invoke.c: dynInvoke nodes or
     // dyn.defineProp(s) libCalls on the IR.
-    dynInvoke: moduleUsesDynInvoke(mod),
+    // scr_buffer_val.c (a buffer value, or a direct Buffer.from over an untyped operand) calls the
+    // dispatch unit (scr_dyn_objinst_member_get), so it implies this gate.
+    dynInvoke: moduleUsesDynInvoke(mod) || moduleUsesBufferValue(mod),
     dynClass: moduleUsesDynClass(mod),
     // The link switch for scr_dyn_ext.c: its libCalls on the IR.
-    dynExt: moduleUsesDynExt(mod),
+    // scr_buffer_val.c calls scr_dyn_is_buffer, scr_buffer_concat_dyn and the other ext helpers.
+    dynExt: moduleUsesDynExt(mod) || moduleUsesBufferValue(mod),
     // The link switch for scr_array_dyn.c: a dyn-element array operation on the IR.
     dynArr: moduleUsesDynArrayOps(mod),
     // The link switch for scr_buffer_val.c: a buffer module value (Buffer, its members, Blob, File).
@@ -831,7 +834,8 @@ function programNativeFeatures(
     dc: moduleUsesDc(mod),
     // The link switch for scr_async_dyn.c: the checked-dynamic async
     // surfaces (cc.ts also pulls it under the dynInvoke/dc gates).
-    dynAsync: moduleUsesDynAsync(mod),
+    // scr_buffer_val.c's Blob methods return promises (scr_dyn_new_promise).
+    dynAsync: moduleUsesDynAsync(mod) || moduleUsesBufferValue(mod),
     // The link switch for scr_events.c: process signal/exit listeners and
     // the stdin event surface on the IR.
     events: moduleUsesProcessEvents(mod),

@@ -117,6 +117,9 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // (scr_cipher_key.c's shape). scr_bigint.c must not name scr_insp_*: it
   // is linked by any program that reaches a bigint, inspect or not.
   "scr_bigint_inspect.c": ["scr_bigint.c", "scr_inspect.c"],
+  // The buffer value unit (Buffer and Blob values, and the direct Buffer.from over untyped operands)
+  // names the dispatch unit, the ext helpers and the async unit; index.ts widens those gates to it.
+  "scr_buffer_val.c": ["scr_async_dyn.c", "scr_dyn_ext.c", "scr_dyn_invoke.c"],
 };
 
 /** The edges an SCR_DYNAMIC build ADDS (the island exists only there, and
