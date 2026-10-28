@@ -56,7 +56,25 @@ export function ctorFieldFillProven(L: Lowerer, expr: ts.NewExpression): boolean
   const stmt = assign.parent;
   if (!ts.isExpressionStatement(stmt)) return false;
   const body = stmt.parent;
-  if (!ts.isBlock(body) || body.statements.length !== 1) return false;
+  if (!ts.isBlock(body)) return false;
+  // The other statements may only copy a parameter or a literal into a
+  // field (`this.n = n`): no call, no user code, and none of them writes F.
+  const ctorOf = body.parent;
+  const paramNames = new Set(
+    ts.isConstructorDeclaration(ctorOf) ? ctorOf.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : "")) : [],
+  );
+  const fieldName = (assign.left as ts.PropertyAccessExpression).name.text;
+  for (const other of body.statements) {
+    if (other === stmt) continue;
+    if (!ts.isExpressionStatement(other)) return false;
+    const e = other.expression;
+    if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false;
+    if (!ts.isPropertyAccessExpression(e.left) || e.left.expression.kind !== ts.SyntaxKind.ThisKeyword) return false;
+    if (e.left.name.text === fieldName) return false;
+    const v = e.right;
+    const plain = (ts.isIdentifier(v) && paramNames.has(v.text)) || isLiteralInit(v);
+    if (!plain) return false;
+  }
   const ctor = body.parent;
   if (!ts.isConstructorDeclaration(ctor) || ctor.body !== body) return false;
   const cls = ctor.parent;
