@@ -359,6 +359,11 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
             f.throws = true;
           }
           break;
+        case "arrayNewLen":
+          // `new Array(n)`: a length that is not a valid array length is a
+          // catchable RangeError (scr_arr_length_gate), before allocation.
+          if (rec["checked"] === true) f.throws = true;
+          break;
         case "arrIntrinsic":
           if (MAY_THROW_ARR_METHODS.has(rec["method"] as IrArrIntrinsicMethod)) {
             f.throws = true;

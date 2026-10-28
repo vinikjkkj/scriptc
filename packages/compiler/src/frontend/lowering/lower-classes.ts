@@ -11334,7 +11334,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
                 "build and push, or use the elements form: new Array(a, b)",
             );
           }
-          return { kind: "arrayNewLen", length: n, type: arrT, loc };
+          return { kind: "arrayNewLen", length: n, type: arrT, loc, checked: true };
         }
         // JS's `new Array()` types any[]; the contextual type carries the
         // annotation when one exists (the new Map() stance) — staticArr

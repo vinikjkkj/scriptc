@@ -18926,6 +18926,36 @@
       "<repo>/tests/corpus/14495-str-index-eq-parens.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/14750-new-array-negative-length-throws.ts": {
+    "order": [
+      "<repo>/tests/corpus/14750-new-array-negative-length-throws.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14751-new-array-invalid-length-forms.ts": {
+    "order": [
+      "<repo>/tests/corpus/14751-new-array-invalid-length-forms.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14752-new-array-valid-lengths.ts": {
+    "order": [
+      "<repo>/tests/corpus/14752-new-array-valid-lengths.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14753-new-array-string-invalid-length.ts": {
+    "order": [
+      "<repo>/tests/corpus/14753-new-array-string-invalid-length.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14754-new-array-length-error-is-catchable-per-call.ts": {
+    "order": [
+      "<repo>/tests/corpus/14754-new-array-length-error-is-catchable-per-call.ts"
+    ],
+    "diags": []
   }
  }
 }

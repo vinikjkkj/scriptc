@@ -1146,6 +1146,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (e.type.kind !== "array") throw new Error("emitter bug: arrayNewLen of non-array type");
         const elem = e.type.elem;
         const n = E.emitExpr(e.length);
+        if (e.checked === true) {
+          // `new Array(n)`: ArrayCreate's length check FIRST, so a bad
+          // length is Node's RangeError before anything is allocated.
+          E.line(`scr_arr_length_gate(${n.name});`);
+          E.emitPendingCheck();
+        }
         const arr = E.newTemp(e.type, E.arrNewC(elem, 0));
         // The ABSENT value, one spelling for all three producers (this
         // node, setLength's growth arm, and arrayClear's tombstone write).

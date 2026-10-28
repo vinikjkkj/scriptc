@@ -6990,8 +6990,13 @@ export type IrExpr =
    * where Node yields undefined — SEMANTICS.md 46). Scalar elements have
    * no absent value and are fenced by the frontend. The bound is ToLength
    * via the `i <= n - 1` loop form (fractions truncate; negative/NaN give
-   * an empty array). Allocates; the result is owned (+1). */
-  | { kind: "arrayNewLen"; length: IrExpr; type: IrType; loc: SrcLoc }
+   * an empty array). Allocates; the result is owned (+1).
+   *
+   * `checked` marks the `new Array(n)` producer: its length is the spec's
+   * ArrayCreate, not ToLength. A negative, fractional, NaN or >= 2^32 length
+   * is V8's catchable `RangeError: Invalid array length` (the emitters run
+   * scr_arr_length_gate before anything is allocated). MAY THROW when set. */
+  | { kind: "arrayNewLen"; length: IrExpr; type: IrType; loc: SrcLoc; checked?: true }
   /** Element read `a[i]`. Index is f64; a non-integer or out-of-bounds index
    * traps at runtime (JS returns undefined — documented divergence). For
    * refcounted elements the result is a fresh owned (+1) reference. */

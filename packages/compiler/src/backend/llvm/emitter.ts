@@ -8304,6 +8304,12 @@ class LlEmitter {
         if (e.type.kind !== "array") throw new Error("llvm emitter bug: arrayNewLen of non-array type");
         const elem = e.type.elem;
         const n = this.emitExpr(e.length);
+        if (e.checked === true) {
+          // `new Array(n)`: ArrayCreate's length check FIRST (see the C arm).
+          this.declare(`declare void @scr_arr_length_gate(double)`);
+          B.line(`call void @scr_arr_length_gate(double ${n.name})`);
+          this.emitPendingCheck();
+        }
         const arr = B.tmp();
         B.line(`${arr} = ${arrNewCall(this, elem, "0")}`);
         const out = this.own({ name: arr, type: e.type });
