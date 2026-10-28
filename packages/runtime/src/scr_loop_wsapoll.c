@@ -236,7 +236,36 @@ int scrp_drain(ScrPoller *p, ScrPollerEvent *out, int max) {
     return filled;
   }
   int n = WSAPoll(pfds, npfds, 0);
-  for (ULONG j = 0; j < npfds; j++) if ((owners[j]->mask & SCRP_WRITABLE) != 0) fprintf(stdout, "NETDBG poll n=%d fd=%d ev=%x re=%x\n", n, (int)pfds[j].fd, (unsigned)pfds[j].events, (unsigned)pfds[j].revents);
+  { /* NETDBG tlsdbg: select() writefds/exceptfds for writable entries WSAPoll left silent */
+    static unsigned long sel_calls = 0;
+    fd_set wf, ef;
+    struct timeval z = {0, 0};
+    int any = 0;
+    FD_ZERO(&wf);
+    FD_ZERO(&ef);
+    for (ULONG j = 0; j < npfds; j++) {
+      if ((owners[j]->mask & SCRP_WRITABLE) == 0 || pfds[j].revents != 0) continue;
+      FD_SET(pfds[j].fd, &wf);
+      FD_SET(pfds[j].fd, &ef);
+      any++;
+    }
+    if (any > 0) {
+      sel_calls++;
+      int sn = select(0, NULL, &wf, &ef, &z);
+      for (ULONG j = 0; j < npfds; j++) {
+        if ((owners[j]->mask & SCRP_WRITABLE) == 0 || pfds[j].revents != 0) continue;
+        int w = FD_ISSET(pfds[j].fd, &wf) ? 1 : 0;
+        int e = FD_ISSET(pfds[j].fd, &ef) ? 1 : 0;
+        if (w || e || sel_calls % 200 == 0) {
+          int so = -1;
+          int ol = (int)sizeof so;
+          int gs = getsockopt((SOCKET)pfds[j].fd, SOL_SOCKET, SO_ERROR, (char *)&so, &ol);
+          fprintf(stdout, "NETDBG select t=%.1f fd=%d w=%d e=%d sn=%d poll_n=%d so_rc=%d so_error=%d calls=%lu\n",
+                  scr_now_ms(), (int)pfds[j].fd, w, e, sn, n, gs, so, sel_calls);
+        }
+      }
+    }
+  }
   if (n <= 0) {
     if (filled > 0) scrp_drain_progress = true;
     return filled; /* none/failed: a spurious pass */

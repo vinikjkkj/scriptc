@@ -2577,7 +2577,7 @@ static bool scr_net_sock_dial_ip(ScrNetSocket *s, const ScrStr *ip) {
   int one = 1;
   setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
   int rc = connect(fd, sa, salen);
-  fprintf(stdout, "NETDBG dial_ip_async fd=%d rc=%d errno=%d ip=%s port=%d\n", (int)fd, rc, rc == 0 ? 0 : errno, h, s->peer_port);
+  fprintf(stdout, "NETDBG dial_ip_async t=%.1f fd=%d rc=%d errno=%d ip=%s port=%d\n", scr_now_ms(), (int)fd, rc, rc == 0 ? 0 : errno, h, s->peer_port);
   if (rc == 0) scr_net_dial_log_clear(s); /* connected at once: no failed attempt to report */
   if (rc == 0 || errno == EINPROGRESS) {
     s->fd = fd;
@@ -2638,7 +2638,7 @@ static void scr_net_sock_attempt_timeout(ScrNetSocket *s) {
   s->dial_timer_armed = false;
   scr_net_dbg("attempt_timeout_fire", ETIMEDOUT, s->peer_port, s->peer_ip);
   { int so = -1; socklen_t sl = sizeof so; int gs = getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &so, &sl);
-    fprintf(stdout, "NETDBG attempt_timeout fd=%d so_error_rc=%d so_error=%d connecting=%d\n", s->fd, gs, so, s->connecting); }
+    fprintf(stdout, "NETDBG attempt_timeout t=%.1f fd=%d so_error_rc=%d so_error=%d connecting=%d\n", scr_now_ms(), s->fd, gs, so, s->connecting); }
   if (!s->connecting || s->fd < 0 || s->dial_i >= s->dial_n) return;
   char msg[128];
   snprintf(msg, sizeof msg, "connect ETIMEDOUT %s:%d", s->peer_ip, s->peer_port);
