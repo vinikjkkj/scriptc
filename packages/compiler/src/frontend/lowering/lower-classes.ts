@@ -1018,6 +1018,34 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
   return null;
 }
 
+/** The method `name` a read of `C.prototype.name` returns: the nearest class
+   * on the prototype chain that declares it, walked through the DECLARATIONS
+   * (`info.decl`, then each `info.base`'s), not through the ClassInfo method
+   * maps. The maps hold only the methods collected with a fixed signature: an
+   * implicit-any JS method (npm-static, untyped parameters) collects into
+   * `genericMethods` instead, so `end(callback)` on mysql2's BaseConnection
+   * was invisible to findMethodOn. A non-static accessor of that name answers
+   * null (the read is a getter); an instance field does not live on the
+   * prototype and is skipped. */
+  function prototypeMethodDeclOf(info: ClassInfo | null, ownDecl: ts.ClassDeclaration | undefined, name: string): ts.MethodDeclaration | null {
+    let cur: ClassInfo | null = info;
+    let decl: ts.ClassLikeDeclaration | null = ownDecl ?? info?.decl ?? null;
+    for (;;) {
+      if (decl !== null) {
+        for (const m of decl.members) {
+          const mName = (m as { name?: ts.PropertyName }).name;
+          if (mName === undefined || !ts.isIdentifier(mName) || mName.text !== name) continue;
+          if (ts.getModifiers(m)?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) === true) continue;
+          if (ts.isMethodDeclaration(m)) return m;
+          if (ts.isGetAccessorDeclaration(m) || ts.isSetAccessorDeclaration(m)) return null;
+        }
+      }
+      cur = cur?.base ?? null;
+      if (cur === null) return null;
+      decl = cur.decl;
+    }
+  }
+
 /** The function-like `rhs` names, for `C.prototype.m = rhs`: a class METHOD
    * (`D.prototype.n`), a function declaration, a `function` expression bound
    * to a const, or an object-literal method reached through a name (a
@@ -1056,16 +1084,8 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
         // The method may be INHERITED: `Connection.prototype.end` where Connection
         // extends BaseConnection, which declares end. The declarer's body is the
         // one Node's read returns, so its declaration is the source.
-        const declarer = dinfo !== undefined ? findMethodOn(L, dinfo, e.name.text)?.declarer : undefined;
-        const declDecl = declarer !== undefined ? declarer.decl : dinfo !== undefined ? dinfo.decl : d;
-        if (declDecl !== null && declDecl !== undefined && (ts.isClassDeclaration(declDecl) || ts.isClassExpression(declDecl))) {
-          for (const m of declDecl.members) {
-            if (ts.isMethodDeclaration(m) && ts.isIdentifier(m.name) && m.name.text === e.name.text &&
-                !(ts.getModifiers(m)?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) === true)) {
-              return plain(m) as ts.MethodDeclaration | null;
-            }
-          }
-        }
+        const m = prototypeMethodDeclOf(dinfo ?? null, dinfo === undefined ? (d as ts.ClassDeclaration) : undefined, e.name.text);
+        if (m !== null) return plain(m) as ts.MethodDeclaration | null;
       }
       return null;
     }
