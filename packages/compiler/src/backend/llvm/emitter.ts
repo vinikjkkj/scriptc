@@ -13971,6 +13971,8 @@ class LlEmitter {
         return call("scr_str_to_lower", "ptr (ptr)", `ptr ${r.name}`, "ptr", true);
       case "toUpperCase":
         return call("scr_str_to_upper", "ptr (ptr)", `ptr ${r.name}`, "ptr", true);
+      case "normalize":
+        return call("scr_str_normalize", "ptr (ptr, ptr)", `ptr ${r.name}, ptr ${args[0]!.name}`, "ptr", true);
       // The well-formedness pair: no-ops over well-formed storage
       // (constant true / retained identity; scr_string.c).
       case "isWellFormed":

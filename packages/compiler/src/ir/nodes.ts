@@ -2957,6 +2957,9 @@ export type IrStrIntrinsicMethod =
   | "padEnd"
   | "toLowerCase"
   | "toUpperCase"
+  // normalize(form): form is the args[0] STRING (NFC/NFD/NFKC/NFKD; the
+  // frontend completes an omitted form to "NFC"). scr_regex.c, lre-linked.
+  | "normalize"
   // isWellFormed()/toWellFormed() — no-ops over the runtime's well-formed
   // storage (lone surrogates became U+FFFD at their producers): constant
   // true and the identity, per spec on well-formed input.
@@ -10096,7 +10099,7 @@ export function moduleUsesRegex(mod: IrModule): boolean {
     // case tables): they ride the same link switch as regex nodes.
     if (kind === "strIntrinsic") {
       const method = (v as { method?: unknown }).method;
-      if (method === "toLowerCase" || method === "toUpperCase") {
+      if (method === "toLowerCase" || method === "toUpperCase" || method === "normalize") {
         found = true;
         return;
       }
