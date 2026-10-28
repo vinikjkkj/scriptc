@@ -504,7 +504,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // leniently (never throws), concat copies its borrowed list; the sync
   // fs Buffer pair and zlib.inflateSync ride the may-throw check.
   "buffer.fromStr": "scr_bytes_from_str",
-  "buffer.fromDyn": "scr_buffer_from_dyn",
+  "buffer.fromDyn": "scr_bv_from_dyn",
   "rsa.publicEncrypt": "scr_rsa_public_encrypt",
   "rsa.publicEncryptLabel": "scr_rsa_public_encrypt",
   "crypto.inputBytes": "scr_crypto_input_bytes",
@@ -952,7 +952,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.toString": "scr_dyn_to_string_method",
   "dyn.toStringRange": "scr_dyn_to_string_range",
   "dyn.toStringRangeDyn": "scr_dyn_to_string_range_dyn",
-  "buffer.fromDynEnc": "scr_buffer_from_dyn_enc",
+  "buffer.fromDynEnc": "scr_bv_from_dyn_enc",
   "dyn.this": "scr_dyn_this_get",
   "dyn.thisSloppy": "scr_dyn_this_get_sloppy",
   "dyn.isGlobalThis": "scr_dyn_is_global_this",

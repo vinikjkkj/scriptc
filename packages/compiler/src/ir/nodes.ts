@@ -10979,7 +10979,7 @@ export function moduleUsesBufferValue(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && node.fn === "dyn.bufferValue") {
+    if (node.kind === "libCall" && (node.fn === "dyn.bufferValue" || node.fn === "buffer.fromDyn" || node.fn === "buffer.fromDynEnc")) {
       found = true;
       return;
     }

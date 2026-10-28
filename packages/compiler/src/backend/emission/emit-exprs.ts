@@ -3779,7 +3779,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "dyn.toStringRangeDyn":
             return finish(`scr_dyn_to_string_range_dyn(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
           case "buffer.fromDynEnc":
-            return finish(`scr_buffer_from_dyn_enc(${arg(0)}, ${arg(1)})`);
+            return finish(`scr_bv_from_dyn_enc(${arg(0)}, ${arg(1)})`);
           case "dyn.toStringRange":
             // The RANGE form (+1): args[2]/args[3] are the dyn start/end
             // (an omitted end is the undefined literal — the runtime
@@ -6606,7 +6606,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "buffer.fromStr":
             return finish(`scr_bytes_from_str(${arg(0)}, ${arg(1)})`);
           case "buffer.fromDyn":
-            return finish(`scr_buffer_from_dyn(${arg(0)})`);
+            return finish(`scr_bv_from_dyn(${arg(0)})`);
           case "crypto.inputBytes":
             return finish(`scr_crypto_input_bytes(${arg(0)})`);
           case "crypto.updateStrEnc":
