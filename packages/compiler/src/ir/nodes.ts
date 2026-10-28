@@ -10939,6 +10939,8 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     "dc.chanBindStore", "dc.chanUnbindStore", "dc.chanRunStores",
     // Blob and File are promise-returning classes (text, arrayBuffer, bytes): their values link scr_async_dyn.c.
     "dyn.bufferValue",
+    // dns.lookup's empty-name DEP0118 goes through the warning channel (scr_dgram.c).
+    "dns.lookup",
   ]);
   const recs = new Map((mod.records ?? []).map((r) => [r.id, r] as const));
   const uns = new Map((mod.unions ?? []).map((u) => [u.id, u] as const));
