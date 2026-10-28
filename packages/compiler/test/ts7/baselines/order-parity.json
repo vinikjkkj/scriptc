@@ -19369,6 +19369,72 @@
       "<repo>/tests/corpus/14852-pg-scram-shape.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/14910-net-socket-idle-write-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/14910-net-socket-idle-write-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14911-net-socket-idle-end-then-connect.ts": {
+   "order": [
+    "<repo>/tests/corpus/14911-net-socket-idle-end-then-connect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14912-net-socket-idle-destroy-reconnect.ts": {
+   "order": [
+    "<repo>/tests/corpus/14912-net-socket-idle-destroy-reconnect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14913-net-socket-connect-already-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/14913-net-socket-connect-already-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14914-net-socket-reconnect-after-close.ts": {
+   "order": [
+    "<repo>/tests/corpus/14914-net-socket-reconnect-after-close.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14915-net-socket-connect-options-keepalive.ts": {
+   "order": [
+    "<repo>/tests/corpus/14915-net-socket-connect-options-keepalive.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14916-net-socket-write-after-end-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/14916-net-socket-write-after-end-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14917-net-socket-require-binding-exchange.ts": {
+   "order": [
+    "<repo>/tests/corpus/14917-net-socket-require-binding-exchange.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14918-net-socket-paren-require-exchange.ts": {
+   "order": [
+    "<repo>/tests/corpus/14918-net-socket-paren-require-exchange.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14919-net-socket-named-import-exchange.ts": {
+   "order": [
+    "<repo>/tests/corpus/14919-net-socket-named-import-exchange.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14920-net-server-unref-exit.ts": {
+   "order": [
+    "<repo>/tests/corpus/14920-net-server-unref-exit.ts"
+   ],
+   "diags": []
   }
  }
 }
