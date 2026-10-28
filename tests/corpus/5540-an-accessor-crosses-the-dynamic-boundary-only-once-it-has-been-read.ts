@@ -4,9 +4,9 @@
 // `%get:a` holding a closure; the property name `a` has no data slot at
 // all. The dyn object model has no representation for an ENUMERABLE
 // accessor (its accessor table is the NON-enumerable
-// Object.defineProperty family), so the shape itself does not cross in
-// either direction -- both halves are compile-time refusals, pinned in
-// tests/diagnostics/an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts.
+// Object.defineProperty family), so the shape crosses only as a live accessor
+// (corpus 14300-14312), and a checked cast back into an accessor-declaring
+// target stays refused (tests/diagnostics/an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts).
 //
 // What DOES cross is the getter's value, once it has been read. This file
 // is the behavioural half of that fence: every line is Node's own answer,

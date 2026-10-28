@@ -3281,6 +3281,84 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14300-accessor-dyn-read-through-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/14300-accessor-dyn-read-through-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14301-accessor-keys-json-inspect-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/14301-accessor-keys-json-inspect-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14302-accessor-object-keys-entries.ts": {
+   "order": [
+    "<repo>/tests/corpus/14302-accessor-object-keys-entries.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14303-accessor-for-in-and-in.ts": {
+   "order": [
+    "<repo>/tests/corpus/14303-accessor-for-in-and-in.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14304-accessor-throwing-getter-and-set-only.ts": {
+   "order": [
+    "<repo>/tests/corpus/14304-accessor-throwing-getter-and-set-only.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14305-accessor-literal-order-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/14305-accessor-literal-order-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14306-accessor-nested-record-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/14306-accessor-nested-record-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14307-accessor-object-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/14307-accessor-object-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14308-accessor-own-property-names.ts": {
+   "order": [
+    "<repo>/tests/corpus/14308-accessor-own-property-names.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14309-accessor-object-assign.ts": {
+   "order": [
+    "<repo>/tests/corpus/14309-accessor-object-assign.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14310-accessor-hasown-in-json.ts": {
+   "order": [
+    "<repo>/tests/corpus/14310-accessor-hasown-in-json.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14311-accessor-setter-pair-dyn.ts": {
+   "order": [
+    "<repo>/tests/corpus/14311-accessor-setter-pair-dyn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14312-accessor-map-readback-checked.ts": {
+   "order": [
+    "<repo>/tests/corpus/14312-accessor-map-readback-checked.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1431-caught-tostring.ts": {
    "order": [
     "<repo>/tests/corpus/1431-caught-tostring.ts"
