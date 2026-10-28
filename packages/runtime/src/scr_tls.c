@@ -103,6 +103,8 @@
 #include "mbedtls/net_sockets.h" /* the MBEDTLS_ERR_NET_* codes the BIOs answer */
 #include "mbedtls/pk.h"
 #include "mbedtls/ssl.h"
+#include "mbedtls/ssl_ticket.h"
+#include "../vendor/mbedtls/library/ssl_misc.h" /* handshake->new_session_tickets_count (resumed server: zero tickets, Node) */
 #include "mbedtls/x509_crt.h"
 
 static void scr_tls_oom(void) {
@@ -318,6 +320,10 @@ void scr_tls_dyn_install(void) {
 typedef struct ScrTlsSrv {
   size_t rc;
   mbedtls_ssl_config conf;
+  /* the session-ticket keys (TLS 1.3 NewSessionTicket and the 1.2 ticket
+   * extension): a random key set per server, as Node's default. Without it
+   * a scriptc server issues no ticket, so no client can resume against it. */
+  mbedtls_ssl_ticket_context tickets;
   mbedtls_x509_crt cert;
   mbedtls_pk_context pk;
   /* https: the wrapped http-parser connection hook, attached from
@@ -344,6 +350,8 @@ typedef struct ScrTlsSrv {
 static const char *SCR_TLS_ALPN_HTTP11[] = {"http/1.1", NULL};
 static const char *SCR_TLS_ALPN_H2[] = {"h2", NULL};
 
+static int scr_tls_ticket_parse(void *p_ticket, mbedtls_ssl_session *session, unsigned char *buf, size_t len);
+
 static ScrTlsSrv *scr_tls_srv_new(const char *cert, size_t cert_len, const char *key,
                                    size_t key_len, bool alpn_http11) {
   scr_tls_rng_init();
@@ -368,6 +376,14 @@ static ScrTlsSrv *scr_tls_srv_new(const char *cert, size_t cert_len, const char 
     scr_tls_bad_material("certificate/key pair", 0);
   }
   if (alpn_http11) mbedtls_ssl_conf_alpn_protocols(&s->conf, SCR_TLS_ALPN_HTTP11);
+  mbedtls_ssl_ticket_init(&s->tickets);
+  if (mbedtls_ssl_ticket_setup(&s->tickets, mbedtls_ctr_drbg_random, &scr_tls_drbg,
+                               MBEDTLS_CIPHER_AES_256_GCM, 300) != 0) {
+    scr_tls_oom();
+  }
+  mbedtls_ssl_conf_session_tickets_cb(&s->conf, mbedtls_ssl_ticket_write,
+                                      scr_tls_ticket_parse, &s->tickets);
+  mbedtls_ssl_conf_new_session_tickets(&s->conf, 2); /* Node's default: two NewSessionTickets */
   return s;
 }
 
@@ -381,6 +397,7 @@ static void scr_tls_srv_release(ScrTlsSrv *s) {
   if (s->inner_ctx_free) s->inner_ctx_free(s->inner_ctx);
   if (s->h2_ctx_free) s->h2_ctx_free(s->h2_ctx);
   scr_closure_release(s->sni_cb);
+  mbedtls_ssl_ticket_free(&s->tickets);
   mbedtls_ssl_config_free(&s->conf);
   mbedtls_x509_crt_free(&s->cert);
   mbedtls_pk_free(&s->pk);
@@ -763,6 +780,18 @@ static void scr_tls_verify_msg(ScrTlsSock *t, char *out, size_t n) {
  * to the answered context (single-threaded runtime; set around
  * mbedtls_ssl_handshake). */
 static ScrTlsSock *scr_tls_current = NULL;
+
+/* A ticket the server accepts means the handshake RESUMES: Node's server then
+ * sends no NewSessionTicket. mbedTLS sends one (its "limit to one" rule), so the
+ * parse wrapper zeroes the handshake's ticket count for the current handshake.
+ * scr_tls_current is the socket whose handshake is running (scr_tls_handshake). */
+static int scr_tls_ticket_parse(void *p_ticket, mbedtls_ssl_session *session, unsigned char *buf, size_t len) {
+  int r = mbedtls_ssl_ticket_parse(p_ticket, session, buf, len);
+  if (r == 0 && scr_tls_current != NULL && scr_tls_current->ssl.MBEDTLS_PRIVATE(handshake) != NULL) {
+    scr_tls_current->ssl.MBEDTLS_PRIVATE(handshake)->new_session_tickets_count = 0;
+  }
+  return r;
+}
 
 /* Defined with the other transport ops below; the answer path needs the
  * table's identity to re-find its engine from the boxed socket. */
