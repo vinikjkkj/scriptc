@@ -12,6 +12,7 @@ import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
 import { pureReemittable } from "./lower-exprs.js";
+import { liveBagRef, liveTwinOf } from "./cjs-live-exports.js";
 import { cjsLexedExportsOf } from "../cjs-lexer.js";
 import { moduleNsStarExports } from "./lower-namespaces.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } from "./lowerer.js";
@@ -1215,6 +1216,11 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
    * as a plain property because Node's lexer links `import { __esModule }`
    * there). Reads through it agree: `ns.default.leaf === ns.leaf` is true
    * here and true in node, because both keys name one local. */
+  /** A member of a LIVE CommonJS export object, read from its bag (the namespace snapshot's value). */
+  function liveMemberRead(L: Lowerer, dep: ts.SourceFile, name: string, loc: IrExpr["loc"]): IrExpr {
+    return { kind: "dynKeyGet", key: { kind: "strLit", value: name, type: STRING, loc }, optional: true, value: liveBagRef(L, dep, loc), type: DYN, loc };
+  }
+
   function cjsExportTableNsOf(
     L: Lowerer,
     dep: ts.SourceFile,
@@ -1232,6 +1238,9 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
       `import the names statically (\`import { x } from "..."\`), which resolves through the same ` +
       `table with no namespace object in between`;
     const table = cjsKeptExportTableOf(dep);
+    // The declaration twin of a package resolves to its compiled module (cjs-live-exports.ts liveTwinOf).
+    const liveSf = liveTwinOf(L, dep);
+    const liveDep = liveSf !== null;
     if (table === null) {
       L.unsupported("SC1090", dep, `${what} whose \`module.exports\` is not a static export table`, why);
     }
@@ -1282,7 +1291,8 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
           why,
         );
       }
-      bind(exportName, value);
+      // A LIVE export object (cjs-live-exports.ts) keeps its members in the bag, which holds the values at this point.
+      bind(exportName, liveSf !== null ? liveMemberRead(L, liveSf, exportName, loc) : value);
     }
     // MEMBER exports the table does not carry: `module.exports = { … };
     // module.exports.extra = "extra";` is one module.exports object to
@@ -1298,7 +1308,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
       const vs = L.cjsExportValueSymbol(ps);
       const value = exportDynValue(L, n, vs ?? ps, loc);
       if (value === null) continue; // a pure type surface: Node has no key for it either
-      bind(n, value);
+      bind(n, liveSf !== null ? liveMemberRead(L, liveSf, n, loc) : value);
     }
     // NODE'S OWN RULE, as the last word. Everything above reads the
     // CHECKER; the name set Node materializes is its LEXER's, and
@@ -1327,7 +1337,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
       if (memberSym !== undefined) {
         const memberValue = exportDynValue(L, n, L.cjsExportValueSymbol(memberSym) ?? memberSym, loc);
         if (memberValue !== null) {
-          bind(n, memberValue);
+          bind(n, liveSf !== null ? liveMemberRead(L, liveSf, n, loc) : memberValue);
           continue;
         }
       }
@@ -1447,9 +1457,12 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
       return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
     });
     const fields: { key: IrExpr; value: IrExpr }[] = [];
+    // A CommonJS dependency whose export object is LIVE (cjs-live-exports.ts) reads each member from its bag.
+    const liveSf = isCjsJsFile(dep) || dep.isDeclarationFile ? liveTwinOf(L, dep) : null;
     for (const [exportName, sym] of entries) {
-      const value = exportDynValue(L, exportName, sym, loc);
-      if (value === null) continue;
+      const probe = exportDynValue(L, exportName, sym, loc);
+      if (probe === null) continue;
+      const value = liveSf !== null ? liveMemberRead(L, liveSf, exportName, loc) : probe;
       fields.push({ key: { kind: "strLit", value: exportName, type: STRING, loc }, value });
     }
     return fields;
