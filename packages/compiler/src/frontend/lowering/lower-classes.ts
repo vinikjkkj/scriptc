@@ -851,11 +851,39 @@ export interface GenericClassInfo {
    * only (the scan runs before any lowering): a member the checker already
    * knows (a field, a method, an accessor) is not undeclared. */
   function undeclaredWriteClassOf(L: Lowerer, access: ts.PropertyAccessExpression): ts.ClassDeclaration | null {
+    // Narrow by construction: only a write that the lowering would otherwise
+    // REFUSE (a plain expando on a plain program class, the pg-pool PendingItem
+    // shape). Every other undeclared-looking write already lowers through its
+    // own path, and a run-time table on its class would change those lowerings
+    // (Object.keys, for-in, spread over a table class all refuse), so they keep
+    // the class as it was. Excluded: private names (`this.#x`, including the
+    // own-property shadow the lowering synthesizes), prototype data
+    // (`C.prototype.k = v`, lower-protodata), and a class with a builtin base
+    // (`class E extends Error`, whose expandos lower through the builtin path).
+    if (ts.isPrivateIdentifier(access.name)) return null;
+    if (ts.isPropertyAccessExpression(access.expression) && access.expression.name.text === "prototype") return null;
     const cls = receiverClassDeclOfAny(L, access.expression);
     if (cls === null || !ts.isClassDeclaration(cls) || !isJsSourceFile(cls.getSourceFile())) return null;
+    if (classHasBuiltinBase(L, cls)) return null;
     const recvT = L.checker.getTypeAtLocation(access.expression);
     if (L.checker.getPropertyOfType(recvT, access.name.text) !== undefined) return null;
     return cls;
+  }
+
+  /** True when some class in `cls`'s extends chain is not a program class
+   * (a runtime or lib constructor such as Error). */
+  function classHasBuiltinBase(L: Lowerer, cls: ts.ClassLikeDeclaration): boolean {
+    let cur: ts.ClassLikeDeclaration | null = cls;
+    for (let hop = 0; cur !== null && hop < 16; hop++) {
+      const ext: ts.ExpressionWithTypeArguments | undefined = cur.heritageClauses
+        ?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword)?.types[0];
+      if (ext === undefined) return false;
+      const sym = L.checker.getSymbolAtLocation(ext.expression);
+      const decl = (sym === undefined ? [] : L.checker.declarationsOf(sym)).find((d) => ts.isClassDeclaration(d) || ts.isClassExpression(d));
+      if (decl === undefined || !L.fileTag.has(decl.getSourceFile()) || decl.getSourceFile().isDeclarationFile) return true;
+      cur = decl as ts.ClassLikeDeclaration;
+    }
+    return cur !== null;
   }
 
   export function definePropSlotSiteOf(L: Lowerer, call: ts.CallExpression): DefinePropSlotSite | null {
