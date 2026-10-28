@@ -63,6 +63,9 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   "scr_cipher_key.c": ["scr_asym.c", "scr_cipher_value.c"],
   "scr_cipher_value.c": ["scr_cipher.c"],
   "scr_dc.c": ["scr_async_dyn.c"],
+  // The WebCrypto unit: subtle promises (scr_dyn_new_promise) and the SHA-3
+  // ExperimentalWarning (scr_emit_warning) both live in the async unit.
+  "scr_webcrypto.c": ["scr_async_dyn.c"],
   // The three readiness-poller backends are selected together and each is
   // empty off its own platform, so naming all three is platform-neutral.
   "scr_dgram.c": ["scr_loop_kqueue.c", "scr_loop_epoll.c", "scr_loop_wsapoll.c"],
@@ -351,6 +354,9 @@ export interface CcOptions {
    * reactions, AsyncLocalStorage, the unhandledRejection/warning
    * process events. */
   dynAsync?: boolean;
+  /** The program reads WebCrypto (moduleUsesWebCrypto on the IR: the dyn.webCrypto
+   * libCall): compiles scr_webcrypto.c, whose promises ride scr_async_dyn.c. */
+  webCrypto?: boolean;
   /** The program uses the process-events surface (signal/exit listeners,
    * stdin events, for-await over stdin — moduleUsesProcessEvents on the
    * IR): compiles scr_events.c into the binary. Event-free binaries keep
@@ -2505,6 +2511,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.bytesOwn ? [rt(join(rtDir, "scr_bytes_own.c"))] : []),
     ...(opts.dc ? [rt(join(rtDir, "scr_dc.c"))] : []),
     ...(opts.dynAsync || opts.dynInvoke || opts.dc ? [rt(join(rtDir, "scr_async_dyn.c"))] : []),
+    ...(opts.webCrypto ? [rt(join(rtDir, "scr_webcrypto.c"))] : []),
     // The zlib UNIT (scr_zlib.c) gates on zlib.* IR use; the LINK (system
     // libz on hosts, the vendored per-target objects on cross builds)
     // also serves the native fetch's gzip decoder — spread exactly once.
