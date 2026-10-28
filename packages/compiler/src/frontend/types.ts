@@ -1500,6 +1500,8 @@ export type SymbolicResolver = (t: ts.Type) => ts.Type | null;
  * one new field here, not a new parameter at every call site. */
 export interface TypeMapperCtx {
   checker: ts.TypeChecker;
+  /** Every class declaration in the PROGRAM's own files (closed-world instance mapping). */
+  programClassDecls?: () => readonly ts.ClassDeclaration[];
   shapes: ShapeRegistry;
   unions: UnionRegistry;
   classNamer: ClassNamer;
@@ -2475,6 +2477,36 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // modules are never declaration files. Without --dynamic it stays
   // unmapped; badType reports the per-package requires-dynamic diagnostic
   // for node_modules types and the generic story otherwise.
+  // CLOSED-WORLD instance of a TYPES-ONLY declared class (no JS twin, no program
+  // body; pg's ClientBase). The whole program is compiled, so a value of such a type
+  // can only be an instance of a PROGRAM class. If exactly one program class is
+  // assignable to it, the type IS that class: its members resolve against that
+  // class's compiled methods, and a `this` return is the class itself. Several
+  // candidates stay unmapped (a named refusal), zero candidates fall through.
+  {
+    const cwSym = widened.getSymbol();
+    const cwDecls = cwSym !== undefined ? checker.declarationsOf(cwSym) : [];
+    if (
+      !ctx.dynamic &&
+      ctx.programClassDecls !== undefined &&
+      cwSym !== undefined &&
+      (cwSym.flags & ts.SymbolFlags.Class) !== 0 &&
+      cwDecls.length > 0 &&
+      cwDecls.every((d) => {
+        const sf = d.getSourceFile();
+        return sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !(ctx.declFileHasCompiledImpl?.(sf) ?? false);
+      }) &&
+      checker.getConstructSignatures(widened).length === 0
+    ) {
+      const closed = ctx.programClassDecls().filter((cd) => {
+        const csym = cd.name !== undefined ? checker.getSymbolAtLocation(cd.name) : undefined;
+        if (csym === undefined || cd.typeParameters !== undefined) return false;
+        return checker.isTypeAssignableTo(checker.getDeclaredTypeOfSymbol(csym), widened);
+      });
+      if (closed.length === 1) return { kind: "object", className: ctx.classNamer(closed[0]!) };
+      if (closed.length > 1) return null;
+    }
+  }
   const npmSym = widened.getAliasSymbol() ?? widened.getSymbol();
   const npmDecls = npmSym ? checker.declarationsOf(npmSym) : undefined;
   // INFILE_CALLABLE_LITERAL_MARKER: set when `widened` ITSELF is admitted

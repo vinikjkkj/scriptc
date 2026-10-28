@@ -1950,6 +1950,29 @@ export class Lowerer {
   readonly paramIrOverrides = new Map<ts.ParameterDeclaration, IrType>();
   /** File → qualifier prefix: "" for the entry, "%mI." otherwise. */
   readonly fileTag = new Map<ts.SourceFile, string>();
+  private programClassDeclCache: ts.ClassDeclaration[] | undefined;
+  /** Every named class declaration in the program's own files, in source order
+   * (the closed world a types-only class instance is mapped against). */
+  programClassDeclarations(): ts.ClassDeclaration[] {
+    // The file tags are registered after construction: a call before that must not
+    // freeze an empty list, so the cache is keyed on the tagged-file count.
+    if (this.programClassDeclCache === undefined) {
+      const out: ts.ClassDeclaration[] = [];
+      for (const sf of this.program.getSourceFiles()) {
+        // Every compiled (non-declaration, non-stdlib) file of the program: modules are
+        // tagged lazily as the import graph is discovered, so the fileTag set is not the
+        // closed world yet.
+        if (sf.isDeclarationFile || this.isStdlibFile(sf)) continue;
+        const visit = (n: ts.Node): void => {
+          if (ts.isClassDeclaration(n) && n.name !== undefined) out.push(n);
+          ts.forEachChild(n, visit);
+        };
+        ts.forEachChild(sf, visit);
+      }
+      this.programClassDeclCache = out;
+    }
+    return this.programClassDeclCache;
+  }
   /** Class declarations written inside a function or block that lower as
    * module-level classes (lower-modules.ts liftedLocalClasses): they capture
    * nothing local, carry no static state and are used in ways one evaluation
@@ -2328,6 +2351,7 @@ export class Lowerer {
       // fileTag is filled just below; the hook is only ever CALLED during
       // lowering, long after the constructor completes.
       isProgramFile: (sf) => this.fileTag.has(sf),
+      programClassDecls: () => this.programClassDeclarations(),
       declFileHasCompiledImpl: (sf) => this.declTwinCompiled(sf),
       dtsWitnessClass: (t) => dtsWitnessClassOf(this, t),
       pairedProtoInstance: (decl) => pairedProtoInstanceType(this, decl),
