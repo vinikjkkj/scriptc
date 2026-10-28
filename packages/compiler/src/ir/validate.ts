@@ -4852,10 +4852,17 @@ function validateFunction(
               def.arms.length === 2 &&
               def.arms.some((a) => a.kind === "nullT") &&
               def.arms.some((a) => a.kind === "object" && a.className === "%Error");
+            // The address and family slots are the per-path answer unions
+            // (lower-dgram.ts: string | null | undefined, number | undefined).
+            const armKinds = (t: IrType | undefined): string[] | null => {
+              if (t?.kind !== "union") return null;
+              const d = unions.get(t.unionId);
+              return d ? d.arms.map((a) => a.kind).sort() : null;
+            };
             const p1 = cbT.params[1];
-            if (ok && p1 !== undefined) ok = p1.kind === "string";
+            if (ok && p1 !== undefined) ok = armKinds(p1)?.join(",") === ["nullT", "string", "undefinedT"].join(",");
             const p2 = cbT.params[2];
-            if (ok && p2 !== undefined) ok = p2.kind === "f64";
+            if (ok && p2 !== undefined) ok = armKinds(p2)?.join(",") === ["f64", "undefinedT"].join(",");
           }
           if (!ok) {
             err(`libCall dns.lookup callback shape (frontend must fence)`, e.loc);

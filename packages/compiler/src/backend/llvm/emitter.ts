@@ -11951,41 +11951,90 @@ class LlEmitter {
    * takes the Error's +1. Interned per (union id, parameter count). */
   private dnsLookupThunkFor(cbT: IrType & { kind: "func" }): string {
     const errT = cbT.params[0]!;
-    if (errT.kind !== "union") throw new Error("llvm emitter bug: dns.lookup err param not a union");
+    const addrT = cbT.params[1];
+    const famT = cbT.params[2];
+    if (errT.kind !== "union" || (cbT.params.length >= 2 && addrT?.kind !== "union") || (cbT.params.length === 3 && famT?.kind !== "union")) {
+      throw new Error("llvm emitter bug: dns.lookup callback slots are not unions (frontend must type them)");
+    }
     const nparams = cbT.params.length;
-    const key = `dns:${errT.unionId}:${nparams}`;
+    const errU = errT.unionId;
+    const addrU = addrT?.kind === "union" ? addrT.unionId : "-";
+    const famU = famT?.kind === "union" ? famT.unionId : "-";
+    const key = `dns:${errU}/${addrU}/${famU}/${nparams}`;
     const seen = this.resolveThunks.get(key);
     if (seen) return seen;
     const sym = `sc_dnsl_${this.resolveThunks.size}`;
     this.resolveThunks.set(key, sym);
-    const def = this.unionsById.get(errT.unionId);
-    const errTag = def ? def.arms.findIndex((a) => a.kind === "object") : -1;
-    const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
-    if (errTag < 0 || nullTag < 0) throw new Error("llvm emitter bug: dns.lookup err union lacks its arms");
+    const armOf = (unionId: string, kind: string): number => {
+      const def = this.unionsById.get(unionId);
+      const tag = def ? def.arms.findIndex((a) => a.kind === kind) : -1;
+      if (tag < 0) throw new Error(`llvm emitter bug: dns.lookup union ${unionId} lacks a ${kind} arm`);
+      return tag;
+    };
+    const errTag = armOf(errU, "object");
+    const nullErrTag = armOf(errU, "nullT");
+    const strTag = addrU !== "-" ? armOf(addrU, "string") : -1;
+    const addrNullTag = addrU !== "-" ? armOf(addrU, "nullT") : -1;
+    const addrUndefTag = addrU !== "-" ? armOf(addrU, "undefinedT") : -1;
     this.declare(`declare ptr @scr_dns_error_new(ptr)`);
     this.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
     this.declare(`declare ptr @scr_error_retain_v(ptr)`);
     this.declare(`declare void @scr_error_release_v(ptr)`);
-    const unitRef = this.unitInstanceRef(errT.unionId, nullTag);
-    const args = ["ptr %cb", "ptr %uu", ...(nparams >= 2 ? ["ptr %a"] : []), ...(nparams >= 3 ? ["double %fam"] : [])];
-    this.resolveThunkDefs.push(
-      `define internal void @${sym}(ptr %cb, ptr %err, ptr %addr, double %fam) ${FN_ATTRS} { ; dns.lookup adapter (${nparams} params)`,
+    this.declare(`declare ptr @scr_str_retain_v(ptr)`);
+    this.declare(`declare void @scr_str_release_v(ptr)`);
+    // The answer's slots are stored into allocas by the path that owns them,
+    // so the closure is called once with the slots the path produced.
+    const body: string[] = [
       `entry:`,
-      `  %isnull = icmp eq ptr %err, null`,
-      `  br i1 %isnull, label %nul, label %obj`,
-      `obj:`,
+      `  %ue = alloca ptr`,
+      `  %ua = alloca ptr`,
+      `  %uf = alloca ptr`,
+      `  %isfail = icmp ne ptr %err, null`,
+      `  br i1 %isfail, label %fail, label %notfail`,
+      `fail:`,
       `  %e = call ptr @scr_dns_error_new(ptr %err)`,
-      `  %u = call ptr @scr_union_new_ref(i32 ${errTag}, ptr %e, ptr @scr_error_retain_v, ptr @scr_error_release_v, ptr null)`,
-      `  br label %go`,
-      `nul:`,
-      `  br label %go`,
-      `go:`,
-      `  %uu = phi ptr [ %u, %obj ], [ ${unitRef}, %nul ]`,
-      ...(nparams >= 2 ? [`  %a = call ptr @scr_str_retain_v(ptr %addr)`] : []),
+      `  %eu = call ptr @scr_union_new_ref(i32 ${errTag}, ptr %e, ptr @scr_error_retain_v, ptr @scr_error_release_v, ptr null)`,
+      `  store ptr %eu, ptr %ue`,
+      ...(addrU === "-" ? [] : [`  store ptr ${this.unitInstanceRef(addrU, addrUndefTag)}, ptr %ua`]),
+      ...(famU === "-" ? [] : [`  store ptr ${this.unitInstanceRef(famU, armOf(famU, "undefinedT"))}, ptr %uf`]),
+      `  br label %call`,
+      `notfail:`,
+      `  store ptr ${this.unitInstanceRef(errU, nullErrTag)}, ptr %ue`,
+      ...(addrU === "-" ? [`  br label %famblk`] : [
+        `  %hasaddr = icmp ne ptr %addr, null`,
+        `  br i1 %hasaddr, label %astr, label %anull`,
+        `astr:`,
+        `  %as = call ptr @scr_str_retain_v(ptr %addr)`,
+        `  %asu = call ptr @scr_union_new_ref(i32 ${strTag}, ptr %as, ptr @scr_str_retain_v, ptr @scr_str_release_v, ptr null)`,
+        `  store ptr %asu, ptr %ua`,
+        `  br label %famblk`,
+        `anull:`,
+        `  store ptr ${this.unitInstanceRef(addrU, addrNullTag)}, ptr %ua`,
+        `  br label %famblk`,
+      ]),
+      `famblk:`,
+    ];
+    if (famU !== "-") {
+      this.declare(`declare ptr @scr_union_new_f64(i32, double)`);
+      const famNumTag = armOf(famU, "f64");
+      body.push(`  %fu = call ptr @scr_union_new_f64(i32 ${famNumTag}, double %fam)`, `  store ptr %fu, ptr %uf`);
+    }
+    body.push(`  br label %call`, `call:`, `  %uu = load ptr, ptr %ue`, `  %aa = load ptr, ptr %ua`);
+    const args = ["ptr %cb", "ptr %uu"];
+    if (nparams >= 2) args.push("ptr %aa");
+    if (nparams >= 3) {
+      body.push(`  %ff = load ptr, ptr %uf`);
+      args.push("ptr %ff");
+    }
+    body.push(
       `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
       `  %fn = load ptr, ptr %fnp`,
       `  call void %fn(${args.join(", ")})`,
       `  ret void`,
+    );
+    this.resolveThunkDefs.push(
+      `define internal void @${sym}(ptr %cb, ptr %err, ptr %addr, double %fam) ${FN_ATTRS} { ; dns.lookup adapter (${nparams} params)`,
+      ...body,
       `}`,
       ``,
     );

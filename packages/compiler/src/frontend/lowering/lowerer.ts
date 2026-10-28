@@ -1547,6 +1547,9 @@ function thisOwnedBy(node: ts.Node, fn: ts.Node | null): boolean {
 
 export class Lowerer {
   readonly checker: ts.TypeChecker;
+  /** The lowering program, kept for the ambient answer-type aliases a
+   * lowering reads by declaration (lower-dgram.ts's dns.lookup answers). */
+  readonly loweringProgram: ts.Program;
   readonly diags: ScrDiagnostic[] = [];
   /** Set by the emitting lowering only: run the dyn-record cast fence in run(). */
   dynRecordFenceAtRun = false;
@@ -2303,6 +2306,7 @@ export class Lowerer {
     // The JSON-aware view (lower-modules.ts jsonAwareChecker): a CommonJS
     // JSON document's members answer their structure, not the checker's `any`.
     this.checker = jsonAwareChecker(this, program.getTypeChecker());
+    this.loweringProgram = program;
     this.typeCtx = {
       checker: this.checker,
       shapes: this.shapes,

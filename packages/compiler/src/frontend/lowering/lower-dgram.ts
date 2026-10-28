@@ -10,8 +10,9 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { BOOL, canBoxFuncIntoDyn, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, SrcLoc, STRING, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { BOOL, canBoxFuncIntoDyn, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, NULL_T, SrcLoc, STRING, typeKey, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { DNS_LOOKUP_DOCUMENTED_OPTIONS, fenceOrDropOptionKey } from "./surfaces.js";
+import { overridesDtsPath } from "../shared.js";
 
 const DGRAM_SURFACE_HINT =
   "bind, connect, send, address, close, unref/ref, and on/once of " +
@@ -222,6 +223,105 @@ export function lowerDgramDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
   );
 }
 
+/** The answer's three slots, as Node delivers them on each path (scr_dgram.c):
+ * the address is a string on success, null for an empty name, undefined on
+ * failure; the family is 4/6 on success and undefined on failure. These are
+ * the callback's parameter IR types, forced over the checker's spelling
+ * (string / number), which the runtime's shape would otherwise contradict.
+ * The arm list is sorted, the interning contract of the union registry. */
+function dnsAnswerUnion(L: Lowerer, arms: IrType[]): IrType {
+  const sorted = [...arms].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+  return { kind: "union", unionId: L.unions.intern(sorted) };
+}
+
+/** True iff `t` is a union of exactly the given arm kinds. */
+function isUnionOfKinds(L: Lowerer, t: IrType, kinds: string[]): boolean {
+  if (t.kind !== "union") return false;
+  const def = L.unions.get(t.unionId);
+  if (!def || def.arms.length !== kinds.length) return false;
+  const have = def.arms.map((a) => a.kind).sort();
+  return have.every((k, i) => k === [...kinds].sort()[i]);
+}
+
+/** A dns.lookup callback: an INLINE function literal (its parameters are
+ * bound here, so the per-path answer types can be forced on it) whose
+ * address and family parameters are plain unannotated identifiers. A named
+ * or imported function value would bind the checker's string/number, which
+ * the delivered null/undefined answers contradict, so it fences by name. */
+/** The checker type of a named answer alias the overrides file declares
+ * (scriptc-overrides.d.ts: ScriptcDnsAddress, ScriptcDnsFamily) — the
+ * union the reads of the forced parameters see, so `typeof`, `=== undefined`
+ * and the argument coercions meet the union, not the checker's string. */
+function dnsAnswerTsType(L: Lowerer, alias: string): ts.Type {
+  const sf = L.loweringProgram.getSourceFile(overridesDtsPath());
+  const decl = sf?.statements.find(
+    (st): st is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(st) && st.name.text === alias,
+  );
+  if (decl === undefined) {
+    throw new Error(`lowering bug: the overrides file declares no ${alias} answer alias`);
+  }
+  return L.checker.getTypeFromTypeNode(decl.type);
+}
+
+function lowerDnsCallback(L: Lowerer, node: ts.Expression): IrExpr {
+  let fn: ts.Expression = node;
+  while (ts.isParenthesizedExpression(fn)) fn = fn.expression;
+  if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) {
+    L.unsupported(
+      "SC1090",
+      node,
+      "lookup callbacks that are not inline function literals (the address and family are delivered as undefined or null on some paths, so the callback must be written in place)",
+    );
+  }
+  const forced: ts.ParameterDeclaration[] = [];
+  const reads: ts.Node[] = [];
+  const force = (idx: number, t: IrType, tsType: ts.Type): void => {
+    const p = fn.parameters[idx];
+    if (p === undefined) return;
+    if (!ts.isIdentifier(p.name) || p.type !== undefined || p.initializer !== undefined ||
+        p.questionToken !== undefined || p.dotDotDotToken !== undefined) {
+      L.unsupported(
+        "SC1090",
+        p,
+        "a lookup callback's address or family parameter with an annotation, default, or rest form (write it as a plain identifier so its per-path type is the delivered one)",
+      );
+    }
+    L.paramIrOverrides.set(p, t);
+    forced.push(p);
+    // Every read of the parameter in the body sees the answer union too.
+    const psym = L.resolveValueSymbol(p.name);
+    const bind = (n: ts.Node): void => {
+      if (L.chainNarrowedType.has(n)) return;
+      L.chainNarrowedType.set(n, tsType);
+      reads.push(n);
+    };
+    bind(p.name);
+    if (psym !== null && fn.body !== undefined) {
+      ts.walkPreorder(fn.body, (n) => {
+        if (ts.isIdentifier(n) && n.text === (p.name as ts.Identifier).text && L.resolveValueSymbol(n) === psym) bind(n);
+        return undefined;
+      });
+    }
+  };
+  const address = dnsAnswerUnion(L, [STRING, NULL_T, UNDEFINED_T]);
+  const family = dnsAnswerUnion(L, [F64, UNDEFINED_T]);
+  force(1, address, dnsAnswerTsType(L, "ScriptcDnsAddress"));
+  force(2, family, dnsAnswerTsType(L, "ScriptcDnsFamily"));
+  try {
+    return lowerCallbackArg(
+      L, node, "lookup callbacks", 3,
+      (p, i) =>
+        i === 0 ? isErrorOrNullUnion(L, p)
+        : i === 1 ? isUnionOfKinds(L, p, ["string", "nullT", "undefinedT"])
+        : isUnionOfKinds(L, p, ["f64", "undefinedT"]),
+      "use (err, address) — err is Error | null, address a string | null | undefined",
+    ).cb;
+  } finally {
+    for (const p of forced) L.paramIrOverrides.delete(p);
+    for (const n of reads) L.chainNarrowedType.delete(n);
+  }
+}
+
 /** dns.lookup(hostname, { family: 4 }, (err, address[, family]) => ...) —
  * the ONE lowered dns member. getaddrinfo runs at call time; the callback
  * defers to the next loop turn (SEMANTICS.md documents the split). */
@@ -251,14 +351,7 @@ function lowerDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
     // address families, the first answer in getaddrinfo's order. The
     // runtime's family argument is 0 (AF_UNSPEC); the callback is the same
     // (err, address, family) shape as the three-argument form.
-    const { cb } = lowerCallbackArg(
-      L, args[1]!, "lookup callbacks", 3,
-      (p, i) =>
-        i === 0 ? isErrorOrNullUnion(L, p)
-        : i === 1 ? p.kind === "string"
-        : p.kind === "f64",
-      "use (err, address) — err is Error | null, address a string",
-    );
+    const cb = lowerDnsCallback(L, args[1]!);
     const family: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
     return { kind: "libCall", fn: "dns.lookup", args: [hostname, family, cb], type: VOID, loc };
   }
@@ -288,7 +381,7 @@ function lowerDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
       // name; undocumented keys drop like Node drops them.
       fenceOrDropOptionKey(
         L, prop, prop.name.text, "lookup", DNS_LOOKUP_DOCUMENTED_OPTIONS,
-        "family: 4 is the supported option",
+        "the family option is the supported option",
         {
           all: "the all-addresses callback shape has no lowering — the lowered callback is (err, address, family) over one IPv4 answer",
         },
@@ -296,11 +389,11 @@ function lowerDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
       continue; // an undocumented key, dropped like Node drops it
     }
     const t = L.typeOf(prop.initializer);
-    if (!t.isNumberLiteralType() || t.value !== 4) {
+    if (!t.isNumberLiteralType() || (t.value !== 0 && t.value !== 4 && t.value !== 6)) {
       L.noLowering(
-        "lookup with a family other than the literal 4",
+        "lookup with a family other than the literal 0, 4, or 6",
         prop.initializer,
-        "IPv4 lookups ({ family: 4 }) are the supported form",
+        "the families Node's lookup accepts are the supported forms: { family: 4 }, { family: 6 }, { family: 0 }",
       );
     }
     family = L.lowerExprExpecting(prop.initializer, F64);
@@ -312,14 +405,7 @@ function lowerDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
       "the supported form is lookup(hostname, { family: 4 }, cb)",
     );
   }
-  const { cb } = lowerCallbackArg(
-    L, args[2]!, "lookup callbacks", 3,
-    (p, i) =>
-      i === 0 ? isErrorOrNullUnion(L, p)
-      : i === 1 ? p.kind === "string"
-      : p.kind === "f64",
-    "use (err, address) — err is Error | null, address a string",
-  );
+  const cb = lowerDnsCallback(L, args[2]!);
   return { kind: "libCall", fn: "dns.lookup", args: [hostname, family, cb], type: VOID, loc };
 }
 

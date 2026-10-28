@@ -11285,7 +11285,9 @@ typedef struct ScrDgramSocket ScrDgramSocket;
 /* The message adapter: msg and the rinfo parts arrive BORROWED (multiple
  * listeners see the same datagram); adapters retain what they keep. */
 typedef void (*ScrDgramMsgFn)(ScrClosure *cb, ScrBytes *msg, ScrStr *addr, ScrStr *family, double port, double size);
-/* The dns.lookup adapter: errmsg is NULL on success; everything borrowed. */
+/* The dns.lookup adapter: everything borrowed. errmsg set = the failure path
+ * (address and family are undefined in Node); otherwise addr NULL = Node's
+ * null address for an empty name, else the answer string with family 4/6. */
 typedef void (*ScrDnsLookupFn)(ScrClosure *cb, ScrStr *errmsg, ScrStr *addr, double family);
 
 ScrDgramSocket *scr_dgram_retain(ScrDgramSocket *s);
