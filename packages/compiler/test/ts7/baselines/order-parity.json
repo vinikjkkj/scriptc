@@ -3755,6 +3755,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14650-tls-session-none-invalid-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/14650-tls-session-none-invalid-undefined.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14651-tls-session-option-rejects-non-buffer.ts": {
+   "order": [
+    "<repo>/tests/corpus/14651-tls-session-option-rejects-non-buffer.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1466-child-containers.ts": {
    "order": [
     "<repo>/tests/corpus/1466-child-containers.ts"
