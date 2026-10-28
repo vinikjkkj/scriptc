@@ -24,8 +24,8 @@
  *            hardcoded copy of a layout this file does not own is what
  *            made the 16-byte cycle header three bugs instead of one.
  *   ScrDynEntry { char *key; uint32_t key_len; uint32_t key_static;
- *                 ScrDyn *value; } — 24 bytes, key +0, key_len +8 (i32),
- *                 value +16.
+ *                 uint32_t value_borrowed; ScrDyn *value; } — 32 bytes, key +0,
+ *                 key_len +8 (i32), value +24.
  *   ScrDynKind: NULL=0 BOOL=1 NUM=2 STR=3 ARR=4 OBJ=5 UNDEF=6 BYTES=7
  *               FUNC=8 HANDLE=9.
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
@@ -272,8 +272,8 @@ export class LlDyn {
     return e;
   }
 
-  /** Object entry field addresses: entries + i*24 (+0 key, +8 key_len,
-   * +16 value).
+  /** Object entry field addresses: entries + i*32 (+0 key, +8 key_len,
+   * +24 value; value_borrowed sits at +16).
    *
    * `key_len` is a 32-bit field, not a 64-bit one: ScrDynEntry spends the
    * other four bytes on the flag that says whether the key bytes are a
@@ -284,7 +284,7 @@ export class LlDyn {
   private entryAt(B: BlockBuilder, entries: string, i: string): { key: string; keyLen: string; value: string; base: string } {
     const off = B.tmp();
     const base = B.tmp();
-    B.line(`${off} = mul i64 ${i}, 24 ; sizeof(ScrDynEntry)`);
+    B.line(`${off} = mul i64 ${i}, 32 ; sizeof(ScrDynEntry)`);
     B.line(`${base} = getelementptr inbounds i8, ptr ${entries}, i64 ${off}`);
     const key = B.tmp();
     B.line(`${key} = load ptr, ptr ${base}`);
@@ -296,7 +296,7 @@ export class LlDyn {
     B.line(`${keyLen} = zext i32 ${keyLen32} to i64`);
     const vp = B.tmp();
     const value = B.tmp();
-    B.line(`${vp} = getelementptr inbounds i8, ptr ${base}, i64 16`);
+    B.line(`${vp} = getelementptr inbounds i8, ptr ${base}, i64 24`);
     B.line(`${value} = load ptr, ptr ${vp}`);
     return { key, keyLen, value, base };
   }
