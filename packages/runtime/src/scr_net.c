@@ -527,7 +527,7 @@ static void scr_net_dial_log_clear(ScrNetSocket *s);
 static ScrError *scr_net_dial_aggregate(ScrNetSocket *s);
 /* NETDBG: tlsdbg branch only, never landed */
 static void scr_net_dbg(const char *site, int err, int port, const char *ip) {
-  fprintf(stdout, "NETDBG site=%s err=%d errname=%s port=%d ip=%s\n", site, err, scr_net_errname(err), port, ip ? ip : "-");
+  fprintf(stdout, "NETDBG t=%.1f site=%s err=%d errname=%s port=%d ip=%s\n", scr_now_ms(), site, err, scr_net_errname(err), port, ip ? ip : "-");
 }
 
 struct ScrNetSocket {
@@ -2052,22 +2052,14 @@ ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/) {
   return first; /* the preferred family's first address: the old answer */
 }
 
-/* NETDBG tlsdbg experiment: bind the unbound socket to the wildcard before connect (libuv does this for ConnectEx) */
+/* NETDBG tlsdbg experiment 2: the connect runs BLOCKING (FIONBIO off) so the
+ * kernel's own answer time is visible in the trace (blocking connect to a
+ * closed loopback port: immediate refusal or the SYN-retry delay). */
 static void scr_net_w32_prebind(int fd, int family) {
 #ifdef _WIN32
-  int rc;
-  if (family == AF_INET6) {
-    struct sockaddr_in6 a6;
-    memset(&a6, 0, sizeof a6);
-    a6.sin6_family = AF_INET6;
-    rc = scr_w32_bind(fd, (struct sockaddr *)&a6, sizeof a6);
-  } else {
-    struct sockaddr_in a4;
-    memset(&a4, 0, sizeof a4);
-    a4.sin_family = AF_INET;
-    rc = scr_w32_bind(fd, (struct sockaddr *)&a4, sizeof a4);
-  }
-  fprintf(stdout, "NETDBG prebind fd=%d family=%d rc=%d\n", fd, family, rc);
+  u_long zero = 0;
+  int rc = ioctlsocket((SOCKET)fd, FIONBIO, &zero);
+  fprintf(stdout, "NETDBG blocking_connect t=%.1f fd=%d family=%d ioctl_rc=%d\n", scr_now_ms(), fd, family, rc);
 #else
   (void)fd;
   (void)family;
