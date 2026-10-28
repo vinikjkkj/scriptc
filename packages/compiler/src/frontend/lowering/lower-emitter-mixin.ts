@@ -20,6 +20,8 @@ import type { IrExpr } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, UNDEFINED_T } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { lowerEmitterMethodCall } from "./lower-emitter.js";
+import type { ClassInfo } from "./lower-classes.js";
+import { dtsWitnessClassOf } from "./lower-twin-witness.js";
 
 /** The hidden instance slot holding the ScrEmitter for a mixin-grafted class. */
 export const EMITTER_MIXIN_FIELD = "__scrEmitter";
@@ -151,16 +153,39 @@ export function lowerEmitterMixinCall(L: Lowerer, call: ts.CallExpression): IrEx
   if (!ts.isPropertyAccessExpression(call.expression)) return null;
   const access = call.expression;
   if (access.questionDotToken !== undefined || !EMITTER_API.has(access.name.text)) return null;
-  const recvT = L.typeOf(access.expression);
-  const mapped = L.mapTypeOf(recvT);
-  if (mapped?.kind !== "object") return null;
-  const info = L.classes.get(mapped.className);
-  if (!info || !info.emitterMixin) return null;
+  const info = graftInfoOfReceiver(L, L.typeOf(access.expression));
+  if (info === null) return null;
   const emitterInfo = L.classes.get(RUNTIME_EMITTER_CLASS);
   if (!emitterInfo) return null;
   const loc = locOf(call);
   const recv = L.lowerExpr(access.expression);
-  return lowerEmitterMethodCall(L, call, access, emitterInfo, undefined, slotOf(L, mapped.className, recv, loc));
+  // The slot is read through the receiver's own IR class (its layout holds the
+  // grafted class's fields as a prefix), so a subclass receiver type-checks.
+  const recvCls = recv.type.kind === "object" ? recv.type.className : info.def.name;
+  return lowerEmitterMethodCall(L, call, access, emitterInfo, undefined, slotOf(L, recvCls, recv, loc));
+}
+
+/** The grafted class a receiver type is, or null. A receiver typed by the
+ * declaration file (the `.d.ts` `Redis` of an npm package) is paired with its
+ * implementation class (dtsWitnessClassOf), whose ClassInfo holds the graft:
+ * the same twin the applyMixin helper body was read from. */
+function graftInfoOfReceiver(L: Lowerer, recvT: ts.Type): ClassInfo | null {
+  const mapped = L.mapTypeOf(recvT);
+  if (mapped?.kind === "object") {
+    // The nearest grafted class on the receiver's chain: a subclass of a
+    // grafted class holds the same slot, declared by the graft's own layout.
+    for (let c: ClassInfo | null | undefined = L.classes.get(mapped.className); c; c = c.base) {
+      if (c.emitterMixin === true) return c;
+    }
+  }
+  const impl = dtsWitnessClassOf(L, recvT);
+  if (impl !== null && ts.isClassDeclaration(impl) && impl.name !== undefined) {
+    const sym = L.checker.getSymbolAtLocation(impl.name);
+    for (let c: ClassInfo | null | undefined = sym ? L.classBySymbol.get(sym) : undefined; c; c = c.base) {
+      if (c.emitterMixin === true) return c;
+    }
+  }
+  return null;
 }
 
 /** `(EventEmitter as any).call(this)` inside a grafted class's own declaration:

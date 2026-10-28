@@ -8963,8 +8963,16 @@ export function isDynBytes(t: IrType): boolean {
  * representations chosen by which conversion site it happened to reach,
  * and `u as Error` would then work or fail depending on that history.
  * One encoding per value is worth more than the two extra classes. */
+/** Classes grafted with the EventEmitter API by applyMixin(Y, EventEmitter)
+ * (lower-emitter-mixin.ts), and their subclasses. Their instances do not box
+ * into a dyn slot: the dyn view of the instance has no emitter members
+ * (`typeof x.emit` is 'undefined', `x.on` throws), which is the OPEN dyn
+ * emitter defect (dynx1). Refused at compile time instead. Filled per
+ * lowering by the class collector and reset when a lowerer starts. */
+export const GRAFTED_EMITTER_CLASSES = new Set<string>();
+
 export function canBoxClassIntoDyn(className: string): boolean {
-  return !RUNTIME_ERROR_CLASSES.has(className);
+  return !RUNTIME_ERROR_CLASSES.has(className) && !GRAFTED_EMITTER_CLASSES.has(className);
 }
 
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:

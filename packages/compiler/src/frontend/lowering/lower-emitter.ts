@@ -51,7 +51,11 @@ import { handlerFnTypeNodeOf } from "../types.js";
 /** True when the class descends from (or is) the runtime emitter. */
 /** A class whose emitter API is grafted on by applyMixin(Y, EventEmitter) (lower-emitter-mixin.ts): its emit and listener sites feed the event tables like an emitter-rooted class. */
 export function emitterRootedOrGrafted(L: Lowerer, info: ClassInfo | undefined | null): boolean {
-  return emitterRooted(L, info) || info?.emitterMixin === true;
+  if (emitterRooted(L, info)) return true;
+  for (let c: ClassInfo | null | undefined = info; c; c = c.base) {
+    if (c.emitterMixin === true) return true;
+  }
+  return false;
 }
 
 export function emitterRooted(L: Lowerer, info: ClassInfo | undefined | null): boolean {
@@ -79,7 +83,25 @@ export function emitterRootKey(info: ClassInfo | undefined | null): string {
     prev = c;
     c = c.base;
   }
-  if (!c) return "*";
+  if (!c) {
+    // applyMixin(Y, EventEmitter) grafts (lower-emitter-mixin.ts) have no builtin
+    // emitter on their chain. Their events are keyed by the TOP grafted class,
+    // so two unrelated grafted classes never unify their tuples (Redis and
+    // Cluster both emit '-node' with different arities in Node).
+    let g: ClassInfo | null = info ?? null;
+    let graftTop: ClassInfo | null = null;
+    while (g) {
+      if (g.emitterMixin === true) graftTop = g;
+      g = g.base;
+    }
+    if (graftTop === null) return "*";
+    let gid = EMITTER_ROOT_IDS.get(graftTop);
+    if (gid === undefined) {
+      gid = emitterRootNext++;
+      EMITTER_ROOT_IDS.set(graftTop, gid);
+    }
+    return `#${gid}`;
+  }
   const top: ClassInfo = prev ?? c;
   let id = EMITTER_ROOT_IDS.get(top);
   if (id === undefined) {

@@ -6189,6 +6189,12 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // compilable body, so the call cannot execute statically and the
       // build refuses it, naming the member — see
       // refuseUncompilableExternMethod.
+      {
+        // A grafted EventEmitter receiver (applyMixin): its own lowering, before the
+        // declaration-only refusal that would otherwise answer a .d.ts-typed receiver.
+        const grafted = lowerEmitterMixinCall(L, expr);
+        if (grafted !== null) return grafted;
+      }
       refuseUncompilableExternMethod(L, expr, expr.expression);
       // The lib fence's METHOD-CALL chokepoint: a stdlib-declared member
       // that every lowering above declined — an unlowered member
