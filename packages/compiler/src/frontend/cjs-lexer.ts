@@ -803,3 +803,65 @@ export function cjsLexerVisibleNames<H>(
   }
   return exports;
 }
+
+/** The COMPLETE set of names a CommonJS file puts on its own exports object,
+ * or null when the file does anything else with `exports`/`module`/`this`
+ * (so the surface cannot be read statically). Parsed with the same 5.9.3
+ * parser as the lexer above. */
+export function completeCjsExportNames(source: string, fileName: string): Set<string> | null {
+  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const names = new Set<string>();
+  /** True when the subtree mentions the module's own exports/module/this. */
+  const mentionsModuleState = (root: ts.Node): boolean => {
+    const stack: Array<{ n: ts.Node; inFn: boolean }> = [{ n: root, inFn: false }];
+    while (stack.length > 0) {
+      const { n, inFn } = stack.pop()!;
+      if (ts.isIdentifier(n) && (n.text === "exports" || n.text === "module")) return true;
+      if (n.kind === ts.SyntaxKind.ThisKeyword && !inFn) return true;
+      const fn =
+        ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isMethodDeclaration(n) ||
+        ts.isConstructorDeclaration(n) || ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n) ||
+        ts.isClassDeclaration(n) || ts.isClassExpression(n);
+      ts.forEachChild(n, (c) => {
+        stack.push({ n: c, inFn: inFn || fn });
+      });
+    }
+    return false;
+  };
+  for (const st of sf.statements) {
+    if (ts.isExpressionStatement(st)) {
+      const e = st.expression;
+      // exports.NAME = rhs
+      if (
+        ts.isBinaryExpression(e) &&
+        e.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(e.left) &&
+        ts.isIdentifier(e.left.expression) &&
+        e.left.expression.text === "exports" &&
+        ts.isIdentifier(e.left.name)
+      ) {
+        if (mentionsModuleState(e.right)) return null;
+        names.add(e.left.name.text);
+        continue;
+      }
+      // Object.defineProperty(exports, "NAME", descriptor)
+      if (
+        ts.isCallExpression(e) &&
+        ts.isPropertyAccessExpression(e.expression) &&
+        ts.isIdentifier(e.expression.expression) &&
+        e.expression.expression.text === "Object" &&
+        e.expression.name.text === "defineProperty" &&
+        e.arguments.length === 3 &&
+        ts.isIdentifier(e.arguments[0]!) &&
+        e.arguments[0].text === "exports" &&
+        ts.isStringLiteral(e.arguments[1]!)
+      ) {
+        if (mentionsModuleState(e.arguments[2]!)) return null;
+        names.add(e.arguments[1].text);
+        continue;
+      }
+    }
+    if (mentionsModuleState(st)) return null;
+  }
+  return names;
+}
