@@ -1330,6 +1330,9 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     fns: ["process.envGet", "process.envSet", "process.envUnset", "process.envPairs"],
     note: "reads, writes, deletes, and enumeration of the process environment (the process global)",
   },
+  // ── fs (lowerFsStatCallbackCall): the callback form of fs.stat — the stat runs
+  // at the call and the (err, stats) answer is the filesystem's, so it demotes.
+  { id: "node-builtin.fs.stat", kind: "node-builtin", name: "fs.stat", fns: ["fs.statCb"], note: "the callback form; the two-argument shape only" },
   { id: "node-builtin.process.argv", kind: "node-builtin", name: "process.argv", fns: ["process.argv"] },
   { id: "node-builtin.process.cwd", kind: "node-builtin", name: "process.cwd", fns: ["process.cwd"] },
   { id: "node-builtin.process.chdir", kind: "node-builtin", name: "process.chdir", fns: ["process.chdir"] },
