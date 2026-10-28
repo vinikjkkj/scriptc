@@ -13227,18 +13227,6 @@ static const char *scr_enc_canon_dyn(const ScrDyn *enc, bool lenient) {
   return NULL;
 }
 
-ScrBytes *scr_buffer_from_dyn_enc(const ScrDyn *v, const ScrDyn *enc) {
-  if (v->kind == SCR_DYN_STR) {
-    const char *canon = scr_enc_canon_dyn(enc, true);
-    if (canon == NULL) return NULL;
-    ScrStr *e = scr_str_new(canon, strlen(canon));
-    ScrBytes *b = scr_bytes_from_str(v->v.str, e);
-    scr_str_release(e);
-    return b;
-  }
-  return scr_buffer_from_dyn(v);
-}
-
 ScrStr *scr_dyn_to_string_range_dyn(const ScrDyn *d, const ScrDyn *enc, ScrDyn *start, ScrDyn *end,
                                     const ScrStr *what) {
   const char *canon = "utf8";
@@ -13251,44 +13239,6 @@ ScrStr *scr_dyn_to_string_range_dyn(const ScrDyn *d, const ScrDyn *enc, ScrDyn *
   scr_str_release(e);
   return r;
 }
-
-ScrBytes *scr_buffer_from_dyn(const ScrDyn *v) {
-  switch (v->kind) {
-    case SCR_DYN_STR: {
-      ScrStr *enc = scr_str_new("utf8", 4);
-      ScrBytes *b = scr_bytes_from_str(v->v.str, enc);
-      scr_str_release(enc);
-      return b;
-    }
-    case SCR_DYN_BYTES:
-    case SCR_DYN_ARRBUF: {
-      const ScrBytes *src = v->v.bytes;
-      size_t n = src->len * scr_bytes_elem_size(src->elem);
-      ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)n);
-      if (n > 0) memcpy(b->data, src->data, n);
-      return b;
-    }
-    case SCR_DYN_ARR: {
-      size_t n = v->v.arr.len;
-      ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)n);
-      for (size_t i = 0; i < n; i++) {
-        const ScrDyn *e = v->v.arr.items[i];
-        double x = e->kind == SCR_DYN_NUM ? e->v.num : 0.0;
-        double m = fmod(trunc(x), 256.0);
-        if (!(m == m)) m = 0.0;
-        if (m < 0) m += 256.0;
-        b->data[i] = (uint8_t)m;
-      }
-      return b;
-    }
-    default:
-      scr_dyn_arg_type_fail("first argument",
-                            "of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object",
-                            v);
-      return NULL;
-  }
-}
-
 
 /* The public face of the encoding canonicalizer for the gated Buffer-value unit (scr_dyn_ext.c). */
 const char *scr_enc_canon_dyn_pub(const ScrDyn *enc, bool lenient) {

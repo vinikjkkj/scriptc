@@ -529,7 +529,7 @@ static ScrDyn *scr_bv_wrap_buffer(ScrBytes *b) {
  *                    {type:'Buffer', data} contents; a DataView is empty
  *   array / typed    every element ToNumber'd and ToUint8'd (BigInt throws)
  *   anything else    ERR_INVALID_ARG_TYPE, "first argument" wording
- * The direct Buffer.from(...) call keeps scr_buffer_from_dyn (scr_json.c). */
+ * The direct Buffer.from(dyn) call takes this same path (scr_bv_from_dyn). */
 #define SCR_BV_FROM_DEPTH_MAX 1000
 
 static void scr_bv_throw_plain(const char *msg) {
@@ -553,6 +553,17 @@ static void scr_bv_throw_first_arg(const ScrDyn *v) {
 
 static void scr_bv_throw_code(int kind, const char *msg, const char *code) {
   scr_throw_error_msg_code(kind, msg, strlen(msg), code);
+}
+
+/* A string's bytes under Buffer.from's encoding: an untyped encoding is lenient (anything but a
+ * non-empty string is utf8), an unknown name throws ERR_UNKNOWN_ENCODING. +1, NULL pending. */
+static ScrBytes *scr_bv_str_bytes(const ScrStr *s, const ScrDyn *enc) {
+  const char *canon = scr_enc_canon_dyn_pub(enc, true);
+  if (canon == NULL) return NULL;
+  ScrStr *e = scr_str_new(canon, strlen(canon));
+  ScrBytes *b = scr_bytes_from_str(s, e);
+  scr_str_release(e);
+  return b;
 }
 
 static ScrDyn *scr_bv_from_val(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *a2, int depth);
@@ -826,7 +837,7 @@ static ScrDyn *scr_bv_from_val(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *
   }
   switch (v->kind) {
     case SCR_DYN_STR: {
-      ScrBytes *b = scr_buffer_from_dyn_enc(v, a1);
+      ScrBytes *b = scr_bv_str_bytes(v->v.str, a1);
       if (b == NULL) return NULL;
       return scr_bv_wrap_buffer(b);
     }
@@ -850,6 +861,19 @@ static ScrDyn *scr_bv_from_val(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *
   scr_bv_throw_first_arg(v);
   return NULL;
 }
+
+/* The direct Buffer.from(dyn) call and Buffer.from(dyn, enc) (lower-containers: an untyped operand):
+ * the value path with the missing arguments undefined. +1 ScrBytes, NULL with the exception pending. */
+static ScrBytes *scr_bv_direct(const ScrDyn *v, const ScrDyn *enc) {
+  ScrDyn *d = scr_bv_from_val(v, enc, scr_dyn_undefined(), 0);
+  if (d == NULL) return NULL;
+  ScrBytes *b = scr_bytes_retain(d->v.bytes);
+  scr_dyn_release(d);
+  return b;
+}
+
+ScrBytes *scr_bv_from_dyn(const ScrDyn *v) { return scr_bv_direct(v, scr_dyn_undefined()); }
+ScrBytes *scr_bv_from_dyn_enc(const ScrDyn *v, const ScrDyn *enc) { return scr_bv_direct(v, enc); }
 
 static ScrDyn *scr_bv_s_from(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   (void)clo;
