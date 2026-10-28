@@ -7186,7 +7186,7 @@ let digestInputValueDispatches = 0;
       }
     }
     const member = expr.name.text;
-    if (member === "errno" || member === "syscall" || member === "path" || member === "dest") {
+    if (member === "errno" || member === "syscall" || member === "path" || member === "dest" || member === "hostname") {
       let eInfo = L.classes.get(recvT.className) ?? null;
       while (eInfo && eInfo.base) eInfo = eInfo.base;
       if (!eInfo || eInfo.def.name !== "%Error" || !L.isStdlibMember(expr)) return null;

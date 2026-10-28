@@ -1305,6 +1305,8 @@ ScrStr *scr_error_report_suffix(const void *payload);
  * thrower is scr_throw_error_msg with the code stamped on the payload. */
 void scr_error_set_code(ScrError *e, const char *code);
 void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char *path, const char *dest);
+void scr_error_set_ext_dns(ScrError *e, double errno_val, const char *syscall, const char *hostname);
+const ScrStr *scr_error_ext_hostname(const ScrError *e);
 bool scr_error_ext_get(const ScrError *e, double *err_no, const ScrStr **syscall, const ScrStr **path,
                        const ScrStr **dest);
 struct ScrDyn *scr_error_ext_dyn(ScrError *e, const ScrStr *key);

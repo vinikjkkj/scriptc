@@ -759,9 +759,12 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
     scr_str_release(entry_str);
   }
   if (has_ext) {
-    const struct { const char *label; const ScrStr *val; } rows[3] = {
-        {"syscall: ", ext_syscall}, {"path: ", ext_path}, {"dest: ", ext_dest}};
-    for (int r = 0; r < 3; r++) {
+    /* Node's own key order: errno, code, syscall, then path/dest (fs) or
+     * hostname (dns). */
+    const struct { const char *label; const ScrStr *val; } rows[4] = {
+        {"syscall: ", ext_syscall}, {"path: ", ext_path}, {"dest: ", ext_dest},
+        {"hostname: ", scr_error_ext_hostname(e)}};
+    for (int r = 0; r < 4; r++) {
       if (rows[r].val == NULL) continue;
       InspBuf entry = {0};
       ib_cstr(&entry, rows[r].label);

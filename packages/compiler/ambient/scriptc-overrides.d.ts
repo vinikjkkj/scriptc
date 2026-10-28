@@ -93,3 +93,12 @@ interface PromiseConstructor {
     reject: (reason: unknown) => void;
   };
 }
+
+/* node:dns's getaddrinfo failure carries `hostname` next to errno, code and
+ * syscall (Node's dnsException shape); @types/node's ErrnoException does not
+ * name it. */
+declare namespace NodeJS {
+  interface ErrnoException {
+    hostname?: string;
+  }
+}
