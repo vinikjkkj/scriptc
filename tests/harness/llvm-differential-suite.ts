@@ -36,6 +36,7 @@ import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-
 import { EXE_SUFFIX } from "./exe.js";
 import { tapPhase } from "../../packages/compiler/src/phase-tap.js";
 import { holdScratch } from "./scratch-lease.mjs";
+import { normalizeWarningPid } from "./stderr-pid.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const corpusDir = join(repoRoot, "tests/corpus");
@@ -439,11 +440,17 @@ export function defineLlvmDifferentialSuite(part = 1, parts = 1): void {
           expect(got?.pre ?? llvmErr.toString("utf8")).toBe(want.pre);
           expect(got?.line ?? "<no uncaught report>").toBe(want.line);
         } else if (expectedExit === 0) {
-          if (!llvmErr.equals(cErr)) {
-            expect(llvmErr.toString("utf8")).toBe(cErr.toString("utf8"));
+          // Every side loses its warning pid (node:<pid>) before the byte
+          // comparison: the pid is process identity, the warning text is not.
+          const norm = (b: Buffer): Buffer => Buffer.from(normalizeWarningPid(b.toString("utf8")), "utf8");
+          const llvmN = norm(llvmErr);
+          const cN = norm(cErr);
+          const nodeN = norm(node.stderr);
+          if (!llvmN.equals(cN)) {
+            expect(llvmN.toString("utf8")).toBe(cN.toString("utf8"));
           }
-          if (!llvmErr.equals(node.stderr)) {
-            expect(llvmErr.toString("utf8")).toBe(node.stderr.toString("utf8"));
+          if (!llvmN.equals(nodeN)) {
+            expect(llvmN.toString("utf8")).toBe(nodeN.toString("utf8"));
           }
         }
         if (hostCrash) {
