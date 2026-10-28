@@ -58,6 +58,26 @@ const RTKEY = "const k = process.argv.length > 99 ? 'zz' : 'plug'\n";
 /** Programs that must COMPILE and print exactly this. */
 const RUNS: readonly { name: string; src: string; out: string }[] = [
   {
+    // A receiver-free `function` getter (the table calls it with no
+    // receiver, and it never reads one). Enumerability is the surface that
+    // matters: the enumerable accessor shows as [Getter], the hidden one
+    // does not, and a redefinition over a sealed one throws Node's text.
+    // Both lanes were probed against $NODE_CI (v24.15.0) before this row.
+    name: "a function getter that never reads its receiver: enumeration parity",
+    src:
+      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
+      "const c = new C()\n" +
+      RTKEY +
+      "const h = process.argv.length > 99 ? 'zz' : 'hid'\n" +
+      "Object.defineProperty(c, h, { get: function () { return 2 }, enumerable: false, configurable: true })\n" +
+      "console.log(c)\n" +
+      "console.log('hid-in', h in c, 'hid-value', (c as any)[h])\n" +
+      "Object.defineProperty(c, k, { get: function () { return 3 }, enumerable: true, configurable: true })\n" +
+      "console.log(c)\n" +
+      "console.log('plug-value', (c as any)[k], 'plug-in', k in c)\n",
+    out: "C { a: 1 }\nhid-in true hid-value 2\nC { a: 1, plug: [Getter] }\nplug-value 3 plug-in true\n",
+  },
+  {
     name: "the zapo shape: an enumerable accessor named by a run-time string",
     src:
       "class Client { readonly name: string\n" +
@@ -346,16 +366,18 @@ const COMPILE_REFUSALS: readonly { name: string; code: string; src: string }[] =
       "console.log(String(e.b))\n",
   },
   {
-    // The table calls the getter with NO receiver, so only a getter whose
-    // `this` is already captured is safe. A `function` expression could
-    // read `this` and would get the wrong one.
-    name: "a getter that is not an arrow function",
+    // The table calls the getter with NO receiver, so a getter whose body
+    // READS its receiver cannot be called that way: it would get no `this`.
+    // A `function` (or method) that never names this/arguments/super/
+    // new.target IS receiver-free and lowers (the RUNS row below, with its
+    // enumeration parity). This row is the shape that still refuses.
+    name: "a getter that reads this",
     code: "SC2020",
     src:
       "class C { a: number\n  constructor() { this.a = 1 } }\n" +
       "const c = new C()\n" +
       RTKEY +
-      "Object.defineProperty(c, k, { get: function () { return 1 }, enumerable: true, configurable: true })\n" +
+      "Object.defineProperty(c, k, { get: function () { return this.a }, enumerable: true, configurable: true })\n" +
       "console.log(c)\n",
   },
   {
