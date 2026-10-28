@@ -3713,6 +3713,16 @@ function lowerOptionalDefaultArg(
     if (args.length === 1 && !ts.isObjectLiteralExpression(args[0]!)) {
       const src = L.lowerExpr(args[0]!);
       if (src.type.kind === "string") return strCharsCall(L, src, loc);
+      // `Array.from(view)` over a numeric typed array or a Buffer is the element
+      // list (Node reads length and indices), the same toArray the bytes view
+      // exposes. DataView and ArrayBufferView share the u8 IR type but have no
+      // length in JS (Array.from answers []), and ArrayBuffer is an opaque
+      // buffer (also []); those keep their fence. 64-bit views (bigint
+      // elements) keep theirs too.
+      if (src.type.kind === "bytes" && ARRAY_FROM_NUMERIC_VIEW.has(src.type.elem) &&
+          !/DataView|ArrayBufferView/.test(L.checker.typeToString(L.typeOf(args[0]!)))) {
+        return { kind: "bytesIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(F64), loc };
+      }
       // `Array.from(a)` on an ARRAY is the shallow copy `a.slice()` — and
       // the drained Map/Set iterators land here too, since their immediate
       // drain already built a fresh array (lowerMapIterDrainCall counts
@@ -8590,6 +8600,8 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
 /** Node's Buffer encoding names → the runtime's canonical spelling (every
  * alias folds at compile time; the runtime sees only canonical names).
  * Shared by toString, Buffer.from, and Buffer.byteLength. */
+/** Element kinds whose Array.from(view) is the numeric element list. 64-bit kinds (bigint elements) are absent. */
+const ARRAY_FROM_NUMERIC_VIEW = new Set(["u8", "u8c", "i8", "i16", "u16", "i32", "u32", "f32", "f64"]);
 const BUF_ENCODINGS: Record<string, string | undefined> = {
   utf8: "utf8",
   "utf-8": "utf8",
