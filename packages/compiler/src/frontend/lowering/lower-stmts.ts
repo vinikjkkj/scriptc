@@ -31,7 +31,7 @@ import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } fr
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf } from "./cjs-live-exports.js";
+import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf, liveAccessorTargetOf } from "./cjs-live-exports.js";
 import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
@@ -7218,7 +7218,9 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       // the tsc re-export idiom and the expansion of __defineGetter__): no
       // storage and no code here. Every read of K lifts the getter
       // (cjsExportAccessorRead), which is the per-read evaluation Node runs.
-      if (cjsExportsGetterDefineOf(expr) !== null) return { kind: "block", body: [], loc: locOf(expr) };
+      // A LIVE export object (cjs-live-exports.ts) keeps the definition: the bag takes the accessor, so a requirer's
+      // read of it lifts the getter Node runs, instead of finding no member (liveAccessorTargetOf).
+      if (cjsExportsGetterDefineOf(expr) !== null && !liveAccessorTargetOf(L, expr)) return { kind: "block", body: [], loc: locOf(expr) };
     }
     // Statement-position `delete` — the two honest receivers: process.env
     // keys (unsetenv(3) — later reads and spawned children observe the

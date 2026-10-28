@@ -29,7 +29,7 @@
  * guard, and errors.test.ts compiles a 7000-level nested expression. */
 import * as ts from "../ts7/adapter.js";
 import { BOOL, DYN, F64, STRING, VOID, type IrExpr, type IrStmt, type SrcLoc } from "../../ir/nodes.js";
-import { cjsExportAssignmentOf, cjsWholeExportAssignmentOf, isCjsJsFile, isModuleExportsAccess, npmStaticDepSf7, requireSpecOf, resolveImport } from "../program.js";
+import { cjsExportAssignmentOf, cjsWholeExportAssignmentOf, isCjsJsFile, isModuleExportsAccess, requireSpecOf, resolveImport } from "../program.js";
 import { isRelativeSpecifier } from "../shared.js";
 import type { Lowerer } from "./lowerer.js";
 import { compoundCombine, cjsExportsBagOf } from "./lower-exprs.js";
@@ -170,9 +170,11 @@ function tableShapeOf(sf: ts.SourceFile): "none" | "table" | "other" {
 
 /** The CommonJS module a `require(spec)` call loads, resolved from `from`, or null. */
 function requireTargetOfSpec(L: Lowerer, from: ts.SourceFile, spec: string): ts.SourceFile | null {
+  // The resolver the binding's own dependency uses (lowerer.ts bareRequireDepOf: an opted-in --npm-static
+  // package, or a --provenance-sources package's mapped entry), so the escape walk and the binding agree.
   const dep = isRelativeSpecifier(spec)
     ? resolveImport(L.program, from, spec) ?? null
-    : npmStaticDepSf7(L.program, from, spec);
+    : L.bareRequireDepOf(from, spec);
   if (dep === null) return null;
   // An npm package's entry is its declaration (`index.d.ts`); the module object is the compiled twin.
   const js = dep.isDeclarationFile ? L.declTwinSourceOf(dep) : dep;
@@ -202,7 +204,7 @@ function outsideEscapesOf(L: Lowerer): Set<ts.SourceFile> {
       // A direct `require(spec).k = v` (or `.__defineSetter__`, `++`, `delete`) writes the export object too.
       if (ts.isCallExpression(n)) {
         const spec = requireSpecOf(n);
-        if (spec !== null && (exportObjectUseOf(n) === "write" || exportObjectUseOf(n) === "escape")) {
+        if (spec !== null && exportObjectUseOf(n) === "write") {
           const dep = requireTargetOfSpec(L, f, spec);
           if (dep !== null) out.add(dep);
         }
@@ -530,6 +532,15 @@ export function orphanTableWriteOf(L: Lowerer, recv: ts.Expression): boolean {
     if (whole === 1 && rec?.kind === "table" && rec.obj !== null) table = true;
   }
   return table && hasBareExportsIdent(dep);
+}
+
+/** True when a `Object.defineProperty(target, ...)` statement's target is a LIVE export object (the module's own
+ * `exports` / `module.exports` in a live file, or a live requirer binding): the definition is a bag write, not
+ * the static accessor export that has no storage. */
+export function liveAccessorTargetOf(L: Lowerer, call: ts.Node): boolean {
+  if (!ts.isCallExpression(call)) return false;
+  const target = call.arguments[0];
+  return target !== undefined && isLiveExportValue(L, target);
 }
 
 /** A property key of a dynamic access over a live export object: a string key as is, a number, boolean or dyn key
