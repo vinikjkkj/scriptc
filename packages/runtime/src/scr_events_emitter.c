@@ -104,7 +104,9 @@ struct ScrEeReg {
  * stamps pre/post from the program's preorder numbering (the
  * scr_error_vts precedent). release is the direct teardown below. */
 static void scr_emitter_release_direct(void *obj);
-ScrVt scr_emitter_vt = {0, 0, &scr_emitter_release_direct};
+/* Default interval {1, 0} is EMPTY: an unstamped emitter root (no emitter class in
+ * the module graph) matches no object, so instanceof EventEmitter cannot read pre 0. */
+ScrVt scr_emitter_vt = {1, 0, &scr_emitter_release_direct};
 
 double scr_emitter_default_max = 10; /* EventEmitter.defaultMaxListeners */
 

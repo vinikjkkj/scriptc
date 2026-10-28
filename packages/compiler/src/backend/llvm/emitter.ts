@@ -323,6 +323,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "error.domClone": "scr_domex_clone",
   "dyn.errInstanceof": "scr_dyn_err_instanceof",
   "tls.dynInstanceOf": "scr_tls_dyn_instanceof",
+  "stream.dynInstanceOf": "scr_stream_dyn_instanceof",
   // The JS operator conversions over dyn operands. They throw on the
   // reference kinds (MAY_THROW_LIB_FNS), so the generic path emits the
   // standard pending check after each — one C symbol per operator so the
