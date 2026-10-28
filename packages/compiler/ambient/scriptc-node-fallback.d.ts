@@ -1454,6 +1454,7 @@ declare module "crypto" {
    * Sec-WebSocket-Accept hash, sha512 for the Noise handshake. */
   export interface Hash {
     update(data: string | Uint8Array): Hash;
+    update(data: string, inputEncoding: "utf8" | "utf-8" | "hex" | "base64" | "base64url" | "latin1" | "binary" | "ascii" | "utf16le" | "utf-16le" | "ucs2" | "ucs-2"): Hash;
     digest(encoding: "hex" | "base64"): string;
     digest(): Buffer;
   }
@@ -1462,6 +1463,7 @@ declare module "crypto" {
    * Buffer (Node's BinaryLike); a KeyObject key has no lowering. */
   export interface Hmac {
     update(data: string | Uint8Array): Hmac;
+    update(data: string, inputEncoding: "utf8" | "utf-8" | "hex" | "base64" | "base64url" | "latin1" | "binary" | "ascii" | "utf16le" | "utf-16le" | "ucs2" | "ucs-2"): Hmac;
     digest(encoding: "hex" | "base64"): string;
     digest(): Buffer;
   }
