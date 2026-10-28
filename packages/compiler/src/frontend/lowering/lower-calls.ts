@@ -4811,6 +4811,11 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // `Error?.(...)` keeps its fence rather than quietly answering.
     if (ts.isIdentifier(expr.expression) && expr.questionDotToken === undefined) {
       const errInfo = L.builtinErrorInfoOf(L.resolveValueSymbol(expr.expression));
+      if (errInfo && errInfo.def.name === "%AggregateError") {
+        // AggregateError is made by the runtime (a failed connect chain); its constructor
+        // takes an array of errors and is not lowered.
+        L.noLowering("new AggregateError", expr);
+      }
       if (errInfo && errInfo.def.name !== "%DOMException") {
         const msg = L.errorMessageArg(expr.arguments, loc, expr, true);
         return errorWithCause(L, {
