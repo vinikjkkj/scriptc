@@ -13394,7 +13394,10 @@ class LlEmitter {
     const dataT = kind === "t" || kind === "l" ? doneT.params[1] : undefined;
     let bytesTag = -1;
     let strTag = -1;
-    if (dataT !== undefined) {
+    // An untyped (dyn) data parameter: the boxed value is consumed by the
+    // runtime (scr_stream_dyn_data_owned), so no union arms and no release.
+    const dataDyn = dataT !== undefined && dataT.kind === "dyn";
+    if (dataT !== undefined && !dataDyn) {
       if (dataT.kind !== "union") throw new Error("llvm emitter bug: stream done data param not a union");
       const def = this.unionsById.get(dataT.unionId);
       bytesTag = def ? def.arms.findIndex((a) => a.kind === "bytes") : -1;
@@ -13457,6 +13460,10 @@ class LlEmitter {
       this.declare(`declare ptr @scr_str_retain_v(ptr)`);
       unwrap("%d", strTag, "@scr_str_retain_v", "%sslot");
     }
+    if (dataDyn) {
+      this.declare(`declare void @scr_stream_dyn_data_owned(ptr, ptr, ptr)`);
+      d.push(`  call void @scr_stream_dyn_data_owned(ptr %d, ptr %bslot, ptr %sslot) ; consumes %d`);
+    }
     d.push(`  %ev = load ptr, ptr %eslot`);
     if (twoSlot) {
       d.push(
@@ -13469,7 +13476,7 @@ class LlEmitter {
     }
     d.push(`  call void @scr_stream_release_v(ptr %s)`);
     if (errT !== undefined) d.push(`  call void @scr_union_release(ptr %e)`);
-    if (dataT !== undefined) d.push(`  call void @scr_union_release(ptr %d)`);
+    if (dataT !== undefined && !dataDyn) d.push(`  call void @scr_union_release(ptr %d)`);
     d.push(`  ret void`, `}`, ``);
     this.resolveThunkDefs.push(...d);
     return sym;

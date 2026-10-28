@@ -3515,6 +3515,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14705-stream-transform-pipe-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/14705-stream-transform-pipe-chain.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1471-child-unref.ts": {
    "order": [
     "<repo>/tests/corpus/1471-child-unref.ts"

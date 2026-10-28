@@ -1134,7 +1134,13 @@ export function streamDoneFnFor(E: CEmitter, kind: "w" | "f" | "d" | "t" | "l", 
   const dataT = doneT.params[1];
   if (kind === "t" || kind === "l") {
     body.push(...dataLines);
-    if (dataT !== undefined) {
+    if (dataT !== undefined && dataT.kind === "dyn") {
+      // An UNTYPED data parameter (`callback(null, text)` against
+      // TransformCallback's `data?: any`): the value arrives boxed and
+      // owned, and the runtime unpacks it (bytes or string; consumes it).
+      params.push("ScrDyn *sc_d");
+      body.push(`  scr_stream_dyn_data_owned(sc_d, &sc_data, &sc_dataStr);`);
+    } else if (dataT !== undefined) {
       if (dataT.kind !== "union") throw new Error("emitter bug: stream done data param not a union");
       const def = E.unionsById.get(dataT.unionId);
       const bytesTag = def ? def.arms.findIndex((a) => a.kind === "bytes") : -1;
@@ -1166,7 +1172,7 @@ export function streamDoneFnFor(E: CEmitter, kind: "w" | "f" | "d" | "t" | "l", 
     `  ${tail} /* moves sc_err/sc_data; borrows sc_s */`,
     `  scr_stream_release(sc_s);`,
     ...(errT !== undefined ? [`  if (sc_e) scr_union_release(sc_e);`] : []),
-    ...((kind === "t" || kind === "l") && dataT !== undefined ? [`  if (sc_d) scr_union_release(sc_d);`] : []),
+    ...((kind === "t" || kind === "l") && dataT !== undefined && dataT.kind !== "dyn" ? [`  if (sc_d) scr_union_release(sc_d);`] : []),
     `}`,
     ``,
   );

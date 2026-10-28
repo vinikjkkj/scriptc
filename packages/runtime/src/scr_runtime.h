@@ -2896,6 +2896,8 @@ ScrDyn *scr_stream_done_dyn_w(ScrClosure *clo, ScrDyn *const *args, size_t argc)
 ScrDyn *scr_stream_done_dyn_f(ScrClosure *clo, ScrDyn *const *args, size_t argc);
 ScrDyn *scr_stream_done_dyn_d(ScrClosure *clo, ScrDyn *const *args, size_t argc);
 ScrDyn *scr_stream_done_dyn_t(ScrClosure *clo, ScrDyn *const *args, size_t argc);
+/* The owned dyn data of an untyped transform/flush callback argument (consumes d). */
+void scr_stream_dyn_data_owned(ScrDyn *d, ScrBytes **b, ScrStr **s);
 ScrDyn *scr_stream_done_dyn_l(ScrClosure *clo, ScrDyn *const *args, size_t argc);
 ScrDyn *scr_stream_done_pack_w(ScrClosure *clo, ScrDyn *pack);
 ScrDyn *scr_stream_done_pack_f(ScrClosure *clo, ScrDyn *pack);

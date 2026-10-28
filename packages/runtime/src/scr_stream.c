@@ -1043,6 +1043,22 @@ ScrDyn *scr_stream_done_dyn_d(ScrClosure *clo, ScrDyn *const *args, size_t argc)
   return scr_stream_done_dyn_ret();
 }
 
+/* The OWNED dyn data argument of a typed transform/flush completion
+ * callback whose data parameter is untyped (TransformCallback's
+ * `data?: any`, so `callback(null, text)` arrives boxed). Consumes d.
+ * Bytes and strings become the completion's data; undefined and null are
+ * no data (Node pushes only when data != null). Any other value is
+ * dropped here; Node rejects it (ERR_INVALID_ARG_TYPE), which this path
+ * does not reproduce yet. Both backends call this one function. */
+void scr_stream_dyn_data_owned(ScrDyn *d, ScrBytes **b, ScrStr **s) {
+  *b = NULL;
+  *s = NULL;
+  if (d == NULL) return;
+  if (d->kind == SCR_DYN_BYTES) *b = scr_dyn_bytes_copy_out(d);
+  else if (d->kind == SCR_DYN_STR) *s = scr_str_retain(d->v.str);
+  scr_dyn_release(d);
+}
+
 static void scr_stream_dyn_data(ScrDyn *const *args, size_t argc,
                                 ScrBytes **data, ScrStr **data_str) {
   *data = NULL;
