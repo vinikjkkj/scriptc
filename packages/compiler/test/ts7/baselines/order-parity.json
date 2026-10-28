@@ -19034,6 +19034,12 @@
       "<repo>/tests/corpus/14754-new-array-length-error-is-catchable-per-call.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/14933-class-define-method-getter-converts-to-data.ts": {
+    "order": [
+      "<repo>/tests/corpus/14933-class-define-method-getter-converts-to-data.ts"
+    ],
+    "diags": []
   }
  }
 }
