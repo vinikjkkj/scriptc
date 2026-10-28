@@ -56,7 +56,7 @@ export class LlWalkers {
 
   /** The value-parameter LLVM type of a writer for `t`. */
   private valTy(t: IrType): string {
-    return t.kind === "f64" ? "double" : t.kind === "bool" ? "i1" : "ptr";
+    return t.kind === "f64" || t.kind === "procStream" ? "double" : t.kind === "bool" ? "i1" : "ptr";
   }
 
   /* ── the byte plumbing shared by every walker ─────────────────────────── */

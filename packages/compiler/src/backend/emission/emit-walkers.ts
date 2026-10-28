@@ -3095,14 +3095,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // A DATE arm (the one handle admitted as a union arm): the arm form
           // pre-tests the match predicate verbatim, so the unbox cannot fail.
           if (soft) d.push(`  if (!scr_dyn_handle_is(d, ${h.tag})) { *ok = false; return NULL; }`);
-          d.push(`  return (${cType(t).trim()})scr_dyn_handle_unbox(d, ${h.tag}, path, ${want});`);
+          d.push(t.kind === "procStream" ? `  return (double)(uintptr_t)scr_dyn_handle_unbox(d, ${h.tag}, path, ${want});` : `  return (${cType(t).trim()})scr_dyn_handle_unbox(d, ${h.tag}, path, ${want});`);
           break;
         }
         if (h && soft) {
           // A union ARM / nested leaf: the tag test decides, the unbox cannot
           // then fail (the same retained reference the hard form answers).
-          d.push(`  if (!scr_dyn_handle_is(d, ${h.tag})) { *ok = false; return NULL; }`);
-          d.push(`  return (${cType(t).trim()})scr_dyn_handle_unbox(d, ${h.tag}, path, ${want});`);
+          // procStream's arm value is a double: its miss answers 0, not a null pointer.
+          d.push(`  if (!scr_dyn_handle_is(d, ${h.tag})) { *ok = false; return ${t.kind === "procStream" ? "0" : "NULL"}; }`);
+          d.push(t.kind === "procStream" ? `  return (double)(uintptr_t)scr_dyn_handle_unbox(d, ${h.tag}, path, ${want});` : `  return (${cType(t).trim()})scr_dyn_handle_unbox(d, ${h.tag}, path, ${want});`);
           break;
         }
         throw new Error(`emitter bug: ${soft ? "dynArm" : "dynCheck"} of non-JSON type ${t.kind}`);
@@ -3718,7 +3719,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // tag's installed ops.
         const h = DYN_HANDLE_KINDS.get(t.kind);
         if (h) {
-          d.push(`  return scr_dyn_new_handle(v, ${h.tag});`);
+          d.push(t.kind === "procStream" ? `  return scr_proc_stream_box(v);` : `  return scr_dyn_new_handle(v, ${h.tag});`);
           break;
         }
         throw new Error(`emitter bug: to-dyn of unsupported type ${t.kind}`);
