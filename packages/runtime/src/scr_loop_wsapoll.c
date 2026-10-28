@@ -260,7 +260,7 @@ int scrp_drain(ScrPoller *p, ScrPollerEvent *out, int max) {
           int so = -1;
           int ol = (int)sizeof so;
           int gs = getsockopt((SOCKET)pfds[j].fd, SOL_SOCKET, SO_ERROR, (char *)&so, &ol);
-          fprintf(stderr, "NETDBG select t=%.1f fd=%d w=%d e=%d sn=%d poll_n=%d so_rc=%d so_error=%d calls=%lu\n",
+          if (0) fprintf(stderr, "NETDBG select t=%.1f fd=%d w=%d e=%d sn=%d poll_n=%d so_rc=%d so_error=%d calls=%lu\n",
                   scr_now_ms(), (int)pfds[j].fd, w, e, sn, n, gs, so, sel_calls);
         }
       }
