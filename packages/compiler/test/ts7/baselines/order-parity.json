@@ -3917,6 +3917,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14850-hash-update-encodings.ts": {
+   "order": [
+    "<repo>/tests/corpus/14850-hash-update-encodings.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14851-array-from-numeric-views.ts": {
+   "order": [
+    "<repo>/tests/corpus/14851-array-from-numeric-views.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14852-pg-scram-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/14852-pg-scram-shape.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/14870-child-stdout-listener-chain.ts": {
    "order": [
     "<repo>/tests/corpus/14870-child-stdout-listener-chain.ts"
@@ -3983,6 +4001,126 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14950-fs-stat-callback-file/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14950-fs-stat-callback-file/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14951-fs-stat-callback-missing/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14951-fs-stat-callback-missing/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14952-fs-stat-callback-directory/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14952-fs-stat-callback-directory/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14953-fs-stat-callback-symlink-follows/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14953-fs-stat-callback-symlink-follows/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14954-fs-stat-callback-error-branch-only/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14954-fs-stat-callback-error-branch-only/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14955-fs-stat-callback-in-helper/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14955-fs-stat-callback-in-helper/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14956-fs-stat-callback-sequence/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14956-fs-stat-callback-sequence/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14957-fs-stat-callback-after-timer/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14957-fs-stat-callback-after-timer/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14958-fs-stat-callback-mode-bits/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14958-fs-stat-callback-mode-bits/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14959-stderr-write-return/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14959-stderr-write-return/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14960-stderr-interleave-console-error/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14960-stderr-interleave-console-error/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14961-stderr-var-binding/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14961-stderr-var-binding/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14962-stderr-function-local-binding/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14962-stderr-function-local-binding/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14963-stdout-binding-write/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14963-stdout-binding-write/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14964-stderr-warn-module-binding/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14964-stderr-warn-module-binding/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14965-stderr-binding-then-console-error/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14965-stderr-binding-then-console-error/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14966-stat-callback-and-stderr-warn/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14966-stat-callback-and-stderr-warn/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14967-fs-stat-callback-loop/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14967-fs-stat-callback-loop/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14968-fs-stat-callback-promise-wrap/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14968-fs-stat-callback-promise-wrap/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14969-stat-mode-not-file/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/14969-stat-mode-not-file/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/14970-scram-mechanism-select-find-any-predicate.ts": {
    "order": [
     "<repo>/tests/corpus/14970-scram-mechanism-select-find-any-predicate.ts"
@@ -4034,6 +4172,47 @@
   "<repo>/tests/corpus/14978-normalize-invalid-form-catchable-rangeerror.ts": {
    "order": [
     "<repo>/tests/corpus/14978-normalize-invalid-form-catchable-rangeerror.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15010-cjs-table-requirer-write/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15010-cjs-table-requirer-write/defaults.cjs",
+    "<repo>/tests/corpus/15010-cjs-table-requirer-write/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15011-cjs-table-setter-define/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15011-cjs-table-setter-define/defaults.cjs",
+    "<repo>/tests/corpus/15011-cjs-table-setter-define/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15012-cjs-table-own-write-requirer-read/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15012-cjs-table-own-write-requirer-read/lib.cjs",
+    "<repo>/tests/corpus/15012-cjs-table-own-write-requirer-read/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15013-cjs-live-alias-write/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15013-cjs-live-alias-write/store.cjs",
+    "<repo>/tests/corpus/15013-cjs-live-alias-write/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15014-cjs-define-getter-on-table/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15014-cjs-define-getter-on-table/config.cjs",
+    "<repo>/tests/corpus/15014-cjs-define-getter-on-table/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15015-cjs-any-define-setter/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15015-cjs-any-define-setter/main.ts"
    ],
    "diags": []
   },
@@ -19231,144 +19410,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/14950-fs-stat-callback-file/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14950-fs-stat-callback-file/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14951-fs-stat-callback-missing/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14951-fs-stat-callback-missing/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14952-fs-stat-callback-directory/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14952-fs-stat-callback-directory/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14953-fs-stat-callback-symlink-follows/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14953-fs-stat-callback-symlink-follows/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14954-fs-stat-callback-error-branch-only/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14954-fs-stat-callback-error-branch-only/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14955-fs-stat-callback-in-helper/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14955-fs-stat-callback-in-helper/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14956-fs-stat-callback-sequence/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14956-fs-stat-callback-sequence/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14957-fs-stat-callback-after-timer/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14957-fs-stat-callback-after-timer/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14958-fs-stat-callback-mode-bits/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14958-fs-stat-callback-mode-bits/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14959-stderr-write-return/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14959-stderr-write-return/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14960-stderr-interleave-console-error/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14960-stderr-interleave-console-error/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14961-stderr-var-binding/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14961-stderr-var-binding/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14962-stderr-function-local-binding/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14962-stderr-function-local-binding/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14963-stdout-binding-write/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14963-stdout-binding-write/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14964-stderr-warn-module-binding/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14964-stderr-warn-module-binding/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14965-stderr-binding-then-console-error/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14965-stderr-binding-then-console-error/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14966-stat-callback-and-stderr-warn/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14966-stat-callback-and-stderr-warn/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14967-fs-stat-callback-loop/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14967-fs-stat-callback-loop/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14968-fs-stat-callback-promise-wrap/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14968-fs-stat-callback-promise-wrap/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14969-stat-mode-not-file/main.ts": {
-    "order": [
-      "<repo>/tests/corpus/14969-stat-mode-not-file/main.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14850-hash-update-encodings.ts": {
-    "order": [
-      "<repo>/tests/corpus/14850-hash-update-encodings.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14851-array-from-numeric-views.ts": {
-    "order": [
-      "<repo>/tests/corpus/14851-array-from-numeric-views.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14852-pg-scram-shape.ts": {
-    "order": [
-      "<repo>/tests/corpus/14852-pg-scram-shape.ts"
-    ],
-    "diags": []
   }
  }
 }
