@@ -14,7 +14,7 @@ import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
 import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsKeyedForEachOf, cjsWholeExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import { cjsExportRecordOf, cjsExportRecordInit, cjsExportRecordCreate } from "./cjs-export-record.js";
 import { liveExportsOf } from "./cjs-live-exports.js";
-import { cjsExportsBagOf } from "./lower-exprs.js";
+import { cjsExportsBagOf, isWebCryptoValueExpr } from "./lower-exprs.js";
 import { npmStaticDepSf7, resolveProjectImportSf7 } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
@@ -27,7 +27,7 @@ import { irAlwaysExits, dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLit
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { dynImportBindingDepOf } from "./lower-island.js";
 import { bufferSpeciesAliasDecl } from "./lower-containers.js";
-import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibBufferVarAliasDecl, stdlibGlobalAliasDecl } from "./surfaces.js";
+import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibBufferVarAliasDecl, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
@@ -1685,6 +1685,14 @@ function cjsScalarLiteral(e: ts.Expression): boolean {
   );
 }
 
+function isWebCryptoOrExpr(L: Lowerer, e: ts.BinaryExpression): boolean {
+  const k = e.operatorToken.kind;
+  if (k !== ts.SyntaxKind.BarBarToken && k !== ts.SyntaxKind.QuestionQuestionToken) return false;
+  const side = (x: ts.Expression): boolean =>
+    ts.isBinaryExpression(x) ? isWebCryptoOrExpr(L, x) : isWebCryptoValueExpr(L, x);
+  return side(e.left) && side(e.right);
+}
+
 /** True when a JS file-scope declaration's initializer provably LOWERS to
  * a checked-dynamic (or unit) value, so a DYN module global can hold it:
  * no initializer, a unit literal, or a checker-`any` call/member/
@@ -1714,6 +1722,12 @@ function jsDynHoldableInitializer(L: Lowerer, init: ts.Expression | undefined): 
   if (ts.isNewExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "Proxy" &&
       L.isStdlibGlobal(e.expression, "Proxy")) return true;
   if (ts.isObjectLiteralExpression(e) && L.dynThisLiterals.has(e)) return true;
+  // `const webCrypto = nodeCrypto.webcrypto || globalThis.crypto` (pg's crypto
+  // utils): both operands are the one WebCrypto singleton, a checked-dynamic
+  // object whatever the checker types the `||` (Crypto, which maps nowhere).
+  // Without a dyn global the binding fences on every function body that reads
+  // it (SC1090, pg lib/crypto/utils.js:32).
+  if (ts.isBinaryExpression(e) && isWebCryptoOrExpr(L, e)) return true;
   if (ts.isArrayLiteralExpression(e) && L.dynArrayLiterals.has(e)) return true;
   if ((ts.isObjectLiteralExpression(e) || ts.isArrayLiteralExpression(e)) && L.dynProxyTargetLiterals.has(e)) return true;
   if (
