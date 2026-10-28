@@ -918,6 +918,9 @@ class FnAnalyzer {
         this.evalExpr(s.index, env);
         clearPathFacts(env);
         return env;
+      case "ordNote":
+        this.evalExpr(s.obj, env);
+        return env;
       case "fieldSet":
         this.evalExpr(s.obj, env);
         this.evalExpr(s.value, env);

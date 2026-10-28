@@ -6116,6 +6116,9 @@ function validateFunction(
         }
         break;
       }
+      case "ordNote":
+        checkExpr(s.obj);
+        break;
       case "fieldSet": {
         checkExpr(s.obj);
         checkExpr(s.value);

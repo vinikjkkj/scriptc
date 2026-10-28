@@ -17024,6 +17024,7 @@ export function seqExprSafeStmt(s: IrStmt): boolean {
     case "varDecl":
     case "assign":
     case "exprStmt":
+    case "ordNote":
     case "fieldSet":
     case "recordSet":
     case "recordKeySet":

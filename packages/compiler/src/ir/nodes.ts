@@ -2703,6 +2703,9 @@ export type IrStmt =
    * Evaluation order: obj, then value. The old value is released; ownership
    * of a refcounted new value MOVES into the object. */
   | { kind: "fieldSet"; obj: IrExpr; className: string; field: string; value: IrExpr; unset?: true; loc: SrcLoc }
+  /** A creation-order NOTE with no value: a JS class's declared field that Node defines as undefined at
+   * construction (no initializer). The record lists the key where Node creates it. */
+  | { kind: "ordNote"; obj: IrExpr; className: string; field: string; loc: SrcLoc }
   /** Record field write `r.f = v` — mirrors `fieldSet` exactly (evaluation
    * order obj then value; old value released; refcounted new value moved
    * in), with a shape id in place of a class name. `unset: true` is

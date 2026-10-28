@@ -928,6 +928,11 @@ function backStmt(
       readsOf(s.index, live);
       return live;
     }
+    case "ordNote": {
+      const live = new Set(liveOut);
+      readsOf(s.obj, live);
+      return live;
+    }
     case "fieldSet":
     case "recordSet": {
       recordPoints(ctx, [s.obj, s.value], liveOut, [], [], true, "recordSet");
