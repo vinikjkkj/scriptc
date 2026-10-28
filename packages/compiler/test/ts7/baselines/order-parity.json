@@ -16761,6 +16761,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/accessor-crossing-cast-into-data-record-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/accessor-crossing-cast-into-data-record-refused.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts": {
    "order": [
     "<repo>/tests/diagnostics/an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts"
