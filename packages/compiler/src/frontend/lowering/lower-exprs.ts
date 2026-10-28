@@ -6426,7 +6426,7 @@ function typeofMethodSniff(L: Lowerer, expr: ts.TypeOfExpression, loc: SrcLoc): 
  * operand; out of range, the strict answer (false for ===, true for !==).
  * The mysql2 `timezone[0] === '-'` site is this shape, where the checker
  * types the element `any`. Operands that re-emit without effects only. */
-export function lowerStrIndexEqTest(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr | null {
+export function lowerStrIndexEqTest(L: Lowerer, expr: ts.BinaryExpression): IrExpr | null {
   const op = expr.operatorToken.kind;
   const eq = op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.EqualsEqualsToken;
   const neq = op === ts.SyntaxKind.ExclamationEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken;
@@ -17336,7 +17336,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // read is lowered whole, before any operand lowers (the loose path
     // below would read the unit through charAt, which answers "" out of range).
     {
-      const strIdx = lowerStrIndexEqTest(L, expr, loc);
+      const strIdx = lowerStrIndexEqTest(L, expr);
       if (strIdx) return strIdx;
     }
     const nullTest = detachedThisNullTest(L, expr);
