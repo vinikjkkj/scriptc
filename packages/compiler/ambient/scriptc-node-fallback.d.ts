@@ -2244,6 +2244,14 @@ declare module "net" {
     resume(): Socket;
     /* TCP_NODELAY on the live fd; missing means true. Chains. */
     setNoDelay(noDelay?: boolean): Socket;
+    /* connect(port[, host][, listener]) and connect({ port, host? }[, listener]):
+     * on an unconnected socket it dials; a socket that closed dials again. */
+    connect(port: number, host?: string, connectListener?: () => void): this;
+    connect(options: { port: number; host?: string }, connectListener?: () => void): this;
+    /* keep-alive (enable defaults false) and the chaining ref/unref. */
+    setKeepAlive(enable?: boolean, initialDelay?: number): this;
+    ref(): this;
+    unref(): this;
     /* end() now, destroy once the FIN actually flushed. */
     destroySoon(): void;
     /* setEncoding('utf8'): 'data' delivers strings — the IncomingMessage
@@ -2298,6 +2306,9 @@ declare module "net" {
      * host-less dual-stack any); ipv6Only sets IPV6_V6ONLY. */
     listen(options: { port: number; host?: string; ipv6Only?: boolean }, callback?: () => void): Server;
     close(callback?: () => void): void;
+    /* the listening server keeps the loop alive unless unref'd; chains. */
+    ref(): this;
+    unref(): this;
     /* The bound AddressInfo (Node answers null before listen — this
      * surface answers the record with port 0 there, the serverPort
      * stance). */
@@ -2325,10 +2336,10 @@ declare module "net" {
     once(event: "upgrade", listener: (req: import("http").IncomingMessage, socket: Socket, head: Buffer) => void): void;
     once(event: "request", listener: (req: import("http").IncomingMessage, res: import("http").ServerResponse) => void): void;
   }
-  /* The Socket VALUE — the `x instanceof net.Socket` narrowing target
-   * (the h2 compat 'connect' listener's test). Constructing bare sockets
-   * has no lowering; the construct signature exists for instanceof. */
-  export const Socket: abstract new () => Socket;
+  /* The Socket VALUE: `new net.Socket()` makes an unconnected socket, and
+   * `x instanceof net.Socket` is the narrowing target (the h2 compat
+   * 'connect' listener's test). */
+  export const Socket: new (options?: {}) => Socket;
   export function createServer(connectionListener?: (socket: Socket) => void): Server;
   export function connect(port: number, host?: string, connectListener?: () => void): Socket;
   export function createConnection(port: number, host?: string, connectListener?: () => void): Socket;

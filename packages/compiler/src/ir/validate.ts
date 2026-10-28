@@ -4794,7 +4794,7 @@ function validateFunction(
             if (e.fn === "net.sockOnData") ok = (p.kind === "bytes" && p.elem === "u8") || p.kind === "dyn";
             else if (e.fn === "net.serverOnError" || e.fn === "net.sockOnError") {
               ok = p.kind === "object" && p.className === "%Error";
-            } else if (e.fn === "net.sockOnClose") ok = p.kind === "bool";
+            } else if (e.fn === "net.sockOnClose") ok = p.kind === "dyn";
             else ok = p.kind === "netSocket";
           }
           if (!ok) {
