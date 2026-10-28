@@ -17685,8 +17685,13 @@ class LlEmitter {
       if (cbT.kind !== "func") throw new Error("llvm emitter bug: net.sockOnClose callback not a func");
       const args = e.args.map((a) => this.emitExpr(a));
       this.moveTemp(args[1]!);
-      const adapter = cbT.params.length === 0 ? null : "scr_net_close_thunk_bool";
-      if (adapter !== null) this.declare(`declare void @${adapter}(ptr, i1 zeroext)`);
+      const adapter = cbT.params.length === 0 ? null
+        : cbT.params[0]!.kind === "dyn" ? "scr_net_close_thunk_dyn" : "scr_net_close_thunk_bool";
+      if (adapter !== null) {
+        this.declare(adapter === "scr_net_close_thunk_dyn"
+          ? `declare void @${adapter}(ptr, ptr)`
+          : `declare void @${adapter}(ptr, i1 zeroext)`);
+      }
       this.declare("declare void @scr_net_sock_on_close(ptr, ptr, ptr, i1 zeroext)");
       B.line(`call void @scr_net_sock_on_close(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr ${adapter === null ? "null" : "@" + adapter}, i1 ${args[2]!.name})`);
       return { name: "", type: e.type };

@@ -5018,7 +5018,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             if (cbT.kind !== "func") throw new Error("emitter bug: net.sockOnClose callback not a func");
             const cb = args[1]!;
             E.moveTemp(cb);
-            const adapter = cbT.params.length === 0 ? "NULL" : "&scr_net_close_thunk_bool";
+            const adapter = cbT.params.length === 0 ? "NULL"
+              : cbT.params[0]!.kind === "dyn" ? "(ScrNetCloseFn)&scr_net_close_thunk_dyn" : "&scr_net_close_thunk_bool";
             E.line(`scr_net_sock_on_close(${arg(0)}, ${cb.name}, ${adapter}, ${arg(2)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           }

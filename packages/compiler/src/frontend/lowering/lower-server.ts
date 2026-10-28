@@ -1460,6 +1460,20 @@ export function isNetSocketCtor(L: Lowerer, callee: ts.Expression): boolean {
   return false;
 }
 
+/** The parameter binding of a close listener, made checked-dynamic: an inline
+ * function's own parameters, or a local function declaration named by the
+ * listener identifier. Returns the nodes to release (dynParamsOf's contract). */
+function closeListenerDynParams(L: Lowerer, listener: ts.Expression): ts.Node[] {
+  let node: ts.Node | undefined = listener;
+  while (node && ts.isParenthesizedExpression(node)) node = node.expression;
+  if (node && ts.isIdentifier(node)) {
+    const sym = L.checker.getSymbolAtLocation(node);
+    const decl = sym ? L.checker.declarationsOf(sym)[0] : undefined;
+    node = decl && ts.isFunctionDeclaration(decl) ? decl : undefined;
+  }
+  return node ? L.dynParamsOf(node, true) : [];
+}
+
 /** The lowered `new net.Socket()` (no options, or an empty options literal).
  * Options (allowHalfOpen, fd, signal, onread, readable/writable) are not
  * modeled: fenced by name. */
@@ -1861,12 +1875,25 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
       // through the zero-argument boundary exactly as before, and the
       // runtime decides per listener from the adapter pointer the
       // emitter stores — the split scr_net_fire_err_impl already uses.
-      const { cb } = lowerCallbackArg(
-        L, args[1]!, "close listeners", 1,
-        (p) => p.kind === "bool",
-        "use (hadError: boolean) or ()",
-        [],
-      );
+      // Node's hadError is undefined on an unconnected socket's close paths,
+      // so the listener's parameter is checked-dynamic (Node's value, whatever
+      // the TS type says). Bound the way a class method's parameters are
+      // (dynParamsOf), and released once the closure is lowered.
+      const undo = closeListenerDynParams(L, args[1]!);
+      let cb: IrExpr;
+      try {
+        ({ cb } = lowerCallbackArg(
+          L, args[1]!, "close listeners", 1,
+          (p) => p.kind === "dyn",
+          "use () or an inline (hadError) => ... listener",
+          [],
+        ));
+      } finally {
+        for (const u of undo) {
+          L.chainNarrowedType.delete(u);
+          if (ts.isParameter(u)) L.paramIrOverrides.delete(u);
+        }
+      }
       return { kind: "libCall", fn: "net.sockOnClose", args: [receiver, cb, once], type: VOID, loc };
     }
     if (event === "end" || event === "connect" || event === "timeout" ||
