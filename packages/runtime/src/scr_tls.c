@@ -1501,6 +1501,25 @@ ScrDyn *scr_tls_check_server_identity_dyn(const ScrStr *host, const ScrDyn *cert
   return d;
 }
 
+/* A fresh object holding the own enumerable members of `src`, in key order
+ * (Node's Object.keys set: an error's code, reason, host and cert, never its
+ * hidden message or name). */
+static ScrDyn *scr_id_copy_own_enum(const ScrDyn *src) {
+  ScrDyn *out = scr_dyn_new_obj();
+  ScrDyn *keys = scr_dyn_obj_keys(src);
+  double n = scr_dyn_arr_len(keys);
+  for (double i = 0; i < n; i++) {
+    ScrDyn *k = scr_dyn_arr_at(keys, i);
+    if (k->kind == SCR_DYN_STR) {
+      const ScrDyn *v = scr_dyn_obj_get(src, k->v.str->data, k->v.str->len);
+      if (v != NULL) scr_dyn_obj_set(out, k->v.str->data, k->v.str->len, scr_dyn_retain((ScrDyn *)v));
+    }
+    scr_dyn_release(k);
+  }
+  scr_dyn_release(keys);
+  return out;
+}
+
 /* Runs the user's checkServerIdentity (tls.connect's option) once the
  * handshake completed. Node calls it only when the chain VERIFIED and the
  * session was not resumed; a truthy answer is the verify error. False =
@@ -1534,6 +1553,9 @@ static bool scr_tls_ident_run(ScrTlsSock *t) {
       code[cl] = '\0';
       scr_error_set_code(e, code);
     }
+    /* the error's own enumerable members (Node's code, reason, host, cert)
+     * ride the ScrError as its expando props, so the listener reads them */
+    if (r->kind == SCR_DYN_OBJ) e->props = scr_id_copy_own_enum(r);
     if (cli->reject) {
       scr_net_sock_transport_error_obj(t->sock, e);
       ok = false;
