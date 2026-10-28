@@ -4,6 +4,7 @@
  * accessor access, upcasts, `new` expressions, and the builtin Error
  * hierarchy registration. */
 import { protoDataFieldNames, registerProtoData } from "./lower-protodata.js";
+import { appliesEmitterMixin, EMITTER_MIXIN_FIELD } from "./lower-emitter-mixin.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { ctorFieldFillProven } from "./ctor-fill-proof.js";
@@ -141,6 +142,8 @@ export interface MethodSig {
 }
 
 export interface ClassInfo {
+  /** applyMixin(this, EventEmitter) graft (lower-emitter-mixin.ts): the hidden emitter slot holds the emitter. */
+  emitterMixin?: true;
   def: IrClassDef;
   /** ALL fields visible on instances — the inherited ones included — for
    * receiver-side lookup (def.fields carries the layout order). */
@@ -148,7 +151,7 @@ export interface ClassInfo {
   /** OWN fields only (declaration order) with their initializers: the
    * class's constructor runs exactly these — inherited fields initialize in
    * the base constructor, before/via super(). */
-  fieldOrder: { name: string; type: IrType; initializer: ts.Expression | undefined; /** Redeclared INHERITED field: the initializer assigns the base slot at this position; no new slot (def.fields excludes it). */ redeclared?: true; /** BARE redeclare of an inherited undefined-armed slot (`override x: T;`, no initializer): Node [[Define]]s the own property to undefined at this position, so the lowering writes the interned undefined arm into the inherited slot — the reset itself, not a value the source spells. Carries `decl` as its blame node (there is no initializer expression to locate). */ resetsToUndefined?: { decl: ts.PropertyDeclaration } }[];
+  fieldOrder: { name: string; type: IrType; initializer: ts.Expression | undefined; /** Hidden emitter slot of an applyMixin(Y, EventEmitter) graft (lower-emitter-mixin.ts): initialised to a new emitter. */ emitterSlot?: true; /** Redeclared INHERITED field: the initializer assigns the base slot at this position; no new slot (def.fields excludes it). */ redeclared?: true; /** BARE redeclare of an inherited undefined-armed slot (`override x: T;`, no initializer): Node [[Define]]s the own property to undefined at this position, so the lowering writes the interned undefined arm into the inherited slot — the reset itself, not a value the source spells. Carries `decl` as its blame node (there is no initializer expression to locate). */ resetsToUndefined?: { decl: ts.PropertyDeclaration } }[];
   /** OWN declared methods only — inherited lookups walk the base chain
    * (findMethodOn). An `abstract` entry is a signature with no body (and
    * no module function): it declares the vtable slot; concrete subclasses
@@ -5547,6 +5550,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           if (absentOk) absentTrackedFields.add(pdName);
         }
       }
+      const emitterMixin = ts.isClassDeclaration(decl) && appliesEmitterMixin(L, decl);
+      if (emitterMixin) {
+        const slotT: IrType = { kind: "object", className: RUNTIME_EMITTER_CLASS };
+        fields.set(EMITTER_MIXIN_FIELD, slotT);
+        fieldOrder.push({ name: EMITTER_MIXIN_FIELD, type: slotT, initializer: undefined, emitterSlot: true });
+      }
       const ownPropsTable =
         L.definePropStringTable(decl) ||
         (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && implicitMonoFile(decl.getSourceFile()));
@@ -5651,6 +5660,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         },
         fields,
         fieldOrder,
+        ...(emitterMixin ? { emitterMixin: true as const } : {}),
         methods,
         decl,
         ...(emitOverride !== undefined ? { emitOverride } : {}),
@@ -9702,6 +9712,18 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
             type: f.type,
             loc,
           },
+          loc,
+        });
+        continue;
+      }
+      if (f.emitterSlot) {
+        const loc = info.def.loc;
+        out.push({
+          kind: "fieldSet",
+          obj: { kind: "varRef", localId: thisLocal.id, type: thisType, loc },
+          className: info.def.name,
+          field: f.name,
+          value: { kind: "libCall", fn: "emitter.new", args: [], type: { kind: "object", className: RUNTIME_EMITTER_CLASS }, loc },
           loc,
         });
         continue;
