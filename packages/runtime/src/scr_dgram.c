@@ -61,9 +61,6 @@
  * holds the loop like an in-flight request. */
 #include "scr_platform.h"
 #include "scr_runtime.h"
-#ifdef _WIN32
-#include <process.h>
-#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -374,21 +371,17 @@ typedef struct ScrDnsPending {
 static ScrDnsPending *scr_dns_pending = NULL;
 static bool scr_dns_empty_warned = false; /* DEP0118 fires once per process */
 
-/* Node's DEP0118 report, byte for byte: the "(node:pid) [CODE] Name: message"
- * line, then the one-time trace hint. Stderr, at delivery (Node defers the
- * warning through nextTick). */
-static void scr_dns_print_empty_warning(void) {
-  static bool hinted = false;
-  fflush(stdout);
-#ifdef _WIN32
-  fprintf(stderr, "(node:%ld) [DEP0118] DeprecationWarning: The provided hostname \"\" is not a valid hostname, and is supported in the dns module solely for compatibility.\n", (long)_getpid());
-#else
-  fprintf(stderr, "(node:%ld) [DEP0118] DeprecationWarning: The provided hostname \"\" is not a valid hostname, and is supported in the dns module solely for compatibility.\n", (long)getpid());
-#endif
-  if (!hinted) {
-    hinted = true;
-    fputs("(Use `node --trace-deprecation ...` to show where the warning was created)\n", stderr);
-  }
+/* DEP0118 (the empty name) goes through the process warning channel, the
+ * way Node's emitWarning does: 'warning' listeners receive the
+ * DeprecationWarning, and the default stderr report and its one-time trace
+ * hint come from scr_emit_warning (scr_async_dyn.c, linked whenever a
+ * dns.lookup is in the program — cc.ts/nodes.ts moduleUsesDynAsync). */
+static void scr_dns_emit_empty_warning(void) {
+  static const char text[] =
+      "The provided hostname \"\" is not a valid hostname, and is supported in the dns module solely for compatibility.";
+  ScrStr *m = scr_str_new(text, sizeof text - 1);
+  scr_emit_warning("DeprecationWarning", "DEP0118", m);
+  scr_str_release(m);
 }
 
 /* ── RC ──────────────────────────────────────────────────────────────── */
@@ -1086,7 +1079,7 @@ static void scr_dgram_sweep(void) {
   while (scr_dns_pending) {
     ScrDnsPending *p = scr_dns_pending;
     scr_dns_pending = p->next;
-    if (p->warn_empty) scr_dns_print_empty_warning();
+    if (p->warn_empty) scr_dns_emit_empty_warning();
     if (!scr_exc_pending()) p->fn(p->cb, p->errmsg, p->addr, p->family);
     scr_closure_release(p->cb);
     scr_str_release(p->errmsg);
