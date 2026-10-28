@@ -1450,7 +1450,13 @@ static void scr_net_sock_connect_done_err(ScrNetSocket *s, int err) {
       s->dial_err = NULL;
       if (!s->pending_err) s->pending_err = scr_str_new(msg, strlen(msg));
     } else if (!s->pending_err) {
+      /* a single address: the error IS that attempt's Error (errno, code,
+       * syscall, address, port), as Node's createConnectionError builds it */
       s->pending_err = scr_str_new(msg, strlen(msg));
+      scr_net_dial_log(s, err, s->peer_ip, s->peer_port);
+      if (s->dial_nerrs > 0 && s->pending_obj == NULL) {
+        s->pending_obj = scr_error_retain(s->dial_errs[s->dial_nerrs - 1]);
+      }
     }
     s->had_error = true;
     scr_net_sock_close_fd(s);
@@ -2475,8 +2481,10 @@ static void scr_net_dial_log(ScrNetSocket *s, int err, const char *ip, int port)
   ScrError *e = scr_error_new(SCR_ERR_ERROR, m); /* retains the message */
   scr_str_release(m);
   scr_error_set_code(e, code);
-  scr_net_dial_prop(e, "errno", scr_dyn_new_num((double)-err));
-  scr_net_dial_prop(e, "syscall", scr_net_dyn_str("connect", 7));
+  /* errno and syscall through the system-error side table: Node's own order is
+   * errno, code, syscall, address, port, and the table places errno/syscall
+   * exactly there in the dyn encoding */
+  scr_error_set_ext(e, err, "connect", NULL, NULL);
   scr_net_dial_prop(e, "address", scr_net_dyn_str(ip, strlen(ip)));
   scr_net_dial_prop(e, "port", scr_dyn_new_num((double)port));
   s->dial_errs[s->dial_nerrs++] = e;
