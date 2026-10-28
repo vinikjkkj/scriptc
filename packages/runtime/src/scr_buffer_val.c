@@ -559,13 +559,64 @@ static ScrDyn *scr_bv_from_val(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *
 
 /* JS ToNumber of one element (Node's typed-array store): BigInt throws, objects
  * run ToPrimitive(number). Writes *out; false with the exception pending. */
+/* [[Get]] of one named member of an object-kind value (OBJ, or a class instance OBJINST): +1, a
+ * missing member is undefined, NULL with the exception pending when a getter throws. A class
+ * instance's method comes back bound to the instance (scr_dyn_objinst_member_get). */
+static ScrDyn *scr_bv_get(const ScrDyn *v, const char *key, size_t kl) {
+  if (v->kind == SCR_DYN_OBJINST) {
+    ScrStr *k = scr_str_new(key, kl);
+    ScrDyn *m = scr_dyn_objinst_member_get((ScrDyn *)v, k);
+    scr_str_release(k);
+    if (m != NULL) return m;
+    if (scr_exc_pending()) return NULL;
+    return scr_dyn_retain(scr_dyn_undefined());
+  }
+  return scr_dyn_obj_key_get((ScrDyn *)v, key, kl);
+}
+
+/* ToPrimitive(number hint) of a class instance: valueOf, then toString, each taken when it is a
+ * method that answers a primitive; otherwise the built-in "[object Object]". +1, NULL pending. */
+static ScrDyn *scr_bv_obj_prim(const ScrDyn *v) {
+  static const char *const names[2] = { "valueOf", "toString" };
+  for (int i = 0; i < 2; i++) {
+    ScrDyn *m = scr_bv_get(v, names[i], strlen(names[i]));
+    if (m == NULL) return NULL;
+    if (m->kind != SCR_DYN_FUNC) {
+      scr_dyn_release(m);
+      continue;
+    }
+    scr_dyn_this_push_dyn(v);
+    ScrDyn *r = scr_dyn_call(m, NULL, 0, names[i]);
+    scr_dyn_this_pop();
+    scr_dyn_release(m);
+    if (r == NULL) return NULL;
+    if (r->kind != SCR_DYN_OBJ && r->kind != SCR_DYN_OBJINST && r->kind != SCR_DYN_ARR &&
+        r->kind != SCR_DYN_BYTES && r->kind != SCR_DYN_FUNC && r->kind != SCR_DYN_HANDLE &&
+        r->kind != SCR_DYN_PROMISE && r->kind != SCR_DYN_MAP && r->kind != SCR_DYN_ARRBUF) {
+      return r;
+    }
+    scr_dyn_release(r);
+  }
+  ScrStr *os = scr_str_new("[object Object]", 15);
+  ScrDyn *od = scr_dyn_new_str(os); /* retains os */
+  scr_str_release(os);
+  return od;
+}
+
 static bool scr_bv_elem_num(const ScrDyn *e, double *out) {
   if (e == NULL) e = scr_dyn_undefined();
+  if (e->kind == SCR_DYN_OBJINST) {
+    ScrDyn *p = scr_bv_obj_prim(e);
+    if (p == NULL) return false;
+    *out = scr_dyn_to_number(p);
+    scr_dyn_release(p);
+    return !scr_exc_pending();
+  }
   if (e->kind == SCR_DYN_BIG) {
     scr_bv_throw_plain("Cannot convert a BigInt value to a number");
     return false;
   }
-  if (e->kind == SCR_DYN_OBJ || e->kind == SCR_DYN_ARR) {
+  if (e->kind == SCR_DYN_OBJ || e->kind == SCR_DYN_ARR || e->kind == SCR_DYN_HANDLE) {
     ScrDyn *p = scr_dyn_to_primitive(e, SCR_TOPRIM_NUMBER);
     if (p == NULL) return false;
     if (p->kind == SCR_DYN_BIG) {
@@ -593,7 +644,7 @@ static ScrDyn *scr_bv_elem_of_arr(const ScrDyn *src, size_t i) {
 static ScrDyn *scr_bv_elem_of_obj(const ScrDyn *src, size_t i) {
   char key[32];
   int kl = snprintf(key, sizeof key, "%zu", i);
-  return scr_dyn_obj_key_get((ScrDyn *)src, key, (size_t)kl);
+  return scr_bv_get(src, key, (size_t)kl);
 }
 
 static ScrDyn *scr_bv_fill_from_elems(const ScrDyn *src, size_t n, ScrBvElemFn elem) {
@@ -671,12 +722,32 @@ static ScrDyn *scr_bv_from_arrbuf(const ScrDyn *v, const ScrDyn *a1, const ScrDy
   return scr_bv_wrap_buffer(view);
 }
 
+/* A Date (a handle, not an OBJ) has Symbol.toPrimitive, and Node's from() takes its
+ * ToPrimitive('string') answer (valueOf answers a number, which from() ignores). Returns true
+ * for a Date; *out is its buffer (+1), or NULL with the exception pending. */
+static bool scr_bv_date_arm(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *a2, int depth, ScrDyn **out) {
+  char detail[64];
+  const char *d = scr_dyn_specific_type(v, detail, sizeof detail);
+  if (strcmp(d, "an instance of Date") != 0) return false;
+  ScrDyn *p = scr_dyn_to_primitive(v, SCR_TOPRIM_STRING);
+  if (p == NULL) {
+    *out = NULL;
+    return true;
+  }
+  *out = p->kind == SCR_DYN_STR ? scr_bv_from_val(p, a1, a2, depth + 1) : NULL;
+  scr_dyn_release(p);
+  return true;
+}
+
 static ScrDyn *scr_bv_from_obj(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *a2, int depth) {
   /* valueOf: its answer is used when it is a string or an object other than v. */
-  ScrDyn *vo = scr_dyn_obj_key_get((ScrDyn *)v, "valueOf", 7);
+  ScrDyn *vo = scr_bv_get(v, "valueOf", 7);
   if (vo == NULL) return NULL;
   if (vo->kind == SCR_DYN_FUNC) {
+    /* The call window carries the receiver as `this` (an OBJ method is not bound to it). */
+    scr_dyn_this_push_dyn(v);
     ScrDyn *r = scr_dyn_call(vo, NULL, 0, "valueOf");
+    scr_dyn_this_pop();
     scr_dyn_release(vo);
     if (r == NULL) return NULL;
     bool object = r->kind == SCR_DYN_STR ||
@@ -693,11 +764,11 @@ static ScrDyn *scr_bv_from_obj(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *
     scr_dyn_release(vo);
   }
   /* fromObject: an array-like (a numeric length, or a buffer-backed object), then {type:'Buffer', data}. */
-  ScrDyn *len = scr_dyn_obj_key_get((ScrDyn *)v, "length", 6);
+  ScrDyn *len = scr_bv_get(v, "length", 6);
   if (len == NULL) return NULL;
   ScrDyn *abuf = NULL;
   if (len->kind == SCR_DYN_UNDEF) {
-    abuf = scr_dyn_obj_key_get((ScrDyn *)v, "buffer", 6);
+    abuf = scr_bv_get(v, "buffer", 6);
     if (abuf == NULL) {
       scr_dyn_release(len);
       return NULL;
@@ -708,7 +779,7 @@ static ScrDyn *scr_bv_from_obj(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *
       return scr_bv_wrap_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
     }
     scr_dyn_release(abuf);
-    ScrDyn *type = scr_dyn_obj_key_get((ScrDyn *)v, "type", 4);
+    ScrDyn *type = scr_bv_get(v, "type", 4);
     if (type == NULL) {
       scr_dyn_release(len);
       return NULL;
@@ -716,7 +787,7 @@ static ScrDyn *scr_bv_from_obj(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *
     bool is_buffer_type = type->kind == SCR_DYN_STR && type->v.str->len == 6 && memcmp(type->v.str->data, "Buffer", 6) == 0;
     scr_dyn_release(type);
     if (is_buffer_type) {
-      ScrDyn *data = scr_dyn_obj_key_get((ScrDyn *)v, "data", 4);
+      ScrDyn *data = scr_bv_get(v, "data", 4);
       if (data == NULL) {
         scr_dyn_release(len);
         return NULL;
@@ -730,6 +801,10 @@ static ScrDyn *scr_bv_from_obj(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *
       scr_dyn_release(data);
     }
     scr_dyn_release(len);
+    {
+      ScrDyn *dout = NULL;
+      if (scr_bv_date_arm(v, a1, a2, depth, &dout)) return dout;
+    }
     scr_bv_throw_first_arg(v);
     return NULL;
   }
@@ -763,25 +838,14 @@ static ScrDyn *scr_bv_from_val(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *
     case SCR_DYN_ARR:
       return scr_bv_fill_from_elems(v, v->v.arr.len, scr_bv_elem_of_arr);
     case SCR_DYN_OBJ:
+    case SCR_DYN_OBJINST:
       return scr_bv_from_obj(v, a1, a2, depth);
     default:
       break;
   }
-  /* A Date has Symbol.toPrimitive, and Node's from() takes its ToPrimitive('string') answer (valueOf
-   * answers a number, which from() ignores): the date's string form, as a utf8 string. */
   {
-    char detail[64];
-    const char *d = scr_dyn_specific_type(v, detail, sizeof detail);
-    if (strcmp(d, "an instance of Date") == 0) {
-      ScrDyn *p = scr_dyn_to_primitive(v, SCR_TOPRIM_STRING);
-      if (p == NULL) return NULL;
-      if (p->kind == SCR_DYN_STR) {
-        ScrDyn *out = scr_bv_from_val(p, a1, a2, depth + 1);
-        scr_dyn_release(p);
-        return out;
-      }
-      scr_dyn_release(p);
-    }
+    ScrDyn *dout = NULL;
+    if (scr_bv_date_arm(v, a1, a2, depth, &dout)) return dout;
   }
   scr_bv_throw_first_arg(v);
   return NULL;
