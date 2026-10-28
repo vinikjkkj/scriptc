@@ -42,6 +42,8 @@ function f64Lit(n: number): string {
   return `0x${[...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }
 
+/* The NaN-marked undefined bits, decimal for `icmp` (scr_runtime.h). */
+const NUM_UNDEF_BITS_DEC_W = "9222246136947990017";
 const FN_ATTRS = "#0";
 
 export class LlWalkers {
@@ -266,8 +268,10 @@ export class LlWalkers {
     const emitFields = order.map((n) => byName.get(n)).filter((f) => f !== undefined);
     // An ARMED shape is droppable by construction: any member can turn out
     // not to have been the source object's own key (emit-walkers.ts's row).
+    // A NUMBER field may hold the NaN-marked undefined (scr_runtime.h): JSON
+    // drops it like any undefined-valued own property.
     const droppable =
-      emitFields.some((f) => this.host.undefinedArmTag(f.type) >= 0) ||
+      emitFields.some((f) => this.host.undefinedArmTag(f.type) >= 0 || f.type.kind === "f64") ||
       !!shape.indexValue ||
       shape.ownmask === true;
     this.putc(B, "%b", "123"); // '{'
@@ -303,7 +307,20 @@ export class LlWalkers {
         // armed one it is `own AND not undefined` (JSON drops an
         // undefined-VALUED own property too — `JSON.stringify({a:
         // undefined})` is `{}`).
-        const present = emitOwnPresentLl(B, shape, f.name, "%v", utag, true);
+        let present = emitOwnPresentLl(B, shape, f.name, "%v", utag, true);
+        if (f.type.kind === "f64") {
+          // The NaN-marked undefined is undefined-valued: not written (scr_runtime.h).
+          const fb = B.tmp();
+          B.line(`${fb} = bitcast double ${v} to i64`);
+          const notMarker = B.tmp();
+          B.line(`${notMarker} = icmp ne i64 ${fb}, ${NUM_UNDEF_BITS_DEC_W}`);
+          if (present === null) present = notMarker;
+          else {
+            const both = B.tmp();
+            B.line(`${both} = and i1 ${present}, ${notMarker}`);
+            present = both;
+          }
+        }
         if (present !== null) {
           const lw = B.newLabel("jwf.w");
           skip = B.newLabel("jwf.s");

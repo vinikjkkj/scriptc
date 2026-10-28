@@ -272,6 +272,8 @@ function f64Lit(n: number): string {
 }
 
 const F64_INF = f64Lit(Infinity);
+/* The NaN-marked undefined bits (scr_runtime.h SCR_NUM_UNDEF_BITS), decimal for `icmp`. */
+const NUM_UNDEF_BITS_DEC = "9222246136947990017";
 
 /** LLVM c"..." payload for a UTF-8 literal, NUL-terminated like the C
  * emitter's flexible-array-member initializer. */
@@ -7827,6 +7829,14 @@ class LlEmitter {
   /** ToUint32 inline (upperf-a probe, ported from upstream #366). Fast path
    * is one fptosi+trunc for |v| <= 2^53; the cold arm does the spec's
    * trunc/modulo wrap and answers 0 for NaN and both infinities. */
+  /* scr_num_canon in IR (scr_runtime.h): dst = v, with a NaN replaced by the
+   * canonical NaN. */
+  private canonInto(dst: string, v: string): void {
+    const isNan = this.B.tmp();
+    this.B.line(`${isNan} = fcmp uno double ${v}, ${v}`);
+    this.B.line(`${dst} = select i1 ${isNan}, double 0x7FF8000000000000, double ${v}`);
+  }
+
   private emitToUint32(value: string): string {
     const B = this.B;
     const aboveMin = B.tmp();
@@ -7991,7 +8001,30 @@ class LlEmitter {
           B.line(`${t} = icmp ${e.op === "===" ? "eq" : "ne"} ptr ${l.name}, ${r.name}`);
         } else if (arith[e.op] !== undefined || cmp[e.op] !== undefined) {
           if (e.left.type.kind !== "f64") throw new LlvmUnsupportedError(`bin:${e.op}:${e.left.type.kind}`, e.loc);
-          if (arith[e.op] !== undefined) B.line(`${t} = ${arith[e.op]} double ${l.name}, ${r.name}`);
+          if (e.op === "===" || e.op === "!==") {
+            // Strict equality with the marker equal to itself (scr_num_same). The
+            // same-bits arm only counts when the bits are the marker's.
+            const eqd = B.tmp();
+            B.line(`${eqd} = fcmp oeq double ${l.name}, ${r.name}`);
+            const lb = B.tmp();
+            const rb = B.tmp();
+            B.line(`${lb} = bitcast double ${l.name} to i64`);
+            B.line(`${rb} = bitcast double ${r.name} to i64`);
+            const same = B.tmp();
+            B.line(`${same} = icmp eq i64 ${lb}, ${rb}`);
+            const isM = B.tmp();
+            B.line(`${isM} = icmp eq i64 ${lb}, ${NUM_UNDEF_BITS_DEC}`);
+            const both = B.tmp();
+            B.line(`${both} = and i1 ${same}, ${isM}`);
+            const eqAll = B.tmp();
+            B.line(`${eqAll} = or i1 ${eqd}, ${both}`);
+            if (e.op === "===") B.line(`${t} = or i1 ${eqAll}, false`);
+            else B.line(`${t} = xor i1 ${eqAll}, true`);
+          } else if (arith[e.op] !== undefined) {
+            const raw = B.tmp();
+            B.line(`${raw} = ${arith[e.op]} double ${l.name}, ${r.name}`);
+            this.canonInto(t, raw);
+          }
           else B.line(`${t} = fcmp ${cmp[e.op]} double ${l.name}, ${r.name}`);
         } else if (bit[e.op] !== undefined) {
           if (e.left.type.kind !== "f64" || e.right.type.kind !== "f64") {
@@ -8011,14 +8044,20 @@ class LlEmitter {
           const fn = libm[e.op];
           if (fn === undefined) throw new LlvmUnsupportedError(`bin:${e.op}`, e.loc);
           this.declare(`declare double @${fn}(double, double)`);
-          B.line(`${t} = call double @${fn}(double ${l.name}, double ${r.name})`);
+          const raw = B.tmp();
+          B.line(`${raw} = call double @${fn}(double ${l.name}, double ${r.name})`);
+          this.canonInto(t, raw);
         }
         return { name: t, type: e.type };
       }
       case "unary": {
         const v = this.emitExpr(e.operand);
         const t = B.tmp();
-        if (e.op === "-") B.line(`${t} = fneg double ${v.name}`);
+        if (e.op === "-") {
+          const raw = B.tmp();
+          B.line(`${raw} = fneg double ${v.name}`);
+          this.canonInto(t, raw);
+        }
         else if (e.op === "!") B.line(`${t} = xor i1 ${v.name}, true`);
         else {
           const value = this.emitToUint32(v.name);
@@ -8037,14 +8076,14 @@ class LlEmitter {
           const box = this.loadBox(b.slot);
           const old = this.boxGet(box, e.type);
           const next = B.tmp();
-          B.line(`${next} = ${e.op === "+" ? "fadd" : "fsub"} double ${old}, ${f64Lit(1)}`);
+          { const raw = B.tmp(); B.line(`${raw} = ${e.op === "+" ? "fadd" : "fsub"} double ${old}, ${f64Lit(1)}`); this.canonInto(next, raw); }
           this.boxSet(box, e.type, next);
           return { name: e.prefix ? next : old, type: e.type };
         }
         const old = B.tmp();
         const next = B.tmp();
         B.line(`${old} = load double, ptr ${b.slot}`);
-        B.line(`${next} = ${e.op === "+" ? "fadd" : "fsub"} double ${old}, ${f64Lit(1)}`);
+        { const raw = B.tmp(); B.line(`${raw} = ${e.op === "+" ? "fadd" : "fsub"} double ${old}, ${f64Lit(1)}`); this.canonInto(next, raw); }
         B.line(`store double ${next}, ptr ${b.slot}`);
         return { name: e.prefix ? next : old, type: e.type };
       }
@@ -9730,7 +9769,7 @@ class LlEmitter {
           B.line(`${old} = call double @${helper}(ptr ${box}, ptr null)`);
           this.emitPendingCheck();
           const next = B.tmp();
-          B.line(`${next} = ${e.op === "+" ? "fadd" : "fsub"} double ${old}, ${f64Lit(1)}`);
+          { const raw = B.tmp(); B.line(`${raw} = ${e.op === "+" ? "fadd" : "fsub"} double ${old}, ${f64Lit(1)}`); this.canonInto(next, raw); }
           this.declare(`declare ptr @scr_dyn_new_num(double)`);
           this.declare(`declare void @scr_dyn_release(ptr)`);
           const boxed = B.tmp();
@@ -9742,7 +9781,7 @@ class LlEmitter {
         const old = B.tmp();
         const next = B.tmp();
         B.line(`${old} = load double, ptr ${ptr}`);
-        B.line(`${next} = ${e.op === "+" ? "fadd" : "fsub"} double ${old}, ${f64Lit(1)}`);
+        { const raw = B.tmp(); B.line(`${raw} = ${e.op === "+" ? "fadd" : "fsub"} double ${old}, ${f64Lit(1)}`); this.canonInto(next, raw); }
         B.line(`store double ${next}, ptr ${ptr}`);
         return { name: e.prefix ? next : old, type: e.type };
       }
@@ -15954,6 +15993,18 @@ class LlEmitter {
    * a result temp joins its frame (the C `finish` shape). Unlisted
    * members refuse by name. */
   private emitLibCall(e: IrExpr & { kind: "libCall" }): LlValue {
+    const out = this.emitLibCallRaw(e);
+    // libm propagates a marker operand's NaN payload: every Math.* number result is
+    // canonicalised, whichever lowering this lane picked (scr_runtime.h).
+    if (e.type.kind === "f64" && e.fn.startsWith("math.")) {
+      const c = this.B.tmp();
+      this.canonInto(c, out.name);
+      return { ...out, name: c };
+    }
+    return out;
+  }
+
+  private emitLibCallRaw(e: IrExpr & { kind: "libCall" }): LlValue {
     const B = this.B;
     // Loop liveness first (one table for generic and special shapes).
     if (USES_TIMERS_LIB_FNS.has(e.fn)) this.usesTimers = true;
@@ -18193,6 +18244,27 @@ class LlEmitter {
       B.line(`${t} = fcmp uno double ${v.name}, ${f64Lit(0)}`);
       return { name: t, type: e.type };
     }
+    // The NaN-marked undefined (scr_runtime.h). Bits, never a double compare:
+    // the marker is a NaN, and NaN != NaN.
+    if (e.fn === "num.isUndef") {
+      const v = this.emitExpr(e.args[0]!);
+      const b = B.tmp();
+      B.line(`${b} = bitcast double ${v.name} to i64`);
+      const t = B.tmp();
+      B.line(`${t} = icmp eq i64 ${b}, ${NUM_UNDEF_BITS_DEC}`);
+      return { name: t, type: e.type };
+    }
+    if (e.fn === "num.canon") {
+      const v = this.emitExpr(e.args[0]!);
+      const isNan = B.tmp();
+      B.line(`${isNan} = fcmp uno double ${v.name}, ${v.name}`);
+      const t = B.tmp();
+      B.line(`${t} = select i1 ${isNan}, double 0x7FF8000000000000, double ${v.name}`);
+      return { name: t, type: e.type };
+    }
+    if (e.fn === "num.undef") {
+      return { name: "0x7FFC00000000DE01", type: e.type };
+    }
     if (e.fn === "sym.newAnon") {
       this.declare(`declare ptr @scr_sym_new(ptr)`);
       const t = B.tmp();
@@ -18365,8 +18437,14 @@ class LlEmitter {
       if (MAY_THROW_LIB_FNS.has(e.fn)) this.emitPendingCheck();
       return { name: "", type: e.type };
     }
-    const t = B.tmp();
-    B.line(`${t} = call ${retTy} @${sym}(${argList})`);
+    const t0 = B.tmp();
+    B.line(`${t0} = call ${retTy} @${sym}(${argList})`);
+    // libm propagates a marker operand's NaN payload: canonicalise Math.* results.
+    let t = t0;
+    if (e.type.kind === "f64" && e.fn.startsWith("math.")) {
+      t = B.tmp();
+      this.canonInto(t, t0);
+    }
     // The result joins its frame BEFORE the pending check so an unwind
     // releases the dummy (NULL for refcounted returns) harmlessly.
     const out = this.own({ name: t, type: e.type });
