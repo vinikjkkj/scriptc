@@ -534,6 +534,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "stats.isSymbolicLink": { argTypes: [STATS_T], result: BOOL },
   "stats.size": { argTypes: [STATS_T], result: F64 },
   "stats.mtimeMs": { argTypes: [STATS_T], result: F64 },
+  "stats.mode": { argTypes: [STATS_T], result: F64 },
+  "stats.field": { argTypes: [STATS_T, F64], result: F64 },
+  "stats.date": { argTypes: [STATS_T, F64], result: DATE_T },
+  "stats.isType": { argTypes: [STATS_T, F64], result: BOOL },
   // The wider sync fs slice (unlink/chmod/chown/copyfile and the
   // mode-carrying write/mkdir forms).
   "fs.unlinkSync": { argTypes: [STRING], result: VOID },
@@ -665,6 +669,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dgram.onClose": { argTypes: [DGRAMSOCK_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "dgram.onConnect": { argTypes: [DGRAMSOCK_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "dns.lookup": { argTypes: [STRING, F64, null], result: VOID },
+  "fs.statCb": { argTypes: [STRING, null], result: VOID },
   // node:test (scr_test.c). Bodies are program-dependent closures (0 or
   // 1 testCtx param, void or Promise<void> result — the spoke pinned the
   // shape): null slots. sub's result is the settled Promise<void> the
@@ -4847,6 +4852,26 @@ function validateFunction(
           }
           if (!ok) {
             err(`libCall ${e.fn} callback shape (frontend must fence)`, e.loc);
+          }
+          break;
+        }
+        if (e.fn === "fs.statCb") {
+          // The callback: void, at most (err: Error | null, stats: Stats).
+          const cbT = e.args[1]?.type;
+          let ok = cbT?.kind === "func" && cbT.ret.kind === "void" && cbT.params.length <= 2;
+          if (ok && cbT?.kind === "func" && cbT.params.length >= 1) {
+            const p0 = cbT.params[0]!;
+            const def = p0.kind === "union" ? unions.get(p0.unionId) : undefined;
+            ok =
+              def !== undefined &&
+              def.arms.length === 2 &&
+              def.arms.some((a) => a.kind === "nullT") &&
+              def.arms.some((a) => a.kind === "object" && a.className === "%Error");
+            const p1 = cbT.params[1];
+            if (ok && p1 !== undefined) ok = p1.kind === "stats";
+          }
+          if (!ok) {
+            err(`libCall fs.statCb callback shape (frontend must fence)`, e.loc);
           }
           break;
         }

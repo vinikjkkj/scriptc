@@ -4520,6 +4520,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_stats_is_symlink(${arg(0)})`);
           case "stats.mtimeMs":
             return finish(`scr_stats_mtime_ms(${arg(0)})`);
+          case "stats.mode":
+            return finish(`scr_stats_mode(${arg(0)})`);
+          case "stats.date":
+            return finish(`scr_stats_date_of(${arg(0)}, ${arg(1)})`);
+          case "stats.field":
+            return finish(`scr_stats_field(${arg(0)}, ${arg(1)})`);
+          case "stats.isType":
+            return finish(`scr_stats_is_type(${arg(0)}, ${arg(1)})`);
           case "stats.isFile":
             return finish(`scr_stats_is_file(${arg(0)})`);
           case "stats.isDirectory":
@@ -5225,6 +5233,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               : e.fn === "dgram.onClose" ? "scr_dgram_on_close"
               : "scr_dgram_on_connect";
             E.line(`${fn}(${arg(0)}, ${cb.name}, ${arg(2)});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
+          case "fs.statCb": {
+            // The stat ran at the call inside the runtime; the typed
+            // callback (moved in) fires at the next loop turn through its
+            // adapter. The pending callback holds the loop open.
+            E.usesTimers = true;
+            const cbT = e.args[1]!.type;
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            const adapter = E.fsStatThunkFor(cbT);
+            E.line(`scr_fs_stat_cb(${arg(0)}, ${cb.name}, &${adapter});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           }
           case "dns.lookup": {

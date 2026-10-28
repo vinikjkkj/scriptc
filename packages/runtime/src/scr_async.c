@@ -3446,6 +3446,63 @@ ScrPromise *scr_fsp_stat(ScrStr *path) {
   return scr_promise_settled_ref(st, &scr_stats_retain_v, &scr_stats_release_v, NULL);
 }
 
+/* ── fs.stat(path, cb) ───────────────────────────────────────────────
+ * The stat runs at the call (fsp.stat's shape); the callback fires on the
+ * next loop turn with (err, stats). On failure Node calls cb(err) with no
+ * stats; the typed closure's stats parameter is NULL then (the same
+ * stance dns.lookup takes for its address on failure). The pending record
+ * is refcounted: the timer's closure holds it through a box, the fire
+ * drops its own reference after the call, and the last release frees the
+ * callback, the error and the stats. */
+typedef struct {
+  size_t rc;
+  ScrClosure *cb;
+  ScrFsStatFn fn;
+  ScrError *err;
+  ScrStats *st;
+} ScrFsStatPending;
+
+static void scr_fs_stat_pending_release(ScrFsStatPending *p) {
+  if (--p->rc != 0) return;
+  scr_closure_release(p->cb);
+  if (p->err) scr_error_release_v(p->err);
+  if (p->st) scr_stats_release_v(p->st);
+  free(p);
+}
+
+static void *scr_fs_stat_pending_retain_v(void *p) {
+  ((ScrFsStatPending *)p)->rc++;
+  return p;
+}
+
+static void scr_fs_stat_pending_release_v(void *p) { scr_fs_stat_pending_release((ScrFsStatPending *)p); }
+
+#ifndef SCR_LIB
+static void scr_fs_stat_fire(ScrClosure *self) {
+  ScrFsStatPending *p = scr_box_get_ref(self->caps[0]);
+  p->fn(p->cb, p->err, p->st);
+  scr_fs_stat_pending_release(p);
+}
+#endif
+
+void scr_fs_stat_cb(ScrStr *path, ScrClosure *cb, ScrFsStatFn fn) {
+#ifdef SCR_LIB
+  scr_closure_release(cb);
+  scr_trap("scriptc: internal error: fs.stat callback reached in a library build — please report this");
+#else
+  ScrFsStatPending *p = calloc(1, sizeof *p);
+  if (!p) scr_trap("scriptc: out of memory\n");
+  p->rc = 1;
+  p->cb = cb; /* moves */
+  p->fn = fn;
+  p->st = scr_fs_stat_try(path, &p->err);
+  ScrClosure *clo = scr_closure_new((void *)scr_fs_stat_fire, 1);
+  clo->caps[0] = scr_box_new_obj(scr_fs_stat_pending_retain_v, scr_fs_stat_pending_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], p); /* the box owns the record's one reference */
+  scr_set_timeout(clo, 0);
+#endif
+}
+
 /* ── node:timers/promises ────────────────────────────────────────────
  * The promisified pair: a PENDING void promise a one-shot heap timer
  * (setTimeout) or the immediate queue (setImmediate) fulfills — the

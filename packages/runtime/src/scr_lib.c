@@ -2043,7 +2043,9 @@ const char *scr_fs_err_path(const ScrStr *path, char buf[PATH_MAX]) {
 #endif
 
 /* Exported (scr_runtime.h): scr_bytes.c's fs Buffer forms share it. */
-void scr_fs_throw(int e, const char *op, const ScrStr *path) {
+/* The Node error for a failed fs operation, BUILT (+1): scr_fs_throw throws
+ * it; the fs callback forms (fs.stat) deliver it to the callback instead. */
+ScrError *scr_fs_error_build(int e, const char *op, const ScrStr *path) {
 #ifdef _WIN32
   /* The CRT lands ERROR_ACCESS_DENIED in errno as EACCES; libuv's
    * uv_translate_sys_error maps the same Win32 error to EPERM, so that
@@ -2070,8 +2072,13 @@ void scr_fs_throw(int e, const char *op, const ScrStr *path) {
    * with `code` stamped to the errno name (the exotic-errno fallback
    * stamps its "E<num>" spelling; Node would carry the uv name there).
    * errno/syscall/path ride the error's side table (scr_error_set_ext). */
-  scr_throw_errno_error(e, name, msg, (size_t)len, op, shown, NULL);
+  ScrError *err = scr_errno_error_build(e, name, msg, (size_t)len, op, shown, NULL);
   free(msg);
+  return err;
+}
+
+void scr_fs_throw(int e, const char *op, const ScrStr *path) {
+  scr_throw_error_value(scr_fs_error_build(e, op, path));
 }
 
 /* ── fs operations ───────────────────────────────────────────────────── */
@@ -3013,6 +3020,21 @@ struct ScrStats {
   bool is_symlink; /* lstat only — a followed stat never sees one */
   double size;
   double mtime_ms; /* milliseconds with the nanosecond fraction (Node) */
+  double mode;     /* st_mode in full, file-type bits included (Node's stats.mode) */
+  /* The rest of Node's Stats own fields (dev..birthtimeMs), in Node's units. */
+  double dev, ino, nlink, uid, gid, rdev, blksize, blocks;
+  double atime_ms, ctime_ms, birth_ms;
+  /* The own enumerable members a dynamic box sees (Node's own data properties:
+   * the fourteen fields, then any expandos), or NULL until a box needs them. */
+  ScrDyn *props;
+  /* The lazily-cached Date members (atime, mtime, ctime, birthtime; index 1..4):
+   * each is a retained ScrDate shared by the static and boxed reads, released by
+   * date_cache_release (scr_date.c's release, stored with the value). */
+  void *date_cache[4];
+  void (*date_cache_release)(void *);
+  /* A time member a program WROTE (Node's setter defines an own, non-enumerable
+   * property holding the value, of any type): the value, retained, or NULL. */
+  ScrDyn *time_over[4];
 };
 
 ScrStats *scr_stats_retain(ScrStats *s) {
@@ -3022,7 +3044,14 @@ ScrStats *scr_stats_retain(ScrStats *s) {
 
 void scr_stats_release(ScrStats *s) {
   if (!s || s->rc == SIZE_MAX) return;
-  if (--s->rc == 0) free(s);
+  if (--s->rc == 0) {
+    if (s->props) scr_dyn_release(s->props);
+    for (int i = 0; i < 4; i++) {
+      if (s->date_cache[i] != NULL) s->date_cache_release(s->date_cache[i]);
+      if (s->time_over[i] != NULL) scr_dyn_release(s->time_over[i]);
+    }
+    free(s);
+  }
 }
 
 void *scr_stats_retain_v(void *p) { return scr_stats_retain(p); }
@@ -3033,8 +3062,70 @@ bool scr_stats_is_dir(ScrStats *s) { return s->is_dir; }
 bool scr_stats_is_symlink(ScrStats *s) { return s->is_symlink; }
 double scr_stats_size(ScrStats *s) { return s->size; }
 double scr_stats_mtime_ms(ScrStats *s) { return s->mtime_ms; }
+double scr_stats_mode(ScrStats *s) { return s->mode; }
 
-static ScrStats *scr_stats_of(const struct stat *st) {
+/* The creation time (st_birthtime) of a path, in Node's ms-with-fraction units:
+ * statx(2) where the kernel reports STATX_BTIME, the BSD/Apple field where the
+ * struct carries one, and 0 otherwise (libuv reports a zero birthtime there
+ * too). `follow` 0 is lstat's no-follow view. */
+static double scr_stats_birth_ms(const char *path, const struct stat *st, int follow) {
+  (void)path; (void)follow; (void)st;
+#if defined(__APPLE__)
+  return (double)st->st_birthtimespec.tv_sec * 1000.0 + (double)st->st_birthtimespec.tv_nsec / 1e6;
+#elif defined(__linux__) && defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 28))
+  struct statx sx;
+  if (statx(AT_FDCWD, path, follow ? 0 : AT_SYMLINK_NOFOLLOW, STATX_BTIME, &sx) != 0) return 0.0;
+  if (!(sx.stx_mask & STATX_BTIME)) return 0.0;
+  return (double)sx.stx_btime.tv_sec * 1000.0 + (double)sx.stx_btime.tv_nsec / 1e6;
+#else
+  return 0.0;
+#endif
+}
+
+#if defined(_WIN32)
+/* A FILETIME (100ns units since 1601) as Node's ms-with-fraction: whole seconds
+ * since the Unix epoch, plus the nanosecond remainder over 1e6 (libuv's conversion). */
+static double scr_stats_win_ft_ms(LONGLONG ft) {
+  LONGLONG t = ft - 116444736000000000LL;
+  LONGLONG sec = t / 10000000LL;
+  LONGLONG ns = (t % 10000000LL) * 100LL;
+  return (double)sec * 1000.0 + (double)ns / 1e6;
+}
+
+static void scr_stats_win_fill(ScrStats *s, const char *path, int follow) {
+  int wlen = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
+  if (wlen <= 0) return;
+  wchar_t *w = malloc((size_t)wlen * sizeof(wchar_t));
+  if (w == NULL) return;
+  MultiByteToWideChar(CP_UTF8, 0, path, -1, w, wlen);
+  DWORD flags = FILE_FLAG_BACKUP_SEMANTICS | (follow ? 0 : FILE_FLAG_OPEN_REPARSE_POINT);
+  HANDLE h = CreateFileW(w, FILE_READ_ATTRIBUTES,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, flags, NULL);
+  free(w);
+  if (h == INVALID_HANDLE_VALUE) return;
+  FILE_BASIC_INFO bi;
+  FILE_STANDARD_INFO si;
+  BY_HANDLE_FILE_INFORMATION bhi;
+  bool ok = GetFileInformationByHandleEx(h, FileBasicInfo, &bi, sizeof bi) &&
+            GetFileInformationByHandleEx(h, FileStandardInfo, &si, sizeof si);
+  bool hok = GetFileInformationByHandle(h, &bhi);
+  CloseHandle(h);
+  if (!ok) return;
+  s->birth_ms = scr_stats_win_ft_ms(bi.CreationTime.QuadPart);
+  s->atime_ms = scr_stats_win_ft_ms(bi.LastAccessTime.QuadPart);
+  s->mtime_ms = scr_stats_win_ft_ms(bi.LastWriteTime.QuadPart);
+  s->ctime_ms = scr_stats_win_ft_ms(bi.ChangeTime.QuadPart);
+  s->size = (double)si.EndOfFile.QuadPart;
+  s->blocks = (double)(si.AllocationSize.QuadPart / 512);
+  s->nlink = (double)si.NumberOfLinks;
+  if (hok) {
+    s->dev = (double)bhi.dwVolumeSerialNumber;
+    s->ino = (double)(((unsigned long long)bhi.nFileIndexHigh << 32) | bhi.nFileIndexLow);
+  }
+}
+#endif
+
+static ScrStats *scr_stats_of(const struct stat *st, const char *path, int follow) {
   ScrStats *s = malloc(sizeof(ScrStats));
   if (!s) {
     scr_trap("scriptc: out of memory\n");
@@ -3049,17 +3140,53 @@ static ScrStats *scr_stats_of(const struct stat *st) {
    * GetFileAttributesEx). */
   s->is_symlink = false;
   s->mtime_ms = (double)st->st_mtime * 1000.0;
+  s->atime_ms = (double)st->st_atime * 1000.0;
+  s->ctime_ms = (double)st->st_ctime * 1000.0;
 #else
   s->is_symlink = S_ISLNK(st->st_mode);
 #if defined(__APPLE__)
-  s->mtime_ms = (double)st->st_mtimespec.tv_sec * 1000.0 +
-                (double)st->st_mtimespec.tv_nsec / 1e6;
+  s->mtime_ms = (double)st->st_mtimespec.tv_sec * 1000.0 + (double)st->st_mtimespec.tv_nsec / 1e6;
+  s->ctime_ms = (double)st->st_ctimespec.tv_sec * 1000.0 + (double)st->st_ctimespec.tv_nsec / 1e6;
+  s->atime_ms = (double)st->st_atimespec.tv_sec * 1000.0 + (double)st->st_atimespec.tv_nsec / 1e6;
 #else
-  s->mtime_ms = (double)st->st_mtim.tv_sec * 1000.0 +
-                (double)st->st_mtim.tv_nsec / 1e6;
+  s->mtime_ms = (double)st->st_mtim.tv_sec * 1000.0 + (double)st->st_mtim.tv_nsec / 1e6;
+  s->ctime_ms = (double)st->st_ctim.tv_sec * 1000.0 + (double)st->st_ctim.tv_nsec / 1e6;
+  s->atime_ms = (double)st->st_atim.tv_sec * 1000.0 + (double)st->st_atim.tv_nsec / 1e6;
 #endif
 #endif
   s->size = (double)st->st_size;
+  s->mode = (double)st->st_mode;
+  s->dev = (double)st->st_dev;
+  s->ino = (double)st->st_ino;
+  s->nlink = (double)st->st_nlink;
+  s->uid = (double)st->st_uid;
+  s->gid = (double)st->st_gid;
+#if defined(_WIN32)
+  s->rdev = 0.0; /* libuv reports no device number on Windows; the CRT's st_rdev is the drive index */
+#else
+  s->rdev = (double)st->st_rdev;
+#endif
+#if defined(_WIN32)
+  s->blksize = 0.0; /* the CRT struct has no block size; the handle fill below sets blocks */
+  s->blocks = 0.0;
+#else
+  s->blksize = (double)st->st_blksize;
+  s->blocks = (double)st->st_blocks;
+#endif
+  s->birth_ms = scr_stats_birth_ms(path, st, follow);
+#if defined(_WIN32)
+  /* The CRT stat has whole seconds and no creation time: Node (libuv's handle
+   * query) reads the 100ns file times, the link count, the sizes and the volume
+   * and file index from the file itself. A path that cannot be opened keeps the
+   * CRT values. */
+  scr_stats_win_fill(s, path, follow);
+#endif
+  s->props = NULL;
+  for (int i = 0; i < 4; i++) {
+    s->date_cache[i] = NULL;
+    s->time_over[i] = NULL;
+  }
+  s->date_cache_release = NULL;
   return s;
 }
 
@@ -3069,7 +3196,20 @@ ScrStats *scr_fs_stat(ScrStr *path) {
     scr_fs_throw(errno, "stat", path);
     return NULL;
   }
-  return scr_stats_of(&st);
+  return scr_stats_of(&st, path->data, 1);
+}
+
+/* stat(2) as a VALUE: +1 stats on success (err stays NULL); on failure NULL
+ * with *err set to the built Node error (+1). The fs.stat callback form
+ * delivers the pair; nothing is thrown. */
+ScrStats *scr_fs_stat_try(const ScrStr *path, ScrError **err) {
+  struct stat st;
+  if (stat(path->data, &st) != 0) {
+    *err = scr_fs_error_build(errno, "stat", path);
+    return NULL;
+  }
+  *err = NULL;
+  return scr_stats_of(&st, path->data, 1);
 }
 
 ScrStats *scr_fs_lstat(ScrStr *path) {
@@ -3078,7 +3218,7 @@ ScrStats *scr_fs_lstat(ScrStr *path) {
     scr_fs_throw(errno, "lstat", path);
     return NULL;
   }
-  return scr_stats_of(&st);
+  return scr_stats_of(&st, path->data, 0);
 }
 
 ScrArr *scr_fs_readdir(ScrStr *path) {
@@ -5628,4 +5768,65 @@ ScrDyn *scr_dyn_web_crypto(void) {
     scr_atexit(scr_wc_teardown);
   }
   return scr_dyn_retain(scr_wc_obj);
+}
+
+/* The numeric Stats fields by index (0..13, STATS_FIELD_INDEX's order): the
+ * slot a read or a write lands on. */
+static double *scr_stats_slot_of(ScrStats *s, int idx) {
+  switch (idx) {
+  case 0: return &s->dev;
+  case 1: return &s->mode;
+  case 2: return &s->nlink;
+  case 3: return &s->uid;
+  case 4: return &s->gid;
+  case 5: return &s->rdev;
+  case 6: return &s->blksize;
+  case 7: return &s->ino;
+  case 8: return &s->size;
+  case 9: return &s->blocks;
+  case 10: return &s->atime_ms;
+  case 11: return &s->mtime_ms;
+  case 12: return &s->ctime_ms;
+  default: return &s->birth_ms;
+  }
+}
+
+/* Accessors for the Date and dyn units (scr_date.c, scr_date_dyn.c), which own
+ * everything that names a Date, so this always-linked unit does not. */
+double *scr_stats_field_slot(ScrStats *s, int idx) { return scr_stats_slot_of(s, idx); }
+ScrDyn **scr_stats_props_slot(ScrStats *s) { return &s->props; }
+ScrDyn **scr_stats_over_slot(ScrStats *s, int which) { return &s->time_over[which - 1]; }
+void *scr_stats_cache_get(ScrStats *s, int which) { return s->date_cache[which - 1]; }
+void scr_stats_cache_store(ScrStats *s, int which, void *date, void (*release)(void *)) {
+  if (s->date_cache[which - 1] != NULL) s->date_cache_release(s->date_cache[which - 1]);
+  s->date_cache[which - 1] = date;
+  s->date_cache_release = release;
+}
+
+/* A Stats snapshot from the fourteen Node fields, in STATS_FIELD_INDEX order (the
+ * fs.Stats constructor's argument list). The mode drives the type predicates. */
+ScrStats *scr_stats_from_fields(const double *f) {
+  ScrStats *s = malloc(sizeof(ScrStats));
+  if (!s) scr_trap("scriptc: out of memory\n");
+  memset(s, 0, sizeof *s);
+  s->rc = 1;
+  for (int i = 0; i < 14; i++) *scr_stats_slot_of(s, i) = f[i];
+  s->mode = f[1];
+  s->is_file = ((unsigned)f[1] & 0170000) == 0100000;
+  s->is_dir = ((unsigned)f[1] & 0170000) == 040000;
+  s->is_symlink = ((unsigned)f[1] & 0170000) == 0120000;
+  s->mtime_ms = f[11];
+  s->ctime_ms = f[12];
+  s->atime_ms = f[10];
+  s->birth_ms = f[13];
+  return s;
+}
+
+/* The numeric Stats fields by STATS_FIELD_INDEX (static reads). */
+double scr_stats_field(ScrStats *s, double idx) { return *scr_stats_slot_of(s, (int)idx); }
+
+/* The is* predicates by STATS_TYPE_INDEX: block, character, FIFO, socket. */
+bool scr_stats_is_type(ScrStats *s, double idx) {
+  static const unsigned bits[] = {060000, 020000, 010000, 0140000};
+  return ((unsigned)s->mode & 0170000) == bits[(int)idx];
 }

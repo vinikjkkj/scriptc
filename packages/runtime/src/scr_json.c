@@ -4986,6 +4986,7 @@ static bool scr_dyn_json_absent(const ScrDyn *d) {
  * the keyed entry every recursion goes through. */
 static bool scr_dyn_json_write(ScrJsonBuf *b, const ScrDyn *d, const char *key, size_t key_len);
 
+static ScrDyn *scr_handle_own_props(const ScrDyn *d);
 static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
   switch (d->kind) {
   case SCR_DYN_UNDEF:
@@ -5197,6 +5198,16 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
       /* A TextEncoder/TextDecoder has no own enumerable property: {} */
       scr_jb_puts(b, "{}");
       return true;
+    }
+    if (d->v.handle.tag == SCR_DYNH_STATS) {
+      /* A Stats box serializes its own enumerable members: the members object
+       * holds exactly Node's (the fourteen fields, then expandos); the cached
+       * Dates are non-enumerable and are not in it. */
+      ScrDyn *own = scr_handle_own_props(d);
+      if (own != NULL) {
+        scr_dyn_json_write_raw(b, own);
+        return true;
+      }
     }
     /* fall through */
   default: {
@@ -6816,9 +6827,17 @@ bool scr_dyn_handle_has_expando(const ScrDyn *d, const char *key, size_t key_len
   return own != NULL && scr_dyn_obj_has_own_prop(own, key, key_len);
 }
 
+/* A native handle's inherited members (a Stats box's prototype accessors and
+ * predicates) for `in` and the for-in presence guard: set by the handle unit. */
+bool (*scr_handle_inherited_has_hook)(const ScrDyn *v, const char *key, size_t key_len) = NULL;
+
 bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len) {
   ScrDyn *own = scr_handle_own_props(d);
   if (own != NULL && scr_dyn_obj_has_own_prop(own, key, key_len)) return true;
+  if (d->kind == SCR_DYN_HANDLE && scr_handle_inherited_has_hook != NULL &&
+      scr_handle_inherited_has_hook(d, key, key_len)) {
+    return true;
+  }
   ScrDyn *found = NULL;
   if (scr_dyn_obj_resolve(d, key, key_len, &found, NULL) != SCR_PROP_ABSENT) return true;
   /* %Error.prototype% HAS a `constructor` in Node, and the fact that
@@ -7544,6 +7563,7 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
     /* An expando a JS write put on the handle (a Date's own data member) is a property `in` sees. */
     const ScrDyn *own = scr_handle_own_props(v);
     if (own != NULL && scr_dyn_obj_has_own_prop(own, key->data, key->len)) return true;
+    if (scr_handle_inherited_has_hook != NULL && scr_handle_inherited_has_hook(v, key->data, key->len)) return true;
   }
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
@@ -12456,6 +12476,10 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
 
 ScrDyn *scr_dyn_obj_keys(const ScrDyn *v) { return scr_dyn_objwalk(v, SCR_OBJWALK_KEYS); }
 
+/* The members a for-in visits: Object.keys' own enumerable keys, then the
+ * inherited enumerable ones a native handle's prototype contributes (a Stats
+ * box's accessors and predicates, which the install hook lists). */
+void (*scr_handle_forin_hook)(const ScrDyn *v, ScrDyn *out) = NULL;
 /* One source's own enumerable members onto an OBJ target — the
  * CopyDataProperties walk Object.assign runs per source. OBJ sources copy
  * their members directly (last write wins); the index-keyed kinds
@@ -12657,7 +12681,15 @@ bool scr_dyn_for_in_accessor(const ScrDyn *v, const ScrStr *key) {
   if (!scr_dyn_obj_hidden_attrs(v, key->data, key->len, &is_data, NULL, NULL, &enumerable)) return false;
   return !is_data && enumerable;
 }
+/* A native handle's own non-enumerable members (a Stats box's cached or written time
+ * members) for Object.hasOwn; set by the handle unit. */
+bool (*scr_handle_own_extra_hook)(const ScrDyn *v, const char *key, size_t key_len) = NULL;
+
 bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
+  if (v->kind == SCR_DYN_HANDLE && scr_handle_own_extra_hook != NULL &&
+      scr_handle_own_extra_hook(v, key->data, key->len)) {
+    return true;
+  }
   SCR_VIEW_FRESH(v);
   if (v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) {
     const char *m = "Cannot convert undefined or null to object";

@@ -3479,6 +3479,12 @@ bool scr_stats_is_dir(ScrStats *s);
 bool scr_stats_is_symlink(ScrStats *s); /* lstat snapshots only */
 double scr_stats_size(ScrStats *s);
 double scr_stats_mtime_ms(ScrStats *s); /* ms with the ns fraction */
+double scr_stats_mode(ScrStats *s);     /* st_mode, file-type bits included */
+/* Node's Stats fields by index (the static reads; the table is STATS_FIELD_INDEX in
+ * ir/nodes.ts) and the is* predicates by index (STATS_TYPE_INDEX). */
+double scr_stats_field(ScrStats *s, double idx);
+bool scr_stats_is_type(ScrStats *s, double idx);
+ScrStats *scr_fs_stat_try(const ScrStr *path, ScrError **err); /* +1 or NULL + err (+1) */
 
 /* FileHandle (fs/promises.open): an OWNED, refcounted descriptor — NOT
  * the raw fd. The distinction is load-bearing rather than cosmetic: the
@@ -3530,6 +3536,11 @@ ScrPromise *scr_fsp_chmod(ScrStr *path, double mode);
 ScrPromise *scr_fsp_readdir(ScrStr *path);
 ScrPromise *scr_fsp_rm(ScrStr *path);
 ScrPromise *scr_fsp_stat(ScrStr *path);
+/* fs.stat(path, cb): the stat runs now; cb(err, stats) fires on the next
+ * loop turn. cb moves in; fn is the per-shape adapter the emitter writes
+ * (it builds the Error | null union and calls the typed closure). */
+typedef void (*ScrFsStatFn)(ScrClosure *cb, ScrError *err, ScrStats *st);
+void scr_fs_stat_cb(ScrStr *path, ScrClosure *cb /*moves*/, ScrFsStatFn fn);
 
 /* ── node:timers/promises (scr_async.c) ──────────────────────────────
  * The promisified pair: a PENDING void promise a one-shot heap timer /
@@ -4735,6 +4746,7 @@ typedef enum {
   SCR_DYNH_TRACING,      /* scr_dc.c — diagnostics_channel TracingChannel (registry id) */
   SCR_DYNH_SECURE_CTX,   /* scr_tls.c — tls.SecureContext (refcounted parsed cert/key, by reference) */
   SCR_DYNH_KEYOBJ,       /* ScrKeyObject — crypto.KeyObject (scr_asym.c; retained, by reference) */
+  SCR_DYNH_STATS,        /* ScrStats — fs.Stats (scr_lib.c; by reference, static ops) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
@@ -6750,6 +6762,14 @@ ScrStr *scr_dyn_string_explicit(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn 
  * the undefined singleton (the checked-dynamic tree's own-property stance — SEMANTICS.md)
  * unless the ops fence it loudly. +1, or NULL with a pending exception. */
 ScrDyn *scr_dyn_handle_key_get(const ScrDyn *d, const ScrStr *k);
+/* The static handle ops for the always-linked Stats tag (scr_lib.c). */
+double *scr_stats_field_slot(ScrStats *s, int idx); /* the numeric field (0..13) as a writable slot */
+ScrDyn **scr_stats_props_slot(ScrStats *s);
+ScrDyn **scr_stats_over_slot(ScrStats *s, int which); /* a written time member (retained), or NULL; which 1..4 */          /* the own enumerable members object (or NULL) */
+void *scr_stats_cache_get(ScrStats *s, int which);   /* a cached Date (borrowed) or NULL; which 1..4 */
+void scr_stats_cache_store(ScrStats *s, int which, void *date, void (*release)(void *)); /* takes date's +1 */
+ScrStats *scr_stats_from_fields(const double *f);    /* the fs.Stats constructor's snapshot (+1) */
+
 
 /* ── class instances in the checked-dynamic tree (SCR_DYN_OBJINST) ────
  * Boxes by REFERENCE (+1 box; retains o through the descriptor's `_v`
@@ -9862,6 +9882,12 @@ bool scr_process_stderr_write_bytes(const ScrBytes *b);
  * file or directory, open 'x'" and throws it catchably. Shared with
  * scr_bytes.c's fs forms. */
 void scr_fs_throw(int e, const char *op, const ScrStr *path);
+/* The same error as a VALUE (+1), and its throw: the fs callback forms
+ * deliver the value, the throwing forms throw it. */
+ScrError *scr_fs_error_build(int e, const char *op, const ScrStr *path);
+ScrError *scr_errno_error_build(int err_no, const char *code, const char *message, size_t len,
+                                const char *syscall, const char *path, const char *dest);
+void scr_throw_error_value(ScrError *e); /* takes its +1 */
 
 /* ── zlib (scr_zlib.c — compiled and linked with -lz only when the
  * program uses zlib, like scr_regex.c/libregexp; see cc.ts) ──────────
@@ -11011,6 +11037,13 @@ typedef struct ScrRequest ScrRequest;
  * case -- has a representation at all. Every member still refuses by
  * name, and `new Date(...)` as a VALUE still refuses. See scr_date.c. */
 typedef struct ScrDate ScrDate;
+/* fs.Stats' cached Date member (scr_date.c; which 1..4 atime..birthtime). +1. */
+ScrDate *scr_stats_date_of(ScrStats *s, double which);
+void scr_stats_dyn_install(void); /* scr_date_dyn.c */
+extern void (*scr_handle_forin_hook)(const ScrDyn *v, ScrDyn *out); /* scr_json.c; set by the handle unit */
+extern bool (*scr_handle_inherited_has_hook)(const ScrDyn *v, const char *key, size_t key_len);
+extern bool (*scr_handle_own_extra_hook)(const ScrDyn *v, const char *key, size_t key_len);
+
 /* A named standard-library handle: Blob, PromiseConstructor. A type first, so a
  * union or record that mentions one has a representation at all; nothing builds
  * a Blob, and the PromiseConstructor is one immortal singleton. See scr_opaque.c. */

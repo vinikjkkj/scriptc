@@ -1403,6 +1403,16 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_str_release(iso);
         return with;
       }
+      if (d->v.handle.tag == SCR_DYNH_STATS) {
+        /* A Stats prints `Stats { ...its enumerable own members... }` (Node's
+         * class-name prefix): the members object is exactly those members. */
+        const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
+        ScrDyn *own = ops->own_props != NULL ? ops->own_props(d->v.handle.ptr) : NULL;
+        ScrStr *base = scr_str_new("Stats", 5);
+        ScrStr *with = own != NULL && own->kind == SCR_DYN_OBJ ? insp_with_base(base, own, recurse, depth) : NULL;
+        scr_str_release(base);
+        if (with != NULL) return with;
+      }
       /* Node prints the class's full property dump (ServerResponse {
        * ... }) — internals we do not model. Fence loudly instead of a
        * silent-wrong shape (SEMANTICS.md). */

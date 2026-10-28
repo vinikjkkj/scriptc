@@ -57,7 +57,7 @@ import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtab
 import { emitCoroFrames, emitCoroSpawns, coroUnwind } from "./emit-coro.js";
 import { coroPlans } from "../../ir/coro-plans.js";
 import { genCoroUnwind } from "./emit-gen-coro.js";
-import { agenSettleThunkFor, emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
+import { agenSettleThunkFor, emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, fsStatThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
 import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch, mergeBrace, emitBranchInto, emitCondition } from "./emit-stmts.js";
 import fs from "node:fs";
@@ -577,6 +577,9 @@ export class CEmitter {
   /** Emitted dns.lookup callback adapters, interned per union id + param
    * count (dnsLookupThunkFor). */
   readonly dnsLookupThunks = new Map<string, string>();
+  /** Emitted fs.stat callback adapters, interned per callback arity and
+   * error-union id (fsStatThunkFor). */
+  readonly fsStatThunks = new Map<string, string>();
   /** Emitted SNI answer-closure thunks, interned per cb func-type key
    * (sniAnswerThunkFor). */
   readonly sniAnswerThunks = new Map<string, string>();
@@ -2754,7 +2757,9 @@ export class CEmitter {
     }
     const t = this.currentReturnType;
     if (t.kind === "void") this.line(`return;`);
-    else if (t.kind === "f64") this.line(`return 0;`);
+    // procStream is the scalar fd double (emit-types: "double"), so its
+    // default is 0 like f64, not NULL.
+    else if (t.kind === "f64" || t.kind === "procStream") this.line(`return 0;`);
     else if (t.kind === "bool") this.line(`return false;`);
     else this.line(`return NULL;`);
   }
@@ -3126,6 +3131,10 @@ export class CEmitter {
 
   dnsLookupThunkFor(cbT: IrType): string {
     return dnsLookupThunkFor(this, cbT);
+  }
+
+  fsStatThunkFor(cbT: IrType): string {
+    return fsStatThunkFor(this, cbT);
   }
 
   sniAnswerThunkFor(cbT: IrType): string {

@@ -46,7 +46,7 @@ import { deferredCallThunk, timerStyleCallback } from "./lower-calls.js";
 import { dynBuiltinFnValueOf } from "./lower-fnvalue.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
 import { lowerDateLocaleFormat } from "./lower-numfmt.js";
-import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { STATS_TYPE_INDEX, KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 import { jsonModuleOfRequire } from "./lower-modules.js";
 
 
@@ -6415,6 +6415,12 @@ let digestInputValueDispatches = 0;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "stats") return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
+    const typeIdx = STATS_TYPE_INDEX.get(name);
+    if (typeIdx !== undefined && call.arguments.length === 0) {
+      const receiver = L.lowerExpr(access.expression);
+      const idx: IrExpr = { kind: "numLit", value: typeIdx, type: F64, loc: locOf(call) };
+      return { kind: "libCall", fn: "stats.isType", args: [receiver, idx], type: BOOL, loc: locOf(call) };
+    }
     if (
       (name === "isFile" || name === "isDirectory" || name === "isSymbolicLink") &&
       call.arguments.length === 0
@@ -6429,7 +6435,7 @@ let digestInputValueDispatches = 0;
     L.noLowering(
       `Stats.${name}`,
       call,
-      "isFile(), isDirectory(), isSymbolicLink(), size, and mtimeMs are the supported Stats members",
+      "every fs.Stats method is supported (see the Stats table)",
       L.checker.getSymbolAtLocation(access.name),
     );
   }

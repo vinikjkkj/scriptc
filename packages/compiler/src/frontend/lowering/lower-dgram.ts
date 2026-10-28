@@ -105,6 +105,25 @@ const RINFO_FIELDS: [string, "string" | "f64"][] = [
   ["address", "string"], ["family", "string"], ["port", "f64"], ["size", "f64"],
 ];
 
+/** fs.stat(path, callback) — the two-argument callback form. The stat runs
+ * at the call; the callback (err, stats) defers to the next loop turn, the
+ * dns.lookup shape. Null for every other fs member and for the options
+ * form (the table fence stands for those, by name). */
+function lowerFsStatCallbackCall(L: Lowerer, expr: ts.CallExpression,
+  bi: { module: string; member: string },
+  loc: SrcLoc,): IrExpr | null {
+  if (bi.member !== "stat") return null;
+  const args = expr.arguments;
+  if (args.length !== 2 || args.some(ts.isSpreadElement)) return null;
+  const path = L.lowerExprExpecting(args[0]!, STRING);
+  const { cb } = lowerCallbackArg(
+    L, args[1]!, "stat callbacks", 2,
+    (p, i) => (i === 0 ? isErrorOrNullUnion(L, p) : p.kind === "stats"),
+    "use (err, stats) — err is Error | null, stats a Stats",
+  );
+  return { kind: "libCall", fn: "fs.statCb", args: [path, cb], type: VOID, loc };
+}
+
 /** Module-function calls on dgram/dns import bindings (named imports AND
  * namespace members — both funnel here): createSocket("udp4" | { type,
  * reuseAddr? }), dns.lookup(hostname, { family: 4 }, cb). Null for other
@@ -114,6 +133,7 @@ export function lowerDgramDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
   bi: { module: string; member: string },
   loc: SrcLoc,): IrExpr | null {
   if (bi.module === "dns") return lowerDnsModuleCall(L, expr, bi, loc);
+  if (bi.module === "fs") return lowerFsStatCallbackCall(L, expr, bi, loc);
   if (bi.module !== "dgram") return null;
   const args = expr.arguments;
   if (bi.member === "createSocket") {

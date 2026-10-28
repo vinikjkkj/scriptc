@@ -233,6 +233,10 @@ export function mangleCloseOverrideWrap(n: number): string {
 export function mangleDnsLookupThunk(n: number): string {
   return `sc_dnslk_${n}`;
 }
+/** Emitted fs.stat callback adapter (the runtime's ScrFsStatFn shape). */
+export function mangleFsStatThunk(n: number): string {
+  return `sc_fsstat_${n}`;
+}
 /** Emitted SNI answer-closure thunk (the `(err, ctx?) => void` callback a
  * TLS server's SNICallback receives — its unions' tags are program data),
  * interned per cb func-type key. */

@@ -622,6 +622,20 @@ export const URL_T: IrType = { kind: "url" };
 export const SEARCH_PARAMS_T: IrType = { kind: "searchParams" };
 export const SYMBOL_T: IrType = { kind: "symbol" };
 export const STATS_T: IrType = { kind: "stats" };
+
+/** The numeric Stats fields and the Date members, by their index in the
+ * stats.field libCall (scr_lib.c's scr_stats_field). Indices 14..17 are the
+ * time members as rounded milliseconds (Node's dateFromMs), which the static
+ * read builds a Date from. */
+export const STATS_FIELD_INDEX: ReadonlyMap<string, number> = new Map([
+  ["dev", 0], ["mode", 1], ["nlink", 2], ["uid", 3], ["gid", 4], ["rdev", 5], ["blksize", 6], ["ino", 7],
+  ["size", 8], ["blocks", 9], ["atimeMs", 10], ["mtimeMs", 11], ["ctimeMs", 12], ["birthtimeMs", 13],
+  ["atime", 14], ["mtime", 15], ["ctime", 16], ["birthtime", 17],
+]);
+/** The type predicates stats.isType answers (isBlockDevice .. isSocket). */
+export const STATS_TYPE_INDEX: ReadonlyMap<string, number> = new Map([
+  ["isBlockDevice", 0], ["isCharacterDevice", 1], ["isFIFO", 2], ["isSocket", 3],
+]);
 export const FILEHANDLE_T: IrType = { kind: "fileHandle" };
 export const SPAWNRES_T: IrType = { kind: "spawnRes" };
 export const CHILD_T: IrType = { kind: "child" };
@@ -4241,6 +4255,10 @@ export type IrLibFn =
   | "dgram.onClose"
   | "dgram.onConnect"
   | "dns.lookup"
+  /** fs.stat(path, cb) (scr_async.c): the stat runs at the call; the typed
+   * callback (err: Error | null, stats: Stats) fires on the next loop turn
+   * through the emitted per-shape adapter. */
+  | "fs.statCb"
   /** node:test (scr_test.c — linked only when one of these appears on
    * the IR; moduleUsesNodeTest is the switch, and the main epilogue asks
    * scr_test_exit_code() for the process's exit status). Strings are
@@ -6822,6 +6840,11 @@ export type IrLibFn =
   | "crypto.x509ValidToStr"
   | "stats.isSymbolicLink"
   | "stats.mtimeMs"
+  /** Stats.mode (the full st_mode, file-type bits included). */
+  | "stats.mode"
+  | "stats.field"
+  | "stats.date"
+  | "stats.isType"
   | "fs.writeFileModeSync"
   | "fs.mkdirModeSync"
   | "fs.mkdirRecursiveModeSync"
@@ -8815,6 +8838,10 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   // crypto.KeyObject (createPrivateKey & co, and the tls `key` member): by
   // reference. Its members are not modeled through unknown (scr_asym.c's ladder).
   ["keyobj", { tag: "SCR_DYNH_KEYOBJ", cls: "KeyObject" }],
+  // fs.Stats (fs.stat's callback value, statSync's result): by reference; the
+  // size/mode/mtimeMs reads answer through the handle, the rest fence by name
+  // (scr_lib.c's Stats ops).
+  ["stats", { tag: "SCR_DYNH_STATS", cls: "Stats" }],
 ]);
 
 /** The bytes ELEMENT kinds that cross the checked-dynamic boundary, each
@@ -11393,7 +11420,9 @@ export function moduleUsesDate(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "date") {
+    // A Stats value carries Date members (atime, mtime, ctime, birthtime), so it
+    // links the Date unit that boxes them.
+    if (node.kind === "date" || node.kind === "stats") {
       found = true;
       return;
     }
@@ -11551,6 +11580,7 @@ function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean; tz: boolean; in
   let fmt = false;
   let date = false;
   let dyn = false;
+  let stats = false;
   let tz = false;
   let intl = false;
   const visit = (v: unknown): void => {
@@ -11562,6 +11592,7 @@ function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean; tz: boolean; in
     const node = v as { kind?: unknown; fn?: unknown };
     if (node.kind === "date") date = true;
     if (node.kind === "dyn") dyn = true;
+    if (node.kind === "stats") stats = true;
     if (node.kind === "libCall" && (node.fn === "date.toString" || node.fn === "date.format")) {
       fmt = true;
       tz = true;
@@ -11580,7 +11611,9 @@ function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean; tz: boolean; in
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);
-  return { fmt, dyn: date && dyn, tz, intl };
+  // A Stats value's Date members box through the Date handle (scr_date_dyn.c),
+  // so a Stats program links that unit like a Date-meets-unknown program.
+  return { fmt, dyn: (date && dyn) || stats, tz, intl };
 }
 
 /** What a program asks of the ICU locale data (scr_ures.c): `langs` the languages its literal locales name (null:
@@ -12753,6 +12786,7 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   // exclude — refuse the surface like the rest of the event-loop family.
   ["fs.existsChk", "the async fs callback surface (fs.exists)"],
   ["fs.readFileCb", "the async fs callback surface (fs.readFile)"],
+  ["fs.statCb", "the async fs callback surface (fs.stat)"],
   ["fs.mkdtempCb", "the async fs callback surface (fs.mkdtemp)"],
   ["fs.readCb", "the async fs callback surface (fs.read)"],
   ["fs.lchmodCb", "the async fs callback surface (fs.lchmod)"],
