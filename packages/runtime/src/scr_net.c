@@ -531,6 +531,7 @@ struct ScrNetServer {
    * Node emits the drained one first, and did so 100/100 while this
    * runtime reversed it at a rate. 0 = not due yet. */
   size_t due_seq;
+  size_t due_clk; /* scr_net_clk at the stamp: orders a due close against queued idle events */
   size_t due_epoch; /* the epoch due_seq was taken in -- see scr_net_epoch */
   bool in_registry;
   bool unref_flag; /* server.unref(): not loop-liveness */
@@ -1778,10 +1779,14 @@ ScrStr *scr_net_server_addr_family(ScrNetServer *s) {
  * never re-stamps, so a second close() cannot move a server ahead of one
  * that came due before it. */
 static size_t scr_net_due_seq = 0;
+/* One clock shared by the due stamps and the idle FIFO, so a due server and a
+ * queued idle event compare by when each entered its queue. */
+static size_t scr_net_clk = 0;
 
 static void scr_net_server_mark_due(ScrNetServer *s) {
   if (s->due_seq == 0 && !s->close_emitted) {
     s->due_seq = ++scr_net_due_seq;
+    s->due_clk = ++scr_net_clk;
     s->due_epoch = scr_net_epoch;
   }
 }
@@ -2404,6 +2409,7 @@ typedef struct ScrIdleEv {
   ScrNetSocket *s;  /* +1 for the queue (kinds IDLE_CLOSE and IDLE_WRITE) */
   ScrNetServer *srv; /* +1 for the queue (kind IDLE_SERVER) */
   int kind;
+  size_t clk; /* scr_net_clk when queued */
   struct ScrIdleEv *next;
 } ScrIdleEv;
 enum { SCR_IDLE_CLOSE = 0, SCR_IDLE_WRITE = 1, SCR_IDLE_SERVER = 2, SCR_IDLE_FINISH = 3 };
@@ -2412,6 +2418,7 @@ static ScrIdleEv *scr_idle_q[2] = {NULL, NULL};  /* [0] destroys, [1] failed wri
 static ScrIdleEv *scr_idle_qt[2] = {NULL, NULL};
 
 static void scr_net_idle_push(int q, ScrIdleEv *ev) {
+  ev->clk = ++scr_net_clk;
   if (scr_idle_qt[q]) scr_idle_qt[q]->next = ev;
   else scr_idle_q[q] = ev;
   scr_idle_qt[q] = ev;
@@ -3081,6 +3088,22 @@ ScrNetSocket *scr_net_sock_connect_dyn(ScrNetSocket *s, ScrDyn *const *args, siz
 /* net.connect(options) over a run-time value: a fresh socket, dialed with the
  * same normalizer as the socket method. Answers the socket (+1), or NULL. */
 ScrNetSocket *scr_net_connect_dyn(const ScrDyn *opts) {
+  /* net.createConnection(bag) builds `new Socket(bag)` first, and the
+   * Socket constructor throws for the objectMode trio when truthy (Node
+   * 24.15: "The property 'options.objectMode' is not supported. Received
+   * true"). connect(bag) on an existing socket does not check them. */
+  if (opts != NULL && opts->kind == SCR_DYN_OBJ) {
+    static const char *const om[] = { "objectMode", "readableObjectMode", "writableObjectMode" };
+    for (size_t i = 0; i < 3; i++) {
+      const ScrDyn *v = scr_dyn_obj_get(opts, om[i], strlen(om[i]));
+      if (v != NULL && scr_dyn_truthy(v)) {
+        char name[48];
+        snprintf(name, sizeof name, "options.%s", om[i]);
+        scr_dyn_arg_value_fail(name, "is not supported", v);
+        return NULL;
+      }
+    }
+  }
   ScrNetSocket *s = scr_net_sock_idle_new();
   ScrDyn *arg = (ScrDyn *)opts;
   ScrNetSocket *r = scr_net_sock_connect_dyn(s, &arg, 1);
@@ -4018,6 +4041,8 @@ static void scr_net_server_settle(ScrNetServer *srv) {
  * from the question: a 'close' that was already due beats every socket
  * event the pass is about to deliver, which is exactly what a next tick
  * buys Node. */
+static void scr_net_idle_step(int q);
+
 static void scr_net_settle_due_after(size_t floor) {
   for (;;) {
     ScrNetServer *due = NULL;
@@ -4028,6 +4053,12 @@ static void scr_net_settle_due_after(size_t floor) {
       }
     }
     if (due == NULL) return;
+    /* An idle event queued before this server came due runs first (nextTick order). */
+    if (scr_idle_q[0] != NULL && scr_idle_q[0]->clk < due->due_clk) {
+      scr_net_idle_step(0);
+      if (scr_exc_pending()) return;
+      continue;
+    }
     scr_net_server_retain(due);
     scr_net_server_settle(due);
     scr_net_server_release(due);
@@ -4058,6 +4089,8 @@ static void scr_net_settle_due_servers(void) { scr_net_settle_due_after(0); }
  * poller drain, so without the epoch test the server's 'close' would
  * overtake a socket 'close' that was already queued -- an ordering Node
  * never produces. The epoch is what keeps the two apart. */
+static void scr_net_idle_step(int q);
+
 static void scr_net_settle_due_head(void) {
   size_t oldest = (size_t)-1;
   for (ScrNetSocket *s = scr_net_socks; s; s = s->next) {
@@ -4074,6 +4107,13 @@ static void scr_net_settle_due_head(void) {
       }
     }
     if (due == NULL) return;
+    /* An idle event queued BEFORE this server came due is a nextTick hop
+     * that Node runs first: run that event, then look again. */
+    if (scr_idle_q[0] != NULL && scr_idle_q[0]->clk < due->due_clk) {
+      scr_net_idle_step(0);
+      if (scr_exc_pending()) return;
+      continue;
+    }
     scr_net_server_retain(due);
     scr_net_server_settle(due);
     scr_net_server_release(due);
@@ -4282,9 +4322,8 @@ static bool scr_net_idle_pending(void) { return scr_idle_q[0] != NULL || scr_idl
 
 /* Drain the idle queues: the destroy hop first, then the failed-write hop,
  * each in call order. */
-static void scr_net_idle_drain(void) {
-  while (scr_net_idle_pending() && !scr_exc_pending()) {
-    const int q = scr_idle_q[0] != NULL ? 0 : 1;
+static void scr_net_idle_step(int q) {
+  {
     ScrIdleEv *ev = scr_idle_q[q];
     scr_idle_q[q] = ev->next;
     if (scr_idle_q[q] == NULL) scr_idle_qt[q] = NULL;
@@ -4293,7 +4332,7 @@ static void scr_net_idle_drain(void) {
       free(ev);
       if (!fs->close_emitted) scr_net_fire0_this(&fs->finish_ls, fs, SCR_DYNH_NET_SOCKET);
       scr_net_sock_release(fs);
-      continue;
+      return;
     }
     if (ev->kind == SCR_IDLE_SERVER) {
       ScrNetServer *srv = ev->srv;
@@ -4301,7 +4340,7 @@ static void scr_net_idle_drain(void) {
       srv->srv_queued = false;
       if (!srv->close_emitted) scr_net_server_settle(srv);
       scr_net_server_release(srv);
-      continue;
+      return;
     }
     ScrNetSocket *s = ev->s;
     const bool err = ev->kind == SCR_IDLE_WRITE;
@@ -4322,6 +4361,12 @@ static void scr_net_idle_drain(void) {
     }
     if (!scr_exc_pending() && !s->close_emitted) scr_net_sock_emit_close(s, scr_net_due_seq);
     scr_net_sock_release(s);
+  }
+}
+
+static void scr_net_idle_drain(void) {
+  while (scr_net_idle_pending() && !scr_exc_pending()) {
+    scr_net_idle_step(scr_idle_q[0] != NULL ? 0 : 1);
   }
 }
 
