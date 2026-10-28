@@ -8,7 +8,7 @@ import { protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf } from "./cjs-live-exports.js";
@@ -8292,13 +8292,31 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         const receiver = L.lowerExpr(expr.expression);
         return { kind: "libCall", fn: "stats.size", args: [receiver], type: F64, loc: locOf(expr) };
       }
+      if (name === "mode") {
+        const receiver = L.lowerExpr(expr.expression);
+        return { kind: "libCall", fn: "stats.mode", args: [receiver], type: F64, loc: locOf(expr) };
+      }
+      // The rest of Node's Stats fields: one field table (scr_lib.c's
+      // scrStatsField); the time members are Date values, built from the
+      // rounded millisecond field (Node's dateFromMs).
+      const statsField = STATS_FIELD_INDEX.get(name);
+      if (statsField !== undefined) {
+        const receiver = L.lowerExpr(expr.expression);
+        if (statsField >= 14) {
+          // The Date members: the shared, cached Date (scr_stats_date_of), 1..4.
+          const which: IrExpr = { kind: "numLit", value: statsField - 13, type: F64, loc: locOf(expr) };
+          return { kind: "libCall", fn: "stats.date", args: [receiver, which], type: DATE_T, loc: locOf(expr) };
+        }
+        const idx: IrExpr = { kind: "numLit", value: statsField, type: F64, loc: locOf(expr) };
+        return { kind: "libCall", fn: "stats.field", args: [receiver, idx], type: F64, loc: locOf(expr) };
+      }
       if (name === "isFile" || name === "isDirectory") {
         L.unsupported("SC1090", expr, `Stats methods as values (call '${name}' directly)`);
       }
       L.noLowering(
         `Stats.${name}`,
         expr,
-        "isFile(), isDirectory(), and size are the supported Stats members",
+        "every fs.Stats field and method is supported (see the Stats table)",
         L.checker.getSymbolAtLocation(expr.name),
       );
     }

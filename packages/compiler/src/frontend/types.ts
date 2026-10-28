@@ -4196,13 +4196,18 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // global-namespace interface real code writes in its own signatures —
   // prefixStream's `output` param). The representation is the raw fd
   // scalar; the lowered surface is write(string).
+  // `NodeJS.WriteStream` is the global-namespace spelling @types/node uses
+  // for process.stdout/stderr's base (`interface WriteStream extends
+  // tty.WriteStream {}` inside `namespace NodeJS`): process.stderr's
+  // declared type is `NodeJS.WriteStream & { fd: 2 }`, so a binding that
+  // holds it (`var w = process.stderr`) needs this spelling too.
   if (
     (psym?.name === "WriteStream" &&
       checker.declarationsOf(psym).some(
         (d) =>
           (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
           ctx.isStdlibFile(d.getSourceFile()) &&
-          isDeclaredInAmbientModule(d, "tty"),
+          (isDeclaredInAmbientModule(d, "tty") || isDeclaredInAmbientNamespace(d, "NodeJS")),
       )) ||
     (psym?.name === "WritableStream" &&
       checker.declarationsOf(psym).some(

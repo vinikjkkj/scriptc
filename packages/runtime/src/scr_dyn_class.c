@@ -579,6 +579,10 @@ static bool ee_rooted_instance(const ScrDyn *v) {
 
 ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
   ScrDyn *keys = scr_dyn_obj_keys(v);
+  /* A native handle's inherited enumerable members (a Stats box's prototype, listed by its unit). */
+  if (keys != NULL && v->kind == SCR_DYN_HANDLE && scr_handle_forin_hook != NULL && keys->kind == SCR_DYN_ARR) {
+    scr_handle_forin_hook(v, keys);
+  }
   if (keys == NULL || !ee_rooted_instance(v)) return keys;
   for (size_t i = 3; i < SCR_EE_PROTO_KEY_COUNT; i++) { /* [0..2] are the emitter's own keys, listed already */
     const char *name = SCR_EE_PROTO_KEYS[i];
@@ -594,6 +598,11 @@ ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
  * Node visits them even when undefined), a visible member, or an inherited EventEmitter.prototype
  * key that no member shadows. */
 bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key) {
+  /* A native handle's inherited member (no own shadow): visited without a value check. */
+  if (v->kind == SCR_DYN_HANDLE && key != NULL && scr_handle_inherited_has_hook != NULL &&
+      scr_handle_inherited_has_hook(v, key->data, key->len)) {
+    return true;
+  }
   if (!ee_rooted_instance(v) || key == NULL) return false;
   const char *s = key->data;
   const size_t n = key->len;

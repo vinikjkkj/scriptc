@@ -427,3 +427,18 @@ void scr_jb_put_date(ScrJsonBuf *b, ScrDate *d) {
   scr_jb_putc(b, '"');
   scr_str_release(s);
 }
+
+/* fs.Stats' Date members (which: 1 atime, 2 mtime, 3 ctime, 4 birthtime). Node's
+ * getter caches the Date on the first read, so every later read — static or boxed
+ * — answers the same object; the cache is the snapshot's (scr_lib.c). Built from the
+ * rounded millisecond field (Node's dateFromMs). +1. */
+ScrDate *scr_stats_date_of(ScrStats *s, double idx) {
+  const int which = (int)idx; /* 1..4: atime, mtime, ctime, birthtime (the static index is a number) */
+  ScrDate *d = (ScrDate *)scr_stats_cache_get(s, which);
+  if (d == NULL) {
+    /* atime..birthtime are the raw ms fields 10..13 (index 9 + which), rounded. */
+    d = scr_date_new(floor(scr_stats_field(s, 9.0 + (double)which) + 0.5));
+    scr_stats_cache_store(s, which, d, &scr_date_release_v);
+  }
+  return (ScrDate *)scr_date_retain_v(d);
+}

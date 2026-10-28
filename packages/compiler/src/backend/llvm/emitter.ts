@@ -590,6 +590,10 @@ const LIB_FN_SYMS: Record<string, string> = {
   "stats.isSymbolicLink": "scr_stats_is_symlink",
   "stats.size": "scr_stats_size",
   "stats.mtimeMs": "scr_stats_mtime_ms",
+  "stats.mode": "scr_stats_mode",
+  "stats.field": "scr_stats_field",
+  "stats.date": "scr_stats_date_of",
+  "stats.isType": "scr_stats_is_type",
   "text.decode": "scr_text_decode",
   "text.encoder": "scr_text_encoder_value",
   "text.decoder": "scr_text_decoder_value",
@@ -1411,6 +1415,7 @@ const STREAM_CANONICAL_CBS: Record<string, ("r" | "w" | "f" | "d" | "t" | "l")[]
  * dispatch so generic and special shapes share one table. */
 const USES_TIMERS_LIB_FNS = new Set<string>([
   "dns.lookup",
+  "fs.statCb",
   "readable.new", "writable.new", "duplex.new", "transform.new", "passthrough.new",
   "readable.init", "writable.init", "duplex.init", "transform.init", "passthrough.init",
   "readable.newDyn", "writable.newDyn", "duplex.newDyn", "transform.newDyn", "passthrough.newDyn",
@@ -5073,7 +5078,8 @@ class LlEmitter {
     }
     const t = this.currentReturnType;
     if (t.kind === "void") this.B.terminate("ret void");
-    else if (t.kind === "f64") this.B.terminate(`ret double ${f64Lit(0)}`);
+    // procStream is the scalar fd double (the same as f64 here), not a pointer.
+    else if (t.kind === "f64" || t.kind === "procStream") this.B.terminate(`ret double ${f64Lit(0)}`);
     else if (t.kind === "bool") this.B.terminate("ret i1 false");
     else this.B.terminate("ret ptr null");
   }
@@ -13551,6 +13557,77 @@ class LlEmitter {
     return sym;
   }
 
+  /** The fs.stat callback adapter (emit-async.ts's fsStatThunkFor, LLVM
+   * twin): the runtime calls it with the BORROWED error (NULL on success)
+   * and stats (NULL on failure). It builds the callback's `Error | null`
+   * union (a +1 retained error, or the union's static null) and passes the
+   * stats +1; the callee owns its arguments. A one-parameter callback gets
+   * no stats; a zero-parameter one only the closure. */
+  private fsStatFnFor(cbT: IrType): string {
+    if (cbT.kind !== "func") throw new Error("llvm emitter bug: fs.stat callback not a func");
+    const nparams = cbT.params.length;
+    const errT = nparams >= 1 ? cbT.params[0] : undefined;
+    const key = `fsstat:${nparams}:${errT?.kind === "union" ? errT.unionId : "-"}`;
+    let sym = this.resolveThunks.get(key);
+    if (sym) return sym;
+    sym = `sc_fsstat_${this.resolveThunks.size}`;
+    this.resolveThunks.set(key, sym);
+    this.declare(`declare ptr @scr_error_retain_v(ptr)`);
+    this.declare(`declare void @scr_error_release_v(ptr)`);
+    this.declare(`declare ptr @scr_stats_retain(ptr)`);
+    const d: string[] = [
+      `define internal void @${sym}(ptr %cb, ptr %err, ptr %st) ${FN_ATTRS} { ; fs.stat callback adapter`,
+      `entry:`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fn = load ptr, ptr %fnp`,
+    ];
+    if (nparams === 0) {
+      d.push(`  call void %fn(ptr %cb)`, `  ret void`, `}`, ``);
+      this.resolveThunkDefs.push(...d);
+      return sym;
+    }
+    if (errT?.kind !== "union") throw new Error("llvm emitter bug: fs.stat err param not a union");
+    const def = this.unionsById.get(errT.unionId);
+    const errTag = def ? def.arms.findIndex((a) => a.kind === "object") : -1;
+    const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
+    if (errTag < 0 || nullTag < 0) throw new Error("llvm emitter bug: fs.stat err union lacks its arms");
+    this.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
+    d.push(
+      `  %hasErr = icmp ne ptr %err, null`,
+      `  br i1 %hasErr, label %mkerr, label %nullarm`,
+      `mkerr:`,
+      `  %er = call ptr @scr_error_retain_v(ptr %err)`,
+      `  %uerr = call ptr @scr_union_new_ref(i32 ${errTag}, ptr %er, ptr @scr_error_retain_v, ptr @scr_error_release_v, ptr null)`,
+      `  br label %haveu`,
+      `nullarm:`,
+      `  br label %haveu`,
+      `haveu:`,
+      `  %u = phi ptr [ %uerr, %mkerr ], [ ${this.unitInstanceRef(errT.unionId, nullTag)}, %nullarm ]`,
+    );
+    if (nparams === 1) {
+      d.push(`  call void %fn(ptr %cb, ptr %u)`, `  ret void`, `}`, ``);
+      this.resolveThunkDefs.push(...d);
+      return sym;
+    }
+    d.push(
+      `  %hasSt = icmp ne ptr %st, null`,
+      `  br i1 %hasSt, label %mkst, label %nostat`,
+      `mkst:`,
+      `  %sr = call ptr @scr_stats_retain(ptr %st)`,
+      `  br label %havest`,
+      `nostat:`,
+      `  br label %havest`,
+      `havest:`,
+      `  %sv = phi ptr [ %sr, %mkst ], [ null, %nostat ]`,
+      `  call void %fn(ptr %cb, ptr %u, ptr %sv)`,
+      `  ret void`,
+      `}`,
+      ``,
+    );
+    this.resolveThunkDefs.push(...d);
+    return sym;
+  }
+
   /** The stream completion-callback closure fn for one done func type —
    * emit-async.ts's streamDoneFnFor: the `callback` a user's write/final/
    * destroy/transform/flush receives. The closure's one capture box holds
@@ -15925,6 +16002,18 @@ class LlEmitter {
       const out = this.own({ name: dummy, type: e.type });
       this.emitPendingCheck();
       return out;
+    }
+    if (e.fn === "fs.statCb") {
+      // fs.stat(path, cb): the stat runs now inside the runtime; the typed
+      // callback (moved in) fires on the next loop turn through this
+      // program's adapter (fsStatFnFor), the C lane's fs.statCb twin.
+      const path = this.emitExpr(e.args[0]!);
+      const cb = this.emitExpr(e.args[1]!);
+      this.moveTemp(cb);
+      const adapter = this.fsStatFnFor(e.args[1]!.type);
+      this.declare(`declare void @scr_fs_stat_cb(ptr, ptr, ptr)`);
+      B.line(`call void @scr_fs_stat_cb(ptr ${path.name}, ptr ${cb.name}, ptr @${adapter})`);
+      return { name: "", type: e.type };
     }
     if (e.fn === "error.nodeThrow") {
       // The compiler-resolved Node-parity throw (always throws — the

@@ -3,7 +3,7 @@
  * payloads onto the runtime's promise and child-process machinery. */
 import { appendLines, type CEmitter } from "./emitter.js";
 import { emitGenCoroSpawn } from "./emit-gen-coro.js";
-import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleChildDataThunk, mangleChildExitThunk, mangleCloseBindThunk, mangleCloseOverrideWrap, mangleConnectSockThunk, mangleDgramMsgThunk, mangleDnsLookupThunk, mangleField, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRaceThunk, mangleRawParam, mangleNetLookupAnswerThunk, mangleEmitterInvokeThunk, mangleStreamCbThunk, mangleStreamDoneFn, mangleRecordNew, mangleRecordRelease, mangleRecordStruct, mangleResolveThunk, mangleSniAnswerThunk, mangleTrampoline } from "../mangle.js";
+import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleChildDataThunk, mangleChildExitThunk, mangleCloseBindThunk, mangleCloseOverrideWrap, mangleConnectSockThunk, mangleDgramMsgThunk, mangleDnsLookupThunk, mangleFsStatThunk, mangleField, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRaceThunk, mangleRawParam, mangleNetLookupAnswerThunk, mangleEmitterInvokeThunk, mangleStreamCbThunk, mangleStreamDoneFn, mangleRecordNew, mangleRecordRelease, mangleRecordStruct, mangleResolveThunk, mangleSniAnswerThunk, mangleTrampoline } from "../mangle.js";
 import { cDecl, cType, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { IrFunction, IrType, isDynPackFunc, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
@@ -530,6 +530,52 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
    * argument (tags are program data — the frontend pinned the union) and
    * calls the listener with as many arguments as it declared, each owned
    * per the universal convention. */
+  /** The fs.stat callback adapter: the runtime calls it with the borrowed
+   * error (null on success) and stats (null on failure) of the pending
+   * record; it builds the callback's `Error | null` union (a +1 retained
+   * error, or the union's static null) and passes the stats +1, the
+   * callee owning its arguments. A one-parameter callback gets no stats. */
+  export function fsStatThunkFor(E: CEmitter, cbT: IrType): string {
+    if (cbT.kind !== "func") throw new Error("emitter bug: fs.stat callback not a func");
+    const nparams = cbT.params.length;
+    const errT = nparams >= 1 ? cbT.params[0]! : undefined;
+    const key = `${nparams}/${errT?.kind === "union" ? errT.unionId : "-"}`;
+    let sym = E.fsStatThunks.get(key);
+    if (!sym) {
+      sym = mangleFsStatThunk(E.fsStatThunks.size);
+      E.fsStatThunks.set(key, sym);
+      const sig = `${E.link}void ${sym}(ScrClosure *sc_cb, ScrError *sc_err, ScrStats *sc_st);`;
+      E.walkerProtos.push(sig);
+      if (nparams === 0) {
+        E.walkerDefs.push(
+          `${E.link}void ${sym}(ScrClosure *sc_cb, ScrError *sc_err, ScrStats *sc_st) {`,
+          `  (void)sc_err; (void)sc_st;`,
+          `  ((void (*)(ScrClosure *))sc_cb->fn)(sc_cb);`,
+          `}`,
+        );
+      } else {
+        if (errT?.kind !== "union") throw new Error("emitter bug: fs.stat err param not a union");
+        const def = E.unionsById.get(errT.unionId);
+        const errTag = def ? def.arms.findIndex((a) => a.kind === "object") : -1;
+        const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
+        if (errTag < 0 || nullTag < 0) {
+          throw new Error("emitter bug: fs.stat err union lacks its arms");
+        }
+        const statsArg = nparams >= 2 ? ", sc_st ? scr_stats_retain(sc_st) : NULL" : "";
+        const callTy = nparams >= 2 ? "ScrClosure *, ScrUnion *, ScrStats *" : "ScrClosure *, ScrUnion *";
+        E.walkerDefs.push(
+          `${E.link}void ${sym}(ScrClosure *sc_cb, ScrError *sc_err, ScrStats *sc_st) {`,
+          `  ScrUnion *sc_u = sc_err`,
+          `      ? scr_union_new_ref(${errTag}, scr_error_retain_v(sc_err), &scr_error_retain_v, &scr_error_release_v, NULL)`,
+          `      : ${E.unitInstanceRef(errT.unionId, nullTag)};`,
+          `  ((void (*)(${callTy}))sc_cb->fn)(sc_cb, sc_u${statsArg});`,
+          `}`,
+        );
+      }
+    }
+    return sym;
+  }
+
   export function dnsLookupThunkFor(E: CEmitter, cbT: IrType): string {
     if (cbT.kind !== "func") throw new Error("emitter bug: dns.lookup callback not a func");
     const nparams = cbT.params.length;

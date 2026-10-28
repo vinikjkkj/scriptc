@@ -415,14 +415,26 @@ bool scr_error_ext_get(const ScrError *e, double *err_no, const ScrStr **syscall
 }
 
 /* The fs/uv throw: message, `code`, and the errno/syscall/path/dest set. */
-void scr_throw_errno_error(int err_no, const char *code, const char *message, size_t len, const char *syscall,
-                           const char *path, const char *dest) {
+/* The errno error as a VALUE (+1): the fs callback forms deliver it, the
+ * throwing shape below wraps it. */
+ScrError *scr_errno_error_build(int err_no, const char *code, const char *message, size_t len, const char *syscall,
+                                const char *path, const char *dest) {
   ScrStr *msg = scr_str_new(message, len);
   ScrError *e = scr_error_new(SCR_ERR_ERROR, msg);
   scr_str_release(msg);
   scr_error_set_code(e, code);
   scr_error_set_ext(e, err_no, syscall, path, dest);
+  return e;
+}
+
+/* Throws a built error value (takes its +1). */
+void scr_throw_error_value(ScrError *e) {
   scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_traced ? &scr_error_trace : NULL);
+}
+
+void scr_throw_errno_error(int err_no, const char *code, const char *message, size_t len, const char *syscall,
+                           const char *path, const char *dest) {
+  scr_throw_error_value(scr_errno_error_build(err_no, code, message, len, syscall, path, dest));
 }
 
 /* An error whose `errno` is a value of its own library, not a C errno: zlib's
