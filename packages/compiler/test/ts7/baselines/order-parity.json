@@ -4498,7 +4498,13 @@
     "<repo>/tests/corpus/15206-webcrypto-hash-agreement.cjs"
    ],
    "diags": []
+  },  "<repo>/tests/corpus/15207-webcrypto-sha3-nist-vectors.cjs": {
+    "order": [
+      "<repo>/tests/corpus/15207-webcrypto-sha3-nist-vectors.cjs"
+    ],
+    "diags": []
   },
+
   "<repo>/tests/corpus/1521-fs-lstat-lock.ts": {
    "order": [
     "<repo>/tests/corpus/1521-fs-lstat-lock.ts"
