@@ -11379,11 +11379,14 @@ void scr_dgram_on_connect(ScrDgramSocket *s, ScrClosure *cb /*moves*/, bool once
  * two-param rinfo shape is emitted per record shape). */
 void scr_dgram_msg_thunk0(ScrClosure *cb, ScrBytes *msg, ScrStr *addr, ScrStr *family, double port, double size);
 void scr_dgram_msg_thunk1(ScrClosure *cb, ScrBytes *msg, ScrStr *addr, ScrStr *family, double port, double size);
-/* dns.lookup: hostname borrowed, family is 4 (AF_INET pinned by the
- * frontend), the callback moves. getaddrinfo runs NOW (blocking —
- * SEMANTICS.md); delivery defers to the next loop turn. */
+/* dns.lookup: hostname borrowed, family 0 (AF_UNSPEC, the two-argument
+ * form), 4 or 6, the callback moves. IP literals answer without the
+ * resolver; a name runs getaddrinfo NOW (blocking — SEMANTICS.md).
+ * Delivery defers to the next loop turn; literal answers queue first. */
 void scr_dns_lookup(ScrStr *hostname /*borrowed*/, double family, ScrClosure *cb /*moves*/, ScrDnsLookupFn fn);
 void scr_dns_thunk0(ScrClosure *cb, ScrStr *errmsg, ScrStr *addr, double family);
+/* The dns.lookup failure Error: message borrowed, code read from it. +1. */
+ScrError *scr_dns_error_new(ScrStr *msg /*borrowed*/);
 void scr_dgram_install(void);
 #ifdef SCR_RC_AUDIT
 long scr_dgram_live_count(void);

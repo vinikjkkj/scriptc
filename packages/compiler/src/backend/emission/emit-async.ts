@@ -556,7 +556,7 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
         `${E.link}void ${sym}(ScrClosure *sc_cb, ScrStr *sc_err, ScrStr *sc_addr, double sc_family) {`,
         `  (void)sc_addr; (void)sc_family;`,
         `  ScrUnion *sc_u = sc_err`,
-        `      ? scr_union_new_ref(${errTag}, scr_error_new(0, sc_err), &scr_error_retain_v, &scr_error_release_v, NULL)`,
+        `      ? scr_union_new_ref(${errTag}, scr_dns_error_new(sc_err), &scr_error_retain_v, &scr_error_release_v, NULL)`,
         `      : ${E.unitInstanceRef(errT.unionId, nullTag)};`,
         `  ((void (*)(${callSig}))sc_cb->fn)(${callArgs});`,
         `}`,

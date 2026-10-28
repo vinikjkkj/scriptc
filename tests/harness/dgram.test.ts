@@ -85,15 +85,12 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<Pr
  * Node byte for byte on both.
  *
  * This list is the tier boundary, written down. It was ALL NINE cases
- * until node:dgram's sixteen missing lib functions were emitted, at which
- * point every `libCall:dgram.*` refusal disappeared and only node:dns's
- * one function was left — so a case leaving this list is progress and a
- * case JOINING it is a regression, and the assertions below are written
- * to fail in both directions rather than to skip quietly. */
-const LLVM_REFUSALS: Record<string, string> = {
-  "dns-lookup": "libCall:dns.lookup",
-  "udp-state-errors": "libCall:dns.lookup",
-};
+ * until node:dgram's sixteen missing lib functions were emitted, then
+ * node:dns.lookup was emitted too (the callback adapter) and the list is
+ * empty: every case builds on both backends. A case JOINING it is a
+ * regression, and the assertions below are written to fail in both
+ * directions rather than to skip quietly. */
+const LLVM_REFUSALS: Record<string, string> = {};
 
 interface Built {
   /** The C binary: the reference lane, always present. */

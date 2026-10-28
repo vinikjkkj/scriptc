@@ -3327,11 +3327,16 @@ declare module "node:dgram" {
 
 /* node:dns — the lookup slice (scr_dgram.c hosts it; getaddrinfo runs AT
  * CALL TIME and the callback defers to the next loop turn — SEMANTICS.md
- * documents the blocking divergence). Only the { family: 4 } options
- * form lowers; failures deliver Node's error shape ("getaddrinfo
- * ENOTFOUND <hostname>") as the callback's Error argument, with "" for
- * the address where Node passes undefined. */
+ * documents the blocking divergence). The two-argument form
+ * lookup(hostname, callback) lowers with Node's defaults (family 0); the
+ * { family: 4 } options form lowers too. Failures deliver Node's error
+ * shape ("getaddrinfo ENOTFOUND <hostname>") as the callback's Error
+ * argument, with "" for the address where Node passes undefined. */
 declare module "dns" {
+  export function lookup(
+    hostname: string,
+    callback: (err: Error | null, address: string, family: number) => void,
+  ): void;
   export function lookup(
     hostname: string,
     /* The options-record stance (see http.RequestOptions): family is the

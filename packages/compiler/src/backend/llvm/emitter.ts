@@ -1410,6 +1410,7 @@ const STREAM_CANONICAL_CBS: Record<string, ("r" | "w" | "f" | "d" | "t" | "l")[]
  * the stream/emitter slice of emit-exprs.ts's markings, applied before
  * dispatch so generic and special shapes share one table. */
 const USES_TIMERS_LIB_FNS = new Set<string>([
+  "dns.lookup",
   "readable.new", "writable.new", "duplex.new", "transform.new", "passthrough.new",
   "readable.init", "writable.init", "duplex.init", "transform.init", "passthrough.init",
   "readable.newDyn", "writable.newDyn", "duplex.newDyn", "transform.newDyn", "passthrough.newDyn",
@@ -11998,6 +11999,56 @@ class LlEmitter {
     }
   }
 
+  /** The per-shape dns.lookup callback adapter — emit-async.ts's
+   * dnsLookupThunkFor in IR. The runtime invokes adapter(cb, errmsg-or-NULL,
+   * addr, family) with everything borrowed; the adapter builds the
+   * `Error | null` first argument (the tags are program data, pinned by the
+   * frontend) and calls the listener with as many arguments as it declared,
+   * each owned per the closure ABI: the address is retained in, the union
+   * takes the Error's +1. Interned per (union id, parameter count). */
+  private dnsLookupThunkFor(cbT: IrType & { kind: "func" }): string {
+    const errT = cbT.params[0]!;
+    if (errT.kind !== "union") throw new Error("llvm emitter bug: dns.lookup err param not a union");
+    const nparams = cbT.params.length;
+    const key = `dns:${errT.unionId}:${nparams}`;
+    const seen = this.resolveThunks.get(key);
+    if (seen) return seen;
+    const sym = `sc_dnsl_${this.resolveThunks.size}`;
+    this.resolveThunks.set(key, sym);
+    const def = this.unionsById.get(errT.unionId);
+    const errTag = def ? def.arms.findIndex((a) => a.kind === "object") : -1;
+    const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
+    if (errTag < 0 || nullTag < 0) throw new Error("llvm emitter bug: dns.lookup err union lacks its arms");
+    this.declare(`declare ptr @scr_dns_error_new(ptr)`);
+    this.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
+    this.declare(`declare ptr @scr_error_retain_v(ptr)`);
+    this.declare(`declare void @scr_error_release_v(ptr)`);
+    const unitRef = this.unitInstanceRef(errT.unionId, nullTag);
+    const args = ["ptr %cb", "ptr %uu", ...(nparams >= 2 ? ["ptr %a"] : []), ...(nparams >= 3 ? ["double %fam"] : [])];
+    this.resolveThunkDefs.push(
+      `define internal void @${sym}(ptr %cb, ptr %err, ptr %addr, double %fam) ${FN_ATTRS} { ; dns.lookup adapter (${nparams} params)`,
+      `entry:`,
+      `  %isnull = icmp eq ptr %err, null`,
+      `  br i1 %isnull, label %nul, label %obj`,
+      `obj:`,
+      `  %e = call ptr @scr_dns_error_new(ptr %err)`,
+      `  %u = call ptr @scr_union_new_ref(i32 ${errTag}, ptr %e, ptr @scr_error_retain_v, ptr @scr_error_release_v, ptr null)`,
+      `  br label %go`,
+      `nul:`,
+      `  br label %go`,
+      `go:`,
+      `  %uu = phi ptr [ %u, %obj ], [ ${unitRef}, %nul ]`,
+      ...(nparams >= 2 ? [`  %a = call ptr @scr_str_retain_v(ptr %addr)`] : []),
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fn = load ptr, ptr %fnp`,
+      `  call void %fn(${args.join(", ")})`,
+      `  ret void`,
+      `}`,
+      ``,
+    );
+    return sym;
+  }
+
   /** The per-shape `dgram` message adapter for the TWO-parameter
    * `(msg, rinfo)` listener — emit-async.ts's dgramMsgThunkFor, in IR.
    *
@@ -17925,6 +17976,23 @@ class LlEmitter {
       B.line(
         `call void @scr_dgram_on_error(ptr ${sock.name}, ptr ${cb.name}, ptr @${adapter}, i1 ${once.name})`,
       );
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "dns.lookup") {
+      // getaddrinfo (or the IP-literal fast path) runs NOW; the callback
+      // moves in and fires at the next loop turn through its per-shape
+      // adapter. The C twin is emit-exprs.ts's "dns.lookup" case: the same
+      // three runtime operands, the same moved closure.
+      const cbT = e.args[2]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: dns.lookup callback not a func");
+      const host = this.emitExpr(e.args[0]!);
+      const fam = this.emitExpr(e.args[1]!);
+      const cb = this.emitExpr(e.args[2]!);
+      this.moveTemp(cb);
+      const adapter = cbT.params.length === 0 ? "scr_dns_thunk0" : this.dnsLookupThunkFor(cbT);
+      this.declare(`declare void @scr_dns_lookup(ptr, double, ptr, ptr)`);
+      if (cbT.params.length === 0) this.declare(`declare void @scr_dns_thunk0(ptr, ptr, ptr, double)`);
+      B.line(`call void @scr_dns_lookup(ptr ${host.name}, double ${fam.name}, ptr ${cb.name}, ptr @${adapter})`);
       return { name: "", type: e.type };
     }
     if (MAY_THROW_LIB_FNS.has(e.fn) && LIB_FN_SYMS[e.fn] === undefined) {
