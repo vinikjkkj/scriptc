@@ -4046,8 +4046,8 @@
   },
   "<repo>/tests/corpus/15061-cjs-require-cycle-operand/main.js": {
    "order": [
-    "<repo>/tests/corpus/15061-cjs-require-cycle-operand/cyc1.js",
     "<repo>/tests/corpus/15061-cjs-require-cycle-operand/cyc2.js",
+    "<repo>/tests/corpus/15061-cjs-require-cycle-operand/cyc1.js",
     "<repo>/tests/corpus/15061-cjs-require-cycle-operand/main.js"
    ],
    "diags": []
