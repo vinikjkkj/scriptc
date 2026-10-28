@@ -10,7 +10,7 @@ import type { Lowerer } from "./lowerer.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
 import { moduleInitAlwaysThrows, relativeRequireRefusal } from "../require-throws.js";
 import { refusalMessage } from "./lower-requirestack.js";
-import { canonicalBuiltinModule, cjsEnumerableAccessorNames, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
+import { canonicalBuiltinModule, cjsEnumerableAccessorNames, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf } from "../program.js";
 import { isRequireBindingIdent, moduleNsSourceFileOf } from "./lower-namespaces.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
@@ -47,7 +47,7 @@ import { dynBuiltinFnValueOf } from "./lower-fnvalue.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
 import { lowerDateLocaleFormat } from "./lower-numfmt.js";
 import { STATS_TYPE_INDEX, KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
-import { jsonModuleOfRequire } from "./lower-modules.js";
+import { FN_CTOR_EXPORT_GLOBALS, jsonModuleOfRequire } from "./lower-modules.js";
 import { requireDepValueOf } from "./lower-island.js";
 
 
@@ -553,6 +553,8 @@ import { requireDepValueOf } from "./lower-island.js";
       {
         const edge = canonicalBuiltinModule(spec) === null ? L.requireDepOf(spec, call) : null;
         if (edge !== null) {
+          const fc = fnCtorExportValueOf(L, edge, spec, call, loc);
+          if (fc !== null) return fc;
           const v = requireDepValueOf(L, edge, loc);
           if (v !== null) return v;
         }
@@ -577,6 +579,27 @@ import { requireDepValueOf } from "./lower-island.js";
     const mapped = L.mapTypeOf(L.typeOf(call));
     if (mapped !== null && mapped.kind !== "dyn") return null;
     return runtimeSpecifierRequire(L, call);
+  }
+
+/** `require(lit)` of a compiled module whose whole export is
+   * `module.exports = new Ctor(...)` (FN_CTOR_EXPORT_GLOBALS, lower-modules):
+   * the value is that export global, the same storage the statement-level
+   * `const m = require(lit)` alias reads. The module's init runs first, at
+   * this evaluation point. Null for any other export shape (the caller's
+   * namespace snapshot then answers, or refuses). */
+  function fnCtorExportValueOf(L: Lowerer, dep: ts.SourceFile, spec: string, call: ts.CallExpression, loc: IrExpr["loc"]): IrExpr | null {
+    for (const st of dep.statements) {
+      if (!ts.isExpressionStatement(st)) continue;
+      let e: ts.Expression = st.expression;
+      while (ts.isParenthesizedExpression(e)) e = e.expression;
+      if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken || !isModuleExportsAccess(e.left)) continue;
+      const g = L.globalsByDeclNode.get(e);
+      if (g === undefined || !FN_CTOR_EXPORT_GLOBALS.has(g)) return null;
+      const init = L.requireInitStmt(spec, call);
+      if (init === null) return null;
+      return { kind: "seqExpr", stmts: [init], result: { kind: "varRef", localId: g.id, type: g.type, loc }, type: g.type, loc };
+    }
+    return null;
   }
 
 /** The run-time-specifier arm: a `require(x)` whose specifier is not a
