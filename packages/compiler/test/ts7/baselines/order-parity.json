@@ -3791,6 +3791,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14656-aggregate-error-refused-everywhere.ts": {
+   "order": [
+    "<repo>/tests/corpus/14656-aggregate-error-refused-everywhere.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1466-child-containers.ts": {
    "order": [
     "<repo>/tests/corpus/1466-child-containers.ts"
