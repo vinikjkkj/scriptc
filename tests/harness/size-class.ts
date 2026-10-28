@@ -2410,7 +2410,10 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
  * the per-socket first-dial test plus the transport's after-connect hook (scr_net.c, the TLS session event). The wider
  * ScrDynEntry (value_borrowed, a non-owning member for the certificate's self-link) is part of the layout, not extra code.
  * Inherent to the defect fixes, so the figure is re-recorded rather than gated. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_782 : null;
+/* 2026-10-28 (aggregate): RE-RECORDED 133_782 -> 133_814 (+32). AggregateError is a runtime error kind (SCR_ERR_AGGREGATE): its
+ * name-table entry, its ScrVt, and the kind's prototype rule are in the always-linked scr_error.c and scr_json.c. Inherent to the
+ * kind, measured on the same zig 0.16.0 x86_64-windows-gnu lane, --backend c. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_814 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
