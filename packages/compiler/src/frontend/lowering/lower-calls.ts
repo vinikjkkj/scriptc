@@ -2,6 +2,7 @@
  * argument completion (optional/default/rest, explicit-undefined ≡ omission),
  * function/lambda lowering and signature collection, and monomorphizing
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
+import { lowerAbsentRequireCall } from "./lower-require-absent.js";
 import * as ts from "../ts7/adapter.js";
 import { defineAccessorCallOf, liveBagRef, liveDefinePropOf, liveDepOfBinding, liveExportsOf } from "./cjs-live-exports.js";
 import { engineFunctionApply } from "./lower-engine-fn.js";
@@ -4321,6 +4322,13 @@ function lowerDynCallArgs(L: Lowerer, args: ts.NodeArray<ts.Expression>): IrExpr
 
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
+    // `X(...)` where X is a member Node's own resolution of the required module
+    // does not define: Node evaluates the arguments and throws "X is not a
+    // function" (lower-require-absent.ts).
+    {
+      const absent = lowerAbsentRequireCall(L, expr);
+      if (absent !== null) return absent;
+    }
     // `R.__defineSetter__(k, f)` / `R.__defineGetter__(k, f)` on a live export object or a dyn receiver: an
     // enumerable, configurable accessor (cjs-live-exports.ts).
     {
