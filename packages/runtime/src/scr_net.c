@@ -2097,10 +2097,19 @@ static void scr_net_sock_dial_peer(ScrNetSocket *s) {
     s->connecting = true;
     scr_net_sock_update_write(s);
   } else {
+    /* A refusal can answer AT ONCE instead of EINPROGRESS (Windows loopback
+     * does; Linux answers EINPROGRESS and takes connect_done_err). The
+     * single-address Error must be the same object on both: errno, code,
+     * syscall, address, port, as Node's createConnectionError builds it. */
+    int err = errno;
     char msg[128];
-    snprintf(msg, sizeof msg, "connect %s %s:%d", scr_net_errname(errno), s->peer_ip,
+    snprintf(msg, sizeof msg, "connect %s %s:%d", scr_net_errname(err), s->peer_ip,
              s->peer_port);
     s->pending_err = scr_str_new(msg, strlen(msg));
+    scr_net_dial_log(s, err, s->peer_ip, s->peer_port);
+    if (s->dial_nerrs > 0 && s->pending_obj == NULL) {
+      s->pending_obj = scr_error_retain(s->dial_errs[s->dial_nerrs - 1]);
+    }
     s->had_error = true;
     s->connecting = false;
     scr_net_sock_close_fd(s);
