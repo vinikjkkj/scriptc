@@ -4327,6 +4327,22 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       const def = defineAccessorCallOf(L, expr, loc);
       if (def !== null) return def;
     }
+    // `f.apply(t, list)` on an OVERLOADED function value held as dyn (a Buffer static read as a value:
+    // `var f = Buffer.from`). The list's static type is the overloads' parameter tuple, so a list literal
+    // retags into that union and a string element traps at run time (measured). Refused by name here, the
+    // fence the value read had on main, never a deferred runtime throw.
+    if (isJsSourceFile(expr.getSourceFile()) && ts.isPropertyAccessExpression(expr.expression) &&
+        !expr.expression.questionDotToken && expr.expression.name.text === "apply" &&
+        L.checker.getCallSignatures(L.typeOf(expr.expression.expression)).length > 1) {
+      const applyRecv = probeLower(L, expr.expression.expression);
+      if (applyRecv?.type.kind === "dyn") {
+        L.noLowering(
+          `Function.prototype.apply over the overloaded function value '${expr.expression.expression.getText()}'`,
+          expr,
+          "an overloaded function has no single parameter list for the argument array; call the value directly (f(a, b))",
+        );
+      }
+    }
     // A live requirer binding's member call (`m.f(x)`, m = require(M), M live): a dynamic call of the
     // bag's member. Spread arguments keep their own fence.
     if (ts.isPropertyAccessExpression(expr.expression) && !expr.expression.questionDotToken && ts.isIdentifier(expr.expression.expression) && !expr.arguments.some(ts.isSpreadElement)) {
