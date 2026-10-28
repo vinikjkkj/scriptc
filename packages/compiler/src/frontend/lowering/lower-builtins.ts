@@ -4993,6 +4993,60 @@ let digestInputValueDispatches = 0;
     return { kind: "libCall", fn: "crypto.inputBytes", args: [probed], type: BYTES_U8, loc: locOf(dataNode) };
   }
 
+/** The encoding argument of `update(data, enc)` as IR. A string literal folds
+   * to its value (the runtime canonicalises it, case-insensitively, with an
+   * unknown name meaning utf8); undefined and null mean Node's default utf8; any
+   * other string-typed expression lowers and is canonicalised at run time. Null
+   * for every other type, which the caller fences. */
+  function digestEncodingArg(L: Lowerer, encNode: ts.Expression, loc: SrcLoc): IrExpr | null {
+    // Syntax decides the fold, never the checker type: a cast can give a
+    // run-time value a literal type, and the runtime must see the value.
+    // Casts and parentheses around a literal carry no run-time meaning.
+    let bare: ts.Expression = encNode;
+    while (ts.isAsExpression(bare) || ts.isParenthesizedExpression(bare) || ts.isNonNullExpression(bare)) {
+      bare = bare.expression;
+    }
+    if (ts.isStringLiteral(bare) || ts.isNoSubstitutionTemplateLiteral(bare)) {
+      return { kind: "strLit", value: bare.text, type: STRING, loc };
+    }
+    if (bare.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(bare) && bare.text === "undefined")) {
+      return { kind: "strLit", value: "utf8", type: STRING, loc };
+    }
+    if (L.mapTypeOf(L.typeOf(encNode))?.kind === "string") return L.lowerExprExpecting(encNode, STRING);
+    return null;
+  }
+
+/** The IR bytes a Hash/Hmac `update(data, enc)` hashes, or null when the data
+   * or the encoding has no lowering. A string takes the encoding; a view
+   * (Buffer, typed array) ignores it, which Node does too. A checked-dynamic
+   * value takes the dyn ladder with the encoding. */
+  function encodedDigestInput(L: Lowerer, dataNode: ts.Expression, encNode: ts.Expression,
+    loc: SrcLoc): IrExpr | null {
+    const enc = digestEncodingArg(L, encNode, loc);
+    if (enc === null) return null;
+    const dataIr = L.mapTypeOf(L.typeOf(dataNode));
+    if (dataIr?.kind === "bytes") {
+      const data = L.lowerExpr(dataNode);
+      return { kind: "libCall", fn: "crypto.updateBytesEnc", args: [data, enc], type: BYTES_U8, loc };
+    }
+    if (dataIr?.kind === "string") {
+      const data = L.lowerExprExpecting(dataNode, STRING);
+      return { kind: "libCall", fn: "crypto.updateStrEnc", args: [data, enc], type: BYTES_U8, loc };
+    }
+    if (dataIr === null) {
+      const probed = valueDispatchedDigestInput(L, dataNode);
+      if (probed) {
+        const fn: IrLibFn = probed.type.kind === "bytes" ? "crypto.updateBytesEnc" : "crypto.updateStrEnc";
+        return { kind: "libCall", fn, args: [probed, enc], type: BYTES_U8, loc };
+      }
+      const dyn = probeLower(L, dataNode);
+      if (dyn && dyn.type.kind === "dyn") {
+        return { kind: "libCall", fn: "crypto.inputBytesEnc", args: [dyn, enc], type: BYTES_U8, loc };
+      }
+    }
+    return null;
+  }
+
 /** The composed hash chain — `createHash("sha256").update(data).digest("hex")`
    * — fused into ONE libCall: the Hash handle never materializes (no Hash
    * type exists in the value model), exactly the randomBytesToString
@@ -5035,11 +5089,11 @@ let digestInputValueDispatches = 0;
           "Noise handshake, md5 for legacy wire formats that specify it)",
       );
     }
-    if (updateCall.arguments.length !== 1) {
+    if (updateCall.arguments.length < 1 || updateCall.arguments.length > 2) {
       L.noLowering(
         `Hash.update with ${updateCall.arguments.length} arguments`,
         updateCall,
-        "one string or Buffer argument is the lowered update (input encodings have no lowering)",
+        "one string or Buffer argument, or a string or Buffer with an input encoding, is the lowered update",
       );
     }
     // A BARE `.digest()` (no argument) is Node's raw-Buffer digest — the
@@ -5058,6 +5112,19 @@ let digestInputValueDispatches = 0;
     // out of source position observes nothing; the data lowers between
     // them in its own source order.
     const alg = L.lowerExprExpecting(chCall.arguments[0]!, STRING);
+    if (updateCall.arguments.length === 2) {
+      const input = encodedDigestInput(L, updateCall.arguments[0]!, updateCall.arguments[1]!, loc);
+      if (input === null) {
+        L.noLowering(
+          "Hash.update with this input encoding",
+          updateCall.arguments[1]!,
+          "the encoding is a string literal, undefined/null (utf8), or a string-typed value",
+        );
+      }
+      if (bare) return { kind: "libCall", fn: "crypto.hashDigestBytesRaw", args: [alg, input], type: BYTES_U8, loc };
+      const enc = L.lowerExprExpecting(call.arguments[0]!, STRING);
+      return { kind: "libCall", fn: "crypto.hashDigestBytes", args: [alg, input, enc], type: STRING, loc };
+    }
     // The data picks the runtime entry by its static type, the
     // fileURLToPath convention: strings hash their UTF-8 bytes (Node's
     // default input encoding), Buffers/typed arrays hash their bytes.
@@ -5202,12 +5269,25 @@ let digestInputValueDispatches = 0;
     const self: IrType = isHash ? HASH_T : HMAC_T;
     const loc = locOf(call);
     if (access.name.text === "update") {
-      if (call.arguments.length !== 1) {
+      if (call.arguments.length < 1 || call.arguments.length > 2) {
         L.noLowering(
           `${name}.update with ${call.arguments.length} arguments`,
           call,
-          "one string or Buffer argument is the lowered update (input encodings have no lowering)",
+          "one string or Buffer argument, or a string or Buffer with an input encoding, is the lowered update",
         );
+      }
+      if (call.arguments.length === 2) {
+        const recvE = L.lowerExpr(access.expression);
+        const input = encodedDigestInput(L, call.arguments[0]!, call.arguments[1]!, loc);
+        if (input === null) {
+          L.noLowering(
+            `${name}.update with this input encoding`,
+            call.arguments[1]!,
+            "the encoding is a string literal, undefined/null (utf8), or a string-typed value",
+          );
+        }
+        const fnE: IrLibFn = isHash ? "crypto.hashUpdateBytes" : "crypto.hmacUpdateBytes";
+        return { kind: "libCall", fn: fnE, args: [recvE, input], type: self, loc };
       }
       const dataNode = call.arguments[0]!;
       const dataIr = L.mapTypeOf(L.typeOf(dataNode));

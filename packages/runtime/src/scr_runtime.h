@@ -3957,6 +3957,8 @@ ScrStr *scr_crypto_random_string(double n, ScrStr *enc); /* +1, or throws */
 ScrStr *scr_crypto_hash_digest_str(ScrStr *alg, ScrStr *data, ScrStr *enc);
 ScrStr *scr_crypto_hash_digest_bytes(ScrStr *alg, ScrBytes *data, ScrStr *enc);
 ScrBytes *scr_crypto_hash_digest_str_raw(ScrStr *alg, ScrStr *data);
+ScrBytes *scr_crypto_update_str_enc(const ScrStr *data, const ScrStr *enc);
+ScrBytes *scr_crypto_update_bytes_enc(const ScrBytes *data, const ScrStr *enc);
 ScrBytes *scr_crypto_hash_digest_bytes_raw(ScrStr *alg, ScrBytes *data);
 
 /* The MATERIALIZED Hash handle — what a program gets when the chain above
@@ -9578,6 +9580,7 @@ ScrBytes *scr_buffer_from_dyn_enc(const struct ScrDyn *v, const struct ScrDyn *e
 ScrBytes *scr_buffer_from_dyn(const struct ScrDyn *v); /* Buffer.from(dyn): +1 u8 bytes (scr_json.c) */
 ScrBytes *scr_bytes_arg_chk(const struct ScrDyn *v, const ScrStr *name); /* checked Uint8Array argument: +1 same payload, throws ERR_INVALID_ARG_TYPE (scr_json.c) */
 ScrBytes *scr_crypto_input_bytes(const struct ScrDyn *v);
+ScrBytes *scr_crypto_input_bytes_enc(const struct ScrDyn *v, const ScrStr *enc);
 ScrStr *scr_text_decode_dyn(const ScrDyn *v); /* TextDecoder.decode over a checked-dynamic value (scr_json.c): +1 string, or NULL with the exception pending */
 ScrBytes *scr_text_dest_dyn(const ScrDyn *v); /* encodeInto's dest over a checked-dynamic value (scr_json.c): +1 u8 bytes, or NULL with the exception pending */ /* hash/hmac update input: +1 u8 bytes, throws ERR_INVALID_ARG_TYPE (scr_json.c) */
 

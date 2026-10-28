@@ -4827,6 +4827,9 @@ export type IrLibFn =
    * (+1), rather than the hex/base64 string the encoded forms give. */
   | "crypto.hashDigestStrRaw"
   | "crypto.hashDigestBytesRaw"
+  | "crypto.updateStrEnc"
+  | "crypto.updateBytesEnc"
+  | "crypto.inputBytesEnc"
   /** The MATERIALIZED Hash handle (ScrHash, +1): `createHash(alg)` on its
    * own, then update/digest as ordinary methods. The four fused calls
    * above stay — a chain the compiler can see whole never allocates a
@@ -13531,6 +13534,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "buffer.compareChk",
   "buffer.fromDyn",
   "crypto.inputBytes",
+  "crypto.updateStrEnc",
+  "crypto.inputBytesEnc",
   "bytes.argChk",
   "text.decodeDyn",
   "text.destDyn",

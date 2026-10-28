@@ -13082,6 +13082,15 @@ ScrBytes *scr_crypto_input_bytes(const ScrDyn *v) {
   }
 }
 
+/* update(data, enc) over a checked-dynamic data value: a string takes the
+ * encoding (scr_crypto_update_str_enc: unknown names mean utf8, odd 'hex'
+ * throws); a view ignores it; anything else is scr_crypto_input_bytes'
+ * ERR_INVALID_ARG_TYPE. +1 u8 bytes, or NULL with the exception pending. */
+ScrBytes *scr_crypto_input_bytes_enc(const ScrDyn *v, const ScrStr *enc) {
+  if (v->kind == SCR_DYN_STR) return scr_crypto_update_str_enc(v->v.str, enc);
+  return scr_crypto_input_bytes(v);
+}
+
 /* TextDecoder.prototype.decode(x) over a checked-dynamic x. Node's decode: undefined is "" (and a
  * missing argument), a view or an ArrayBuffer decodes its bytes, anything else throws the one message
  * Node's decoder gives for every other value (its validator names the argument "list"). +1 string, or NULL
