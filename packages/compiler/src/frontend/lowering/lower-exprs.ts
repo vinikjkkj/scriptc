@@ -8,6 +8,7 @@ import { protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
+import { checkHoleFlaggedUse, isHoleFlaggedRef } from "./hole-flag.js";
 import { STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
@@ -596,6 +597,8 @@ function helperFieldEnumerationFence(L: Lowerer, expr: ts.Expression): void {
 
 function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     const loc = locOf(expr);
+    // STEP 2a: a flagged number[] may only be indexed, measured, filled or grown.
+    if (ts.isIdentifier(expr)) checkHoleFlaggedUse(L, expr);
     helperFieldEnumerationFence(L, expr);
     // A loop variable of an unrolled accessor family reads as the literal it
     // is bound to in this body (registerAccessorFamilies).
@@ -14140,6 +14143,15 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       const lk = lb !== null ? liveKeyOf(L, expr.argumentExpression) : null;
       if (lb !== null && lk !== null) return { kind: "dynKeyGet", key: lk, optional: true, value: lb, type: DYN, loc: locOf(expr) };
     }
+    // STEP 2a: a read of a flagged number[] (hole-tracked, see hole-flag.ts)
+    // answers the stored double; a hole or a miss reads Node's undefined.
+    if (!expr.questionDotToken && isHoleFlaggedRef(L, expr.expression)) {
+      const recv = L.lowerExpr(expr.expression);
+      if (recv.type.kind === "array" && recv.type.elem.kind === "f64") {
+        const idx = L.lowerExprExpecting(expr.argumentExpression, F64);
+        return { kind: "arrayGet", arr: recv, index: idx, type: F64, holeOnMiss: true, loc: locOf(expr) };
+      }
+    }
     // `a?.[i]`: the guard lowers as an optional-chain step around the
     // plain element read below.
     if (expr.questionDotToken && !L.chainHandled.has(expr)) {
@@ -15878,6 +15890,8 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
     if (!typeEquals(value.type, receiverIr.elem)) {
       L.badType(expr.right, L.typeOf(expr.right));
     }
+    // STEP 2a: a write to a flagged number[] past the end fills the gap with holes.
+    if (isHoleFlaggedRef(L, target.expression)) return { kind: "arraySet", arr, index, value, holeGrow: true, loc: locOf(expr) };
     return { kind: "arraySet", arr, index, value, loc: locOf(expr) };
   }
 
