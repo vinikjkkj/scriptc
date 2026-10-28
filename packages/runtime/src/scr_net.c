@@ -200,7 +200,7 @@ static void scr_net_w32_loopback_fail_fast(int fd, const struct sockaddr *sa) {
   p.MaxSynRetransmissions = SCR_TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS;
   DWORD bytes = 0;
   int rc = WSAIoctl((SOCKET)fd, SIO_TCP_INITIAL_RTO, &p, sizeof p, NULL, 0, &bytes, NULL, NULL);
-  fprintf(stdout, "NETDBG initial_rto fd=%d rc=%d wsa=%d\n", fd, rc, rc ? WSAGetLastError() : 0);
+  fprintf(stderr, "NETDBG initial_rto fd=%d rc=%d wsa=%d\n", fd, rc, rc ? WSAGetLastError() : 0);
 }
 #endif
 static int scr_w32_connect(int fd, const struct sockaddr *sa, socklen_t len) {
@@ -559,7 +559,7 @@ static void scr_net_dial_log_clear(ScrNetSocket *s);
 static ScrError *scr_net_dial_aggregate(ScrNetSocket *s);
 /* NETDBG: tlsdbg branch only, never landed */
 static void scr_net_dbg(const char *site, int err, int port, const char *ip) {
-  fprintf(stdout, "NETDBG t=%.1f site=%s err=%d errname=%s port=%d ip=%s\n", scr_now_ms(), site, err, scr_net_errname(err), port, ip ? ip : "-");
+  fprintf(stderr, "NETDBG t=%.1f site=%s err=%d errname=%s port=%d ip=%s\n", scr_now_ms(), site, err, scr_net_errname(err), port, ip ? ip : "-");
 }
 
 struct ScrNetSocket {
@@ -1457,7 +1457,7 @@ static void scr_net_sock_connect_done(ScrNetSocket *s) {
  * attempt failed with this errno. */
 static void scr_net_sock_connect_done_err(ScrNetSocket *s, int err) {
   scr_net_dbg("connect_done_err", err, s->peer_port, s->peer_ip);
-  fprintf(stdout, "NETDBG   dial_n=%zu dial_i=%zu pending_err=%d pending_obj=%d dial_nerrs=%zu\n", s->dial_n, s->dial_i, s->pending_err != NULL, s->pending_obj != NULL, s->dial_nerrs);
+  fprintf(stderr, "NETDBG   dial_n=%zu dial_i=%zu pending_err=%d pending_obj=%d dial_nerrs=%zu\n", s->dial_n, s->dial_i, s->pending_err != NULL, s->pending_obj != NULL, s->dial_nerrs);
   s->connecting = false;
   /* this attempt has ANSWERED (either way): its budget is spent, and a
    * stale timer must not fire into the next attempt's fd */
@@ -1854,7 +1854,7 @@ void scr_net_server_close_direct(ScrNetServer *s, ScrClosure *cb /*moves, nullab
     int accl = sizeof acc;
     int gacc = (getsockopt)((SOCKET)s->fd, SOL_SOCKET, SO_ACCEPTCONN, (char *)&acc, &accl);
     unsigned short lport = gsn == 0 ? ntohs(la.sin_port) : 0;
-    fprintf(stdout, "NETDBG server_close t=%.1f fd=%d port=%u getsockname_rc=%d wsa=%d acceptconn_rc=%d acceptconn=%d\n", scr_now_ms(), s->fd, (unsigned)lport, gsn, gwsa, gacc, acc);
+    fprintf(stderr, "NETDBG server_close t=%.1f fd=%d port=%u getsockname_rc=%d wsa=%d acceptconn_rc=%d acceptconn=%d\n", scr_now_ms(), s->fd, (unsigned)lport, gsn, gwsa, gacc, acc);
     scr_net_close_fd_raw(s->fd);
     if (lport != 0) {
       SOCKET probe_s = socket(AF_INET, SOCK_STREAM, 0);
@@ -1864,7 +1864,7 @@ void scr_net_server_close_direct(ScrNetServer *s, ScrClosure *cb /*moves, nullab
       ba.sin_port = htons(lport);
       ba.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
       int brc = bind(probe_s, (struct sockaddr *)&ba, sizeof ba);
-      fprintf(stdout, "NETDBG server_close rebind_probe t=%.1f port=%u bind_rc=%d wsa=%d\n", scr_now_ms(), (unsigned)lport, brc, brc ? WSAGetLastError() : 0);
+      fprintf(stderr, "NETDBG server_close rebind_probe t=%.1f port=%u bind_rc=%d wsa=%d\n", scr_now_ms(), (unsigned)lport, brc, brc ? WSAGetLastError() : 0);
       closesocket(probe_s);
     }
 #else
@@ -2052,7 +2052,7 @@ static size_t scr_net_lookup_candidates(ScrStr *host /*borrowed*/, ScrStr ***out
   hints.ai_socktype = SOCK_STREAM;
   struct addrinfo *res = NULL;
   int gai = getaddrinfo(host->data, NULL, &hints, &res);
-  fprintf(stdout, "NETDBG lookup host=%s gai=%d res=%d\n", host->data, gai, res != NULL);
+  fprintf(stderr, "NETDBG lookup host=%s gai=%d res=%d\n", host->data, gai, res != NULL);
   if (gai != 0 || res == NULL) {
     if (res) freeaddrinfo(res);
     return 0;
@@ -2084,7 +2084,7 @@ static size_t scr_net_lookup_candidates(ScrStr *host /*borrowed*/, ScrStr ***out
     g[d][gn[d]++] = scr_str_new(ip, iplen);
   }
   freeaddrinfo(res);
-  fprintf(stdout, "NETDBG lookup answers fam0=%zu fam1=%zu\n", gn[0], gn[1]);
+  fprintf(stderr, "NETDBG lookup answers fam0=%zu fam1=%zu\n", gn[0], gn[1]);
   size_t n = gn[0] + gn[1];
   if (n == 0) return 0;
   ScrStr **list = malloc(n * sizeof *list);
@@ -2579,7 +2579,7 @@ static void scr_net_dial_log_clear(ScrNetSocket *s) {
  * the last attempt's code, and `errors` (each attempt, in dial order). */
 static ScrError *scr_net_dial_aggregate(ScrNetSocket *s) {
   ScrError *last = s->dial_errs[s->dial_nerrs - 1];
-  fprintf(stdout, "NETDBG aggregate nerrs=%zu last_code=%s\n", s->dial_nerrs, (const char *)last->code->data);
+  fprintf(stderr, "NETDBG aggregate nerrs=%zu last_code=%s\n", s->dial_nerrs, (const char *)last->code->data);
   ScrStr *empty = scr_str_new("", 0);
   ScrError *e = scr_error_new(SCR_ERR_AGGREGATE, empty); /* retains the message */
   scr_str_release(empty);
@@ -2634,7 +2634,7 @@ static bool scr_net_sock_dial_ip(ScrNetSocket *s, const ScrStr *ip) {
   int one = 1;
   setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
   int rc = connect(fd, sa, salen);
-  fprintf(stdout, "NETDBG dial_ip_async t=%.1f fd=%d rc=%d errno=%d ip=%s port=%d\n", scr_now_ms(), (int)fd, rc, rc == 0 ? 0 : errno, h, s->peer_port);
+  fprintf(stderr, "NETDBG dial_ip_async t=%.1f fd=%d rc=%d errno=%d ip=%s port=%d\n", scr_now_ms(), (int)fd, rc, rc == 0 ? 0 : errno, h, s->peer_port);
   if (rc == 0) scr_net_dial_log_clear(s); /* connected at once: no failed attempt to report */
   if (rc == 0 || errno == EINPROGRESS) {
     s->fd = fd;
@@ -2695,7 +2695,7 @@ static void scr_net_sock_attempt_timeout(ScrNetSocket *s) {
   s->dial_timer_armed = false;
   scr_net_dbg("attempt_timeout_fire", ETIMEDOUT, s->peer_port, s->peer_ip);
   { int so = -1; socklen_t sl = sizeof so; int gs = getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &so, &sl);
-    fprintf(stdout, "NETDBG attempt_timeout t=%.1f fd=%d so_error_rc=%d so_error=%d connecting=%d\n", scr_now_ms(), s->fd, gs, so, s->connecting); }
+    fprintf(stderr, "NETDBG attempt_timeout t=%.1f fd=%d so_error_rc=%d so_error=%d connecting=%d\n", scr_now_ms(), s->fd, gs, so, s->connecting); }
   if (!s->connecting || s->fd < 0 || s->dial_i >= s->dial_n) return;
   char msg[128];
   snprintf(msg, sizeof msg, "connect ETIMEDOUT %s:%d", s->peer_ip, s->peer_port);
@@ -3747,7 +3747,7 @@ static void scr_net_sweep(void) {
       ScrError *obj = sock->pending_obj;
       sock->pending_obj = NULL;
       { double en = 0; const ScrStr *sy = NULL, *pa = NULL, *de = NULL; bool hx = obj ? scr_error_ext_get(obj, &en, &sy, &pa, &de) : false;
-        fprintf(stdout, "NETDBG emit msg=%.*s obj=%d ext=%d errno=%g syscall=%s nerrs=%zu\n", (int)msg->len, msg->data, obj != NULL, hx, en, sy ? "set" : "none", sock->dial_nerrs); }
+        fprintf(stderr, "NETDBG emit msg=%.*s obj=%d ext=%d errno=%g syscall=%s nerrs=%zu\n", (int)msg->len, msg->data, obj != NULL, hx, en, sy ? "set" : "none", sock->dial_nerrs); }
       if (obj == NULL && sock->dial_nerrs >= 2) {
         /* autoSelectFamily tried several addresses and every one failed: Node's
          * AggregateError (empty message, the attempts in `errors`) */
@@ -3903,7 +3903,7 @@ static void scr_net_dispatch(void) {
          * epoll may coalesce both into one — writes first (connect
          * completion, flushes), then reads, re-checking the fd a write
          * failure may have closed. */
-        if (s->connecting) fprintf(stdout, "NETDBG dispatch events=%x\n", (unsigned)evs[i].events);
+        if (s->connecting) fprintf(stderr, "NETDBG dispatch events=%x\n", (unsigned)evs[i].events);
         if (evs[i].events & SCRP_WRITABLE) {
           if (s->connecting) scr_net_sock_connect_done(s);
           else if (s->tops && !s->t_est) {
