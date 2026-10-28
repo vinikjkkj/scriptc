@@ -4037,6 +4037,47 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15010-cjs-table-requirer-write/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15010-cjs-table-requirer-write/defaults.cjs",
+    "<repo>/tests/corpus/15010-cjs-table-requirer-write/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15011-cjs-table-setter-define/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15011-cjs-table-setter-define/defaults.cjs",
+    "<repo>/tests/corpus/15011-cjs-table-setter-define/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15012-cjs-table-own-write-requirer-read/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15012-cjs-table-own-write-requirer-read/lib.cjs",
+    "<repo>/tests/corpus/15012-cjs-table-own-write-requirer-read/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15013-cjs-live-alias-write/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15013-cjs-live-alias-write/store.cjs",
+    "<repo>/tests/corpus/15013-cjs-live-alias-write/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15014-cjs-define-getter-on-table/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15014-cjs-define-getter-on-table/config.cjs",
+    "<repo>/tests/corpus/15014-cjs-define-getter-on-table/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15015-cjs-any-define-setter/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15015-cjs-any-define-setter/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1520-fs-wider-surface.ts": {
    "order": [
     "<repo>/tests/corpus/1520-fs-wider-surface.ts"
