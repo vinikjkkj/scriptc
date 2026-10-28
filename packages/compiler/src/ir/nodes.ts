@@ -10664,9 +10664,27 @@ export function moduleUsesAssert(mod: IrModule): boolean {
  * its emitted main installs it. A program with no class never reaches any of
  * it, so the always-linked scr_json.c carries none of that code. */
 export function moduleUsesDynClass(mod: IrModule): boolean {
-  return (mod.classes ?? []).some(
+  if ((mod.classes ?? []).some(
     (c) => c.name !== RUNTIME_EMITTER_CLASS && !RUNTIME_STREAM_CLASSES.has(c.name) && canBoxClassIntoDyn(c.name),
-  );
+  )) return true;
+  // The dyn for-in walk (scr_dyn_forin_keys / _certain / _plain) lives in this unit too, so a
+  // program that walks a dyn receiver's keys links it even when it declares no class.
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("dyn.forIn")) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v as object)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod.functions);
+  return found;
 }
 
 export function moduleUsesDynInvoke(mod: IrModule): boolean {
