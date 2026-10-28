@@ -5,6 +5,14 @@ import { fiberOnly, type Fenced } from "../../ir/suspends.js";
 import { poisonYieldArm } from "./gen-poison.js";
 import { emitCoroYield } from "./emit-gen-coro.js";
 import type { CEmitter, Temp } from "./emitter.js";
+
+/* A number-typed result passes through scr_num_canon: arithmetic and libm
+ * propagate an operand's NaN payload, and the NaN-marked undefined (scr_runtime.h)
+ * must not survive an operation Node answers with a plain NaN. Other types pass
+ * through unchanged. */
+function canonNum(type: { kind: string }, expr: string): string {
+  return type.kind === "f64" ? `scr_num_canon(${expr})` : expr;
+}
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
@@ -181,17 +189,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const r = E.emitExpr(e.right);
         switch (e.op) {
           case "%":
-            return E.newTemp(e.type, `fmod(${l.name}, ${r.name})`);
+            return E.newTemp(e.type, canonNum(e.type, `fmod(${l.name}, ${r.name})`));
           // `**` IS Math.pow — one spec operation (Number::exponentiate),
           // so one runtime entry. C pow() is NOT it: pow(1, NaN) and
           // pow(-1, ±Infinity) answer 1.0 where JS answers NaN, and this
           // lane answered the C values until scr_math_pow landed.
           case "**":
-            return E.newTemp(e.type, `scr_math_pow(${l.name}, ${r.name})`);
+            return E.newTemp(e.type, canonNum(e.type, `scr_math_pow(${l.name}, ${r.name})`));
+          // Two number operands: the NaN-marked undefined equals itself
+          // (scr_num_same, scr_runtime.h); every other NaN is unequal, as in Node.
           case "===":
-            return E.newTemp(e.type, `${l.name} == ${r.name}`);
+            return E.newTemp(e.type, e.left.type.kind === "f64" ? `scr_num_same(${l.name}, ${r.name})` : `${l.name} == ${r.name}`);
           case "!==":
-            return E.newTemp(e.type, `${l.name} != ${r.name}`);
+            return E.newTemp(e.type, e.left.type.kind === "f64" ? `!scr_num_same(${l.name}, ${r.name})` : `${l.name} != ${r.name}`);
           // The bitwise six ride runtime helpers (ToInt32/ToUint32 wrap,
           // 5-bit shift masks, exact C-portable arithmetic shifts) -- the
           // `_inl` twins, which are static inline in scr_runtime.h. The
@@ -215,13 +225,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case ">>>":
             return E.newTemp(e.type, `scr_bit_ushr_inl(${l.name}, ${r.name})`);
           default:
-            return E.newTemp(e.type, `${l.name} ${e.op} ${r.name}`);
+            return E.newTemp(e.type, canonNum(e.type, `${l.name} ${e.op} ${r.name}`));
         }
       }
       case "unary": {
         const v = E.emitExpr(e.operand);
         if (e.op === "~") return E.newTemp(e.type, `scr_bit_not_inl(${v.name})`);
-        return E.newTemp(e.type, `${e.op}${v.name}`);
+        return E.newTemp(e.type, canonNum(e.type, `${e.op}${v.name}`));
       }
       case "incDec": {
         // Expression-position ++/--: read, write ±1, yield old (postfix)
@@ -234,19 +244,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const box = mangleLocal(e.localId);
           const old = E.newTemp(e.type, `scr_box_get_${boxAccess(e.type)}(${box})`);
           if (e.prefix) {
-            const t = E.newTemp(e.type, `${old.name} ${one}`);
+            const t = E.newTemp(e.type, canonNum(e.type, `${old.name} ${one}`));
             E.line(`scr_box_set_${boxAccess(e.type)}(${box}, ${t.name});`);
             return t;
           }
-          E.line(`scr_box_set_${boxAccess(e.type)}(${box}, ${old.name} ${one});`);
+          E.line(`scr_box_set_${boxAccess(e.type)}(${box}, ${canonNum(e.type, `${old.name} ${one}`)});`);
           return old;
         }
         if (!local && !E.globalsById.has(e.localId)) {
           throw new Error(`emitter bug: incDec of unknown binding ${e.localId}`);
         }
         const target = local ? mangleLocal(e.localId) : mangleGlobal(e.localId);
-        const t = E.newTemp(e.type, e.prefix ? `${target} ${one}` : target);
-        E.line(`${target} = ${e.prefix ? t.name : `${t.name} ${one}`};`);
+        const t = E.newTemp(e.type, e.prefix ? canonNum(e.type, `${target} ${one}`) : target);
+        E.line(`${target} = ${e.prefix ? t.name : canonNum(e.type, `${t.name} ${one}`)};`);
         return t;
       }
       case "fieldIncDec": {
@@ -267,16 +277,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (!e.fieldDyn) {
           const old = E.newTemp(e.type, field);
           if (e.prefix) {
-            const t = E.newTemp(e.type, `${old.name} ${one}`);
+            const t = E.newTemp(e.type, canonNum(e.type, `${old.name} ${one}`));
             E.line(`${field} = ${t.name};${E.srcComment(e.loc)}`);
             return t;
           }
-          E.line(`${field} = ${old.name} ${one};${E.srcComment(e.loc)}`);
+          E.line(`${field} = ${canonNum(e.type, `${old.name} ${one}`)};${E.srcComment(e.loc)}`);
           return old;
         }
         const helper = E.dynCheckHelper(e.type);
         const old = E.fallibleTemp(e.type, `${helper}(${field}, NULL)`);
-        const next = E.newTemp(e.type, `${old.name} ${one}`);
+        const next = E.newTemp(e.type, canonNum(e.type, `${old.name} ${one}`));
         const oldBox = `sc_t${E.tempCounter++}`;
         E.line(`ScrDyn *${oldBox} = ${field};`);
         E.line(`${field} = scr_dyn_new_num(${next.name});${E.srcComment(e.loc)}`);
@@ -3508,7 +3518,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // See ir/suspends.ts -- fiberOnly was opt-in, and that is how the
         // second fiber-only primitive reached an admitted coroutine body.
         const finish = <S extends string>(call: Fenced<S>): Temp => {
-          const c = call as unknown as string;
+          // Math.* propagates a marker operand's NaN payload (libm does); canonicalise.
+          const c = e.fn.startsWith("math.") ? canonNum(e.type, call as unknown as string) : (call as unknown as string);
           if (e.type.kind === "void") {
             E.line(`${c};${E.srcComment(e.loc)}`);
             if (MAY_THROW_LIB_FNS.has(e.fn)) E.emitPendingCheck();
@@ -4049,6 +4060,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_string_to_number(${arg(0)})`);
           case "num.isNaN":
             return finish(`(bool)isnan(${arg(0)})`);
+          // The NaN-marked undefined (scr_runtime.h): the bit test, the NaN
+          // canonicaliser, and the marker value itself.
+          case "num.isUndef":
+            return finish(`scr_num_is_undef(${arg(0)})`);
+          case "num.canon":
+            return finish(`scr_num_canon(${arg(0)})`);
+          case "num.undef":
+            return finish(`scr_num_undef()`);
           // The URI codecs (scr_string.c). Borrow; results +1. decode
           // throws the spec's catchable URIError on bad hex or invalid
           // UTF-8 octets (may-throw seed set); the encoders never throw.

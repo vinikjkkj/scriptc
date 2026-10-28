@@ -1068,8 +1068,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // runtime state).
         // An ARMED shape is droppable by construction: any member can turn
         // out not to have been the source object's own key.
+        // A NUMBER field may hold the NaN-marked undefined (scr_runtime.h), which
+        // JSON drops like any undefined-valued own property: such a field makes
+        // the shape droppable.
         const droppable =
-          emitFields.some((f) => E.undefinedArmTag(f.type) >= 0) ||
+          emitFields.some((f) => E.undefinedArmTag(f.type) >= 0 || f.type.kind === "f64") ||
           !!shape.indexValue ||
           shape.ownmask === true;
         d.push(`  scr_jb_putc(b, '{');`);
@@ -1090,7 +1093,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // The own-key question, one spelling: an undefined-valued
             // field drops like Node, and on a shape a crossing wrote, so
             // does a member the source object only INHERITED.
-            const cond = ownPresentCondC(shape, f.name, "v", utag, true);
+            let cond = ownPresentCondC(shape, f.name, "v", utag, true);
+            if (f.type.kind === "f64") {
+              const notMarker = `!scr_num_is_undef(v->${mangleField(f.name)})`;
+              cond = cond === null ? notMarker : `(${cond}) && ${notMarker}`;
+            }
             const pad = cond !== null ? "    " : "  ";
             if (cond !== null) {
               d.push(`  if (${cond}) { /* not an own key of the value: dropped, like Node */`);

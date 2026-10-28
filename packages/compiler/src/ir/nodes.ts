@@ -3730,6 +3730,10 @@ export type IrLibFn =
    * ToNumber coercion exists to model). Borrow; never throw. */
   | "num.parseInt"
   | "num.isNaN"
+  /** NaN-marked undefined (scr_runtime.h): the bit test, the NaN canonicaliser, the marker value. */
+  | "num.isUndef"
+  | "num.canon"
+  | "num.undef"
   /** ES parseFloat (scr_string.c): the longest StrDecimalLiteral prefix
    * of the trimmed input (no hex, "Infinity" exact-case), NaN when none —
    * ECMA-262 19.2.4 over a string argument (non-string arguments keep the
