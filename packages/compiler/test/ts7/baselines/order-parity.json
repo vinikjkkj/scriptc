@@ -3767,6 +3767,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14652-tls-peer-cert-self-signed.ts": {
+   "order": [
+    "<repo>/tests/corpus/14652-tls-peer-cert-self-signed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14653-tls-peer-cert-chain-aia-eku.ts": {
+   "order": [
+    "<repo>/tests/corpus/14653-tls-peer-cert-chain-aia-eku.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14654-tls-peer-cert-rsa-modulus.ts": {
+   "order": [
+    "<repo>/tests/corpus/14654-tls-peer-cert-rsa-modulus.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1466-child-containers.ts": {
    "order": [
     "<repo>/tests/corpus/1466-child-containers.ts"
