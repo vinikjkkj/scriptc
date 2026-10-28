@@ -4730,3 +4730,54 @@ void scr_stream_install(void) {
   scr_emitter_on_hook = &scr_stream_on_listener;
   scr_loop_set_stream(&scr_stream_ticks_pending, &scr_stream_dispatch);
 }
+
+/* `u instanceof <class>` on an unknown value, for the runtime classes the stream and
+ * events surfaces model. `which` is the class code the lowering passes (lower-exprs.ts
+ * RT_CLASS_CODE): 0 Stream, 1 Readable, 2 Writable, 3 Duplex, 4 Transform, 5 EventEmitter,
+ * 6 net.Socket, 7 net.Server. Node's answer is the prototype chain (Writable additionally
+ * answers true for any Duplex-family object, through Writable[Symbol.hasInstance]).
+ * Object-class answers come from the preorder intervals of the stream and emitter vtables;
+ * an unstamped vtable keeps its EMPTY default {1,0} (scr_readable_vt, scr_emitter_vt), so no
+ * object matches it. Handle answers are the Node table measured in lab/cls/tbl.mjs (http and
+ * child stdio rows measured, Http2 rows inferred from the class hierarchy). Never throws. */
+bool scr_stream_dyn_instanceof(const ScrDyn *d, double which) {
+  enum { C_STREAM, C_READABLE, C_WRITABLE, C_DUPLEX, C_TRANSFORM, C_EMITTER, C_SOCKET, C_SERVER };
+  int c = (int)which;
+  if (d->kind == SCR_DYN_OBJINST) {
+    bool rd = scr_dyn_objinst_is(d, scr_readable_vt.pre, scr_readable_vt.post);
+    bool wr = scr_dyn_objinst_is(d, scr_writable_vt.pre, scr_writable_vt.post);
+    bool du = scr_dyn_objinst_is(d, scr_duplex_vt.pre, scr_duplex_vt.post);
+    bool tr = scr_dyn_objinst_is(d, scr_transform_vt.pre, scr_transform_vt.post);
+    bool em = scr_dyn_objinst_is(d, scr_emitter_vt.pre, scr_emitter_vt.post);
+    switch (c) {
+      case C_STREAM: return rd || wr;
+      case C_READABLE: return rd;
+      case C_WRITABLE: return wr || du;
+      case C_DUPLEX: return du;
+      case C_TRANSFORM: return tr;
+      case C_EMITTER: return em;
+      default: return false; /* net.Socket / net.Server are handle kinds only */
+    }
+  }
+  if (d->kind != SCR_DYN_HANDLE) return false;
+  /* Rows: which class answers true for each handle kind (Node, measured or inferred). */
+  switch (d->v.handle.tag) {
+    case SCR_DYNH_NET_SOCKET:
+    case SCR_DYNH_CHILD_STREAM: /* child stdio is a net.Socket (pipes) in Node */
+      return c == C_STREAM || c == C_READABLE || c == C_WRITABLE || c == C_DUPLEX ||
+             c == C_EMITTER || c == C_SOCKET;
+    case SCR_DYNH_HTTP_REQ: /* IncomingMessage: Readable */
+      return c == C_STREAM || c == C_READABLE || c == C_EMITTER;
+    case SCR_DYNH_HTTP_RES: /* ServerResponse and ClientRequest: Stream only, not Writable */
+    case SCR_DYNH_HTTP_CLIENT:
+      return c == C_STREAM || c == C_EMITTER;
+    case SCR_DYNH_H2_STREAM: /* Http2Stream extends Duplex (inferred) */
+      return c == C_STREAM || c == C_READABLE || c == C_WRITABLE || c == C_DUPLEX || c == C_EMITTER;
+    case SCR_DYNH_H2_SESSION: /* Http2Session extends EventEmitter (inferred) */
+      return c == C_EMITTER;
+    case SCR_DYNH_NET_SERVER: /* net.Server extends EventEmitter */
+      return c == C_EMITTER || c == C_SERVER;
+    default:
+      return false;
+  }
+}

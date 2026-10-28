@@ -9,7 +9,7 @@ import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { checkHoleFlaggedUse, isHoleFlaggedRef } from "./hole-flag.js";
-import { STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf, liveRecvBagOf, liveKeyOf, liveIdentityRefOf, dynValueOf } from "./cjs-live-exports.js";
@@ -20313,6 +20313,130 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
     return bi !== null && bi.module === "tls" && bi.member === "TLSSocket";
   }
 
+  /** The runtime classes the stream and events surfaces model, as the right-hand side of
+   * instanceof, in every spelling (the named import, a require binding, a member read,
+   * the namespace member). Each resolves through the builtin-member tables. */
+  type RtClass = "Stream" | "Readable" | "Writable" | "Duplex" | "Transform" | "EventEmitter" | "netSocket" | "netServer";
+  /** The class code the runtime's scr_stream_dyn_instanceof reads (scr_stream.c). */
+  const RT_CLASS_CODE: Record<RtClass, number> = {
+    Stream: 0, Readable: 1, Writable: 2, Duplex: 3, Transform: 4, EventEmitter: 5, netSocket: 6, netServer: 7,
+  };
+
+  /** Is the declaration inside `declare module "<name>"` (an ambient module of the stdlib)? */
+  function declaredInAmbientModule(d: ts.Node, name: string): boolean {
+    for (let n: ts.Node | undefined = d; n !== undefined; n = n.parent) {
+      if (ts.isModuleDeclaration(n)) return ts.isStringLiteral(n.name) && n.name.text === name;
+    }
+    return false;
+  }
+
+  function rtClassOfRhs(L: Lowerer, e: ts.Expression): RtClass | null {
+    // Stream and the events / net names are members of their builtin modules.
+    const bi = ts.isIdentifier(e)
+      ? L.builtinImportOf(e)
+      : ts.isPropertyAccessExpression(e)
+        ? L.builtinMemberOf(e)
+        : null;
+    if (bi !== null && bi.module === "stream" && bi.member === "Stream") return "Stream";
+    if (bi !== null && bi.module === "events" && bi.member === "EventEmitter") return "EventEmitter";
+    if (bi !== null && bi.module === "net" && bi.member === "Socket") return "netSocket";
+    if (bi !== null && bi.module === "net" && bi.member === "Server") return "netServer";
+    // Stream classes and the emitter class are program-visible symbols with builtin
+    // class infos (the same tables the typed routes use).
+    let sym: ts.Symbol | null = null;
+    if (ts.isIdentifier(e)) sym = L.resolveValueSymbol(e);
+    else if (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.name)) sym = L.checker.getSymbolAtLocation(e.name) ?? null;
+    if (sym !== null && sym.flags & ts.SymbolFlags.Alias) sym = L.checker.getAliasedSymbol(sym);
+    if (sym === null) return null;
+    const streamInfo = L.builtinStreamInfoOf(sym);
+    if (streamInfo !== null) {
+      const m = streamInfo.def.name.replace(/^%/, "");
+      if (m === "Readable" || m === "Writable" || m === "Duplex" || m === "Transform") return m;
+      return null;
+    }
+    if (L.builtinEmitterInfoOf(sym) !== null) return "EventEmitter";
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.some((d) => ts.isClassDeclaration(d) && declaredInAmbientModule(d, "net"))) {
+      if (sym.name === "Socket") return "netSocket";
+      if (sym.name === "Server") return "netServer";
+    }
+    return null;
+  }
+
+  /** The Node answers for the runtime HANDLE kinds (the table scr_stream_dyn_instanceof
+   * reads; lab/cls/tbl.mjs measured the socket, server and http rows on v24.15.0). Every
+   * key is a RtClass; a missing key is false. */
+  const SOCKET_ROW: Partial<Record<RtClass, boolean>> = {
+    Stream: true, Readable: true, Writable: true, Duplex: true, EventEmitter: true, netSocket: true,
+  };
+  const HANDLE_ROWS: Record<string, Partial<Record<RtClass, boolean>>> = {
+    netSocket: SOCKET_ROW,
+    childStream: SOCKET_ROW,
+    procStream: SOCKET_ROW,
+    netServer: { EventEmitter: true, netServer: true },
+    httpReq: { Stream: true, Readable: true, EventEmitter: true },
+    httpRes: { Stream: true, EventEmitter: true },
+    httpClientReq: { Stream: true, EventEmitter: true },
+    http2Stream: { Stream: true, Readable: true, Writable: true, Duplex: true, EventEmitter: true },
+    http2Session: { EventEmitter: true },
+  };
+
+  /** `x instanceof <runtime class>` (node:stream / node:events / node:net). A typed
+   * operand decides statically where its type fixes the answer; anything else takes the
+   * run-time test (scr_stream_dyn_instanceof), which reads the object's class position
+   * against the stream/emitter vtable intervals or the handle-kind table. */
+  function lowerRuntimeInstanceOf(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc, cls: RtClass): IrExpr {
+    const left = L.lowerExpr(expr.left);
+    const decided = (value: boolean): IrExpr => ({
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: left, loc: locOf(expr.left) }],
+      result: { kind: "boolLit", value, type: BOOL, loc },
+      type: BOOL,
+      loc,
+    });
+    const t = left.type;
+    if (t.kind === "f64" || t.kind === "string" || t.kind === "bool" || t.kind === "bigint" ||
+        t.kind === "undefinedT" || t.kind === "nullT" || t.kind === "void" || t.kind === "symbol") {
+      return decided(false);
+    }
+    const row = HANDLE_ROWS[t.kind];
+    if (row !== undefined) return decided(row[cls] === true);
+    if (t.kind === "object") {
+      if (hasRuntimeAncestor(L, t.className)) {
+        // A stream or emitter object: only Stream and EventEmitter are fixed by the class
+        // (every stream is both); the narrower answers depend on the run-time subclass.
+        if ((cls === "Stream" || cls === "EventEmitter") && streamClassOrSubclass(L, t.className)) return decided(true);
+      } else {
+        const info = L.classes.get(t.className);
+        if (info !== undefined && isProgramClassInfo(L, info)) return decided(false);
+      }
+    }
+    if (t.kind === "dyn" || t.kind === "union" || t.kind === "object" || t.kind === "jsval") {
+      const value = L.lowerExprExpecting(expr.left, DYN);
+      return { kind: "libCall", fn: "stream.dynInstanceOf", args: [value, { kind: "numLit", value: RT_CLASS_CODE[cls], type: F64, loc }], type: BOOL, loc };
+    }
+    L.unsupported(
+      "SC1090",
+      expr,
+      `'instanceof ${cls}' on this operand (its type is ${t.kind}; the runtime test needs an unknown, a union or a runtime object)`,
+    );
+  }
+
+  /** Is this class name one of the runtime stream classes, or a subclass of one? */
+  function streamClassOrSubclass(L: Lowerer, cls: string): boolean {
+    if (RUNTIME_STREAM_CLASSES.has(cls)) return true;
+    for (const base of RUNTIME_STREAM_CLASSES.keys()) {
+      if (L.isSubclassOf(cls, base)) return true;
+    }
+    return false;
+  }
+
+  /** Does the class reach a runtime stream or emitter class (so its instances can be
+   * streams or emitters at run time)? */
+  function hasRuntimeAncestor(L: Lowerer, cls: string): boolean {
+    return streamClassOrSubclass(L, cls) || cls === RUNTIME_EMITTER_CLASS || L.isSubclassOf(cls, RUNTIME_EMITTER_CLASS);
+  }
+
   /** The WHATWG URL constructor as a value: the global `URL`, the named
    * import/require binding of node:url's `URL` (`const { URL } =
    * require('url')`), or the namespace spelling `url.URL`. All three are
@@ -20386,6 +20510,19 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
         { kind: "exprStmt", expr: L.lowerExpr(expr.left), loc: locOf(expr.left) },
       ];
       return { kind: "seqExpr", stmts, result: thrown, type: BOOL, loc };
+    }
+    // `x instanceof <runtime class>` (Stream, Readable, Writable, Duplex, Transform,
+    // EventEmitter, net.Socket, net.Server) in every spelling. A typed class-instance operand
+    // keeps the existing typed routes below; every other operand is decided here.
+    {
+    const rtCls = rtClassOfRhs(L, expr.right);
+    if (rtCls !== null && !L.caughtLocalOf(expr.left)) {
+      const probedLeft = probeLower(L, expr.left);
+      const leftIsTypedObject = probedLeft !== null && probedLeft.type.kind === "object";
+      if (!leftIsTypedObject || rtCls === "Stream" || rtCls === "EventEmitter") {
+        return lowerRuntimeInstanceOf(L, expr, loc, rtCls);
+      }
+    }
     }
     const rhsSymbol = ts.isIdentifier(expr.right) ? L.resolveValueSymbol(expr.right) : null;
     // `x instanceof events.EventEmitter` — the namespace-member spelling
