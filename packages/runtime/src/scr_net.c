@@ -1816,9 +1816,13 @@ void scr_net_server_close_direct(ScrNetServer *s, ScrClosure *cb /*moves, nullab
     /* NETDBG tlsdbg: does the listener port come free at close? */
     struct sockaddr_in la;
     int lalen = sizeof la;
-    int gsn = getsockname((SOCKET)s->fd, (struct sockaddr *)&la, &lalen);
+    int gsn = (getsockname)((SOCKET)s->fd, (struct sockaddr *)&la, &lalen);
+    int gwsa = gsn != 0 ? WSAGetLastError() : 0;
+    int acc = -1;
+    int accl = sizeof acc;
+    int gacc = (getsockopt)((SOCKET)s->fd, SOL_SOCKET, SO_ACCEPTCONN, (char *)&acc, &accl);
     unsigned short lport = gsn == 0 ? ntohs(la.sin_port) : 0;
-    fprintf(stdout, "NETDBG server_close t=%.1f fd=%d port=%u getsockname_rc=%d\n", scr_now_ms(), s->fd, (unsigned)lport, gsn);
+    fprintf(stdout, "NETDBG server_close t=%.1f fd=%d port=%u getsockname_rc=%d wsa=%d acceptconn_rc=%d acceptconn=%d\n", scr_now_ms(), s->fd, (unsigned)lport, gsn, gwsa, gacc, acc);
     scr_net_close_fd_raw(s->fd);
     if (lport != 0) {
       SOCKET probe_s = socket(AF_INET, SOCK_STREAM, 0);
