@@ -74,6 +74,8 @@ import type {
   SrcLoc,
 } from "../../ir/nodes.js";
 import { moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym } from "../../ir/nodes.js";
+import { setDynOrderPlan } from "../dyn-members.js";
+import { orderRecordPlanCached } from "../../ir/nodes.js";
 import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -126,6 +128,7 @@ import {
   buildClassGraph,
   classFieldIndex,
   classStructSym,
+  llOrdIndexOf,
   emitClassObjDefs,
   emitClassShapes,
   type LlClassMeta,
@@ -233,6 +236,7 @@ export interface LlvmEmitStats {
 
 export function emitLlvmModule(mod: IrModule, stats?: LlvmEmitStats): string {
   resetSrcSiteCache();
+  setDynOrderPlan(orderRecordPlanCached(mod.classes ?? []));
   const e = new LlEmitter(mod);
   const out = e.emit();
   if (stats !== undefined) stats.coroLowered = e.coroLoweredCount();
@@ -2396,13 +2400,13 @@ class LlEmitter {
       // always-linked dyn core a descriptor whose `members` read runs off
       // the end of the object — measured, as an access violation on the
       // first boxed method call.
-      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8 }`,
+      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64 }`,
       // One row of a class's instance MEMBER TABLE
       // { name, len, get, call, enumerable } (ScrDynClassMember in
       // scr_runtime.h) — what `x.get()` and `x.v` read through once the
       // instance is in a dyn slot. The trailing `bool` is an i8 with 7
       // bytes of tail padding, the descriptor above's own rule.
-      `%ScrDynClassMember = type { ptr, i64, ptr, ptr, i8 }`,
+      `%ScrDynClassMember = type { ptr, i64, ptr, ptr, i8, i8 }`,
       // One row of the function-name table { fn, name } — the closure
       // entry point and the JS name of the value it backs (ScrFnName in
       // scr_runtime.h). main() installs the array; walker-built boxes
@@ -3756,7 +3760,8 @@ class LlEmitter {
       `i8 ${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) || dynEnumerationFenced(meta) ? 1 : 0}, i8 ${opaque ? 1 : 0}, i8 ${errorRooted ? 1 : 0}, ` +
       `ptr ${statics === null ? "null" : `@${statics.sym}`}, i64 ${statics === null ? 0 : statics.count}, i8 ${staticsOpaque ? 1 : 0}, ` +
       `ptr ${meta.base === null ? "null" : this.cstr(dynClassDisplayName(meta.base.def))}, i8 ${dynRuntimeRoot(meta)}, ` +
-      `i8 ${this.tracedShapes.has(`object:${className}`) ? 1 : 0} }`;
+      `i8 ${this.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
+      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     // Subclass descriptors join the registry (see the C twin): a base-typed
     // box can hold a derived instance whose own member table must resolve.
@@ -3865,6 +3870,32 @@ class LlEmitter {
     return acc === "f64" ? f64Lit(0) : acc === "bool" ? "false" : "null";
   }
 
+  /** The inferred-field count of a class's hierarchy (ScrDynClass.nord). */
+  ordNordOf(className: string): number {
+    return orderRecordPlanCached(this.mod.classes ?? []).namesOf(className).length;
+  }
+  /** ScrDynClass.ord_off: the byte offset of the hierarchy's order record,
+   * as a constant expression (0 when the hierarchy has none). */
+  ordOffsetOf(className: string): string {
+    const plan = orderRecordPlanCached(this.mod.classes ?? []);
+    const root = plan.rootOf(className);
+    if (root === null || plan.recordBytes(className) === 0) return "0";
+    const rootMeta = this.classMetaFor(root);
+    const idx = llOrdIndexOf(rootMeta);
+    return `ptrtoint (ptr getelementptr inbounds (%${classStructSym(root)}, ptr null, i32 0, i32 ${idx}) to i64)`;
+  }
+  /** A hidden per-instance order note for a write of an inferred field
+   * (ir/nodes.ts orderRecordPlanOf): the record's GEP and scr_ord_note. */
+  noteOrderWrite(objName: string, className: string, field: string, forget = false): void {
+    const ord = orderRecordPlanCached(this.mod.classes ?? []).ordinalOf(className, field);
+    if (ord === null) return;
+    const meta = this.classMetaFor(className);
+    const rp = this.B.tmp();
+    this.B.line(`${rp} = getelementptr inbounds %${classStructSym(className)}, ptr ${objName}, i64 0, i32 ${llOrdIndexOf(meta)}`);
+    const fn = forget ? "scr_ord_forget" : "scr_ord_note";
+    this.declare(`declare void @${fn}(ptr, i8)`);
+    this.B.line(`call void @${fn}(ptr ${rp}, i8 ${ord})`);
+  }
   declare(decl: string): void {
     this.decls.add(decl);
   }
@@ -6892,6 +6923,7 @@ class LlEmitter {
         // Classes and records share the struct layout, so one emission.
         const obj = this.emitExpr(s.obj);
         const v = this.emitExpr(s.value);
+        if (s.kind === "fieldSet") this.noteOrderWrite(obj.name, s.className, s.field, s.unset === true);
         const { ptr, type } =
           s.kind === "fieldSet"
             ? this.classFieldPtr(obj.name, s.className, s.field)
@@ -9656,6 +9688,7 @@ class LlEmitter {
         // release like fieldSet (emit-exprs.ts's shape).
         const obj = this.emitExpr(e.obj);
         const { ptr } = this.classFieldPtr(obj.name, e.className, e.field);
+        this.noteOrderWrite(obj.name, e.className, e.field);
         if (e.fieldDyn) {
           const box = B.tmp();
           B.line(`${box} = load ptr, ptr ${ptr}`);

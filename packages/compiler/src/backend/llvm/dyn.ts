@@ -5126,7 +5126,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3 }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3, i8 0 }`);
         continue;
       }
       if (row.kind === "field") {
@@ -5176,7 +5176,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1} }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk} }`);
         continue;
       }
 
@@ -5220,7 +5220,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.enumerable === true ? 1 : 0} }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.enumerable === true ? 1 : 0}, i8 0 }`);
         continue;
       }
 
@@ -5305,7 +5305,7 @@ export class LlDyn {
         `}`,
         ``,
       );
-      entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr null, ptr @${sym}, i8 0 }`);
+      entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr null, ptr @${sym}, i8 0, i8 0 }`);
     }
 
     const sym = `sc_dclt_${this.classMemberTbls++}`;

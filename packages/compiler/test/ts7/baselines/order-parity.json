@@ -18956,6 +18956,12 @@
       "<repo>/tests/corpus/14754-new-array-length-error-is-catchable-per-call.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/14151-js-class-inferred-field-order.js": {
+    "order": [
+      "<repo>/tests/corpus/14151-js-class-inferred-field-order.js"
+    ],
+    "diags": []
   }
  }
 }

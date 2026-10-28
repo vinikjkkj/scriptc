@@ -6,7 +6,7 @@ import { protoDataAssignStmt } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
-import { BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
@@ -6363,7 +6363,7 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
         const absent = L.wrappedUndefined(ftype, loc);
         if (absent) {
           return {
-            pre: [{ kind: "fieldSet", obj, className: obj.type.className, field: fieldName, value: absent, loc }],
+            pre: [{ kind: "fieldSet", obj, className: obj.type.className, field: fieldName, value: absent, unset: true, loc }],
             result: yes,
           };
         }
@@ -10960,6 +10960,18 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
    * local, `var` assigns the hoisted shared slot, a pre-declared
    * identifier target assigns per pass; destructuring heads are tsc
    * errors. */
+  /** True when a class's instances enumerate exactly through the dyn member table:
+   * no class in its chain is a runtime stream, emitter or error class, and it has
+   * no run-time property table (the same conditions the runtime gate checks). */
+  function classEnumerableForIn(L: Lowerer, className: string): boolean {
+    for (let info: ClassInfo | null | undefined = L.classes.get(className); info; info = info.base) {
+      const n = info.def.name;
+      if (RUNTIME_STREAM_CLASSES.has(n) || n === RUNTIME_EMITTER_CLASS || RUNTIME_ERROR_CLASSES.has(n)) return false;
+      if (info.hasPropsTable === true) return false;
+    }
+    return true;
+  }
+
   export function lowerForIn(L: Lowerer, stmt: ts.ForInStatement): IrStmt {
     const labels = L.takeLabels();
     const loc = locOf(stmt);
@@ -11055,10 +11067,17 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       if (probe?.type.kind === "dyn") return lowerForInDyn(L, stmt, labels);
     }
     if (recvT?.kind === "object") {
+      // A class instance walks its OWN keys through the dyn member table: the
+      // instance's own-property order (declared fields, then the inferred fields in
+      // the order the instance wrote them) is the runtime's, exactly as Object.keys
+      // reads it. Classes whose enumeration the runtime fences (a stream, emitter
+      // or error root, or a run-time property table) keep the compile-time refusal:
+      // the walk would only throw there.
+      if (classEnumerableForIn(L, recvT.className)) return lowerForInDyn(L, stmt, labels);
       L.unsupported(
         "SC1052",
         stmt.expression,
-        "for-in over class instances (which keys exist on an instance depends on runtime property creation the class model does not track — for-in over records and arrays compiles)",
+        "for-in over class instances whose class chain roots in a runtime stream, emitter or error class, or carries a run-time property table (the runtime fences their key walk)",
       );
     }
     L.unsupported(
