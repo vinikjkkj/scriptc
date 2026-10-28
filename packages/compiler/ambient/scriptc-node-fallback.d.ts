@@ -2674,6 +2674,8 @@ declare module "tls" {
     isSessionReused(): boolean;
     /** the serialized session (a Buffer), or undefined (no session yet, or a server socket). */
     getSession(): Buffer | undefined;
+    /** the peer certificate (Node's 20-member object), or {} with none. */
+    getPeerCertificate(detailed?: boolean): PeerCertificate;
   }
   /** tls.connect options — the RUNTIME options record (members read at
    * runtime; port/host/rejectUnauthorized/ca/servername are the

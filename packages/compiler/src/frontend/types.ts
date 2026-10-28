@@ -4044,8 +4044,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // identity check reads. As a record, a callback's declared parameter would
   // dyn-check EVERY required member (ca, bits, raw, ...) at each handshake and
   // refuse the partial object; the dyn kind is the representation it has.
+  // DetailedPeerCertificate (what @types/node's getPeerCertificate(true)
+  // returns) extends it with a self-typed issuerCertificate: as a record the
+  // dyn check would recurse forever on the self-issued certificate.
   if (
-    psym?.name === "PeerCertificate" &&
+    (psym?.name === "PeerCertificate" || psym?.name === "DetailedPeerCertificate") &&
     checker.declarationsOf(psym).some(
       (d) =>
         ts.isInterfaceDeclaration(d) &&

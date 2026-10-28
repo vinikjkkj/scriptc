@@ -4559,6 +4559,7 @@ export type IrLibFn =
   | "tls.sockAuthError"
   | "tls.sockSessionReused"
   | "tls.sockGetSession"
+  | "tls.sockPeerCert"
   | "tls.sockOnSecureConnect"
   | "tls.sockOnSession"
   /** tls.createSecureContext({ cert, key }) — parses the PEM pair into an
