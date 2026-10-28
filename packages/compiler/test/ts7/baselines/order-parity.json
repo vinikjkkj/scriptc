@@ -3941,6 +3941,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14970-scram-mechanism-select-find-any-predicate.ts": {
+   "order": [
+    "<repo>/tests/corpus/14970-scram-mechanism-select-find-any-predicate.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14971-scram-some-every-any-predicate.ts": {
+   "order": [
+    "<repo>/tests/corpus/14971-scram-some-every-any-predicate.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14972-scram-nonce-client-first.ts": {
+   "order": [
+    "<repo>/tests/corpus/14972-scram-nonce-client-first.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14973-saslprep-nfkc-method-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/14973-saslprep-nfkc-method-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14974-normalize-all-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/14974-normalize-all-forms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14975-normalize-default-form-length.ts": {
+   "order": [
+    "<repo>/tests/corpus/14975-normalize-default-form-length.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14976-normalize-chained-then-split.ts": {
+   "order": [
+    "<repo>/tests/corpus/14976-normalize-chained-then-split.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14977-filter-any-predicate-truthiness.ts": {
+   "order": [
+    "<repo>/tests/corpus/14977-filter-any-predicate-truthiness.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1520-fs-wider-surface.ts": {
    "order": [
     "<repo>/tests/corpus/1520-fs-wider-surface.ts"
