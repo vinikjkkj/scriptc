@@ -18878,6 +18878,18 @@
       "<repo>/tests/corpus/14495-str-index-eq-parens.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/14890-dns-lookup-two-arg-literals.ts": {
+    "order": [
+      "<repo>/tests/corpus/14890-dns-lookup-two-arg-literals.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14891-dns-lookup-two-arg-enotfound.ts": {
+    "order": [
+      "<repo>/tests/corpus/14891-dns-lookup-two-arg-enotfound.ts"
+    ],
+    "diags": []
   }
  }
 }

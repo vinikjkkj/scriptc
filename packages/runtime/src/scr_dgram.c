@@ -363,6 +363,7 @@ typedef struct ScrDnsPending {
   ScrStr *errmsg; /* +1 or NULL (success) */
   ScrStr *addr;   /* +1 ("" on failure) */
   double family;
+  bool literal; /* an IP literal: answered without the resolver */
   struct ScrDnsPending *next;
 } ScrDnsPending;
 
@@ -859,8 +860,38 @@ static void scr_dgram_read(ScrDgramSocket *s) {
 
 /* ── dns.lookup ──────────────────────────────────────────────────────── */
 
+/* The Error a dns.lookup failure delivers: Node's dnsException shape,
+ * message "getaddrinfo <CODE> <hostname>" with `code` = <CODE>. The
+ * runtime hands the adapter only the message (ScrDnsLookupFn), so the
+ * code is read back from it: the token between "getaddrinfo " and the
+ * next space is always one of ENOTFOUND / EAI_AGAIN / EAI_FAIL. errno,
+ * syscall and hostname have no slot on ScrError (name/message/code only)
+ * and stay absent — a residual divergence, recorded in the slice report. */
+ScrError *scr_dns_error_new(ScrStr *msg /*borrowed*/) {
+  ScrError *e = scr_error_new(SCR_ERR_ERROR, msg);
+  const char *sp = strchr(msg->data, ' ');
+  if (sp) {
+    const char *code = sp + 1;
+    const char *end = strchr(code, ' ');
+    size_t n = end ? (size_t)(end - code) : strlen(code);
+    char buf[32];
+    if (n > 0 && n < sizeof buf) {
+      memcpy(buf, code, n);
+      buf[n] = '\0';
+      scr_error_set_code(e, buf);
+    }
+  }
+  return e;
+}
+
+/* dns.lookup(hostname, family, cb): family is 0 (AF_UNSPEC: Node's default),
+ * 4 or 6. Node's answer for an IP LITERAL never reaches the resolver: it
+ * is the hostname verbatim with the literal's own family, whatever family
+ * was asked for (lib/dns.js's isIP fast path), delivered on process.nextTick
+ * — so it queues AHEAD of every resolver answer of the same turn. A name
+ * resolves through getaddrinfo with Node's hints (socktype STREAM, no
+ * flags) and the FIRST answer in getaddrinfo's order (verbatim). */
 void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLookupFn fn) {
-  (void)family; /* the frontend pinned 4; AF_INET below IS that pin */
 #ifdef _WIN32
   /* getaddrinfo needs winsock started (WSANOTINITIALISED otherwise); the
    * poller owns WSAStartup on this arm, so a lookup-only program rides
@@ -872,38 +903,61 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
   p->cb = cb; /* moves */
   p->fn = fn;
   p->family = 4;
-  struct addrinfo hints;
-  memset(&hints, 0, sizeof hints);
-  hints.ai_family = AF_INET;
-  hints.ai_socktype = SOCK_DGRAM;
-  struct addrinfo *res = NULL;
-  int rc = getaddrinfo(hostname->data, NULL, &hints, &res);
-  if (rc == 0 && res) {
-    char ip[64] = "0.0.0.0";
-    inet_ntop(AF_INET, &((struct sockaddr_in *)res->ai_addr)->sin_addr, ip, sizeof ip);
-    p->addr = scr_str_new(ip, strlen(ip));
+  unsigned char lit[16];
+  if (inet_pton(AF_INET, hostname->data, lit) == 1) {
+    p->family = 4;
+    p->literal = true;
+    p->addr = scr_str_new(hostname->data, strlen(hostname->data));
+  } else if (inet_pton(AF_INET6, hostname->data, lit) == 1) {
+    p->family = 6;
+    p->literal = true;
+    p->addr = scr_str_new(hostname->data, strlen(hostname->data));
   } else {
-    /* Node maps name-not-found (and macOS's EAI_NODATA) to ENOTFOUND;
-     * everything else surfaces its EAI_* name. Message shape:
-     * "getaddrinfo ENOTFOUND <hostname>". */
-    const char *code =
-        (rc == EAI_NONAME
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = family == 6 ? AF_INET6 : family == 4 ? AF_INET : AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *res = NULL;
+    int rc = getaddrinfo(hostname->data, NULL, &hints, &res);
+    if (rc == 0 && res) {
+      char ip[64] = "0.0.0.0";
+      if (res->ai_family == AF_INET6) {
+        inet_ntop(AF_INET6, &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr, ip, sizeof ip);
+        p->family = 6;
+      } else {
+        inet_ntop(AF_INET, &((struct sockaddr_in *)res->ai_addr)->sin_addr, ip, sizeof ip);
+        p->family = 4;
+      }
+      p->addr = scr_str_new(ip, strlen(ip));
+    } else {
+      /* Node maps name-not-found (and macOS's EAI_NODATA) to ENOTFOUND;
+       * everything else surfaces its EAI_* name. Message shape:
+       * "getaddrinfo ENOTFOUND <hostname>". */
+      const char *code =
+          (rc == EAI_NONAME
 #ifdef EAI_NODATA
-         || rc == EAI_NODATA
+           || rc == EAI_NODATA
 #endif
-         )
-            ? "ENOTFOUND"
-        : rc == EAI_AGAIN ? "EAI_AGAIN"
-                          : "EAI_FAIL";
-    char msg[192];
-    snprintf(msg, sizeof msg, "getaddrinfo %s %s", code, hostname->data);
-    p->errmsg = scr_str_new(msg, strlen(msg));
-    p->addr = scr_str_new("", 0);
+           )
+              ? "ENOTFOUND"
+          : rc == EAI_AGAIN ? "EAI_AGAIN"
+                            : "EAI_FAIL";
+      char msg[192];
+      snprintf(msg, sizeof msg, "getaddrinfo %s %s", code, hostname->data);
+      p->errmsg = scr_str_new(msg, strlen(msg));
+      p->addr = scr_str_new("", 0);
+    }
+    if (res) freeaddrinfo(res);
   }
-  if (res) freeaddrinfo(res);
-  /* FIFO append: deliveries fire in call order at the next sweep. */
+  /* Queue order: literals (nextTick) before resolver answers, FIFO within
+   * each class. */
   ScrDnsPending **link = &scr_dns_pending;
-  while (*link) link = &(*link)->next;
+  if (p->literal) {
+    while (*link && (*link)->literal) link = &(*link)->next;
+  } else {
+    while (*link) link = &(*link)->next;
+  }
+  p->next = *link;
   *link = p;
 }
 

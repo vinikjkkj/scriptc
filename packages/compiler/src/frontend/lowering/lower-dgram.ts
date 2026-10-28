@@ -238,14 +238,30 @@ function lowerDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
   }
   requireStatementPosition(L, expr, "dns.lookup(...)");
   const args = expr.arguments;
-  if (args.length !== 3) {
+  if (args.length !== 2 && args.length !== 3) {
     L.noLowering(
       `lookup with ${args.length} arguments`,
       expr,
-      "the supported form is lookup(hostname, { family: 4 }, callback)",
+      "the supported forms are lookup(hostname, callback) and lookup(hostname, { family: 4 }, callback)",
     );
   }
   const hostname = L.lowerExprExpecting(args[0]!, STRING);
+  if (args.length === 2) {
+    // lookup(hostname, callback): Node's default options — family 0, both
+    // address families, the first answer in getaddrinfo's order. The
+    // runtime's family argument is 0 (AF_UNSPEC); the callback is the same
+    // (err, address, family) shape as the three-argument form.
+    const { cb } = lowerCallbackArg(
+      L, args[1]!, "lookup callbacks", 3,
+      (p, i) =>
+        i === 0 ? isErrorOrNullUnion(L, p)
+        : i === 1 ? p.kind === "string"
+        : p.kind === "f64",
+      "use (err, address) — err is Error | null, address a string",
+    );
+    const family: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
+    return { kind: "libCall", fn: "dns.lookup", args: [hostname, family, cb], type: VOID, loc };
+  }
   // The options: an object literal whose one meaningful entry is the
   // IPv4 pin — `{ family: 4 }`. Node's family-less and family-6 lookups
   // have no lowering (the runtime resolves over getaddrinfo/AF_INET).
