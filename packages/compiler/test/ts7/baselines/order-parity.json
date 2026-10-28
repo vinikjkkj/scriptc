@@ -19453,6 +19453,42 @@
     "<repo>/tests/corpus/14923-net-dyn-reconnect-keeps-listeners.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/14924-net-dyn-connect-port-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/14924-net-dyn-connect-port-string.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14925-net-dyn-connect-sync-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/14925-net-dyn-connect-sync-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14926-net-dyn-connect-lookup-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/14926-net-dyn-connect-lookup-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14927-net-dyn-connect-name-enotfound.ts": {
+   "order": [
+    "<repo>/tests/corpus/14927-net-dyn-connect-name-enotfound.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14928-net-dyn-connect-lookup-connects.ts": {
+   "order": [
+    "<repo>/tests/corpus/14928-net-dyn-connect-lookup-connects.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14929-net-dyn-connect-ignored-options.ts": {
+   "order": [
+    "<repo>/tests/corpus/14929-net-dyn-connect-ignored-options.ts"
+   ],
+   "diags": []
   }
  }
 }
