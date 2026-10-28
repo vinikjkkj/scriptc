@@ -32,6 +32,7 @@
  *   counted by the OS) so a poller created first still works. */
 #ifdef _WIN32
 
+#include <stdio.h> /* NETDBG tlsdbg */
 #include "scr_platform.h"
 #include "scr_runtime.h"
 
