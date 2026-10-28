@@ -19035,9 +19035,15 @@
     ],
     "diags": []
   },
-  "<repo>/tests/corpus/14933-class-define-method-getter-converts-to-data.ts": {
+  "<repo>/tests/corpus/14931-defineproperties-clone-of-dyn-config.ts": {
     "order": [
-      "<repo>/tests/corpus/14933-class-define-method-getter-converts-to-data.ts"
+      "<repo>/tests/corpus/14931-defineproperties-clone-of-dyn-config.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14932-defineproperties-clone-hidden-members.ts": {
+    "order": [
+      "<repo>/tests/corpus/14932-defineproperties-clone-hidden-members.ts"
     ],
     "diags": []
   }

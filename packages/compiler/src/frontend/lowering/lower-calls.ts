@@ -12184,6 +12184,32 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // Only the two-argument form can be the idiom: Object.create(null) and
     // Object.create(proto) keep their own lowerings.
     if (call.arguments.length !== 2 || call.arguments.some((x) => ts.isSpreadElement(x))) return null;
+    const [protoArg, descArg] = call.arguments as unknown as [ts.Expression, ts.Expression];
+    return lowerCloneIdiomFrom(L, call, protoArg, descArg);
+  }
+
+  /** `Object.defineProperties(Object.create(getPrototypeOf(x)),
+   * getOwnPropertyDescriptors(x))` — the clone spelled as two calls
+   * (pg's utils.js cloneQueryConfig). It IS the two-argument
+   * `Object.create(getPrototypeOf(x), getOwnPropertyDescriptors(x))`: ES
+   * defines Object.create(P, D) as OrdinaryObjectCreate(P) followed by
+   * ObjectDefineProperties(obj, D), and the one-argument create plus
+   * defineProperties runs the same two steps in the same order, with the
+   * same two argument evaluations (getPrototypeOf(x) first, then
+   * getOwnPropertyDescriptors(x)). Anything else keeps the fence. */
+  function lowerDefinePropsCloneIdiom(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    if (call.arguments.length !== 2 || call.arguments.some((x) => ts.isSpreadElement(x))) return null;
+    let inner: ts.Expression = call.arguments[0]!;
+    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+    if (!ts.isCallExpression(inner) || inner.arguments.length !== 1 || ts.isSpreadElement(inner.arguments[0]!)) return null;
+    const acc = inner.expression;
+    if (!ts.isPropertyAccessExpression(acc) || acc.name.text !== "create" || !L.isStdlibGlobal(acc.expression, "Object")) {
+      return null;
+    }
+    return lowerCloneIdiomFrom(L, call, inner.arguments[0]!, call.arguments[1]!);
+  }
+
+  function lowerCloneIdiomFrom(L: Lowerer, call: ts.CallExpression, protoArg: ts.Expression, descArg: ts.Expression): IrExpr | null {
     const unparen = (e: ts.Expression): ts.Expression => {
       let x = e;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
@@ -12202,7 +12228,6 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       if (!ts.isPropertyAccessExpression(acc) || acc.name.text !== name) return null;
       return L.isStdlibGlobal(acc.expression, "Object") ? e : null;
     };
-    const [protoArg, descArg] = call.arguments as unknown as [ts.Expression, ts.Expression];
     const protoCall = objectStaticCall(unparen(protoArg), "getPrototypeOf");
     const descCall = objectStaticCall(unparen(descArg), "getOwnPropertyDescriptors");
     if (protoCall === null || descCall === null) return null;
@@ -12310,6 +12335,10 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           loc: ploc,
         };
       }
+    }
+    if (member === "defineProperties") {
+      const cloned = lowerDefinePropsCloneIdiom(L, call);
+      if (cloned) return cloned;
     }
     if (member === "defineProperty") {
       const slot = lowerDefinePropHiddenSlot(L, call);
