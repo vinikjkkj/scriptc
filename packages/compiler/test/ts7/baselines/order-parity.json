@@ -18746,6 +18746,42 @@
       "<repo>/tests/corpus/14474-oob-annotated-return-twice.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/14490-str-index-eq-in-range.ts": {
+    "order": [
+      "<repo>/tests/corpus/14490-str-index-eq-in-range.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14491-str-index-eq-out-of-range.ts": {
+    "order": [
+      "<repo>/tests/corpus/14491-str-index-eq-out-of-range.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14492-str-index-eq-surrogate.ts": {
+    "order": [
+      "<repo>/tests/corpus/14492-str-index-eq-surrogate.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14493-str-index-eq-tz.ts": {
+    "order": [
+      "<repo>/tests/corpus/14493-str-index-eq-tz.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14494-str-index-eq-fractional.ts": {
+    "order": [
+      "<repo>/tests/corpus/14494-str-index-eq-fractional.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14495-str-index-eq-parens.ts": {
+    "order": [
+      "<repo>/tests/corpus/14495-str-index-eq-parens.ts"
+    ],
+    "diags": []
   }
  }
 }
