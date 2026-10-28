@@ -13340,32 +13340,17 @@ class LlEmitter {
       finish(null);
       d.push(`}`, ``);
     } else if (p.kind === "bytes" || p.kind === "string") {
-      const msg = p.kind === "bytes"
-        ? "a 'data' listener declaring a Buffer chunk received a string (the stream has an encoding set)"
-        : "a 'data' listener declaring a string chunk received a Buffer (call setEncoding, or declare the chunk as a Buffer)";
       const slot = p.kind === "bytes" ? "%a0" : "%a1";
-      this.declare(`declare void @scr_throw_error_msg(i32, ptr, i64)`);
-      // An objectMode payload (no bytes/string slot, the dyn cur set) gets
-      // the object message; the C thunk's emit-async.ts text is identical.
-      const objMsg = p.kind === "bytes"
-        ? "a 'data' listener declaring a Buffer chunk received an object (the stream is in objectMode)"
-        : "a 'data' listener declaring a string chunk received an object (the stream is in objectMode)";
-      this.declare(`declare ptr @scr_stream_data_dyn_cur()`);
+      this.declare(`declare void @scr_trap(ptr)`);
+      // Reached only by a listener left typed (see the C thunk): the lowering
+      // routes every other chunk through the checked-dynamic path, so a null
+      // slot here is an invariant break, trapped rather than thrown.
       d.push(
         `  %miss = icmp eq ptr ${slot}, null`,
         `  br i1 %miss, label %bad, label %ok`,
         `bad:`,
-        `  %curd = call ptr @scr_stream_data_dyn_cur()`,
-        `  %isobj = icmp ne ptr %curd, null`,
-        `  br i1 %isobj, label %badobj, label %badstr`,
-        `badobj:`,
-        `  call void @scr_throw_error_msg(i32 1, ptr ${this.cstr(objMsg)}, i64 ${Buffer.byteLength(objMsg, "utf8")})`,
-        `  call void @scr_closure_release(ptr %orig)`,
-        `  ret void`,
-        `badstr:`,
-        `  call void @scr_throw_error_msg(i32 1, ptr ${this.cstr(msg)}, i64 ${Buffer.byteLength(msg, "utf8")})`,
-        `  call void @scr_closure_release(ptr %orig)`,
-        `  ret void`,
+        `  call void @scr_trap(ptr ${this.cstr("scriptc: a typed Buffer or string 'data' listener met a non-matching chunk; the lowering routes that case through the checked-dynamic path")})`,
+        `  unreachable`,
         `ok:`,
         `  %r0 = call ptr ${retainSym(this, p)}(ptr ${slot})`,
       );

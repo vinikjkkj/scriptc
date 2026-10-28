@@ -59,14 +59,11 @@ const EMITTER_FILES = [
 /** The uncoded throw is allowed only where the site is NOT a refusal. Keyed
  * by the emitted message's distinctive fragment, because that is what an
  * instrument reading a TU has to key on too. */
-const UNCODED_ALLOWED: { fragment: string; why: string }[] = [
-  {
-    fragment: "chunk received a",
-    why:
-      "emit-async's stream 'data' flavor mismatch is a PARITY throw, not a refusal: " +
-      "Node throws a TypeError at the same point, so it needs no scriptc code",
-  },
-];
+// Empty: the stream 'data' chunk-kind mismatch is no longer a throw. A typed
+// Buffer or string 'data' listener on a program that may carry a non-Buffer
+// chunk is lowered checked-dynamic (lower-emitter.ts dataListenerNeedsDyn), so
+// nothing reaches the thunk's invariant trap with a mismatched chunk.
+const UNCODED_ALLOWED: { fragment: string; why: string }[] = [];
 
 function uncodedCallSites(src: string): { line: number; text: string }[] {
   const out: { line: number; text: string }[] = [];

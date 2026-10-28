@@ -860,6 +860,87 @@ const META_OBSERVER_CACHE = new WeakMap<ts.Program, boolean>();
  * as name-only). Such an observer receives each registered listener FUNCTION, so in
  * this program every registration takes the dyn path, which carries the box.
  * Computed once per program. */
+/** Whether any chunk a stream in this program can emit may be a non-Buffer:
+ * objectMode (a literal key, a non-literal options argument, Readable.from,
+ * a stream subclass's super(options)), an encoding (setEncoding, an
+ * `encoding` key, createReadStream with a string). Conservative over the
+ * program's own sources, node_modules included. When false, every chunk is
+ * a Buffer and a Buffer-typed 'data' listener is exact as written. */
+const NONBUF_CHUNK_CACHE = new WeakMap<ts.Program, boolean>();
+const NONBUF_KEYS = new Set(["objectMode", "readableObjectMode", "writableObjectMode", "encoding"]);
+const STREAM_CLASSES = new Set(["Readable", "Duplex", "Transform", "PassThrough"]);
+function calleeNameOf(e: ts.Expression): string | null {
+  if (ts.isIdentifier(e)) return e.text;
+  if (ts.isPropertyAccessExpression(e)) return e.name.text;
+  return null;
+}
+function programMayCarryNonBufferChunks(L: Lowerer): boolean {
+  const cached = NONBUF_CHUNK_CACHE.get(L.program);
+  if (cached !== undefined) return cached;
+  let found = false;
+  const isLiteral = (a: ts.Expression | undefined): boolean => a !== undefined && ts.isObjectLiteralExpression(a);
+  const inStreamSubclass = (n: ts.Node): boolean => {
+    for (let c: ts.Node | undefined = n.parent; c !== undefined; c = c.parent) {
+      if (ts.isClassDeclaration(c) || ts.isClassExpression(c)) {
+        return (c.heritageClauses ?? []).some((h: ts.HeritageClause) => h.types.some((t) => {
+          const nm = calleeNameOf(t.expression);
+          return nm !== null && STREAM_CLASSES.has(nm);
+        }));
+      }
+    }
+    return false;
+  };
+  const visit = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(n)) {
+      const nm = calleeNameOf(n.expression);
+      if (nm === "setEncoding") found = true;
+      else if (nm === "createReadStream" && n.arguments.some((a) => ts.isStringLiteralLike(a))) found = true;
+      else if (nm === "from" && ts.isPropertyAccessExpression(n.expression) &&
+          calleeNameOf(n.expression.expression) === "Readable") found = true;
+      else if (n.expression.kind === ts.SyntaxKind.SuperKeyword && n.arguments.length > 0 &&
+          !isLiteral(n.arguments[0]) && inStreamSubclass(n)) found = true;
+    } else if (ts.isNewExpression(n)) {
+      const nm = calleeNameOf(n.expression);
+      if (nm !== null && STREAM_CLASSES.has(nm) && n.arguments !== undefined && n.arguments.length > 0 &&
+          !isLiteral(n.arguments[0])) found = true;
+    } else if (ts.isPropertyAssignment(n) || ts.isShorthandPropertyAssignment(n) || ts.isMethodDeclaration(n) ||
+        ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)) {
+      const nm = n.name;
+      if (nm !== undefined && (ts.isIdentifier(nm) || ts.isStringLiteralLike(nm)) && NONBUF_KEYS.has(nm.text)) found = true;
+    } else if (ts.isPropertyAccessExpression(n) && NONBUF_KEYS.has(n.name.text)) {
+      found = true;
+    }
+    if (!found) ts.forEachChild(n, visit);
+  };
+  for (const sf of L.program.getSourceFiles()) {
+    if (sf.isDeclarationFile) continue;
+    visit(sf);
+    if (found) break;
+  }
+  NONBUF_CHUNK_CACHE.set(L.program, found);
+  return found;
+}
+
+/** A 'data' listener whose chunk parameter is typed Buffer or string, on a
+ * program that may carry a non-Buffer chunk (or any string-typed listener):
+ * it registers checked-dynamic, so it receives exactly the value Node passes. */
+function dataListenerNeedsDyn(L: Lowerer, node: ts.Expression): boolean {
+  if (dynListenerFlavor(L, node) !== null) return false;
+  let t: IrType | null;
+  try {
+    t = L.mapTypeOf(L.typeOf(node));
+  } catch {
+    return false;
+  }
+  if (t?.kind !== "func") return false;
+  const p = t.params[0];
+  if (p === undefined) return false;
+  if (p.kind === "string") return true;
+  if (p.kind === "bytes" && p.elem === "u8") return programMayCarryNonBufferChunks(L);
+  return false;
+}
+
 function programObservesMetaArgs(L: Lowerer): boolean {
   const cached = META_OBSERVER_CACHE.get(L.program);
   if (cached !== undefined) return cached;
@@ -1433,8 +1514,14 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     // therefore lowered as checked-dynamic, the same path an unannotated
     // listener takes: its reads go through the dyn surface and the
     // Error-encoded wrapper unwraps at the boundary.
-    if (name === "error" && (sides === "r" || sides === "rw")) {
-      const errTuple: IrType[] = [{ kind: "object", className: "%Error" }];
+    const dynEvt: { tuple: IrType[]; streamData: boolean } | null =
+      name === "error" && (sides === "r" || sides === "rw")
+        ? { tuple: [{ kind: "object", className: "%Error" }], streamData: false }
+        : name === "data" && (sides === "r" || sides === "rw") && dataListenerNeedsDyn(L, args[1]!)
+          ? { tuple: [DYN], streamData: true }
+          : null;
+    if (dynEvt !== null) {
+      const errTuple = dynEvt.tuple;
       const unparen = (e: ts.Expression): ts.Expression => {
         let x = e;
         while (ts.isParenthesizedExpression(x)) x = x.expression;
@@ -1470,7 +1557,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
         const undo = L.dynParamsOf(listener, true);
         try {
           return lowerDynListenerCall(
-            L, member, name, errTuple, receiver, listener, "func", registering, once, prepend, loc, false,
+            L, member, name, errTuple, receiver, listener, "func", registering, once, prepend, loc, dynEvt.streamData,
           );
         } finally {
           for (const u of undo) {
@@ -1500,7 +1587,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
             type: DYN,
             loc,
           };
-          return dynListenerRegistration(L, errTuple, receiver, name, cbDyn, registering, once, prepend, false, loc);
+          return dynListenerRegistration(L, errTuple, receiver, name, cbDyn, registering, once, prepend, dynEvt.streamData, loc);
         }
       }
     }
