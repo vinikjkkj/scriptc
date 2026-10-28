@@ -610,6 +610,17 @@ function helperFieldEnumerationFence(L: Lowerer, expr: ts.Expression): void {
   }
 }
 
+
+/** WebCrypto members with no lowering are refused at COMPILE time, by name.
+ * The lowered SubtleCrypto members are digest, importKey, sign and deriveBits
+ * (runtime: scr_lib.c, the WebCrypto block); the lowered Crypto members are
+ * getRandomValues, randomUUID and subtle. Receivers are matched by the checker's
+ * declared type (SubtleCrypto / Crypto from the Node and DOM declarations).
+ * Literal algorithm names and formats the runtime does not serve are refused
+ * here too, so no program meets an unsupported algorithm at run time. */
+const SUBTLE_LOWERED_MEMBERS: ReadonlySet<string> = new Set(["digest", "importKey", "sign", "deriveBits"]);
+const CRYPTO_LOWERED_MEMBERS: ReadonlySet<string> = new Set(["getRandomValues", "randomUUID", "subtle"]);
+
 /** True when `e` denotes the WebCrypto singleton (`require('crypto').webcrypto`,
  * or `globalThis.crypto` / the global `crypto`), or is a `||` / `??` over such
  * spellings. Mirrors the value lowering (lower-exprs: dyn.webCrypto). */
@@ -622,7 +633,254 @@ export function isWebCryptoValueExpr(L: Lowerer, e: ts.Expression): boolean {
   return stdlibGlobalNameOf(L, e) === "crypto";
 }
 
+/** The WebCrypto kind an expression denotes: "Crypto" for the WebCrypto
+ * singleton (`require('crypto').webcrypto`, `globalThis.crypto`), "SubtleCrypto"
+ * for its `.subtle`, or null. A const binding follows its initializer. In a
+ * JavaScript file the checker types `require` as any, so the value spelling is
+ * the test there; a TypeScript file also answers by the declared type. */
+function webCryptoKindOf(L: Lowerer, e: ts.Expression, depth = 0): string | null {
+  if (depth > 12) return null;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  const sym = L.typeOf(e).getSymbol();
+  if (sym !== undefined && (sym.name === "SubtleCrypto" || sym.name === "Crypto") &&
+      L.checker.declarationsOf(sym).some((d) => d.getSourceFile().isDeclarationFile)) {
+    return sym.name;
+  }
+  if (isWebCryptoValueExpr(L, e)) return "Crypto";
+  if (ts.isPropertyAccessExpression(e) && e.name.text === "subtle") {
+    return webCryptoKindOf(L, e.expression, depth + 1) === "Crypto" ? "SubtleCrypto" : null;
+  }
+  if (ts.isBinaryExpression(e) && (e.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+      e.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)) {
+    const l = webCryptoKindOf(L, e.left, depth + 1);
+    return l !== null && l === webCryptoKindOf(L, e.right, depth + 1) ? l : null;
+  }
+  if (ts.isIdentifier(e)) {
+    const dsym = L.resolveValueSymbol(e);
+    const decl = dsym === null ? undefined : L.checker.declarationsOf(dsym)[0];
+    if (decl !== undefined && ts.isVariableDeclaration(decl) && decl.initializer !== undefined &&
+        ts.isIdentifier(decl.name) && ts.isVariableDeclarationList(decl.parent) &&
+        (decl.parent.flags & ts.NodeFlags.Const) !== 0) {
+      return webCryptoKindOf(L, decl.initializer, depth + 1);
+    }
+  }
+  return null;
+}
+
+function webCryptoReceiverName(L: Lowerer, recv: ts.Expression): string | null {
+  return webCryptoKindOf(L, recv);
+}
+
+export function refuseUnloweredWebCrypto(L: Lowerer, access: ts.PropertyAccessExpression): void {
+  const recv = webCryptoReceiverName(L, access.expression);
+  if (recv === null) return;
+  const name = access.name.text;
+  if (recv === "SubtleCrypto" && !SUBTLE_LOWERED_MEMBERS.has(name)) {
+    L.unsupported("SC1090", access.name, `SubtleCrypto.${name} (no lowering: digest, importKey, sign and deriveBits are the lowered members)`);
+  }
+  if (recv === "Crypto" && !CRYPTO_LOWERED_MEMBERS.has(name)) {
+    L.unsupported("SC1090", access.name, `Crypto.${name} (no lowering: getRandomValues, randomUUID and subtle are the lowered members)`);
+  }
+}
+
+/** The string a provable expression spells, or null: a literal, a const
+ * binding to one, or a property of a const object literal. */
+function provableString(L: Lowerer, e: ts.Expression, depth = 0): string | null {
+  if (depth > 8) return null;
+  while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+  if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return e.text;
+  const init = constInitOf(L, e);
+  if (init !== null) return provableString(L, init, depth + 1);
+  if (ts.isPropertyAccessExpression(e)) {
+    const obj = provableObject(L, e.expression, depth + 1);
+    const v = obj === null ? undefined : memberOf(obj, e.name.text);
+    return v === undefined ? null : provableString(L, v, depth + 1);
+  }
+  return null;
+}
+
+/** The object literal an expression denotes (directly, or through a const binding), or null. */
+function provableObject(L: Lowerer, e: ts.Expression, depth = 0): ts.ObjectLiteralExpression | null {
+  if (depth > 8) return null;
+  while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+  if (ts.isObjectLiteralExpression(e)) return e;
+  const init = constInitOf(L, e);
+  return init === null ? null : provableObject(L, init, depth + 1);
+}
+
+/** The initializer of an identifier bound by a single const declaration, or null. */
+function constInitOf(L: Lowerer, e: ts.Expression): ts.Expression | null {
+  if (!ts.isIdentifier(e)) return null;
+  const sym = L.resolveValueSymbol(e);
+  if (sym === null) return null;
+  const decl = L.checker.declarationsOf(sym)[0];
+  if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return null;
+  if (!ts.isIdentifier(decl.name) || !ts.isVariableDeclarationList(decl.parent)) return null;
+  if ((decl.parent.flags & ts.NodeFlags.Const) === 0) return null;
+  return decl.initializer;
+}
+
+/** The value of a plain (non-shorthand, non-computed) member of an object literal, or undefined. */
+function memberOf(obj: ts.ObjectLiteralExpression, name: string): ts.Expression | undefined {
+  for (const p of obj.properties) {
+    if (ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) && p.name.text === name) {
+      return p.initializer;
+    }
+  }
+  return undefined;
+}
+
+/** The SubtleCrypto calls the runtime serves. The algorithm, hash and format
+ * arguments must be PROVABLY inside the served set (a literal, or a const chain to
+ * one); a dynamic value is refused by name. digest takes any name: the runtime
+ * answers every name exactly as Node does. */
+const SERVED_HASHES: ReadonlySet<string> = new Set(["sha-1", "sha-256", "sha-384", "sha-512", "sha3-256", "sha3-384", "sha3-512"]);
+
+export function refuseUnloweredSubtleCall(L: Lowerer, call: ts.CallExpression): void {
+  const callee = call.expression;
+  if (!ts.isPropertyAccessExpression(callee) || webCryptoReceiverName(L, callee.expression) !== "SubtleCrypto") return;
+  const name = callee.name.text;
+  const args = call.arguments;
+  const refuse = (what: string): void => {
+    L.unsupported("SC1090", callee.name, `SubtleCrypto.${name} with ${what} (served: digest with SHA-1/256/384/512 and SHA3-256/384/512; importKey raw HMAC and PBKDF2 keys; sign HMAC; deriveBits PBKDF2 with a served hash)`);
+  };
+  /** the algorithm name a provable argument spells: a string, or a dictionary's `name` */
+  const algNameOf = (e: ts.Expression | undefined): string | null => {
+    if (e === undefined) return null;
+    const direct = provableString(L, e);
+    if (direct !== null) return direct;
+    const obj = provableObject(L, e);
+    if (obj === null) return null;
+    const n = memberOf(obj, "name");
+    return n === undefined ? null : provableString(L, n);
+  };
+  /** the hash of a dictionary argument: provably served, or absent (the runtime answers the missing-member error) */
+  const hashOk = (e: ts.Expression | undefined): boolean => {
+    if (e === undefined) return true;
+    const obj = provableObject(L, e);
+    if (obj === null) return provableString(L, e) !== null; /* a bare name has no hash to check */
+    const h = memberOf(obj, "hash");
+    if (h === undefined) return true;
+    const hv = provableString(L, h);
+    return hv !== null && SERVED_HASHES.has(hv.toLowerCase());
+  };
+  if (name === "sign") {
+    const alg = algNameOf(args[0]);
+    if (alg === null || alg.toUpperCase() !== "HMAC") refuse(alg === null ? "an algorithm the compiler cannot prove is HMAC" : `algorithm '${alg}'`);
+  }
+  if (name === "deriveBits") {
+    const alg = algNameOf(args[0]);
+    if (alg === null || alg.toUpperCase() !== "PBKDF2") refuse(alg === null ? "an algorithm the compiler cannot prove is PBKDF2" : `algorithm '${alg}'`);
+    else if (!hashOk(args[0])) refuse("a hash the compiler cannot prove is served");
+  }
+  if (name === "importKey") {
+    const fmt = args[0] === undefined ? null : provableString(L, args[0]);
+    if (fmt !== "raw") refuse(fmt === null ? "a format the compiler cannot prove is 'raw'" : `format '${fmt}'`);
+    const alg = algNameOf(args[2]);
+    if (alg === null || (alg.toUpperCase() !== "HMAC" && alg.toUpperCase() !== "PBKDF2")) {
+      refuse(alg === null ? "an algorithm the compiler cannot prove is HMAC or PBKDF2" : `algorithm '${alg}'`);
+    } else if (!hashOk(args[2])) {
+      refuse("a hash the compiler cannot prove is served");
+    }
+  }
+}
+
+/** The members of a WebCrypto interface the runtime does not serve. */
+function unservedWebCryptoMember(kind: string, name: string): boolean {
+  return kind === "SubtleCrypto" ? !SUBTLE_LOWERED_MEMBERS.has(name) : !CRYPTO_LOWERED_MEMBERS.has(name);
+}
+
+/** `({ encrypt } = subtle)`: an assignment destructuring over a WebCrypto receiver names its members. */
+export function refuseUnloweredWebCryptoAssign(L: Lowerer, e: ts.BinaryExpression): void {
+  if (e.operatorToken.kind !== ts.SyntaxKind.EqualsToken || !ts.isObjectLiteralExpression(e.left)) return;
+  const recv = webCryptoReceiverName(L, e.right);
+  if (recv === null) return;
+  for (const p of e.left.properties) {
+    if (ts.isSpreadAssignment(p)) {
+      L.unsupported("SC1090", p, `a rest element over '${recv}' (the member set is not statically enumerable)`);
+      continue;
+    }
+    const key = p.name;
+    const name = ts.isIdentifier(key) || ts.isStringLiteral(key) ? key.text : null;
+    if (name === null) L.unsupported("SC1090", p, `a computed member of '${recv}'`);
+    else if (unservedWebCryptoMember(recv, name)) L.unsupported("SC1090", p, `${recv}.${name} (no lowering)`);
+  }
+}
+
+/** A WebCrypto value passed to a statically resolved function whose matching parameter
+ * destructures a member the runtime does not serve (`function f({ encrypt }) {}`, `f(subtle)`). */
+export function refuseWebCryptoDestructuredArgs(L: Lowerer, call: ts.CallExpression): void {
+  const kinds = call.arguments.map((a) => webCryptoKindOf(L, a));
+  if (kinds.every((k) => k === null)) return;
+  if (!ts.isIdentifier(call.expression)) return;
+  const sym = L.resolveValueSymbol(call.expression);
+  if (sym === null) return;
+  const decl = L.checker.declarationsOf(sym)[0];
+  let fn: ts.SignatureDeclaration | undefined;
+  if (decl !== undefined && ts.isFunctionDeclaration(decl)) fn = decl;
+  else if (decl !== undefined && ts.isVariableDeclaration(decl) && decl.initializer !== undefined &&
+      (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))) fn = decl.initializer;
+  if (fn === undefined) return;
+  fn.parameters.forEach((param, i) => {
+    const kind = kinds[i];
+    if (kind === undefined || kind === null || !ts.isObjectBindingPattern(param.name)) return;
+    for (const el of param.name.elements) {
+      const key = el.propertyName ?? el.name;
+      if (key === undefined) continue;
+      const name = ts.isIdentifier(key) || ts.isStringLiteral(key) ? key.text : null;
+      if (name === null) L.unsupported("SC1090", el, `a computed member of '${kind}'`);
+      else if (unservedWebCryptoMember(kind, name)) L.unsupported("SC1090", el, `${kind}.${name} (no lowering)`);
+    }
+  });
+}
+
+/** A WebCrypto object enumerated or introspected by name: for-in (Node enumerates
+ * the interface's prototype members, which the runtime does not model) and the
+ * own-property walks that see the runtime's hidden CryptoKey members. */
+export function refuseWebCryptoIntrospection(L: Lowerer, e: ts.Expression, what: string): void {
+  const recv = webCryptoKindOf(L, e);
+  if (recv !== null) L.unsupported("SC1090", e, `${what} over a ${recv} object (its prototype members are enumerated by Node and not modelled)`);
+}
+
+/** Object.getOwnPropertyNames / getOwnPropertyDescriptor(s) / Reflect.ownKeys over a WebCrypto value. */
+export function refuseWebCryptoOwnKeys(L: Lowerer, call: ts.CallExpression): void {
+  const c = call.expression;
+  if (!ts.isPropertyAccessExpression(c) || call.arguments.length === 0) return;
+  const owner = ts.isIdentifier(c.expression) ? c.expression.text : null;
+  const m = c.name.text;
+  const ownKeysCall = (owner === "Object" && (m === "getOwnPropertyNames" || m === "getOwnPropertyDescriptors" || m === "getOwnPropertyDescriptor")) ||
+    (owner === "Reflect" && m === "ownKeys");
+  if (!ownKeysCall) return;
+  const target = call.arguments[0];
+  if (target !== undefined) refuseWebCryptoIntrospection(L, target, `${owner}.${m}`);
+}
+
+/** A destructuring of a WebCrypto receiver (`const { encrypt } = subtle`):
+ * each named member is checked like a member read, and a rest element is
+ * refused (the member set is not statically enumerable). */
+export function refuseUnloweredWebCryptoPattern(L: Lowerer, pattern: ts.ObjectBindingPattern, init: ts.Expression): void {
+  const recv = webCryptoReceiverName(L, init);
+  if (recv === null) return;
+  const lowered = recv === "SubtleCrypto" ? SUBTLE_LOWERED_MEMBERS : CRYPTO_LOWERED_MEMBERS;
+  for (const el of pattern.elements) {
+    if (el.dotDotDotToken !== undefined) {
+      L.unsupported("SC1090", el, `a rest element over '${recv}' (the member set is not statically enumerable)`);
+      continue;
+    }
+    const key = el.propertyName ?? el.name;
+    if (key === undefined) continue;
+    const name = ts.isIdentifier(key) || ts.isStringLiteral(key) ? key.text : null;
+    if (name === null) {
+      L.unsupported("SC1090", el, `a computed member of '${recv}'`);
+    } else if (!lowered.has(name)) {
+      L.unsupported("SC1090", el, `${recv}.${name} (no lowering: ${recv === "SubtleCrypto" ? "digest, importKey, sign and deriveBits" : "getRandomValues, randomUUID and subtle"} are the lowered members)`);
+    }
+  }
+}
+
+
 function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
+  if (ts.isBinaryExpression(expr)) refuseUnloweredWebCryptoAssign(L, expr);
     const loc = locOf(expr);
     // STEP 2a: a flagged number[] may only be indexed, measured, filled or grown.
     if (ts.isIdentifier(expr)) checkHoleFlaggedUse(L, expr);
@@ -2525,6 +2783,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (whole !== null) return whole;
     }
     if (ts.isPropertyAccessExpression(expr)) {
+      refuseUnloweredWebCrypto(L, expr);
       // A prototype DATUM of a paired class, read through a value whose checker type does
       // not declare it (the declaration file names no `isPoint`): the lowering would answer
       // the absent read `undefined`, where Node answers the constant. Refused loudly.
