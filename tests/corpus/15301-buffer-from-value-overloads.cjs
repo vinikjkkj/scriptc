@@ -1,0 +1,40 @@
+// Every string-encoding and array/typed-array overload of Buffer.from, called through the stored value.
+var bf = Buffer.from
+function hx (b) { return b.length + ':' + b.toString('hex') }
+function t (name, fn) {
+  try { console.log(name, hx(fn())) } catch (e) { console.log(name, 'THREW', e.name, e.code, e.message) }
+}
+function dv (x) { return x }
+t('str', function () { return bf('Hello') })
+t('hex', function () { return bf('48656c6c6f', 'hex') })
+t('hex-odd', function () { return bf('abc', 'hex') })
+t('hex-bad', function () { return bf('zz12', 'hex') })
+t('b64', function () { return bf('aGk=', 'base64') })
+t('b64url', function () { return bf('aGk-_w', 'base64url') })
+t('latin1', function () { return bf('hÿ', 'latin1') })
+t('binary', function () { return bf('hÿ', 'binary') })
+t('ascii', function () { return bf('hÿ', 'ascii') })
+t('ucs2', function () { return bf('hi', 'ucs2') })
+t('utf16le', function () { return bf('hi', 'utf16le') })
+t('UTF8-upper', function () { return bf('hé', 'UTF8') })
+t('enc-num', function () { return bf('ab', 5) })
+t('enc-undef', function () { return bf('ab', undefined) })
+t('enc-empty', function () { return bf('ab', '') })
+t('arr', function () { return bf(dv([1, 2, 256, -1, 1.7, NaN, '7', true, null, undefined])) })
+t('arr-empty', function () { return bf([]) })
+t('arr-enc', function () { return bf([65, 66], 'hex') })
+t('u8', function () { return bf(new Uint8Array([9, 8, 7])) })
+t('buf', function () { return bf(Buffer.from('xy')) })
+t('u16', function () { return bf(new Uint16Array([256, 3])) })
+t('f32', function () { return bf(new Float32Array([1.5, -2])) })
+t('i16', function () { return bf(new Int16Array([-1, 300])) })
+t('f64', function () { return bf(new Float64Array([1e20, -1.5, NaN])) })
+t('empty-u8', function () { return bf(new Uint8Array(0)) })
+t('vo-str', function () { return bf({ valueOf: function () { return 'hi' } }) })
+t('arrlike', function () { return bf({ length: 2, 0: 65, 1: 66 }) })
+t('arrlike-frac', function () { return bf({ length: 2.5, 0: 1, 1: 2, 2: 3 }) })
+t('typebuf', function () { return bf({ type: 'Buffer', data: [1, 2] }) })
+t('typebuf-300', function () { return bf({ type: 'Buffer', data: [300, -1] }) })
+t('arr-valueof-obj', function () { return bf(dv([{ valueOf: function () { return 7 } }])) })
+t('arr-str7', function () { return bf(dv(['7', '  9 ', 'x'])) })
+t('dataview', function () { return bf(dv(new DataView(new ArrayBuffer(3)))) })

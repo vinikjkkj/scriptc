@@ -4431,6 +4431,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15140-number-marker-consumers.ts": {
+   "order": [
+    "<repo>/tests/corpus/15140-number-marker-consumers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15141-number-marker-equality-json.ts": {
+   "order": [
+    "<repo>/tests/corpus/15141-number-marker-equality-json.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15142-number-marker-math.ts": {
+   "order": [
+    "<repo>/tests/corpus/15142-number-marker-math.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15143-number-marker-forge.ts": {
+   "order": [
+    "<repo>/tests/corpus/15143-number-marker-forge.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15144-lru-hole-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/15144-lru-hole-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15145-lru-hole-reads.ts": {
+   "order": [
+    "<repo>/tests/corpus/15145-lru-hole-reads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15146-lru-min-resize-evict.ts": {
+   "order": [
+    "<repo>/tests/corpus/15146-lru-min-resize-evict.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1520-fs-wider-surface.ts": {
    "order": [
     "<repo>/tests/corpus/1520-fs-wider-surface.ts"
@@ -4536,6 +4578,30 @@
   "<repo>/tests/corpus/1530-spread-override-completion.ts": {
    "order": [
     "<repo>/tests/corpus/1530-spread-override-completion.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15300-buffer-from-value-bytea.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15300-buffer-from-value-bytea.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15301-buffer-from-value-overloads.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15301-buffer-from-value-overloads.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15302-buffer-from-value-errors.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15302-buffer-from-value-errors.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15303-buffer-from-value-identity.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15303-buffer-from-value-identity.cjs"
    ],
    "diags": []
   },
@@ -18057,6 +18123,84 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/grown-number-array-aliased.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-aliased.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-fill-value.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-fill-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-for-of.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-for-of.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-forEach.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-forEach.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-in.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-in.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-indexOf-join.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-indexOf-join.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-json.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-json.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-logged.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-logged.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-map.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-map.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-passed.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-passed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-returned.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-returned.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-slice.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-slice.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-spread.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/grown-number-array-spread.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/helper-unrolled-field-enumeration.js": {
    "order": [
     "<repo>/tests/diagnostics/helper-unrolled-field-enumeration.js"
@@ -19590,126 +19734,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/15140-number-marker-consumers.ts": {
-    "order": [
-      "<repo>/tests/corpus/15140-number-marker-consumers.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15141-number-marker-equality-json.ts": {
-    "order": [
-      "<repo>/tests/corpus/15141-number-marker-equality-json.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15142-number-marker-math.ts": {
-    "order": [
-      "<repo>/tests/corpus/15142-number-marker-math.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15143-number-marker-forge.ts": {
-    "order": [
-      "<repo>/tests/corpus/15143-number-marker-forge.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15144-lru-hole-shape.ts": {
-    "order": [
-      "<repo>/tests/corpus/15144-lru-hole-shape.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15145-lru-hole-reads.ts": {
-    "order": [
-      "<repo>/tests/corpus/15145-lru-hole-reads.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15146-lru-min-resize-evict.ts": {
-    "order": [
-      "<repo>/tests/corpus/15146-lru-min-resize-evict.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-aliased.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-aliased.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-fill-value.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-fill-value.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-for-of.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-for-of.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-forEach.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-forEach.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-in.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-in.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-indexOf-join.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-indexOf-join.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-json.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-json.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-logged.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-logged.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-map.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-map.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-passed.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-passed.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-returned.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-returned.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-slice.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-slice.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/grown-number-array-spread.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/grown-number-array-spread.ts"
-    ],
-    "diags": []
   }
  }
 }
