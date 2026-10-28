@@ -3866,6 +3866,28 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // stays f64-typed). Arms that AGREE on an array type decide it
       // themselves (a context- or sibling-built literal arm can carry a
       // tagged element type the checker's own type doesn't spell).
+      // A conditional of FUNCTIONS flowing into a function-typed slot (the
+      // tls.connect checkServerIdentity option: `cond ? tls.checkServerIdentity
+      // : function () {...}`). Each arm takes the slot's callback type through
+      // the same per-value coercion a single function value gets, so the
+      // select has ONE function type and the enclosing width copy sees it.
+      // Gated on both arms lowering to functions and the slot being one
+      // function type (or a function arm beside undefined).
+      const fnTarget = (() => {
+        if (ctxMapped?.kind === "func") return ctxMapped;
+        if (ctxMapped?.kind !== "union") return null;
+        const arms = L.unions.get(ctxMapped.unionId)?.arms ?? [];
+        const fns = arms.filter((a) => a.kind === "func");
+        const rest = arms.filter((a) => a.kind !== "func");
+        return fns.length === 1 && rest.every((a) => a.kind === "undefinedT") ? fns[0]! : null;
+      })();
+      if (fnTarget?.kind === "func" && thenRaw.type.kind === "func" && elseRaw.type.kind === "func") {
+        const thenFn = L.coerceInto(expr.whenTrue, thenRaw, fnTarget);
+        const elseFn = L.coerceInto(expr.whenFalse, elseRaw, fnTarget);
+        if (thenFn.type.kind === "func" && elseFn.type.kind === "func") {
+          return { kind: "ternary", cond, then: thenFn, else_: elseFn, type: fnTarget, loc };
+        }
+      }
       const own = L.mapTypeOf(L.typeOf(expr));
       const useCtx =
         (ctxMapped?.kind === "record" || ctxMapped?.kind === "union" || ctxMapped?.kind === "object") &&
