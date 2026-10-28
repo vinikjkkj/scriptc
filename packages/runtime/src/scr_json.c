@@ -5048,6 +5048,11 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
     return true;
   }
   case SCR_DYN_OBJ: {
+    /* enter/leave bracket, as the instance writer does: a member may reach
+     * this object again (a self-issued certificate's issuerCertificate), and
+     * an unguarded walk is an infinite recursion. Guarded, a cycle is V8's
+     * "Converting circular structure to JSON". */
+    if (!scr_jb_enter(b, d, false)) return true; /* cyclic; pending */
     scr_jb_putc(b, '{');
     bool first = true;
     size_t *ord = scr_dyn_obj_key_order(d); /* JS own-key order, NULL when stored order is it */
@@ -5070,6 +5075,7 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
         scr_str_release(k);
         if (sl_skip) continue;
         free(ord);
+        scr_jb_leave(b);
         return true; /* the getter threw; the caller checks the pending exception */
       }
       /* The toJSON protocol runs BEFORE the drop test — an omitted member
@@ -5082,6 +5088,7 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
         scr_dyn_release(mv);
         scr_str_release(k);
         free(ord);
+        scr_jb_leave(b);
         return true; /* pending exception; caller checks */
       }
       const ScrDyn *val = sub ? sub : mv;
@@ -5095,17 +5102,20 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
       first = false;
       scr_jb_put_json_str(b, k);
       scr_jb_putc(b, ':');
+      scr_jb_edge_key(b, k); /* names the edge for a circular-structure message */
       scr_dyn_json_write_raw(b, val); /* absence already decided above */
       if (sub) scr_dyn_release(sub);
       scr_dyn_release(mv);
       scr_str_release(k);
       if (scr_exc_pending()) { /* a nested member threw */
         free(ord);
+        scr_jb_leave(b);
         return true;
       }
     }
     free(ord);
     scr_jb_putc(b, '}');
+    scr_jb_leave(b);
     return true;
   }
   case SCR_DYN_BYTES: {
