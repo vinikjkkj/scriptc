@@ -130,7 +130,9 @@ function cMemberTables(c: string): Map<string, string> {
     const rows: { name: string; get: boolean; enumerable: boolean }[] = [];
     // The flag is a u8: true/false for the rows with one answer, 1 or 2 (yes,
     // or yes unless the value is still undefined) for a declared field.
-    const ent = /\{ "([^"]*)", \d+, (NULL|&\w+), (NULL|&\w+), (true|false|[012]) \}/g;
+    // The trailing ordinal and value slots (ScrDynClassMember's last fields) are read past, not
+    // compared: a row with a method value names it, and that is checked by the runtime tests.
+    const ent = /\{ "([^"]*)", \d+, (NULL|&\w+), (NULL|&\w+), (true|false|[012])(?:, \d+)?(?:, (?:NULL|&\w+))? \}/g;
     for (const e of m[2]!.matchAll(ent)) {
       rows.push({ name: e[1]!, get: e[2] !== "NULL", enumerable: e[4] !== "false" && e[4] !== "0" });
     }
@@ -147,7 +149,7 @@ function llMemberTables(ll: string, cstrs: Map<string, string>): Map<string, str
   for (const m of ll.matchAll(re)) {
     const rows: { name: string; get: boolean; enumerable: boolean }[] = [];
     const ent =
-      /%ScrDynClassMember \{ ptr @(sc_cs_\d+), i64 \d+, ptr (null|@[\w.]+), ptr (null|@[\w.]+), i8 ([012]) \}/g;
+      /%ScrDynClassMember \{ ptr @(sc_cs_\d+), i64 \d+, ptr (null|@[\w.]+), ptr (null|@[\w.]+), i8 ([012]), i8 \d+, ptr (?:null|@[\w.]+) \}/g;
     for (const e of m[2]!.matchAll(ent)) {
       const nm = cstrs.get(e[1]!);
       if (nm === undefined) throw new Error(`llvm member row names an undefined cstr ${e[1]}`);
@@ -178,7 +180,7 @@ function cDescriptors(c: string): Map<string, string> {
   // class is optional here rather than assumed.
   // const ScrDynClass sc_dcl_0 = { "Lone", 5, 5, false, &r, &rl, sc_dclt_0, 1, false, false, false, NULL, 0, false, NULL, 0 }; /* dyn box: class Lone */
   const re =
-    /(?:static )?const ScrDynClass sc_dcl_\d+ = \{ "([^"]*)", (\d+), (\d+), (true|false), &(\w+), &(\w+), (NULL|\w+), (\d+), (true|false), (true|false), (true|false), (NULL|\w+), (\d+), (true|false), (NULL|"[^"]*"), (\d), (\d) \};/g;
+    /(?:static )?const ScrDynClass sc_dcl_\d+ = \{ "([^"]*)", (\d+), (\d+), (true|false), &(\w+), &(\w+), (NULL|\w+), (\d+), (true|false), (true|false), (true|false), (NULL|\w+), (\d+), (true|false), (NULL|"[^"]*"), (\d), (\d), \d+, \d+ \};/g;
   for (const m of c.matchAll(re)) {
     const mem = m[7] === "NULL" ? "[]" : (tbls.get(m[7]!) ?? `<missing table ${m[7]}>`);
     const declared = Number(m[8]);
@@ -201,7 +203,7 @@ function llDescriptors(ll: string): Map<string, string> {
   const out = new Map<string, string>();
   // @sc_dcl_0 = internal constant %ScrDynClass { ptr @sc_cs_3, i64 5, i64 5, i8 0, ptr @r, ptr @rl, ptr @sc_dclt_0, i64 1, i8 0, i8 0, i8 0, ptr null, i64 0, i8 0, ptr null, i8 0 }
   const re =
-    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), i8 ([01]), i8 ([01]), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), ptr (null|@sc_cs_\d+), i8 (\d), i8 ([01]) \}/gm;
+    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), i8 ([01]), i8 ([01]), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), ptr (null|@sc_cs_\d+), i8 (\d), i8 ([01]), i64 \d+, i64 \d+ \}/gm;
   for (const m of ll.matchAll(re)) {
     const name = cstrs.get(m[1]!);
     if (name === undefined) throw new Error(`llvm descriptor names an undefined cstr ${m[1]}`);
