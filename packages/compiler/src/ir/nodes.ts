@@ -2180,6 +2180,14 @@ export function orderRecordPlanOf(classes: readonly IrClassDef[]): OrdPlan {
     if (rootMemo.has(name)) return rootMemo.get(name)!;
     let cur = byName.get(name);
     if (cur === undefined) { rootMemo.set(name, null); return null; }
+    // A chain rooted in a runtime ERROR class has no record: the record would sit before the
+    // runtime's ScrError prefix, which the cast to ScrError reads from its first field.
+    for (let b: string | undefined = cur.base; b !== undefined; ) {
+      if (RUNTIME_ERROR_CLASSES.has(b)) { rootMemo.set(name, null); return null; }
+      const bc = byName.get(b);
+      if (bc === undefined) break;
+      b = bc.base;
+    }
     let guard = 0;
     // The root is the first EMITTED class of the chain: a runtime-provided base (EventEmitter,
     // the stream and error classes) has its own struct, and the record lives after its prefix
