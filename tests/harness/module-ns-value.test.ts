@@ -300,10 +300,15 @@ describe("the three cells a snapshot cannot be, and how each refuses", () => {
         `compile refused:\n${(built.diagnostics ?? []).map((d) => `${d.code} ${d.message}`).join("\n")}`,
       ).toBe(true);
       const got = await run(join(dir, exeName(`mut-${what}`)), [], dir);
-      // Node throws a TypeError here and this build throws its own refusal:
-      // a DIVERGENCE, named. What must never happen is the write landing.
+      // Node throws a TypeError here, with the text measured on v24.15.0
+      // against `import * as ns`; this build throws the same TypeError with
+      // the same text. What must never happen is the write landing.
       expect(got.stdout, "the mutation must not be accepted").toContain("outcome threw");
-      expect(got.stdout, "the refusal must name the namespace").toContain("module namespace object");
+      const nodeMsg =
+        what === "assigning"
+          ? "Cannot assign to read only property 'konst' of object '[object Module]'"
+          : "Cannot delete property 'konst' of [object Module]";
+      expect(got.stdout, "the message is Node's, and names the namespace").toContain(`msg ${nodeMsg}`);
       // ...and the object must be untouched afterwards, exactly as in Node.
       expect(got.stdout).toContain("konst 1");
       expect(got.stdout).toContain("keys K,bump,default,fn,konst,reads");

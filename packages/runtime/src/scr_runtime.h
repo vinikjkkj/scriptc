@@ -6092,10 +6092,6 @@ ScrDyn *scr_dyn_mark_module_ns(ScrDyn *d);
  * boundary copy. `what` names the operation ("assigning a property",
  * "deleting a property", "'push'") and leads the message. */
 void scr_dyn_static_copy_refuse(const char *what);
-/* The namespace-flavored twin, thrown ahead of it for a `module_ns`
- * receiver: the boundary-copy text advises a fix ("give the parameter a
- * static type") that a namespace has no spelling for. */
-void scr_dyn_module_ns_refuse(const char *what);
 /* The Buffer-flavored twin: FORCES the flag on rather than reading the
  * payload's flavor, for producers whose ScrBytes is stamped UNKNOWN but
  * whose Node value is a Buffer regardless (stream 'data' chunks). The two
