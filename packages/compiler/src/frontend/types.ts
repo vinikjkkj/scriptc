@@ -2522,6 +2522,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         isPlainDeclMethodType(widened, npmDecls, checker) ||
         (ctx.declMember === true && isDeclMemberCallable(widened, npmDecls, checker)));
     if (callableLiteral) fromUncompiledCallableLiteral = true;
+    const ctorLiteral = !ctx.dynamic && isPlainConstructableTypeLiteral(widened, npmDecls, checker);
     // A data record whose ONLY non-data members are ORDINARY (non-generic,
     // single-signature, non-constructable) methods -- exactly the shape
     // mapRecordTypeInner's own member loop already knows how to carry as
@@ -2574,7 +2575,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // whether the arms share a home. Two spellings of one type must map alike.
     const declUnionAlias =
       !ctx.dynamic && widened.isUnionType() && npmDecls.every((d) => ts.isTypeAliasDeclaration(d));
-    if (!dataInterface && !callableLiteral && !dataWithOrdinaryMethods && !bodylessClass && !declUnionAlias) return ctx.dynamic ? JSVAL : null;
+    if (!dataInterface && !callableLiteral && !ctorLiteral && !dataWithOrdinaryMethods && !bodylessClass && !declUnionAlias) return ctx.dynamic ? JSVAL : null;
   }
   // A callable type declared in a declaration file (the standard library's
   // included) while mapping a member of a body-less .d.ts class instance:
@@ -7488,6 +7489,28 @@ export function isPlainCallableTypeLiteral(
   if (sigs[0]!.getTypeParameters().length > 0) return false; // generic literal: a different question, untouched here
   return (
     checker.getConstructSignatures(t).length === 0 &&
+    checker.getPropertiesOfType(t).length === 0 &&
+    checker.getIndexInfosOfType(t).length === 0
+  );
+}
+
+/** A bare CONSTRUCTOR-TYPE literal from a declaration file (`new () => T`,
+ * pg's `Client?: new () => ClientBase`): one non-generic construct signature,
+ * no call signature, no properties, no index signature. Its value side is
+ * fenced where a class value crosses in; the type itself maps through the
+ * constructor branch (funcOf over the instance), exactly as a program-written
+ * constructor type does. */
+export function isPlainConstructableTypeLiteral(
+  t: ts.Type,
+  decls: readonly ts.Node[],
+  checker: ts.TypeChecker,
+): boolean {
+  if (decls.length === 0 || !decls.every((d) => ts.isConstructorTypeNode(d))) return false;
+  const sigs = checker.getConstructSignatures(t);
+  if (sigs.length !== 1) return false;
+  if (sigs[0]!.getTypeParameters().length > 0) return false;
+  return (
+    checker.getCallSignatures(t).length === 0 &&
     checker.getPropertiesOfType(t).length === 0 &&
     checker.getIndexInfosOfType(t).length === 0
   );
