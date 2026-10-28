@@ -1,0 +1,6 @@
+webcrypto-flow-any-parameter.cjs:5:18 - error SC1090: a WebCrypto value passed to an any- or unknown-typed parameter (its uses are not visible to the compiler) is not supported yet
+
+  4 | }
+  5 | console.log(take(require('crypto').webcrypto.subtle))
+    |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  6 | 
