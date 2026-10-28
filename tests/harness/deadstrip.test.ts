@@ -80,11 +80,15 @@ describe("an unloweraable member is a build error, not a deferred trap", () => {
 });
 
 describe("the same constructs, reached, fail exactly as before", () => {
-  test("a reached class-instance for-in fails the build", async () => {
-    const diags = await diagnosticsOf("tests/deadstrip/reached-for-in.ts");
-    expect(diags).toEqual([
-      "SC1052: for-in over class instances (which keys exist on an instance depends on runtime property creation the class model does not track — for-in over records and arrays compiles) are not supported yet",
-    ]);
+  // The for-in walks the instance's own keys through the dyn member table (ownkeys2): Node
+  // prints `id` on C and LLVM (measured, lab/out/dsfi*.bin), so the build no longer refuses.
+  test("a reached class-instance for-in compiles and walks the instance's keys", async () => {
+    const outDir = join(cacheDir, "deadstrip-reached");
+    const result = await compile(join(repoRoot, "tests/deadstrip/reached-for-in.ts"), {
+      outPath: join(outDir, "for-in"),
+      outDir,
+    });
+    expect(result.ok, result.ok ? "" : result.diagnostics.map((d) => d.message).join("; ")).toBe(true);
   });
 
   test("a reached comptime throw fails at compile time", async () => {
