@@ -29,7 +29,7 @@ import { absentRead, lowerLyingPlus, lowerNullablePointerChain, nullableFieldRea
 import { arrayAtOf, BYTES_CTORS, lowerBufferFlavorTest, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, mapIterDrainHelperCall, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
-import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf, jsonRequireTypeOverride } from "./lower-modules.js";
+import { FN_CTOR_EXPORT_GLOBALS, declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf, jsonRequireTypeOverride } from "./lower-modules.js";
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
 import { ambientErasedIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
@@ -2869,7 +2869,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           // the keyed get a dyn value answers, so an accessor runs its getter.
           const msym = L.checker.getSymbolAtLocation(expr.name);
           const valueForm = msym !== undefined && (L.globalsBySymbol.has(msym) || L.classBySymbol.has(msym) || L.fnSigsBySymbol.has(msym));
-          if (!valueForm && ts.isIdentifier(expr.expression) && !expr.questionDotToken) {
+          const rg = ts.isIdentifier(expr.expression) && !expr.questionDotToken ? L.globalOf(expr.expression) : null;
+          if (!valueForm && rg !== null && rg !== undefined && FN_CTOR_EXPORT_GLOBALS.has(rg)) {
             const recv = L.lowerExpr(expr.expression);
             if (recv.type.kind === "dyn") {
               return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc }, value: recv, type: DYN, loc };
@@ -25893,6 +25894,8 @@ function lowerDynLiteralSpread(
 function moduleExportsGlobalRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
   const sf = expr.getSourceFile();
   if (!isCjsJsFile(sf)) return null;
+  // Only the new-Ctor export globals (see FN_CTOR_EXPORT_GLOBALS): other whole-export
+  // globals keep the fence, so their accessor reads are not changed by this lowering.
   if (L.resolveLocal(expr.expression as ts.Identifier) !== null) return null;
   let stmtEnd = -1;
   let g: IrGlobal | undefined;
@@ -25908,7 +25911,7 @@ function moduleExportsGlobalRead(L: Lowerer, expr: ts.PropertyAccessExpression):
     g = reg;
     stmtEnd = st.getEnd();
   }
-  if (g === undefined || expr.getStart(sf) < stmtEnd) return null;
+  if (g === undefined || !FN_CTOR_EXPORT_GLOBALS.has(g) || expr.getStart(sf) < stmtEnd) return null;
   for (let p: ts.Node | undefined = expr.parent; p !== undefined && p.kind !== ts.SyntaxKind.SourceFile; p = p.parent) {
     if (ts.isFunctionLike(p)) {
       if (ts.isFunctionDeclaration(p) || p.getStart(sf) < stmtEnd) return null;

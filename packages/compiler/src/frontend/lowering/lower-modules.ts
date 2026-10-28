@@ -2162,6 +2162,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             const g: IrGlobal = { id: `%g.${tag}exports`, name: "exports", type: DYN, mutable: false };
             L.globalsByDeclNode.set(cjs.expr, g);
             L.globalsList.push(g);
+            FN_CTOR_EXPORT_GLOBALS.add(g);
           } else if (ts.isIdentifier(rhs) && wholeExportRootNeedsStorage(L, rhs, cjs.expr)) {
             // `module.exports = <root>` over a module-scope VARIABLE the
             // alias path cannot carry — THE WHOLE-EXPORT ROOT'S STORAGE.
@@ -4484,6 +4485,13 @@ export function collectDeclTwinExportBridges(L: Lowerer, parts: FileParts[]): vo
     if (bridges.length > 0) L.twinExportBridges.set(twin, bridges);
   }
 }
+
+/** The DYN export globals that `module.exports = new Ctor(...)` registers (the
+ * isFunctionCtorNew branch). Only these answer a requirer's member read as a dyn
+ * key get and a `module.exports` value read: every other export global keeps its
+ * own lowering, whose accessors (__defineGetter__, live export getters) are invoked
+ * by paths a dyn key get does not reach. */
+export const FN_CTOR_EXPORT_GLOBALS = new WeakSet<IrGlobal>();
 
 /** `new Ctor(...)` where Ctor names a plain FUNCTION (a FunctionDeclaration, or a
    * variable initialized by a function expression), not a class: the ES5
