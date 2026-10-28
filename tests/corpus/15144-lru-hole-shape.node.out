@@ -1,0 +1,8 @@
+{"max":2,"head":0,"tail":1,"size":1,"len":2,"lenP":2} 0>
+{"max":5,"head":0,"tail":1,"size":1,"len":5,"lenP":5}
+false false 0 number 0 false
+false false 0 number 0 false
+{"max":3,"head":0,"tail":2,"size":3,"len":3,"lenP":3}
+false false 0 number 0 false false false 1 number 1 false
+true true undefined undefined -1 false true true undefined undefined -1 false
+undefined true undefined 42

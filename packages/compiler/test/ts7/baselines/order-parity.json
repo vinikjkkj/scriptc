@@ -19464,6 +19464,18 @@
       "<repo>/tests/corpus/15143-number-marker-forge.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/15144-lru-hole-shape.ts": {
+    "order": [
+      "<repo>/tests/corpus/15144-lru-hole-shape.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15145-lru-hole-reads.ts": {
+    "order": [
+      "<repo>/tests/corpus/15145-lru-hole-reads.ts"
+    ],
+    "diags": []
   }
  }
 }
