@@ -4305,6 +4305,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15144-lru-hole-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/15144-lru-hole-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15145-lru-hole-reads.ts": {
+   "order": [
+    "<repo>/tests/corpus/15145-lru-hole-reads.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1520-fs-wider-surface.ts": {
    "order": [
     "<repo>/tests/corpus/1520-fs-wider-surface.ts"
