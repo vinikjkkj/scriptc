@@ -18557,6 +18557,14 @@
     "<repo>/tests/corpus/14053-proto-alias-required-base/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/14100-proto-alias-three-module-chain/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14100-proto-alias-three-module-chain/a.cjs",
+    "<repo>/tests/corpus/14100-proto-alias-three-module-chain/b.cjs",
+    "<repo>/tests/corpus/14100-proto-alias-three-module-chain/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
