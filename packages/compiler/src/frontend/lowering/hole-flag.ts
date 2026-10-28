@@ -82,7 +82,7 @@ export function checkHoleFlaggedUse(L: Lowerer, id: ts.Identifier): void {
     }
   }
   L.noLowering(
-    `'${id.text}' (a number[] the program grows with '.length =', so its holes are tracked)`,
+    `a grown number[] (${id.text})`,
     id,
     "it may only be indexed, measured, filled as a statement, or grown with '.length =' — " +
       "passing, returning, assigning, spreading or iterating it would let the holes escape",
