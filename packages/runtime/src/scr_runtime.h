@@ -10143,8 +10143,18 @@ void scr_net_sock_destroy(ScrNetSocket *s);
 ScrNetSocket *scr_net_sock_pause(ScrNetSocket *s);            /* +1: chaining */
 ScrNetSocket *scr_net_sock_resume(ScrNetSocket *s);           /* +1: chaining */
 ScrNetSocket *scr_net_sock_set_nodelay(ScrNetSocket *s, bool enable); /* +1: chaining */
+ScrNetSocket *scr_net_sock_idle_new(void); /* new net.Socket(): +1, no handle yet */
+ScrNetSocket *scr_net_sock_connect(ScrNetSocket *s, double port, ScrStr *host /*borrowed, nullable*/); /* +1 */
+ScrNetSocket *scr_net_sock_connect_cb(ScrNetSocket *s, double port, ScrStr *host /*borrowed, nullable*/, ScrClosure *cb /*moves, nullable*/); /* +1 */
+ScrNetSocket *scr_net_sock_ref(ScrNetSocket *s); /* +1: chaining */
+ScrNetServer *scr_net_server_ref(ScrNetServer *s); /* +1: chaining */
+ScrNetServer *scr_net_server_unref(ScrNetServer *s); /* +1: chaining */
+ScrNetSocket *scr_net_sock_unref(ScrNetSocket *s); /* +1: chaining */
+ScrNetSocket *scr_net_sock_set_keepalive(ScrNetSocket *s, bool enable, double ms); /* +1: chaining */
+ScrNetSocket *scr_net_sock_set_ref(ScrNetSocket *s, bool ref); /* +1: chaining */
 void scr_net_sock_destroy_soon(ScrNetSocket *s);
 void scr_net_sock_on_finish(ScrNetSocket *s, ScrClosure *cb /*moves*/);
+void scr_net_sock_on_finish_opt(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once);
 void scr_net_sock_on_write_flush(ScrNetSocket *s, ScrClosure *cb /*moves*/);
 double scr_net_sock_bytes_written(ScrNetSocket *s);
 bool scr_net_sock_readable(ScrNetSocket *s);
