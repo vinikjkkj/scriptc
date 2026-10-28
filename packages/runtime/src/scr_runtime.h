@@ -8577,6 +8577,55 @@ void scr_jsval_cast_fail(ScrJsval *v, const ScrStr *target);
  * 10): shortest digit string that round-trips, ECMA placement rules.
  * Writes NUL-terminated result into buf (>= 32 bytes), returns length.
  */
+/* ── NaN-marked undefined inside a number slot (user decision, "NaN marcado",
+ * 2026-10-28) ───────────────────────────────────────────────────────────────
+ * A raw double slot has no undefined state. Two quiet-NaN bit patterns stand
+ * for it:
+ *   SCR_NUM_UNDEF_BITS  the value undefined in a number-typed slot;
+ *   SCR_NUM_HOLE_BITS   an absent element (a hole) in a number array's storage.
+ * Holes are never a value: a read of a hole yields SCR_NUM_UNDEF_BITS.
+ * Both payloads (…DE01, …DE02) lie outside every NaN the box produces:
+ *   - hardware and libm default NaNs carry payload 0 (0x7FF8… or 0xFFF8…);
+ *   - arithmetic and libm PROPAGATE an operand's payload (MEASURED, lab/nan/
+ *     prop.c: m+1, m*2, 1-m, sqrt(m), m+m, fmod(1,m) all keep the marker bits),
+ *     so every number-producing operation on a possibly-marked operand must
+ *     pass its result through scr_num_canon;
+ *   - bytes reinterpreted as a double (Buffer/Float64Array/DataView/BigInt
+ *     reads) canonicalise, so a forged payload never becomes a marker. Float32
+ *     and Float16 widening cannot produce these payloads (their low 29 / 42
+ *     mantissa bits are zero).
+ * Predicates compare BITS, never doubles (NaN != NaN). */
+#define SCR_NUM_UNDEF_BITS 0x7FFC00000000DE01ULL
+#define SCR_NUM_HOLE_BITS 0x7FFC00000000DE02ULL
+#define SCR_NUM_NAN_BITS 0x7FF8000000000000ULL
+static inline uint64_t scr_num_bits(double x) {
+  uint64_t b;
+  memcpy(&b, &x, sizeof b);
+  return b;
+}
+static inline double scr_num_from_bits(uint64_t b) {
+  double d;
+  memcpy(&d, &b, sizeof d);
+  return d;
+}
+static inline bool scr_num_is_undef(double x) { return scr_num_bits(x) == SCR_NUM_UNDEF_BITS; }
+static inline bool scr_num_is_hole(double x) { return scr_num_bits(x) == SCR_NUM_HOLE_BITS; }
+static inline bool scr_num_is_marker(double x) {
+  uint64_t b = scr_num_bits(x);
+  return b == SCR_NUM_UNDEF_BITS || b == SCR_NUM_HOLE_BITS;
+}
+/* Number strict equality: NaN is unequal to itself, but the marker equals the
+ * marker (undefined === undefined). */
+static inline bool scr_num_same(double a, double b) {
+  return a == b || (scr_num_is_marker(a) && scr_num_bits(a) == scr_num_bits(b));
+}
+/* Every NaN becomes the canonical NaN; every other value is returned as is. */
+static inline double scr_num_canon(double x) {
+  return x != x ? scr_num_from_bits(SCR_NUM_NAN_BITS) : x;
+}
+/* The marker as a value: what `undefined` is in a number-typed slot. */
+static inline double scr_num_undef(void) { return scr_num_from_bits(SCR_NUM_UNDEF_BITS); }
+
 size_t scr_f64_to_str(double x, char *buf);
 
 /* Number.prototype.toString(radix) for any radix (ECMA-262 §21.1.3.6):
