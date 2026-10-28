@@ -1308,9 +1308,9 @@ void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char 
 void scr_error_set_ext_dns(ScrError *e, double errno_val, const char *syscall, const char *hostname);
 const ScrStr *scr_error_ext_hostname(const ScrError *e);
 void scr_error_set_ext_net(ScrError *e, double errno_val, const char *syscall, const char *address, double port);
+void scr_error_set_ext_sys(ScrError *e, int err_no, const char *syscall, const char *address, bool with_port, double port);
 ScrStr *scr_error_ext_address(const ScrError *e);
 bool scr_error_ext_port(const ScrError *e, double *port);
-void scr_net_sock_mark_dyn(void *sock); /* a socket crossed into a dyn slot (weak-linked by scr_json.c) */
 bool scr_error_ext_get(const ScrError *e, double *err_no, const ScrStr **syscall, const ScrStr **path,
                        const ScrStr **dest);
 struct ScrDyn *scr_error_ext_dyn(ScrError *e, const ScrStr *key);
@@ -7335,6 +7335,7 @@ typedef void (*ScrDynListenerErrFn)(ScrClosure *cb, ScrStr *msg);
 extern void scr_dyn_listener_fire0(ScrClosure *cb);
 extern void scr_dyn_listener_fire_data(ScrClosure *cb, ScrBytes *chunk);
 extern void scr_dyn_listener_fire_err(ScrClosure *cb, ScrStr *msg);
+extern void scr_dyn_listener_fire_err_obj(ScrClosure *cb, ScrError *err); /* err +1 */
 
 /* Output buffer for the compiler-emitted type-directed JSON serializers.
  * Value-typed and stack-allocated by the emitted code; _finish hands the

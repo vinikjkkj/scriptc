@@ -411,6 +411,17 @@ void scr_error_set_ext_net(ScrError *e, double errno_val, const char *syscall, c
   x->has_port = true;
 }
 
+/* A system error from a C errno (libuv's value, syscall, and the address; the
+ * port too when with_port). Node's uvException shape for socket operations. */
+void scr_error_set_ext_sys(ScrError *e, int err_no, const char *syscall, const char *address, bool with_port,
+                           double port) {
+  scr_error_set_ext_val(e, scr_uv_errno(err_no), syscall, NULL, NULL);
+  ScrErrExt *x = scr_err_ext_head;
+  if (address != NULL) x->address = scr_str_new(address, strlen(address));
+  x->port = port;
+  x->has_port = with_port;
+}
+
 /* errno/syscall/path/dest accessors are in scr_dyn_ext.c; these two answer
  * the net-only address and port, undefined (NULL) for every other error. */
 ScrStr *scr_error_ext_address(const ScrError *e) {

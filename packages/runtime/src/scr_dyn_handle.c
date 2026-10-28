@@ -66,6 +66,19 @@ void scr_dyn_listener_fire_data(ScrClosure *cb, ScrBytes *chunk) {
   scr_dyn_release(fn);
 }
 
+/* An error listener on a dyn handle, given the Error object itself (err +1): the
+ * dyn value keeps the object's code and fields, as the static listener does. */
+void scr_dyn_listener_fire_err_obj(ScrClosure *cb, ScrError *err) {
+  ScrDyn *fn = scr_dyn_listener_peek(cb);
+  ScrDyn *arg = scr_dyn_from_error(err);
+  scr_error_release(err);
+  ScrDyn *args[1] = { arg };
+  ScrDyn *r = scr_dyn_call(fn, args, 1, "listener");
+  scr_dyn_release(r);
+  scr_dyn_release(arg);
+  scr_dyn_release(fn);
+}
+
 void scr_dyn_listener_fire_err(ScrClosure *cb, ScrStr *msg) {
   ScrDyn *fn = scr_dyn_listener_peek(cb);
   /* The checked-dynamic tree's error encoding (caughtToDyn's shape) — what a dyn 'error'
