@@ -1009,6 +1009,13 @@
       "status": "static"
     },
     {
+      "id": "node-builtin.fs.stat",
+      "kind": "node-builtin",
+      "name": "fs.stat",
+      "status": "static",
+      "note": "the callback form; the two-argument shape only"
+    },
+    {
       "id": "node-builtin.fs.statSync",
       "kind": "node-builtin",
       "name": "fs.statSync",
