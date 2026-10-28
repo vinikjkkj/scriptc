@@ -316,13 +316,6 @@
       ]
     },
     {
-      "name": "3472-http-client-pipe-upload.ts",
-      "mode": "TYPE",
-      "codes": [
-        "SC0001"
-      ]
-    },
-    {
       "name": "3712-net-socket-close-haderror.ts",
       "mode": "TYPE",
       "codes": [
