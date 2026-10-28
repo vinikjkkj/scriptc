@@ -6417,6 +6417,69 @@ function typeofMethodSniff(L: Lowerer, expr: ts.TypeOfExpression, loc: SrcLoc): 
     };
   }
 
+/** `s[i] === 'x'` (also `!==`, `==`, `!=`) over a STRING receiver read with a
+ * NUMBER index. JS reads the UTF-16 unit at an integer index in range and
+ * `undefined` otherwise (out of range, fractional, NaN), and `undefined` is
+ * never equal to a string. The element read itself has no exact string form
+ * (charAt answers "" out of range, which the literal '' would match), so the
+ * comparison is lowered whole: in range, charAt compared with the other
+ * operand; out of range, the strict answer (false for ===, true for !==).
+ * The mysql2 `timezone[0] === '-'` site is this shape, where the checker
+ * types the element `any`. Operands that re-emit without effects only. */
+export function lowerStrIndexEqTest(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr | null {
+  const op = expr.operatorToken.kind;
+  const eq = op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.EqualsEqualsToken;
+  const neq = op === ts.SyntaxKind.ExclamationEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken;
+  if (!eq && !neq) return null;
+  const unwrap = (e: ts.Expression): ts.Expression => {
+    let x = e;
+    while (ts.isParenthesizedExpression(x)) x = x.expression;
+    return x;
+  };
+  const repeatable = (e: IrExpr): boolean => e.kind === "numLit" || e.kind === "strLit" || pureReemittable(e);
+  for (const [a0, b0] of [
+    [expr.left, expr.right],
+    [expr.right, expr.left],
+  ] as const) {
+    const a = unwrap(a0);
+    if (!ts.isElementAccessExpression(a) || a.questionDotToken) continue;
+    const recvT = neverTaintedJsType(L, a.expression, L.typeOf(a.expression)) ? null : L.mapTypeOf(L.typeOf(a.expression));
+    if (recvT?.kind !== "string") continue;
+    if (L.mapTypeOf(L.typeOf(a.argumentExpression))?.kind !== "f64") continue;
+    if (L.mapTypeOf(L.typeOf(b0))?.kind !== "string") continue;
+    const recv = L.lowerExpr(a.expression);
+    const idx = L.lowerExpr(a.argumentExpression);
+    const other = L.lowerExpr(b0);
+    if (recv.type.kind !== "string" || idx.type.kind !== "f64" || other.type.kind !== "string") continue;
+    if (!repeatable(recv) || !repeatable(idx) || !repeatable(other)) continue;
+    const loc2 = locOf(a);
+    const num = (v: number): IrExpr => ({ kind: "numLit", value: v, type: F64, loc: loc2 });
+    // idx >= 0 && idx === Math.trunc(idx) && idx < s.length
+    const inRange: IrExpr = {
+      kind: "logical", op: "&&", type: BOOL, loc: loc2,
+      left: { kind: "bin", op: ">=", left: idx, right: num(0), type: BOOL, loc: loc2 },
+      right: {
+        kind: "logical", op: "&&", type: BOOL, loc: loc2,
+        left: {
+          kind: "bin", op: "===", type: BOOL, loc: loc2, left: idx,
+          right: { kind: "libCall", fn: "math.trunc", args: [idx], type: F64, loc: loc2 },
+        },
+        right: {
+          kind: "bin", op: "<", type: BOOL, loc: loc2, left: idx,
+          right: { kind: "strIntrinsic", method: "length", receiver: recv, args: [], type: F64, loc: loc2 },
+        },
+      },
+    };
+    const cmp: IrExpr = {
+      kind: "strEq", negated: neq, type: BOOL, loc: loc2,
+      left: { kind: "strIntrinsic", method: "charAt", receiver: recv, args: [idx], type: STRING, loc: loc2 },
+      right: other,
+    };
+    return { kind: "ternary", cond: inRange, then: cmp, else_: { kind: "boolLit", value: neq, type: BOOL, loc: loc2 }, type: BOOL, loc: loc2 };
+  }
+  return null;
+}
+
 export function pureReemittable(e: IrExpr): boolean {
     if (e.kind === "varRef") return true;
     if (e.kind === "recordGet" || e.kind === "fieldGet") return pureReemittable(e.obj);
@@ -17269,6 +17332,13 @@ function boolAsNumber(e: IrExpr): IrExpr {
 export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const loc = locOf(expr);
     const op = expr.operatorToken.kind;
+    // `s[i] === 'x'` (and ==, !=, !==) over a string receiver: the element
+    // read is lowered whole, before any operand lowers (the loose path
+    // below would read the unit through charAt, which answers "" out of range).
+    {
+      const strIdx = lowerStrIndexEqTest(L, expr, loc);
+      if (strIdx) return strIdx;
+    }
     const nullTest = detachedThisNullTest(L, expr);
     if (nullTest !== null) return nullTest;
     const globalIdentity = sloppyThisGlobalIdentity(L, expr);
