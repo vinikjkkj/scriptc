@@ -1006,6 +1006,13 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       return out;
     }
     case SCR_DYN_OBJ: {
+      /* Node's circular check comes first, before the empty and depth answers:
+       * a member that is an ancestor on the stack (a self-issued certificate's
+       * issuerCertificate) renders [Circular *N], and the ancestor gets <ref *N>. */
+      {
+        double cid = scr_insp_circ_check(d);
+        if (cid > 0) return scr_insp_circular(cid);
+      }
       /* An ERROR that crossed the boundary renders like one that did not.
        *
        * This arm used to see the encoding as an ordinary object and print
@@ -1106,6 +1113,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
                              : scr_str_new("[Object]", 8);
       }
       scr_insp_begin(recurse + 1);
+      scr_insp_seen_push(d);
       /* JS own-key order — index keys first, ascending, then the rest in
        * insertion order. Node's util.inspect lists exactly what
        * Object.keys lists, in the same order; this walk used to print the
@@ -1161,7 +1169,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_str_release(base);
       scr_str_release(b0);
       scr_str_release(b1);
-      return out;
+      ScrStr *wrapped = scr_insp_ref_wrap(d, out); /* <ref *N> when this object was a circle's target */
+      scr_str_release(out);
+      return wrapped;
     }
     case SCR_DYN_FUNC: {
       /* Node's function rendering: [Function: name] / [Function
