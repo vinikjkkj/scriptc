@@ -172,7 +172,39 @@ static int scr_w32_bind(int fd, const struct sockaddr *sa, socklen_t len) {
   return 0;
 }
 
+#ifdef _WIN32
+/* libuv (src/win/tcp.c uv__tcp_try_connect) stops a loopback SYN from being
+ * retried: a closed loopback port refuses at once instead of after the
+ * TcpMaxConnectRetransmissions backoff (about 2 s here). Same condition and
+ * the same ioctl; the SDK names are defined here in case the headers lack them. */
+#ifndef SIO_TCP_INITIAL_RTO
+#define SIO_TCP_INITIAL_RTO _WSAIOW(IOC_VENDOR, 17)
+#endif
+typedef struct scr_tcp_initial_rto {
+  USHORT Rtt;
+  UCHAR MaxSynRetransmissions;
+} scr_tcp_initial_rto;
+#define SCR_TCP_INITIAL_RTO_UNSPECIFIED_RTT ((USHORT)-1)
+#define SCR_TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS ((UCHAR)-2)
+static void scr_net_w32_loopback_fail_fast(int fd, const struct sockaddr *sa) {
+  bool loop = false;
+  if (sa->sa_family == AF_INET) {
+    loop = ((const struct sockaddr_in *)sa)->sin_addr.S_un.S_un_b.s_b1 == 127;
+  } else if (sa->sa_family == AF_INET6) {
+    loop = IN6_IS_ADDR_LOOPBACK(&((const struct sockaddr_in6 *)sa)->sin6_addr);
+  }
+  if (!loop) return;
+  scr_tcp_initial_rto p;
+  memset(&p, 0xff, sizeof p);
+  p.Rtt = SCR_TCP_INITIAL_RTO_UNSPECIFIED_RTT;
+  p.MaxSynRetransmissions = SCR_TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS;
+  DWORD bytes = 0;
+  int rc = WSAIoctl((SOCKET)fd, SIO_TCP_INITIAL_RTO, &p, sizeof p, NULL, 0, &bytes, NULL, NULL);
+  fprintf(stdout, "NETDBG initial_rto fd=%d rc=%d wsa=%d\n", fd, rc, rc ? WSAGetLastError() : 0);
+}
+#endif
 static int scr_w32_connect(int fd, const struct sockaddr *sa, socklen_t len) {
+  scr_net_w32_loopback_fail_fast(fd, sa);
   if (connect((SOCKET)fd, sa, (int)len) != 0) {
     int e = (int)WSAGetLastError();
     /* pending nonblocking connect: WSAEWOULDBLOCK here is the callers'
@@ -2077,20 +2109,6 @@ ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/) {
   return first; /* the preferred family's first address: the old answer */
 }
 
-/* NETDBG tlsdbg experiment 2: the connect runs BLOCKING (FIONBIO off) so the
- * kernel's own answer time is visible in the trace (blocking connect to a
- * closed loopback port: immediate refusal or the SYN-retry delay). */
-static void scr_net_w32_prebind(int fd, int family) {
-#ifdef _WIN32
-  u_long zero = 0;
-  int rc = ioctlsocket((SOCKET)fd, FIONBIO, &zero);
-  fprintf(stdout, "NETDBG blocking_connect t=%.1f fd=%d family=%d ioctl_rc=%d\n", scr_now_ms(), fd, family, rc);
-#else
-  (void)fd;
-  (void)family;
-#endif
-}
-
 /* The dial itself (peer_ip/peer_port already set): the sockaddr arms,
  * socket(), and the nonblocking connect(). Shared by the immediate dial
  * (scr_net_connect) and the DEFERRED one (the http agent's maxSockets
@@ -2136,7 +2154,6 @@ static void scr_net_sock_dial_peer(ScrNetSocket *s) {
   int one = 1;
   setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
   s->fd = fd;
-  scr_net_w32_prebind(fd, sa->sa_family);
   int rc = connect(fd, sa, salen);
   if (rc == 0) {
     /* Immediate success (loopback can): still async — the write filter
@@ -2616,7 +2633,6 @@ static bool scr_net_sock_dial_ip(ScrNetSocket *s, const ScrStr *ip) {
   scr_net_nonblock(fd);
   int one = 1;
   setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-  scr_net_w32_prebind(fd, sa->sa_family);
   int rc = connect(fd, sa, salen);
   fprintf(stdout, "NETDBG dial_ip_async t=%.1f fd=%d rc=%d errno=%d ip=%s port=%d\n", scr_now_ms(), (int)fd, rc, rc == 0 ? 0 : errno, h, s->peer_port);
   if (rc == 0) scr_net_dial_log_clear(s); /* connected at once: no failed attempt to report */
