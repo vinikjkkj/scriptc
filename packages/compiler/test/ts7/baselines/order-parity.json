@@ -19671,6 +19671,36 @@
     ],
     "diags": []
   },
+  "<repo>/tests/corpus/15380-promise-all-set-of-any.js": {
+    "order": [
+      "<repo>/tests/corpus/15380-promise-all-set-of-any.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15381-promise-all-typed-set.ts": {
+    "order": [
+      "<repo>/tests/corpus/15381-promise-all-typed-set.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15382-promise-all-dyn-array.js": {
+    "order": [
+      "<repo>/tests/corpus/15382-promise-all-dyn-array.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15383-promise-all-microtask-timers.js": {
+    "order": [
+      "<repo>/tests/corpus/15383-promise-all-microtask-timers.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15384-promise-all-reject-chain.js": {
+    "order": [
+      "<repo>/tests/corpus/15384-promise-all-reject-chain.js"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/15146-lru-min-resize-evict.ts": {
     "order": [
       "<repo>/tests/corpus/15146-lru-min-resize-evict.ts"
