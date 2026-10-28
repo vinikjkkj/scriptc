@@ -9,8 +9,8 @@ const srv = Tls.createServer({ key, cert }, (s) => {
 });
 // No session, an explicit undefined, a Buffer that is not a session, and an
 // empty Buffer: none resumes, every connection answers getSession(), and the
-// 'session' event (registered on each socket) never fires — Node's measured
-// behaviour on a client TLSSocket.
+// 'session' event fires once per ticket the server sends (two per connection
+// on this dual-stack listener, where Node's first dial attempt connects).
 function run(port: number, label: string, session: Buffer | undefined, next: () => void) {
   let events = 0;
   const sock = Tls.connect({ port, host: "localhost", ca, session }, () => {
@@ -28,7 +28,7 @@ function run(port: number, label: string, session: Buffer | undefined, next: () 
   sock.on("error", (e: Error) => { console.log(label, "error", e.message); next(); });
   sock.on("close", () => next());
 }
-srv.listen(0, "127.0.0.1", () => {
+srv.listen(0, () => {
   const port = (srv.address() as any).port;
   run(port, "A-none", undefined, () => {
     run(port, "B-undef", undefined, () => {
