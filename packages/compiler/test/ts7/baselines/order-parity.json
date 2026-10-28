@@ -4317,6 +4317,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15146-lru-min-resize-evict.ts": {
+   "order": [
+    "<repo>/tests/corpus/15146-lru-min-resize-evict.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1520-fs-wider-surface.ts": {
    "order": [
     "<repo>/tests/corpus/1520-fs-wider-surface.ts"
