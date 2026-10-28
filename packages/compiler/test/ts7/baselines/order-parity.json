@@ -18957,5 +18957,23 @@
     ],
     "diags": []
   }
- }
+ },
+  "<repo>/tests/corpus/14870-child-stdout-listener-chain.ts": {
+    "order": [
+      "<repo>/tests/corpus/14870-child-stdout-listener-chain.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14871-child-stdout-identity.ts": {
+    "order": [
+      "<repo>/tests/corpus/14871-child-stdout-identity.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14872-child-stdout-promise-executor.ts": {
+    "order": [
+      "<repo>/tests/corpus/14872-child-stdout-promise-executor.ts"
+    ],
+    "diags": []
+  }
 }
