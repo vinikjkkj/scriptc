@@ -3,6 +3,7 @@
  * seeds), npm/JSON import collection, per-file %init functions, %main, and
  * the module artifacts (globals, embedded npm tables) the IR module carries. */
 import * as ts from "../ts7/adapter.js";
+import { poisonedRecordShapeDiag } from "../../diagnostics/diagnostic.js";
 import type { Lowerer } from "./lowerer.js";
 import { uniformTupleArrayExpectation } from "./lower-stmts.js";
 import { registerAbsentGlobal } from "./lower-absent.js";
@@ -1578,10 +1579,19 @@ export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
         // discarded ids and kill the compiler (frontend/types.ts,
         // ShapeRegistry.rollback). If the claim ever stops holding, this
         // says so instead of emitting an empty struct.
+        const poisonedText = L.shapes.poisonedText(id);
+        if (poisonedText !== undefined) {
+          // A reference a FAILED frame left behind (ShapeRegistry.poisonPendingShape):
+          // the type does not compile, so the program is refused by name here.
+          L.pushDiag(poisonedRecordShapeDiag(poisonedText, { file: "", start: 0, end: 0 }));
+          continue;
+        }
         if (L.shapes.isPending(id)) {
-          throw new Error(
-            `internal error: record shape ${id} reached the module without ever being finalized`,
-          );
+          // Never an internal error: a pending placeholder no frame completed is a
+          // reference a failed speculative attempt left behind. The program is refused
+          // by name here (SC2009), with the id, instead of emitting an empty struct.
+          L.pushDiag(poisonedRecordShapeDiag(`record shape ${id}`, { file: "", start: 0, end: 0 }));
+          continue;
         }
         const shape = L.shapes.get(id);
         visit(shape?.fields);

@@ -336,6 +336,10 @@ export class ShapeRegistry {
    * permanently pending when the outer mapping failed (such shapes are
    * referenced by nothing reachable and prune at module assembly). */
   private readonly pendingRec = new Set<string>();
+  /** Placeholder ids POISONED by a failed frame (the record mapping that minted
+   * them returned null). id -> the checker type's text, for the named refusal
+   * a leaked reference gets at module assembly (never an internal error). */
+  private readonly poisonedRec = new Map<string, string>();
 
   /** THE OVERFLOW GRANT. A record shape named by `overflowShapeKeys` gets
    * a `dyn` overflow portion, so a reshape INTO it (`x as unknown as T`)
@@ -538,6 +542,28 @@ export class ShapeRegistry {
   /** The checker type whose frame owns the still-pending placeholder `id`, for
    * diagnostics only (the trace names WHICH enclosing mapping a member's slot
    * is waiting on). */
+  /** POISONS the unfinalized placeholder minted for `t` when the frame that would
+   * have completed it returned null (the shape twin of UnionRegistry's
+   * poisonPendingPlaceholder). Anything that still reaches the id is refused at
+   * module assembly with a named diagnostic. Rollback-safe like the union version. */
+  poisonPendingShape(t: ts.Type, text: string): void {
+    const id = this.recIds.get(t);
+    if (id === undefined || !this.pendingRec.has(id)) return;
+    this.recordUndo(id, () => {
+      this.poisonedRec.delete(id);
+      this.pendingRec.add(id);
+      this.recIds.set(t, id);
+    });
+    this.pendingRec.delete(id);
+    this.recIds.delete(t);
+    this.poisonedRec.set(id, text);
+  }
+
+  /** The text of the poisoned type behind `id`, or undefined when not poisoned. */
+  poisonedText(id: string): string | undefined {
+    return this.poisonedRec.get(id);
+  }
+
   ownerOfPending(id: string): ts.Type | undefined {
     for (const [t, rid] of this.recIds) if (rid === id && this.pendingRec.has(id)) return t;
     return undefined;
@@ -7726,6 +7752,10 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const inner = mapRecordTypeInner(widened, ctx);
     if (inner === null) {
       if (process.env["SCRIPTC_DOORS"] !== undefined && shapes.recursivePending(widened)) console.error("[doors] saiu por inner===null");
+      // A back-reference minted a placeholder for this type while its frame ran;
+      // the frame failed, so nothing will complete it. Poison it: a reference that
+      // leaked into a memoised sub-result is refused by name at module assembly.
+      if (shapes.recursivePending(widened)) shapes.poisonPendingShape(widened, ctx.checker.typeToString(widened));
       return null;
     } // a pending placeholder, if minted, stays unfinalized (prunes as unreachable)
     if (!("fields" in inner)) {
@@ -7733,7 +7763,10 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // canonical shape). If a back-reference minted a placeholder for
       // this very type meanwhile, the two answers disagree — fence rather
       // than leave references to a shape that is not this type's mapping.
-      if (shapes.recursivePending(widened) && inner.kind !== "jsval" && inner.kind !== "dyn") return null;
+      if (shapes.recursivePending(widened) && inner.kind !== "jsval" && inner.kind !== "dyn") {
+        shapes.poisonPendingShape(widened, ctx.checker.typeToString(widened));
+        return null;
+      }
       return inner;
     }
     if (shapes.recursivePending(widened)) {

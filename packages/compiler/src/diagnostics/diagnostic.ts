@@ -1468,3 +1468,15 @@ export function iceDiag(message: string, loc: SrcLoc): ScrDiagnostic {
     loc,
   };
 }
+
+/** A record shape a FAILED mapping left reachable (see ShapeRegistry.poisonPendingShape):
+ * the program does not compile, named by the type whose mapping failed. */
+export function poisonedRecordShapeDiag(typeText: string, loc: SrcLoc): ScrDiagnostic {
+  return {
+    code: "SC2009",
+    message:
+      `values of type '${typeText}' cannot be compiled: a reference to it survived a failed mapping`,
+    loc,
+    milestone: "M2",
+  };
+}
