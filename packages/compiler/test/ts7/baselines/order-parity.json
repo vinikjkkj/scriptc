@@ -18812,6 +18812,30 @@
       "<repo>/tests/corpus/14754-new-array-length-error-is-catchable-per-call.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/14755-ctor-field-filled-at-construction-site.ts": {
+    "order": [
+      "<repo>/tests/corpus/14755-ctor-field-filled-at-construction-site.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14756-ctor-field-negative-count-throws.ts": {
+    "order": [
+      "<repo>/tests/corpus/14756-ctor-field-negative-count-throws.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14757-ctor-field-two-classes-two-params.ts": {
+    "order": [
+      "<repo>/tests/corpus/14757-ctor-field-two-classes-two-params.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14758-ctor-field-fractional-count-throws.ts": {
+    "order": [
+      "<repo>/tests/corpus/14758-ctor-field-fractional-count-throws.ts"
+    ],
+    "diags": []
   }
  }
 }
