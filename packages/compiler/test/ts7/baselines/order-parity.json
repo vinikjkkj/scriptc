@@ -3941,6 +3941,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14933-class-define-method-getter-converts-to-data.ts": {
+   "order": [
+    "<repo>/tests/corpus/14933-class-define-method-getter-converts-to-data.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1520-fs-wider-surface.ts": {
    "order": [
     "<repo>/tests/corpus/1520-fs-wider-surface.ts"

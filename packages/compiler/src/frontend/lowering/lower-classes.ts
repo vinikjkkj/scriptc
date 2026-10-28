@@ -715,6 +715,18 @@ export interface GenericClassInfo {
       return "the descriptor is not an OBJECT LITERAL, so its get/set halves cannot be checked at all";
     }
     for (const p of desc.properties) {
+      // `get() { … }` / `set(v) { … }` METHOD members are the other
+      // spelling of the same half (pg's lib/index.js `native` getter).
+      if (ts.isMethodDeclaration(p)) {
+        const nm = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : null;
+        if (nm !== "get" && nm !== "set") {
+          return "the descriptor has a shorthand, spread or method member rather than plain `name: value` assignments";
+        }
+        if (!receiverFreeHalf(p)) {
+          return `the descriptor's '${nm}' method reads this, arguments, super or new.target, and the table calls it with no receiver`;
+        }
+        continue;
+      }
       if (!ts.isPropertyAssignment(p)) {
         return "the descriptor has a shorthand, spread or method member rather than plain `name: value` assignments";
       }
@@ -727,15 +739,36 @@ export interface GenericClassInfo {
       if (nm !== "get" && nm !== "set") continue;
       let half: ts.Expression = p.initializer;
       while (ts.isParenthesizedExpression(half)) half = half.expression;
-      if (!ts.isArrowFunction(half)) {
+      if (!ts.isArrowFunction(half) && !(ts.isFunctionExpression(half) && receiverFreeHalf(half))) {
         // The table calls the half with NO receiver: a compiled instance
         // has no dyn spelling to bind as `this`. An arrow's `this` is
-        // lexical and already captured, so nothing is lost; anything else
-        // could read `this` and would get the wrong one.
-        return `the descriptor's '${nm}' is not an ARROW function, and the table calls it with no receiver — only an arrow's \`this\` is already captured`;
+        // lexical and already captured, so nothing is lost; a function
+        // whose body never reads its own receiver is the same call, and
+        // anything else could read `this` and would get the wrong one.
+        return `the descriptor's '${nm}' is not an ARROW function, and the table calls it with no receiver — only an arrow's \`this\` is already captured, or a function that never reads this/arguments/super/new.target`;
       }
     }
     return null;
+  }
+
+  /** A `get`/`set` half that the property table may call with NO receiver:
+   * its body (parameters included) never names `this`, `super`,
+   * `new.target` or `arguments`, at any depth. Conservative on purpose — a
+   * nested function's own `this` also counts, so the answer can only say
+   * "no" where a receiver-free call would have been exact. Iterative
+   * (depth guard is not yet in force for these walks). */
+  function receiverFreeHalf(fn: ts.FunctionExpression | ts.MethodDeclaration): boolean {
+    const stack: ts.Node[] = [];
+    for (const prm of fn.parameters) stack.push(prm);
+    if (fn.body !== undefined) stack.push(fn.body);
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (n.kind === ts.SyntaxKind.ThisKeyword || n.kind === ts.SyntaxKind.SuperKeyword ||
+        n.kind === ts.SyntaxKind.MetaProperty) return false;
+      if (ts.isIdentifier(n) && n.text === "arguments") return false;
+      ts.forEachChild(n, (c) => { stack.push(c); return undefined; });
+    }
+    return true;
   }
 
   /** Why an `Object.defineProperty` whose receiver IS a program class did
