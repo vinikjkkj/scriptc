@@ -5640,6 +5640,21 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             const absent = E.unitInstanceRef(e.type.unionId, nullTag);
             return E.newTemp(e.type, `${b.name} ? ${present} : ${absent}`);
           }
+          case "tls.sockSessionReused":
+            return finish(`scr_tls_sock_session_reused(${arg(0)})`);
+          case "tls.sockGetSession": {
+            // Buffer | undefined: +1 bytes or NULL, NULL takes the undefined arm.
+            if (e.type.kind !== "union") throw new Error("emitter bug: tls.sockGetSession result is not a union");
+            const def = E.unionsById.get(e.type.unionId);
+            const bytesTag = def ? def.arms.findIndex((a) => a.kind === "bytes" && a.elem === "u8") : -1;
+            const undefTag = E.undefinedArmTag(e.type);
+            if (bytesTag < 0 || undefTag < 0) throw new Error("emitter bug: tls.sockGetSession union lacks its arms");
+            const b = E.newTemp(BYTES_U8, `scr_tls_sock_get_session(${arg(0)})`);
+            E.moveTemp(b); // moves into the box when present; NULL otherwise
+            const present = `scr_union_new_ref(${bytesTag}, ${b.name}, &scr_bytes_retain_v, &scr_bytes_release_v, NULL)`;
+            const absent = E.unitInstanceRef(e.type.unionId, undefTag);
+            return E.newTemp(e.type, `${b.name} ? ${present} : ${absent}`);
+          }
           case "net.sockUnshift":
             E.line(`scr_net_sock_unshift_bytes(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };

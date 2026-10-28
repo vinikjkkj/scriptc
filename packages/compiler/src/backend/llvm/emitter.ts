@@ -623,6 +623,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "tlsca.get": "scr_tls_ca_get",
   "tlsca.getDyn": "scr_tls_ca_get_dyn",
   "tls.checkServerIdentity": "scr_tls_check_server_identity_dyn",
+  "tls.sockSessionReused": "scr_tls_sock_session_reused",
   "tlsca.set": "scr_tls_ca_set_default",
   // ── node:tls's runtime-options slice and node:dgram: the rows that
   // were the whole of this tier's enumerated refusal list except the two
@@ -17776,6 +17777,19 @@ class LlEmitter {
       const raw = B.tmp();
       B.line(`${raw} = call ptr @${entry}(${argList}) ; +1 or NULL`);
       return this.wrapNullable(raw, raw, STRING, strTag, e.type, undefTag);
+    }
+    if (e.fn === "tls.sockGetSession") {
+      // Buffer | undefined: +1 bytes or NULL, NULL takes the undefined arm.
+      if (e.type.kind !== "union") throw new Error("llvm emitter bug: tls.sockGetSession result is not a union");
+      const def = this.unionsById.get(e.type.unionId);
+      const bytesTag = def ? def.arms.findIndex((a) => a.kind === "bytes" && a.elem === "u8") : -1;
+      const undefTag = this.undefinedArmTag(e.type);
+      if (bytesTag < 0 || undefTag < 0) throw new Error("llvm emitter bug: tls.sockGetSession union lacks its arms");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.declare(`declare ptr @scr_tls_sock_get_session(ptr)`);
+      const raw = B.tmp();
+      B.line(`${raw} = call ptr @scr_tls_sock_get_session(ptr ${args[0]!.name}) ; +1 or NULL`);
+      return this.wrapNullable(raw, raw, def!.arms[bytesTag]!, bytesTag, e.type, undefTag);
     }
     if (e.fn === "net.sockEncrypted") {
       // boolean | undefined: the true arm iff a TLS transport.

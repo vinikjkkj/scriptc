@@ -1546,6 +1546,26 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
     const fn: IrLibFn = name === "pause" ? "net.sockPause" : "net.sockResume";
     return { kind: "libCall", fn, args: [receiver], type: NETSOCKET_T, loc };
   }
+  if (name === "isSessionReused") {
+    // TLSSocket.isSessionReused(): true iff the handshake resumed the
+    // offered session (tls.connect's `session` option). Node types it on
+    // TLSSocket; the receiver's kind is already a socket.
+    if (args.length !== 0) {
+      L.noLowering(`isSessionReused with ${args.length} arguments`, call, "the form is isSessionReused()");
+    }
+    const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
+    return { kind: "libCall", fn: "tls.sockSessionReused", args: [receiver], type: BOOL, loc };
+  }
+  if (name === "getSession") {
+    // TLSSocket.getSession(): the serialized session as a Buffer, or
+    // undefined (no session yet, or a server socket).
+    if (args.length !== 0) {
+      L.noLowering(`getSession with ${args.length} arguments`, call, "the form is getSession()");
+    }
+    const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
+    const type: IrType = L.withUndefinedArm(BYTES_U8);
+    return { kind: "libCall", fn: "tls.sockGetSession", args: [receiver], type, loc };
+  }
   if (name === "setNoDelay") {
     // TCP_NODELAY on the live fd; missing/undefined means true (Node).
     // Answers the socket, Node's chaining.
