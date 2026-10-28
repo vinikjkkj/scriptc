@@ -1708,6 +1708,12 @@
       "note": "recognized module (bare and node:-prefixed specifiers)"
     },
     {
+      "id": "node-builtin.tls.checkServerIdentity",
+      "kind": "node-builtin",
+      "name": "tls.checkServerIdentity",
+      "status": "static"
+    },
+    {
       "id": "node-builtin.tls.connect",
       "kind": "node-builtin",
       "name": "tls.connect",
