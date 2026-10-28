@@ -18956,30 +18956,30 @@
       "<repo>/tests/corpus/14754-new-array-length-error-is-catchable-per-call.ts"
     ],
     "diags": []
-  }
- },
+  },
   "<repo>/tests/corpus/14870-child-stdout-listener-chain.ts": {
-    "order": [
-      "<repo>/tests/corpus/14870-child-stdout-listener-chain.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/14870-child-stdout-listener-chain.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/14871-child-stdout-identity.ts": {
-    "order": [
-      "<repo>/tests/corpus/14871-child-stdout-identity.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/14871-child-stdout-identity.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/14872-child-stdout-promise-executor.ts": {
-    "order": [
-      "<repo>/tests/corpus/14872-child-stdout-promise-executor.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/14872-child-stdout-promise-executor.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/14873-child-stdout-once-chain.ts": {
-    "order": [
-      "<repo>/tests/corpus/14873-child-stdout-once-chain.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/14873-child-stdout-once-chain.ts"
+   ],
+   "diags": []
   }
+ }
 }
