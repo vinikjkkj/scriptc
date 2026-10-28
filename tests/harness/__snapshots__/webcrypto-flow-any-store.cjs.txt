@@ -1,0 +1,6 @@
+webcrypto-flow-any-store.cjs:4:7 - error SC1090: a WebCrypto value stored into an any- or unknown-typed target (its uses are not visible to the compiler) is not supported yet
+
+  3 | const s = require('crypto').webcrypto.subtle
+  4 | o.s = s
+    |       ^
+  5 | console.log(o)
