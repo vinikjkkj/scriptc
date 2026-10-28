@@ -79,7 +79,7 @@ export type DynMemberRow =
    * the method rows, so a read by name must never find it: the runtime skips
    * these rows (enumerable 3) when it looks a member up and answers the
    * method, whose body forwards to `target` while the flag is set. */
-  | { kind: "shadow"; name: string; target: string; flag: string; flagType: IrType };
+  | { kind: "shadow"; name: string; target: string; flag: string; flagType: IrType; ordk: number };
 
 /**
  * The member table rows for one class, FLATTENED over its base chain with
@@ -231,7 +231,10 @@ export function dynMemberTable(
       pushed.add(f.name);
       // The row is the property's; the name is not marked seen, because the
       // method row of the same name must still be emitted after it.
-      rows.push({ kind: "shadow", name: sh.method, target: sh.target, flag: f.name, flagType: f.type });
+      // The flag is written on the property's first write, so its inferred-field ordinal places
+      // the own key where Node creates it, not at the head of the static rows.
+      const shOrd = ORDER_PLAN?.ordinalOf(cls.def.name, f.name) ?? null;
+      rows.push({ kind: "shadow", name: sh.method, target: sh.target, flag: f.name, flagType: f.type, ordk: shOrd === null ? 0 : shOrd + 1 });
     }
   };
   pushShadows("");

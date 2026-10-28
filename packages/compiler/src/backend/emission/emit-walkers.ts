@@ -180,7 +180,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         );
         entries.push(
           `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
-            `&${sym}, NULL, 3 },`,
+            `&${sym}, NULL, 3, ${row.ordk} },`,
         );
         continue;
       }
