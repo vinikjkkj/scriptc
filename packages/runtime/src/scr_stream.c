@@ -990,6 +990,14 @@ static ScrError *scr_stream_dyn_err(ScrDyn *const *args, size_t argc) {
   if (argc < 1) return NULL;
   const ScrDyn *a = args[0];
   if (a->kind == SCR_DYN_UNDEF || a->kind == SCR_DYN_NULL) return NULL;
+  /* A runtime Error boxed as dyn (scr_dyn_from_error's encoding, or a boxed
+   * instance of an Error subclass): the error IS the value, message and
+   * identity included. The OBJ arm below reads an enumerable-looking
+   * `message`, which the encoding keeps hidden, so it answered "". */
+  if (scr_dyn_is_error_value(a)) {
+    ScrError *e = scr_error_from_dyn(a);
+    if (e != NULL) return e;
+  }
   if (a->kind == SCR_DYN_STR) {
     ScrError *e = scr_error_new(SCR_ERR_ERROR, a->v.str);
     return e;

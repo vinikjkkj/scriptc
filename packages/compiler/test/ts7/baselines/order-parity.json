@@ -3485,6 +3485,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14700-stream-transform-done-const-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/14700-stream-transform-done-const-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14701-stream-transform-done-concat-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/14701-stream-transform-done-concat-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14702-stream-transform-callback-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/14702-stream-transform-callback-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14703-stream-writable-callback-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/14703-stream-writable-callback-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14704-stream-transform-class-events.ts": {
+   "order": [
+    "<repo>/tests/corpus/14704-stream-transform-class-events.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1471-child-unref.ts": {
    "order": [
     "<repo>/tests/corpus/1471-child-unref.ts"
