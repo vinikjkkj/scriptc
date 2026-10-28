@@ -1235,6 +1235,19 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           loc,
         };
       }
+      // A number-typed operand: the NaN-marked undefined (scr_runtime.h) answers
+      // "undefined". The operand is evaluated once, inside the test.
+      if (operand.type.kind === "f64") {
+        const isUndef: IrExpr = { kind: "libCall", fn: "num.isUndef", args: [operand], type: BOOL, loc };
+        return {
+          kind: "ternary",
+          cond: isUndef,
+          then: { kind: "strLit", value: "undefined", type: STRING, loc },
+          else_: { kind: "strLit", value: "number", type: STRING, loc },
+          type: STRING,
+          loc,
+        };
+      }
       const FOLD: Partial<Record<string, string>> = {
         f64: "number", string: "string", bool: "boolean", func: "function",
         array: "object", object: "object", record: "object",
@@ -6004,6 +6017,13 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
         loc,
       };
     }
+    // A number-typed operand compared with undefined: the NaN-marked undefined
+    // (scr_runtime.h) is the one number that IS undefined. null never equals a
+    // number.
+    if (other.type.kind === "f64" && unit.unit === "undefined") {
+      const test: IrExpr = { kind: "libCall", fn: "num.isUndef", args: [other], type: BOOL, loc };
+      return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
+    }
     if (other.kind === "unitLit") {
       // Two unit literals (`undefined === undefined`): statically decided.
       return { kind: "boolLit", value: (other.unit === unit.unit) !== negated, type: BOOL, loc };
@@ -6171,6 +6191,12 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
     if (L.presenceResults.has(other)) {
       // A pointer-backed field's presence bool: `f == null` is "absent".
       return negated ? other : { kind: "unary", op: "!", operand: other, type: BOOL, loc };
+    }
+    if (other.type.kind === "f64") {
+      // A number against null/undefined under LOOSE equality: only the
+      // NaN-marked undefined (scr_runtime.h) is nullish.
+      const test: IrExpr = { kind: "libCall", fn: "num.isUndef", args: [other], type: BOOL, loc };
+      return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
     }
     if (isUnitType(other.type)) {
       // `null == null`, `undefined == null`: units are mutually loose-equal.
@@ -6719,6 +6745,30 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
       // marshals in (the emitter's jsval nullish arm).
       const right = L.jsvalIn(L.lowerExpr(expr.right), expr.right);
       return { kind: "nullish", left, right, type: JSVAL, loc };
+    }
+    // A number-typed left: the NaN-marked undefined (scr_runtime.h) takes the
+    // default. The left is evaluated once into a hidden local; the default stays
+    // lazy in the ternary's own arm.
+    if (left.type.kind === "f64") {
+      const rightRaw = L.lowerExpr(expr.right);
+      if (rightRaw.type.kind === "f64") {
+        const h = L.declareHiddenLocal("%numNullish", F64);
+        const held: IrExpr = { kind: "varRef", localId: h.id, type: F64, loc };
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "varDecl", localId: h.id, init: left, loc }],
+          result: {
+            kind: "ternary",
+            cond: { kind: "libCall", fn: "num.isUndef", args: [held], type: BOOL, loc },
+            then: rightRaw,
+            else_: held,
+            type: F64,
+            loc,
+          },
+          type: F64,
+          loc,
+        };
+      }
     }
     // `node.attrs.from ?? hostDomain`, and the same read one binding later
     // (`const from = node.attrs.from; from ?? hostDomain`). The checker
@@ -16904,7 +16954,8 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
         }
         const plusOperand = boolAsNumber(operand);
         if (plusOperand.type.kind !== "f64") L.unsupported("SC1043", expr);
-        return plusOperand;
+        // ToNumber of the NaN-marked undefined is a plain NaN (scr_runtime.h).
+        return { kind: "libCall", fn: "num.canon", args: [plusOperand], type: F64, loc };
       }
       case ts.SyntaxKind.ExclamationToken: {
         // `!x` is ToBoolean-then-negate: f64/string operands go through toBool.
@@ -17902,6 +17953,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         }
         if (left.type.kind === "string" && right.type.kind === "string") {
           return strEqExpr(negated, left, right, loc);
+        }
+        // `n == undefined` / `n == void 0` on a number: loose equality with a unit
+        // literal is the NaN-marked test (scr_runtime.h), not a fold.
+        if ((left.type.kind === "f64" && right.kind === "unitLit") || (right.type.kind === "f64" && left.kind === "unitLit")) {
+          const num = left.type.kind === "f64" ? left : right;
+          const test: IrExpr = { kind: "libCall", fn: "num.isUndef", args: [num], type: BOOL, loc };
+          return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
         }
         if (
           (left.type.kind === "f64" && right.type.kind === "f64") ||
