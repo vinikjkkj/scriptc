@@ -61,16 +61,16 @@ declare namespace NodeJS {
    * once at EOF and always BEFORE the child's 'exit'. A flowing stream
    * keeps the loop alive. */
   interface ReadableStream {
-    on(event: "data", listener: (chunk: Buffer) => void): void;
-    on(event: "end", listener: () => void): void;
-    once(event: "data", listener: (chunk: Buffer) => void): void;
-    once(event: "end", listener: () => void): void;
+    on(event: "data", listener: (chunk: Buffer) => void): this;
+    on(event: "end", listener: () => void): this;
+    once(event: "data", listener: (chunk: Buffer) => void): this;
+    once(event: "end", listener: () => void): this;
     /* Declared surface without a lowering (chunks stay bytes; decode
      * with TextDecoder) — string-mode consumers typecheck and fence at
      * the reached site. With setEncoding in force Node hands strings to
      * 'data', hence the string arm on the listener above being absent:
      * the lowered surface is bytes-only. */
-    setEncoding(encoding: string): void;
+    setEncoding(encoding: string): this;
   }
 }
 
