@@ -23,6 +23,7 @@ import { tapPhase } from "../../packages/compiler/src/phase-tap.js";
 import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-report.js";
 import { oracleIsTrustworthy as oracleTrustworthy } from "./oracle-trust.js";
 import { holdScratch } from "./scratch-lease.mjs";
+import { normalizeWarningPid } from "./stderr-pid.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -501,9 +502,12 @@ export function defineDifferentialSuite(part = 1, parts = 1): void {
           expect(got?.pre ?? comparableStderr(nativeRes.stderr).toString("utf8")).toBe(want.pre);
           expect(got?.line ?? "<no uncaught report>").toBe(want.line);
         } else if (expectedExit === 0) {
-          const nativeErr = comparableStderr(nativeRes.stderr);
-          if (!nodeRes.stderr.equals(nativeErr)) {
-            expect(nativeErr.toString("utf8")).toBe(nodeRes.stderr.toString("utf8"));
+          // Both sides lose the warning pid (node:<pid>): the pid is process
+          // identity, so the warning text still compares byte for byte.
+          const nativeErr = Buffer.from(normalizeWarningPid(comparableStderr(nativeRes.stderr).toString("utf8")), "utf8");
+          const nodeErr = Buffer.from(normalizeWarningPid(nodeRes.stderr.toString("utf8")), "utf8");
+          if (!nodeErr.equals(nativeErr)) {
+            expect(nativeErr.toString("utf8")).toBe(nodeErr.toString("utf8"));
             expect.unreachable("stderr differed at byte level but not after utf8 decode");
           }
         }
