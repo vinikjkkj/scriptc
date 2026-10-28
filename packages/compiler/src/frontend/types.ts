@@ -2183,6 +2183,23 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     console.error(`[innerwhy] enter: ${ctx.checker.typeToString(type).slice(0, 90)}`);
   }
   const { checker, unions, classNamer, resolveTypeParam } = ctx;
+  // PromiseConstructorLike is a lib TYPE ALIAS for `new <T>(executor) => PromiseLike<T>`:
+  // its symbol is the anonymous type literal, so the name test lives on the alias
+  // symbol. It answers the same singleton as PromiseConstructor (the global Promise),
+  // before the generic construct signature is mapped and before any cache is written.
+  {
+    const aliasSym = type.getAliasSymbol();
+    if (
+      !ctx.dynamic &&
+      aliasSym !== undefined &&
+      aliasSym.name === "PromiseConstructorLike" &&
+      checker.declarationsOf(aliasSym).some(
+        (d) => ts.isTypeAliasDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()),
+      )
+    ) {
+      return { kind: "opaque", name: "PromiseConstructor" };
+    }
+  }
   if (resolveTypeParam && type.flags & ts.TypeFlags.TypeParameter) {
     const bound = resolveTypeParam(type);
     // Consulting the bindings is itself context-dependent, bound or not.
@@ -4875,14 +4892,18 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (
     !ctx.dynamic &&
     psym !== undefined &&
-    (psym.name === "Blob" || psym.name === "PromiseConstructor") &&
+    (psym.name === "Blob" || psym.name === "PromiseConstructor" || psym.name === "PromiseConstructorLike") &&
     checker.declarationsOf(psym).some(
       (d) =>
         (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d) || ts.isVariableDeclaration(d)) &&
         ctx.isStdlibFile(d.getSourceFile()),
     )
   ) {
-    return { kind: "opaque", name: psym.name };
+    // PromiseConstructorLike (pg's `Promise?` option) has the same one native
+    // instance as PromiseConstructor: the global Promise. Both answer the same
+    // singleton, so the global value fills either slot; any other value fails
+    // to convert at its own write site.
+    return { kind: "opaque", name: psym.name === "PromiseConstructorLike" ? "PromiseConstructor" : psym.name };
   }
   if (isStdlibInterface("PromiseRejectedResult")) {
     return {
