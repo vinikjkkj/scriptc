@@ -1391,6 +1391,12 @@ ScrStr *scr_str_trim(ScrStr *s);
 ScrStr *scr_str_to_lower(const ScrStr *s);
 ScrStr *scr_str_to_upper(const ScrStr *s);
 
+/* normalize(form): ECMA-262 String.prototype.normalize via libunicode's
+ * unicode_normalize, in scr_regex.c with the case conversion (the lre link
+ * flag). form is NFC/NFD/NFKC/NFKD (anything else traps, as RangeError).
+ * Borrow s and form; +1. */
+ScrStr *scr_str_normalize(const ScrStr *s, const ScrStr *form);
+
 /* charAt(i): 1-code-unit string; out of range → empty string. Half of an
  * astral pair → U+FFFD (divergence, see above). Returns +1. */
 ScrStr *scr_str_char_at(ScrStr *s, double i);

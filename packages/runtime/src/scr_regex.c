@@ -1005,6 +1005,57 @@ static ScrStr *scr_str_case_conv(const ScrStr *s, int to_lower) {
 ScrStr *scr_str_to_lower(const ScrStr *s) { return scr_str_case_conv(s, 1); }
 ScrStr *scr_str_to_upper(const ScrStr *s) { return scr_str_case_conv(s, 0); }
 
+/* ── String.prototype.normalize (the static path) ────────────────────────
+ * ECMA-262 String.prototype.normalize over the vendored libunicode's
+ * unicode_normalize (the same decomposition, combining-class and
+ * composition tables quickjs.c's own normalize runs). Lives here for the
+ * same reason as the case conversion above: it needs libunicode, and the
+ * compiler sets the lre link flag for normalize sites. The form is
+ * validated at runtime (Node's RangeError message; scr_trap is this
+ * runtime's uncatchable RangeError convention, as repeat's count check).
+ * Borrows s and form; the result is a fresh +1 string. */
+static void *scr_norm_realloc(void *opaque, void *ptr, size_t size) {
+  (void)opaque;
+  if (size == 0) {
+    free(ptr);
+    return NULL;
+  }
+  void *p = realloc(ptr, size);
+  if (!p) abort();
+  return p;
+}
+
+static int scr_norm_form_is(const ScrStr *form, const char *name) {
+  size_t n = strlen(name);
+  return form->len == n && memcmp(form->data, name, n) == 0;
+}
+
+ScrStr *scr_str_normalize(const ScrStr *s, const ScrStr *form) {
+  int nt;
+  if (scr_norm_form_is(form, "NFC")) nt = UNICODE_NFC;
+  else if (scr_norm_form_is(form, "NFD")) nt = UNICODE_NFD;
+  else if (scr_norm_form_is(form, "NFKC")) nt = UNICODE_NFKC;
+  else if (scr_norm_form_is(form, "NFKD")) nt = UNICODE_NFKD;
+  else scr_trap("scriptc: RangeError: The normalization form should be one of NFC, NFD, NFKC, NFKD.\n");
+  uint32_t *src = malloc(sizeof(uint32_t) * (s->len ? s->len : 1));
+  if (!src) abort();
+  size_t n = 0;
+  for (size_t i = 0; i < s->len;) {
+    size_t adv;
+    src[n++] = scr_case_decode(s->data + i, &adv);
+    i += adv;
+  }
+  uint32_t *dst = NULL;
+  int out = unicode_normalize(&dst, src, (int)n, nt, NULL, scr_norm_realloc);
+  free(src);
+  if (out < 0) abort();
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  for (int j = 0; j < out; j++) scr_case_put_cp(&b, dst[j]);
+  free(dst);
+  return scr_jb_finish(&b);
+}
+
 /* ── assert.match / assert.doesNotMatch ──────────────────────────────────
  * Lives here (not scr_assert.c) because it needs the matcher, and every
  * call site carries a regex value — the regex link switch is already on,

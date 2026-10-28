@@ -7525,6 +7525,10 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     if ((entry.method === "padStart" || entry.method === "padEnd") && args.length === 1) {
       args.push({ kind: "strLit", value: " ", type: STRING, loc: locOf(call) });
     }
+    // normalize() with the form omitted: Node normalizes to NFC.
+    if (entry.method === "normalize" && args.length === 0) {
+      args.push({ kind: "strLit", value: "NFC", type: STRING, loc: locOf(call) });
+    }
     const split: IrExpr = {
       kind: "strIntrinsic",
       method: entry.method,
