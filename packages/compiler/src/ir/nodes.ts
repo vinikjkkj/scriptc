@@ -10909,7 +10909,27 @@ export function moduleUsesDestroyDyn(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && (node.fn === "stream.destroyDyn" || node.fn === "http.clientDestroyDyn")) {
+    if (node.kind === "libCall" && node.fn === "stream.destroyDyn") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** http.clientDestroyDyn on the IR: the request's dyn destroy unit (scr_http_dyn.c). */
+export function moduleUsesHttpDestroyDyn(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "http.clientDestroyDyn") {
       found = true;
       return;
     }
@@ -10929,7 +10949,7 @@ export function moduleUsesInspect(mod: IrModule): boolean {
     }
     const node = v as { kind?: unknown; fn?: unknown };
     if (node.kind === "libCall" && typeof node.fn === "string" &&
-        (node.fn.startsWith("insp.") || node.fn === "stream.destroyDyn" || node.fn === "http.clientDestroyDyn")) {
+        (node.fn.startsWith("insp.") || node.fn === "stream.destroyDyn")) {
       found = true;
       return;
     }

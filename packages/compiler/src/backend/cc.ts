@@ -85,6 +85,9 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // The dyn destroy: its non-Error wrapper installs the inspect text into the json
   // hook, so it links the stream and inspect units (streamDyn gate).
   "scr_stream_dyn.c": ["scr_stream.c", "scr_inspect.c", "scr_json.c"],
+  // request.destroy(dyn): the http destroy pair (scr_http.c) and the non-Error
+  // wrapper (scr_stream_dyn.c, which links the stream and inspect units).
+  "scr_http_dyn.c": ["scr_http.c", "scr_net.c", "scr_stream_dyn.c"],
   "scr_symbol.c": ["scr_assert.c"],
   // safeIntegers() answers a real BigInt and binds one back, so the
   // SQLite gate owes the linker the bigint unit — scr_big_parse,
@@ -299,6 +302,8 @@ export interface CcOptions {
   zlibStream?: boolean;
   /** The stream.destroyDyn gate: scr_stream_dyn.c (links stream + inspect). */
   streamDyn?: boolean;
+  /** The http.clientDestroyDyn gate: scr_http_dyn.c (implies scr_stream_dyn.c). */
+  httpDyn?: boolean;
   bigint?: boolean;
   asym?: boolean;
   rsaPubEnc?: boolean;
@@ -2507,7 +2512,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // The zlib ↔ stream bridge (createUnzip and friends). The -I/-lz it
     // needs already rode the zlib arm above, which this gate implies.
     ...(opts.zlibStream ? [rt(join(rtDir, "scr_zlib_stream.c"))] : []),
-    ...(opts.streamDyn ? [rt(join(rtDir, "scr_stream_dyn.c"))] : []),
+    ...(opts.streamDyn || opts.httpDyn ? [rt(join(rtDir, "scr_stream_dyn.c"))] : []),
+    ...(opts.httpDyn ? [rt(join(rtDir, "scr_http_dyn.c"))] : []),
     // The zlib ↔ island bridge: only when BOTH halves are in the build
     // (the scr_inspect_island.c pattern) — the emitted main calls its
     // installer exactly then.

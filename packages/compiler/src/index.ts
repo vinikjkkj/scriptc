@@ -24,7 +24,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleUsesDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
+import { moduleUsesDestroyDyn, moduleUsesHttpDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
   moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -807,11 +807,12 @@ function programNativeFeatures(
     // link line.
     zlibStream: moduleUsesZlibStream(mod),
     streamDyn: moduleUsesDestroyDyn(mod),
+    httpDyn: moduleUsesHttpDestroyDyn(mod),
     // The link switch for scr_assert.c: assert.* libCalls on the IR (the
     // regex switch also pulls it — scr_regex.c calls the assert helpers).
     assert: moduleUsesAssert(mod),
     // The link switch for scr_inspect.c: insp.* libCalls on the IR.
-    inspect: moduleUsesInspect(mod),
+    inspect: moduleUsesInspect(mod) || moduleUsesHttpDestroyDyn(mod),
     // The SCR_ENGINE switch: a non-foldable Function site runs on the engine.
     engine: moduleUsesEngineFn(mod),
     // The link switch for scr_dyn_invoke.c: dynInvoke nodes or
@@ -887,7 +888,7 @@ function programNativeFeatures(
     qs: moduleUsesQs(mod),
     // The link switch for scr_stream.c: the node:stream class surface on
     // the IR (stream libCalls or the %Readable-family class defs).
-    stream: moduleUsesStream(mod),
+    stream: moduleUsesStream(mod) || moduleUsesHttpDestroyDyn(mod),
     // The link switch for scr_net.c: net.* (or http.* — http rides on
     // net) libCalls on the IR.
     net: moduleUsesNet(mod),
@@ -2122,7 +2123,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
     sanitize: opts.sanitize ?? false,
     regex: moduleUsesRegex(mod),
     assert: moduleUsesAssert(mod),
-    inspect: moduleUsesInspect(mod),
+    inspect: moduleUsesInspect(mod) || moduleUsesHttpDestroyDyn(mod),
     symbol: moduleUsesSymbol(mod),
     weak: moduleUsesWeakMap(mod),
     url: moduleUsesUrl(mod),
