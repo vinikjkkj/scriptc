@@ -31,6 +31,7 @@ import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } fr
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
+import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf } from "./cjs-live-exports.js";
 import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
@@ -6726,6 +6727,10 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       }
     }
     const table = tableObj!;
+    // A LIVE table export (cjs-live-exports.ts): the entries are stored into the module's bag at this statement.
+    if (!resolvedTarget && cjs.kind === "table" && liveExportsOf(L, cjs.expr.getSourceFile())) {
+      return liveTableStmt(L, cjs.expr.getSourceFile(), table as ts.ObjectLiteralExpression, loc);
+    }
     const body: IrStmt[] = [];
     // Identifier-valued properties are alias plumbing (importers resolve
     // through to the declaration) — EXACT for const/function bindings, a
@@ -7284,7 +7289,15 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
           const ex = lowerExpandoAssignStmt(L, expr);
           if (ex) return ex;
         }
-        if (ts.isElementAccessExpression(expr.left)) return L.lowerElementWrite(expr);
+        if (ts.isElementAccessExpression(expr.left)) {
+          // `module.exports[k] = v` / `d[k] = v` over a LIVE export object (cjs-live-exports.ts): the bag's keyed store.
+          const lb = liveRecvBagOf(L, expr.left.expression, locOf(expr));
+          const lk = lb !== null && !expr.left.questionDotToken ? liveKeyOf(L, expr.left.argumentExpression) : null;
+          if (lb !== null && lk !== null) {
+            return { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [lb, lk, dynValueOf(L, expr.right)], type: VOID, loc: locOf(expr) }, loc: locOf(expr) };
+          }
+          return L.lowerElementWrite(expr);
+        }
         if (ts.isPropertyAccessExpression(expr.left)) {
           // A write to a member of a fetch RequestInit VALUE, assertion or
           // not. Claimed FIRST, ahead of the asserted-receiver path just
@@ -7483,6 +7496,18 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
               loc,
             };
           }
+          // `d.k = v` over a require binding of a LIVE CommonJS module (cjs-live-exports.ts): the store is the
+          // module's bag, the object the module and every requirer read.
+          if (!expr.left.questionDotToken) {
+            const bagRecv = liveWriteBagOf(L, expr.left.expression, locOf(expr));
+            if (bagRecv !== null) {
+              return {
+                kind: "exprStmt",
+                expr: { kind: "libCall", fn: "dyn.keySet", args: [bagRecv, { kind: "strLit", value: expr.left.name.text, type: STRING, loc: locOf(expr) }, dynValueOf(L, expr.right)], type: VOID, loc: locOf(expr) },
+                loc: locOf(expr),
+              };
+            }
+          }
           // wrapper.close = fn — the net.Server close-override idiom
           // (routed to lower-server; the generic fences stay for
           // everything else).
@@ -7512,6 +7537,16 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
               const value = L.lowerExprExpecting(expr.right, nsT.type);
               return { kind: "assign", localId: nsT.id, value, loc: locOf(expr) };
             }
+          }
+          // A member write through a table export's require binding that names a bare `exports` (no static global
+          // took it above): the snapshot the write would reach is not the table, so it refuses here (cjs-live-exports.ts).
+          if (!expr.left.questionDotToken && orphanTableWriteOf(L, expr.left.expression)) {
+            L.unsupported(
+              "SC1090",
+              expr,
+              `a member write through a require binding of a module whose export is a table and which also names a bare 'exports' (after 'module.exports = {...}', 'exports' is the discarded object; the live table form does not model it)`,
+            );
+            return { kind: "block", body: [], loc: locOf(expr) };
           }
           // `C.x = v` — a static-field write through the DECLARING class's
           // own name: the field's module global assigns. Writes through a
@@ -8066,6 +8101,11 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       }
       const compound = COMPOUND_ASSIGN_OPS[opKind];
       if (compound !== undefined) {
+        // `R.k op= e` over a live export object (cjs-live-exports.ts): the bag's read-modify-write.
+        if (ts.isPropertyAccessExpression(expr.left)) {
+          const liveCmp = liveCompoundStmtOf(L, expr.left, compound, expr.right, expr, locOf(expr));
+          if (liveCmp !== null) return liveCmp;
+        }
         // Desugar `x op= e` to `x = x op e` — reads x before e, like JS.
         if (ts.isElementAccessExpression(expr.left)) {
           // `this[kLimit] += v` — a declared symbol-keyed class field is
@@ -8127,6 +8167,9 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
         // increment (the member's global IS the variable); expando
         // function members (`foo.count++`) are module globals too.
         if (ts.isPropertyAccessExpression(expr.operand) && !expr.operand.questionDotToken) {
+          // `R.k++` over a live export object (cjs-live-exports.ts): the bag's read-modify-write.
+          const liveInc = liveCompoundStmtOf(L, expr.operand, expr.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-", null, expr, locOf(expr));
+          if (liveInc !== null) return liveInc;
           const exT = expandoWritableTarget(L, expr.operand);
           if (exT) return lowerIncDecToTarget(L, expr, exT);
           const nsT = nsWritableTarget(L, expr.operand);

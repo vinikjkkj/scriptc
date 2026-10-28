@@ -11,7 +11,7 @@ import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
-import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf } from "./cjs-live-exports.js";
+import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf, liveRecvBagOf, liveKeyOf } from "./cjs-live-exports.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExportRecordReadDyn, cjsExportRecordRef, isBareExportsAccess } from "./cjs-export-record.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
@@ -2835,9 +2835,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // below answers them, not the module-namespace delegation. A whole-class
       // require binding delegates to the module's export member first.
       // A live requirer binding (`m.x` where m = require(M), M a live module): the member is the bag's.
-      if (!expr.questionDotToken && ts.isIdentifier(expr.expression) && liveDepOfBinding(L, expr.expression) !== null) {
-        const ld = liveDepOfBinding(L, expr.expression)!;
-        return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr) }, optional: true, value: liveBagRef(L, ld, locOf(expr)), type: DYN, loc: locOf(expr) };
+      // A member read of a LIVE export object (`module.exports.k` / `exports.k` of a live module, or a live
+      // requirer binding): the bag's member, whatever the member's declaration.
+      if (!expr.questionDotToken) {
+        const lb = liveRecvBagOf(L, expr.expression, locOf(expr));
+        if (lb !== null) return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr) }, optional: true, value: lb, type: DYN, loc: locOf(expr) };
       }
       if (!expr.questionDotToken && ((L.cjsLocalModuleBindingOf(expr.expression) && jsonRequireTypeOverride(L, expr.expression) === null) || L.cjsWholeClassRequireDepOf(expr.expression) !== null)) {
         // A binding whose dep is a class-expression WHOLE export
@@ -14060,6 +14062,12 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
    * string-key element access (`a["length"]`) and string indexing (`s[0]`
    * typechecks against the lib's index signature; use .charAt) stay out. */
   export function lowerElementAccess(L: Lowerer, expr: ts.ElementAccessExpression): IrExpr {
+    // `module.exports[k]` / `d[k]` over a LIVE export object (cjs-live-exports.ts): the bag's dynamic read.
+    if (!expr.questionDotToken) {
+      const lb = liveRecvBagOf(L, expr.expression, locOf(expr));
+      const lk = lb !== null ? liveKeyOf(L, expr.argumentExpression) : null;
+      if (lb !== null && lk !== null) return { kind: "dynKeyGet", key: lk, optional: true, value: lb, type: DYN, loc: locOf(expr) };
+    }
     // `a?.[i]`: the guard lowers as an optional-chain step around the
     // plain element read below.
     if (expr.questionDotToken && !L.chainHandled.has(expr)) {
