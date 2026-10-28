@@ -4299,66 +4299,6 @@ ScrBytes *scr_crypto_hash_digest_bytes_raw(ScrStr *alg, ScrBytes *data) {
   return scr_hash_digest_raw_bytes(alg, data->data, data->len * scr_bytes_elem_size(data->elem));
 }
 
-/* Hash update(data, encoding): the encoding leg the Buffer names do not
- * share. MEASURED on Node v24.15.0 (lab/node/enc*.js): the name folds case
- * over the Buffer aliases; a name Node does not know, an empty one, and
- * undefined/null all mean utf8 with NO throw ('bogus', 'utf-16be',
- * 'constructor' hash the UTF-8 bytes). 'hex' validates the UTF-16 length
- * BEFORE decoding and throws ERR_INVALID_ARG_VALUE when it is odd. A view
- * (Buffer, typed array) ignores the encoding entirely. */
-static const char *scr_hash_enc_canon(const ScrStr *enc) {
-  static const struct { const char *from; const char *to; } map[] = {
-    {"utf8", "utf8"}, {"utf-8", "utf8"}, {"hex", "hex"}, {"base64", "base64"},
-    {"base64url", "base64url"}, {"latin1", "latin1"}, {"binary", "latin1"},
-    {"ascii", "ascii"}, {"utf16le", "utf16le"}, {"utf-16le", "utf16le"},
-    {"ucs2", "utf16le"}, {"ucs-2", "utf16le"},
-  };
-  for (size_t i = 0; i < sizeof map / sizeof map[0]; i++) {
-    size_t n = strlen(map[i].from);
-    if (enc->len != n) continue;
-    int same = 1;
-    for (size_t k = 0; k < n && same; k++) {
-      unsigned char c = (unsigned char)enc->data[k];
-      if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + 32);
-      if (c != (unsigned char)map[i].from[k]) same = 0;
-    }
-    if (same) return map[i].to;
-  }
-  return "utf8";
-}
-
-/* UTF-16 code units of a UTF-8 string: every code point is one unit, and a
- * four-byte lead (astral) is two. Node's length check reads this count. */
-static size_t scr_hash_utf16_len(const ScrStr *s) {
-  size_t units = 0;
-  for (size_t i = 0; i < s->len; i++) {
-    unsigned char b = (unsigned char)s->data[i];
-    if ((b & 0xC0) != 0x80) units += (b >= 0xF0) ? 2 : 1;
-  }
-  return units;
-}
-
-/* A string's hash input under update(str, enc). +1 u8 bytes, or NULL with
- * ERR_INVALID_ARG_VALUE pending (odd 'hex' length). Args are borrowed. */
-ScrBytes *scr_crypto_update_str_enc(const ScrStr *data, const ScrStr *enc) {
-  const char *canon = scr_hash_enc_canon(enc);
-  if (strcmp(canon, "hex") == 0) {
-    size_t units = scr_hash_utf16_len(data);
-    if (units % 2 != 0) {
-      char msg[192];
-      int len = snprintf(msg, sizeof msg,
-                         "The argument 'encoding' is invalid for data of length %zu. Received '%.*s'",
-                         units, (int)(enc->len < 64 ? enc->len : 64), enc->data);
-      scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)(len < 0 ? 0 : len), "ERR_INVALID_ARG_VALUE");
-      return NULL;
-    }
-  }
-  ScrStr *c = scr_str_new(canon, strlen(canon));
-  ScrBytes *b = scr_bytes_from_str(data, c);
-  scr_str_release(c);
-  return b;
-}
-
 /* A view's hash input under update(view, enc): the encoding is ignored and
  * the bytes are copied. +1 u8 bytes. Args are borrowed. */
 ScrBytes *scr_crypto_update_bytes_enc(const ScrBytes *data, const ScrStr *enc) {
