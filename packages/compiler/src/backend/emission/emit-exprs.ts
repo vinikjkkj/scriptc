@@ -6355,6 +6355,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "http.clientDestroyErr":
             E.line(`scr_http_client_destroy_err(${arg(0)}, (ScrError *)${arg(1)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
+          case "http.clientDestroyDyn":
+            E.line(`scr_http_client_destroy_dyn(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
           case "http.clientPipeFrom":
             E.usesTimers = true;
             return finish(`scr_http_client_pipe_from((ScrStream *)${arg(0)}, ${arg(1)}, ${arg(2)})`);

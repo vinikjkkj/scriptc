@@ -10643,6 +10643,9 @@ ScrHttpClientReq *scr_http_client_pipe_from(ScrStream *src, ScrHttpClientReq *c,
  * suppresses the 'socket hang up' the bare destroy() would have raised.
  * A second destroy is a no-op — the first error wins. err borrowed. */
 void scr_http_client_destroy_err(ScrHttpClientReq *c, ScrError *err /*borrowed*/);
+/* request.destroy(value) with a checked-dynamic value: the stream lane's
+ * destroy(dyn) rule (scr_stream_dyn.c). value borrowed. */
+void scr_http_client_destroy_dyn(ScrHttpClientReq *c, ScrDyn *d /*borrowed*/);
 bool scr_http_client_destroyed(ScrHttpClientReq *c);
 /* The ABORT SEAM. scr_http.c must not name an scr_abort.c symbol and
  * scr_abort.c must not name an scr_http.c one: the two units are
