@@ -381,7 +381,7 @@ function lowerDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
       // name; undocumented keys drop like Node drops them.
       fenceOrDropOptionKey(
         L, prop, prop.name.text, "lookup", DNS_LOOKUP_DOCUMENTED_OPTIONS,
-        "the family option is the supported option",
+        "family: 4 is the supported option",
         {
           all: "the all-addresses callback shape has no lowering — the lowered callback is (err, address, family) over one IPv4 answer",
         },
