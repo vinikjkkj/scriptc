@@ -4301,6 +4301,24 @@ export function lowerFfiCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null
     };
   }
 
+/** The arguments of a call on a dyn receiver. A function literal argument is
+ * called by the run time, so its own parameters are checked-dynamic even when
+ * annotated: `(h: boolean) => ...` receives Node's undefined as-is (the same
+ * binding a close listener gets from dynParamsOf). */
+function lowerDynCallArgs(L: Lowerer, args: ts.NodeArray<ts.Expression>): IrExpr[] {
+  return args.map((a) => {
+    const undo = L.dynParamsOf(a, true);
+    try {
+      return L.lowerExprExpecting(a, DYN);
+    } finally {
+      for (const u of undo) {
+        L.chainNarrowedType.delete(u);
+        if (ts.isParameter(u)) L.paramIrOverrides.delete(u);
+      }
+    }
+  });
+}
+
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
     // `R.__defineSetter__(k, f)` / `R.__defineGetter__(k, f)` on a live export object or a dyn receiver: an
@@ -6718,7 +6736,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // committing: restore the sink, then replay what the probes said
     L.diagSink = saved;
     for (const d of captured) L.pushDiag(d);
-    const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+    const args = lowerDynCallArgs(L, call.arguments);
     return {
       kind: "dynInvoke",
       recv,
@@ -6949,7 +6967,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (call.arguments.some((a) => ts.isSpreadElement(a))) {
         return dynInvokeWithSpread(L, call, recv, access);
       }
-      const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+      const args = lowerDynCallArgs(L, call.arguments);
       return {
         kind: "dynInvoke",
         recv,
@@ -7011,7 +7029,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     if (call.arguments.some((a) => ts.isSpreadElement(a))) {
       return dynInvokeWithSpread(L, call, recv, access);
     }
-    const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+    const args = lowerDynCallArgs(L, call.arguments);
     fenceObservableContainerStore(L, call, access, recvTs, args);
     // dynInvoke, NOT a keyed read plus a plain call. `o.m(x)` in JS binds
     // `o` as the callee's `this`, and a read-then-call DROPS it: the
@@ -7161,7 +7179,7 @@ function lowerDynEmitterReceiverCall(L: Lowerer, call: ts.CallExpression,
       recv: ref,
       method: member,
       calleeName: access.getText(),
-      args: call.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
+      args: lowerDynCallArgs(L, call.arguments),
       type: DYN,
       loc,
     };

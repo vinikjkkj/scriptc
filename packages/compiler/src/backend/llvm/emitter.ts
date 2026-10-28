@@ -1429,6 +1429,7 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "dns.lookup",
   "fs.statCb",
   "net.sockConnect", "net.sockConnectCb",
+  "net.sockConnect", "net.sockConnectCb", "net.sockNew",
   "readable.new", "writable.new", "duplex.new", "transform.new", "passthrough.new",
   "readable.init", "writable.init", "duplex.init", "transform.init", "passthrough.init",
   "readable.newDyn", "writable.newDyn", "duplex.newDyn", "transform.newDyn", "passthrough.newDyn",
