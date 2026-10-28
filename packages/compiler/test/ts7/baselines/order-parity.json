@@ -3455,6 +3455,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14450-tls-check-identity-direct.ts": {
+   "order": [
+    "<repo>/tests/corpus/14450-tls-check-identity-direct.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14451-tls-identity-error-paths.ts": {
+   "order": [
+    "<repo>/tests/corpus/14451-tls-identity-error-paths.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14452-tls-identity-option-success.ts": {
+   "order": [
+    "<repo>/tests/corpus/14452-tls-identity-option-success.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14453-tls-identity-fn-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/14453-tls-identity-fn-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14454-tls-identity-altnames-format.ts": {
+   "order": [
+    "<repo>/tests/corpus/14454-tls-identity-altnames-format.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14455-tls-identity-option-both-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/14455-tls-identity-option-both-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14456-fn-conditional-into-typed-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/14456-fn-conditional-into-typed-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14457-tls-connect-undeclared-literal-key.cjs": {
+   "order": [
+    "<repo>/tests/corpus/14457-tls-connect-undeclared-literal-key.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1446-exit-uncaught.ts": {
    "order": [
     "<repo>/tests/corpus/1446-exit-uncaught.ts"
