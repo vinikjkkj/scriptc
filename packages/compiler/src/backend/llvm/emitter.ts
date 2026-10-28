@@ -614,6 +614,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "tlsca.root": "scr_tls_ca_root",
   "tlsca.get": "scr_tls_ca_get",
   "tlsca.getDyn": "scr_tls_ca_get_dyn",
+  "tls.checkServerIdentity": "scr_tls_check_server_identity_dyn",
   "tlsca.set": "scr_tls_ca_set_default",
   // ── node:tls's runtime-options slice and node:dgram: the rows that
   // were the whole of this tier's enumerated refusal list except the two

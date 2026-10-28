@@ -864,7 +864,9 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
   // options + secureConnection handler, https.createServer, and the
   // https client's rejectUnauthorized/ca options are all special-cased
   // in lower-server.ts).
-  tls: {},
+  tls: {
+    checkServerIdentity: { fn: "tls.checkServerIdentity", params: [STRING, DYN], result: DYN },
+  },
   https: {},
   // node:dgram and node:dns lower ENTIRELY through the dgram spoke
   // (lower-dgram.ts — createSocket's option literal, dns.lookup's
@@ -1049,6 +1051,7 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
  *                                 member; more than one spelling means the
  *                                 row is not the whole call */
 export const BUILTIN_MEMBER_FN_VALUES: Record<string, ReadonlySet<string> | undefined> = {
+  tls: new Set(["checkServerIdentity"]),
   // Every fs entry here is a single libCall over scalar parameters with no
   // arm in lowerBuiltinModuleCall: the option-form members (readFileSync,
   // writeFileSync, mkdirSync, rmSync, readdirSync, accessSync,
