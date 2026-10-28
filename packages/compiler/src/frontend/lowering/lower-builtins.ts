@@ -6943,8 +6943,12 @@ let digestInputValueDispatches = 0;
             : "end listeners with parameters or a return value (use ())",
         );
       }
+      // The result is the receiver only when a value uses it. In statement
+      // position (`child.stdout?.on(...)`, where the optional chain wraps the
+      // call in `T | undefined`) it stays void, as before.
+      const resultT = ts.isExpressionStatement(call.parent) ? VOID : CHILDSTREAM_T;
       if (event === "end") {
-        return { kind: "libCall", fn: "stream.onEnd", args: [receiver, cb, once], type: CHILDSTREAM_T, loc };
+        return { kind: "libCall", fn: "stream.onEnd", args: [receiver, cb, once], type: resultT, loc };
       }
       const param = cb.type.params[0];
       const unionOk = (p: IrType): boolean => {
@@ -6959,7 +6963,7 @@ let digestInputValueDispatches = 0;
           `data listeners whose parameter is not 'Buffer' (or a Buffer-armed union; got '${L.fmt(param)}')`,
         );
       }
-      return { kind: "libCall", fn: "stream.onData", args: [receiver, cb, once], type: CHILDSTREAM_T, loc };
+      return { kind: "libCall", fn: "stream.onData", args: [receiver, cb, once], type: resultT, loc };
     }
     L.noLowering(
       `ReadableStream.${name}`,

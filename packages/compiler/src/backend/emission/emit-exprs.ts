@@ -4688,6 +4688,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               `scr_child_stream_on_data(${arg(0)}, ${cb.name}, &${adapter}, ${arg(2)});${E.srcComment(e.loc)}`,
             );
             // Node's `this`: the receiver, +1 (the borrowed receiver is retained).
+            if (e.type.kind === "void") return { name: "", type: e.type };
             return E.newTemp(e.type, `scr_child_stream_retain(${arg(0)})`);
           }
           case "stream.onEnd": {
@@ -4695,6 +4696,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.moveTemp(cb);
             E.line(`scr_child_stream_on_end(${arg(0)}, ${cb.name}, ${arg(2)});${E.srcComment(e.loc)}`);
             // Node's `this`: the receiver, +1 (the borrowed receiver is retained).
+            if (e.type.kind === "void") return { name: "", type: e.type };
             return E.newTemp(e.type, `scr_child_stream_retain(${arg(0)})`);
           }
           case "procStream.write":

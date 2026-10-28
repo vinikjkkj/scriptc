@@ -5506,7 +5506,11 @@ function validateFunction(
           }
         }
         // dyn.adoptPromise answers a promise of either payload (see its sig).
-        if (e.fn === "dyn.adoptPromise" ? e.type.kind !== "promise" : !typeEquals(e.type, sig.result)) {
+        // stream.onData/onEnd answer the receiver, or void in statement position.
+        const streamListenerResult =
+          (e.fn === "stream.onData" || e.fn === "stream.onEnd") &&
+          (e.type.kind === "void" || e.type.kind === "childStream");
+        if (e.fn === "dyn.adoptPromise" ? e.type.kind !== "promise" : !streamListenerResult && !typeEquals(e.type, sig.result)) {
           err(`libCall ${e.fn} must be ${sig.result.kind}, got ${e.type.kind}`, e.loc);
         }
         break;
