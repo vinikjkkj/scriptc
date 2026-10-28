@@ -3359,6 +3359,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14313-accessor-same-keys-other-order-object-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/14313-accessor-same-keys-other-order-object-keys.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1431-caught-tostring.ts": {
    "order": [
     "<repo>/tests/corpus/1431-caught-tostring.ts"
