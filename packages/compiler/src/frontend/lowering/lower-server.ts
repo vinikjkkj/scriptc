@@ -1013,6 +1013,14 @@ function lowerNetServerMethodCall(L: Lowerer, call: ts.CallExpression,
   const name = access.name.text;
   const loc = locOf(call);
   const args = call.arguments;
+  if (name === "ref" || name === "unref") {
+    if (args.length !== 0) {
+      L.noLowering(`${name} with ${args.length} arguments`, call, `the form is ${name}()`);
+    }
+    const receiver = handleReceiver(L, access.expression, NETSERVER_T);
+    const fn: IrLibFn = name === "ref" ? "net.serverRef" : "net.serverUnref";
+    return { kind: "libCall", fn, args: [receiver], type: NETSERVER_T, loc };
+  }
   if (name === "listen") {
     if (args.length < 1 || args.length > 3) {
       L.noLowering(
@@ -1433,6 +1441,176 @@ function lowerNetServerMethodCall(L: Lowerer, call: ts.CallExpression,
   );
 }
 
+/** `new net.Socket()` — the unconnected socket. The callee is a builtin
+ * `net` member through a namespace, a CommonJS `require('net')` binding,
+ * the parenthesized inline `(require('net').Socket)`, or a named import of
+ * Socket: all four answer the same { module: 'net', member: 'Socket' } from
+ * the builtin tables. False for everything else. */
+export function isNetSocketCtor(L: Lowerer, callee: ts.Expression): boolean {
+  let c: ts.Expression = callee;
+  while (ts.isParenthesizedExpression(c)) c = c.expression;
+  if (ts.isPropertyAccessExpression(c)) {
+    const bi = L.builtinMemberOf(c);
+    return bi !== null && bi.module === "net" && bi.member === "Socket";
+  }
+  if (ts.isIdentifier(c)) {
+    const bi = L.builtinImportOf(c);
+    return bi !== null && bi.module === "net" && bi.member === "Socket";
+  }
+  return false;
+}
+
+/** The lowered `new net.Socket()` (no options, or an empty options literal).
+ * Options (allowHalfOpen, fd, signal, onread, readable/writable) are not
+ * modeled: fenced by name. */
+export function lowerNetSocketNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc): IrExpr {
+  const args = expr.arguments ?? [];
+  const emptyOpts = args.length === 1 && ts.isObjectLiteralExpression(args[0]!) && args[0]!.properties.length === 0;
+  if (args.length !== 0 && !emptyOpts) {
+    L.noLowering(
+      `new net.Socket with ${args.length} argument(s)`,
+      expr,
+      "new net.Socket() takes no options here (allowHalfOpen, fd, signal, onread, readable and writable are not modeled)",
+    );
+  }
+  return { kind: "libCall", fn: "net.sockNew", args: [], type: NETSOCKET_T, loc };
+}
+
+/** The call `getStream(...)` of a LOCAL function every one of whose return
+ * statements is `new net.Socket(...)` (pg's getStream shape): the value is
+ * the unconnected socket, so connect() on it is the idle-origin case. Nested
+ * functions' returns do not count. False for any other call. */
+function returnsIdleNetSocket(L: Lowerer, call: ts.Expression): boolean {
+  let c: ts.Expression = call;
+  while (ts.isParenthesizedExpression(c)) c = c.expression;
+  if (!ts.isCallExpression(c) || !ts.isIdentifier(c.expression)) return false;
+  const sym = L.checker.getSymbolAtLocation(c.expression);
+  const decl = sym ? L.checker.declarationsOf(sym)[0] : undefined;
+  if (!decl || !ts.isFunctionDeclaration(decl) || decl.body === undefined) return false;
+  // Iterative (an explicit stack): this walk runs before the depth guard.
+  let sawReturn = false;
+  let ok = true;
+  const stack: ts.Node[] = [decl.body];
+  while (stack.length > 0 && ok) {
+    const n = stack.pop()!;
+    if (ts.isFunctionLike(n) && n !== decl) continue;
+    if (ts.isReturnStatement(n)) {
+      sawReturn = true;
+      let r: ts.Expression | undefined = n.expression;
+      while (r && ts.isParenthesizedExpression(r)) r = r.expression;
+      if (!r || !ts.isNewExpression(r) || !isNetSocketCtor(L, r.expression)) ok = false;
+      continue;
+    }
+    ts.forEachChild(n, (child) => {
+      stack.push(child);
+    });
+  }
+  return ok && sawReturn;
+}
+
+/** socket.connect(port, host?, listener?) and socket.connect({ port, host? }, listener?)
+ * on any netSocket receiver. The dial and its reuse rules are the runtime's
+ * (scr_net_sock_connect). */
+function lowerNetSocketConnect(L: Lowerer, call: ts.CallExpression,
+  access: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr {
+  const args = call.arguments;
+  // A socket that closed and is connected again keeps its listeners only
+  // when it was made by new net.Socket() (the runtime's idle-origin rule);
+  // any other socket drops them at its close. So connect() is lowered for a
+  // const bound to new net.Socket(...) and fenced by name elsewhere.
+  {
+    const recv = (() => {
+      let r: ts.Expression = access.expression;
+      while (ts.isParenthesizedExpression(r)) r = r.expression;
+      return r;
+    })();
+    let provenIdle = false;
+    if (ts.isIdentifier(recv)) {
+      const sym = L.checker.getSymbolAtLocation(recv);
+      const decl = sym ? L.checker.declarationsOf(sym)[0] : undefined;
+      if (decl && ts.isVariableDeclaration(decl) && ts.isIdentifier(decl.name) && decl.initializer &&
+          (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0) {
+        let init: ts.Expression = decl.initializer;
+        while (ts.isParenthesizedExpression(init)) init = init.expression;
+        provenIdle = ts.isNewExpression(init) && isNetSocketCtor(L, init.expression) ||
+          returnsIdleNetSocket(L, init);
+      }
+    }
+    if (!provenIdle) {
+      L.noLowering(
+        "socket.connect on a socket that is not a const bound to new net.Socket()",
+        call,
+        "a socket that closed keeps its listeners for a reconnect only when new net.Socket() made it: bind it with `const s = new net.Socket()`",
+      );
+    }
+  }
+  let portNode: ts.Expression | undefined;
+  let hostNode: ts.Expression | undefined;
+  let cbNode: ts.Expression | undefined;
+  if (args.length >= 1 && ts.isObjectLiteralExpression(args[0]!)) {
+    for (const prop of (args[0] as ts.ObjectLiteralExpression).properties) {
+      // `{ port, host: h }` and the shorthand `{ port }` read the same binding
+      if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) &&
+          (prop.name.text === "port" || prop.name.text === "host")) {
+        if (prop.name.text === "port") portNode = prop.initializer;
+        else hostNode = prop.initializer;
+        continue;
+      }
+      if (ts.isShorthandPropertyAssignment(prop)) {
+        const key = (prop.name as ts.Identifier).text;
+        if (key === "port" || key === "host") {
+          if (key === "port") portNode = prop.name as ts.Identifier;
+          else hostNode = prop.name as ts.Identifier;
+          continue;
+        }
+      }
+      L.noLowering(
+        "socket.connect option other than port and host",
+        prop,
+        "the connect options modeled here are { port, host? } (plus an optional listener)",
+      );
+    }
+    if (portNode === undefined) {
+      L.noLowering("socket.connect options without a port", args[0]!, "connect({ port, host? }) needs a port");
+    }
+    if (args.length > 2) {
+      L.noLowering(`socket.connect with ${args.length} arguments`, call, "the options form takes connect({ port, host? }, listener?)");
+    }
+    cbNode = args[1];
+  } else {
+    if (args.length < 1 || args.length > 3) {
+      L.noLowering(
+        `socket.connect with ${args.length} arguments`,
+        call,
+        "the supported forms are connect(port, host?, listener?) and connect({ port, host? }, listener?)",
+      );
+    }
+    portNode = args[0];
+    if (args.length === 2) {
+      if (L.mapTypeOf(L.typeOf(args[1]!))?.kind === "string") hostNode = args[1];
+      else cbNode = args[1];
+    } else if (args.length === 3) {
+      hostNode = args[1];
+      cbNode = args[2];
+    }
+  }
+  const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
+  const port = L.lowerExprExpecting(portNode!, F64);
+  const host: IrExpr = hostNode
+    ? L.lowerExprExpecting(hostNode, STRING)
+    : { kind: "strLit", value: "localhost", type: STRING, loc };
+  if (!cbNode) {
+    return { kind: "libCall", fn: "net.sockConnect", args: [receiver, port, host], type: NETSOCKET_T, loc };
+  }
+  const { cb } = lowerCallbackArg(
+    L, cbNode, "connect listeners", 0,
+    () => false,
+    "use ()",
+    [],
+  );
+  return { kind: "libCall", fn: "net.sockConnectCb", args: [receiver, port, host, cb], type: NETSOCKET_T, loc };
+}
+
 /** Method calls on net.Socket receivers: write/end/destroy/pipe and
  * on/once("data" | "end" | "close" | "error" | "connect"). Null for
  * other receivers. */
@@ -1544,6 +1722,28 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
     const fn: IrLibFn = name === "pause" ? "net.sockPause" : "net.sockResume";
+    return { kind: "libCall", fn, args: [receiver], type: NETSOCKET_T, loc };
+  }
+  if (name === "connect") return lowerNetSocketConnect(L, call, access, loc);
+  if (name === "setKeepAlive") {
+    // setKeepAlive(enable = false, initialDelay = 0): SO_KEEPALIVE on the
+    // live fd, stored for an unconnected socket's next dial.
+    if (args.length > 2) {
+      L.noLowering(`setKeepAlive with ${args.length} arguments`, call, "the form is setKeepAlive(enable?, initialDelay?)");
+    }
+    const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
+    const enable: IrExpr = args.length >= 1 ? L.lowerExprExpecting(args[0]!, BOOL) : boolLit(false, loc);
+    const delay: IrExpr = args.length >= 2
+      ? L.lowerExprExpecting(args[1]!, F64)
+      : { kind: "numLit", value: 0, type: F64, loc };
+    return { kind: "libCall", fn: "net.sockSetKeepAlive", args: [receiver, enable, delay], type: NETSOCKET_T, loc };
+  }
+  if (name === "ref" || name === "unref") {
+    if (args.length !== 0) {
+      L.noLowering(`${name} with ${args.length} arguments`, call, `the form is ${name}()`);
+    }
+    const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
+    const fn: IrLibFn = name === "ref" ? "net.sockRef" : "net.sockUnref";
     return { kind: "libCall", fn, args: [receiver], type: NETSOCKET_T, loc };
   }
   if (name === "setNoDelay") {
@@ -1680,10 +1880,10 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
       return { kind: "libCall", fn, args: [receiver, cb, once], type: VOID, loc };
     }
     if (event === "finish") {
-      // Fires once when the FIN goes out — once either way (the event
-      // happens at most once per socket).
+      // The FIN event: once() takes one, on() keeps every life's (a socket
+      // that reconnects finishes again).
       const { cb } = lowerCallbackArg(L, args[1]!, "finish listeners", 0, () => false, "use ()", []);
-      return { kind: "libCall", fn: "net.sockOnFinish", args: [receiver, cb], type: VOID, loc };
+      return { kind: "libCall", fn: "net.sockOnFinish", args: [receiver, cb, once], type: VOID, loc };
     }
     if (event === "secureConnect") {
       // The TLS client's post-handshake event: on a TLS socket the

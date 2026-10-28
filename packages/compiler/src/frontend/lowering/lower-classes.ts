@@ -26,7 +26,7 @@ import { erasableSuperDelegation } from "./lower-emitter.js";
 import { emitOverrideShapeReason, emitSpecSuperForward, emitterRooted, lowerEmitterSuperCall, type EmitOverrideRec } from "./lower-emitter.js";
 import { declSymbolOf } from "./lower-modules.js";
 import { boundedKeyValuesOf, uniqueSymbolKeyOf } from "./lower-exprs.js";
-import { lowerHttpAgentNew, lowerHttpServerNew } from "./lower-server.js";
+import { isNetSocketCtor, lowerHttpAgentNew, lowerHttpServerNew, lowerNetSocketNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { bodylessMixinCalleeOf, mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 
@@ -10734,6 +10734,9 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     // symbol resolves to the same ambient class as the named import.
     // `new FastBuffer(...)` where FastBuffer = Buffer[Symbol.species].
     if (isBufferSpeciesCtor(L, expr.expression)) return lowerFastBufferNew(L, expr, loc);
+    // `new net.Socket()` through a namespace/require binding, the inline
+    // require, or a named import: one constructor (lower-server.ts).
+    if (isNetSocketCtor(L, expr.expression)) return lowerNetSocketNew(L, expr, loc);
     // `new url.URL(...)` through the node:url namespace: the same
     // construction as the global (lowerUrlNew).
     if (ts.isPropertyAccessExpression(expr.expression)) {

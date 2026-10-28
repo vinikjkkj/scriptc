@@ -1101,6 +1101,14 @@ const LIB_FN_SYMS: Record<string, string> = {
   "net.sockPause": "scr_net_sock_pause",
   "net.sockResume": "scr_net_sock_resume",
   "net.sockSetNoDelay": "scr_net_sock_set_nodelay",
+  "net.sockNew": "scr_net_sock_idle_new",
+  "net.sockConnect": "scr_net_sock_connect",
+  "net.sockConnectCb": "scr_net_sock_connect_cb",
+  "net.sockSetKeepAlive": "scr_net_sock_set_keepalive",
+  "net.sockRef": "scr_net_sock_ref",
+  "net.sockUnref": "scr_net_sock_unref",
+  "net.serverRef": "scr_net_server_ref",
+  "net.serverUnref": "scr_net_server_unref",
   "net.sockDestroySoon": "scr_net_sock_destroy_soon",
   "net.sockBytesWritten": "scr_net_sock_bytes_written",
   "net.sockReadable": "scr_net_sock_readable",
@@ -1376,6 +1384,7 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
  * under SCRIPTC_RC_AUDIT, which is why the seat is a table and not a
  * per-call habit. Index is into the IR's argument list. */
 const LIB_FN_MOVE_ARGS: Record<string, readonly number[]> = {
+  "net.sockConnectCb": [3],
   // scr_dgram_connect's `ScrClosure *cb /*moves, nullable*/`.
   "dgram.connectCb": [3],
   // The same seat on the rest of the dgram surface: `scr_dgram_bind`'s
@@ -1419,6 +1428,7 @@ const STREAM_CANONICAL_CBS: Record<string, ("r" | "w" | "f" | "d" | "t" | "l")[]
 const USES_TIMERS_LIB_FNS = new Set<string>([
   "dns.lookup",
   "fs.statCb",
+  "net.sockConnect", "net.sockConnectCb",
   "readable.new", "writable.new", "duplex.new", "transform.new", "passthrough.new",
   "readable.init", "writable.init", "duplex.init", "transform.init", "passthrough.init",
   "readable.newDyn", "writable.newDyn", "duplex.newDyn", "transform.newDyn", "passthrough.newDyn",
@@ -18041,8 +18051,8 @@ class LlEmitter {
     if (e.fn === "net.sockOnFinish") {
       const args = e.args.map((a) => this.emitExpr(a));
       this.moveTemp(args[1]!);
-      this.declare(`declare void @scr_net_sock_on_finish(ptr, ptr)`);
-      B.line(`call void @scr_net_sock_on_finish(ptr ${args[0]!.name}, ptr ${args[1]!.name})`);
+      this.declare(`declare void @scr_net_sock_on_finish_opt(ptr, ptr, i1 zeroext)`);
+      B.line(`call void @scr_net_sock_on_finish_opt(ptr ${args[0]!.name}, ptr ${args[1]!.name}, i1 ${args[2]!.name})`);
       return { name: "", type: e.type };
     }
     if (e.fn === "island.castFail") {
