@@ -4459,7 +4459,23 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // handle).
     if (arg.flags & ts.TypeFlags.Any && !ctx.dynamic) return { kind: "promise", inner: DYN };
     const inner = mapType(arg, ctx);
-    if (!inner) return null;
+    // `Promise<any[]>` (Promise.all over promises of any, a `Promise<any[]>`
+    // annotation, an async method's declared payload): the element `any`
+    // maps to no static type, so the array has no static mapping of its
+    // own, and the promise would vanish with it. The payload is the
+    // checked-dynamic array: the collapse every dyn-element array takes
+    // (`unknown[]` is DYN here, the same payload `Promise<any>` takes
+    // above), and what the Promise.all countdown over dyn entries resolves
+    // to. Narrow by design: only an array whose ELEMENT is bare `any`.
+    if (!inner) {
+      const elemTs = checker.isArrayType(arg)
+        ? checker.getTypeArguments(arg as ts.TypeReference)[0]
+        : undefined;
+      if (elemTs && (elemTs.flags & ts.TypeFlags.Any) !== 0 && !ctx.dynamic) {
+        return { kind: "promise", inner: DYN };
+      }
+      return null;
+    }
     return { kind: "promise", inner };
   }
   // Iterable<T> — the structural iterable interface, whose ONLY member is
