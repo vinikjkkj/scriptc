@@ -20,6 +20,7 @@ import { isLiveAliasName } from "./cjs-live-exports.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
 import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
+import { fenceDynRecordCasts } from "./dyn-record-fence.js";
 import type { EnumRefill, NullProtoPatch, OwnKeyPatch, SlotFilledPatch } from "./ir-patch.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -797,6 +798,7 @@ export function lowerToIr(
   for (const d of dynamicCycleDiags) emit.pushDiag(d);
   for (const d of ffiValidation.diagnostics) emit.pushDiag(d);
   const __t1 = performance.now();
+  emit.dynRecordFenceAtRun = true;
   const result = emit.run();
   lowerProfileNote("%emit-run", performance.now() - __t1);
   lowerProfileNote("%ovf-after-discovery", __ovfAfterDiscovery.size);
@@ -1546,6 +1548,8 @@ function thisOwnedBy(node: ts.Node, fn: ts.Node | null): boolean {
 export class Lowerer {
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
+  /** Set by the emitting lowering only: run the dyn-record cast fence in run(). */
+  dynRecordFenceAtRun = false;
   readonly fnSigsBySymbol = new Map<ts.Symbol, FnSig>();
   readonly genericFnsBySymbol = new Map<ts.Symbol, GenericFnInfo>();
   /** Object-literal GENERIC methods (`{ m<T>(x: T) {...} }`), interned by
@@ -3513,6 +3517,19 @@ export class Lowerer {
           );
         }
       }
+    }
+    // Closed-world fence (dyn-record-fence.ts), BEFORE the module is withdrawn:
+    // it reads the functions of this lowering whether or not other diagnostics
+    // exist, so a refused cast is named in every build, not only clean ones.
+    if (this.dynRecordFenceAtRun) {
+      fenceDynRecordCasts(
+        {
+          shapeGet: (id) => this.shapes.get(id),
+          unionGet: (id) => this.unions.get(id),
+        },
+        { irVersion: 4, sourceFile: this.entry.fileName, functions, classes: artifacts.classes, globals: this.globalsList } as unknown as IrModule,
+        (d) => this.pushDiag(d),
+      );
     }
     // Every shape a dynCheck MATERIALISES arms its hidden own-key mask —
     // after the whole walk, so the answer does not depend on whether the

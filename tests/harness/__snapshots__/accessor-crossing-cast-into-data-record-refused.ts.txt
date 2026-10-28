@@ -1,0 +1,6 @@
+accessor-crossing-cast-into-data-record-refused.ts:14:13 - error SC1090: a checked cast of 'unknown' into a DATA record whose field is also a live accessor on a crossed object: 'available' of the target against accessor 'available' of r0. The cast copies the member when it runs, so a later change to the getter would be answered stale. Read the accessor's value into a const and cast that instead. is not supported yet
+
+  13 | m.set("k", c);
+  14 | const got = m.get("k") as { available: number; size: number };
+     |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  15 | console.log(got.available, got.size);
