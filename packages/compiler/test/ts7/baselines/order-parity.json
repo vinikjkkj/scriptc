@@ -19440,6 +19440,30 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/15140-number-marker-consumers.ts": {
+    "order": [
+      "<repo>/tests/corpus/15140-number-marker-consumers.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15141-number-marker-equality-json.ts": {
+    "order": [
+      "<repo>/tests/corpus/15141-number-marker-equality-json.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15142-number-marker-math.ts": {
+    "order": [
+      "<repo>/tests/corpus/15142-number-marker-math.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15143-number-marker-forge.ts": {
+    "order": [
+      "<repo>/tests/corpus/15143-number-marker-forge.ts"
+    ],
+    "diags": []
   }
  }
 }

@@ -1,0 +1,13 @@
+const b = Buffer.alloc(8);
+b.writeUInt32LE(0xDE01, 0);
+b.writeUInt32LE(0x7FFC0000, 4);
+const d = b.readDoubleLE(0);
+console.log(d, typeof d, d === undefined, Number.isNaN(d), String(d), d + 1);
+const dv = new DataView(new ArrayBuffer(8));
+dv.setUint32(0, 0xDE02, true);
+dv.setUint32(4, 0x7FFC0000, true);
+const e = dv.getFloat64(0, true);
+console.log(e, e === undefined, isNaN(e), `${e}`);
+const k = Buffer.alloc(8);
+k.writeDoubleLE(NaN, 0);
+console.log(k.readUInt32LE(0).toString(16), k.readUInt32LE(4).toString(16));
