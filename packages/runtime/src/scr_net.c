@@ -581,6 +581,10 @@ struct ScrNetSocket {
    * answer undefined after close */
   ScrStr *remote_cache;
   ScrStr *pending_err; /* deferred connect failure */
+  /* the Error object behind pending_err, when a transport produced one
+   * (tls.connect's checkServerIdentity): listeners receive it with its
+   * code; NULL = the message-only error */
+  ScrError *pending_obj;
   /* the caller-lookup dial (net.connect with a lookup option): true while
    * the lookup decides; dial_ips holds its answered addresses (+1 each),
    * dialed in order — a connect failure closes the fd and tries
@@ -725,6 +729,7 @@ void scr_net_sock_release(ScrNetSocket *s) {
     scr_net_ls_drop(&s->finish_ls);
     scr_net_ls_drop(&s->wcb_ls);
     scr_str_release(s->pending_err);
+    scr_error_release(s->pending_obj);
     scr_str_release(s->remote_cache);
     for (size_t i = 0; i < s->dial_n; i++) scr_str_release(s->dial_ips[i]);
     free(s->dial_ips);
@@ -3077,6 +3082,14 @@ void scr_net_sock_replay(ScrNetSocket *s, const char *data, size_t len) {
   s->rcap = total;
 }
 
+void scr_net_sock_transport_error_obj(ScrNetSocket *s, ScrError *e) {
+  if (!s->pending_err) s->pending_err = scr_str_retain(e->message);
+  scr_error_release(s->pending_obj);
+  s->pending_obj = e; /* moves */
+  s->had_error = true;
+  scr_net_sock_close_fd(s);
+}
+
 void scr_net_sock_transport_error(ScrNetSocket *s, const char *msg) {
   if (msg != NULL) {
     if (!s->pending_err) s->pending_err = scr_str_new(msg, strlen(msg));
@@ -3504,13 +3517,19 @@ static void scr_net_sweep(void) {
     if (sock->pending_err) {
       ScrStr *msg = sock->pending_err;
       sock->pending_err = NULL;
+      ScrError *obj = sock->pending_obj;
+      sock->pending_obj = NULL;
       /* the protocol layer gets first claim (the http conn/client owns
        * the error story: 'error' on the req, or Node's silent server-side
        * teardown); unconsumed errors fall through to the socket's own
        * listeners — and the unhandled-'error' exit */
       bool consumed = false;
       if (sock->native_err) consumed = sock->native_err(sock->native_ctx, msg);
-      if (!consumed && !scr_exc_pending()) scr_net_fire_err_this(&sock->err_ls, msg, sock, SCR_DYNH_NET_SOCKET);
+      if (!consumed && !scr_exc_pending()) {
+        if (obj != NULL) scr_net_fire_err_impl(&sock->err_ls, msg, obj, sock, SCR_DYNH_NET_SOCKET);
+        else scr_net_fire_err_this(&sock->err_ls, msg, sock, SCR_DYNH_NET_SOCKET);
+      }
+      scr_error_release(obj);
       scr_str_release(msg);
       if (scr_exc_pending()) {
         scr_net_sock_release(sock);
