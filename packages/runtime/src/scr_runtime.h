@@ -2799,7 +2799,7 @@ void *scr_stream_ext(const ScrStream *s);
 void scr_stream_set_cls(ScrStream *s, const char *cls);
 /* `u instanceof <runtime class>` on an unknown value (the lowering's stream.dynInstanceOf;
  * lower-exprs.ts RT_CLASS_CODE gives `which`): Stream, Readable, Writable, Duplex,
- * Transform, EventEmitter, net.Socket, net.Server. Borrowed; never throws. */
+ * Transform, PassThrough, EventEmitter, net.Socket, net.Server. Borrowed; never throws. */
 bool scr_stream_dyn_instanceof(const ScrDyn *d, double which);
 
 ScrStream *scr_stream_new_transform(double rhwm, double whwm, bool auto_destroy,
