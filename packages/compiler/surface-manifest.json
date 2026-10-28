@@ -2708,6 +2708,13 @@
       "note": "the lowered call form takes no arguments"
     },
     {
+      "id": "stdlib.string.normalize",
+      "kind": "stdlib",
+      "name": "string.prototype.normalize",
+      "status": "static",
+      "note": "the lowered call form takes 0 to 1 arguments"
+    },
+    {
       "id": "stdlib.string.padEnd",
       "kind": "stdlib",
       "name": "string.prototype.padEnd",
