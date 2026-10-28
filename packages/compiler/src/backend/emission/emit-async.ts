@@ -1203,31 +1203,18 @@ export function streamDataThunkFor(E: CEmitter, cbT: IrType): string {
   if (p === undefined) {
     body.push(`  (void)sc_b;`, `  (void)sc_s;`);
   } else if (p.kind === "bytes") {
+    // Reached only by a listener the lowering left typed: a stream whose
+    // chunks cannot be non-Buffer (no objectMode, no encoding anywhere in the
+    // program — stream-data-dyn.ts). A null here is an invariant break.
     body.push(
-      `  if (!sc_b) {`,
-      `    if (scr_stream_data_dyn_cur() != NULL) {`,
-      `      static const char sc_m[] = "a 'data' listener declaring a Buffer chunk received an object (the stream is in objectMode)";`,
-      `      scr_throw_error_msg(SCR_ERR_TYPE, sc_m, sizeof sc_m - 1);`,
-      `    } else {`,
-      `      static const char sc_m[] = "a 'data' listener declaring a Buffer chunk received a string (the stream has an encoding set)";`,
-      `      scr_throw_error_msg(SCR_ERR_TYPE, sc_m, sizeof sc_m - 1);`,
-      `    }`,
-      `    return;`,
-      `  }`,
+      `  if (!sc_b) scr_trap("scriptc: a typed Buffer 'data' listener met a non-Buffer chunk; the lowering routes that case through the checked-dynamic path\\n");`,
     );
     passed.push("scr_bytes_retain(sc_b)");
   } else if (p.kind === "string") {
+    // Every string-typed data listener is lowered checked-dynamic, so this
+    // branch is an invariant, not a reachable case (see the bytes thunk).
     body.push(
-      `  if (!sc_s) {`,
-      `    if (scr_stream_data_dyn_cur() != NULL) {`,
-      `      static const char sc_m[] = "a 'data' listener declaring a string chunk received an object (the stream is in objectMode)";`,
-      `      scr_throw_error_msg(SCR_ERR_TYPE, sc_m, sizeof sc_m - 1);`,
-      `    } else {`,
-      `      static const char sc_m[] = "a 'data' listener declaring a string chunk received a Buffer (call setEncoding, or declare the chunk as a Buffer)";`,
-      `      scr_throw_error_msg(SCR_ERR_TYPE, sc_m, sizeof sc_m - 1);`,
-      `    }`,
-      `    return;`,
-      `  }`,
+      `  if (!sc_s) scr_trap("scriptc: a typed string 'data' listener met a non-string chunk; the lowering routes that case through the checked-dynamic path\\n");`,
     );
     passed.push("scr_str_retain(sc_s)");
   } else {
