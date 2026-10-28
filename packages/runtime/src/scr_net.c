@@ -521,6 +521,11 @@ struct ScrNetServer {
   struct ScrNetServer *next;
 };
 
+/* autoSelectFamily's failed attempts (defined with the dial chain below) */
+static void scr_net_dial_log(ScrNetSocket *s, int err, const char *ip, int port);
+static void scr_net_dial_log_clear(ScrNetSocket *s);
+static ScrError *scr_net_dial_aggregate(ScrNetSocket *s);
+
 struct ScrNetSocket {
   int kind; /* FIRST: poller udata routes on it */
   size_t rc;
@@ -585,6 +590,11 @@ struct ScrNetSocket {
    * (tls.connect's checkServerIdentity): listeners receive it with its
    * code; NULL = the message-only error */
   ScrError *pending_obj;
+  /* every failed attempt of the autoSelectFamily chain (Node's AggregateError
+   * members, each an Error with code/errno/syscall/address/port). Cleared when
+   * an attempt connects. */
+  ScrError **dial_errs;
+  size_t dial_nerrs, dial_ecap;
   /* the caller-lookup dial (net.connect with a lookup option): true while
    * the lookup decides; dial_ips holds its answered addresses (+1 each),
    * dialed in order — a connect failure closes the fd and tries
@@ -731,6 +741,7 @@ void scr_net_sock_release(ScrNetSocket *s) {
     scr_str_release(s->pending_err);
     scr_error_release(s->pending_obj);
     scr_str_release(s->remote_cache);
+    scr_net_dial_log_clear(s);
     for (size_t i = 0; i < s->dial_n; i++) scr_str_release(s->dial_ips[i]);
     free(s->dial_ips);
     scr_str_release(s->dial_err);
@@ -815,6 +826,7 @@ static ssize_t scr_net_send(int fd, const void *buf, size_t len) {
   return write(fd, buf, len);
 #endif
 }
+
 
 /* The idle timer rides the same poller: one-shot, keyed by the socket
  * pointer (kqueue: EVFILT_TIMER ident; epoll: a per-key timerfd), in
@@ -1383,6 +1395,7 @@ static void scr_net_sock_connect_done(ScrNetSocket *s) {
     /* a caller-lookup dial with addresses left: record the failure
      * (last-wins, surfaced only on exhaustion) and retry QUIETLY — no
      * 'error'/'close' until the list runs out */
+    scr_net_dial_log(s, err, s->peer_ip, s->peer_port);
     char msg[128];
     snprintf(msg, sizeof msg, "connect %s %s:%d", scr_net_errname(err), s->peer_ip,
              s->peer_port);
@@ -1398,6 +1411,7 @@ static void scr_net_sock_connect_done(ScrNetSocket *s) {
     char msg[128];
     snprintf(msg, sizeof msg, "connect %s %s:%d", scr_net_errname(err), s->peer_ip,
              s->peer_port);
+    if (s->dial_n > 0) scr_net_dial_log(s, err, s->peer_ip, s->peer_port);
     if (s->dial_n > 0) {
       /* the dial chain's LAST address failed asynchronously */
       scr_str_release(s->dial_err);
@@ -1416,6 +1430,7 @@ static void scr_net_sock_connect_done(ScrNetSocket *s) {
     scr_str_release(s->dial_err);
     s->dial_err = NULL;
   }
+  scr_net_dial_log_clear(s); /* this attempt connected: the chain's failures do not surface */
   scr_net_sock_update_write(s); /* keeps the filter iff bytes are buffered */
   scr_net_sock_update_read(s);
   scr_net_sock_touch(s);
@@ -1899,10 +1914,10 @@ static void scr_net_server_accept(ScrNetServer *srv) {
 
 /* ── the client ──────────────────────────────────────────────────────── */
 
-/* connect(port, host): numeric IPv4/IPv6 hosts and "localhost" (pinned to
- * 127.0.0.1 — the documented divergence from Node's family autoselect).
- * The connect callback registers as once('connect'). Never throws: every
- * failure is the async 'error' event, like Node. */
+/* connect(port, host): numeric IPv4/IPv6 hosts, and names resolved with
+ * getaddrinfo in Node's autoSelectFamily order ("localhost": ::1, then
+ * 127.0.0.1). The connect callback registers as once('connect'). Never
+ * throws: every failure is the async 'error' event, like Node. */
 /* Blocking hostname resolution for the CLIENT bridges — the dns.lookup
  * precedent (scr_dgram.c): getaddrinfo runs AT CALL TIME. The dial keeps
  * the WHOLE answer (scr_net_lookup_candidates below); a caller that only
@@ -1924,7 +1939,6 @@ static void scr_net_server_accept(ScrNetServer *srv) {
 static size_t scr_net_lookup_candidates(ScrStr *host /*borrowed*/, ScrStr ***out) {
   *out = NULL;
   if (host == NULL || host->len == 0) return 0;
-  if (host->len == 9 && memcmp(host->data, "localhost", 9) == 0) return 0;
   struct in_addr a4;
   struct in6_addr a6;
   if (inet_pton(AF_INET, host->data, &a4) == 1 || inet_pton(AF_INET6, host->data, &a6) == 1) {
@@ -2055,8 +2069,21 @@ static void scr_net_sock_dial_peer(ScrNetSocket *s) {
   }
 }
 
+/* net.connect(port, host): a name dials its whole answer in Node's order
+ * (scr_net_connect_host), a literal or a single answer dials one address. */
+static ScrNetSocket *scr_net_connect_one(double port, ScrStr *host, ScrClosure *cb);
+
 ScrNetSocket *scr_net_connect(double port, ScrStr *host /*borrowed, nullable*/,
-                               ScrClosure *cb /*moves, nullable*/) {
+                              ScrClosure *cb /*moves, nullable*/) {
+  /* an invalid port throws before anything is resolved (Node's validatePort) */
+  if (!(trunc(port) == port && port >= 0 && port < 65536)) return scr_net_connect_one(port, host, cb);
+  return scr_net_connect_host(port, host, cb);
+}
+
+/* One dial of ONE address (a literal, or a name the resolver answered with one
+ * address): the body the candidate chain collapses to. */
+static ScrNetSocket *scr_net_connect_one(double port, ScrStr *host /*borrowed, nullable*/,
+                                         ScrClosure *cb /*moves, nullable*/) {
   if (!(trunc(port) == port && port >= 0 && port < 65536)) {
     /* validatePort: Node throws before it creates anything. */
     ScrDyn *pv = scr_dyn_new_num(port);
@@ -2101,7 +2128,7 @@ ScrNetSocket *scr_net_connect_host(double port, ScrStr *host /*borrowed, nullabl
   if (n <= 1) {
     ScrStr *one = n == 1 ? ips[0] : NULL;
     free(ips);
-    ScrNetSocket *s = scr_net_connect(port, one != NULL ? one : host, cb);
+    ScrNetSocket *s = scr_net_connect_one(port, one != NULL ? one : host, cb);
     if (one != NULL) scr_str_release(one);
     return s;
   }
@@ -2382,6 +2409,67 @@ void scr_net_sock_dial_start(ScrNetSocket *s) {
  * SNI-answer pattern); late, repeated, or dead-socket answers are
  * ignored. */
 
+/* a dyn string of `s` (+1) */
+static ScrDyn *scr_net_dyn_str(const char *s, size_t n) {
+  ScrStr *t = scr_str_new(s, n);
+  ScrDyn *d = scr_dyn_new_str(t);
+  scr_str_release(t);
+  return d;
+}
+
+/* sets one own member of an error's bag and gives up the caller's reference */
+static void scr_net_dial_prop(ScrError *e, const char *key, ScrDyn *value) {
+  ScrStr *k = scr_str_new(key, strlen(key));
+  scr_error_prop_set(e, k, value);
+  scr_dyn_release(value);
+  scr_str_release(k);
+}
+
+/* One failed attempt, kept as the Error Node puts in an AggregateError's
+ * `errors`: message "connect CODE ip:port", code, errno (negative), syscall,
+ * address, port. */
+static void scr_net_dial_log(ScrNetSocket *s, int err, const char *ip, int port) {
+  if (s->dial_nerrs == s->dial_ecap) {
+    size_t cap = s->dial_ecap ? s->dial_ecap * 2 : 4;
+    ScrError **grown = realloc(s->dial_errs, cap * sizeof *grown);
+    if (!grown) scr_net_oom();
+    s->dial_errs = grown;
+    s->dial_ecap = cap;
+  }
+  const char *code = scr_net_errname(err);
+  char msg[160];
+  snprintf(msg, sizeof msg, "connect %s %s:%d", code, ip, port);
+  ScrError *e = scr_error_new(SCR_ERR_ERROR, scr_str_new(msg, strlen(msg)));
+  scr_error_set_code(e, code);
+  scr_net_dial_prop(e, "errno", scr_dyn_new_num((double)-err));
+  scr_net_dial_prop(e, "syscall", scr_net_dyn_str("connect", 7));
+  scr_net_dial_prop(e, "address", scr_net_dyn_str(ip, strlen(ip)));
+  scr_net_dial_prop(e, "port", scr_dyn_new_num((double)port));
+  s->dial_errs[s->dial_nerrs++] = e;
+}
+
+static void scr_net_dial_log_clear(ScrNetSocket *s) {
+  for (size_t i = 0; i < s->dial_nerrs; i++) scr_error_release(s->dial_errs[i]);
+  free(s->dial_errs);
+  s->dial_errs = NULL;
+  s->dial_nerrs = s->dial_ecap = 0;
+}
+
+/* Node's AggregateError for a chain of attempts that all failed: message "",
+ * the last attempt's code, and `errors` (each attempt, in dial order). */
+static ScrError *scr_net_dial_aggregate(ScrNetSocket *s) {
+  ScrError *last = s->dial_errs[s->dial_nerrs - 1];
+  ScrError *e = scr_error_new(SCR_ERR_ERROR, scr_str_new("", 0));
+  scr_error_set_code(e, (const char *)last->code->data);
+  scr_net_dial_prop(e, "name", scr_net_dyn_str("AggregateError", 14));
+  ScrDyn *arr = scr_dyn_new_arr();
+  for (size_t i = 0; i < s->dial_nerrs; i++) {
+    scr_dyn_arr_push(arr, scr_dyn_from_error(s->dial_errs[i])); /* arr takes the +1 */
+  }
+  scr_net_dial_prop(e, "errors", arr);
+  return e;
+}
+
 /* Dials one IP now. Success (established or in progress) answers true;
  * failure records the message (LAST-wins — the retry chain's contract),
  * closes any fd, and answers false without emitting. */
@@ -2424,13 +2512,16 @@ static bool scr_net_sock_dial_ip(ScrNetSocket *s, const ScrStr *ip) {
   int one = 1;
   setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
   int rc = connect(fd, sa, salen);
+  if (rc == 0) scr_net_dial_log_clear(s); /* connected at once: no failed attempt to report */
   if (rc == 0 || errno == EINPROGRESS) {
     s->fd = fd;
     s->connecting = true;
     scr_net_sock_update_write(s);
     return true;
   }
-  snprintf(msg, sizeof msg, "connect %s %s:%d", scr_net_errname(errno), s->peer_ip, s->peer_port);
+  int cerr = errno;
+  scr_net_dial_log(s, cerr, s->peer_ip, s->peer_port);
+  snprintf(msg, sizeof msg, "connect %s %s:%d", scr_net_errname(cerr), s->peer_ip, s->peer_port);
   scr_str_release(s->dial_err);
   s->dial_err = scr_str_new(msg, strlen(msg));
   close(fd);
@@ -3528,6 +3619,14 @@ static void scr_net_sweep(void) {
       sock->pending_err = NULL;
       ScrError *obj = sock->pending_obj;
       sock->pending_obj = NULL;
+      if (obj == NULL && sock->dial_nerrs >= 2) {
+        /* autoSelectFamily tried several addresses and every one failed: Node's
+         * AggregateError (empty message, the attempts in `errors`) */
+        obj = scr_net_dial_aggregate(sock);
+        scr_str_release(msg);
+        msg = scr_str_new("", 0);
+      }
+      scr_net_dial_log_clear(sock);
       /* the protocol layer gets first claim (the http conn/client owns
        * the error story: 'error' on the req, or Node's silent server-side
        * teardown); unconsumed errors fall through to the socket's own
