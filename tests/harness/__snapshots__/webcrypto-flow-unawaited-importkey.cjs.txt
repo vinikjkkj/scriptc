@@ -1,0 +1,6 @@
+webcrypto-flow-unawaited-importkey.cjs:3:11 - error SC1090: SubtleCrypto.importKey outside an await (the CryptoKey of an unawaited promise is a flow the compiler cannot see) is not supported yet
+
+  2 | const s = require('crypto').webcrypto.subtle
+  3 | const p = s.importKey('raw', new Uint8Array(3), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+    |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  4 | p.then((k) => console.log(k))
