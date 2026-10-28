@@ -2901,6 +2901,25 @@ function lowerTlsModuleCall(L: Lowerer, expr: ts.CallExpression,
   bi: { module: string; member: string },
   loc: SrcLoc,): IrExpr {
   const args = expr.arguments;
+  if (bi.member === "checkServerIdentity") {
+    // Node's identity check (scr_tls.c, Node's algorithm): a dyn verdict.
+    // The cert is the runtime's dyn object; a typed PeerCertificate lowers
+    // through dynFrom like any other dyn argument.
+    if (args.length !== 2 || args.some(ts.isSpreadElement)) {
+      L.noLowering(
+        `checkServerIdentity with ${args.length} arguments`,
+        expr,
+        "the lowered form is checkServerIdentity(hostname, cert)",
+      );
+    }
+    const host = L.lowerExprExpecting(args[0]!, STRING);
+    const raw = L.lowerExpr(args[1]!);
+    const cert: IrExpr = raw.type.kind === "dyn" ? raw : { kind: "dynFrom", value: raw, type: DYN, loc };
+    const verdict: IrExpr = { kind: "libCall", fn: "tls.checkServerIdentity", args: [host, cert], type: DYN, loc };
+    // The verdict's declared type (Error | undefined) is the checker's mapping.
+    const declared = L.mapTypeOf(L.typeOf(expr));
+    return declared === null || declared.kind === "dyn" ? verdict : { kind: "dynCheck", value: verdict, type: declared, loc };
+  }
   if (bi.member === "createServer") {
     if (args.length < 1 || args.length > 2) {
       L.noLowering(

@@ -5976,6 +5976,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_tls_create_secure_context_dyn(${arg(0)})`);
           case "tlsca.getDyn":
             return finish(`scr_tls_ca_get_dyn(${arg(0)})`);
+          // tls.checkServerIdentity(hostname, cert): Node's identity algorithm
+          // (scr_tls.c). May-throw: the malformed-altnames format error.
+          case "tls.checkServerIdentity":
+            return finish(`scr_tls_check_server_identity_dyn(${arg(0)}, ${arg(1)})`);
           // The CA-store introspection unit (scr_tls_ca.c): cached
           // per-type PEM string arrays (+1 retained answers), and the
           // default-set replacement. get/set are may-throw seeds.

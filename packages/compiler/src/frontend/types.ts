@@ -4038,6 +4038,23 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return { kind: "secureCtx" };
   }
+  // tls.PeerCertificate: the certificate Node passes checkServerIdentity
+  // (getPeerCertificate is fenced). The runtime builds it as a checked-dynamic
+  // object (scr_tls.c, scr_tls_peer_cert_dyn), carrying the members the
+  // identity check reads. As a record, a callback's declared parameter would
+  // dyn-check EVERY required member (ca, bits, raw, ...) at each handshake and
+  // refuse the partial object; the dyn kind is the representation it has.
+  if (
+    psym?.name === "PeerCertificate" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        ts.isInterfaceDeclaration(d) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientModule(d, "tls"),
+    )
+  ) {
+    return DYN;
+  }
   // fs.FSWatcher: the fs.watch handle (scr_watch.c). Module-checked like
   // net.Server — @types/node declares `interface FSWatcher extends
   // EventEmitter` inside `declare module "fs"`, and the shipped fallback
