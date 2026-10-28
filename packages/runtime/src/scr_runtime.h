@@ -1307,6 +1307,10 @@ void scr_error_set_code(ScrError *e, const char *code);
 void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char *path, const char *dest);
 void scr_error_set_ext_dns(ScrError *e, double errno_val, const char *syscall, const char *hostname);
 const ScrStr *scr_error_ext_hostname(const ScrError *e);
+void scr_error_set_ext_net(ScrError *e, double errno_val, const char *syscall, const char *address, double port);
+ScrStr *scr_error_ext_address(const ScrError *e);
+bool scr_error_ext_port(const ScrError *e, double *port);
+void scr_net_sock_mark_dyn(void *sock); /* a socket crossed into a dyn slot (weak-linked by scr_json.c) */
 bool scr_error_ext_get(const ScrError *e, double *err_no, const ScrStr **syscall, const ScrStr **path,
                        const ScrStr **dest);
 struct ScrDyn *scr_error_ext_dyn(ScrError *e, const ScrStr *key);
@@ -7318,6 +7322,7 @@ size_t scr_num_received(double v, char out[48]);
  * per-event thunk types the registration entries take (fire0's zero-arg
  * convention / ScrNetDataFn / ScrChildErrFn). cb borrowed; result +1. */
 ScrClosure *scr_dyn_listener_closure0(const ScrDyn *cb);
+ScrClosure *scr_dyn_listener_closure_close(const ScrDyn *cb);
 ScrClosure *scr_dyn_listener_closure_data(const ScrDyn *cb);
 ScrClosure *scr_dyn_listener_closure_err(const ScrDyn *cb);
 /* The generic pair for fire thunks the OWNING units define (handle-boxing
@@ -10194,6 +10199,7 @@ void scr_net_data_thunk_str(ScrClosure *cb, ScrBytes *chunk);
  * Buffer-flavored dyn (toString decodes utf8, Node's 'data' payload). */
 void scr_net_data_thunk_dyn(ScrClosure *cb, ScrBytes *chunk);
 void scr_net_close_thunk_bool(ScrClosure *cb, bool had_error);
+void scr_net_close_thunk_dyn(ScrClosure *cb, ScrDyn *had_error);
 void scr_net_conn_thunk0(ScrClosure *cb, ScrNetSocket *sock);
 void scr_net_conn_thunk_sock(ScrClosure *cb, ScrNetSocket *sock);
 void scr_net_install(void);
