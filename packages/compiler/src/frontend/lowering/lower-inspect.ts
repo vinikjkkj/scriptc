@@ -370,6 +370,9 @@ function jsHierarchyHasInferredFields(L: Lowerer, className: string): boolean {
     const c = stack.pop()!;
     if (seen.has(c.def.name)) continue;
     seen.add(c.def.name);
+    // A symbol-keyed field's layout name is Node's `Symbol(desc)` spelling, which the dyn member table
+    // carries as a string key the dyn inspector would quote. Such a hierarchy keeps the static printer.
+    if ((c.symbolFields?.size ?? 0) > 0) return false;
     if (c.decl != null && isJsSourceFile(c.decl.getSourceFile())) return true;
     for (const sub of c.subclasses) stack.push(sub);
   }
