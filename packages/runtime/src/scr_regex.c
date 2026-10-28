@@ -1010,9 +1010,9 @@ ScrStr *scr_str_to_upper(const ScrStr *s) { return scr_str_case_conv(s, 0); }
  * unicode_normalize (the same decomposition, combining-class and
  * composition tables quickjs.c's own normalize runs). Lives here for the
  * same reason as the case conversion above: it needs libunicode, and the
- * compiler sets the lre link flag for normalize sites. The form is
- * validated at runtime (Node's RangeError message; scr_trap is this
- * runtime's uncatchable RangeError convention, as repeat's count check).
+ * compiler sets the lre link flag for normalize sites. An invalid form
+ * throws Node's catchable RangeError through the exception cell and
+ * answers NULL; the emitter's pending check after the call delivers it.
  * Borrows s and form; the result is a fresh +1 string. */
 static void *scr_norm_realloc(void *opaque, void *ptr, size_t size) {
   (void)opaque;
@@ -1036,7 +1036,11 @@ ScrStr *scr_str_normalize(const ScrStr *s, const ScrStr *form) {
   else if (scr_norm_form_is(form, "NFD")) nt = UNICODE_NFD;
   else if (scr_norm_form_is(form, "NFKC")) nt = UNICODE_NFKC;
   else if (scr_norm_form_is(form, "NFKD")) nt = UNICODE_NFKD;
-  else scr_trap("scriptc: RangeError: The normalization form should be one of NFC, NFD, NFKC, NFKD.\n");
+  else {
+    static const char msg[] = "The normalization form should be one of NFC, NFD, NFKC, NFKD.";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return NULL;
+  }
   uint32_t *src = malloc(sizeof(uint32_t) * (s->len ? s->len : 1));
   if (!src) abort();
   size_t n = 0;

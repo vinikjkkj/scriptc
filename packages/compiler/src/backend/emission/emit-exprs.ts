@@ -962,7 +962,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "toWellFormed":
             return E.newTemp(e.type, `scr_str_to_well_formed(${r.name})`);
           case "normalize":
-            return E.newTemp(e.type, `scr_str_normalize(${r.name}, ${args[0]!.name})`);
+            // Throws a catchable RangeError for an invalid form: the pending
+            // check follows the call (the result is NULL on that path).
+            return E.fallibleTemp(e.type, `scr_str_normalize(${r.name}, ${args[0]!.name})`);
           case "cpAt":
             return E.newTemp(e.type, `scr_str_cp_at(${r.name}, ${args[0]!.name})`);
           default: {
