@@ -3989,6 +3989,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14978-normalize-invalid-form-catchable-rangeerror.ts": {
+   "order": [
+    "<repo>/tests/corpus/14978-normalize-invalid-form-catchable-rangeerror.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1520-fs-wider-surface.ts": {
    "order": [
     "<repo>/tests/corpus/1520-fs-wider-surface.ts"
