@@ -1756,6 +1756,9 @@ export const RUNTIME_ERROR_CLASSES: ReadonlyMap<string, { lib: string; kind: num
     // The layout is a plain ScrError — no hidden slots — so `extends
     // ReferenceError` compiles like `extends TypeError`.
     ["%ReferenceError", { lib: "ReferenceError", kind: 5, base: "%Error" }],
+    // AggregateError (kind 6, appended after ReferenceError). Runtime-minted by
+    // autoSelectFamily's failed chain; `errors` is the non-enumerable member.
+    ["%AggregateError", { lib: "AggregateError", kind: 6, base: "%Error" }],
   ]);
 
 /** The SCR_ERR_* kind of a runtime error class the CHECKED-DYNAMIC TREE can

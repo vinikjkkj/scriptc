@@ -38,7 +38,8 @@ static const char *const scr_error_names[SCR_ERR_KINDS] = {
      * lookup below must therefore SKIP index 4 rather than scan a range:
      * scanning through it would map the string "Error" onto the
      * DOMException kind. */
-    "ReferenceError"};
+    "ReferenceError",
+    "AggregateError"};
 
 /* The kind's BUILTIN name — this table, published. The dyn boundary needs
  * it to tell an error whose `name` is still its constructor's (a prototype
@@ -140,12 +141,13 @@ static void scr_domex_reld(void *obj) {
 /* Defaults cover only the instants before main() stamps the program's real
  * preorder intervals; release is permanent. */
 ScrVt scr_error_vts[SCR_ERR_KINDS] = {
-    {0, 5, &scr_error_reld}, /* Error */
+    {0, 6, &scr_error_reld}, /* Error */
     {1, 1, &scr_error_reld}, /* TypeError */
     {2, 2, &scr_error_reld}, /* RangeError */
     {3, 3, &scr_error_reld}, /* SyntaxError */
     {4, 4, &scr_domex_reld}, /* DOMException */
     {5, 5, &scr_error_reld}, /* ReferenceError */
+    {6, 6, &scr_error_reld}, /* AggregateError */
 };
 
 ScrError *scr_error_retain(ScrError *e) {
