@@ -4037,6 +4037,41 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15060-cjs-require-or-operand/main.js": {
+   "order": [
+    "<repo>/tests/corpus/15060-cjs-require-or-operand/m.js",
+    "<repo>/tests/corpus/15060-cjs-require-or-operand/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15061-cjs-require-cycle-operand/main.js": {
+   "order": [
+    "<repo>/tests/corpus/15061-cjs-require-cycle-operand/cyc1.js",
+    "<repo>/tests/corpus/15061-cjs-require-cycle-operand/cyc2.js",
+    "<repo>/tests/corpus/15061-cjs-require-cycle-operand/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15062-cjs-require-conditional-operand/main.js": {
+   "order": [
+    "<repo>/tests/corpus/15062-cjs-require-conditional-operand/m.js",
+    "<repo>/tests/corpus/15062-cjs-require-conditional-operand/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15063-js-class-expando-timer-write.js": {
+   "order": [
+    "<repo>/tests/corpus/15063-js-class-expando-timer-write.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15064-cjs-require-fnctor-export-operand/main.js": {
+   "order": [
+    "<repo>/tests/corpus/15064-cjs-require-fnctor-export-operand/m.js",
+    "<repo>/tests/corpus/15064-cjs-require-fnctor-export-operand/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1520-fs-wider-surface.ts": {
    "order": [
     "<repo>/tests/corpus/1520-fs-wider-surface.ts"
