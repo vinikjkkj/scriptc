@@ -4251,6 +4251,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15100-cjs-pg-types-override-shape/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15100-cjs-pg-types-override-shape/types.cjs",
+    "<repo>/tests/corpus/15100-cjs-pg-types-override-shape/overrides.cjs",
+    "<repo>/tests/corpus/15100-cjs-pg-types-override-shape/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15101-cjs-nested-require-value/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15101-cjs-nested-require-value/types.cjs",
+    "<repo>/tests/corpus/15101-cjs-nested-require-value/overrides.cjs",
+    "<repo>/tests/corpus/15101-cjs-nested-require-value/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15102-cjs-identity-stored-copy/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15102-cjs-identity-stored-copy/store.cjs",
+    "<repo>/tests/corpus/15102-cjs-identity-stored-copy/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15103-cjs-identity-two-requires/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15103-cjs-identity-two-requires/store.cjs",
+    "<repo>/tests/corpus/15103-cjs-identity-two-requires/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1520-fs-wider-surface.ts": {
    "order": [
     "<repo>/tests/corpus/1520-fs-wider-surface.ts"
