@@ -767,6 +767,22 @@ static ScrDyn *scr_bv_from_val(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *
     default:
       break;
   }
+  /* A Date has Symbol.toPrimitive, and Node's from() takes its ToPrimitive('string') answer (valueOf
+   * answers a number, which from() ignores): the date's string form, as a utf8 string. */
+  {
+    char detail[64];
+    const char *d = scr_dyn_specific_type(v, detail, sizeof detail);
+    if (strcmp(d, "an instance of Date") == 0) {
+      ScrDyn *p = scr_dyn_to_primitive(v, SCR_TOPRIM_STRING);
+      if (p == NULL) return NULL;
+      if (p->kind == SCR_DYN_STR) {
+        ScrDyn *out = scr_bv_from_val(p, a1, a2, depth + 1);
+        scr_dyn_release(p);
+        return out;
+      }
+      scr_dyn_release(p);
+    }
+  }
   scr_bv_throw_first_arg(v);
   return NULL;
 }
