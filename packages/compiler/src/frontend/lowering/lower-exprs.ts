@@ -33,7 +33,7 @@ import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf,
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
 import { ambientErasedIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
-import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
+import { LITERAL_IGNORED_KEYS, lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
 import { jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
@@ -12723,6 +12723,19 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           }
           continue;
         }
+      }
+      // An explicit key the stdlib options record does not declare is dropped
+      // ONLY where the callee's own implementation provably ignores it (the
+      // per-callee table in lower-server.ts, LITERAL_IGNORED_KEYS), and only
+      // when the initializer is a literal, so the drop loses no evaluation.
+      // Every other undeclared key keeps the SC2002 refusal below.
+      if (!fieldType && !shape.indexValue && ts.isPropertyAssignment(prop) && isJsSourceFile(expr.getSourceFile())) {
+        let ini: ts.Expression = prop.initializer;
+        while (ts.isParenthesizedExpression(ini)) ini = ini.expression;
+        const pureLit =
+          ts.isNumericLiteral(ini) || ts.isStringLiteral(ini) || ini.kind === ts.SyntaxKind.TrueKeyword ||
+          ini.kind === ts.SyntaxKind.FalseKeyword || ini.kind === ts.SyntaxKind.NullKeyword;
+        if (pureLit && LITERAL_IGNORED_KEYS.get(expr)?.has(propNameText(L, prop.name)) === true) continue;
       }
       if (!fieldType && !shape.indexValue) throw shapeMismatch(prop);
 
