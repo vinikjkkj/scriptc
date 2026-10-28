@@ -68,6 +68,7 @@
 
 #include <io.h>
 #include <signal.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1929,6 +1930,24 @@ void scr_children_poll(void) {
 }
 
 #else /* !_WIN32 — the POSIX implementation, untouched below */
+#include <signal.h>
+#include <spawn.h>
+#include <string.h>
+
+/* Node ignores SIGPIPE in the process (so a write to a closed peer is EPIPE);
+ * a child keeps the default disposition, which exec would otherwise inherit as
+ * ignored. Fills an attribute set that restores SIGPIPE to SIG_DFL in the child. */
+static void scr_child_sigdefault_attr(posix_spawnattr_t *at, short extra_flags) {
+  posix_spawnattr_init(at);
+  sigset_t def;
+  sigemptyset(&def);
+#ifdef SIGPIPE
+  sigaddset(&def, SIGPIPE);
+#endif
+  posix_spawnattr_setsigdefault(at, &def);
+  posix_spawnattr_setflags(at, (short)(POSIX_SPAWN_SETSIGDEF | extra_flags));
+}
+
 
 #include <errno.h>
 #include <fcntl.h>
@@ -2173,7 +2192,10 @@ static ScrSpawnRes *scr_spawn_sync_core(ScrStr *cmd, ScrArr *args, double timeou
 
   char **argv = scr_child_argv(cmd, args);
   pid_t pid = -1;
-  int spawn_err = posix_spawnp(&pid, cmd->data, &fa, NULL, argv, environ);
+  posix_spawnattr_t sat;
+  scr_child_sigdefault_attr(&sat, 0);
+  int spawn_err = posix_spawnp(&pid, cmd->data, &fa, &sat, argv, environ);
+  posix_spawnattr_destroy(&sat);
   posix_spawn_file_actions_destroy(&fa);
   free(argv);
   if (cap_out) close(outfd[1]);
@@ -2497,8 +2519,11 @@ ScrStr *scr_exec_sync_core(ScrStr *cmd, ScrArr *args, const ScrExecOpts *o) {
   char **argv = scr_child_argv(cmd, args);
   char **envp = o->env_pairs != NULL ? scr_exec_envp(o->env_pairs) : NULL;
   pid_t pid = -1;
-  int spawn_err = posix_spawnp(&pid, cmd->data, &fa, NULL, argv,
+  posix_spawnattr_t sat;
+  scr_child_sigdefault_attr(&sat, 0);
+  int spawn_err = posix_spawnp(&pid, cmd->data, &fa, &sat, argv,
                                envp != NULL ? envp : environ);
+  posix_spawnattr_destroy(&sat);
   posix_spawn_file_actions_destroy(&fa);
   free(argv);
   scr_exec_envp_free(envp);
@@ -3378,9 +3403,8 @@ ScrChild *scr_spawn_opts(ScrStr *cmd, ScrArr *args, double in_mode,
   }
 #endif
   posix_spawnattr_t at;
-  posix_spawnattr_init(&at);
+  scr_child_sigdefault_attr(&at, detached ? POSIX_SPAWN_SETSID : 0);
 #ifdef POSIX_SPAWN_SETSID
-  if (detached) posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSID);
 #else
   (void)detached; /* hosts without the flag: the child stays attached */
 #endif
