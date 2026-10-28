@@ -19316,6 +19316,24 @@
       "<repo>/tests/corpus/14969-stat-mode-not-file/main.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/14850-hash-update-encodings.ts": {
+    "order": [
+      "<repo>/tests/corpus/14850-hash-update-encodings.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14851-array-from-numeric-views.ts": {
+    "order": [
+      "<repo>/tests/corpus/14851-array-from-numeric-views.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/14852-pg-scram-shape.ts": {
+    "order": [
+      "<repo>/tests/corpus/14852-pg-scram-shape.ts"
+    ],
+    "diags": []
   }
  }
 }
