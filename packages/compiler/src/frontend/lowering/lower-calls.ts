@@ -3,7 +3,7 @@
  * function/lambda lowering and signature collection, and monomorphizing
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
 import * as ts from "../ts7/adapter.js";
-import { liveBagRef, liveDepOfBinding, liveExportsOf } from "./cjs-live-exports.js";
+import { defineAccessorCallOf, liveBagRef, liveDefinePropOf, liveDepOfBinding, liveExportsOf } from "./cjs-live-exports.js";
 import { engineFunctionApply } from "./lower-engine-fn.js";
 import { applyEnumRefill, registerEnumRefill } from "./ir-patch.js";
 import type { EnumRefill } from "./ir-patch.js";
@@ -4303,6 +4303,12 @@ export function lowerFfiCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null
 
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
+    // `R.__defineSetter__(k, f)` / `R.__defineGetter__(k, f)` on a live export object or a dyn receiver: an
+    // enumerable, configurable accessor (cjs-live-exports.ts).
+    {
+      const def = defineAccessorCallOf(L, expr, loc);
+      if (def !== null) return def;
+    }
     // A live requirer binding's member call (`m.f(x)`, m = require(M), M live): a dynamic call of the
     // bag's member. Spread arguments keep their own fence.
     if (ts.isPropertyAccessExpression(expr.expression) && !expr.expression.questionDotToken && ts.isIdentifier(expr.expression.expression) && !expr.arguments.some(ts.isSpreadElement)) {
@@ -12348,6 +12354,9 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       if (table) return table;
       const dynDefine = lowerDefinePropDyn(L, call);
       if (dynDefine) return dynDefine;
+      // A live export object's member definition (cjs-live-exports.ts): the bag takes the descriptor.
+      const liveDefine = liveDefinePropOf(L, call, locOf(call));
+      if (liveDefine) return liveDefine;
     }
     // Object.is — the spec's SameValue over the static kinds. Number
     // pairs take the runtime SameValue (NaN equals NaN, +0 differs from
