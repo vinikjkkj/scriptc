@@ -2680,6 +2680,15 @@ declare module "tls" {
    * client verifies against; a certificate-free non-empty array throws
    * Node's ERR_CRYPTO_OPERATION_FAILED Error. */
   export function setDefaultCACertificates(certs: readonly string[]): void;
+  /** The certificate Node hands checkServerIdentity (getPeerCertificate is fenced):
+   * the members the identity check reads are built at run time. */
+  export interface PeerCertificate {
+    subject: { [key: string]: string[] | string | undefined };
+    subjectaltname?: string | undefined;
+    [key: string]: any;
+  }
+  /** Node's hostname identity check (RFC 6125), the default checkServerIdentity. */
+  export function checkServerIdentity(hostname: string, cert: PeerCertificate): Error | undefined;
 }
 declare module "node:tls" {
   export * from "tls";

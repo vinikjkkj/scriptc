@@ -821,6 +821,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The CA-store introspection unit (scr_tls_ca.c): per-type cached PEM
   // string arrays and the default-set replacement.
   "tlsca.get": { argTypes: [STRING], result: arrayOf(STRING) },
+  "tls.checkServerIdentity": { argTypes: [STRING, DYN], result: DYN },
   "tlsca.root": { argTypes: [], result: arrayOf(STRING) },
   "tlsca.set": { argTypes: [arrayOf(STRING)], result: VOID },
   "https.createServer": { argTypes: [null, null, null], result: NETSERVER_T },

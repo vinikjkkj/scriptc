@@ -530,9 +530,24 @@ export function builtinMemberFnValueType(
   // Belt and braces over the allow-list: neither shape can be a value.
   if (row.variadicPack === true || row.defaults !== undefined) return null;
   const want = funcOf([...row.params], row.result);
+  // tls.checkServerIdentity: the row's runtime verdict is a dyn value; the
+  // value's declared return (Error | undefined) is the checker's own mapping,
+  // so the row adopts it and the body dyn-checks the verdict into it. The cert
+  // parameter maps to dyn (types.ts, tls.PeerCertificate), so the whole
+  // signature is the checker's mapping and the typeEquals gate below holds.
+  let row2 = row;
+  let want2 = want;
+  if (bi.module === "tls" && bi.member === "checkServerIdentity") {
+    const sigs = L.checker.getCallSignatures(L.typeOf(node));
+    if (sigs.length !== 1) return null;
+    const retMapped = L.mapTypeOf(L.checker.getReturnTypeOfSignature(sigs[0]!));
+    if (retMapped === null) return null;
+    row2 = { ...row, result: retMapped };
+    want2 = funcOf([...row2.params], retMapped);
+  }
   const mapped = L.mapTypeOf(L.typeOf(node));
-  if (mapped === null || !typeEquals(mapped, want)) return null;
-  return { want, row };
+  if (mapped === null || !typeEquals(mapped, want2)) return null;
+  return { want: want2, row: row2 };
 }
 
 /** The slot fence, module-member spelling. Identical rule to
@@ -558,6 +573,16 @@ function memberNarrowedSlotFence(L: Lowerer, node: ts.Expression, text: string, 
   );
 }
 
+/** The lifted body's value: the row's libCall, dyn-checked into the row's
+ * declared result when that result is not dyn (tls.checkServerIdentity's
+ * verdict is a dyn value; its declared type is Error | undefined). */
+function builtinRowResult(row: BuiltinModuleFn, args: readonly IrExpr[], loc: SrcLoc): IrExpr {
+  // Only the dyn-returning rows (tls.checkServerIdentity) are dyn-checked; every
+  // other row's libCall is typed by its own result, as before.
+  if (row.fn !== "tls.checkServerIdentity" || row.result.kind === "dyn") return libCall(row.fn, args, row.result, loc);
+  return { kind: "dynCheck", value: libCall(row.fn, args, DYN, loc), type: row.result, loc };
+}
+
 /** `fs.existsSync` / `dirname` (a named import binding) as a VALUE: the
  * interned zero-capture closure over the memoized lift, or null when the
  * member is not in the allow-list or does not pass the gate — in which
@@ -581,7 +606,7 @@ export function builtinMemberFnValueOf(
       params,
       returnType: got.row.result,
       locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
-      body: [{ kind: "return", value: libCall(got.row.fn, args, got.row.result, loc), loc }],
+      body: [{ kind: "return", value: builtinRowResult(got.row, args, loc), loc }],
       loc,
     };
     L.liftedFns.push(fn);
