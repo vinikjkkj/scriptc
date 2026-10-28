@@ -6894,9 +6894,10 @@ let digestInputValueDispatches = 0;
    * `Buffer | string`-union chunk (the ngrok appendOutput shape — the
    * runtime only ever fires Buffers; the compiler-emitted adapter wraps
    * the chunk at the union's Buffer arm); 'end' listeners take none.
-   * Statement position only (Node returns the stream for chaining; here
-   * the result is void). Chained receivers (`child.stdout?.on(...)`)
-   * ride the optional-chain re-dispatch (chainBlocked). Everything else
+   * The result is the receiver (Node's `this`), so `s.on(a).on(b)` and
+   * `const r = s.on(a); r === s` work: the emitter answers the receiver +1.
+   * Chained receivers (`child.stdout?.on(...)`) ride the optional-chain
+   * re-dispatch (chainBlocked). Everything else
    * @types/node declares on Readable fences member-qualified. Null for
    * non-stream receivers.
    *
@@ -6929,13 +6930,6 @@ let digestInputValueDispatches = 0;
           '"data" and "end" are the supported child-stream events (as literals)',
         );
       }
-      if (!ts.isExpressionStatement(call.parent)) {
-        L.unsupported(
-          "SC1090",
-          call,
-          "chaining stream listener registration (the result is void here — register each listener as its own statement)",
-        );
-      }
       const receiver = L.lowerExpr(access.expression);
       const cb = L.lowerExpr(call.arguments[1]!);
       const once: IrExpr = { kind: "boolLit", value: name === "once", type: BOOL, loc };
@@ -6950,7 +6944,7 @@ let digestInputValueDispatches = 0;
         );
       }
       if (event === "end") {
-        return { kind: "libCall", fn: "stream.onEnd", args: [receiver, cb, once], type: VOID, loc };
+        return { kind: "libCall", fn: "stream.onEnd", args: [receiver, cb, once], type: CHILDSTREAM_T, loc };
       }
       const param = cb.type.params[0];
       const unionOk = (p: IrType): boolean => {
@@ -6965,7 +6959,7 @@ let digestInputValueDispatches = 0;
           `data listeners whose parameter is not 'Buffer' (or a Buffer-armed union; got '${L.fmt(param)}')`,
         );
       }
-      return { kind: "libCall", fn: "stream.onData", args: [receiver, cb, once], type: VOID, loc };
+      return { kind: "libCall", fn: "stream.onData", args: [receiver, cb, once], type: CHILDSTREAM_T, loc };
     }
     L.noLowering(
       `ReadableStream.${name}`,

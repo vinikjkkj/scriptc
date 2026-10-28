@@ -993,9 +993,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "child.stderr": { argTypes: [CHILD_T], result: VOID },
   // Listener registrations: callback func shapes are program-dependent
   // (zero-param / Buffer / Buffer-armed union) — the slots pin arity,
-  // the stream receiver, and the once-flag.
-  "stream.onData": { argTypes: [CHILDSTREAM_T, null, BOOL], result: VOID },
-  "stream.onEnd": { argTypes: [CHILDSTREAM_T, null, BOOL], result: VOID },
+  // the stream receiver, and the once-flag. The result is the receiver
+  // itself (Node's `this`), +1, so `s.on(a).on(b)` chains.
+  "stream.onData": { argTypes: [CHILDSTREAM_T, null, BOOL], result: CHILDSTREAM_T },
+  "stream.onEnd": { argTypes: [CHILDSTREAM_T, null, BOOL], result: CHILDSTREAM_T },
   "procStream.write": { argTypes: [PROCSTREAM_T, STRING], result: BOOL },
   "child.killed": { argTypes: [CHILD_T], result: BOOL },
   "child.kill": { argTypes: [CHILD_T, STRING], result: BOOL },

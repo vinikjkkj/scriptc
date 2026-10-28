@@ -4030,8 +4030,8 @@ export type IrLibFn =
    * `Readable | null` union (type-directed construction in the backend
    * over the +1-or-NULL runtime pair — the child.pid pattern with a ref
    * arm). stream.onData/onEnd register 'data'/'end' listeners (receiver
-   * borrowed, CALLBACK MOVES, trailing once-flag, void — chaining
-   * fenced): 'data' fires one Buffer chunk per read (zero-param and
+   * borrowed, CALLBACK MOVES, trailing once-flag; the result is the
+   * receiver +1, Node's `this`, so chains work): 'data' fires one Buffer chunk per read (zero-param and
    * Buffer-param adapters are runtime-provided; a union-param listener —
    * ngrok's `Buffer | string` — gets a compiler-emitted adapter wrapping
    * the chunk at its Buffer arm), 'end' fires once at EOF, always BEFORE

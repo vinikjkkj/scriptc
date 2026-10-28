@@ -16041,7 +16041,11 @@ class LlEmitter {
       }
       this.declare(`declare void @scr_child_stream_on_data(ptr, ptr, ptr, i1 zeroext)`);
       B.line(`call void @scr_child_stream_on_data(ptr ${s0.name}, ptr ${cb.name}, ptr @${adapter}, i1 ${once.name})`);
-      return { name: "", type: e.type };
+      // Node's `this`: the receiver, +1.
+      this.declare(`declare ptr @scr_child_stream_retain(ptr)`);
+      const self = B.tmp();
+      B.line(`${self} = call ptr @scr_child_stream_retain(ptr ${s0.name})`);
+      return this.own({ name: self, type: e.type });
     }
     if (e.fn === "stream.onEnd") {
       const s0 = this.emitExpr(e.args[0]!);
@@ -16050,7 +16054,11 @@ class LlEmitter {
       this.moveTemp(cb);
       this.declare(`declare void @scr_child_stream_on_end(ptr, ptr, i1 zeroext)`);
       B.line(`call void @scr_child_stream_on_end(ptr ${s0.name}, ptr ${cb.name}, i1 ${once.name})`);
-      return { name: "", type: e.type };
+      // Node's `this`: the receiver, +1.
+      this.declare(`declare ptr @scr_child_stream_retain(ptr)`);
+      const self = B.tmp();
+      B.line(`${self} = call ptr @scr_child_stream_retain(ptr ${s0.name})`);
+      return this.own({ name: self, type: e.type });
     }
     if (e.fn === "fs.watch") {
       // The callback-less form: NULL listener/adapter. Throws Node-shaped
