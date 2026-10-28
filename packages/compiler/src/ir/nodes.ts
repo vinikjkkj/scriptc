@@ -8845,6 +8845,10 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   // size/mode/mtimeMs reads answer through the handle, the rest fence by name
   // (scr_lib.c's Stats ops).
   ["stats", { tag: "SCR_DYNH_STATS", cls: "Stats" }],
+  // process.stdout / process.stderr (the procStream scalar, its value the fd): boxed by the fd
+  // itself (scr_lib.c's scr_proc_stream_box), so the box's identity is the stream's. Emitters convert
+  // the double to and from the handle pointer (C: uintptr_t casts; LLVM: fptoui/inttoptr).
+  ["procStream", { tag: "SCR_DYNH_PROC_STREAM", cls: "WriteStream" }],
 ]);
 
 /** The bytes ELEMENT kinds that cross the checked-dynamic boundary, each
@@ -9913,6 +9917,121 @@ export function canExitIslandToType(
  * the boxing site appear together or not at all. Same generic JSON walk
  * as moduleUsesRegex: `kind` discriminants live only on IR objects, so
  * user string VALUES can never false-positive. */
+/** True when a process.stdout / process.stderr value is converted into the
+ * checked-dynamic tree anywhere in the module. A boxed stream's write(data, cb)
+ * answers its callback on the next tick, so the program must run the loop
+ * that drains the tick queue (emitter.ts's loop gate reads this). */
+/** The stream-surface member names a dynamic process-stream value answers
+ * through its handle ladder (scr_proc_dyn.c) and that have no lowering: a
+ * read or call of one of these on a dynamic value that may be a stream
+ * must refuse at compile time, never throw at run time. */
+export const PROC_STREAM_LADDER_NAMES: ReadonlySet<string> = new Set([
+  "on", "once", "off", "addListener", "removeListener", "removeAllListeners", "prependListener",
+  "prependOnceListener", "emit", "listeners", "rawListeners", "listenerCount", "eventNames",
+  "setMaxListeners", "getMaxListeners", "end", "cork", "uncork", "destroy", "pipe", "unpipe",
+  "setDefaultEncoding", "_write", "_writev", "_destroy", "writableLength", "writableHighWaterMark",
+  "writableEnded", "writableFinished", "writableNeedDrain", "writableCorked", "writableObjectMode",
+  "writableAborted", "closed", "errored", "destroyed", "constructor", "getColorDepth", "hasColors",
+  "getWindowSize", "clearLine", "clearScreenDown", "cursorTo", "moveCursor", "isRaw", "setRawMode",
+  "_type", "_isStdio", "_handle", "_writableState",
+]);
+
+/** The first dynamic member access in a module that boxes a process stream
+ * and that the stream's handle ladder would answer by throwing: a literal
+ * ladder name (`x.on(...)`, `x.destroyed`), or a COMPUTED key on a dynamic
+ * receiver (the name is only known at run time). Null when the module boxes
+ * no stream or has no such access. The fence is the compile-time answer the
+ * ladder cannot give. */
+export function procStreamDynMemberFence(mod: IrModule): { loc: SrcLoc; name: string | null } | null {
+  if (!moduleBoxesProcStream(mod)) return null;
+  let found: { loc: SrcLoc; name: string | null } | null = null;
+  const visit = (v: unknown): void => {
+    if (found !== null || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const o = v as {
+      kind?: unknown; loc?: SrcLoc; key?: { kind?: unknown; value?: unknown }; method?: unknown;
+      methodKey?: unknown;
+    };
+    // A dynInvoke with a RUNTIME key (`s[k](...)`) names its method only at run time.
+    if (o.kind === "dynInvoke" && o.methodKey != null && o.loc !== undefined) {
+      found = { loc: o.loc, name: null };
+      return;
+    }
+    if (o.kind === "dynKeyGet" || o.kind === "dynInvoke") {
+      const name = o.kind === "dynKeyGet"
+        ? (o.key?.kind === "strLit" ? (typeof o.key.value === "string" ? o.key.value : null) : undefined)
+        : (typeof o.method === "string" ? o.method : undefined);
+      if (name === undefined) {
+        // a computed key the ladder would answer by name at run time
+        if (o.loc !== undefined) { found = { loc: o.loc, name: null }; return; }
+      } else if (name !== null && PROC_STREAM_LADDER_NAMES.has(name) && o.loc !== undefined) {
+        found = { loc: o.loc, name };
+        return;
+      }
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
+}
+
+/** The first write a library build cannot deliver: a write with more than one
+ * argument (the callback form, or an encoding) or a `write` read as a value,
+ * on a dynamic value in a module that boxes a process stream. A library
+ * artifact links no event loop, so a write callback has nowhere to fire; the
+ * single-argument write is synchronous and exact. Null when the module boxes
+ * no stream or has no such access. */
+export function procStreamLibWriteFence(mod: IrModule): { loc: SrcLoc } | null {
+  if (!moduleBoxesProcStream(mod)) return null;
+  let found: { loc: SrcLoc } | null = null;
+  const visit = (v: unknown): void => {
+    if (found !== null || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const o = v as {
+      kind?: unknown; loc?: SrcLoc; key?: { kind?: unknown; value?: unknown };
+      method?: unknown; args?: unknown[];
+    };
+    if (o.loc !== undefined) {
+      if (o.kind === "dynInvoke" && o.method === "write" && Array.isArray(o.args) && o.args.length >= 2) {
+        found = { loc: o.loc };
+        return;
+      }
+      if (o.kind === "dynKeyGet" && o.key?.kind === "strLit" && o.key.value === "write") {
+        found = { loc: o.loc };
+        return;
+      }
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
+}
+
+export function moduleBoxesProcStream(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const o = v as { kind?: unknown; value?: { type?: { kind?: unknown } } };
+    if (o.kind === "dynFrom" && o.value?.type?.kind === "procStream") {
+      found = true;
+      return;
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
+}
+
 export function moduleUsesChildStream(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {

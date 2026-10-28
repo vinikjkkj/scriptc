@@ -4749,6 +4749,7 @@ typedef enum {
   SCR_DYNH_SECURE_CTX,   /* scr_tls.c — tls.SecureContext (refcounted parsed cert/key, by reference) */
   SCR_DYNH_KEYOBJ,       /* ScrKeyObject — crypto.KeyObject (scr_asym.c; retained, by reference) */
   SCR_DYNH_STATS,        /* ScrStats — fs.Stats (scr_lib.c; by reference, static ops) */
+  SCR_DYNH_PROC_STREAM,  /* process.stdout/stderr (scr_lib.c): the handle pointer is the fd (1 or 2) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
@@ -6721,6 +6722,8 @@ const ScrDynHandleOps *scr_dyn_handle_ops_of(const ScrDyn *d);
  * The tag MUST be installed — emitted programs install a unit's ops
  * whenever they can box its handles. */
 ScrDyn *scr_dyn_new_handle(void *h, ScrDynHandleTag tag);
+/* process.stdout / process.stderr boxed by reference (scr_lib.c): the handle pointer is the fd (1 or 2). */
+ScrDyn *scr_proc_stream_box(double fd);
 extern ScrDyn *(*scr_dyn_date_box_hook)(double ms); /* see scr_json.c */
 /* `new TextEncoder()` / `new TextDecoder()` evaluate to one of two IMMORTAL
  * strings (scr_json.c) instead of a fresh "utf-8", and scr_dyn_new_str

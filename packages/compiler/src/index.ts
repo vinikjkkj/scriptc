@@ -6,7 +6,7 @@ import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
 import { coroPlans } from "./ir/coro-plans.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
 import { emitLlvmModule, LlvmUnsupportedError, type LlvmEmitStats } from "./backend/llvm/emitter.js";
-import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
+import { checkerPanicDiag, ffiNativeBuildDiag, unsupportedDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
 import { checkLibraryIntegerSlots, classSeed, hasIntSlots, numberCarrierKind, type FnIntSlots, type IntSlotConfig } from "./library/int-infer.js";
 import { loadLibraryProfile, profileRemediation, profileTeaching, type LibraryProfile } from "./library/profile.js";
 import { decorateLibraryRefusals, evaluateLibraryFences } from "./library/fence-eval.js";
@@ -25,7 +25,7 @@ import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
 import { moduleUsesDestroyDyn, moduleUsesHttpDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
-  moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
+  moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc , moduleBoxesProcStream, procStreamLibWriteFence} from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
@@ -969,6 +969,7 @@ function programNativeFeatures(
     // which packages it reads, and one flag per literal language; icuAll when a locale is computed or defaulted.
     ...icuFeatureFlags(moduleIcuUse(mod)),
     dateDyn: moduleUsesDateDyn(mod),
+    procDyn: moduleBoxesProcStream(mod),
     dynView: moduleUsesDynView(mod),
     opaque: moduleUsesOpaque(mod),
   };
@@ -2005,6 +2006,14 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
     sourceTexts,
   });
 
+  // A library has no event loop: a dynamic process stream write that could carry a callback (or read
+  // write as a value) is refused here, before any emission.
+  const libWriteFence = procStreamLibWriteFence(mod);
+  if (libWriteFence !== null) {
+    return fail([unsupportedDiag("SC1090", libWriteFence.loc, "a write with more than one argument (or a write read as a value) on a dynamic process stream value in a library build",
+      "a library artifact has no event loop to deliver a write callback on; write the chunk with one argument, or keep the stream out of the dynamic tree")]);
+  }
+
   // Export resolution first (SC4002/SC4003/SC4004/SC4007 anchor at the
   // mapped declaration — a mapped async export reports as SC4004, not the
   // graph-wide gate), then the async_free requirement (ratified, SC4005),
@@ -2136,6 +2145,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
     zlib: moduleUsesZlib(mod),
     copying: moduleUsesCopying(mod),
     abortSignal: moduleUsesAbortSignal(mod),
+    procDyn: moduleBoxesProcStream(mod),
   });
 
   // The sidecar lands beside the compiled object, written by the same

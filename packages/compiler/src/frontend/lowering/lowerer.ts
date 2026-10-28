@@ -63,7 +63,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -799,7 +799,27 @@ export function lowerToIr(
   for (const d of ffiValidation.diagnostics) emit.pushDiag(d);
   const __t1 = performance.now();
   emit.dynRecordFenceAtRun = true;
-  const result = emit.run();
+  let result = emit.run();
+  // A module that boxes process.stdout/stderr into the dynamic tree may not
+  // reach a stream member the handle ladder has no lowering for: that would
+  // be a run-time throw where the program had no defined answer. Refused here.
+  if (result.module !== null) {
+    const fence = procStreamDynMemberFence(result.module);
+    if (fence !== null) {
+      const what = fence.name === null
+        ? "a computed member access (read or call) on a dynamic value in a program that boxes process.stdout/stderr"
+        : `'.${fence.name}' on a dynamic value in a program that boxes process.stdout/stderr`;
+      result = {
+        ...result,
+        module: null,
+        diagnostics: [
+          ...result.diagnostics,
+          unsupportedDiag("SC1090", fence.loc, `${what}`,
+            "the stream members of a dynamic process stream value (on/once/end/...) have no lowering; read the stream through its static surface (write, isTTY, columns) or keep the value out of the dynamic tree"),
+        ],
+      };
+    }
+  }
   lowerProfileNote("%emit-run", performance.now() - __t1);
   lowerProfileNote("%ovf-after-discovery", __ovfAfterDiscovery.size);
   lowerProfileNote("%ovf-after-emit", overflowShapeKeys.size);

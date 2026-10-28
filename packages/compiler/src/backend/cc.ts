@@ -579,6 +579,8 @@ export interface CcOptions {
   icuAll?: boolean;
   /** A Date and an `unknown` meet (moduleUsesDateDyn): compiles scr_date_dyn.c. */
   dateDyn?: boolean;
+  /** A process.stdout / process.stderr value is boxed into the dyn tree (moduleBoxesProcStream): compiles scr_proc_dyn.c. */
+  procDyn?: boolean;
   /** A static array can cross into a dyn slot (moduleUsesDynView): compiles scr_dyn_view.c, the live array view. */
   dynView?: boolean;
   /** The program holds a named stdlib handle, `Blob` or `PromiseConstructor`
@@ -1762,6 +1764,8 @@ export interface LibArchiveOptions {
   cipher?: boolean;
   copying?: boolean;
   abortSignal?: boolean;
+  /** A process stream value is boxed into the dyn tree: links scr_proc_dyn.c (the same gate as the program lane). */
+  procDyn?: boolean;
 }
 
 export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> {
@@ -1796,6 +1800,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     // the embedder's own stream do the framing.
     ...(opts.zlib ? ["scr_zlib.c"] : []),
     ...(opts.bigint ? ["scr_bigint.c"] : []),
+    ...(opts.procDyn ? ["scr_proc_dyn.c"] : []),
     ...(opts.bigint && opts.inspect ? ["scr_bigint_inspect.c"] : []),
     ...(opts.asym ? ["scr_asym.c"] : []),
     ...(opts.cipher ? ["scr_cipher.c", "scr_cipher_value.c"] : []),
@@ -2554,6 +2559,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // program that declares the shape still emits its release calls.
     ...(dateUnit ? [rt(join(rtDir, "scr_date.c"))] : []),
     ...(dateDynUnit ? [rt(join(rtDir, "scr_date_dyn.c"))] : []),
+    ...((opts.procDyn ?? false) ? [rt(join(rtDir, "scr_proc_dyn.c"))] : []),
     ...((opts.dynView ?? false) ? [rt(join(rtDir, "scr_dyn_view.c"))] : []),
     ...(dateFmtUnit ? [rt(join(rtDir, "scr_date_fmt.c")), rt(join(rtDir, "scr_date_zones.c"))] : []),
     ...(dateIntlUnit

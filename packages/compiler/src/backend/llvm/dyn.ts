@@ -62,6 +62,8 @@ export const DYN_HANDLE_TAG_NUM: Record<string, number> = {
   keyobj: 16,
   // SCR_DYNH_STATS (scr_runtime.h: after SCR_DYNH_KEYOBJ).
   stats: 17,
+  // SCR_DYNH_PROC_STREAM (scr_runtime.h: after SCR_DYNH_STATS). The handle pointer is the fd.
+  procStream: 18,
 };
 
 /** The tag's numeric value, or the LLVM lane's honest miss.
@@ -208,7 +210,8 @@ export class LlDyn {
 
   /** The value LLVM type of a dynCheck result / toDyn operand for `t`. */
   private valTy(t: IrType): string {
-    return t.kind === "f64" ? "double" : t.kind === "bool" ? "i1" : "ptr";
+    // procStream is the scalar fd double (emitter.ts valTy), not a pointer.
+    return t.kind === "f64" || t.kind === "procStream" ? "double" : t.kind === "bool" ? "i1" : "ptr";
   }
 
   /* ── dyn node plumbing ─────────────────────────────────────────────── */
@@ -2329,14 +2332,28 @@ export class LlDyn {
           host.declare(`declare ptr @scr_dyn_handle_unbox(ptr, i32, ptr, ptr)`);
           const r = B.tmp();
           B.line(`${r} = call ptr @scr_dyn_handle_unbox(ptr %d, i32 ${dynHandleTagNum(t.kind)}, ptr %path, ptr ${want})`);
-          B.terminate(`ret ptr ${r}`);
+          if (t.kind === "procStream") {
+            // procStream's LLVM value is the fd double; the box's pointer IS the fd.
+            const pi = B.tmp();
+            B.line(`${pi} = ptrtoint ptr ${r} to i64`);
+            const pd = B.tmp();
+            B.line(`${pd} = uitofp i64 ${pi} to double`);
+            B.terminate(`ret double ${pd}`);
+          } else B.terminate(`ret ptr ${r}`);
           break;
         }
         if (h && !soft) {
           host.declare(`declare ptr @scr_dyn_handle_unbox(ptr, i32, ptr, ptr)`);
           const r = B.tmp();
           B.line(`${r} = call ptr @scr_dyn_handle_unbox(ptr %d, i32 ${dynHandleTagNum(t.kind)}, ptr %path, ptr ${want})`);
-          B.terminate(`ret ptr ${r}`);
+          if (t.kind === "procStream") {
+            // procStream's LLVM value is the fd double; the box's pointer IS the fd.
+            const pi = B.tmp();
+            B.line(`${pi} = ptrtoint ptr ${r} to i64`);
+            const pd = B.tmp();
+            B.line(`${pd} = uitofp i64 ${pi} to double`);
+            B.terminate(`ret double ${pd}`);
+          } else B.terminate(`ret ptr ${r}`);
           break;
         }
         throw new LlvmUnsupportedError(`${soft ? "dynArm" : "type"}:${t.kind}`);
@@ -3248,7 +3265,12 @@ export class LlDyn {
         if (h) {
           host.declare(`declare ptr @scr_dyn_new_handle(ptr, i32)`);
           const r = B.tmp();
-          B.line(`${r} = call ptr @scr_dyn_new_handle(ptr %v, i32 ${dynHandleTagNum(t.kind)})`);
+          if (t.kind === "procStream") {
+            host.declare(`declare ptr @scr_proc_stream_box(double)`);
+            B.line(`${r} = call ptr @scr_proc_stream_box(double %v)`);
+          } else {
+            B.line(`${r} = call ptr @scr_dyn_new_handle(ptr %v, i32 ${dynHandleTagNum(t.kind)})`);
+          }
           B.terminate(`ret ptr ${r}`);
           break;
         }

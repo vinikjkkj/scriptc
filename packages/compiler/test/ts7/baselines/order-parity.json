@@ -4251,6 +4251,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15080-stdio-dyn-identity/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15080-stdio-dyn-identity/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15081-stdio-dyn-interleave/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15081-stdio-dyn-interleave/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15082-stdio-dyn-swapped/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15082-stdio-dyn-swapped/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15083-stdio-dyn-callback-bytes/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15083-stdio-dyn-callback-bytes/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15084-stdio-dyn-members/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15084-stdio-dyn-members/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/15100-cjs-pg-types-override-shape/main.cjs": {
    "order": [
     "<repo>/tests/corpus/15100-cjs-pg-types-override-shape/types.cjs",
