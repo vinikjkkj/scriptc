@@ -2810,7 +2810,12 @@ static void scr_dyn_handle_release(void *h, ScrDynHandleTag tag) {
  * program without the Date handle keeps the engine object by reference. */
 ScrDyn *(*scr_dyn_date_box_hook)(double ms) = NULL;
 
+/* scr_net.c is gated: a program that never makes a socket does not link it,
+ * so the boxing hook is weak and absent means no socket can be boxed. */
+extern void scr_net_sock_mark_dyn(void *sock) __attribute__((weak));
+
 ScrDyn *scr_dyn_new_handle(void *h, ScrDynHandleTag tag) {
+  if (tag == SCR_DYNH_NET_SOCKET && scr_net_sock_mark_dyn != NULL) scr_net_sock_mark_dyn(h);
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_HANDLE);
   d->v.handle.ptr = scr_dyn_handle_ops(tag)->retain(h);
   d->v.handle.tag = tag;
@@ -5463,6 +5468,14 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
     for (int i = 0; i < 3; i++) {
       if (ext_vals[i]) scr_dyn_obj_set(d, ext_keys[i], strlen(ext_keys[i]), scr_dyn_new_str((ScrStr *)ext_vals[i]));
     }
+  }
+  /* A net system error's peer, after the fs/uv set (Node's uvException order:
+   * errno, code, syscall, address, port). */
+  {
+    const ScrStr *ext_addr = scr_error_ext_address((const ScrError *)e);
+    if (ext_addr) scr_dyn_obj_set(d, "address", 7, scr_dyn_new_str((ScrStr *)ext_addr));
+    double ext_port = 0;
+    if (scr_error_ext_port((const ScrError *)e, &ext_port)) scr_dyn_obj_set(d, "port", 4, scr_dyn_new_num(ext_port));
   }
   /* DOMException: `code` is the WebIDL legacy NUMBER (never the errno
    * string slot), and the options form's cause crosses as itself. Both are

@@ -300,6 +300,9 @@ typedef struct ScrErrExt {
   ScrStr *path;
   ScrStr *dest;
   ScrStr *hostname; /* the dns failure's hostname (NULL elsewhere) */
+  ScrStr *address; /* net system errors: the peer address (NULL = absent) */
+  double port;     /* ... and the peer port, valid when has_port */
+  bool has_port;
   struct ScrErrExt *next;
 } ScrErrExt;
 
@@ -316,6 +319,7 @@ static void scr_err_ext_drop(ScrError *e) {
       scr_str_release(x->path);
       scr_str_release(x->dest);
       scr_str_release(x->hostname);
+      scr_str_release(x->address);
       free(x);
       scr_err_ext_count--;
       return;
@@ -395,6 +399,38 @@ const ScrStr *scr_error_ext_hostname(const ScrError *e) {
     if (x->e == e) return x->hostname;
   }
   return NULL;
+}
+
+/* A net system error (libuv's uvException for a socket op): errno (already
+ * libuv's negative value), syscall, and the peer's address and port. */
+void scr_error_set_ext_net(ScrError *e, double errno_val, const char *syscall, const char *address, double port) {
+  scr_error_set_ext_val(e, errno_val, syscall, NULL, NULL);
+  ScrErrExt *x = scr_err_ext_head;
+  x->address = scr_str_new(address, strlen(address));
+  x->port = port;
+  x->has_port = true;
+}
+
+/* errno/syscall/path/dest accessors are in scr_dyn_ext.c; these two answer
+ * the net-only address and port, undefined (NULL) for every other error. */
+ScrStr *scr_error_ext_address(const ScrError *e) {
+  if (scr_err_ext_count == 0) return NULL;
+  for (ScrErrExt *x = scr_err_ext_head; x != NULL; x = x->next) {
+    if (x->e == e) return x->address;
+  }
+  return NULL;
+}
+
+bool scr_error_ext_port(const ScrError *e, double *port) {
+  if (scr_err_ext_count == 0) return false;
+  for (ScrErrExt *x = scr_err_ext_head; x != NULL; x = x->next) {
+    if (x->e == e) {
+      if (!x->has_port) return false;
+      *port = x->port;
+      return true;
+    }
+  }
+  return false;
 }
 
 /* Borrowed views of the stamped properties; false when the error carries

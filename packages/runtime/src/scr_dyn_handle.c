@@ -44,6 +44,18 @@ void scr_dyn_listener_fire0(ScrClosure *cb) {
   scr_dyn_release(fn);
 }
 
+/* A socket 'close' listener on a dyn handle: hadError is handed over as the
+ * checked-dynamic value it is (a boolean, or undefined on an unconnected
+ * socket's close), owned +1 by the adapter. */
+void scr_dyn_listener_fire_close(ScrClosure *cb, ScrDyn *had_error) {
+  ScrDyn *fn = scr_dyn_listener_peek(cb);
+  ScrDyn *args[1] = { had_error };
+  ScrDyn *r = scr_dyn_call(fn, args, 1, "listener");
+  scr_dyn_release(r);
+  scr_dyn_release(had_error);
+  scr_dyn_release(fn);
+}
+
 void scr_dyn_listener_fire_data(ScrClosure *cb, ScrBytes *chunk) {
   ScrDyn *fn = scr_dyn_listener_peek(cb);
   ScrDyn *arg = scr_dyn_new_chunk(chunk); /* Buffer-flavored, or a string inside a setEncoding window */
@@ -88,6 +100,9 @@ ScrClosure *scr_dyn_listener_closure_fn(const ScrDyn *cb, void *fire) {
 }
 ScrClosure *scr_dyn_listener_closure0(const ScrDyn *cb) {
   return scr_dyn_listener_closure(cb, (void *)&scr_dyn_listener_fire0);
+}
+ScrClosure *scr_dyn_listener_closure_close(const ScrDyn *cb) {
+  return scr_dyn_listener_closure(cb, (void *)&scr_dyn_listener_fire_close);
 }
 ScrClosure *scr_dyn_listener_closure_data(const ScrDyn *cb) {
   return scr_dyn_listener_closure(cb, (void *)&scr_dyn_listener_fire_data);

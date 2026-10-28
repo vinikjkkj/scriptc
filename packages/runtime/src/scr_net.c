@@ -364,13 +364,19 @@ void scr_net_fire0(ScrNetLs *l) { scr_net_fire0_this(l, NULL, 0); }
  * parameter. It is the pointer dispatch scr_net_fire_err_impl already
  * uses, for the same reason it does: the (ScrClosure *) call convention
  * eight other handle families share stays unwidened. */
-static void scr_net_fire_close(ScrNetLs *l, void *self, ScrDynHandleTag tag, bool had_error) {
+void scr_net_close_thunk_dyn(ScrClosure *cb, ScrDyn *had_error);
+
+static void scr_net_fire_close(ScrNetLs *l, void *self, ScrDynHandleTag tag, bool had_error, bool undef) {
   ScrNetL *snap;
   size_t n = scr_net_ls_snapshot(l, &snap);
+  /* the idle paths pass undefined to a listener that takes the dyn value */
   scr_dyn_this_push(self, tag);
   for (size_t i = 0; i < n; i++) {
     if (!scr_exc_pending()) {
-      if (snap[i].fn != NULL) ((ScrNetCloseFn)snap[i].fn)(snap[i].cb, had_error);
+      if (snap[i].fn == (void *)&scr_net_close_thunk_dyn) {
+        ScrDyn *d = undef ? scr_dyn_retain(scr_dyn_undefined()) : scr_dyn_new_bool(had_error);
+        scr_net_close_thunk_dyn(snap[i].cb, d);
+      } else if (snap[i].fn != NULL) ((ScrNetCloseFn)snap[i].fn)(snap[i].cb, had_error);
       else ((void (*)(ScrClosure *))snap[i].cb->fn)(snap[i].cb);
     }
     scr_closure_release(snap[i].cb);
@@ -680,6 +686,13 @@ struct ScrNetSocket {
   bool keepalive_pref; /* setKeepAlive asked while there is no fd */
   double keepalive_ms;
   bool unref_flag;     /* ref()/unref(): an unref'd socket is not loop-liveness */
+  /* Node's hadError is undefined on the unconnected socket's close paths */
+  bool close_undef;
+  /* the socket crossed into a dyn slot: a dyn method call can reach it, so
+   * its listeners are kept across a close (see scr_net_keeps_listeners) */
+  bool dyn_boxed;
+  /* linked in the keep list: the exit hook drops this socket's listeners */
+  bool keep_linked;
   /* every idle-origin socket is linked here (no refcount): the exit hook
    * drops their listeners, which a settled socket keeps for a reconnect */
   struct ScrNetSocket *idle_prev, *idle_next;
@@ -691,7 +704,12 @@ enum { SCR_NET_NS_IDLE = 0, SCR_NET_NS_LIVE = 1, SCR_NET_NS_CLOSED = 2 };
 
 /* a listener registration on a settled socket is dead, except on an
  * idle-origin socket, whose listeners wait for a reconnect */
-#define LISTEN_DEAD(sk) ((sk)->close_emitted && !(sk)->idle_origin)
+/* A socket keeps its listeners across a close when a later connect() can reach
+ * it: an unconnected one (new net.Socket()), or one a dyn slot holds (a dyn
+ * connect is then possible). Any other socket is unreachable for connect() once
+ * closed (the compiler fences the static form), so it drops them as before. */
+static bool scr_net_keeps_listeners(const ScrNetSocket *s) { return s->idle_origin || s->dyn_boxed; }
+#define LISTEN_DEAD(sk) ((sk)->close_emitted && !scr_net_keeps_listeners(sk))
 
 #ifdef SCR_RC_AUDIT
 static long scr_net_live = 0;
@@ -756,7 +774,7 @@ void scr_net_sock_release(ScrNetSocket *s) {
     scr_net_ls_drop(&s->wcb_ls);
     scr_str_release(s->pending_err);
     scr_error_release(s->pending_obj);
-    if (s->idle_origin) scr_net_idle_unlink(s);
+    if (s->keep_linked) scr_net_idle_unlink(s);
     scr_str_release(s->remote_cache);
     for (size_t i = 0; i < s->dial_n; i++) scr_str_release(s->dial_ips[i]);
     free(s->dial_ips);
@@ -2182,12 +2200,14 @@ static void scr_net_idle_unlink(ScrNetSocket *s) {
   else if (scr_net_idle_head == s) scr_net_idle_head = s->idle_next;
   if (s->idle_next) s->idle_next->idle_prev = s->idle_prev;
   s->idle_prev = s->idle_next = NULL;
+  s->keep_linked = false;
 }
 
-ScrNetSocket *scr_net_sock_idle_new(void) {
-  ScrNetSocket *s = scr_net_sock_new();
-  s->idle_origin = true;
-  s->ns_state = SCR_NET_NS_IDLE;
+/* Link a socket that keeps its listeners into the exit hook's list (once). */
+static void scr_net_keep_link(ScrNetSocket *s) {
+  if (s->keep_linked) return;
+  s->keep_linked = true;
+  s->idle_prev = NULL;
   s->idle_next = scr_net_idle_head;
   if (scr_net_idle_head) scr_net_idle_head->idle_prev = s;
   scr_net_idle_head = s;
@@ -2195,6 +2215,13 @@ ScrNetSocket *scr_net_sock_idle_new(void) {
     scr_net_idle_hook_armed = true;
     atexit(scr_net_idle_exit_hook); /* armed after the audit's, so it runs first */
   }
+}
+
+ScrNetSocket *scr_net_sock_idle_new(void) {
+  ScrNetSocket *s = scr_net_sock_new();
+  s->idle_origin = true;
+  s->ns_state = SCR_NET_NS_IDLE;
+  scr_net_keep_link(s);
   return s;
 }
 
@@ -2223,6 +2250,7 @@ static void scr_net_sock_idle_close(ScrNetSocket *s, bool had_error) {
   s->wr_done = true;
   s->rd_eof = true;
   s->had_error = had_error;
+  s->close_undef = true;
   scr_net_sock_register(s);
   if (!s->close_emitted) {
     s->emit_close = true;
@@ -2246,6 +2274,7 @@ static void scr_net_sock_idle_write_fail(ScrNetSocket *s) {
   s->wr_done = true;
   s->rd_eof = true;
   s->had_error = false;
+  s->close_undef = true;
   scr_net_sock_register(s);
   if (!s->close_emitted) {
     s->emit_close = true;
@@ -2276,7 +2305,15 @@ static void scr_net_sock_already(ScrNetSocket *s) {
   }
   char msg[220];
   snprintf(msg, sizeof msg, "connect EALREADY %s:%d - Local (%s)", s->peer_ip, s->peer_port, local);
-  scr_net_sock_set_pending_obj(s, scr_net_coded_err("EALREADY", msg));
+  /* libuv's errno for EALREADY (negative): the Node system-error fields */
+#ifdef _WIN32
+  double ealready = -4084; /* UV_EALREADY */
+#else
+  double ealready = -(double)EALREADY;
+#endif
+  ScrError *ea = scr_net_coded_err("EALREADY", msg);
+  scr_error_set_ext_net(ea, ealready, "connect", s->peer_ip, (double)s->peer_port);
+  scr_net_sock_set_pending_obj(s, ea);
   s->had_error = true;
   s->ns_state = SCR_NET_NS_CLOSED;
   scr_net_sock_register(s);
@@ -2310,6 +2347,7 @@ static void scr_net_sock_revive(ScrNetSocket *s) {
   s->finish_pending = false;
   s->destroy_on_finish = false;
   s->had_error = false;
+  s->close_undef = false;
   s->emit_close = false;
   s->close_emitted = false;
   s->close_seq = 0;
@@ -3091,7 +3129,7 @@ static void scr_net_sock_append_rbuf(ScrNetSocket *s, const char *data, size_t l
 }
 
 void scr_net_sock_on_readable(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once) {
-  if (LISTEN_DEAD(s) || (s->rd_eof && !s->idle_origin)) {
+  if (LISTEN_DEAD(s) || (s->rd_eof && !scr_net_keeps_listeners(s))) {
     scr_closure_release(cb);
     return;
   }
@@ -3237,6 +3275,14 @@ void scr_net_close_thunk_bool(ScrClosure *cb, bool had_error) {
   ((void (*)(ScrClosure *, bool))cb->fn)(cb, had_error);
 }
 
+/* The dyn adapter: the listener owns its +1 param (undefined or a boolean). */
+void scr_net_close_thunk_dyn(ScrClosure *cb, ScrDyn *had_error) {
+  ((void (*)(ScrClosure *, ScrDyn *))cb->fn)(cb, had_error);
+}
+
+/* A socket crossed into a dyn slot. */
+void scr_net_sock_mark_dyn(void *p) { ((ScrNetSocket *)p)->dyn_boxed = true; }
+
 void scr_net_sock_on_error(ScrNetSocket *s, ScrClosure *cb /*moves*/, ScrChildErrFn fn,
                             bool once) {
   if (LISTEN_DEAD(s)) {
@@ -3247,7 +3293,7 @@ void scr_net_sock_on_error(ScrNetSocket *s, ScrClosure *cb /*moves*/, ScrChildEr
 }
 
 void scr_net_sock_on_connect(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once) {
-  if (s->idle_origin) {
+  if (scr_net_keeps_listeners(s)) {
     /* a listener on an unconnected socket waits for the connect() that is
      * still to come (or comes again after a close); only an socket that
      * is ALREADY connected has passed its 'connect' */
@@ -3685,14 +3731,14 @@ static bool scr_net_sock_emit_close(ScrNetSocket *sock, size_t due_floor) {
     sock->native_closed(sock->native_ctx);
     if (scr_exc_pending()) return false;
   }
-  scr_net_fire_close(&sock->close_ls, sock, SCR_DYNH_NET_SOCKET, sock->had_error);
+  scr_net_fire_close(&sock->close_ls, sock, SCR_DYNH_NET_SOCKET, sock->had_error, sock->close_undef);
   /* a 'close' listener that connect()ed this socket again (Node: the same
    * object lives on): the new life is registered and owns the state, so
    * the settle below must not drop its listeners or unregister it */
-  if (sock->idle_origin && sock->ns_state == SCR_NET_NS_LIVE) return !scr_exc_pending();
+  if (scr_net_keeps_listeners(sock) && sock->ns_state == SCR_NET_NS_LIVE) return !scr_exc_pending();
   /* settle: listeners drop (cycle story), except on an idle-origin socket,
    * whose listeners stay for a reconnect (see LISTEN_DEAD) */
-  if (!sock->idle_origin) {
+  if (!scr_net_keeps_listeners(sock)) {
     scr_net_ls_drop(&sock->data_ls);
     scr_net_ls_drop(&sock->end_ls);
     scr_net_ls_drop(&sock->close_ls);
@@ -3702,6 +3748,8 @@ static bool scr_net_sock_emit_close(ScrNetSocket *sock, size_t due_floor) {
     scr_net_ls_drop(&sock->readable_ls);
     scr_net_ls_drop(&sock->finish_ls);
     scr_net_ls_drop(&sock->wcb_ls);
+  } else {
+    scr_net_keep_link(sock);
   }
   if (sock->pipe_dst) {
     scr_net_sock_release(sock->pipe_dst);
@@ -4218,7 +4266,7 @@ static ScrDyn *scr_net_dynh_sock_invoke(void *h, ScrDyn *self, const char *metho
     } else if (scr_net_dynh_name_is(name, "end")) {
       scr_net_sock_on_end(s, scr_dyn_listener_closure0(cb), once);
     } else if (scr_net_dynh_name_is(name, "close")) {
-      scr_net_sock_on_close(s, scr_dyn_listener_closure0(cb), NULL, once);
+      scr_net_sock_on_close(s, scr_dyn_listener_closure_close(cb), (ScrNetCloseFn)&scr_net_close_thunk_dyn, once);
     } else if (scr_net_dynh_name_is(name, "error")) {
       scr_net_sock_on_error(s, scr_dyn_listener_closure_err(cb), (ScrChildErrFn)&scr_dyn_listener_fire_err, once);
     } else if (scr_net_dynh_name_is(name, "connect")) {
@@ -4307,21 +4355,36 @@ static ScrDyn *scr_net_dynh_sock_invoke(void *h, ScrDyn *self, const char *metho
     scr_net_sock_release(scr_net_sock_set_keepalive(s, enable, ms));
     return scr_dyn_retain(self);
   }
-  if (strcmp(method, "connect") == 0 && argc >= 1 && args[0]->kind == SCR_DYN_NUM && s->idle_origin) {
-    /* connect(port, [host], [listener]) with a numeric port, on a socket
-     * made by new net.Socket() (the only kind whose listeners survive a
-     * close for this reconnect). Anything else stays on the loud list below. */
+  if (strcmp(method, "connect") == 0 && argc >= 1 &&
+      (args[0]->kind == SCR_DYN_NUM || args[0]->kind == SCR_DYN_OBJ)) {
+    /* connect(port, [host], [listener]) or connect({ port, host }, [listener]).
+     * A dyn call only reaches a boxed socket, which keeps its listeners (see
+     * scr_net_keeps_listeners), so the dial is exact. The port must be numeric. */
+    const ScrDyn *portD = args[0];
     ScrStr *host = NULL;
     ScrDyn *listener = NULL;
-    if (argc >= 2 && args[1]->kind == SCR_DYN_STR) host = args[1]->v.str;
-    if (argc >= 2 && args[1]->kind == SCR_DYN_FUNC) listener = args[1];
-    if (argc >= 3 && args[2]->kind == SCR_DYN_FUNC) listener = args[2];
+    size_t next = 1;
+    if (args[0]->kind == SCR_DYN_OBJ) {
+      portD = scr_dyn_obj_get(args[0], "port", 4);
+      const ScrDyn *hostD = scr_dyn_obj_get(args[0], "host", 4);
+      if (hostD != NULL && hostD->kind == SCR_DYN_STR) host = hostD->v.str;
+      next = 1;
+    }
+    if (portD == NULL || portD->kind != SCR_DYN_NUM) goto connect_not_numeric;
+    if (args[0]->kind == SCR_DYN_NUM) {
+      if (argc >= 2 && args[1]->kind == SCR_DYN_STR) host = args[1]->v.str;
+      next = 2;
+    }
+    for (size_t k = next; k < (size_t)argc; k++) {
+      if (args[k]->kind == SCR_DYN_FUNC) listener = args[k];
+    }
     ScrClosure *cb = listener ? scr_dyn_listener_closure0(listener) : NULL;
-    ScrNetSocket *r = scr_net_sock_connect_cb(s, scr_dyn_to_number(args[0]), host, cb);
+    ScrNetSocket *r = scr_net_sock_connect_cb(s, scr_dyn_to_number(portD), host, cb);
     if (r == NULL) return NULL; /* the port check threw */
     scr_net_sock_release(r);
     return scr_dyn_retain(self);
   }
+  connect_not_numeric:
   if (strcmp(method, "destroySoon") == 0) {
     scr_net_sock_destroy_soon(s);
     return scr_dyn_retain(scr_dyn_undefined());
