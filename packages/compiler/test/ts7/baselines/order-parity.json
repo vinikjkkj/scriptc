@@ -18896,12 +18896,6 @@
       "<repo>/tests/corpus/14892-dns-lookup-answer-paths.ts"
     ],
     "diags": []
-  },
-  "<repo>/tests/corpus/14893-dns-lookup-empty-name.ts": {
-    "order": [
-      "<repo>/tests/corpus/14893-dns-lookup-empty-name.ts"
-    ],
-    "diags": []
   }
  }
 }
