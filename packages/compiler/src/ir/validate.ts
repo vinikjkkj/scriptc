@@ -828,6 +828,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The TLSSocket member surface (authError's `string | null` union is
   // shape-checked in the special cases below — the reqHeader pattern).
   "tls.sockAuthorized": { argTypes: [NETSOCKET_T], result: BOOL },
+  "tls.sockSessionReused": { argTypes: [NETSOCKET_T], result: BOOL },
+  "tls.sockGetSession": { argTypes: [NETSOCKET_T], result: VOID },
   "tls.sockAuthError": { argTypes: [NETSOCKET_T], result: VOID },
   "tls.sockOnSecureConnect": { argTypes: [NETSOCKET_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "tls.sockOnSession": { argTypes: [NETSOCKET_T, null, BOOL], result: VOID },
@@ -4613,6 +4615,20 @@ function validateFunction(
             def.arms[1]!.kind === "undefinedT";
           if (!ok) {
             err(`libCall net.sockEncrypted must return the 'boolean | undefined' union`, e.loc);
+          }
+          break;
+        }
+        if (e.fn === "tls.sockGetSession") {
+          // Result is the interned `Buffer | undefined` union (Node's
+          // getSession: the serialized session, or undefined).
+          const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
+          const ok =
+            def &&
+            def.arms.length === 2 &&
+            def.arms.some((a) => a.kind === "bytes" && a.elem === "u8") &&
+            def.arms.some((a) => a.kind === "undefinedT");
+          if (!ok) {
+            err(`libCall tls.sockGetSession must return the 'Buffer | undefined' union`, e.loc);
           }
           break;
         }
