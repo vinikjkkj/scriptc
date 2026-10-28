@@ -175,7 +175,40 @@ static int scr_w32_bind(int fd, const struct sockaddr *sa, socklen_t len) {
   return 0;
 }
 
+#ifdef _WIN32
+/* libuv (src/win/tcp.c uv__tcp_try_connect) keeps a loopback SYN from being
+ * retried: a closed loopback port refuses at once instead of after the
+ * TcpMaxConnectRetransmissions backoff (about 2 s on the CI runner). Same
+ * ioctl, same loopback test; the SDK names are defined here in case the
+ * headers lack them. */
+#ifndef SIO_TCP_INITIAL_RTO
+#define SIO_TCP_INITIAL_RTO _WSAIOW(IOC_VENDOR, 17)
+#endif
+typedef struct scr_tcp_initial_rto {
+  USHORT Rtt;
+  UCHAR MaxSynRetransmissions;
+} scr_tcp_initial_rto;
+#define SCR_TCP_INITIAL_RTO_UNSPECIFIED_RTT ((USHORT)-1)
+#define SCR_TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS ((UCHAR)-2)
+static void scr_net_w32_loopback_fail_fast(int fd, const struct sockaddr *sa) {
+  bool loop = false;
+  if (sa->sa_family == AF_INET) {
+    loop = ((const struct sockaddr_in *)sa)->sin_addr.S_un.S_un_b.s_b1 == 127;
+  } else if (sa->sa_family == AF_INET6) {
+    loop = IN6_IS_ADDR_LOOPBACK(&((const struct sockaddr_in6 *)sa)->sin6_addr);
+  }
+  if (!loop) return;
+  scr_tcp_initial_rto p;
+  memset(&p, 0xff, sizeof p);
+  p.Rtt = SCR_TCP_INITIAL_RTO_UNSPECIFIED_RTT;
+  p.MaxSynRetransmissions = SCR_TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS;
+  DWORD bytes = 0;
+  /* best effort, as libuv: a failed ioctl leaves the stack's default backoff */
+  (void)WSAIoctl((SOCKET)fd, SIO_TCP_INITIAL_RTO, &p, sizeof p, NULL, 0, &bytes, NULL, NULL);
+}
+#endif
 static int scr_w32_connect(int fd, const struct sockaddr *sa, socklen_t len) {
+  scr_net_w32_loopback_fail_fast(fd, sa);
   if (connect((SOCKET)fd, sa, (int)len) != 0) {
     int e = (int)WSAGetLastError();
     /* pending nonblocking connect: WSAEWOULDBLOCK here is the callers'
