@@ -1,4 +1,4 @@
-// An accessor record stored in a Map<string, unknown> and read back through a checked cast answers its getters.
+// An accessor record stored in a Map<string, unknown> reads back through JSON and Object.keys; a checked cast into a data record that names the getters is refused (diagnostics/accessor-crossing-cast-into-data-record-refused.ts).
 // Map value holding accessor record, read back through a checked cast
 const m = new Map<string, unknown>();
 function make(max: number) {
@@ -12,5 +12,5 @@ function make(max: number) {
 const c = make(4);
 c.add();
 m.set("k", c);
-const got = m.get("k") as { available: number; size: number };
-console.log(got.available, got.size);
+console.log(JSON.stringify(m.get("k")));
+console.log(Object.keys(m.get("k") as object));

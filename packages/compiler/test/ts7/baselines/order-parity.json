@@ -3365,6 +3365,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14314-accessor-unrelated-data-cast.ts": {
+   "order": [
+    "<repo>/tests/corpus/14314-accessor-unrelated-data-cast.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1431-caught-tostring.ts": {
    "order": [
     "<repo>/tests/corpus/1431-caught-tostring.ts"

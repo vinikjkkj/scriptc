@@ -12,5 +12,5 @@ c.add();
 const u: unknown = c;
 const box = new Map<string, unknown>();
 box.set("k", u);
-const got = box.get("k") as { available: number; size: number };
-console.log(got.available, got.size);
+console.log(JSON.stringify(box.get("k")));
+console.log(Object.keys(box.get("k") as object));
