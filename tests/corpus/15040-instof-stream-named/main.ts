@@ -4,7 +4,6 @@
 // Symbol.hasInstance (every Duplex-family object answers true for Writable).
 import * as net from "net";
 import * as tls from "tls";
-import * as fs from "fs";
 import { EventEmitter } from "events";
 import { Stream, Readable, Writable, Duplex, Transform, PassThrough } from "stream";
 
@@ -42,7 +41,7 @@ function pick(i: number): unknown {
     case 19: return new MyReadable();
     case 20: return new MyEmitter();
     case 21: return new Plain();
-    case 22: return fs.createReadStream("/dev/null");
+    case 22: return new Readable({ objectMode: true, read() {} });
     case 23: return new Date(0);
     case 24: return [1];
     case 25: return () => 1;
