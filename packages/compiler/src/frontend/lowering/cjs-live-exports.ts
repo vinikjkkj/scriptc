@@ -553,6 +553,28 @@ export function liveKeyOf(L: Lowerer, arg: ts.Expression): IrExpr | null {
   return key.type.kind === "string" ? key : null;
 }
 
+/** True when no assignment (`=`, compound, `++`, `--`) in the declaring file writes the variable `decl` names. An
+ * explicit stack walk: it runs during lowering, and the file may be deeply nested. */
+function neverReassignedIn(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+  if (!ts.isIdentifier(decl.name)) return false;
+  const sym = L.checker.getSymbolAtLocation(decl.name);
+  const stack: ts.Node[] = [decl.getSourceFile()];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (ts.isIdentifier(n) && n.text === decl.name.text && n !== decl.name && L.checker.getSymbolAtLocation(n) === sym) {
+      const p = n.parent;
+      if (p !== undefined && ts.isBinaryExpression(p) && p.left === n &&
+          p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && p.operatorToken.kind <= ts.SyntaxKind.LastAssignment) return false;
+      if (p !== undefined && (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) &&
+          (p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken)) return false;
+    }
+    ts.forEachChild(n, (c) => {
+      stack.push(c);
+    });
+  }
+  return true;
+}
+
 /** The DYN bag of a LIVE export object reference (`require` binding, the module's own `exports` /
  * `module.exports`, or an alias variable holding one), or null. Identity compares of these are exact: every
  * reference to one module is the same bag object. */
@@ -566,8 +588,13 @@ export function liveIdentityRefOf(L: Lowerer, e: ts.Expression, loc: SrcLoc): Ir
     const sym = L.checker.getSymbolAtLocation(x);
     const decl = sym ? L.checker.declarationsOf(sym).find(ts.isVariableDeclaration) : undefined;
     if (decl !== undefined && decl.initializer !== undefined && isLiveExportValue(L, decl.initializer)) {
-      const lowered = L.lowerExpr(x);
-      if (lowered.type.kind === "dyn") return lowered;
+      // A `const` alias of a live export object is the same object as its initializer (a const is never
+      // reassigned), so its identity is the initializer's bag. Any other alias (a `var`, which may be
+      // reassigned) has a static record storage that cannot answer identity: refused, never compared statically.
+      const list = decl.parent;
+      const isConst = ts.isVariableDeclarationList(list) && (list.flags & ts.NodeFlags.Const) !== 0;
+      if (isConst || neverReassignedIn(L, decl)) return liveIdentityRefOf(L, decl.initializer, loc);
+      L.unsupported("SC1100", x, "comparing the identity of a CommonJS module object through a `var` alias that is reassigned (only an alias that is never reassigned is the module's bag)");
     }
   }
   return null;
