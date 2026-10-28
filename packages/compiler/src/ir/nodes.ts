@@ -4398,7 +4398,6 @@ export type IrLibFn =
    * the 'session' registration (fires once with the serialized session —
    * a Buffer; the received-ticket event). */
   | "tls.sockAuthorized"
-  | "tls.sockSessionReused"
   | "tls.sockAuthError"
   | "tls.sockOnSecureConnect"
   | "tls.sockOnSession"

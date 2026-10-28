@@ -10245,8 +10245,6 @@ ScrNetSocket *scr_tls_connect_dyn(double port, ScrStr *host /*borrowed, nullable
  * registers the received-ticket event (fires once with the serialized
  * session as a Buffer; `fn` is the data-listener adapter ABI). */
 bool scr_tls_sock_authorized(ScrNetSocket *s);
-/* TLSSocket.isSessionReused(): always false here (no TLS resumption). */
-bool scr_tls_sock_session_reused(ScrNetSocket *s);
 ScrStr *scr_tls_sock_auth_error(ScrNetSocket *s); /* +1 or NULL */
 void scr_tls_sock_on_secure_connect(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once);
 void scr_tls_sock_on_session(ScrNetSocket *s, ScrClosure *cb /*moves*/, void *fn, bool once);
