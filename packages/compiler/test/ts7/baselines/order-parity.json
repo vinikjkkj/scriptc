@@ -4613,6 +4613,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15350-mixin-emitter-members.js": {
+   "order": [
+    "<repo>/tests/corpus/15350-mixin-emitter-members.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15351-mixin-every-member.js": {
+   "order": [
+    "<repo>/tests/corpus/15351-mixin-every-member.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15352-mixin-instance-loop.js": {
+   "order": [
+    "<repo>/tests/corpus/15352-mixin-instance-loop.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15353-mixin-subclass-shares-graft.js": {
+   "order": [
+    "<repo>/tests/corpus/15353-mixin-subclass-shares-graft.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1536-destructuring-defaults.ts": {
    "order": [
     "<repo>/tests/corpus/1536-destructuring-defaults.ts"
