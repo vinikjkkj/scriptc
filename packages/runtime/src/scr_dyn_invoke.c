@@ -1632,6 +1632,7 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
   const ScrDynClassMember *cm = scr_dyn_objinst_member(d, key->data, key->len);
   if (cm == NULL) return NULL;
   if (cm->get != NULL) return cm->get(d->v.inst.o);
+  if (cm->value != NULL) return cm->value();
   const ScrDynClass *cls = scr_dyn_objinst_class_of(d);
   ScrObjinstMethodFn *w = scr_objinst_fns;
   while (w != NULL && !(w->cls == cls && w->cm == cm)) w = w->next;

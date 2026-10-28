@@ -10,7 +10,7 @@ import { rcSitesRequested } from "./emitter.js";
 import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
-import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
 import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
@@ -276,9 +276,29 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       }
       d.push(`}`, ``);
       defs.push(...d);
+      // The method's VALUE (`o.m` read through the dyn side): the SAME interned
+      // unbound thunk the static read `x.m` names (lower-exprs unboundMethodThunk,
+      // "%unbound.<Declarer>.<m>%direct"), boxed over its immortal closure, so
+      // `o[k] === x.m` compares equal by closure identity (scr_dyn_strict_eq).
+      let valueFn = "NULL";
+      const thunkName = !isStatic && fn.name.startsWith("%") ? `%unbound.${fn.name.slice(1)}%direct` : null;
+      if (thunkName !== null && E.fnByName.has(thunkName)) {
+        const tfn = E.fnByName.get(thunkName)!;
+        E.fnValues.add(thunkName);
+        const box = dynFuncBoxHelper(E, { kind: "func", params: tfn.params.map((q) => q.type), ret: tfn.returnType });
+        const vsym = `sc_dclv_${E.dynClassMemberFns++}`;
+        E.walkerProtos.push(`${E.link}ScrDyn *${vsym}(void); /* member value ${className}.${row.name} */`);
+        defs.push(
+          `${E.link}ScrDyn *${vsym}(void) { /* member value ${className}.${row.name} */`,
+          `  return ${box}((ScrClosure *)&${mangleFnClosure(thunkName)}, ${cStringLiteral(Buffer.from(row.name, "utf8"))}, NULL);`,
+          `}`,
+          ``,
+        );
+        valueFn = `&${vsym}`;
+      }
       entries.push(
         `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
-          `NULL, &${sym}, false },`,
+          `NULL, &${sym}, false, 0, ${valueFn} },`,
       );
     }
 

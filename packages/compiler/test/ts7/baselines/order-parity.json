@@ -18968,6 +18968,12 @@
       "<repo>/tests/corpus/14152-ee-subclass-for-in-keys.js"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/14600-dyn-method-identity.js": {
+    "order": [
+      "<repo>/tests/corpus/14600-dyn-method-identity.js"
+    ],
+    "diags": []
   }
  }
 }

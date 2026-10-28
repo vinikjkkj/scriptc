@@ -4768,6 +4768,10 @@ typedef struct ScrDynClassMember {
    * wrote it: the instance's order record (ScrDynClass.ord) holds these
    * ordinals in write order. Appended, like every trailing member. */
   unsigned char ordk;
+  /* A METHOD's value (`o.m` read through the dyn side): the box over the interned unbound
+   * thunk the static read names, +1, or NULL for a data member / a method with no thunk (the
+   * box minted per read, which no identity test can equal). Emitted per method row. */
+  ScrDyn *(*value)(void);
 } ScrDynClassMember;
 /* True when an enumerating walk must skip this member of `obj`: not
  * enumerable, a method, or an absent-until-assigned field still undefined. */

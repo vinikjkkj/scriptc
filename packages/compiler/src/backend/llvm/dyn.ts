@@ -35,7 +35,7 @@ import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arra
 import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
-import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
@@ -152,6 +152,8 @@ export interface DynHost extends WalkerHost {
    * implementation each class actually has, and a dead-stripped body is
    * a row that is not there. */
   readonly fnByName: ReadonlyMap<string, IrFunction>;
+  /** Marks a declared function as used as a value (its interned closure is emitted). */
+  noteFnValue(name: string): void;
   /** The GEP index of a declared field inside the class's own struct
    * (the hierarchy prefix already counted). */
   classFieldGep(className: string, field: string): number;
@@ -5126,7 +5128,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3, i8 0 }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3, i8 0, ptr null }`);
         continue;
       }
       if (row.kind === "field") {
@@ -5176,7 +5178,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk} }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk}, ptr null }`);
         continue;
       }
 
@@ -5220,7 +5222,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.enumerable === true ? 1 : 0}, i8 0 }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.enumerable === true ? 1 : 0}, i8 0, ptr null }`);
         continue;
       }
 
@@ -5305,7 +5307,26 @@ export class LlDyn {
         `}`,
         ``,
       );
-      entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr null, ptr @${sym}, i8 0, i8 0 }`);
+      // The method's VALUE (`o.m` read through the dyn side): a box over the interned
+      // unbound thunk the static `x.m` read names (lower-exprs unboundMethodThunk), the
+      // C emitter's twin (emit-walkers dynClassMembers), so identity holds across the boundary.
+      let valueRef = "null";
+      const thunkName = !isStatic && fn.name.startsWith("%") ? `%unbound.${fn.name.slice(1)}%direct` : null;
+      if (thunkName !== null && host.fnByName.has(thunkName)) {
+        const tfn = host.fnByName.get(thunkName)!;
+        host.noteFnValue(thunkName);
+        const box = this.dynFuncBoxHelper({ kind: "func", params: tfn.params.map((q) => q.type), ret: tfn.returnType });
+        const vsym = `sc_dclv_${this.classMemberFns++}`;
+        this.defs.push(
+          `define internal ptr @${vsym}() ${FN_ATTRS} { ; member value ${className}.${row.name}`,
+          `  %r = call ptr @${box}(ptr @${mangleFnClosure(thunkName)}, ptr ${nameLit}, ptr null)`,
+          `  ret ptr %r`,
+          `}`,
+          ``,
+        );
+        valueRef = `@${vsym}`;
+      }
+      entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr null, ptr @${sym}, i8 0, i8 0, ptr ${valueRef} }`);
     }
 
     const sym = `sc_dclt_${this.classMemberTbls++}`;
