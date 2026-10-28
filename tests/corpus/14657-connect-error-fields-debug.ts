@@ -24,15 +24,21 @@ const probe = net.createServer(() => {});
 probe.listen(0, "127.0.0.1", () => {
   const port = (probe.address() as { port: number }).port;
   probe.close(() => {
+    const t1 = Date.now();
     const s1 = net.connect(port, "127.0.0.1");
     s1.on("error", (e: unknown) => {
       report("v4", e, port);
+      console.log("v4 elapsed-bucket-ms", Math.round((Date.now() - t1) / 100) * 100);
+      const t2 = Date.now();
       const s2 = net.connect(port, "localhost");
       s2.on("error", (e2: unknown) => {
         report("lh", e2, port);
+        console.log("lh elapsed-bucket-ms", Math.round((Date.now() - t2) / 100) * 100);
+        const t3 = Date.now();
         const s3 = Tls.connect({ port, host: "localhost" });
         s3.on("error", (e3: unknown) => {
           report("tls", e3, port);
+          console.log("tls elapsed-bucket-ms", Math.round((Date.now() - t3) / 100) * 100);
         });
       });
     });
