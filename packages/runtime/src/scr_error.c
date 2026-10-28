@@ -364,6 +364,7 @@ static double scr_uv_errno(int err_no) {
   /* libuv's win.h value for a refused connect (Node on win32: errno -4078).
    * Without this row the default would print -107, the MinGW POSIX value. */
   case ECONNREFUSED: return -4078;
+  case ETIMEDOUT: return -4039; /* libuv's win.h value (Node on win32: ETIMEDOUT -4039) */
   default: break;
   }
 #endif
