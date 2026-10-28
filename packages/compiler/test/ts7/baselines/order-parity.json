@@ -18975,5 +18975,11 @@
       "<repo>/tests/corpus/14872-child-stdout-promise-executor.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/14873-child-stdout-once-chain.ts": {
+    "order": [
+      "<repo>/tests/corpus/14873-child-stdout-once-chain.ts"
+    ],
+    "diags": []
   }
 }
