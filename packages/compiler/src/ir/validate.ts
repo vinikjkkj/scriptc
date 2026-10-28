@@ -322,6 +322,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "num.parseFloat": { argTypes: [STRING], result: F64 },
   "num.fromString": { argTypes: [STRING], result: F64 },
   "num.isNaN": { argTypes: [F64], result: BOOL },
+  "num.isUndef": { argTypes: [F64], result: BOOL },
+  "num.canon": { argTypes: [F64], result: F64 },
+  "num.undef": { argTypes: [], result: F64 },
   "str.encodeUriComponent": { argTypes: [STRING], result: STRING },
   // The base64 globals: the argument is a dyn value (WebIDL ToString
   // runs in the runtime); the zero-argument form always throws.
