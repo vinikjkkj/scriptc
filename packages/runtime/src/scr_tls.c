@@ -939,6 +939,23 @@ void scr_tls_sni_answer(ScrClosure *self, bool has_err, ScrSecureCtx *ctx /*move
  * with RFC 6125 single-label wildcards, the JSON-literal walk of
  * subjectaltname (splitEscapedAltNames), and canonicalizeIP. */
 
+/* Owned-string builders for the identity path. scr_dyn_new_str and
+ * scr_error_new both RETAIN their string argument, so the scr_str_new
+ * reference is released here, once the wrapper holds its own. */
+static ScrDyn *scr_id_dyn_str(const char *s, size_t n) {
+  ScrStr *t = scr_str_new(s, n);
+  ScrDyn *d = scr_dyn_new_str(t);
+  scr_str_release(t);
+  return d;
+}
+
+static ScrError *scr_id_err_new(const char *s, size_t n) {
+  ScrStr *t = scr_str_new(s, n);
+  ScrError *e = scr_error_new(SCR_ERR_ERROR, t);
+  scr_str_release(t);
+  return e;
+}
+
 typedef struct { const char *p; size_t n; } ScrIdSpan;
 typedef struct { char *buf; ScrIdSpan *lab; size_t nlab; } ScrIdLabels;
 
@@ -1244,6 +1261,7 @@ static char *scr_id_reason(const char *host, size_t hn, const char *alt, size_t 
     for (size_t k = 0; k < altn && !quoted; k++) quoted = alt[k] == '"';
     if (quoted) {
       if (!scr_id_split_escaped(alt, altn, &entries)) {
+        scr_id_list_free(&entries);
         *fmt_err = true;
         return NULL;
       }
@@ -1403,7 +1421,7 @@ static ScrDyn *scr_tls_peer_cert_dyn(const mbedtls_x509_crt *crt) {
       if (n->oid.p == NULL || n->val.p == NULL) continue;
       if (mbedtls_oid_get_attr_short_name(&n->oid, &sn) != 0 || sn == NULL) continue;
       size_t kl = strlen(sn);
-      ScrDyn *v = scr_dyn_new_str(scr_str_new((const char *)n->val.p, n->val.len));
+      ScrDyn *v = scr_id_dyn_str((const char *)n->val.p, n->val.len);
       const ScrDyn *prev = scr_dyn_obj_get(subj, sn, kl);
       if (prev == NULL) {
         scr_dyn_obj_set(subj, sn, kl, v);
@@ -1453,7 +1471,7 @@ static ScrDyn *scr_tls_peer_cert_dyn(const mbedtls_x509_crt *crt) {
       free(one.s);
     }
   }
-  if (san.n > 0) scr_dyn_obj_set(cert, "subjectaltname", 14, scr_dyn_new_str(scr_str_new(san.s, san.n)));
+  if (san.n > 0) scr_dyn_obj_set(cert, "subjectaltname", 14, scr_id_dyn_str(san.s, san.n));
   free(san.s);
   return cert;
 }
@@ -1466,7 +1484,7 @@ static ScrError *scr_id_error(const char *reason) {
   if (!msg) scr_tls_oom();
   memcpy(msg, pre, pl);
   memcpy(msg + pl, reason, rl);
-  ScrError *e = scr_error_new(SCR_ERR_ERROR, scr_str_new(msg, pl + rl));
+  ScrError *e = scr_id_err_new(msg, pl + rl);
   free(msg);
   scr_error_set_code(e, "ERR_TLS_CERT_ALTNAME_INVALID");
   return e;
@@ -1494,8 +1512,8 @@ ScrDyn *scr_tls_check_server_identity_dyn(const ScrStr *host, const ScrDyn *cert
   ScrDyn *d = scr_dyn_from_error(e);
   scr_error_release(e);
   size_t hn = host->len > 0 && host->data[host->len - 1] == '.' ? host->len - 1 : host->len;
-  scr_dyn_obj_set(d, "reason", 6, scr_dyn_new_str(scr_str_new(reason, strlen(reason))));
-  scr_dyn_obj_set(d, "host", 4, scr_dyn_new_str(scr_str_new(host->data, hn)));
+  scr_dyn_obj_set(d, "reason", 6, scr_id_dyn_str(reason, strlen(reason)));
+  scr_dyn_obj_set(d, "host", 4, scr_id_dyn_str(host->data, hn));
   scr_dyn_obj_set(d, "cert", 4, scr_dyn_retain((ScrDyn *)cert));
   free(reason);
   return d;
@@ -1531,7 +1549,7 @@ static bool scr_tls_ident_run(ScrTlsSock *t) {
   if (t->vrfy_expired || t->vrfy_leaf_self || t->vrfy_chain_self) return true;
   if (mbedtls_ssl_get_verify_result(&t->ssl) & MBEDTLS_X509_BADCERT_NOT_TRUSTED) return true;
   ScrDyn *args[2];
-  args[0] = scr_dyn_new_str(scr_str_new(cli->verify_name, strlen(cli->verify_name)));
+  args[0] = scr_id_dyn_str(cli->verify_name, strlen(cli->verify_name));
   args[1] = scr_tls_peer_cert_dyn(mbedtls_ssl_get_peer_cert(&t->ssl));
   ScrDyn *r = scr_dyn_call(cli->identity, args, 2, "checkServerIdentity");
   scr_dyn_release(args[0]);
@@ -1544,8 +1562,9 @@ static bool scr_tls_ident_run(ScrTlsSock *t) {
   if (r != NULL && scr_id_truthy(r)) {
     const ScrDyn *m = scr_dyn_err_read(r, "message", 7);
     const ScrDyn *c = scr_dyn_err_read(r, "code", 4);
-    ScrStr *msg = m != NULL && m->kind == SCR_DYN_STR ? scr_str_retain(m->v.str) : scr_str_new("", 0);
-    ScrError *e = scr_error_new(SCR_ERR_ERROR, msg);
+    /* scr_error_new retains its message: the borrowed string needs no extra ref */
+    ScrError *e = m != NULL && m->kind == SCR_DYN_STR ? scr_error_new(SCR_ERR_ERROR, m->v.str)
+                                                      : scr_id_err_new("", 0);
     if (c != NULL && c->kind == SCR_DYN_STR) {
       char code[64];
       size_t cl = c->v.str->len < sizeof code - 1 ? c->v.str->len : sizeof code - 1;
