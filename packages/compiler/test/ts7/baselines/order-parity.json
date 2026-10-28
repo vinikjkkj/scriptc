@@ -18716,6 +18716,12 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/14151-js-class-inferred-field-order.js": {
+    "order": [
+      "<repo>/tests/corpus/14151-js-class-inferred-field-order.js"
+    ],
+    "diags": []
   }
  }
 }

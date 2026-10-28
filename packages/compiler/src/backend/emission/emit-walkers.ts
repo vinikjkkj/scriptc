@@ -13,6 +13,7 @@ import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vA
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
 import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
+import { ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -105,7 +106,8 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) || dynEnumerationFenced(meta) ? "true" : "false"}, ${opaque ? "true" : "false"}, ${errorRooted ? "true" : "false"}, ` +
         `${statics === null ? "NULL, 0" : `${statics.sym}, ${statics.count}`}, ${staticsOpaque ? "true" : "false"}, ` +
         `${meta.base === null ? "NULL" : cStringLiteral(Buffer.from(dynClassDisplayName(meta.base.def), "utf8"))}, ` +
-        `${dynRuntimeRoot(meta)}, ${E.tracedShapes.has(`object:${className}`) ? 1 : 0} }; ` +
+        `${dynRuntimeRoot(meta)}, ${E.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
+        `${dynOrdNord(E, meta)}, ${dynOrdOffsetC(E, meta)} }; ` +
         `/* dyn box: class ${className} */`,
     );
     // A base-typed box can hold a DERIVED instance, and the registry resolves
@@ -139,6 +141,17 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
  * Answers null when the class has no rows: an empty C array is not a C
  * array, and the descriptor then carries `NULL, 0` and behaves exactly as
  * it did before member tables existed. */
+  /** The inferred-field order record of a class's hierarchy (ir/nodes.ts): the
+   * number of inferred fields the hierarchy may write (0 = none), and the
+   * byte offset of the record in this class's struct (the root's `sc_ord`). */
+  function dynOrdNord(E: CEmitter, meta: ClassMeta): string {
+    return String(orderRecordPlanCached(E.mod.classes ?? []).namesOf(meta.def.name).length);
+  }
+  function dynOrdOffsetC(E: CEmitter, meta: ClassMeta): string {
+    const plan = orderRecordPlanCached(E.mod.classes ?? []);
+    if (plan.recordBytes(meta.def.name) === 0) return "0";
+    return `offsetof(${mangleClassStruct(plan.rootOf(meta.def.name)!)}, ${ORD_MEMBER})`;
+  }
   function dynClassMembers(E: CEmitter, className: string, meta: ClassMeta, statics = false): { sym: string; count: number } | null {
     const getRec = (id: string) => E.recordsById.get(id);
     const getUni = (id: string) => E.unionsById.get(id);
@@ -186,7 +199,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         );
         entries.push(
           `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
-            `&${sym}, NULL, ${row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1} },`,
+            `&${sym}, NULL, ${row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, ${row.ordk} },`,
         );
         continue;
       }

@@ -4683,7 +4683,22 @@ typedef struct ScrDynClass {
    * instance (no cycle header): a dyn box owns it by reference only and
    * releases it through `release` as before. Appended last, like rt_root. */
   unsigned char cyc;
+  /* The number of INFERRED fields this class's hierarchy may write (0: none,
+   * and then `ord` is NULL and the table is walked in its own order). APPENDED.
+   * `ord_off` is the byte offset of the instance's order record (the hierarchy
+   * root's `sc_ord` member): rec[0] = how many ordinals are written,
+   * rec[1..rec[0]] = those ordinals in write order (scr_ord_note). */
+  size_t nord;
+  size_t ord_off;
 } ScrDynClass;
+
+/* The order record of an instance whose class has inferred fields: `k` is the
+ * field's ordinal (0..254). A WRITE of a field not yet written appends it;
+ * a write of a written field changes nothing (JS: the key keeps its place).
+ * scr_ord_forget is `delete` of the field: its ordinal leaves the record, so
+ * a later write appends it again, after every other key (Node's rule). */
+void scr_ord_note(uint8_t *rec, uint8_t k);
+void scr_ord_forget(uint8_t *rec, uint8_t k);
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
  * HANDLE kinds whose member surfaces already have complete static
@@ -4747,6 +4762,12 @@ typedef struct ScrDynClassMember {
    * method is non-enumerable in JS, which is why `Object.keys(new Box(7))`
    * is ["v"] and not ["v","get"]. */
   unsigned char enumerable; /* 0 no, 1 yes, 2 yes UNLESS the value is undefined (a field whose undefined arm means "not assigned yet"), 3 as 2 and ALSO skipped by a lookup by name (an own property shadowing a method: the method row answers the name), 4 yes UNLESS the dyn slot holds the absent marker (a field `delete` removed) */
+  /* INFERRED-FIELD ORDINAL + 1 (0 = a static member: a declared field or a
+   * method, listed in table order). A field the class's constructor or a
+   * method first WRITES (a JS expando) is listed in the order the instance
+   * wrote it: the instance's order record (ScrDynClass.ord) holds these
+   * ordinals in write order. Appended, like every trailing member. */
+  unsigned char ordk;
 } ScrDynClassMember;
 /* True when an enumerating walk must skip this member of `obj`: not
  * enumerable, a method, or an absent-until-assigned field still undefined. */

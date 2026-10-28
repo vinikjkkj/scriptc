@@ -5,7 +5,7 @@
  * VtSlot) the emitter builds up front; emission ORDER is part of the C. */
 import type { CEmitter } from "./emitter.js";
 import type { IrBuiltinRendering, IrFunction, OwnMaskShape } from "../../ir/nodes.js";
-import { DYN, IrClassDef, IrType, moduleUsesCtorName, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
+import { DYN, IrClassDef, IrType, moduleUsesCtorName, ORD_MEMBER, orderRecordPlanCached, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
 import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
 
@@ -186,6 +186,10 @@ export interface ClassMeta {
        * trailing `ScrDyn *` member, treated as one more (dyn-typed) field
        * by new/release/trace. */
       srcproto?: true;
+      /** Class shapes whose hierarchy has inferred fields: the bytes of the
+       * per-instance order record (ir/nodes.ts ORD_MEMBER), laid out first among
+       * the fields so every class of the hierarchy shares its offset. */
+      ordBytes?: number;
       comment: string;
       /** Class shapes only; hierarchy members get the vtable machinery. */
       meta: ClassMeta | null;
@@ -204,6 +208,7 @@ export interface ClassMeta {
         gcFree: mangleClassGcFree(cls.name),
         traced: E.tracedShapes.has(`object:${cls.name}`),
         fields: cls.fields,
+        ordBytes: orderRecordPlanCached(E.mod.classes ?? []).recordBytes(cls.name),
         comment: `class ${cls.name}`,
         meta: E.classMeta.get(cls.name) ?? null,
       })),
@@ -301,6 +306,9 @@ export interface ClassMeta {
             decl.push(`  ScrStreamState *sc_st; /* stream state (ScrStream prefix) */`);
           }
         }
+      }
+      if (s.ordBytes !== undefined && s.ordBytes > 0) {
+        decl.push(`  uint8_t ${ORD_MEMBER}[${s.ordBytes}]; /* hidden per-instance order record of the inferred fields */`);
       }
       for (const f of s.fields) {
         decl.push(`  ${cDecl(f.type, mangleField(f.name))}; /* ${f.name} */`);
