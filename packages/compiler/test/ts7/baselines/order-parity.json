@@ -19632,6 +19632,84 @@
       "<repo>/tests/corpus/15146-lru-min-resize-evict.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-aliased.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-aliased.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-fill-value.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-fill-value.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-for-of.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-for-of.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-forEach.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-forEach.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-in.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-in.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-indexOf-join.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-indexOf-join.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-json.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-json.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-logged.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-logged.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-map.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-map.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-passed.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-passed.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-returned.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-returned.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-slice.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-slice.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/grown-number-array-spread.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/grown-number-array-spread.ts"
+    ],
+    "diags": []
   }
  }
 }
