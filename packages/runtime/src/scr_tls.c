@@ -622,6 +622,14 @@ typedef struct ScrTlsSock {
    * fires per received ticket; this surface fires once per socket) */
   ScrNetLs session_ls;
   bool session_fired;
+  /* the last session a ticket absorbed INSIDE the handshake carried (Node
+   * keeps one pending session and emits it after secureConnect) */
+  ScrBytes *pending_session;
+  /* the session bytes last exported for this socket. mbedTLS exports a session
+   * ONCE (mbedtls_ssl_get_session fails on a second export), but getSession()
+   * answers the current session at any time: the cache answers it until the
+   * next ticket replaces the session. */
+  ScrBytes *sess_cache;
   bool resumed; /* the handshake resumed the offered session (isSessionReused) */
   /* what the verify callback saw (the peer chain is gone once the
    * handshake has failed, so the shape is recorded as it verifies) */
@@ -695,6 +703,8 @@ static int scr_tls_bio_recv(void *ctx, unsigned char *buf, size_t len) {
 
 static void scr_tls_fire_session(ScrTlsSock *t);
 static bool scr_tls_resumed(ScrTlsSock *t);
+static ScrBytes *scr_tls_session_bytes(ScrTlsSock *t);
+static ScrBytes *scr_tls_session_bytes_fresh(ScrTlsSock *t);
 
 static ssize_t scr_tls_xread(void *tctx, char *buf, size_t n) {
   ScrTlsSock *t = (ScrTlsSock *)tctx;
@@ -792,6 +802,7 @@ static int scr_tls_ticket_parse(void *p_ticket, mbedtls_ssl_session *session, un
   }
   return r;
 }
+
 
 /* Defined with the other transport ops below; the answer path needs the
  * table's identity to re-find its engine from the boxed socket. */
@@ -2008,9 +2019,19 @@ static int scr_tls_handshake(void *tctx) {
   if (t->sni_state == SCR_SNI_WAIT) return 0; /* the callback is deciding */
   scr_tls_current = t;
   int r = mbedtls_ssl_handshake(&t->ssl);
-  /* a ticket absorbed mid-handshake is not a handshake failure: keep going */
+  /* a ticket absorbed mid-handshake is not a handshake failure: keep going,
+   * and remember its session for the 'session' event after secureConnect */
 #if defined(MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET)
-  while (r == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET) r = mbedtls_ssl_handshake(&t->ssl);
+  while (r == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET) {
+    if (t->cli != NULL && scr_net_sock_first_attempt(t->sock)) {
+      ScrBytes *b = scr_tls_session_bytes_fresh(t);
+      if (b != NULL) {
+        scr_bytes_release(t->pending_session);
+        t->pending_session = b;
+      }
+    }
+    r = mbedtls_ssl_handshake(&t->ssl);
+  }
 #endif
   scr_tls_current = NULL;
   if (r == 0) {
@@ -2045,7 +2066,6 @@ static int scr_tls_handshake(void *tctx) {
 static void scr_tls_on_established(void *tctx) {
   ScrTlsSock *t = (ScrTlsSock *)tctx;
   t->established = true;
-  if (t->cli != NULL) scr_tls_fire_session(t); /* the 1.2 arm; 1.3 fires on ticket receipt */
   if (t->srv != NULL && t->srv->h2_conn != NULL) {
     /* the h2 secure server: dispatch on the NEGOTIATED protocol — the
      * h2 session attaches as the socket's native reader (it reads
@@ -2085,6 +2105,8 @@ static void scr_tls_shutdown_write(void *tctx) {
 
 static void scr_tls_free(void *tctx) {
   ScrTlsSock *t = (ScrTlsSock *)tctx;
+  scr_bytes_release(t->pending_session);
+  scr_bytes_release(t->sess_cache);
   mbedtls_ssl_free(&t->ssl);
   if (t->srv) scr_tls_srv_release(t->srv);
   if (t->cli) scr_tls_cli_free(t->cli);
@@ -2092,6 +2114,15 @@ static void scr_tls_free(void *tctx) {
   free(t->hello);
   scr_secure_ctx_release(t->sni_ctx);
   free(t);
+}
+
+static void scr_tls_fire_session_bytes(ScrTlsSock *t, ScrBytes *buf);
+static void scr_tls_after_connect(void *tctx) {
+  ScrTlsSock *t = (ScrTlsSock *)tctx;
+  ScrBytes *b = t->pending_session;
+  if (b == NULL) return;
+  t->pending_session = NULL;
+  scr_tls_fire_session_bytes(t, b); /* consumes b */
 }
 
 static const ScrNetTransportOps SCR_TLS_OPS = {
@@ -2102,6 +2133,7 @@ static const ScrNetTransportOps SCR_TLS_OPS = {
   .pending = scr_tls_pending,
   .shutdown_write = scr_tls_shutdown_write,
   .free_fn = scr_tls_free,
+  .after_connect = scr_tls_after_connect,
 };
 
 /* ── the server surface ──────────────────────────────────────────────── */
@@ -3305,18 +3337,41 @@ static ScrTlsSock *scr_tls_sock_of(ScrNetSocket *s) {
   return (ScrTlsSock *)scr_net_sock_transport_ctx_for(s, &SCR_TLS_OPS);
 }
 
-/* The client 'session' event. Node 24.15 never emits it on a client
- * TLSSocket: the new-session callback never reaches JS, although the
- * server issues tickets (server newSession fires) and getSession() answers
- * a resumable session (MEASURED, lab/node-sess5.js, node-sess7.js: TLS 1.2
- * and 1.3, ticketKeys, servername, sessionTimeout). So the registration is
- * accepted and never fires, exactly Node's observable behaviour. */
-static void scr_tls_fire_session(ScrTlsSock *t) { (void)t; }
+/* The client 'session' event: fired once per received ticket with the session
+ * the client can resume with (Node's onnewsessionclient). Node's handle is
+ * re-initialised when a connect falls back to a later address (autoSelectFamily),
+ * and a re-initialised handle never gets the session callback: the event only
+ * fires on a connection made by the FIRST dial attempt (measured on Node 24.15:
+ * localhost -> an IPv4-only server emits no 'session', the IPv6 first attempt does). */
+static void scr_tls_fire_session(ScrTlsSock *t) {
+  if (t->session_ls.n == 0 || t->cli == NULL || !t->established) return;
+  if (!scr_net_sock_first_attempt(t->sock)) return;
+  ScrBytes *buf = scr_tls_session_bytes_fresh(t);
+  if (buf != NULL) scr_tls_fire_session_bytes(t, buf);
+}
+
+/* delivers one session to the listeners; consumes buf */
+static void scr_tls_fire_session_bytes(ScrTlsSock *t, ScrBytes *buf) {
+  if (t->session_ls.n == 0) {
+    scr_bytes_release(buf);
+    return;
+  }
+  ScrNetL *snap;
+  size_t n = scr_net_ls_snapshot(&t->session_ls, &snap);
+  scr_dyn_this_push(t->sock, SCR_DYNH_NET_SOCKET);
+  for (size_t i = 0; i < n; i++) {
+    if (!scr_exc_pending()) ((ScrNetDataFn)snap[i].fn)(snap[i].cb, buf);
+    scr_closure_release(snap[i].cb);
+  }
+  scr_dyn_this_pop();
+  free(snap);
+  scr_bytes_release(buf);
+}
 
 /* The negotiated session serialized (mbedtls_ssl_session_save), +1 bytes,
  * or NULL when the handshake has no session. The `session` option and
  * getSession() share this wire form. */
-static ScrBytes *scr_tls_session_bytes(ScrTlsSock *t) {
+static ScrBytes *scr_tls_session_export(ScrTlsSock *t) {
   mbedtls_ssl_session sess;
   mbedtls_ssl_session_init(&sess);
   if (mbedtls_ssl_get_session(&t->ssl, &sess) != 0) {
@@ -3334,6 +3389,22 @@ static ScrBytes *scr_tls_session_bytes(ScrTlsSock *t) {
     return NULL;
   }
   return b;
+}
+
+/* The current session's bytes (+1): a fresh export when a new session arrived
+ * (the ticket path clears the cache first), otherwise the cached export. */
+static ScrBytes *scr_tls_session_bytes(ScrTlsSock *t) {
+  if (t->sess_cache != NULL) return scr_bytes_retain(t->sess_cache);
+  ScrBytes *b = scr_tls_session_export(t);
+  if (b != NULL) t->sess_cache = scr_bytes_retain(b);
+  return b;
+}
+
+/* a new session arrived: the next answer is a fresh export */
+static ScrBytes *scr_tls_session_bytes_fresh(ScrTlsSock *t) {
+  scr_bytes_release(t->sess_cache);
+  t->sess_cache = NULL;
+  return scr_tls_session_bytes(t);
 }
 
 /* Whether the handshake RESUMED the offered session. A resumption leaves the
@@ -3415,7 +3486,6 @@ void scr_tls_sock_on_session(ScrNetSocket *s, ScrClosure *cb /*moves*/, void *fn
     return;
   }
   scr_net_ls_add(&t->session_ls, cb, fn, once);
-  if (t->established) scr_tls_fire_session(t); /* the ticket already arrived */
 }
 
 static bool scr_tls_dynh_get(ScrNetSocket *s, const char *key, ScrDyn **out) {
@@ -3456,7 +3526,6 @@ static bool scr_tls_dynh_on(ScrNetSocket *s, const char *event, const ScrDyn *cb
                    (void *)&scr_dyn_listener_fire_data, once);
     /* a late registration on an established socket fires directly (the
      * ticket already arrived — nothing further would trigger it) */
-    if (t->established) scr_tls_fire_session(t);
     return true;
   }
   return false;

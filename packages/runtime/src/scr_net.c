@@ -1484,6 +1484,10 @@ static void scr_net_sock_transport_pump(ScrNetSocket *s) {
   }
   scr_net_fire0_this(&s->conn_ls, s, SCR_DYNH_NET_SOCKET);
   if (scr_exc_pending()) return;
+  if (s->tops->after_connect) {
+    s->tops->after_connect(s->tctx);
+    if (scr_exc_pending()) return;
+  }
   scr_net_sock_flush(s);
   scr_net_sock_update_read(s);
   scr_net_sock_update_write(s);
@@ -2680,6 +2684,11 @@ void scr_net_sock_on_timeout(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool onc
  * types `encrypted: true` on TLSSocket from construction; plain sockets
  * answer the undefined arm — the emitter maps false to it). */
 bool scr_net_sock_encrypted(ScrNetSocket *s) { return s->tops != NULL; }
+
+/* True when the connection was made by the first dial attempt (at most one
+ * candidate address was dialled). A later attempt is Node's re-initialised
+ * handle, which the TLS session event does not reach. */
+bool scr_net_sock_first_attempt(ScrNetSocket *s) { return s->dial_i <= 1; }
 
 ScrStr *scr_net_sock_remote_address(ScrNetSocket *s) {
   if (s->remote_cache) return scr_str_retain(s->remote_cache);

@@ -10232,6 +10232,10 @@ typedef struct ScrNetTransportOps {
    * under any profiling lane. This was the only such collision in the
    * runtime, and ScrCycHdr already spells the same idea free_fn. */
   void (*free_fn)(void *tctx);
+  /* optional: runs after the socket's 'connect' listeners (the secureConnect
+   * event) at establishment, the point a TLS client's deferred 'session'
+   * event is delivered (Node flushes its pending session after secureConnect). */
+  void (*after_connect)(void *tctx);
 } ScrNetTransportOps;
 void scr_net_sock_set_transport(ScrNetSocket *s, const ScrNetTransportOps *ops, void *tctx);
 int scr_net_sock_fd(ScrNetSocket *s);
@@ -10332,6 +10336,8 @@ bool scr_tls_sock_authorized(ScrNetSocket *s);
 /* TLSSocket.isSessionReused() / getSession(): resumption of the offered session
  * (tls.connect's `session`). getSession answers +1 bytes or NULL (undefined). */
 bool scr_tls_sock_session_reused(ScrNetSocket *s);
+/* true when the connection was made by the first dial attempt (scr_net.c) */
+bool scr_net_sock_first_attempt(ScrNetSocket *s);
 ScrBytes *scr_tls_sock_get_session(ScrNetSocket *s);
 /* TLSSocket.getPeerCertificate(detailed): the peer certificate object (+1), or {} */
 ScrDyn *scr_tls_sock_peer_cert(ScrNetSocket *s, bool detailed);
