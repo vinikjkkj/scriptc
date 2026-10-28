@@ -10170,6 +10170,9 @@ void scr_net_sock_replay(ScrNetSocket *s, const char *data, size_t len);
  * 'error' + teardown to the sweep; NULL tears down silently — Node's
  * default for an unhandled server-side handshake failure. */
 void scr_net_sock_transport_error(ScrNetSocket *s, const char *msg);
+/* The same failure carrying its Error object (tls.connect's checkServerIdentity):
+ * listeners receive `e` (moved) with its code. */
+void scr_net_sock_transport_error_obj(ScrNetSocket *s, ScrError *e);
 /* Defer the server's 'connection' listeners to handshake completion —
  * tls.createServer's handler is the 'secureConnection' event, fired with
  * the socket only once the TLS layer stands (Node's timing). */
@@ -10279,6 +10282,10 @@ ScrSecureCtx *scr_tls_create_secure_context_dyn(const ScrDyn *opts);
 /* tls.getCACertificates over a run-time value (scr_tls_ca.c): validateString,
  * then the real answer; +1 or NULL with the exception pending. */
 struct ScrArr *scr_tls_ca_get_dyn(const ScrDyn *type);
+/* tls.checkServerIdentity(hostname, cert) (Node's algorithm): undefined on a
+ * match, else the ERR_TLS_CERT_ALTNAME_INVALID error object. +1, or NULL with
+ * an exception pending (the malformed-altnames format error). Borrows both. */
+ScrDyn *scr_tls_check_server_identity_dyn(const ScrStr *host, const ScrDyn *cert);
 /* ── AbortSignal ──────────────────────────────────────────────────────
  * The fetch-cancellation slice's handle. Present so that a signal has a
  * TYPE: it is almost always an optional field on an options record the

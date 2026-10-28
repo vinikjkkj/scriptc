@@ -73,6 +73,7 @@
 #include "scr_runtime.h"
 #include "scr_tls_ciph.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -92,6 +93,7 @@
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/error.h"
+#include "mbedtls/oid.h"
 #include "mbedtls/net_sockets.h" /* the MBEDTLS_ERR_NET_* codes the BIOs answer */
 #include "mbedtls/pk.h"
 #include "mbedtls/ssl.h"
@@ -392,6 +394,10 @@ typedef struct ScrTlsCli {
    * VERIFY_NONE socket (the https client's rejectUnauthorized:false)
    * never verified, so authorized answers false like Node's. */
   bool verify_recorded;
+  /* the user's checkServerIdentity (owned; NULL = the builtin mbedTLS name check) */
+  ScrDyn *identity;
+  bool reject;      /* rejectUnauthorized: a failed identity fails the connection */
+  char *verify_name; /* the name Node passes as hostname (servername/host/IP, never NULL) */
 } ScrTlsCli;
 
 /* The default trust anchors when no `ca` option is given: the system
@@ -534,6 +540,9 @@ static ScrTlsCli *scr_tls_cli_new2(ScrStr *host, bool reject_unauthorized, const
   struct in_addr a4;
   struct in6_addr a6;
   const char *h = host->len > 0 ? host->data : "localhost";
+  c->verify_name = strdup(h);
+  if (!c->verify_name) scr_tls_oom();
+  c->reject = reject_unauthorized;
   if (inet_pton(AF_INET, h, &a4) != 1 && inet_pton(AF_INET6, h, &a6) != 1) {
     c->hostname = strdup(h);
     if (!c->hostname) scr_tls_oom();
@@ -550,6 +559,8 @@ static void scr_tls_cli_free(ScrTlsCli *c) {
   mbedtls_ssl_config_free(&c->conf);
   mbedtls_x509_crt_free(&c->ca);
   free(c->hostname);
+  scr_dyn_release(c->identity);
+  free(c->verify_name);
   free(c);
 }
 
@@ -594,6 +605,9 @@ static int scr_tls_vrfy_cb(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t
   ScrTlsSock *t = (ScrTlsSock *)ctx;
   bool self = crt->issuer_raw.len == crt->subject_raw.len &&
               memcmp(crt->issuer_raw.p, crt->subject_raw.p, crt->subject_raw.len) == 0;
+  /* a user checkServerIdentity REPLACES mbedTLS's name check (Node's rule): the
+   * CN flag is not a verdict then, and the identity run decides it */
+  if (t->cli != NULL && t->cli->identity != NULL) *flags &= ~MBEDTLS_X509_BADCERT_CN_MISMATCH;
   if (*flags & MBEDTLS_X509_BADCERT_EXPIRED) t->vrfy_expired = true;
   if (*flags & MBEDTLS_X509_BADCERT_CN_MISMATCH) t->vrfy_cn_mismatch = true;
   if (*flags & MBEDTLS_X509_BADCERT_NOT_TRUSTED) {
@@ -918,6 +932,620 @@ void scr_tls_sni_answer(ScrClosure *self, bool has_err, ScrSecureCtx *ctx /*move
   scr_net_sock_release(sock);
 }
 
+/* ── tls.checkServerIdentity (Node v24.15 lib/tls.js, algorithm-exact) ──
+ * The identity check Node runs once the chain verified (or as the user's
+ * checkServerIdentity option). Mirrors Node's helpers: unfqdn (one
+ * trailing dot), splitHost (ASCII A-Z lowered, split on '.'), check()
+ * with RFC 6125 single-label wildcards, the JSON-literal walk of
+ * subjectaltname (splitEscapedAltNames), and canonicalizeIP. */
+
+typedef struct { const char *p; size_t n; } ScrIdSpan;
+typedef struct { char *buf; ScrIdSpan *lab; size_t nlab; } ScrIdLabels;
+
+static void scr_id_labels_free(ScrIdLabels *L) {
+  free(L->buf);
+  free(L->lab);
+  L->buf = NULL;
+  L->lab = NULL;
+  L->nlab = 0;
+}
+
+static void scr_id_split_host(ScrIdLabels *L, const char *s, size_t n) {
+  if (n > 0 && s[n - 1] == '.') n--;
+  L->buf = malloc(n + 1);
+  if (!L->buf) scr_tls_oom();
+  size_t nlab = 1;
+  for (size_t i = 0; i < n; i++) {
+    char c = s[i];
+    if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+    L->buf[i] = c;
+    if (c == '.') nlab++;
+  }
+  L->buf[n] = '\0';
+  L->lab = malloc(nlab * sizeof *L->lab);
+  if (!L->lab) scr_tls_oom();
+  L->nlab = nlab;
+  size_t k = 0, start = 0;
+  for (size_t i = 0; i <= n; i++) {
+    if (i == n || L->buf[i] == '.') {
+      L->lab[k].p = L->buf + start;
+      L->lab[k].n = i - start;
+      k++;
+      start = i + 1;
+    }
+  }
+}
+
+static bool scr_id_span_eq(ScrIdSpan a, ScrIdSpan b) {
+  return a.n == b.n && (a.n == 0 || memcmp(a.p, b.p, a.n) == 0);
+}
+
+/* Node's check(hostParts, pattern, true). */
+static bool scr_id_check(const ScrIdLabels *h, const char *pat, size_t pn) {
+  if (pn == 0) return false;
+  ScrIdLabels p;
+  scr_id_split_host(&p, pat, pn);
+  bool ok = false;
+  do {
+    if (h->nlab != p.nlab) break;
+    bool bad = false;
+    for (size_t i = 0; i < p.nlab && !bad; i++) {
+      if (p.lab[i].n == 0) bad = true;
+      for (size_t j = 0; j < p.lab[i].n && !bad; j++) {
+        unsigned char c = (unsigned char)p.lab[i].p[j];
+        if (c < 0x21 || c > 0x7f) bad = true;
+      }
+    }
+    if (bad) break;
+    bool tail = true;
+    for (size_t i = h->nlab - 1; i > 0; i--) {
+      if (!scr_id_span_eq(h->lab[i], p.lab[i])) {
+        tail = false;
+        break;
+      }
+    }
+    if (!tail) break;
+    ScrIdSpan hs = h->lab[0], ps = p.lab[0];
+    size_t stars = 0, star_at = 0;
+    for (size_t j = 0; j < ps.n; j++) {
+      if (ps.p[j] == '*') {
+        if (stars == 0) star_at = j;
+        stars++;
+      }
+    }
+    bool has_xn = false;
+    for (size_t j = 0; j + 4 <= ps.n && !has_xn; j++) has_xn = memcmp(ps.p + j, "xn--", 4) == 0;
+    if (stars == 0 || has_xn) {
+      ok = scr_id_span_eq(hs, ps);
+      break;
+    }
+    if (stars > 1) break;     /* more than one wildcard is always wrong */
+    if (p.nlab <= 2) break;   /* *.tld wildcards are not allowed */
+    size_t pre = star_at, suf = ps.n - star_at - 1;
+    if (pre + suf > hs.n) break;
+    if (memcmp(hs.p, ps.p, pre) != 0) break;
+    if (memcmp(hs.p + hs.n - suf, ps.p + star_at + 1, suf) != 0) break;
+    ok = true;
+  } while (0);
+  scr_id_labels_free(&p);
+  return ok;
+}
+
+/* canonicalizeIP: the canonical text of an IPv4/IPv6 literal, or false. */
+static bool scr_id_canon_ip(const char *s, size_t n, char *out, size_t cap) {
+  char tmp[80];
+  if (n == 0 || n >= sizeof tmp) return false;
+  memcpy(tmp, s, n);
+  tmp[n] = '\0';
+  struct in_addr a4;
+  struct in6_addr a6;
+  if (inet_pton(AF_INET, tmp, &a4) == 1) return inet_ntop(AF_INET, &a4, out, (socklen_t)cap) != NULL;
+  if (inet_pton(AF_INET6, tmp, &a6) == 1) return inet_ntop(AF_INET6, &a6, out, (socklen_t)cap) != NULL;
+  return false;
+}
+
+typedef struct { char *s; size_t n, cap; } ScrIdBuf;
+static void scr_id_buf_add(ScrIdBuf *b, const char *s, size_t n) {
+  if (b->n + n + 1 > b->cap) {
+    size_t cap = (b->n + n + 1) * 2 + 16;
+    char *grown = realloc(b->s, cap);
+    if (!grown) scr_tls_oom();
+    b->s = grown;
+    b->cap = cap;
+  }
+  if (n > 0) memcpy(b->s + b->n, s, n);
+  b->n += n;
+  b->s[b->n] = '\0';
+}
+
+static void scr_id_buf_lit(ScrIdBuf *b, const char *s) { scr_id_buf_add(b, s, strlen(s)); }
+
+typedef struct { ScrIdBuf *v; size_t n, cap; } ScrIdList;
+static void scr_id_list_push(ScrIdList *l, ScrIdBuf b) {
+  if (l->n == l->cap) {
+    size_t cap = l->cap ? l->cap * 2 : 8;
+    ScrIdBuf *grown = realloc(l->v, cap * sizeof *grown);
+    if (!grown) scr_tls_oom();
+    l->v = grown;
+    l->cap = cap;
+  }
+  l->v[l->n++] = b;
+}
+static void scr_id_list_free(ScrIdList *l) {
+  for (size_t i = 0; i < l->n; i++) free(l->v[i].s);
+  free(l->v);
+  l->v = NULL;
+  l->n = l->cap = 0;
+}
+
+/* The length of the JSON string literal at s (ECMA-404, exactly the
+ * pattern Node's splitEscapedAltNames matches); 0 when none. */
+static size_t scr_id_json_str_len(const char *s, size_t n) {
+  if (n == 0 || s[0] != '"') return 0;
+  size_t i = 1;
+  while (i < n) {
+    unsigned char c = (unsigned char)s[i];
+    if (c == '"') return i + 1;
+    if (c < 0x20) return 0;
+    if (c != '\\') {
+      i++;
+      continue;
+    }
+    if (i + 1 >= n) return 0;
+    char e = s[i + 1];
+    if (e == 'u') {
+      if (i + 6 > n) return 0;
+      for (size_t k = i + 2; k < i + 6; k++) {
+        if (!isxdigit((unsigned char)s[k])) return 0;
+      }
+      i += 6;
+    } else if (e == '"' || e == '\\' || e == '/' || e == 'b' || e == 'f' || e == 'n' || e == 'r' || e == 't') {
+      i += 2;
+    } else {
+      return 0;
+    }
+  }
+  return 0;
+}
+
+static void scr_id_put_utf8(ScrIdBuf *b, unsigned cp) {
+  char o[4];
+  size_t k;
+  if (cp < 0x80) {
+    o[0] = (char)cp;
+    k = 1;
+  } else if (cp < 0x800) {
+    o[0] = (char)(0xC0 | (cp >> 6));
+    o[1] = (char)(0x80 | (cp & 0x3F));
+    k = 2;
+  } else if (cp < 0x10000) {
+    o[0] = (char)(0xE0 | (cp >> 12));
+    o[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    o[2] = (char)(0x80 | (cp & 0x3F));
+    k = 3;
+  } else {
+    o[0] = (char)(0xF0 | (cp >> 18));
+    o[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    o[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    o[3] = (char)(0x80 | (cp & 0x3F));
+    k = 4;
+  }
+  scr_id_buf_add(b, o, k);
+}
+
+static int scr_id_hex4(const char *s) {
+  int v = 0;
+  for (int k = 0; k < 4; k++) {
+    char c = s[k];
+    int d = (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : c - 'A' + 10;
+    v = v * 16 + d;
+  }
+  return v;
+}
+
+/* JSON.parse of a validated literal's contents (the quotes excluded). */
+static void scr_id_json_decode(ScrIdBuf *b, const char *s, size_t n) {
+  for (size_t i = 0; i < n;) {
+    if (s[i] != '\\') {
+      scr_id_buf_add(b, s + i, 1);
+      i++;
+      continue;
+    }
+    char e = s[i + 1];
+    if (e == 'u') {
+      unsigned cp = (unsigned)scr_id_hex4(s + i + 2);
+      i += 6;
+      if (cp >= 0xD800 && cp <= 0xDBFF && i + 6 <= n && s[i] == '\\' && s[i + 1] == 'u') {
+        unsigned lo = (unsigned)scr_id_hex4(s + i + 2);
+        if (lo >= 0xDC00 && lo <= 0xDFFF) {
+          cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+          i += 6;
+        }
+      }
+      scr_id_put_utf8(b, cp);
+      continue;
+    }
+    char out = e == 'b' ? '\b' : e == 'f' ? '\f' : e == 'n' ? '\n' : e == 'r' ? '\r' : e == 't' ? '\t' : e;
+    scr_id_buf_add(b, &out, 1);
+    i += 2;
+  }
+}
+
+/* Node's splitEscapedAltNames (used when the string holds a '"'). False on
+ * a malformed literal (Node's ERR_TLS_CERT_ALTNAME_FORMAT). */
+static bool scr_id_split_escaped(const char *a, size_t n, ScrIdList *out) {
+  ScrIdBuf tok = {0};
+  size_t off = 0;
+  while (off < n) {
+    size_t sep = n, quo = n;
+    for (size_t k = off; k < n; k++) {
+      if (a[k] == ',') {
+        sep = k;
+        break;
+      }
+    }
+    for (size_t k = off; k < n; k++) {
+      if (a[k] == '"') {
+        quo = k;
+        break;
+      }
+    }
+    if (quo < n && (sep == n || quo < sep)) {
+      scr_id_buf_add(&tok, a + off, quo - off);
+      size_t m = scr_id_json_str_len(a + quo, n - quo);
+      if (m == 0) {
+        free(tok.s);
+        return false;
+      }
+      scr_id_json_decode(&tok, a + quo + 1, m - 2);
+      off = quo + m;
+    } else if (sep < n) {
+      scr_id_buf_add(&tok, a + off, sep - off);
+      scr_id_list_push(out, tok);
+      tok = (ScrIdBuf){0};
+      off = sep + 2;
+    } else {
+      scr_id_buf_add(&tok, a + off, n - off);
+      off = n;
+    }
+  }
+  scr_id_list_push(out, tok);
+  return true;
+}
+
+/* Node's altNames.split(', ') (the string holds no '"'). */
+static void scr_id_split_plain(const char *a, size_t n, ScrIdList *out) {
+  size_t start = 0;
+  for (size_t k = 0; k + 1 < n; k++) {
+    if (a[k] == ',' && a[k + 1] == ' ') {
+      ScrIdBuf t = {0};
+      scr_id_buf_add(&t, a + start, k - start);
+      scr_id_list_push(out, t);
+      start = k + 2;
+      k++;
+    }
+  }
+  ScrIdBuf t = {0};
+  scr_id_buf_add(&t, a + start, n - start);
+  scr_id_list_push(out, t);
+}
+
+/* The verdict: the Node reason (malloc'd) when the identity does NOT match,
+ * NULL when it does. `alt`/`altn` is subjectaltname (NULL when absent).
+ * `cns` holds subject.CN: one entry for a string CN, every entry of an
+ * array CN (Node's Array.isArray arm), none when CN is absent or falsy.
+ * `has_cn` is Node's truthy test on subject?.CN. */
+static char *scr_id_reason(const char *host, size_t hn, const char *alt, size_t altn,
+                           bool has_cn, const ScrIdList *cns, bool *fmt_err) {
+  ScrIdList entries = {0}, dns = {0}, ips = {0};
+  *fmt_err = false;
+  if (alt != NULL && altn > 0) {
+    bool quoted = false;
+    for (size_t k = 0; k < altn && !quoted; k++) quoted = alt[k] == '"';
+    if (quoted) {
+      if (!scr_id_split_escaped(alt, altn, &entries)) {
+        *fmt_err = true;
+        return NULL;
+      }
+    } else {
+      scr_id_split_plain(alt, altn, &entries);
+    }
+    for (size_t i = 0; i < entries.n; i++) {
+      ScrIdBuf *e = &entries.v[i];
+      if (e->n >= 4 && memcmp(e->s, "DNS:", 4) == 0) {
+        ScrIdBuf d = {0};
+        scr_id_buf_add(&d, e->s + 4, e->n - 4);
+        scr_id_list_push(&dns, d);
+      } else if (e->n >= 11 && memcmp(e->s, "IP Address:", 11) == 0) {
+        /* an unparseable SAN address canonicalizes to undefined: it never matches */
+        char canon[80];
+        ScrIdBuf d = {0};
+        if (scr_id_canon_ip(e->s + 11, e->n - 11, canon, sizeof canon)) scr_id_buf_add(&d, canon, strlen(canon));
+        scr_id_list_push(&ips, d);
+      }
+    }
+  }
+  /* unfqdn: Node strips one trailing dot before every use, messages included */
+  size_t hostn = hn > 0 && host[hn - 1] == '.' ? hn - 1 : hn;
+  char *reason = NULL;
+  bool valid = false;
+  ScrIdLabels h;
+  scr_id_split_host(&h, host, hn);
+  char lit[80];
+  bool is_ip = false;
+  if (hostn < sizeof lit) {
+    memcpy(lit, host, hostn);
+    lit[hostn] = '\0';
+    struct in_addr a4;
+    struct in6_addr a6;
+    is_ip = inet_pton(AF_INET, lit, &a4) == 1 || inet_pton(AF_INET6, lit, &a6) == 1;
+  }
+  if (is_ip) {
+    char canon[80];
+    if (scr_id_canon_ip(host, hostn, canon, sizeof canon)) {
+      for (size_t i = 0; i < ips.n && !valid; i++) {
+        valid = ips.v[i].n == strlen(canon) && memcmp(ips.v[i].s, canon, ips.v[i].n) == 0;
+      }
+    }
+    if (!valid) {
+      ScrIdBuf r = {0};
+      scr_id_buf_lit(&r, "IP: ");
+      scr_id_buf_add(&r, host, hostn);
+      scr_id_buf_lit(&r, " is not in the cert's list: ");
+      for (size_t i = 0; i < ips.n; i++) {
+        if (i > 0) scr_id_buf_lit(&r, ", ");
+        scr_id_buf_add(&r, ips.v[i].s, ips.v[i].n);
+      }
+      reason = r.s;
+    }
+  } else if (dns.n > 0 || has_cn) {
+    if (dns.n > 0) {
+      for (size_t i = 0; i < dns.n && !valid; i++) valid = scr_id_check(&h, dns.v[i].s, dns.v[i].n);
+      if (!valid) {
+        ScrIdBuf r = {0};
+        scr_id_buf_lit(&r, "Host: ");
+        scr_id_buf_add(&r, host, hostn);
+        scr_id_buf_lit(&r, ". is not in the cert's altnames: ");
+        scr_id_buf_add(&r, alt, altn);
+        reason = r.s;
+      }
+    } else {
+      for (size_t i = 0; i < cns->n && !valid; i++) valid = scr_id_check(&h, cns->v[i].s, cns->v[i].n);
+      if (!valid) {
+        ScrIdBuf r = {0};
+        scr_id_buf_lit(&r, "Host: ");
+        scr_id_buf_add(&r, host, hostn);
+        scr_id_buf_lit(&r, ". is not cert's CN: ");
+        for (size_t i = 0; i < cns->n; i++) {
+          if (i > 0) scr_id_buf_lit(&r, ",");
+          scr_id_buf_add(&r, cns->v[i].s, cns->v[i].n);
+        }
+        reason = r.s;
+      }
+    }
+  } else {
+    reason = strdup("Cert does not contain a DNS name");
+    if (!reason) scr_tls_oom();
+  }
+  scr_id_labels_free(&h);
+  scr_id_list_free(&entries);
+  scr_id_list_free(&dns);
+  scr_id_list_free(&ips);
+  if (valid) {
+    free(reason);
+    return NULL;
+  }
+  return reason;
+}
+
+/* JS truthiness over the dyn kinds (the callback's verdict: undefined and
+ * null are accepted, like every falsy value Node's `if (verifyError)` takes). */
+static bool scr_id_truthy(const ScrDyn *v) {
+  switch (v->kind) {
+    case SCR_DYN_UNDEF:
+    case SCR_DYN_NULL:
+      return false;
+    case SCR_DYN_BOOL:
+      return v->v.b;
+    case SCR_DYN_NUM:
+      return v->v.num != 0 && !isnan(v->v.num);
+    case SCR_DYN_STR:
+      return v->v.str->len > 0;
+    default:
+      return true;
+  }
+}
+
+/* The subject.CN values and subjectaltname of a checked-dynamic cert. Node
+ * reads `cert.subject` / `cert.subjectaltname` directly (a non-object cert
+ * answers nothing here). Borrows `cert`; the CN strings are copied. */
+static void scr_id_cert_fields(const ScrDyn *cert, ScrIdList *cns, const char **alt, size_t *altn,
+                               bool *has_cn) {
+  *alt = NULL;
+  *altn = 0;
+  *has_cn = false;
+  if (cert == NULL || cert->kind != SCR_DYN_OBJ) return;
+  const ScrDyn *a = scr_dyn_obj_get(cert, "subjectaltname", 14);
+  if (a != NULL && a->kind == SCR_DYN_STR && a->v.str->len > 0) {
+    *alt = a->v.str->data;
+    *altn = a->v.str->len;
+  }
+  const ScrDyn *subj = scr_dyn_obj_get(cert, "subject", 7);
+  const ScrDyn *cn = subj != NULL && subj->kind == SCR_DYN_OBJ ? scr_dyn_obj_get(subj, "CN", 2) : NULL;
+  if (cn == NULL || !scr_id_truthy(cn)) return;
+  *has_cn = true;
+  if (cn->kind == SCR_DYN_ARR) {
+    double n = scr_dyn_arr_len(cn);
+    for (double i = 0; i < n; i++) {
+      ScrDyn *el = scr_dyn_arr_at(cn, i);
+      ScrIdBuf b = {0};
+      if (el->kind == SCR_DYN_STR) scr_id_buf_add(&b, el->v.str->data, el->v.str->len);
+      scr_dyn_release(el);
+      scr_id_list_push(cns, b);
+    }
+  } else if (cn->kind == SCR_DYN_STR) {
+    ScrIdBuf b = {0};
+    scr_id_buf_add(&b, cn->v.str->data, cn->v.str->len);
+    scr_id_list_push(cns, b);
+  }
+}
+
+/* The peer certificate as Node's getPeerCertificate() presents the fields
+ * the identity check reads: `subject` (short attribute names, repeated
+ * attributes as arrays) and `subjectaltname` (DNS and IP entries). Other
+ * PeerCertificate members are not built. */
+static ScrDyn *scr_tls_peer_cert_dyn(const mbedtls_x509_crt *crt) {
+  ScrDyn *cert = scr_dyn_new_obj();
+  ScrDyn *subj = scr_dyn_new_obj();
+  if (crt != NULL) {
+    for (const mbedtls_x509_name *n = &crt->subject; n != NULL; n = n->next) {
+      const char *sn = NULL;
+      if (n->oid.p == NULL || n->val.p == NULL) continue;
+      if (mbedtls_oid_get_attr_short_name(&n->oid, &sn) != 0 || sn == NULL) continue;
+      size_t kl = strlen(sn);
+      ScrDyn *v = scr_dyn_new_str(scr_str_new((const char *)n->val.p, n->val.len));
+      const ScrDyn *prev = scr_dyn_obj_get(subj, sn, kl);
+      if (prev == NULL) {
+        scr_dyn_obj_set(subj, sn, kl, v);
+      } else if (prev->kind == SCR_DYN_ARR) {
+        scr_dyn_arr_push((ScrDyn *)prev, v);
+      } else {
+        ScrDyn *arr = scr_dyn_new_arr();
+        scr_dyn_arr_push(arr, scr_dyn_retain((ScrDyn *)prev));
+        scr_dyn_arr_push(arr, v);
+        scr_dyn_obj_set(subj, sn, kl, arr);
+      }
+    }
+  }
+  scr_dyn_obj_set(cert, "subject", 7, subj);
+  ScrIdBuf san = {0};
+  if (crt != NULL) {
+    for (const mbedtls_x509_sequence *s = &crt->subject_alt_names; s != NULL; s = s->next) {
+      if (s->buf.p == NULL) continue;
+      int tag = s->buf.tag & MBEDTLS_ASN1_TAG_VALUE_MASK;
+      ScrIdBuf one = {0};
+      if (tag == MBEDTLS_X509_SAN_DNS_NAME) {
+        scr_id_buf_lit(&one, "DNS:");
+        scr_id_buf_add(&one, (const char *)s->buf.p, s->buf.len);
+      } else if (tag == MBEDTLS_X509_SAN_IP_ADDRESS && (s->buf.len == 4 || s->buf.len == 16)) {
+        /* OpenSSL's rendering (Node's subjectaltname text): dotted quad for
+         * IPv4; IPv6 as eight uncompressed upper-case groups ("2001:DB8:0:...:1") */
+        char txt[80];
+        const unsigned char *b = s->buf.p;
+        if (s->buf.len == 4) {
+          snprintf(txt, sizeof txt, "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
+        } else {
+          size_t o = 0;
+          for (int g = 0; g < 8; g++) {
+            o += (size_t)snprintf(txt + o, sizeof txt - o, "%s%X", g ? ":" : "", (b[2 * g] << 8) | b[2 * g + 1]);
+          }
+        }
+        scr_id_buf_lit(&one, "IP Address:");
+        scr_id_buf_add(&one, txt, strlen(txt));
+      }
+      /* other GeneralName kinds are not rendered (see the header comment) */
+      if (one.n == 0) {
+        free(one.s);
+        continue;
+      }
+      if (san.n > 0) scr_id_buf_lit(&san, ", ");
+      scr_id_buf_add(&san, one.s, one.n);
+      free(one.s);
+    }
+  }
+  if (san.n > 0) scr_dyn_obj_set(cert, "subjectaltname", 14, scr_dyn_new_str(scr_str_new(san.s, san.n)));
+  free(san.s);
+  return cert;
+}
+
+/* %Error with Node's ERR_TLS_CERT_ALTNAME_INVALID message and code. */
+static ScrError *scr_id_error(const char *reason) {
+  static const char pre[] = "Hostname/IP does not match certificate's altnames: ";
+  size_t pl = sizeof pre - 1, rl = strlen(reason);
+  char *msg = malloc(pl + rl + 1);
+  if (!msg) scr_tls_oom();
+  memcpy(msg, pre, pl);
+  memcpy(msg + pl, reason, rl);
+  ScrError *e = scr_error_new(SCR_ERR_ERROR, scr_str_new(msg, pl + rl));
+  free(msg);
+  scr_error_set_code(e, "ERR_TLS_CERT_ALTNAME_INVALID");
+  return e;
+}
+
+/* The lowered tls.checkServerIdentity(hostname, cert) (both backends):
+ * undefined when the identity matches, else Node's ERR_TLS_CERT_ALTNAME_INVALID
+ * error object (message, code, reason, host, cert). `cert` is borrowed. */
+ScrDyn *scr_tls_check_server_identity_dyn(const ScrStr *host, const ScrDyn *cert) {
+  ScrIdList cns = {0};
+  const char *alt = NULL;
+  size_t altn = 0;
+  bool has_cn = false;
+  scr_id_cert_fields(cert, &cns, &alt, &altn, &has_cn);
+  bool fmt = false;
+  char *reason = scr_id_reason(host->data, host->len, alt, altn, has_cn, &cns, &fmt);
+  scr_id_list_free(&cns);
+  if (fmt) {
+    scr_throw_error_msg_code(SCR_ERR_ERROR, "Invalid subject alternative name string", 36,
+                             "ERR_TLS_CERT_ALTNAME_FORMAT");
+    return NULL;
+  }
+  if (reason == NULL) return scr_dyn_retain(scr_dyn_undefined());
+  ScrError *e = scr_id_error(reason);
+  ScrDyn *d = scr_dyn_from_error(e);
+  scr_error_release(e);
+  size_t hn = host->len > 0 && host->data[host->len - 1] == '.' ? host->len - 1 : host->len;
+  scr_dyn_obj_set(d, "reason", 6, scr_dyn_new_str(scr_str_new(reason, strlen(reason))));
+  scr_dyn_obj_set(d, "host", 4, scr_dyn_new_str(scr_str_new(host->data, hn)));
+  scr_dyn_obj_set(d, "cert", 4, scr_dyn_retain((ScrDyn *)cert));
+  free(reason);
+  return d;
+}
+
+/* Runs the user's checkServerIdentity (tls.connect's option) once the
+ * handshake completed. Node calls it only when the chain VERIFIED and the
+ * session was not resumed; a truthy answer is the verify error. False =
+ * the connection failed (rejectUnauthorized) and the transport error is
+ * set; with rejectUnauthorized:false the socket connects unauthorized. */
+static bool scr_tls_ident_run(ScrTlsSock *t) {
+  ScrTlsCli *cli = t->cli;
+  if (cli == NULL || cli->identity == NULL || !cli->verify_recorded) return true;
+  if (t->vrfy_expired || t->vrfy_leaf_self || t->vrfy_chain_self) return true;
+  if (mbedtls_ssl_get_verify_result(&t->ssl) & MBEDTLS_X509_BADCERT_NOT_TRUSTED) return true;
+  ScrDyn *args[2];
+  args[0] = scr_dyn_new_str(scr_str_new(cli->verify_name, strlen(cli->verify_name)));
+  args[1] = scr_tls_peer_cert_dyn(mbedtls_ssl_get_peer_cert(&t->ssl));
+  ScrDyn *r = scr_dyn_call(cli->identity, args, 2, "checkServerIdentity");
+  scr_dyn_release(args[0]);
+  scr_dyn_release(args[1]);
+  if (scr_exc_pending()) {
+    scr_dyn_release(r);
+    return false;
+  }
+  bool ok = true;
+  if (r != NULL && scr_id_truthy(r)) {
+    const ScrDyn *m = scr_dyn_err_read(r, "message", 7);
+    const ScrDyn *c = scr_dyn_err_read(r, "code", 4);
+    ScrStr *msg = m != NULL && m->kind == SCR_DYN_STR ? scr_str_retain(m->v.str) : scr_str_new("", 0);
+    ScrError *e = scr_error_new(SCR_ERR_ERROR, msg);
+    if (c != NULL && c->kind == SCR_DYN_STR) {
+      char code[64];
+      size_t cl = c->v.str->len < sizeof code - 1 ? c->v.str->len : sizeof code - 1;
+      memcpy(code, c->v.str->data, cl);
+      code[cl] = '\0';
+      scr_error_set_code(e, code);
+    }
+    if (cli->reject) {
+      scr_net_sock_transport_error_obj(t->sock, e);
+      ok = false;
+    } else {
+      t->vrfy_cn_mismatch = true;
+      scr_error_release(e);
+    }
+  }
+  scr_dyn_release(r);
+  return ok;
+}
+
 static int scr_tls_handshake(void *tctx) {
   ScrTlsSock *t = (ScrTlsSock *)tctx;
   if (t->sni_state == SCR_SNI_COLLECT) {
@@ -930,7 +1558,7 @@ static int scr_tls_handshake(void *tctx) {
   scr_tls_current = t;
   int r = mbedtls_ssl_handshake(&t->ssl);
   scr_tls_current = NULL;
-  if (r == 0) return 1;
+  if (r == 0) return scr_tls_ident_run(t) ? 1 : -1;
   if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) return 0;
   if (t->srv != NULL) {
     /* Node's server default: 'tlsClientError' with no listener destroys
@@ -2017,6 +2645,7 @@ ScrNetSocket *scr_tls_connect_dyn(double port, ScrStr *host /*borrowed, nullable
   scr_tls_rng_init();
   bool reject = true;
   ScrBytes *ca = NULL;
+  ScrDyn *ident = NULL; /* owned: the checkServerIdentity option, moved into the client config */
   const ScrStr *servername = NULL;
   const ScrStr *opt_host = NULL;
   bool ok = true;
@@ -2043,9 +2672,9 @@ ScrNetSocket *scr_tls_connect_dyn(double port, ScrStr *host /*borrowed, nullable
           scr_dyn_prop_type_fail("options.checkServerIdentity", "of type function", v);
           ok = false;
         } else {
-          scr_tls_opt_fence("tls.connect", "checkServerIdentity",
-                            "custom identity verification has no lowering — the runtime verifies against the servername/host");
-          ok = false;
+          /* the callback runs once the handshake verified (scr_tls_ident_run) */
+          scr_dyn_release(ident);
+          ident = scr_dyn_retain((ScrDyn *)v);
         }
         continue;
       }
@@ -2104,6 +2733,7 @@ ScrNetSocket *scr_tls_connect_dyn(double port, ScrStr *host /*borrowed, nullable
   if (!ok) {
     scr_bytes_release(ca);
     scr_closure_release(cb);
+    scr_dyn_release(ident);
     return NULL;
   }
   ScrStr *dial_host = (ScrStr *)(host != NULL && host->len > 0 ? host : opt_host);
@@ -2123,6 +2753,8 @@ ScrNetSocket *scr_tls_connect_dyn(double port, ScrStr *host /*borrowed, nullable
   ScrTlsCli *cli = scr_tls_cli_new2(verify_host, reject,
                                      ca != NULL ? (const char *)ca->data : NULL,
                                      ca != NULL ? ca->len : 0, !reject);
+  cli->identity = ident;
+  ident = NULL;
   scr_tls_cli_wrap(s, cli);
   scr_str_release(localhost_fallback);
   scr_bytes_release(ca);
