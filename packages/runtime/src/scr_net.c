@@ -1288,6 +1288,8 @@ static bool scr_net_sock_deliver(ScrNetSocket *s, const char *buf, size_t n) {
 static void scr_net_sock_append_rbuf(ScrNetSocket *s, const char *data, size_t len);
 static void scr_net_sock_transport_pump(ScrNetSocket *s);
 
+static void scr_net_sock_connect_done_err(ScrNetSocket *s, int err);
+
 static void scr_net_sock_read(ScrNetSocket *s) {
   size_t reads_left = 32; /* at most 2 MiB with the 64 KiB read buffer */
   if (s->tops && !s->t_est) return; /* readiness feeds the handshake pump instead */
@@ -1340,6 +1342,7 @@ static void scr_net_sock_read(ScrNetSocket *s) {
       if (p < 0) {
         if (errno == EINTR) continue;
         if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+        if (s->connecting) { scr_net_sock_connect_done_err(s, errno); return; }
         char msg[96];
         snprintf(msg, sizeof msg, "read %s", scr_net_errname(errno));
         if (!s->pending_err) s->pending_err = scr_str_new(msg, strlen(msg));
@@ -1355,6 +1358,9 @@ static void scr_net_sock_read(ScrNetSocket *s) {
     if (n < 0) {
       if (errno == EINTR) continue;
       if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+      /* a read error while the dial is still connecting IS the connect's
+       * refusal (the readiness can arrive before the write one): same chain */
+      if (s->connecting) { scr_net_sock_connect_done_err(s, errno); return; }
       char msg[96];
       snprintf(msg, sizeof msg, "read %s", scr_net_errname(errno));
       if (!s->pending_err) s->pending_err = scr_str_new(msg, strlen(msg));
@@ -1407,6 +1413,12 @@ static void scr_net_sock_connect_done(ScrNetSocket *s) {
   int err = 0;
   socklen_t len = sizeof err;
   if (getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) err = errno;
+  scr_net_sock_connect_done_err(s, err);
+}
+
+/* The dial's verdict, given: 0 = connected (the chain is done), else the
+ * attempt failed with this errno. */
+static void scr_net_sock_connect_done_err(ScrNetSocket *s, int err) {
   s->connecting = false;
   /* this attempt has ANSWERED (either way): its budget is spent, and a
    * stale timer must not fire into the next attempt's fd */
@@ -2459,7 +2471,9 @@ static void scr_net_dial_log(ScrNetSocket *s, int err, const char *ip, int port)
   const char *code = scr_net_errname(err);
   char msg[160];
   snprintf(msg, sizeof msg, "connect %s %s:%d", code, ip, port);
-  ScrError *e = scr_error_new(SCR_ERR_ERROR, scr_str_new(msg, strlen(msg)));
+  ScrStr *m = scr_str_new(msg, strlen(msg));
+  ScrError *e = scr_error_new(SCR_ERR_ERROR, m); /* retains the message */
+  scr_str_release(m);
   scr_error_set_code(e, code);
   scr_net_dial_prop(e, "errno", scr_dyn_new_num((double)-err));
   scr_net_dial_prop(e, "syscall", scr_net_dyn_str("connect", 7));
@@ -2479,14 +2493,15 @@ static void scr_net_dial_log_clear(ScrNetSocket *s) {
  * the last attempt's code, and `errors` (each attempt, in dial order). */
 static ScrError *scr_net_dial_aggregate(ScrNetSocket *s) {
   ScrError *last = s->dial_errs[s->dial_nerrs - 1];
-  ScrError *e = scr_error_new(SCR_ERR_ERROR, scr_str_new("", 0));
+  ScrStr *empty = scr_str_new("", 0);
+  ScrError *e = scr_error_new(SCR_ERR_AGGREGATE, empty); /* retains the message */
+  scr_str_release(empty);
   scr_error_set_code(e, (const char *)last->code->data);
-  scr_net_dial_prop(e, "name", scr_net_dyn_str("AggregateError", 14));
   ScrDyn *arr = scr_dyn_new_arr();
   for (size_t i = 0; i < s->dial_nerrs; i++) {
     scr_dyn_arr_push(arr, scr_dyn_from_error(s->dial_errs[i])); /* arr takes the +1 */
   }
-  scr_net_dial_prop(e, "errors", arr);
+  scr_error_set_errors(e, arr);
   return e;
 }
 
