@@ -235,6 +235,7 @@ int scrp_drain(ScrPoller *p, ScrPollerEvent *out, int max) {
     return filled;
   }
   int n = WSAPoll(pfds, npfds, 0);
+  for (ULONG j = 0; j < npfds; j++) if ((owners[j]->mask & SCRP_WRITABLE) != 0) fprintf(stdout, "NETDBG poll n=%d fd=%d ev=%x re=%x\n", n, (int)pfds[j].fd, (unsigned)pfds[j].events, (unsigned)pfds[j].revents);
   if (n <= 0) {
     if (filled > 0) scrp_drain_progress = true;
     return filled; /* none/failed: a spurious pass */
