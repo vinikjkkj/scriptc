@@ -1087,6 +1087,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "net.sockPause": "scr_net_sock_pause",
   "net.sockResume": "scr_net_sock_resume",
   "net.sockSetNoDelay": "scr_net_sock_set_nodelay",
+  "tls.sockSessionReused": "scr_tls_sock_session_reused",
   "net.sockDestroySoon": "scr_net_sock_destroy_soon",
   "net.sockBytesWritten": "scr_net_sock_bytes_written",
   "net.sockReadable": "scr_net_sock_readable",

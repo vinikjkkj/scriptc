@@ -811,6 +811,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The TLSSocket member surface (authError's `string | null` union is
   // shape-checked in the special cases below — the reqHeader pattern).
   "tls.sockAuthorized": { argTypes: [NETSOCKET_T], result: BOOL },
+  "tls.sockSessionReused": { argTypes: [NETSOCKET_T], result: BOOL },
   "tls.sockAuthError": { argTypes: [NETSOCKET_T], result: VOID },
   "tls.sockOnSecureConnect": { argTypes: [NETSOCKET_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "tls.sockOnSession": { argTypes: [NETSOCKET_T, null, BOOL], result: VOID },
