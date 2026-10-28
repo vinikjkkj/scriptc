@@ -6017,13 +6017,6 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
         loc,
       };
     }
-    // A number-typed operand compared with undefined: the NaN-marked undefined
-    // (scr_runtime.h) is the one number that IS undefined. null never equals a
-    // number.
-    if (other.type.kind === "f64" && unit.unit === "undefined") {
-      const test: IrExpr = { kind: "libCall", fn: "num.isUndef", args: [other], type: BOOL, loc };
-      return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
-    }
     if (other.kind === "unitLit") {
       // Two unit literals (`undefined === undefined`): statically decided.
       return { kind: "boolLit", value: (other.unit === unit.unit) !== negated, type: BOOL, loc };
@@ -6101,6 +6094,13 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
           return { kind: "unionIsTag", unionId: armed.type.unionId, tag, negated, value: armed, type: BOOL, loc };
         }
       }
+    }
+    // A number-typed operand compared with undefined: the NaN-marked undefined
+    // (scr_runtime.h) is the one number that IS undefined. null never equals a
+    // number.
+    if (other.type.kind === "f64" && unit.unit === "undefined") {
+      const test: IrExpr = { kind: "libCall", fn: "num.isUndef", args: [other], type: BOOL, loc };
+      return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
     }
     // Non-union operand: it can never hold undefined/null at runtime (the
     // checker narrowed it to a concrete arm), so `=== unit` is false and
@@ -6193,6 +6193,10 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
       return negated ? other : { kind: "unary", op: "!", operand: other, type: BOOL, loc };
     }
     if (other.type.kind === "f64") {
+      // An index-signature read that may miss answers at dyn width (the same
+      // route the unit comparisons take): loose null tests the nullish kind.
+      const atDyn = unitTestAtDynWidth(L, other, "nullish", negated, loc);
+      if (atDyn) return atDyn;
       // A number against null/undefined under LOOSE equality: only the
       // NaN-marked undefined (scr_runtime.h) is nullish.
       const test: IrExpr = { kind: "libCall", fn: "num.isUndef", args: [other], type: BOOL, loc };
@@ -6746,30 +6750,6 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
       const right = L.jsvalIn(L.lowerExpr(expr.right), expr.right);
       return { kind: "nullish", left, right, type: JSVAL, loc };
     }
-    // A number-typed left: the NaN-marked undefined (scr_runtime.h) takes the
-    // default. The left is evaluated once into a hidden local; the default stays
-    // lazy in the ternary's own arm.
-    if (left.type.kind === "f64") {
-      const rightRaw = L.lowerExpr(expr.right);
-      if (rightRaw.type.kind === "f64") {
-        const h = L.declareHiddenLocal("%numNullish", F64);
-        const held: IrExpr = { kind: "varRef", localId: h.id, type: F64, loc };
-        return {
-          kind: "seqExpr",
-          stmts: [{ kind: "varDecl", localId: h.id, init: left, loc }],
-          result: {
-            kind: "ternary",
-            cond: { kind: "libCall", fn: "num.isUndef", args: [held], type: BOOL, loc },
-            then: rightRaw,
-            else_: held,
-            type: F64,
-            loc,
-          },
-          type: F64,
-          loc,
-        };
-      }
-    }
     // `node.attrs.from ?? hostDomain`, and the same read one binding later
     // (`const from = node.attrs.from; from ?? hostDomain`). The checker
     // types an index-signature read by the signature's value type, so the
@@ -6925,6 +6905,30 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
     {
       const armed = nullishArmBridge(L, left);
       if (armed) left = armed;
+    }
+    // A number-typed left: the NaN-marked undefined (scr_runtime.h) takes the
+    // default. The left is evaluated once into a hidden local; the default stays
+    // lazy in the ternary's own arm.
+    if (left.type.kind === "f64") {
+      const rightRaw = L.lowerExpr(expr.right);
+      if (rightRaw.type.kind === "f64") {
+        const h = L.declareHiddenLocal("%numNullish", F64);
+        const held: IrExpr = { kind: "varRef", localId: h.id, type: F64, loc };
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "varDecl", localId: h.id, init: left, loc }],
+          result: {
+            kind: "ternary",
+            cond: { kind: "libCall", fn: "num.isUndef", args: [held], type: BOOL, loc },
+            then: rightRaw,
+            else_: held,
+            type: F64,
+            loc,
+          },
+          type: F64,
+          loc,
+        };
+      }
     }
     if (left.type.kind !== "union") return left;
     const def = L.unions.get(left.type.unionId);
@@ -17958,6 +17962,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // literal is the NaN-marked test (scr_runtime.h), not a fold.
         if ((left.type.kind === "f64" && right.kind === "unitLit") || (right.type.kind === "f64" && left.kind === "unitLit")) {
           const num = left.type.kind === "f64" ? left : right;
+          const atDyn = unitTestAtDynWidth(L, num, "nullish", negated, loc);
+          if (atDyn) return atDyn;
           const test: IrExpr = { kind: "libCall", fn: "num.isUndef", args: [num], type: BOOL, loc };
           return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
         }
