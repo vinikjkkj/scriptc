@@ -19782,6 +19782,12 @@
     "<repo>/tests/corpus/15304-buffer-from-value-class-instances.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/15305-buffer-from-direct-dyn.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15305-buffer-from-direct-dyn.cjs"
+   ],
+   "diags": []
   }
  }
 }
