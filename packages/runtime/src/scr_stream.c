@@ -4741,13 +4741,14 @@ void scr_stream_install(void) {
  * object matches it. Handle answers are the Node table measured in lab/cls/tbl.mjs (http and
  * child stdio rows measured, Http2 rows inferred from the class hierarchy). Never throws. */
 bool scr_stream_dyn_instanceof(const ScrDyn *d, double which) {
-  enum { C_STREAM, C_READABLE, C_WRITABLE, C_DUPLEX, C_TRANSFORM, C_EMITTER, C_SOCKET, C_SERVER };
+  enum { C_STREAM, C_READABLE, C_WRITABLE, C_DUPLEX, C_TRANSFORM, C_EMITTER, C_SOCKET, C_SERVER, C_PASSTHROUGH };
   int c = (int)which;
   if (d->kind == SCR_DYN_OBJINST) {
     bool rd = scr_dyn_objinst_is(d, scr_readable_vt.pre, scr_readable_vt.post);
     bool wr = scr_dyn_objinst_is(d, scr_writable_vt.pre, scr_writable_vt.post);
     bool du = scr_dyn_objinst_is(d, scr_duplex_vt.pre, scr_duplex_vt.post);
     bool tr = scr_dyn_objinst_is(d, scr_transform_vt.pre, scr_transform_vt.post);
+    bool pt = scr_dyn_objinst_is(d, scr_passthrough_vt.pre, scr_passthrough_vt.post);
     bool em = scr_dyn_objinst_is(d, scr_emitter_vt.pre, scr_emitter_vt.post);
     switch (c) {
       case C_STREAM: return rd || wr;
@@ -4755,6 +4756,7 @@ bool scr_stream_dyn_instanceof(const ScrDyn *d, double which) {
       case C_WRITABLE: return wr || du;
       case C_DUPLEX: return du;
       case C_TRANSFORM: return tr;
+      case C_PASSTHROUGH: return pt;
       case C_EMITTER: return em;
       default: return false; /* net.Socket / net.Server are handle kinds only */
     }

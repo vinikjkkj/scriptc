@@ -20332,10 +20332,10 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
   /** The runtime classes the stream and events surfaces model, as the right-hand side of
    * instanceof, in every spelling (the named import, a require binding, a member read,
    * the namespace member). Each resolves through the builtin-member tables. */
-  type RtClass = "Stream" | "Readable" | "Writable" | "Duplex" | "Transform" | "EventEmitter" | "netSocket" | "netServer";
+  type RtClass = "Stream" | "Readable" | "Writable" | "Duplex" | "Transform" | "PassThrough" | "EventEmitter" | "netSocket" | "netServer";
   /** The class code the runtime's scr_stream_dyn_instanceof reads (scr_stream.c). */
   const RT_CLASS_CODE: Record<RtClass, number> = {
-    Stream: 0, Readable: 1, Writable: 2, Duplex: 3, Transform: 4, EventEmitter: 5, netSocket: 6, netServer: 7,
+    Stream: 0, Readable: 1, Writable: 2, Duplex: 3, Transform: 4, EventEmitter: 5, netSocket: 6, netServer: 7, PassThrough: 8,
   };
 
   /** Is the declaration inside `declare module "<name>"` (an ambient module of the stdlib)? */
@@ -20367,7 +20367,7 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
     const streamInfo = L.builtinStreamInfoOf(sym);
     if (streamInfo !== null) {
       const m = streamInfo.def.name.replace(/^%/, "");
-      if (m === "Readable" || m === "Writable" || m === "Duplex" || m === "Transform") return m;
+      if (m === "Readable" || m === "Writable" || m === "Duplex" || m === "Transform" || m === "PassThrough") return m;
       return null;
     }
     if (L.builtinEmitterInfoOf(sym) !== null) return "EventEmitter";
