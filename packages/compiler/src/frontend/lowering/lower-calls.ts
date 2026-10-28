@@ -21,7 +21,7 @@ import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCa
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
-import { unboundMethodThunk, undefinedArmedInAnswer } from "./lower-exprs.js";
+import { refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, unboundMethodThunk, undefinedArmedInAnswer } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -4322,6 +4322,11 @@ function lowerDynCallArgs(L: Lowerer, args: ts.NodeArray<ts.Expression>): IrExpr
 
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
+    // SubtleCrypto / Crypto members with no lowering, refused by name (lower-exprs.ts).
+    if (ts.isPropertyAccessExpression(expr.expression)) refuseUnloweredWebCrypto(L, expr.expression);
+    refuseUnloweredSubtleCall(L, expr);
+    refuseWebCryptoDestructuredArgs(L, expr);
+    refuseWebCryptoOwnKeys(L, expr);
     // `X(...)` where X is a member Node's own resolution of the required module
     // does not define: Node evaluates the arguments and throws "X is not a
     // function" (lower-require-absent.ts).
