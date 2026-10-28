@@ -5132,7 +5132,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         const atWidth = L.numberConvAtDynWidth(arg);
         if (atWidth) return { kind: "libCall", fn: "dyn.toNumber", args: [atWidth], type: F64, loc };
       }
-      if (arg.type.kind === "f64") return arg;
+      if (arg.type.kind === "f64") return { kind: "libCall", fn: "num.canon", args: [arg], type: F64, loc }; // a marker is ToNumber NaN (scr_runtime.h)
       if (arg.type.kind === "bool") {
         return {
           kind: "ternary",
@@ -5502,6 +5502,14 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // checker-pinned (or checked) to number, where the global's ToNumber
       // coercion is the identity and the tests are Number.isNaN /
       // Number.isFinite exactly (ms's `isFinite(val)` guard).
+      // The hidden NaN-marked-undefined producer (scr_runtime.h): `__scrNumUndef()`
+      // answers undefined in a number-typed slot, which is what Node's
+      // `undefined` is there. A reserved name, so no declaration is consulted;
+      // the corpus declares the same name in TypeScript so Node runs it too.
+      if (ts.isIdentifier(expr.expression) && expr.expression.text === "__scrNumUndef") {
+        if (expr.arguments.length !== 0) L.noLowering("__scrNumUndef with arguments", expr);
+        return { kind: "libCall", fn: "num.undef", args: [], type: F64, loc };
+      }
       if (
         (expr.expression.text === "parseInt" || expr.expression.text === "isNaN") &&
         L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined)
