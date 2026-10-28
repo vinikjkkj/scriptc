@@ -4956,6 +4956,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "net.sockResume":
             return finish(`scr_net_sock_resume(${arg(0)})`);
           case "net.sockNew":
+            // an unconnected socket's queued 'close' needs the loop to run
+            E.usesTimers = true;
             return finish(`scr_net_sock_idle_new()`);
           case "net.sockConnect":
             E.usesTimers = true; // a dialed socket holds the loop open
