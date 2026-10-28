@@ -648,6 +648,21 @@ void *scr_arr_copy_ref(ScrArr *a, double i) {
   return scr_elem_retain_p(a, p);
 }
 
+/* ── STEP 2a: flagged number[] ────────────────────────────────────────────
+ * Only arrays the program grows with `.length =` take these entry points
+ * (hole-flag.ts); every other number[] keeps the trapping readers and
+ * writers above. A hole reads as the marker, and so does a miss. */
+double scr_arr_get_f64_hole(ScrArr *a, double i) {
+  if (i >= 0.0 && i < SCR_ARR_FAST_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)a->len) {
+      double v = scr_slot_to_f64(a->data[n]);
+      return scr_num_is_hole(v) ? scr_num_undef() : v;
+    }
+  }
+  return scr_num_undef();
+}
+
 /* ── writes: i == len appends ──────────────────────────────────────────── */
 
 /* A write past the end of a REF array (any[] / dyn-element) grows it over the
@@ -686,6 +701,19 @@ static void scr_arr_set_slot(ScrArr *a, double i, uint64_t slot) {
 }
 
 void scr_arr_set_f64(ScrArr *a, double i, double v) {
+  scr_arr_set_slot(a, i, scr_slot_from_f64(v));
+}
+
+/* STEP 2a: a write past the end of a flagged number[] fills the gap with holes
+ * (no trap); an index that is not an integer in range keeps the trap below. */
+void scr_arr_set_f64_hole(ScrArr *a, double i, double v) {
+  if (i > (double)a->len && i < (double)a->len + SCR_ARR_SPARSE_LIMIT && i == trunc(i)) {
+    size_t idx = (size_t)i;
+    size_t holes = idx - a->len;
+    scr_arr_grow(a, idx + 1);
+    for (size_t k = 0; k < holes; k++) a->data[a->len + k] = scr_slot_from_f64(scr_num_hole());
+    a->len = idx;
+  }
   scr_arr_set_slot(a, i, scr_slot_from_f64(v));
 }
 
