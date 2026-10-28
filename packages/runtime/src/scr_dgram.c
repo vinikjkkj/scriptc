@@ -371,16 +371,40 @@ typedef struct ScrDnsPending {
 static ScrDnsPending *scr_dns_pending = NULL;
 static bool scr_dns_empty_warned = false; /* DEP0118 fires once per process */
 
+#ifdef _WIN32
+#include <process.h>
+#define SCR_DNS_PID() ((long)_getpid())
+#else
+#define SCR_DNS_PID() ((long)getpid())
+#endif
+
 /* DEP0118 (the empty name) goes through the process warning channel, the
  * way Node's emitWarning does: 'warning' listeners receive the
  * DeprecationWarning, and the default stderr report and its one-time trace
  * hint come from scr_emit_warning (scr_async_dyn.c, linked whenever a
  * dns.lookup is in the program — cc.ts/nodes.ts moduleUsesDynAsync). */
+static ScrDnsWarnHookFn scr_dns_warn_hook = NULL;
+
+void scr_dns_set_warn_hook(ScrDnsWarnHookFn fn) { scr_dns_warn_hook = fn; }
+
 static void scr_dns_emit_empty_warning(void) {
   static const char text[] =
       "The provided hostname \"\" is not a valid hostname, and is supported in the dns module solely for compatibility.";
   ScrStr *m = scr_str_new(text, sizeof text - 1);
-  scr_emit_warning("DeprecationWarning", "DEP0118", m);
+  if (scr_dns_warn_hook != NULL) {
+    scr_dns_warn_hook("DeprecationWarning", "DEP0118", m);
+  } else {
+    /* The channel is not linked: no listener can exist, so the default
+     * report alone is Node's output — "(node:pid) [CODE] Name: message"
+     * and the one-time trace hint. */
+    static bool hinted = false;
+    fflush(stdout);
+    fprintf(stderr, "(node:%ld) [DEP0118] DeprecationWarning: %s\n", SCR_DNS_PID(), text);
+    if (!hinted) {
+      hinted = true;
+      fputs("(Use `node --trace-deprecation ...` to show where the warning was created)\n", stderr);
+    }
+  }
   scr_str_release(m);
 }
 

@@ -73,9 +73,8 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym } from "../../ir/nodes.js";
-import { setDynOrderPlan } from "../dyn-members.js";
-import { orderRecordPlanCached } from "../../ir/nodes.js";
+import { moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync } from "../../ir/nodes.js";
+import { orderRecordPlanCached, moduleUsesDynAsync } from "../../ir/nodes.js";
 import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -2198,6 +2197,10 @@ class LlEmitter {
     if (usesHttp) this.declare(`declare void @scr_http_dyn_install()`);
     if (usesHttp2) this.declare(`declare void @scr_http2_dyn_install()`);
     if (usesDgram) this.declare(`declare void @scr_dgram_install()`);
+    if (usesDgram && moduleUsesDynAsync(this.mod)) {
+      this.declare(`declare void @scr_dns_set_warn_hook(ptr)`);
+      this.declare(`declare void @scr_emit_warning(ptr, ptr, ptr)`);
+    }
     if (embedsZlib) this.declare(`declare void @scr_zlib_island_install()`);
     if (embedsHttpClient) this.declare(`declare void @scr_net_island_install()`);
     if (usesRegex) this.declare(`declare void @scr_regex_dyn_install()`);
@@ -2706,6 +2709,8 @@ class LlEmitter {
       ...(usesFetchDispatch ? [`  call void @scr_fetch_dispatch_install()`] : []),
       ...(usesHttp2 ? [`  call void @scr_http2_dyn_install()`] : []),
       ...(usesDgram ? [`  call void @scr_dgram_install()`] : []),
+      ...(usesDgram && moduleUsesDynAsync(this.mod)
+        ? [`  call void @scr_dns_set_warn_hook(ptr @scr_emit_warning)`] : []),
       ...(embedsZlib ? [`  call void @scr_zlib_island_install()`] : []),
       ...(embedsHttpClient ? [`  call void @scr_net_island_install()`] : []),
       `  call void @scr_lib_init(i32 %argc, ptr %argv)`,
