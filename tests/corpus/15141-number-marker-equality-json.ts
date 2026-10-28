@@ -1,0 +1,20 @@
+function __scrNumUndef(): number { return undefined as unknown as number; }
+const u = __scrNumUndef();
+const v = __scrNumUndef();
+const n = 3;
+console.log(u === v, u !== v, u === n, u !== n);
+console.log(u < 1, u > 1, u <= 1, u >= 1, !u, !n);
+if (u) console.log("truthy"); else console.log("falsy");
+console.log(Math.max(u, 1), Math.round(u));
+console.log(Number(u), +u, -(-u), u | 0, u >>> 0, ~u);
+console.log(u % 2, u ** 2, u / 2, u - u);
+let w = u;
+w++;
+console.log(w, typeof w);
+let z = n;
+z = u;
+console.log(z, z === undefined, typeof z);
+console.log({ x: u, y: n });
+console.log(JSON.stringify({ x: u, y: n }), JSON.stringify([u, n]));
+console.log(String(u), u + "", [u].join("-"));
+console.log(parseFloat(String(u)), Number.isInteger(u), Number.isFinite(u));
