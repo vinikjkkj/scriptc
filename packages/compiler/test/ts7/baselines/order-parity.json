@@ -3785,6 +3785,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14655-tls-peer-cert-circular-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/14655-tls-peer-cert-circular-inspect.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1466-child-containers.ts": {
    "order": [
     "<repo>/tests/corpus/1466-child-containers.ts"
