@@ -644,6 +644,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "tls.createServerDyn": "scr_tls_create_server_dyn",
   "tls.createSecureContextDyn": "scr_tls_create_secure_context_dyn",
   "tls.connect": "scr_tls_connect_dyn",
+  "tls.connectCb": "scr_tls_connect_dyn",
   // ── node:dgram, THE WHOLE SURFACE. Four of the twenty declared
   // `dgram.*` lib functions used to be here, so every program that binds
   // a socket or registers a message listener raised
@@ -1376,6 +1377,9 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
 const LIB_FN_MOVE_ARGS: Record<string, readonly number[]> = {
   // scr_dgram_connect's `ScrClosure *cb /*moves, nullable*/`.
   "dgram.connectCb": [3],
+  // scr_tls_connect_dyn's `ScrClosure *cb /*moves, nullable*/` (the connect
+  // listener of tls.connect(opts, cb)): the C tier moves it the same way.
+  "tls.connectCb": [3],
   // The same seat on the rest of the dgram surface: `scr_dgram_bind`'s
   // fourth argument, `scr_dgram_close`'s second, and the closure every
   // event registration hands to the socket's listener registry. The C
@@ -1442,7 +1446,7 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   // node:tls / node:https servers and the TLS client socket, and the
   // dgram calls that implicit-bind — emit-exprs.ts marks E.usesTimers on
   // exactly these, and a server whose loop never runs accepts nothing.
-  "tls.createServer", "tls.createServerCb", "tls.createServerDyn", "tls.connect",
+  "tls.createServer", "tls.createServerCb", "tls.createServerDyn", "tls.connect", "tls.connectCb",
   "https.createServer",
   "dgram.bind", "dgram.bindCb", "dgram.connect", "dgram.connectCb",
   "dgram.sendStr", "dgram.sendBytes", "dgram.sendConnStr", "dgram.sendConnBytes", "dgram.sendDyn",
@@ -17729,6 +17733,31 @@ class LlEmitter {
       const t = B.tmp();
       B.line(`${t} = call ptr @scr_net_connect(double ${args[0]!.name}, ptr ${args[1]!.name}, ptr ${cb})`);
       return this.own({ name: t, type: e.type });
+    }
+    if (e.fn === "tls.sockOnSecureConnect") {
+      // secureConnect listeners: the closure moves in; scr_tls_sock_on_secure_connect
+      // gates on the TLS transport (a plain socket never fires it).
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      this.declare(`declare void @scr_tls_sock_on_secure_connect(ptr, ptr, i1 zeroext)`);
+      B.line(`call void @scr_tls_sock_on_secure_connect(ptr ${args[0]!.name}, ptr ${args[1]!.name}, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "tls.sockOnSession") {
+      // 'session' listeners: the same adapter choice as the C tier (scr_tls_sock_on_session
+      // stores the pair; the event itself never fires, see scr_tls.c).
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: tls.sockOnSession callback not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const adapter =
+        cbT.params.length === 0 ? "scr_net_data_thunk0"
+        : cbT.params[0]!.kind === "dyn" ? "scr_net_data_thunk_dyn"
+        : "scr_net_data_thunk_bytes";
+      this.declare(`declare void @${adapter}(ptr, ptr)`);
+      this.declare(`declare void @scr_tls_sock_on_session(ptr, ptr, ptr, i1 zeroext)`);
+      B.line(`call void @scr_tls_sock_on_session(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${adapter}, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
     }
     if (e.fn === "net.sockOnData" || e.fn === "http.reqOnData") {
       const cbT = e.args[1]!.type;
