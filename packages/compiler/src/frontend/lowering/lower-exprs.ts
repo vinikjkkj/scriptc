@@ -610,6 +610,18 @@ function helperFieldEnumerationFence(L: Lowerer, expr: ts.Expression): void {
   }
 }
 
+/** True when `e` denotes the WebCrypto singleton (`require('crypto').webcrypto`,
+ * or `globalThis.crypto` / the global `crypto`), or is a `||` / `??` over such
+ * spellings. Mirrors the value lowering (lower-exprs: dyn.webCrypto). */
+export function isWebCryptoValueExpr(L: Lowerer, e: ts.Expression): boolean {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (ts.isPropertyAccessExpression(e)) {
+    const bi = L.builtinMemberOf(e);
+    if (bi !== null && bi.module === "crypto" && bi.member === "webcrypto") return true;
+  }
+  return stdlibGlobalNameOf(L, e) === "crypto";
+}
+
 function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     const loc = locOf(expr);
     // STEP 2a: a flagged number[] may only be indexed, measured, filled or grown.
