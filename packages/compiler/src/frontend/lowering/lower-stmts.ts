@@ -11004,8 +11004,42 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       // EventEmitter roots are modelled (scr_dyn_forin_keys walks EventEmitter.prototype's keys).
       if (RUNTIME_STREAM_CLASSES.has(n) || RUNTIME_ERROR_CLASSES.has(n)) return false;
       if (info.hasPropsTable === true) return false;
+      if (protoKeyWritten(info)) return false;
     }
     return true;
+  }
+
+  /** True when the program writes a run-time key onto C.prototype (`C.prototype[k] = v`) or defines a
+   * property on it (`Object.defineProperty(C.prototype, ...)`): an enumerable prototype key that the
+   * dyn walk does not model, so for-in over an instance would omit it (Node visits it). Scanned in the
+   * class's own source file, the one a prototype write sits beside in practice. */
+  function protoKeyWritten(info: ClassInfo): boolean {
+    const decl = info.decl;
+    const name = decl?.name?.text;
+    if (decl == null || name === undefined) return false;
+    const sf = decl.getSourceFile();
+    const isProtoOf = (e: ts.Expression): boolean =>
+      ts.isPropertyAccessExpression(e) && e.name.text === "prototype" && ts.isIdentifier(e.expression) && e.expression.text === name;
+    let found = false;
+    const visit = (n: ts.Node): void => {
+      if (found) return;
+      if (
+        ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isElementAccessExpression(n.left) && isProtoOf(n.left.expression) &&
+        !ts.isStringLiteral(n.left.argumentExpression)
+      ) {
+        found = true;
+        return;
+      }
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.text === "defineProperty" && n.arguments.length > 0 && isProtoOf(n.arguments[0]!)) {
+        found = true;
+        return;
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    return found;
   }
 
   export function lowerForIn(L: Lowerer, stmt: ts.ForInStatement): IrStmt {
