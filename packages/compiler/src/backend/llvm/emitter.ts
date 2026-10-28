@@ -15974,7 +15974,8 @@ class LlEmitter {
       }
       this.declare(`declare void @scr_child_stream_on_data(ptr, ptr, ptr, i1 zeroext)`);
       B.line(`call void @scr_child_stream_on_data(ptr ${s0.name}, ptr ${cb.name}, ptr @${adapter}, i1 ${once.name})`);
-      // Node's `this`: the receiver, +1.
+      // Node's `this`: the receiver, +1 (none in statement position, where void).
+      if (e.type.kind === "void") return { name: "", type: e.type };
       this.declare(`declare ptr @scr_child_stream_retain(ptr)`);
       const self = B.tmp();
       B.line(`${self} = call ptr @scr_child_stream_retain(ptr ${s0.name})`);
@@ -15987,7 +15988,8 @@ class LlEmitter {
       this.moveTemp(cb);
       this.declare(`declare void @scr_child_stream_on_end(ptr, ptr, i1 zeroext)`);
       B.line(`call void @scr_child_stream_on_end(ptr ${s0.name}, ptr ${cb.name}, i1 ${once.name})`);
-      // Node's `this`: the receiver, +1.
+      // Node's `this`: the receiver, +1 (none in statement position, where void).
+      if (e.type.kind === "void") return { name: "", type: e.type };
       this.declare(`declare ptr @scr_child_stream_retain(ptr)`);
       const self = B.tmp();
       B.line(`${self} = call ptr @scr_child_stream_retain(ptr ${s0.name})`);
