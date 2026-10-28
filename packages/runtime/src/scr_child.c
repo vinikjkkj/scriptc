@@ -1209,6 +1209,10 @@ struct ScrChildStream {
   size_t rc;
   HANDLE h; /* the pipe's read end; NULL after EOF or spawn failure */
   bool eof;
+  /* Node's readableFlowing, sticky: set by the first 'data' listener or by
+   * the exit flush (flushStdio's resume). Never cleared: a consumed once()
+   * leaves the stream flowing, so later data discards and 'end' still fires. */
+  bool flowing;
   ScrChildStreamDataL *data_ls;
   size_t n_data, cap_data;
   ScrChildStreamEndL *end_ls;
@@ -1312,7 +1316,7 @@ void scr_child_stream_release_v(void *p) { scr_child_stream_release((ScrChildStr
 
 /* True while the stream has a consumer and can still deliver. */
 static bool scr_child_stream_watching(const ScrChildStream *s) {
-  return !s->eof && s->h != NULL && s->n_data > 0;
+  return !s->eof && s->h != NULL && s->flowing;
 }
 
 /* A fresh piped stream over the pipe's read end, registered with the
@@ -1388,7 +1392,6 @@ static bool scr_child_stream_pump(ScrChildStream *s) {
             memmove(s->data_ls + j, s->data_ls + j + 1,
                     (s->n_data - j - 1) * sizeof *s->data_ls);
             s->n_data--;
-            if (s->n_data == 0) scr_child_streams_watching--;
             break;
           }
         }
@@ -1440,6 +1443,13 @@ static void scr_child_stream_drain_now(ScrChildStream *s) {
   }
 }
 
+/* Node's resume(): the stream starts flowing (idempotent, sticky). */
+static void scr_child_stream_start_flow(ScrChildStream *s) {
+  if (s->flowing) return;
+  s->flowing = true;
+  scr_child_streams_watching++;
+}
+
 void scr_child_stream_on_data(ScrChildStream *s, ScrClosure *cb /*moves*/,
                               ScrChildStreamDataFn fn, bool once) {
   if (s->eof || s->h == NULL) {
@@ -1455,7 +1465,7 @@ void scr_child_stream_on_data(ScrChildStream *s, ScrClosure *cb /*moves*/,
   s->data_ls[s->n_data].fn = fn;
   s->data_ls[s->n_data].once = once;
   s->n_data++;
-  if (s->n_data == 1) scr_child_streams_watching++;
+  scr_child_stream_start_flow(s);
 }
 
 void scr_child_stream_on_end(ScrChildStream *s, ScrClosure *cb /*moves*/, bool once) {
@@ -1472,6 +1482,20 @@ void scr_child_stream_on_end(ScrChildStream *s, ScrClosure *cb /*moves*/, bool o
   s->end_ls[s->n_end].cb = cb;
   s->end_ls[s->n_end].once = once;
   s->n_end++;
+}
+
+/* Node's flushStdio (lib/internal/child_process.js, v24.15.0): after the
+ * child's 'exit' listeners, every piped stdio stream that is not flowing is
+ * resumed. The resumed stream discards what no listener takes and emits
+ * 'end' at EOF on a later turn, so 'end' follows 'exit'. */
+static void scr_child_stream_flush_after_exit(ScrChildStream *s) {
+  if (s == NULL || s->eof) return;
+#ifdef _WIN32
+  if (s->h == NULL) return;
+#else
+  if (s->fd < 0) return;
+#endif
+  scr_child_stream_start_flow(s);
 }
 
 ScrChildStream *scr_child_stdout(ScrChild *c) {
@@ -1841,6 +1865,10 @@ static void scr_child_settle(ScrChild *c) {
       c->exit_cbs[i].fn(c->exit_cbs[i].cb, c->has_code, c->code, c->exit_signal);
       if (scr_exc_pending()) break;
     }
+  }
+  if (c->state == SCR_CHILD_EXITED && !scr_exc_pending()) {
+    scr_child_stream_flush_after_exit(c->out_stream);
+    scr_child_stream_flush_after_exit(c->err_stream);
   }
   scr_child_drop_listeners(c);
   scr_child_release(c); /* the registry's reference */
@@ -2748,6 +2776,8 @@ struct ScrChildStream {
   size_t rc;
   int fd;   /* the pipe's read end; -1 after EOF or spawn failure */
   bool eof; /* 'end' delivered (or the stream never opened) */
+  /* Node's readableFlowing, sticky (see the Windows struct note). */
+  bool flowing;
   bool armed;     /* EVFILT_READ registered on the child kqueue */
   bool uncounted; /* counted into scr_children_unwatched (arm failure) */
   ScrChildStreamDataL *data_ls;
@@ -3009,11 +3039,10 @@ void scr_child_stream_release(ScrChildStream *s) {
 void *scr_child_stream_retain_v(void *p) { return scr_child_stream_retain((ScrChildStream *)p); }
 void scr_child_stream_release_v(void *p) { scr_child_stream_release((ScrChildStream *)p); }
 
-static void scr_child_stream_dearm(ScrChildStream *s);
 
 /* True while the stream has a consumer and can still deliver. */
 static bool scr_child_stream_watching(const ScrChildStream *s) {
-  return !s->eof && s->fd >= 0 && s->n_data > 0;
+  return !s->eof && s->fd >= 0 && s->flowing;
 }
 
 /* A fresh piped stream over the pipe's read end (nonblocking, cloexec);
@@ -3100,14 +3129,6 @@ static bool scr_child_stream_pump(ScrChildStream *s) {
             memmove(s->data_ls + j, s->data_ls + j + 1,
                     (s->n_data - j - 1) * sizeof *s->data_ls);
             s->n_data--;
-            if (s->n_data == 0) {
-              scr_child_streams_watching--;
-              scr_child_stream_dearm(s);
-              if (s->uncounted) {
-                s->uncounted = false;
-                scr_children_unwatched--;
-              }
-            }
             break;
           }
         }
@@ -3161,25 +3182,8 @@ static void scr_child_stream_drain_now(ScrChildStream *s) {
   }
 }
 
-/* Drops the read filter when the LAST consumer leaves (a once-listener
- * removal): a level-triggered filter over an unread pipe would otherwise
- * wake every idle sleep for data nobody consumes. */
-static void scr_child_stream_dearm(ScrChildStream *s) {
-  if (!s->armed) return;
-  s->armed = false;
-#ifdef SCR_HAVE_KQUEUE
-  if (scr_child_kq >= 0 && s->fd >= 0) {
-    struct kevent ev;
-    EV_SET(&ev, (uintptr_t)s->fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
-    struct timespec zero = {0, 0};
-    (void)kevent(scr_child_kq, &ev, 1, NULL, 0, &zero);
-  }
-#elif defined(SCR_CHILD_HAVE_PIDFD)
-  if (scr_child_ep >= 0 && s->fd >= 0) {
-    (void)epoll_ctl(scr_child_ep, EPOLL_CTL_DEL, s->fd, NULL);
-  }
-#endif
-}
+/* (The read filter lives until the stream finishes: closing its fd drops
+ * the filter, and a flowing stream reads to EOF, so no idle wake-ups.) */
 
 /* Arms the level-triggered read filter for a consumer-owning stream (see
  * the design note: no EV_CLEAR — the wait's drain discards events). An
@@ -3217,6 +3221,15 @@ static void scr_child_stream_arm(ScrChildStream *s) {
   }
 }
 
+/* Node's resume(): the stream starts flowing (idempotent, sticky). The
+ * level-triggered read filter is armed here (the consumer's wake-up). */
+static void scr_child_stream_start_flow(ScrChildStream *s) {
+  if (s->flowing) return;
+  s->flowing = true;
+  scr_child_streams_watching++;
+  scr_child_stream_arm(s);
+}
+
 /* stream.on/once("data", cb): the consumer that makes the pipe flow (and
  * keeps the loop alive). Post-'end' registrations release immediately
  * and never fire, the stdin rule. */
@@ -3235,10 +3248,7 @@ void scr_child_stream_on_data(ScrChildStream *s, ScrClosure *cb /*moves*/,
   s->data_ls[s->n_data].fn = fn;
   s->data_ls[s->n_data].once = once;
   s->n_data++;
-  if (s->n_data == 1) {
-    scr_child_streams_watching++;
-    scr_child_stream_arm(s);
-  }
+  scr_child_stream_start_flow(s);
 }
 
 /* stream.on/once("end", cb): fires once at EOF; alone it neither reads
@@ -3261,6 +3271,20 @@ void scr_child_stream_on_end(ScrChildStream *s, ScrClosure *cb /*moves*/, bool o
 
 /* child.stdout / child.stderr — +1 handle, or NULL when the slot was not
  * piped (Node's null there). */
+/* Node's flushStdio (lib/internal/child_process.js, v24.15.0): after the
+ * child's 'exit' listeners, every piped stdio stream that is not flowing is
+ * resumed. The resumed stream discards what no listener takes and emits
+ * 'end' at EOF on a later turn, so 'end' follows 'exit'. */
+static void scr_child_stream_flush_after_exit(ScrChildStream *s) {
+  if (s == NULL || s->eof) return;
+#ifdef _WIN32
+  if (s->h == NULL) return;
+#else
+  if (s->fd < 0) return;
+#endif
+  scr_child_stream_start_flow(s);
+}
+
 ScrChildStream *scr_child_stdout(ScrChild *c) {
   return c->out_stream ? scr_child_stream_retain(c->out_stream) : NULL;
 }
@@ -3713,6 +3737,10 @@ static void scr_child_settle(ScrChild *c) {
       c->exit_cbs[i].fn(c->exit_cbs[i].cb, c->has_code, c->code, c->exit_signal);
       if (scr_exc_pending()) break;
     }
+  }
+  if (c->state == SCR_CHILD_EXITED && !scr_exc_pending()) {
+    scr_child_stream_flush_after_exit(c->out_stream);
+    scr_child_stream_flush_after_exit(c->err_stream);
   }
   scr_child_drop_listeners(c);
   scr_child_release(c); /* the registry's reference */
