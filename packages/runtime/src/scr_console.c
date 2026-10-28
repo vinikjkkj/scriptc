@@ -1,5 +1,6 @@
 #include "scr_runtime.h"
 
+#include <signal.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -147,6 +148,13 @@ static void scr_flush_at_exit(void) { fflush(stdout); }
 static void scr_collect_cycles_at_exit(void) { scr_collect_cycles(); }
 
 void scr_init(void) {
+#ifdef SIGPIPE
+  /* Node ignores SIGPIPE for the whole process (node::InitializeOncePerProcess):
+   * a write to a closed peer then answers EPIPE, which the socket surfaces as an
+   * 'error' event, instead of killing the process. Children reset it to the
+   * default at spawn (scr_child.c), as libuv does. Windows has no SIGPIPE. */
+  signal(SIGPIPE, SIG_IGN);
+#endif
 #ifdef _WIN32
   /* The CRT opens std streams in TEXT mode, which writes \n as \r\n. Node
    * on Windows does NOT translate — console.log emits \n whether stdout is

@@ -672,7 +672,7 @@ static int scr_tls_bio_send(void *ctx, const unsigned char *buf, size_t len) {
   ScrTlsSock *t = (ScrTlsSock *)ctx;
   int fd = scr_net_sock_fd(t->sock);
   if (fd < 0) return MBEDTLS_ERR_NET_CONN_RESET;
-  ssize_t n = write(fd, buf, len);
+  ssize_t n = scr_net_write_nosig(fd, buf, len); /* a closed peer: EPIPE, not SIGPIPE */
   if (n >= 0) return (int)n;
   if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
     scr_net_sock_transport_want_write(t->sock);
