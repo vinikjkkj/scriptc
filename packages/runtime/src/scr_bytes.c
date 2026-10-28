@@ -425,7 +425,7 @@ double scr_bytes_get(const ScrBytes *b, double i) {
     case SCR_BYTES_F64: {
       double v;
       memcpy(&v, b->data + idx * 8, 8);
-      return v;
+      return scr_num_canon(v); /* forged payloads never become markers */
     }
     case SCR_BYTES_I8:
       return (double)(int8_t)b->data[idx];
@@ -874,7 +874,7 @@ double scr_dataview_get(const ScrBytes *b, double byte_off, ScrDataViewGet kind,
     case SCR_DV_F64: {
       double d;
       memcpy(&d, &u, 8);
-      return d;
+      return scr_num_canon(d);
     }
     case SCR_DV_BIGU64:
       /* Number(view.getBigUint64(...)): u64 → double rounds to nearest
@@ -1544,6 +1544,7 @@ ScrBytes *scr_bytes_from_arr(ScrBytesElem elem, const ScrArr *arr) {
   for (size_t i = 0; i < arr->len; i++) {
     double v;
     memcpy(&v, &arr->data[i], sizeof v); /* SCR_ELEM_F64 slots hold doubles */
+    v = scr_num_canon(v); /* a marker stores as the canonical NaN, as in Node */
     switch (elem) {
       case SCR_BYTES_U8:
         b->data[i] = (uint8_t)scr_bytes_to_u32(v);
@@ -2102,7 +2103,7 @@ double scr_bytes_read_num(const ScrBytes *b, double offset, ScrBytesNumKind kind
     case SCR_BN_F64: {
       double d;
       memcpy(&d, &u, 8);
-      return d;
+      return scr_num_canon(d);
     }
   }
   return 0; /* unreachable */
@@ -2111,6 +2112,7 @@ double scr_bytes_read_num(const ScrBytes *b, double offset, ScrBytesNumKind kind
 double scr_bytes_write_num(ScrBytes *b, double value, double offset, ScrBytesNumKind kind, bool le) {
   size_t width = scr_bytes_num_width(kind);
   uint64_t u;
+  if (kind == SCR_BN_F64) value = scr_num_canon(value); /* a marker writes the canonical NaN */
   if (kind == SCR_BN_F32 || kind == SCR_BN_F64) {
     /* Float writes carry no value check (any double stores; the float
      * cast rounds to nearest exactly like Float32Array assignment). */
