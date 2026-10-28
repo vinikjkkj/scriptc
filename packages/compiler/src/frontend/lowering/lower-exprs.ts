@@ -45,6 +45,7 @@ import { lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, st
 import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { emitterRooted } from "./lower-emitter.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, type ClassInfo } from "./lower-classes.js";
+import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
 
 /** SCRIPTC_DTSTWIN_WHY probe: how many reads have taken the declaration-
  * module fence instead of the silent erasure stance. Read in the SAME run
@@ -638,11 +639,11 @@ export function isWebCryptoValueExpr(L: Lowerer, e: ts.Expression): boolean {
  * for its `.subtle`, or null. A const binding follows its initializer. In a
  * JavaScript file the checker types `require` as any, so the value spelling is
  * the test there; a TypeScript file also answers by the declared type. */
-function webCryptoKindOf(L: Lowerer, e: ts.Expression, depth = 0): string | null {
+export function webCryptoKindOf(L: Lowerer, e: ts.Expression, depth = 0): string | null {
   if (depth > 12) return null;
   while (ts.isParenthesizedExpression(e)) e = e.expression;
   const sym = L.typeOf(e).getSymbol();
-  if (sym !== undefined && (sym.name === "SubtleCrypto" || sym.name === "Crypto") &&
+  if (sym !== undefined && (sym.name === "SubtleCrypto" || sym.name === "Crypto" || sym.name === "CryptoKey") &&
       L.checker.declarationsOf(sym).some((d) => d.getSourceFile().isDeclarationFile)) {
     return sym.name;
   }
@@ -655,9 +656,26 @@ function webCryptoKindOf(L: Lowerer, e: ts.Expression, depth = 0): string | null
     const l = webCryptoKindOf(L, e.left, depth + 1);
     return l !== null && l === webCryptoKindOf(L, e.right, depth + 1) ? l : null;
   }
+  if (ts.isAwaitExpression(e)) {
+    // `await subtle.importKey(...)`: the CryptoKey of a tracked SubtleCrypto (its type is any in JavaScript).
+    const inner = e.expression;
+    if (ts.isCallExpression(inner) && ts.isPropertyAccessExpression(inner.expression) &&
+        inner.expression.name.text === "importKey" && webCryptoKindOf(L, inner.expression.expression, depth + 1) === "SubtleCrypto") {
+      return "CryptoKey";
+    }
+    return null;
+  }
   if (ts.isIdentifier(e)) {
     const dsym = L.resolveValueSymbol(e);
     const decl = dsym === null ? undefined : L.checker.declarationsOf(dsym)[0];
+    // `const { subtle } = require('crypto').webcrypto`: the member of a tracked Crypto.
+    if (decl !== undefined && ts.isBindingElement(decl) && ts.isObjectBindingPattern(decl.parent) &&
+        ts.isVariableDeclaration(decl.parent.parent) && decl.parent.parent.initializer !== undefined) {
+      const key = decl.propertyName ?? decl.name;
+      if (key === undefined) return null;
+      const kin = webCryptoKindOf(L, decl.parent.parent.initializer, depth + 1);
+      return kin === "Crypto" && ts.isIdentifier(key) && key.text === "subtle" ? "SubtleCrypto" : null;
+    }
     if (decl !== undefined && ts.isVariableDeclaration(decl) && decl.initializer !== undefined &&
         ts.isIdentifier(decl.name) && ts.isVariableDeclarationList(decl.parent) &&
         (decl.parent.flags & ts.NodeFlags.Const) !== 0) {
@@ -879,7 +897,8 @@ export function refuseUnloweredWebCryptoPattern(L: Lowerer, pattern: ts.ObjectBi
 }
 
 
-function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
+function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
+  refuseWebCryptoFlowsAt(L, expr);
   if (ts.isBinaryExpression(expr)) refuseUnloweredWebCryptoAssign(L, expr);
     const loc = locOf(expr);
     // STEP 2a: a flagged number[] may only be indexed, measured, filled or grown.

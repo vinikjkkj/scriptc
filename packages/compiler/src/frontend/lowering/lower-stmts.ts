@@ -44,6 +44,7 @@ import { probeNodeRequireRefusal } from "../npm.js";
 import { lowerAbsentGlobal, lowerAbsentLocal } from "./lower-absent.js";
 import { deadBranchSkippable, relativeRequireRefusal, statementAlwaysThrowsOnRequire } from "../require-throws.js";
 import { refusalMessage } from "./lower-requirestack.js";
+import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
 
 /** `const X = /* @__PURE__ *\/ makeX()` at a module's top level: every
  * declarator initialized by a call (or `new`) carrying the bundler PURE
@@ -1113,6 +1114,8 @@ export function irAlwaysExits(s: IrStmt | readonly IrStmt[]): boolean {
 }
 
 export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | null {
+    if (ts.isReturnStatement(stmt)) refuseWebCryptoFlowsAt(L, stmt);
+    if (ts.isExpressionStatement(stmt) && ts.isBinaryExpression(stmt.expression)) refuseWebCryptoFlowsAt(L, stmt.expression);
     // `({ encrypt } = subtle);` as a statement: the assignment destructuring is checked here (lower-exprs.ts).
     if (ts.isExpressionStatement(stmt) && ts.isBinaryExpression(stmt.expression)) refuseUnloweredWebCryptoAssign(L, stmt.expression);
     if (ts.isVariableStatement(stmt)) {
@@ -4622,6 +4625,7 @@ function evolvedLetType(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean
 }
 
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
+    refuseWebCryptoFlowsAt(L, decl);
     // A helper unrolled into accessors of a class (registerHelperAccessors): its body is never a value.
     if (L.helperDecls.has(decl)) return null;
     // `const { encrypt } = subtle`: a WebCrypto member with no lowering refuses at the binding (lower-exprs.ts).
