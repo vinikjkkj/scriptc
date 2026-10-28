@@ -35,6 +35,8 @@ import type {
 } from "../../ir/nodes.js";
 import { DYN, funcOf, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
+import { setDynOrderPlan } from "../dyn-members.js";
+import { orderRecordPlanCached } from "../../ir/nodes.js";
 import {
   mangleAsyncSpawn,
   mangleGenSpawn,
@@ -150,6 +152,7 @@ export function emitModuleProgram(
   sourceText: string | undefined,
   headerName: string,
 ): EmittedProgram {
+  setDynOrderPlan(orderRecordPlanCached(mod.classes ?? []));
   resetSrcSiteCache();
   const E = new CEmitter(mod, sourceText);
   E.headerName = headerName;

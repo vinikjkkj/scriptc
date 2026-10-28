@@ -5,7 +5,7 @@
 import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
-import { BOOL, CAUGHT, F64, IrExpr, IrStmt, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-types.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER } from "./emit-shapes.js";
 import { emitStableReceiver } from "./emit-exprs.js";
@@ -897,6 +897,11 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
             ? (s.field === "%code" ? "code" : s.field)
             : mangleField(s.field);
         const field = `${obj.name}->${member}`;
+        if (s.kind === "fieldSet") {
+          const ord = orderRecordPlanCached(E.mod.classes ?? []).ordinalOf(s.className, s.field);
+          const fn = s.unset === true ? "scr_ord_forget" : "scr_ord_note";
+          if (ord !== null) E.line(`${fn}(${obj.name}->${ORD_MEMBER}, ${ord});${E.srcComment(s.loc)}`);
+        }
         if (isRefCounted(v.type)) {
           E.moveTemp(v);
           const old = `sc_t${E.tempCounter++}`;

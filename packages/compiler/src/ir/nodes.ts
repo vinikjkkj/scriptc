@@ -1635,6 +1635,12 @@ export interface IrClassDef {
    * (Object.keys, for-in, util.inspect, JSON) read it; the struct layout
    * does not move. */
   keyOrder?: string[];
+  /** The fields THIS class's own code first writes after construction: JS
+   * expando fields the class does not declare (`this.x = ...` in a method or a
+   * constructor, not a class-body declaration). Their insertion order is per
+   * instance, so every instance records it (orderRecordPlanOf). Absent when
+   * the class has none. Inherited fields are the base's, not repeated. */
+  ordered?: string[];
   /** ALL fields in layout order: the base chain's fields first — an
    * IDENTICAL prefix, so an upcast is a pointer reinterpret and base-field
    * offsets agree through any static type — then this class's own fields.
@@ -2135,6 +2141,84 @@ export function slotStorageKey(shape: IrRecordShape, field: string): string {
  * one bit per declared field. Stated once so both backends lay out the same
  * struct; `fields` is the canonical (name-sorted) list, so the bit index is
  * a field's position in it and never moves. */
+/** THE INFERRED-FIELD ORDER RECORD (per-instance insertion order of the
+ * fields a JS class first writes after its declarations). One record per
+ * class HIERARCHY: the root's struct carries it as its first member after the
+ * prefix (every class of the hierarchy declares it at the same index, so an
+ * upcast reads the same record), `ORD_MEMBER`, sized 1 + count bytes: byte 0
+ * is how many ordinals are written, bytes 1.. are the ordinals in write order.
+ * An ordinal names a field across the whole hierarchy (base first). Null when
+ * no class of the hierarchy has inferred fields: such hierarchies are laid out
+ * exactly as before. */
+export const ORD_MEMBER = "sc_ord";
+export interface OrdPlan {
+  /** The hierarchy root of a class (the top-most class of its base chain
+   * among `classes`), or null for a class outside the list. */
+  rootOf(cls: string): string | null;
+  /** Bytes of the record the hierarchy of `cls` carries (0 = none). */
+  recordBytes(cls: string): number;
+  /** The field's ordinal within its hierarchy, or null when the field is not
+   * inferred (static slot). */
+  ordinalOf(cls: string, field: string): number | null;
+  /** The hierarchy's inferred field names by ordinal (for the member table). */
+  namesOf(cls: string): string[];
+}
+const ORD_PLAN_CACHE = new WeakMap<readonly IrClassDef[], OrdPlan>();
+/** orderRecordPlanOf, computed once per class list (the emitters ask per class). */
+export function orderRecordPlanCached(classes: readonly IrClassDef[]): OrdPlan {
+  let p = ORD_PLAN_CACHE.get(classes);
+  if (p === undefined) {
+    p = orderRecordPlanOf(classes);
+    ORD_PLAN_CACHE.set(classes, p);
+  }
+  return p;
+}
+export function orderRecordPlanOf(classes: readonly IrClassDef[]): OrdPlan {
+  const byName = new Map(classes.map((c) => [c.name, c] as const));
+  const rootMemo = new Map<string, string | null>();
+  const rootOf = (name: string): string | null => {
+    if (rootMemo.has(name)) return rootMemo.get(name)!;
+    let cur = byName.get(name);
+    if (cur === undefined) { rootMemo.set(name, null); return null; }
+    let guard = 0;
+    while (cur.base !== undefined && byName.has(cur.base) && guard++ < 1000) cur = byName.get(cur.base)!;
+    rootMemo.set(name, cur.name);
+    return cur.name;
+  };
+  const ordinals = new Map<string, number>(); // `${root}\0${field}` -> ordinal
+  const names = new Map<string, string[]>(); // root -> names by ordinal
+  for (const c of classes) {
+    const root = rootOf(c.name);
+    if (root === null) continue;
+    for (const f of c.ordered ?? []) {
+      const key = `${root}\0${f}`;
+      if (ordinals.has(key)) continue;
+      const list = names.get(root) ?? [];
+      ordinals.set(key, list.length);
+      list.push(f);
+      names.set(root, list);
+    }
+  }
+  return {
+    rootOf,
+    recordBytes(cls) {
+      const root = rootOf(cls);
+      if (root === null) return 0;
+      const n = names.get(root)?.length ?? 0;
+      return n === 0 ? 0 : 1 + n;
+    },
+    ordinalOf(cls, field) {
+      const root = rootOf(cls);
+      if (root === null) return null;
+      return ordinals.get(`${root}\0${field}`) ?? null;
+    },
+    namesOf(cls) {
+      const root = rootOf(cls);
+      return root === null ? [] : [...(names.get(root) ?? [])];
+    },
+  };
+}
+
 export function ownMaskBytes(shape: { fields: { name: string }[] }): number {
   return 1 + ((shape.fields.length + 7) >> 3);
 }
@@ -2605,7 +2689,7 @@ export type IrStmt =
   /** Field write `obj.f = v` — statement-only, like `assign`/`arraySet`.
    * Evaluation order: obj, then value. The old value is released; ownership
    * of a refcounted new value MOVES into the object. */
-  | { kind: "fieldSet"; obj: IrExpr; className: string; field: string; value: IrExpr; loc: SrcLoc }
+  | { kind: "fieldSet"; obj: IrExpr; className: string; field: string; value: IrExpr; unset?: true; loc: SrcLoc }
   /** Record field write `r.f = v` — mirrors `fieldSet` exactly (evaluation
    * order obj then value; old value released; refcounted new value moved
    * in), with a shape id in place of a class name. `unset: true` is

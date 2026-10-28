@@ -88,6 +88,35 @@ function classKeyOrderNames(
   return all;
 }
 
+/** THE INFERRED FIELDS OF A JS CLASS (IrClassDef.ordered): the own fields the
+ * class body does not declare and the constructor's parameter properties do
+ * not name. A JS constructor or method creates them by assignment, so their
+ * insertion order is per instance. TypeScript classes have none: their
+ * fields are declared, and their order is the declaration order (classKeyOrderNames). */
+function classOrderedNames(
+  decl: ts.ClassDeclaration | ts.ClassExpression,
+  fieldOrder: ClassInfo["fieldOrder"],
+): string[] {
+  if (!isJsSourceFile(decl.getSourceFile())) return [];
+  const declared = new Set<string>();
+  const params = new Set<string>();
+  for (const m of decl.members) {
+    if (ts.isPropertyDeclaration(m) && ts.isIdentifier(m.name)) declared.add(m.name.text);
+    if (ts.isConstructorDeclaration(m)) {
+      for (const p of m.parameters) {
+        if (ts.isIdentifier(p.name) && (ts.getModifiers(p) ?? []).length > 0) params.add(p.name.text);
+      }
+    }
+  }
+  const out: string[] = [];
+  for (const f of fieldOrder) {
+    if (f.redeclared === true || declared.has(f.name) || params.has(f.name)) continue;
+    if (f.name.startsWith("%") || f.name.startsWith("#")) continue;
+    if (!out.includes(f.name)) out.push(f.name);
+  }
+  return out;
+}
+
 export interface MethodSig {
   params: ParamShape[];
   ret: IrType;
@@ -5477,6 +5506,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         reorderFieldsByCtorWrites(ctor.body, fieldOrder);
       }
       const keyOrder = classKeyOrderNames(decl, base, fieldOrder);
+      const orderedNames = classOrderedNames(decl, fieldOrder);
 
       const info: ClassInfo = {
         def: {
@@ -5504,6 +5534,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             ...fieldOrder.filter((f) => f.redeclared !== true).map((f) => ({ name: f.name, type: f.type })),
           ],
           ...(keyOrder !== undefined ? { keyOrder } : {}),
+          ...(orderedNames.length > 0 ? { ordered: orderedNames } : {}),
           ...(methods.size > 0 ? { methods: [...methods.keys()] } : {}),
           ...(absentTrackedFields.size > 0 ? { absentFields: [...absentTrackedFields] } : {}),
           ...(abstractClass ? { abstract: true as const } : {}),
