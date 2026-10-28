@@ -2670,6 +2670,10 @@ declare module "tls" {
   export interface TLSSocket extends Socket {
     authorized: boolean;
     authorizationError: string | null;
+    /** true iff the handshake resumed the session tls.connect's `session` offered. */
+    isSessionReused(): boolean;
+    /** the serialized session (a Buffer), or undefined (no session yet, or a server socket). */
+    getSession(): Buffer | undefined;
   }
   /** tls.connect options — the RUNTIME options record (members read at
    * runtime; port/host/rejectUnauthorized/ca/servername are the
