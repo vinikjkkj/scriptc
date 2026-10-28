@@ -10338,6 +10338,8 @@ bool scr_tls_sock_authorized(ScrNetSocket *s);
 bool scr_tls_sock_session_reused(ScrNetSocket *s);
 /* true when the connection was made by the first dial attempt (scr_net.c) */
 bool scr_net_sock_first_attempt(ScrNetSocket *s);
+/* send(2) with SIGPIPE suppressed (a closed peer is EPIPE, not a signal) */
+ssize_t scr_net_write_nosig(int fd, const void *buf, size_t len);
 ScrBytes *scr_tls_sock_get_session(ScrNetSocket *s);
 /* TLSSocket.getPeerCertificate(detailed): the peer certificate object (+1), or {} */
 ScrDyn *scr_tls_sock_peer_cert(ScrNetSocket *s, bool detailed);
