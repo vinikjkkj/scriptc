@@ -84,15 +84,6 @@ stdlib-fence.ts:26:13 - error SC2020: 'new ArrayBuffer' is part of the standard 
 
   hint: no free-standing ArrayBuffer value exists — typed arrays own their storage: allocate the view directly (new Uint8Array(n)), or erase a fresh buffer into one (new Uint8Array(new ArrayBuffer(n)), new DataView(new ArrayBuffer(n), ...))
 
-stdlib-fence.ts:31:7 - error SC2020: 'AggregateError' is part of the standard library types but has no scriptc lowering yet
-
-  30 | // and the unlowered members of lowered error objects.)
-  31 | const agg = new AggregateError([]);
-     |       ^~~
-  32 | // (`.stack` READS now lower — the header line a zero-frame capture
-
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
-
 stdlib-fence.ts:31:13 - error SC2020: 'new AggregateError' is part of the standard library types but has no scriptc lowering yet
 
   30 | // and the unlowered members of lowered error objects.)
