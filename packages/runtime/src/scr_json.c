@@ -5289,6 +5289,11 @@ ScrError *scr_error_wrap_nonerr(const ScrDyn *payload /*borrowed*/) {
   scr_str_release(empty);
   if (w->name) scr_str_release(w->name);
   w->name = scr_str_retain(scr_nonerr_marker());
+  /* The bag is props on the wrapper, so the wrapper's teardown must reach it:
+   * install the props drop before any bag exists (scr_error_prop_set's rule).
+   * Without it the bag and the payload it holds leak, two dyn values per
+   * non-Error destroy. */
+  scr_error_install_props_drop(&scr_error_props_drop_impl);
   ScrDyn *bag = scr_dyn_new_obj();
   scr_dyn_obj_set(bag, "%nonerr", 7, scr_dyn_retain((ScrDyn *)payload)); /* moves in */
   w->props = bag;
