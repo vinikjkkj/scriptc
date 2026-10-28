@@ -2797,6 +2797,10 @@ void *scr_stream_ext(const ScrStream *s);
 /* Stamp the display name (a borrowed string literal) over the one the
  * constructor set -- "Unzip" on a Transform, the way Node names it. */
 void scr_stream_set_cls(ScrStream *s, const char *cls);
+/* `u instanceof <runtime class>` on an unknown value (the lowering's stream.dynInstanceOf;
+ * lower-exprs.ts RT_CLASS_CODE gives `which`): Stream, Readable, Writable, Duplex,
+ * Transform, EventEmitter, net.Socket, net.Server. Borrowed; never throws. */
+bool scr_stream_dyn_instanceof(const ScrDyn *d, double which);
 
 ScrStream *scr_stream_new_transform(double rhwm, double whwm, bool auto_destroy,
     bool emit_close, bool allow_half_open, bool readable_side, bool writable_side,
