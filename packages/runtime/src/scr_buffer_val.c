@@ -518,13 +518,262 @@ static ScrDyn *scr_bv_wrap_buffer(ScrBytes *b) {
   return d;
 }
 
+/* ── Buffer.from(value, encodingOrOffset, length) as a VALUE ─────────────
+ * Node's lib/buffer.js from(), arm by arm, over checked-dynamic operands
+ * (the Buffer class's `from` box is the one every mention of Buffer.from
+ * yields, so a program can store it and call it with any argument kinds):
+ *   string           the encoding (ERR_UNKNOWN_ENCODING for an unknown name)
+ *   ArrayBuffer      byteOffset and length; the Buffer ALIASES the buffer
+ *   other objects    valueOf's answer when that is a string or an object
+ *                    (not a number); else the array-like or the
+ *                    {type:'Buffer', data} contents; a DataView is empty
+ *   array / typed    every element ToNumber'd and ToUint8'd (BigInt throws)
+ *   anything else    ERR_INVALID_ARG_TYPE, "first argument" wording
+ * The direct Buffer.from(...) call keeps scr_buffer_from_dyn (scr_json.c). */
+#define SCR_BV_FROM_DEPTH_MAX 1000
+
+static void scr_bv_throw_plain(const char *msg) {
+  scr_throw_error(SCR_ERR_TYPE, scr_str_new(msg, strlen(msg)));
+}
+
+static void scr_bv_throw_kind(int kind, const char *msg) {
+  scr_throw_error(kind, scr_str_new(msg, strlen(msg)));
+}
+
+/* Node's ERR_INVALID_ARG_TYPE for the first argument (the "first argument must be" wording:
+ * no quotes, unlike scr_dyn_arg_type_fail). */
+static void scr_bv_throw_first_arg(const ScrDyn *v) {
+  char detail[64];
+  const char *d = scr_dyn_specific_type(v, detail, sizeof detail);
+  char msg[320];
+  int len = snprintf(msg, sizeof msg,
+                     "The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received %s", d);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)len, "ERR_INVALID_ARG_TYPE");
+}
+
+static void scr_bv_throw_code(int kind, const char *msg, const char *code) {
+  scr_throw_error_msg_code(kind, msg, strlen(msg), code);
+}
+
+static ScrDyn *scr_bv_from_val(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *a2, int depth);
+
+/* JS ToNumber of one element (Node's typed-array store): BigInt throws, objects
+ * run ToPrimitive(number). Writes *out; false with the exception pending. */
+static bool scr_bv_elem_num(const ScrDyn *e, double *out) {
+  if (e == NULL) e = scr_dyn_undefined();
+  if (e->kind == SCR_DYN_BIG) {
+    scr_bv_throw_plain("Cannot convert a BigInt value to a number");
+    return false;
+  }
+  if (e->kind == SCR_DYN_OBJ || e->kind == SCR_DYN_ARR) {
+    ScrDyn *p = scr_dyn_to_primitive(e, SCR_TOPRIM_NUMBER);
+    if (p == NULL) return false;
+    if (p->kind == SCR_DYN_BIG) {
+      scr_dyn_release(p);
+      scr_bv_throw_plain("Cannot convert a BigInt value to a number");
+      return false;
+    }
+    *out = scr_dyn_to_number(p);
+    scr_dyn_release(p);
+    return !scr_exc_pending();
+  }
+  *out = scr_dyn_to_number(e);
+  return !scr_exc_pending();
+}
+
+/* A buffer of n bytes filled from element reads: f(i) answers the i-th element (+1, or
+ * NULL with the exception pending). The one loop every array-like arm shares. */
+typedef ScrDyn *(*ScrBvElemFn)(const ScrDyn *src, size_t i);
+
+static ScrDyn *scr_bv_elem_of_arr(const ScrDyn *src, size_t i) {
+  const ScrDyn *e = src->v.arr.items[i];
+  return scr_dyn_retain(e != NULL ? (ScrDyn *)e : scr_dyn_undefined());
+}
+
+static ScrDyn *scr_bv_elem_of_obj(const ScrDyn *src, size_t i) {
+  char key[32];
+  int kl = snprintf(key, sizeof key, "%zu", i);
+  return scr_dyn_obj_key_get((ScrDyn *)src, key, (size_t)kl);
+}
+
+static ScrDyn *scr_bv_fill_from_elems(const ScrDyn *src, size_t n, ScrBvElemFn elem) {
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  if (out == NULL) return NULL;
+  for (size_t i = 0; i < n; i++) {
+    ScrDyn *e = elem(src, i);
+    if (e == NULL) {
+      scr_bytes_release(out);
+      return NULL;
+    }
+    double x = 0;
+    bool ok = scr_bv_elem_num(e, &x);
+    scr_dyn_release(e);
+    if (!ok) {
+      scr_bytes_release(out);
+      return NULL;
+    }
+    out->data[i] = scr_bv_u8_of_num(x);
+  }
+  return scr_bv_wrap_buffer(out);
+}
+
+static ScrDyn *scr_bv_from_typed(const ScrBytes *b) {
+  /* A typed array (Buffer included): element values, not raw bytes. */
+  if (b->elem == SCR_BYTES_U8 || b->elem == SCR_BYTES_U8C) {
+    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)b->len);
+    if (out == NULL) return NULL;
+    if (b->len > 0) memcpy(out->data, b->data, b->len);
+    return scr_bv_wrap_buffer(out);
+  }
+  if (b->elem == SCR_BYTES_I64 || b->elem == SCR_BYTES_U64) {
+    if (b->len > 0) {
+      scr_bv_throw_plain("Cannot mix BigInt and other types, use explicit conversions");
+      return NULL;
+    }
+    return scr_bv_wrap_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
+  }
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)b->len);
+  if (out == NULL) return NULL;
+  for (size_t i = 0; i < b->len; i++) out->data[i] = scr_bv_u8_of_num(scr_bytes_get(b, (double)i));
+  return scr_bv_wrap_buffer(out);
+}
+
+/* The ArrayBuffer arm: Node's fromArrayBuffer checks, then a Uint8Array view (aliasing). */
+static ScrDyn *scr_bv_from_arrbuf(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *a2) {
+  double off = 0;
+  if (a1->kind != SCR_DYN_UNDEF) {
+    if (!scr_bv_elem_num(a1, &off)) return NULL;
+    if (off != off) off = 0;
+  }
+  double maxlen = (double)v->v.bytes->len - off;
+  if (maxlen < 0) {
+    scr_bv_throw_code(SCR_ERR_RANGE, "\"offset\" is outside of buffer bounds", "ERR_BUFFER_OUT_OF_BOUNDS");
+    return NULL;
+  }
+  double len = maxlen;
+  if (a2->kind != SCR_DYN_UNDEF) {
+    if (!scr_bv_elem_num(a2, &len)) return NULL;
+    if (len > 0) {
+      if (len > maxlen) {
+        scr_bv_throw_code(SCR_ERR_RANGE, "\"length\" is outside of buffer bounds", "ERR_BUFFER_OUT_OF_BOUNDS");
+        return NULL;
+      }
+    } else {
+      len = 0;
+    }
+  }
+  ScrDyn *od = scr_dyn_new_num(off);
+  ScrDyn *ld = scr_dyn_new_num(len);
+  ScrBytes *view = scr_dyn_u8view_new(v, od, ld);
+  scr_dyn_release(od);
+  scr_dyn_release(ld);
+  if (view == NULL) return NULL;
+  return scr_bv_wrap_buffer(view);
+}
+
+static ScrDyn *scr_bv_from_obj(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *a2, int depth) {
+  /* valueOf: its answer is used when it is a string or an object other than v. */
+  ScrDyn *vo = scr_dyn_obj_key_get((ScrDyn *)v, "valueOf", 7);
+  if (vo == NULL) return NULL;
+  if (vo->kind == SCR_DYN_FUNC) {
+    ScrDyn *r = scr_dyn_call(vo, NULL, 0, "valueOf");
+    scr_dyn_release(vo);
+    if (r == NULL) return NULL;
+    bool object = r->kind == SCR_DYN_STR ||
+                  (r->kind != SCR_DYN_NULL && r->kind != SCR_DYN_FUNC && r->kind != SCR_DYN_NUM &&
+                   r->kind != SCR_DYN_BOOL && r->kind != SCR_DYN_UNDEF && r->kind != SCR_DYN_BIG &&
+                   scr_dyn_typeof_is_object(r));
+    if (r != v && object) {
+      ScrDyn *out = scr_bv_from_val(r, a1, a2, depth + 1);
+      scr_dyn_release(r);
+      return out;
+    }
+    scr_dyn_release(r);
+  } else {
+    scr_dyn_release(vo);
+  }
+  /* fromObject: an array-like (a numeric length, or a buffer-backed object), then {type:'Buffer', data}. */
+  ScrDyn *len = scr_dyn_obj_key_get((ScrDyn *)v, "length", 6);
+  if (len == NULL) return NULL;
+  ScrDyn *abuf = NULL;
+  if (len->kind == SCR_DYN_UNDEF) {
+    abuf = scr_dyn_obj_key_get((ScrDyn *)v, "buffer", 6);
+    if (abuf == NULL) {
+      scr_dyn_release(len);
+      return NULL;
+    }
+    if (abuf->kind == SCR_DYN_ARRBUF) {
+      scr_dyn_release(abuf);
+      scr_dyn_release(len);
+      return scr_bv_wrap_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
+    }
+    scr_dyn_release(abuf);
+    ScrDyn *type = scr_dyn_obj_key_get((ScrDyn *)v, "type", 4);
+    if (type == NULL) {
+      scr_dyn_release(len);
+      return NULL;
+    }
+    bool is_buffer_type = type->kind == SCR_DYN_STR && type->v.str->len == 6 && memcmp(type->v.str->data, "Buffer", 6) == 0;
+    scr_dyn_release(type);
+    if (is_buffer_type) {
+      ScrDyn *data = scr_dyn_obj_key_get((ScrDyn *)v, "data", 4);
+      if (data == NULL) {
+        scr_dyn_release(len);
+        return NULL;
+      }
+      if (data->kind == SCR_DYN_ARR) {
+        ScrDyn *out = scr_bv_fill_from_elems(data, data->v.arr.len, scr_bv_elem_of_arr);
+        scr_dyn_release(data);
+        scr_dyn_release(len);
+        return out;
+      }
+      scr_dyn_release(data);
+    }
+    scr_dyn_release(len);
+    scr_bv_throw_first_arg(v);
+    return NULL;
+  }
+  if (len->kind != SCR_DYN_NUM) {
+    scr_dyn_release(len);
+    return scr_bv_wrap_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
+  }
+  double n = len->v.num;
+  scr_dyn_release(len);
+  if (!(n > 0)) n = 0;
+  n = floor(n);
+  return scr_bv_fill_from_elems(v, (size_t)n, scr_bv_elem_of_obj);
+}
+
+static ScrDyn *scr_bv_from_val(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *a2, int depth) {
+  if (depth > SCR_BV_FROM_DEPTH_MAX) {
+    scr_bv_throw_kind(SCR_ERR_RANGE, "Maximum call stack size exceeded");
+    return NULL;
+  }
+  switch (v->kind) {
+    case SCR_DYN_STR: {
+      ScrBytes *b = scr_buffer_from_dyn_enc(v, a1);
+      if (b == NULL) return NULL;
+      return scr_bv_wrap_buffer(b);
+    }
+    case SCR_DYN_ARRBUF:
+      return scr_bv_from_arrbuf(v, a1, a2);
+    case SCR_DYN_BYTES:
+      if (v->v.bytes->flavor == SCR_BF_DATAVIEW) return scr_bv_wrap_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
+      return scr_bv_from_typed(v->v.bytes);
+    case SCR_DYN_ARR:
+      return scr_bv_fill_from_elems(v, v->v.arr.len, scr_bv_elem_of_arr);
+    case SCR_DYN_OBJ:
+      return scr_bv_from_obj(v, a1, a2, depth);
+    default:
+      break;
+  }
+  scr_bv_throw_first_arg(v);
+  return NULL;
+}
+
 static ScrDyn *scr_bv_s_from(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   (void)clo;
-  const ScrDyn *v = scr_bv_arg(args, argc, 0);
-  ScrBytes *b = (argc >= 2 && !scr_bv_is_undef(args[1]))
-                    ? scr_buffer_from_dyn_enc(v, args[1])
-                    : scr_buffer_from_dyn(v);
-  return scr_bv_wrap_buffer(b);
+  return scr_bv_from_val(scr_bv_arg(args, argc, 0), scr_bv_arg(args, argc, 1), scr_bv_arg(args, argc, 2), 0);
 }
 
 static ScrDyn *scr_bv_s_of(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
@@ -862,7 +1111,7 @@ ScrDyn *scr_dyn_buffer_ctor(void) {
    * byteLength. Each is an enumerable data property of the class. */
   ScrDyn *table = scr_dyn_fn_props(c); /* +1 */
   scr_dyn_obj_set(table, "poolSize", 8, scr_bv_pool_size_value());
-  scr_dyn_obj_set(table, "from", 4, scr_bv_new_fn("from", scr_bv_s_from, 2));
+  scr_dyn_obj_set(table, "from", 4, scr_bv_new_fn("from", scr_bv_s_from, 3));
   scr_dyn_obj_set(table, "copyBytesFrom", 13, scr_bv_new_fn("copyBytesFrom", scr_bv_s_copy_bytes_from, 3));
   scr_dyn_obj_set(table, "of", 2, scr_bv_new_fn("of", scr_bv_s_of, 0));
   scr_dyn_obj_set(table, "alloc", 5, scr_bv_new_fn("alloc", scr_bv_s_alloc, 3));
