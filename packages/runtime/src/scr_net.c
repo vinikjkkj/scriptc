@@ -2513,15 +2513,19 @@ static void scr_net_sock_already(ScrNetSocket *s) {
     }
     if (out) snprintf(local, sizeof local, "%s:%d", out, port);
   }
-  char msg[220];
-  snprintf(msg, sizeof msg, "connect EALREADY %s:%d - Local (%s)", s->peer_ip, s->peer_port, local);
-  /* libuv's errno for EALREADY (negative): the Node system-error fields */
+  /* The code for a second connect while the first is still in flight. Node
+   * on Windows reports EISCONN (libuv's UV_EISCONN, -4069) for it; on POSIX
+   * it is EALREADY. Measured: the corpus 14913 / 14922 expected text. */
 #ifdef _WIN32
-  double ealready = -4084; /* UV_EALREADY */
+  const char *ecode = "EISCONN";
+  double ealready = -4069; /* UV_EISCONN */
 #else
+  const char *ecode = "EALREADY";
   double ealready = -(double)EALREADY;
 #endif
-  ScrError *ea = scr_net_coded_err("EALREADY", msg);
+  char msg[220];
+  snprintf(msg, sizeof msg, "connect %s %s:%d - Local (%s)", ecode, s->peer_ip, s->peer_port, local);
+  ScrError *ea = scr_net_coded_err(ecode, msg);
   scr_error_set_ext_net(ea, ealready, "connect", s->peer_ip, (double)s->peer_port);
   scr_net_sock_set_pending_obj(s, ea);
   s->had_error = true;
@@ -2884,7 +2888,13 @@ static bool scr_net_lookup_start(ScrNetSocket *s, const ScrDyn *lookup_fn, ScrSt
   scr_net_sock_register(s);
   ScrDyn *hostD = scr_dyn_new_str(host);
   ScrDyn *opts = scr_dyn_new_obj();
+  /* Node's default dns hints: ADDRCONFIG (32) everywhere but Windows, where
+   * it is not set (measured in the corpus 14928 expected text: 0). */
+#ifdef _WIN32
+  scr_dyn_obj_set(opts, "hints", 5, scr_dyn_new_num(0));
+#else
   scr_dyn_obj_set(opts, "hints", 5, scr_dyn_new_num(32));
+#endif
   scr_dyn_obj_set(opts, "all", 3, scr_dyn_new_bool(true));
   ScrClosure *clo = scr_closure_new((void *)scr_net_lookup_cb_thunk, 1);
   ScrBox *box = scr_box_new_obj(&scr_net_sock_retain_v, &scr_net_sock_release_v, NULL);
