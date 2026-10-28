@@ -9,6 +9,7 @@ const lookup = (host: any, opts: any, cb: any) => {
   console.log('lookup', host, JSON.stringify(opts))
   cb(null, [{ address: '127.0.0.1', family: 4 }])
 }
-srv.listen(17928, '127.0.0.1', () => {
-  d.connect({ port: 17928, host: 'example.invalid', lookup })
+srv.listen(0, '127.0.0.1', () => {
+  const port = srv.address().port
+  d.connect({ port: port, host: 'example.invalid', lookup })
 })
