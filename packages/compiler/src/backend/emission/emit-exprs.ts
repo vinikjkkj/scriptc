@@ -7450,6 +7450,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // `u instanceof tls.TLSSocket` on an unknown value: the net-socket handle's
             // TLS transport answers it (scr_tls.c). Borrowed; never throws.
             return finish(`scr_tls_dyn_instanceof(${arg(0)})`);
+          case "stream.dynInstanceOf":
+            // `u instanceof Stream` on an unknown value (scr_stream.c). Borrowed; never throws.
+            return finish(`scr_stream_dyn_instanceof(${arg(0)}, ${arg(1)})`);
           case "dyn.structuredClone":
             // Deep dyn clone (+1); option/DataClone/cycle errors throw
             // (may-throw seed set). Both args borrowed.

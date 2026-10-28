@@ -5611,6 +5611,10 @@ export type IrLibFn =
    * Never throws. */
   | "dyn.errInstanceof"
   | "tls.dynInstanceOf"
+  /** `u instanceof <runtime class>` on an unknown value (scr_stream.c, arg 1 = the class
+   * code): the stream and emitter vtable intervals for objects, the handle-kind table for
+   * sockets, http messages, child stdio, servers. */
+  | "stream.dynInstanceOf"
   /** ToNumber (ECMA-262 7.1.4) over a checked-dynamic operand
    * (scr_json.c) — the numeric sibling of scr_dyn_truthy (ToBoolean) and
    * scr_dyn_string_coerce (ToString), and the conversion every
@@ -10505,7 +10509,8 @@ export function moduleUsesStream(mod: IrModule): boolean {
         // same hazard applies verbatim: a gate that misses here surfaces
         // as "undefined symbol: scr_stream_new_transform".
         isZlibStreamFn(node.fn) ||
-        node.fn.startsWith("stream.set"))
+        node.fn.startsWith("stream.set") ||
+        node.fn === "stream.dynInstanceOf")
     ) {
       found = true;
       return;
