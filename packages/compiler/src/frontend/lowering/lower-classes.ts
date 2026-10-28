@@ -10993,6 +10993,11 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           loc,
         };
       }
+      if (errInfo && errInfo.def.name === "%AggregateError") {
+        // AggregateError is made by the runtime (a failed connect chain); its constructor
+        // takes an array of errors and is not lowered.
+        L.noLowering("new AggregateError", expr);
+      }
       if (errInfo) {
         const msg = L.errorMessageArg(expr.arguments ?? [], loc, expr, true);
         return errorWithCause(L, {
