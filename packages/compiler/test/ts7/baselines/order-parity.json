@@ -4605,6 +4605,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15304-buffer-from-value-class-instances.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15304-buffer-from-value-class-instances.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1531-delete-optional-fields.ts": {
    "order": [
     "<repo>/tests/corpus/1531-delete-optional-fields.ts"
