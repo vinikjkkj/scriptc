@@ -344,6 +344,21 @@ export function bufferValueOf(index: number, loc: SrcLoc): IrExpr {
   return { kind: "libCall", fn: "dyn.bufferValue", args: [{ kind: "numLit", value: index, type: F64, loc }], type: DYN, loc };
 }
 
+/** The Buffer statics read as VALUES (`var bufferFrom = Buffer.from || Buffer`, postgres-bytea).
+ * The runtime's Buffer class object (index 0, scr_dyn_buffer_ctor) carries each static as an own
+ * function property, so the read is the keyed read of that object: every mention of Buffer is the
+ * same box, so `Buffer.from === Buffer.from` and `f === Buffer.from` hold as in Node. The call is a
+ * dyn call, which dispatches on the run-time argument kinds (scr_buffer_val.c). Only the members
+ * listed here are served; the rest keep their fence (named SC1090). */
+const BUFFER_STATIC_VALUE_MEMBERS: ReadonlySet<string> = new Set(["from"]);
+export function bufferStaticValueRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+  if (L.dynamic || expr.questionDotToken !== undefined || !ts.isIdentifier(expr.expression)) return null;
+  if (!BUFFER_STATIC_VALUE_MEMBERS.has(expr.name.text)) return null;
+  if (!L.isStdlibGlobal(expr.expression, "Buffer")) return null;
+  const loc = locOf(expr);
+  return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc }, value: bufferValueOf(0, loc), type: DYN, loc };
+}
+
 const BUILTIN_MEMBER_IS_GLOBAL: ReadonlySet<string> = new Set([
   "buffer.Buffer", "url.URL", "url.URLSearchParams", "util.TextEncoder", "util.TextDecoder",
 ]);
@@ -3103,6 +3118,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // hasSubscribers over the f64 tracing handle.
         L.lowerDcTracingChannelProperty(expr) ??
         L.lowerTestCtxProperty(expr) ??
+        bufferStaticValueRead(L, expr) ??
         L.lowerProcessProperty(expr) ??
         lowerNavigatorProperty(L, expr) ??
         L.lowerProcessStreamProperty(expr) ??
