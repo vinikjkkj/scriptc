@@ -1034,9 +1034,12 @@ enum {
    * ReferenceError` compiles the way the other four do and only
    * DOMException stays fenced. */
   SCR_ERR_REFERENCE = 5,
+  /* AggregateError (autoSelectFamily's failed chain, and the class a user's
+   * `instanceof AggregateError` tests). Appended after ReferenceError. */
+  SCR_ERR_AGGREGATE = 6,
   /* One past the last kind — the bound every table and every scan over
    * them uses, so adding a kind is one line here and nowhere else. */
-  SCR_ERR_KINDS = 6,
+  SCR_ERR_KINDS = 7,
 };
 
 extern ScrVt scr_error_vts[SCR_ERR_KINDS]; /* indexed by SCR_ERR_*; main() stamps pre/post */
@@ -1134,6 +1137,8 @@ void scr_error_prop_set(ScrError *e, ScrStr *key, struct ScrDyn *value);
  * is an ordinary enumerable property and goes through scr_error_prop_set).
  * Borrows both; stores a +1 copy. */
 void scr_error_set_cause(ScrError *e, struct ScrDyn *value);
+/* AggregateError's non-enumerable `errors` (arr owned) */
+void scr_error_set_errors(ScrError *e, struct ScrDyn *arr);
 struct ScrDyn *scr_error_prop_get(ScrError *e, ScrStr *key);
 
 ScrError *scr_error_retain(ScrError *e);
