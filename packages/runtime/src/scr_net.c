@@ -892,6 +892,10 @@ static ssize_t scr_net_send(int fd, const void *buf, size_t len) {
 #endif
 }
 
+/* the no-SIGPIPE send for a transport that writes its own bytes (the TLS BIO):
+ * a closed peer answers EPIPE, never a process-killing SIGPIPE. */
+ssize_t scr_net_write_nosig(int fd, const void *buf, size_t len) { return scr_net_send(fd, buf, len); }
+
 
 /* The idle timer rides the same poller: one-shot, keyed by the socket
  * pointer (kqueue: EVFILT_TIMER ident; epoll: a per-key timerfd), in
@@ -939,6 +943,22 @@ static void scr_net_sock_touch(ScrNetSocket *s) {
 static void scr_net_close_fd_raw(int fd) {
   if (fd < 0) return;
   if (scr_net_poller != NULL) scrp_forget(scr_net_poller, fd);
+#if !defined(_WIN32)
+  /* Bytes the peer sent that this side never read: closing with them unread
+   * makes the kernel send RST, and the peer sees ECONNRESET/EPIPE where Node's
+   * socket (which reads them into its own buffer) closes with a plain FIN.
+   * Read what is already queued, without blocking, before the close. */
+  {
+    char sink[4096];
+    size_t total = 0;
+    for (;;) {
+      ssize_t r = recv(fd, sink, sizeof sink, MSG_DONTWAIT);
+      if (r <= 0) break;
+      total += (size_t)r;
+      if (total > ((size_t)16 << 20)) break; /* bounded: never spin on a flood */
+    }
+  }
+#endif
   close(fd);
 }
 
