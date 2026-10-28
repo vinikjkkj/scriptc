@@ -527,7 +527,7 @@ static void scr_net_dial_log_clear(ScrNetSocket *s);
 static ScrError *scr_net_dial_aggregate(ScrNetSocket *s);
 /* NETDBG: tlsdbg branch only, never landed */
 static void scr_net_dbg(const char *site, int err, int port, const char *ip) {
-  fprintf(stderr, "NETDBG site=%s err=%d errname=%s port=%d ip=%s\n", site, err, scr_net_errname(err), port, ip ? ip : "-");
+  fprintf(stdout, "NETDBG site=%s err=%d errname=%s port=%d ip=%s\n", site, err, scr_net_errname(err), port, ip ? ip : "-");
 }
 
 struct ScrNetSocket {
@@ -1425,7 +1425,7 @@ static void scr_net_sock_connect_done(ScrNetSocket *s) {
  * attempt failed with this errno. */
 static void scr_net_sock_connect_done_err(ScrNetSocket *s, int err) {
   scr_net_dbg("connect_done_err", err, s->peer_port, s->peer_ip);
-  fprintf(stderr, "NETDBG   dial_n=%zu dial_i=%zu pending_err=%d pending_obj=%d dial_nerrs=%zu\n", s->dial_n, s->dial_i, s->pending_err != NULL, s->pending_obj != NULL, s->dial_nerrs);
+  fprintf(stdout, "NETDBG   dial_n=%zu dial_i=%zu pending_err=%d pending_obj=%d dial_nerrs=%zu\n", s->dial_n, s->dial_i, s->pending_err != NULL, s->pending_obj != NULL, s->dial_nerrs);
   s->connecting = false;
   /* this attempt has ANSWERED (either way): its budget is spent, and a
    * stale timer must not fire into the next attempt's fd */
@@ -1994,7 +1994,9 @@ static size_t scr_net_lookup_candidates(ScrStr *host /*borrowed*/, ScrStr ***out
   memset(&hints, 0, sizeof hints);
   hints.ai_socktype = SOCK_STREAM;
   struct addrinfo *res = NULL;
-  if (getaddrinfo(host->data, NULL, &hints, &res) != 0 || res == NULL) {
+  int gai = getaddrinfo(host->data, NULL, &hints, &res);
+  fprintf(stdout, "NETDBG lookup host=%s gai=%d res=%d\n", host->data, gai, res != NULL);
+  if (gai != 0 || res == NULL) {
     if (res) freeaddrinfo(res);
     return 0;
   }
@@ -2025,6 +2027,7 @@ static size_t scr_net_lookup_candidates(ScrStr *host /*borrowed*/, ScrStr ***out
     g[d][gn[d]++] = scr_str_new(ip, iplen);
   }
   freeaddrinfo(res);
+  fprintf(stdout, "NETDBG lookup answers fam0=%zu fam1=%zu\n", gn[0], gn[1]);
   size_t n = gn[0] + gn[1];
   if (n == 0) return 0;
   ScrStr **list = malloc(n * sizeof *list);
@@ -2519,7 +2522,7 @@ static void scr_net_dial_log_clear(ScrNetSocket *s) {
  * the last attempt's code, and `errors` (each attempt, in dial order). */
 static ScrError *scr_net_dial_aggregate(ScrNetSocket *s) {
   ScrError *last = s->dial_errs[s->dial_nerrs - 1];
-  fprintf(stderr, "NETDBG aggregate nerrs=%zu last_code=%s\n", s->dial_nerrs, (const char *)last->code->data);
+  fprintf(stdout, "NETDBG aggregate nerrs=%zu last_code=%s\n", s->dial_nerrs, (const char *)last->code->data);
   ScrStr *empty = scr_str_new("", 0);
   ScrError *e = scr_error_new(SCR_ERR_AGGREGATE, empty); /* retains the message */
   scr_str_release(empty);
@@ -3684,7 +3687,7 @@ static void scr_net_sweep(void) {
       ScrError *obj = sock->pending_obj;
       sock->pending_obj = NULL;
       { double en = 0; const ScrStr *sy = NULL, *pa = NULL, *de = NULL; bool hx = obj ? scr_error_ext_get(obj, &en, &sy, &pa, &de) : false;
-        fprintf(stderr, "NETDBG emit msg=%.*s obj=%d ext=%d errno=%g syscall=%s nerrs=%zu\n", (int)msg->len, msg->data, obj != NULL, hx, en, sy ? "set" : "none", sock->dial_nerrs); }
+        fprintf(stdout, "NETDBG emit msg=%.*s obj=%d ext=%d errno=%g syscall=%s nerrs=%zu\n", (int)msg->len, msg->data, obj != NULL, hx, en, sy ? "set" : "none", sock->dial_nerrs); }
       if (obj == NULL && sock->dial_nerrs >= 2) {
         /* autoSelectFamily tried several addresses and every one failed: Node's
          * AggregateError (empty message, the attempts in `errors`) */
@@ -3840,7 +3843,7 @@ static void scr_net_dispatch(void) {
          * epoll may coalesce both into one — writes first (connect
          * completion, flushes), then reads, re-checking the fd a write
          * failure may have closed. */
-        if (s->connecting) fprintf(stderr, "NETDBG dispatch events=%x\n", (unsigned)evs[i].events);
+        if (s->connecting) fprintf(stdout, "NETDBG dispatch events=%x\n", (unsigned)evs[i].events);
         if (evs[i].events & SCRP_WRITABLE) {
           if (s->connecting) scr_net_sock_connect_done(s);
           else if (s->tops && !s->t_est) {
