@@ -1500,6 +1500,8 @@ export type SymbolicResolver = (t: ts.Type) => ts.Type | null;
  * one new field here, not a new parameter at every call site. */
 export interface TypeMapperCtx {
   checker: ts.TypeChecker;
+  /** True when a class expression's enclosing function provably runs at most once (class-once.ts). */
+  classExprAtMostOnce?: (e: ts.ClassLikeDeclaration) => boolean;
   /** Every class declaration in the PROGRAM's own files (closed-world instance mapping). */
   programClassDecls?: () => readonly ts.ClassDeclaration[];
   shapes: ShapeRegistry;
@@ -3156,7 +3158,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     }
     // A class expression inside a function/static block never registers
     // (a distinct class per evaluation): unmappable for the same reason.
-    if (classExprNeverRegisters(classDecl)) return null;
+    if (classExprNeverRegisters(classDecl) && !(ctx.classExprAtMostOnce?.(classDecl) ?? false)) return null;
     // A GENERIC class's instance type (`Box<number>`) maps to the concrete
     // INSTANTIATION's class (`Box%0`), registered on demand — the Lowerer
     // hook owns the instance table (monomorphization by flow).
@@ -3185,7 +3187,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return { kind: "classval", className: viaMixin.className };
       }
     }
-    if (classExprNeverRegisters(classDecl)) return null;
+    if (classExprNeverRegisters(classDecl) && !(ctx.classExprAtMostOnce?.(classDecl) ?? false)) return null;
     // A GENERIC class's static side: only an INSTANTIATED one maps — an
     // instantiation expression's type (`Box<number>` as a value) carries a
     // construct signature returning the concrete instance, which maps to

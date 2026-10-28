@@ -6680,7 +6680,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         "class expressions inside generic functions (each instantiation would need its own class)",
       );
     }
-    for (let p: ts.Node = expr.parent; !ts.isSourceFile(p); p = p.parent) {
+    // A class expression whose enclosing function provably runs at most once is ONE
+    // class object (class-once.ts): the function-ancestor fence does not apply to it.
+    const onceProven = L.classExprAtMostOnce(expr);
+    for (let p: ts.Node = expr.parent; !ts.isSourceFile(p) && !onceProven; p = p.parent) {
       if (ts.isFunctionLike(p) || ts.isClassStaticBlockDeclaration(p)) {
         L.unsupported(
           "SC1090",

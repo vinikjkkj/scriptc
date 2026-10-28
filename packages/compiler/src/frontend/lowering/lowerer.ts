@@ -145,6 +145,7 @@ import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type Expand
 import { lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch, throwOnlyValueType } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
 import { dtsWitnessClassOf } from "./lower-twin-witness.js";
+import { ClassOnceProof } from "../class-once.js";
 import { pairedProtoInstanceType } from "./proto-class-consume.js";
 
 /** Entry function name. '%' cannot appear in a TS identifier, so a user
@@ -1950,6 +1951,16 @@ export class Lowerer {
   readonly paramIrOverrides = new Map<ts.ParameterDeclaration, IrType>();
   /** File → qualifier prefix: "" for the entry, "%mI." otherwise. */
   readonly fileTag = new Map<ts.SourceFile, string>();
+  private classOnceProof: ClassOnceProof | undefined;
+  /** True when the class expression's enclosing function provably runs at most once
+   * in the whole program (class-once.ts). Unproven expressions keep every refusal. */
+  classExprAtMostOnce(expr: ts.ClassLikeDeclaration): boolean {
+    if (this.classOnceProof === undefined) {
+      const files = this.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile && !this.isStdlibFile(sf));
+      this.classOnceProof = new ClassOnceProof(this.checker, files);
+    }
+    return this.classOnceProof.classExprAtMostOnce(expr);
+  }
   private programClassDeclCache: ts.ClassDeclaration[] | undefined;
   /** Every named class declaration in the program's own files, in source order
    * (the closed world a types-only class instance is mapped against). */
@@ -2352,6 +2363,7 @@ export class Lowerer {
       // lowering, long after the constructor completes.
       isProgramFile: (sf) => this.fileTag.has(sf),
       programClassDecls: () => this.programClassDeclarations(),
+      classExprAtMostOnce: (e) => this.classExprAtMostOnce(e),
       declFileHasCompiledImpl: (sf) => this.declTwinCompiled(sf),
       dtsWitnessClass: (t) => dtsWitnessClassOf(this, t),
       pairedProtoInstance: (decl) => pairedProtoInstanceType(this, decl),
