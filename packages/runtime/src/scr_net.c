@@ -525,6 +525,10 @@ struct ScrNetServer {
 static void scr_net_dial_log(ScrNetSocket *s, int err, const char *ip, int port);
 static void scr_net_dial_log_clear(ScrNetSocket *s);
 static ScrError *scr_net_dial_aggregate(ScrNetSocket *s);
+/* NETDBG: tlsdbg branch only, never landed */
+static void scr_net_dbg(const char *site, int err, int port, const char *ip) {
+  fprintf(stderr, "NETDBG site=%s err=%d errname=%s port=%d ip=%s\n", site, err, scr_net_errname(err), port, ip ? ip : "-");
+}
 
 struct ScrNetSocket {
   int kind; /* FIRST: poller udata routes on it */
@@ -1413,12 +1417,15 @@ static void scr_net_sock_connect_done(ScrNetSocket *s) {
   int err = 0;
   socklen_t len = sizeof err;
   if (getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) err = errno;
+  scr_net_dbg("connect_done_so_error", err, s->peer_port, s->peer_ip);
   scr_net_sock_connect_done_err(s, err);
 }
 
 /* The dial's verdict, given: 0 = connected (the chain is done), else the
  * attempt failed with this errno. */
 static void scr_net_sock_connect_done_err(ScrNetSocket *s, int err) {
+  scr_net_dbg("connect_done_err", err, s->peer_port, s->peer_ip);
+  fprintf(stderr, "NETDBG   dial_n=%zu dial_i=%zu pending_err=%d pending_obj=%d dial_nerrs=%zu\n", s->dial_n, s->dial_i, s->pending_err != NULL, s->pending_obj != NULL, s->dial_nerrs);
   s->connecting = false;
   /* this attempt has ANSWERED (either way): its budget is spent, and a
    * stale timer must not fire into the next attempt's fd */
@@ -2094,9 +2101,11 @@ static void scr_net_sock_dial_peer(ScrNetSocket *s) {
     s->connecting = true;
     scr_net_sock_update_write(s);
   } else if (errno == EINPROGRESS) {
+    scr_net_dbg("dial_peer_inprogress", EINPROGRESS, s->peer_port, s->peer_ip);
     s->connecting = true;
     scr_net_sock_update_write(s);
   } else {
+    scr_net_dbg("dial_peer_immediate", errno, s->peer_port, s->peer_ip);
     /* A refusal can answer AT ONCE instead of EINPROGRESS (Windows loopback
      * does; Linux answers EINPROGRESS and takes connect_done_err). The
      * single-address Error must be the same object on both: errno, code,
@@ -2510,6 +2519,7 @@ static void scr_net_dial_log_clear(ScrNetSocket *s) {
  * the last attempt's code, and `errors` (each attempt, in dial order). */
 static ScrError *scr_net_dial_aggregate(ScrNetSocket *s) {
   ScrError *last = s->dial_errs[s->dial_nerrs - 1];
+  fprintf(stderr, "NETDBG aggregate nerrs=%zu last_code=%s\n", s->dial_nerrs, (const char *)last->code->data);
   ScrStr *empty = scr_str_new("", 0);
   ScrError *e = scr_error_new(SCR_ERR_AGGREGATE, empty); /* retains the message */
   scr_str_release(empty);
@@ -2572,6 +2582,7 @@ static bool scr_net_sock_dial_ip(ScrNetSocket *s, const ScrStr *ip) {
     return true;
   }
   int cerr = errno;
+  scr_net_dbg("dial_ip_sync", cerr, s->peer_port, s->peer_ip);
   scr_net_dial_log(s, cerr, s->peer_ip, s->peer_port);
   snprintf(msg, sizeof msg, "connect %s %s:%d", scr_net_errname(cerr), s->peer_ip, s->peer_port);
   scr_str_release(s->dial_err);
@@ -2621,6 +2632,7 @@ static void scr_net_sock_dial_next(ScrNetSocket *s) {
  * EXHAUSTS, so a family that fails while the other succeeds is silent. */
 static void scr_net_sock_attempt_timeout(ScrNetSocket *s) {
   s->dial_timer_armed = false;
+  scr_net_dbg("attempt_timeout_fire", ETIMEDOUT, s->peer_port, s->peer_ip);
   if (!s->connecting || s->fd < 0 || s->dial_i >= s->dial_n) return;
   char msg[128];
   snprintf(msg, sizeof msg, "connect ETIMEDOUT %s:%d", s->peer_ip, s->peer_port);
@@ -3671,6 +3683,8 @@ static void scr_net_sweep(void) {
       sock->pending_err = NULL;
       ScrError *obj = sock->pending_obj;
       sock->pending_obj = NULL;
+      { double en = 0; const ScrStr *sy = NULL, *pa = NULL, *de = NULL; bool hx = obj ? scr_error_ext_get(obj, &en, &sy, &pa, &de) : false;
+        fprintf(stderr, "NETDBG emit msg=%.*s obj=%d ext=%d errno=%g syscall=%s nerrs=%zu\n", (int)msg->len, msg->data, obj != NULL, hx, en, sy ? "set" : "none", sock->dial_nerrs); }
       if (obj == NULL && sock->dial_nerrs >= 2) {
         /* autoSelectFamily tried several addresses and every one failed: Node's
          * AggregateError (empty message, the attempts in `errors`) */
@@ -3826,6 +3840,7 @@ static void scr_net_dispatch(void) {
          * epoll may coalesce both into one — writes first (connect
          * completion, flushes), then reads, re-checking the fd a write
          * failure may have closed. */
+        if (s->connecting) fprintf(stderr, "NETDBG dispatch events=%x\n", (unsigned)evs[i].events);
         if (evs[i].events & SCRP_WRITABLE) {
           if (s->connecting) scr_net_sock_connect_done(s);
           else if (s->tops && !s->t_est) {
