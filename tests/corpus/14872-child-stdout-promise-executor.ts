@@ -12,7 +12,7 @@ function drain(stream: NodeJS.ReadableStream): Promise<number> {
 }
 
 async function main(): Promise<void> {
-  const child = spawn("/bin/sh", ["-c", "printf '0123456789'"], { stdio: ["ignore", "pipe", "ignore"] });
+  const child = spawn("node", ["-e", "process.stdout.write('0123456789')"], { stdio: ["ignore", "pipe", "ignore"] });
   console.log("total", await drain(child.stdout as NodeJS.ReadableStream));
 }
 main().catch((e) => console.log("failed", (e as Error).message));

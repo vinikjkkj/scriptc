@@ -10,7 +10,7 @@ function wire(stream: NodeJS.ReadableStream): boolean {
   return same === stream;
 }
 
-const child = spawn("/bin/sh", ["-c", "printf 'xyz'"], { stdio: ["ignore", "pipe", "ignore"] });
+const child = spawn("node", ["-e", "process.stdout.write('xyz')"], { stdio: ["ignore", "pipe", "ignore"] });
 const out = child.stdout as NodeJS.ReadableStream;
 console.log("same", wire(out));
 out.on("end", () => {
