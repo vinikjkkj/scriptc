@@ -4557,6 +4557,8 @@ export type IrLibFn =
    * a Buffer; the received-ticket event). */
   | "tls.sockAuthorized"
   | "tls.sockAuthError"
+  | "tls.sockSessionReused"
+  | "tls.sockGetSession"
   | "tls.sockOnSecureConnect"
   | "tls.sockOnSession"
   /** tls.createSecureContext({ cert, key }) — parses the PEM pair into an
