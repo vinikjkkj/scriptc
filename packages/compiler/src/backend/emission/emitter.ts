@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym } from "../../ir/nodes.js";
+import { DYN, funcOf, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
@@ -1904,6 +1904,11 @@ export class CEmitter {
       // Dgram/dns-surface programs fill the loop's dgram hooks the same
       // way — scr_dgram.c links only when this line is emitted.
       ...(moduleUsesDgram(this.mod) ? [`  scr_dgram_install();`] : []),
+      // DEP0118 (dns.lookup's empty name) reaches the process warning channel
+      // through this hook, installed only when the channel is linked (the
+      // dyn-async unit: listeners and the default report live there).
+      ...(moduleUsesDgram(this.mod) && moduleUsesDynAsync(this.mod)
+        ? [`  scr_dns_set_warn_hook(&scr_emit_warning);`] : []),
       // fs.watch programs fill the loop's watch hooks the same way —
       // scr_watch.c links only when this line is emitted.
       ...(moduleUsesFsWatch(this.mod) ? [`  scr_watch_install();`] : []),

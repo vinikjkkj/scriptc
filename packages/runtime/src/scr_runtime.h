@@ -11338,6 +11338,12 @@ void scr_dgram_msg_thunk1(ScrClosure *cb, ScrBytes *msg, ScrStr *addr, ScrStr *f
  * Delivery defers to the next loop turn; literal answers queue first. */
 void scr_dns_lookup(ScrStr *hostname /*borrowed*/, double family, ScrClosure *cb /*moves*/, ScrDnsLookupFn fn);
 void scr_dns_thunk0(ScrClosure *cb, ScrStr *errmsg, ScrStr *addr, double family);
+/* DEP0118's route into the process warning channel. scr_dgram.c never
+ * references the channel's unit (scr_async_dyn.c): a dns-using program's
+ * main installs scr_emit_warning here when that unit is linked, and
+ * otherwise the default report is printed directly. */
+typedef void (*ScrDnsWarnHookFn)(const char *name, const char *code, ScrStr *message);
+void scr_dns_set_warn_hook(ScrDnsWarnHookFn fn);
 /* The dns.lookup failure Error: message borrowed, code read from it. +1. */
 ScrError *scr_dns_error_new(ScrStr *msg /*borrowed*/);
 void scr_dgram_install(void);
