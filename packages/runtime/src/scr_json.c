@@ -7302,6 +7302,7 @@ static void scr_jb_put_recv_ctor(ScrJsonBuf *b, const ScrDyn *recv) {
  * every later element, which is not what JS does. Refused loudly rather
  * than answered wrongly. Other kinds carry no own properties a delete
  * could remove, so they answer true like JS. Both borrowed. */
+static void scr_dyn_module_ns_throw(const char *a, const ScrStr *key, const char *b);
 bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) return SCR_PX->del(recv, key);
   if (recv != NULL && recv->kind == SCR_DYN_BYTES && !recv->static_copy && recv->v.bytes->own != NULL) {
@@ -7316,11 +7317,8 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
   }
   if (recv->static_copy) {
     if (recv->module_ns) {
-      /* scr_throw_error RECORDS a pending error and returns, so this must
-       * not fall through: the second refusal would overwrite the
-       * namespace text with the boundary-copy one (measured — the test
-       * below read the wrong message before this return existed). */
-      scr_dyn_module_ns_refuse("deleting a property");
+      if (!scr_dyn_obj_has_own_prop(recv, key->data, key->len)) return true;
+      scr_dyn_module_ns_throw("Cannot delete property '", key, "' of [object Module]");
       return false;
     }
     scr_dyn_static_copy_refuse("deleting a property");
@@ -7572,24 +7570,19 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
   return false;
 }
 
-/* The one refusal every mutating dyn entry point shares: this receiver is
- * a copy the static→dyn boundary made of a value the caller still names,
- * so the write cannot reach what Node would write. Loud beats lost. */
-void scr_dyn_module_ns_refuse(const char *what) {
-  ScrJsonBuf b;
-  scr_jb_init(&b);
-  scr_jb_puts(&b, what);
-  scr_jb_puts(&b, " on a module namespace object is not supported yet: Node throws a"
-                  " TypeError there (a namespace's properties are non-writable and"
-                  " non-configurable, and the object is non-extensible), and this build"
-                  " has no exotic namespace to throw that TypeError from — the value it"
-                  " hands over is a checked-dynamic SNAPSHOT of the module's exports."
-                  " Accepting the write would leave it on the snapshot, where nothing"
-                  " can observe it, which is the one answer this refusal ranks below"
-                  " itself. A module's exports are not writable in Node either, so"
-                  " there is no spelling of this write that works: read the member"
-                  " instead, or export a setter function from the module");
-  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+/* A module NAMESPACE snapshot (scr_dyn_mark_module_ns) is [[Set]]- and
+ * [[Delete]]-proof in Node, and Node throws these TypeErrors in strict mode
+ * (measured on v24.15.0 against `import * as ns`): an existing key is a
+ * read-only property, a missing key cannot be added, and deleting an existing
+ * key throws while deleting a missing one answers true. The snapshot holds
+ * exactly the namespace's keys, so its own membership answers each question. */
+static void scr_dyn_module_ns_throw(const char *a, const ScrStr *key, const char *b) {
+  ScrJsonBuf jb;
+  scr_jb_init(&jb);
+  scr_jb_puts(&jb, a);
+  for (size_t i = 0; i < key->len; i++) scr_jb_putc(&jb, key->data[i]);
+  scr_jb_puts(&jb, b);
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&jb));
 }
 
 void scr_dyn_static_copy_refuse(const char *what) {
@@ -7616,7 +7609,10 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
   }
   if (recv->static_copy) {
     if (recv->module_ns) {
-      scr_dyn_module_ns_refuse("assigning a property");
+      if (scr_dyn_obj_has_own_prop(recv, key->data, key->len))
+        scr_dyn_module_ns_throw("Cannot assign to read only property '", key, "' of object '[object Module]'");
+      else
+        scr_dyn_module_ns_throw("Cannot add property ", key, ", object is not extensible");
       return;
     }
     /* A live array view takes an index or `length` write through to its
