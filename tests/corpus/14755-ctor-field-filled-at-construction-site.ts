@@ -1,9 +1,11 @@
 // A constructor allocates an array field from its count parameter; the one
 // construction site fills every index by a counting loop before reading it.
 class Msg {
+  public readonly count: number
   public readonly ids: number[]
-  constructor(public readonly count: number) {
-    this.ids = new Array(this.count)
+  constructor(count: number) {
+    this.count = count
+    this.ids = new Array(count)
   }
 }
 function parse(n: number): Msg {

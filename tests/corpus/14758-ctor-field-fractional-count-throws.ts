@@ -1,8 +1,10 @@
 // A fractional count is an invalid array length in the constructor as well.
 class Grid {
+  public readonly rows: number
   public readonly cells: number[]
-  constructor(public readonly rows: number) {
-    this.cells = new Array(this.rows)
+  constructor(rows: number) {
+    this.rows = rows
+    this.cells = new Array(rows)
   }
 }
 function fill(r: number): Grid {
