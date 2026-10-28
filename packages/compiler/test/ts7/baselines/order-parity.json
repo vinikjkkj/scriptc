@@ -19435,6 +19435,24 @@
     "<repo>/tests/corpus/14920-net-server-unref-exit.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/14921-net-close-hadError-undefined-on-idle.ts": {
+   "order": [
+    "<repo>/tests/corpus/14921-net-close-hadError-undefined-on-idle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14922-net-error-system-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/14922-net-error-system-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14923-net-dyn-reconnect-keeps-listeners.ts": {
+   "order": [
+    "<repo>/tests/corpus/14923-net-dyn-reconnect-keeps-listeners.ts"
+   ],
+   "diags": []
   }
  }
 }
