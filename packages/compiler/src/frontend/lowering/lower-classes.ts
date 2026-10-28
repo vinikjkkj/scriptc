@@ -9570,6 +9570,22 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
   export function fieldInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal): IrStmt[] {
     const out: IrStmt[] = [];
     const thisType: IrType = { kind: "object", className: info.def.name };
+    // Node creates every declared field at construction, in DECLARATION order, before any
+    // initializer or body write (a subclass: right after super() returns). The note order is that
+    // order, whatever order the constructor writes them in (fieldOrder is write-ordered).
+    if (info.decl !== null && isJsSourceFile(info.decl.getSourceFile())) {
+      for (const m of info.decl.members) {
+        if (!ts.isPropertyDeclaration(m) || !ts.isIdentifier(m.name)) continue;
+        if (m.modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword)) continue;
+        out.push({
+          kind: "ordNote",
+          obj: { kind: "varRef", localId: thisLocal.id, type: thisType, loc: locOf(m) },
+          className: info.def.name,
+          field: m.name.text,
+          loc: locOf(m),
+        });
+      }
+    }
     for (const f of info.fieldOrder) {
       // A BARE redeclare of an inherited undefined-armed slot: Node's
       // [[Define]] of the own property to undefined, at this member's
@@ -9603,22 +9619,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       }
       // An own-shadow flag starts false by the zero of its slot; its initializer would note the
       // flag in the instance order at construction, before any key the program wrote.
-      if (!f.initializer) {
-        // Node defines a declared field with no initializer as undefined here, in declaration order.
-        const decl = info.decl;
-        const member = decl?.members.find((m) => ts.isPropertyDeclaration(m) && ts.isIdentifier(m.name) && m.name.text === f.name && m.initializer === undefined);
-        if (member !== undefined && !f.name.startsWith("#__sc_own$")) {
-          out.push({
-            kind: "ordNote",
-            obj: { kind: "varRef", localId: thisLocal.id, type: thisType, loc: locOf(member) },
-            className: info.def.name,
-            field: f.name,
-            loc: locOf(member),
-          });
-        }
-        continue;
-      }
-      if (f.name.startsWith("#__sc_own$")) continue;
+      if (!f.initializer || f.name.startsWith("#__sc_own$")) continue;
       L.stats.statementsTotal++;
       L.bumpFileStat(locOf(f.initializer).file, "total");
       try {
