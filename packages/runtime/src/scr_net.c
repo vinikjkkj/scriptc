@@ -1812,7 +1812,28 @@ void scr_net_server_close_direct(ScrNetServer *s, ScrClosure *cb /*moves, nullab
   }
   if (cb) scr_net_ls_add(&s->close_ls, cb, NULL, true);
   if (s->listening) {
+#ifdef _WIN32
+    /* NETDBG tlsdbg: does the listener port come free at close? */
+    struct sockaddr_in la;
+    int lalen = sizeof la;
+    int gsn = getsockname((SOCKET)s->fd, (struct sockaddr *)&la, &lalen);
+    unsigned short lport = gsn == 0 ? ntohs(la.sin_port) : 0;
+    fprintf(stdout, "NETDBG server_close t=%.1f fd=%d port=%u getsockname_rc=%d\n", scr_now_ms(), s->fd, (unsigned)lport, gsn);
+    scr_net_close_fd_raw(s->fd);
+    if (lport != 0) {
+      SOCKET probe_s = socket(AF_INET, SOCK_STREAM, 0);
+      struct sockaddr_in ba;
+      memset(&ba, 0, sizeof ba);
+      ba.sin_family = AF_INET;
+      ba.sin_port = htons(lport);
+      ba.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+      int brc = bind(probe_s, (struct sockaddr *)&ba, sizeof ba);
+      fprintf(stdout, "NETDBG server_close rebind_probe t=%.1f port=%u bind_rc=%d wsa=%d\n", scr_now_ms(), (unsigned)lport, brc, brc ? WSAGetLastError() : 0);
+      closesocket(probe_s);
+    }
+#else
     scr_net_close_fd_raw(s->fd); /* stops accepting NOW (registrations dropped first) */
+#endif
     s->fd = -1;
     s->listening = false;
   }
