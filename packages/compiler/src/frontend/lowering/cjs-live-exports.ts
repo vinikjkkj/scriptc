@@ -109,7 +109,22 @@ export function exportObjectUseOf(r: ts.Expression): "write" | "escape" | "read"
         (callee.expression.text === "Object" || callee.expression.text === "Reflect") &&
         (callee.name.text === "defineProperty" || callee.name.text === "defineProperties" ||
          callee.name.text === "assign" || callee.name.text === "set" || callee.name.text === "deleteProperty")) return "write";
+    // Read-only consumers: they enumerate or print the object and cannot store into it.
+    if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
+      const o = callee.expression.text;
+      const m = callee.name.text;
+      if ((o === "Object" && (m === "keys" || m === "values" || m === "entries" || m === "getOwnPropertyNames" ||
+           m === "getOwnPropertyDescriptor" || m === "getOwnPropertyDescriptors" || m === "hasOwn")) ||
+          (o === "JSON" && m === "stringify") ||
+          (o === "console" && (m === "log" || m === "info" || m === "warn" || m === "error" || m === "debug"))) return "read";
+    }
   }
+  // Read-only operators: `'k' in o`, `typeof o`, `!o`, and every equality test (identity is refused separately).
+  if (ts.isBinaryExpression(p) && p.right === node && p.operatorToken.kind === ts.SyntaxKind.InKeyword) return "read";
+  if (ts.isBinaryExpression(p) && (p.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+      p.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
+      p.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken || p.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken)) return "read";
+  if (ts.isTypeOfExpression(p) || (ts.isPrefixUnaryExpression(p) && p.operator === ts.SyntaxKind.ExclamationToken)) return "read";
   return "escape";
 }
 
