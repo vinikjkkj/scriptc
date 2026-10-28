@@ -5542,6 +5542,12 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
         if (oc != NULL && oc->kind != SCR_DYN_UNDEF) scr_err_hide(d, "cause", 5, oc);
         else scr_dyn_release(oc);
       }
+      /* AggregateError's non-enumerable `errors`, the same way */
+      {
+        ScrDyn *oe = scr_dyn_obj_key_get(old, "errors", 6); /* +1; the undefined singleton when absent */
+        if (oe != NULL && oe->kind != SCR_DYN_UNDEF) scr_err_hide(d, "errors", 6, oe);
+        else scr_dyn_release(oe);
+      }
       scr_dyn_release(old);
       me->props = NULL;
     }
@@ -5712,7 +5718,7 @@ static void scr_error_kind_proto_teardown(void) {
  * defaults it to "Error" and the builder always writes it explicitly. */
 static bool scr_error_kind_has_proto(int kind) {
   return kind == SCR_ERR_TYPE || kind == SCR_ERR_RANGE ||
-         kind == SCR_ERR_SYNTAX || kind == SCR_ERR_REFERENCE;
+         kind == SCR_ERR_SYNTAX || kind == SCR_ERR_REFERENCE || kind == SCR_ERR_AGGREGATE;
 }
 
 static ScrDyn *scr_dyn_error_kind_prototype(int kind) {
@@ -13096,6 +13102,18 @@ void scr_error_prop_set(ScrError *e, ScrStr *key, ScrDyn *value) {
   /* The full [[Set]] (not a bare insert): an own NON-ENUMERABLE `cause` the
    * constructor option stored keeps its attributes when it is assigned. */
   scr_dyn_key_set(e->props, key, value);
+}
+
+/* AggregateError's own `errors` (Node: own, NON-ENUMERABLE, writable and
+ * configurable, like `cause`). `arr` is owned (+1, given up here). */
+void scr_error_set_errors(ScrError *e, ScrDyn *arr) {
+  scr_error_install_props_drop(&scr_error_props_drop_impl);
+  if (e->props == NULL || e->props->kind != SCR_DYN_OBJ) {
+    scr_dyn_release(e->props);
+    e->props = scr_dyn_new_obj();
+  }
+  scr_dyn_obj_define_hidden_data(e->props, "errors", 6, arr, true, true); /* borrows */
+  scr_dyn_release(arr); /* the caller's +1 */
 }
 
 void scr_error_set_cause(ScrError *e, ScrDyn *value) {
