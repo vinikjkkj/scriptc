@@ -2364,7 +2364,7 @@ class LlEmitter {
       // fn pointer, and the caps[] tail all address through them).
       `%ScrStr = type { i32, i32, i32 }`,
       `%ScrLogArg = type { i32, i64 }`,
-      `%ScrVt = type { i64, i64, ptr, ptr }`,
+      `%ScrVt = type { i64, i64, ptr, ptr, i64, ptr }`,
       `%ScrUnion = type { i64, i32, ptr, ptr, ptr, i64 }`,
       // …including `implicit_proto` (field 4), the prototype object
       // scr_dyn_fn_prototype mints: the caps[] tail is addressed as one

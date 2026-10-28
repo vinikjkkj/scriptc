@@ -772,6 +772,14 @@ typedef struct ScrVt {
    * NULL elsewhere (the runtime-provided hierarchies answer from their own
    * tables — scr_object_ctor_name). */
   const struct ScrStr *name;
+  /* Per-evaluation vtable copies (scr_vtheap.c). `heap` is 0 for every
+   * static vtable (the emitter zero-fills both trailing fields) and a
+   * nonzero identity token for a copy made when a class expression is
+   * evaluated; `parent` is the base's vtable head (static or heap) and is
+   * walked only while `heap` is nonzero, so `x instanceof E` for an
+   * expression class E is the identity walk over that chain. */
+  size_t heap;
+  const struct ScrVt *parent;
 } ScrVt;
 
 /* ── strings ──────────────────────────────────────────────────────────
@@ -966,6 +974,33 @@ ScrStr *scr_object_ctor_name(void *obj);
  * TypeError naming the key (JS would add the property — the documented
  * monomorphic-struct divergence). scr_object.c. */
 void scr_record_key_miss(ScrStr *k);
+
+/* ── per-evaluation vtable copies (scr_vtheap.c) ──────────────────────
+ * Evaluating a class expression allocates one copy of that class's vtable
+ * struct (the head plus its slots, `bytes` long, copied from `proto`). The
+ * copy is the class VALUE and the identity: instances keep pointing at it
+ * through `vt`, so two evaluations of one class expression are two
+ * distinct vtables and `instanceof` against one is an identity walk over
+ * the `parent` chain (scr_vtheap_instanceof), not the shared preorder
+ * interval. `pre`/`post` are copied from `proto`, so static tests against
+ * an ancestor class still hold. The copy owns `env` (captured locals, the
+ * closure-like block the methods read through the vtable) and `statics`,
+ * each released by its own callback when the copy's rc reaches 0. rc is
+ * stored in a header just before the vtable, so the copy is released via
+ * its ScrVt* (scr_vtheap_retain/release). Only heap copies have a header:
+ * never call these on a static vtable. */
+ScrVt *scr_vtheap_new(const ScrVt *proto, size_t bytes, const ScrVt *parent,
+                      void *env, void (*env_release)(void *env),
+                      void *statics, void (*statics_release)(void *statics));
+void scr_vtheap_retain(ScrVt *vt);
+void scr_vtheap_release(ScrVt *vt);
+/* `x instanceof E` for an expression class: is `target` (one evaluation's
+ * vtable copy) on x's chain? Walks heap ancestors only; stops at the first
+ * static vtable (a static class is never a subclass of an expression class). */
+bool scr_vtheap_instanceof(const ScrVt *x, const ScrVt *target);
+#ifdef SCR_RC_AUDIT
+long scr_vtheap_live_count(void);
+#endif
 
 /* ── error objects (scr_error.c) ──────────────────────────────────────
  * `Error` and its lib subclasses (TypeError/RangeError/SyntaxError) are a

@@ -337,7 +337,7 @@ export function emitClassShapes(
     // The class name rides the vtable only in a module that reads
     // `obj.constructor.name` (class.instanceName); otherwise the field is null.
     const nameSym = stampNames ? host.internLiteral(meta.def.jsName ?? "") : null;
-    const head = `%ScrVt { i64 ${meta.pre}, i64 ${meta.post}, ptr @${mangleClassReleaseDirect(cls.name)}, ptr ${nameSym ?? "null"} }`;
+    const head = `%ScrVt { i64 ${meta.pre}, i64 ${meta.post}, ptr @${mangleClassReleaseDirect(cls.name)}, ptr ${nameSym ?? "null"}, i64 0, ptr null }`;
     defs.push(
       `@${mangleVtInstance(cls.name)} = internal constant %${mangleVtStruct(meta.root.def.name)} ` +
         `{ ${[head, ...entries].join(", ")} } ; class ${cls.name}`,
