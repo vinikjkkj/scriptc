@@ -836,7 +836,8 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         if (s.arr.type.kind !== "array") throw new Error("emitter bug: arraySet on non-array");
         const acc = elemAccess(s.arr.type.elem);
         if (acc === "ref") E.moveTemp(v);
-        E.line(`scr_arr_set_${acc}(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
+        if (s.holeGrow) E.line(`scr_arr_set_f64_hole(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
+        else E.line(`scr_arr_set_${acc}(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
         break;
       }
       case "arrayClear": {

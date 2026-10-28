@@ -2847,6 +2847,8 @@ function validateFunction(
           err(`arrayGet on non-array ${e.arr.type.kind}`, e.loc);
         } else if (!typeEquals(e.type, e.arr.type.elem)) {
           err(`arrayGet result ${e.type.kind} != element ${e.arr.type.elem.kind}`, e.loc);
+        } else if (e.holeOnMiss && e.arr.type.elem.kind !== "f64") {
+          err(`arrayGet holeOnMiss over ${e.arr.type.elem.kind} elements`, e.loc);
         } else if (e.nanOnMiss && e.arr.type.elem.kind !== "f64") {
           err(`arrayGet nanOnMiss over ${e.arr.type.elem.kind} elements`, e.loc);
         } else if (e.tryRef && (e.arr.type.elem.kind === "f64" || e.arr.type.elem.kind === "bool")) {
@@ -6143,6 +6145,7 @@ function validateFunction(
           err(`arraySet on non-array ${s.arr.type.kind}`, s.loc);
         } else {
           expectType(s.value, s.arr.type.elem, "arraySet value");
+          if (s.holeGrow && s.arr.type.elem.kind !== "f64") err(`arraySet holeGrow over ${s.arr.type.elem.kind} elements`, s.loc);
         }
         break;
       }
