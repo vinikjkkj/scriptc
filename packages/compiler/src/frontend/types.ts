@@ -390,6 +390,7 @@ export class ShapeRegistry {
     indexValue?: IrType,
     declaredOrder?: string[],
     builtin?: IrBuiltinRendering,
+    keyOrder?: string[],
   ): string {
     // The INTERNAL field set (the names declaredOrder omits) is part of
     // the identity — internalFieldNamesOf carries the whole argument. The
@@ -403,8 +404,14 @@ export class ShapeRegistry {
     // prefix and a `Symbol(type)` line. An absent rendering spells "" and
     // contributes nothing, so no existing shape's key moves.
     const render = builtinRenderingKey(builtin);
+    // An accessor shape's full key order IS identity: the same members with
+    // the getter declared first and last are two different objects.
+    const ord = keyOrder !== undefined && fields.some((f) => accessorSlotProp(f.name) !== null)
+      ? `ord<${keyOrder.join(",")}>!`
+      : "";
     return (
       (tuple ? "tuple!" : "") +
+      ord +
       (indexValue ? `idx<${typeKey(indexValue)}>!` : "") +
       (internal.length > 0 ? `int<${[...internal].sort().join(",")}>!` : "") +
       (render ? `bi<${render}>!` : "") +
@@ -586,7 +593,7 @@ export class ShapeRegistry {
    * registers the structural key (first writer wins — the key may already
    * belong to a structurally identical shape; the recursive id stays
    * authoritative for its own checker type either way). */
-  finalizeRecursive(t: ts.Type, fields: { name: string; type: IrType }[], indexValue?: IrType, declaredOrder?: string[]): string {
+  finalizeRecursive(t: ts.Type, fields: { name: string; type: IrType }[], indexValue?: IrType, declaredOrder?: string[], keyOrder?: string[]): string {
     const id = this.recIds.get(t);
     if (id === undefined) throw new Error("shape registry bug: finalizeRecursive without a placeholder");
     const declaredIndexValue = indexValue;
@@ -611,8 +618,9 @@ export class ShapeRegistry {
       shape.fields = fields;
       if (indexValue) shape.indexValue = indexValue;
       if (declaredOrder) shape.declaredOrder = declaredOrder;
+      if (keyOrder) shape.keyOrder = keyOrder;
       this.pendingRec.delete(id);
-      const key = this.keyOf(fields, false, indexValue, declaredOrder);
+      const key = this.keyOf(fields, false, indexValue, declaredOrder, undefined, keyOrder);
       if (process.env["SCRIPTC_REC_TRACE"]) {
         const owner = this.byKey.get(key);
         process.stderr.write(
@@ -640,10 +648,10 @@ export class ShapeRegistry {
    * value type (`indexValue`) is part of the identity too: the same
    * declared fields with and without an overflow portion — or with
    * differently-typed ones — are different structs. */
-  intern(fields: { name: string; type: IrType }[], tuple = false, indexValue?: IrType, declaredOrder?: string[], builtin?: IrBuiltinRendering): string {
+  intern(fields: { name: string; type: IrType }[], tuple = false, indexValue?: IrType, declaredOrder?: string[], builtin?: IrBuiltinRendering, keyOrder?: string[]): string {
     const declaredIndexValue = indexValue;
     indexValue = this.dialIndexValue(fields, tuple, indexValue);
-    const key = this.keyOf(fields, tuple, indexValue, declaredOrder, builtin);
+    const key = this.keyOf(fields, tuple, indexValue, declaredOrder, builtin, keyOrder);
     let id = this.byKey.get(key);
     if (id !== undefined && indexValue !== declaredIndexValue && !this.granted.has(id)) {
       this.recordUndo(id, () => this.granted.delete(id!));
@@ -661,6 +669,7 @@ export class ShapeRegistry {
         // IrRecordShape doc): a later structurally-equal type keeps the
         // first one's order.
         ...(declaredOrder ? { declaredOrder } : {}),
+        ...(keyOrder && fields.some((f) => accessorSlotProp(f.name) !== null) ? { keyOrder } : {}),
         // ...and the builtin rendering, which IS identity (keyOf).
         ...(builtinRenderingKey(builtin) ? { builtin: builtin! } : {}),
       };
@@ -7718,6 +7727,7 @@ interface RecordShapeParts {
   fields: { name: string; type: IrType }[];
   indexValue?: IrType;
   declaredOrder?: string[];
+  keyOrder?: string[];
   /** Members whose mapping moved the context-sensitivity counters and were
    * kept (see mapRecordTypeInner's counter restore). A recursive record
    * refused for that reason names them. */
@@ -7784,16 +7794,16 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // exactly this. Leaving it empty strands a fieldless record in
         // whatever holds it.
         if (process.env["SCRIPTC_DOORS"] !== undefined) console.error("[doors] saiu pela SENSIVEL (finalizou)");
-        shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder);
+        shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder, inner.keyOrder);
         return null;
       }
       return {
         kind: "record",
-        shapeId: shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder),
+        shapeId: shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder, inner.keyOrder),
       };
     }
     {
-      const id = shapes.intern(inner.fields, false, inner.indexValue, inner.declaredOrder);
+      const id = shapes.intern(inner.fields, false, inner.indexValue, inner.declaredOrder, undefined, inner.keyOrder);
       if (process.env["SCRIPTC_ORDER_WHY"] !== undefined) {
         const f = inner.fields.find((x) => x.name === "indexParts");
         if (f) {
@@ -8994,11 +9004,21 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     // enumerate FIRST ascending, then string keys in insertion order
     // (OrdinaryOwnPropertyKeys) — Object.keys/JSON/inspect all read it.
     const declaredOrder = esOwnKeyOrder(fields.filter((f) => accessorSlotProp(f.name) === null).map((f) => f.name));
+    // The full literal order with each accessor placed where it is declared
+    // (its getter and setter slots collapse to one property name).
+    const keyOrderAll: string[] = [];
+    for (const f of fields) {
+      const acc = accessorSlotProp(f.name);
+      const n = acc !== null ? acc.prop : f.name;
+      if (!keyOrderAll.includes(n)) keyOrderAll.push(n);
+    }
+    const keyOrder = fields.some((f) => accessorSlotProp(f.name) !== null) ? esOwnKeyOrder(keyOrderAll) : undefined;
     fields.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return {
       fields,
       ...(indexValue ? { indexValue } : {}),
       declaredOrder,
+      ...(keyOrder ? { keyOrder } : {}),
       ...(sensitiveMembers.length > 0 ? { sensitiveMembers } : {}),
     };
   }

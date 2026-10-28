@@ -6686,7 +6686,7 @@ export class Lowerer {
         this.unsupported(
           "SC1101",
           node,
-          `converting '${this.fmt(actual)}' values to 'unknown' (${accPath} carries get/set accessor properties — an object-literal getter is an enumerable accessor, and while the dynamic object model can now hold one, the record-to-dyn converter builds no closure to put behind it, so the crossing would list the reserved '%get:'/'%set:' slot as a key and drop the property Node answers; read the accessor into a const and pass that)`,
+          `converting '${this.fmt(actual)}' values to 'unknown' (${accPath} carries get/set accessor properties — an object-literal getter is an enumerable accessor, and while the dynamic object model can now hold one, this shape is not one the converter walks exactly (an owned instance, a completed literal, an overflow store, a tuple, or a shape with no recorded key order); read the accessor into a const and pass that)`,
         );
       }
       this.unsupported("SC1101", node);

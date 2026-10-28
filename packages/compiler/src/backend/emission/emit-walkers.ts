@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView } from "../../ir/nodes.js";
+import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -3351,15 +3351,41 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // slot, so it is no longer mistaken for a Dirent.
         {
           const byName = new Map(shape.fields.map((f) => [f.name, f]));
-          const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
-          const internal = new Set(internalSlotFields(shape));
-          const dynFields = [
-            ...order.map((n) => byName.get(n)).filter((f) => f !== undefined),
+          // An ACCESSOR-carrying shape (accessorShapeCrosses, the converter's
+          // gate) lists its FULL literal order, so each accessor sits where it
+          // is declared among the data keys. Its %get:/%set: slots are not
+          // internal slots: they become one accessor property each below.
+          const accShape = shapeHasAccessorSlots(shape);
+          const accProps = new Set(accShape ? shape.fields.map((f) => accessorSlotProp(f.name)?.prop).filter((p): p is string => p !== undefined) : []);
+          const order = accShape ? accessorKeyOrderOf(shape) : (shape.declaredOrder ?? shape.fields.map((f) => f.name));
+          const internal = new Set(internalSlotFields(shape).filter((n) => accessorSlotProp(n) === null));
+          const dynFields: { name: string; type: IrType }[] = [
+            ...order.map((n) => byName.get(n) ?? (accProps.has(n) ? { name: n, type: VOID } : undefined)).filter((f): f is { name: string; type: IrType } => f !== undefined),
             ...shape.fields.filter((f) => internal.has(f.name)),
           ];
           for (const f of dynFields) {
             const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
             const keyLen = Buffer.byteLength(f.name, "utf8");
+            if (accProps.has(f.name) && !byName.has(f.name)) {
+              // An ACCESSOR property: the getter and setter closures boxed
+              // like any func field (a dyn function value that owns its
+              // closure), installed through the runtime's accessor define,
+              // which BORROWS both halves and records the key's position.
+              // An absent half is the undefined singleton, so a one-sided
+              // accessor reads and writes exactly as the static record does.
+              const getF = shape.fields.find((x) => x.name === `%get:${f.name}`);
+              const setF = shape.fields.find((x) => x.name === `%set:${f.name}`);
+              const gx = getF && getF.type.kind === "func" ? dynFuncFieldBoxC(E, getF.type, `v->${mangleField(getF.name)}`, getF.name) : "NULL";
+              const sx = setF && setF.type.kind === "func" ? dynFuncFieldBoxC(E, setF.type, `v->${mangleField(setF.name)}`, setF.name) : "NULL";
+              d.push(`  {`);
+              d.push(`    ScrDyn *sc_g = ${gx};`);
+              d.push(`    ScrDyn *sc_s = ${sx};`);
+              d.push(`    scr_dyn_obj_define_accessor(d, ${keyLit}, ${keyLen}, sc_g ? sc_g : scr_dyn_undefined(), sc_s ? sc_s : scr_dyn_undefined(), true, true);`);
+              d.push(`    if (sc_g) scr_dyn_release(sc_g);`);
+              d.push(`    if (sc_s) scr_dyn_release(sc_s);`);
+              d.push(`  }`);
+              continue;
+            }
             // THE ABSENT SLOT IS NOT READABLE, so the whole per-field
             // emission has to sit BEHIND the question rather than compute
             // the value and ask afterwards. On a shape a literal COMPLETED

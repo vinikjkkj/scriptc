@@ -31,7 +31,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrBytesElem, IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
-import { arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
+import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
@@ -2668,14 +2668,51 @@ export class LlDyn {
         // declaredOrder OMITS are INTERNAL SLOTS and never become keys —
         // emit-walkers.ts carries the whole argument.
         const byName = new Map(shape.fields.map((f) => [f.name, f]));
-        const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
-        const internal = new Set(internalSlotFields(shape));
-        const dynFields = [
-          ...order.map((n) => byName.get(n)).filter((f) => f !== undefined),
+        // An ACCESSOR-carrying shape lists its full literal order (see
+        // emit-walkers.ts, the C row): each accessor sits among the data keys,
+        // and its %get:/%set: slots are not internal slots.
+        const accShape = shapeHasAccessorSlots(shape);
+        const accProps = new Set(accShape ? shape.fields.map((f) => accessorSlotProp(f.name)?.prop).filter((p): p is string => p !== undefined) : []);
+        const order = accShape ? accessorKeyOrderOf(shape) : (shape.declaredOrder ?? shape.fields.map((f) => f.name));
+        const internal = new Set(internalSlotFields(shape).filter((n) => accessorSlotProp(n) === null));
+        const dynFields: { name: string; type: IrType }[] = [
+          ...order.map((n) => byName.get(n) ?? (accProps.has(n) ? { name: n, type: VOID } : undefined)).filter((f): f is { name: string; type: IrType } => f !== undefined),
           ...shape.fields.filter((f) => internal.has(f.name)),
         ];
         for (const f of dynFields) {
           const klen = Buffer.byteLength(f.name, "utf8");
+          if (accProps.has(f.name) && !byName.has(f.name)) {
+            // An ACCESSOR property: the getter and setter closures boxed like
+            // any func field, installed through the runtime's accessor define
+            // (both halves BORROWED, the key's position recorded). An absent
+            // half is the undefined singleton.
+            const getF = shape.fields.find((x) => x.name === `%get:${f.name}`);
+            const setF = shape.fields.find((x) => x.name === `%set:${f.name}`);
+            const boxOf = (sf: { name: string; type: IrType } | undefined): string | null => {
+              if (!sf || sf.type.kind !== "func") return null;
+              const fp = B.tmp();
+              B.line(`${fp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${fieldIndex.get(sf.name)!} ; .${sf.name}`);
+              const fc = B.tmp();
+              B.line(`${fc} = load ptr, ptr ${fp}`);
+              const fbox = canBoxFuncIntoDyn(sf.type, (id: string) => this.host.recordsById.get(id), (id: string) => this.host.unionsById.get(id))
+                ? this.dynFuncBoxHelper(sf.type)
+                : this.strandedDynFuncBoxHelper(sf.type, sf.name);
+              const bx = B.tmp();
+              B.line(`${bx} = call ptr @${fbox}(ptr ${fc}, ptr null, ptr null)`);
+              return bx;
+            };
+            const g = boxOf(getF);
+            const s = boxOf(setF);
+            const undef = this.undef(B);
+            const gSel = g ?? undef;
+            const sSel = s ?? undef;
+            host.declare(`declare void @scr_dyn_obj_define_accessor(ptr, ptr, i64, ptr, ptr, i1, i1)`);
+            host.declare(`declare void @scr_dyn_release(ptr)`);
+            B.line(`call void @scr_dyn_obj_define_accessor(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${gSel}, ptr ${sSel}, i1 true, i1 true) ; accessor ${f.name}`);
+            if (g) B.line(`call void @scr_dyn_release(ptr ${g}) ; the getter box`);
+            if (s) B.line(`call void @scr_dyn_release(ptr ${s}) ; the setter box`);
+            continue;
+          }
           // THE ABSENT SLOT IS NOT READABLE - emit-walkers.ts's row, and
           // here the branch has to come before the LOAD as well as before
           // the conversion. On a shape a literal COMPLETED a required field

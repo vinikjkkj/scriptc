@@ -59,6 +59,7 @@ const SHAPE_FIELD_ROLE: Record<keyof IrRecordShape, "identity" | "later-pass" | 
   tuple: "identity",
   indexValue: "identity",
   declaredOrder: "identity",
+  keyOrder: "identity",
   tostr: "identity",
   builtin: "identity",
   ownmask: "later-pass",

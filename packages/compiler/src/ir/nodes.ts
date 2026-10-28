@@ -1914,6 +1914,15 @@ export interface IrRecordShape {
    * fields carry that declaredOrder OMITS are internal '%'-fields (Dirent's
    * %dtype) — hidden from every key-order surface, JSON included. */
   declaredOrder?: string[];
+  /** ACCESSOR-carrying shapes only: the FULL own-key order of the literal, with
+   * each accessor property named by its property name (not its `%get:`/`%set:`
+   * slot). It is what places an accessor among the data keys when the record
+   * converts to dyn (emit-walkers.ts / llvm/dyn.ts). Part of the interned
+   * identity (keyOf), unlike declaredOrder: two literals with the same
+   * members in another order must not share one. Absent when the shape has no accessor
+   * slot, or when the mapper did not record one; canConvertToDyn refuses an
+   * accessor shape without it. */
+  keyOrder?: string[];
   /** The HIDDEN per-instance `toString` slot: not a field, not a key, not
    * part of the interned identity — one trailing struct member
    * (`ScrClosure *`, a `() => string`) both backends lay out after the
@@ -2266,6 +2275,21 @@ export function accessorSlotProp(fieldName: string): { kind: "get" | "set"; prop
   if (fieldName.startsWith("%get:")) return { kind: "get", prop: fieldName.slice(5) };
   if (fieldName.startsWith("%set:")) return { kind: "set", prop: fieldName.slice(5) };
   return null;
+}
+
+/** An accessor-carrying shape the record-to-dyn walker can build exactly. */
+export function accessorShapeCrosses(shape: IrRecordShape): boolean {
+  return shape.keyOrder !== undefined && shape.ownmask !== true && shape.srcproto !== true &&
+    shape.reqabsent !== true && shape.indexValue === undefined && shape.tuple !== true;
+}
+
+/** The full key order of an accessor-carrying shape the walker is about to
+ * build. canConvertToDyn admits such a shape only with a recorded keyOrder, so
+ * a missing one is an emitter bug, and it stops the compile rather than
+ * guessing an order (a guessed order is a silent key-order divergence). */
+export function accessorKeyOrderOf(shape: IrRecordShape): string[] {
+  if (shape.keyOrder === undefined) throw new Error(`emitter bug: accessor shape ${shape.id} reached the dyn walker without a key order`);
+  return shape.keyOrder;
 }
 
 /** True when the shape carries at least one accessor slot (see
@@ -8941,37 +8965,32 @@ export function canConvertToDyn(
     if (shape.indexValue !== undefined && !canConvertToDyn(shape.indexValue, getRecord, getUnion, visiting)) {
       return false;
     }
-    // ACCESSOR SLOTS never cross. `%get:x` / `%set:x` are reserved
-    // '%'-fields holding CLOSURES (accessorSlotProp), and the func-field
-    // rule above — written for a method BUNDLE — admitted them by
-    // accident: a `%get:` slot's type is `func`, so `every` waved it
-    // through and the converter wrote it as an ORDINARY DATA ENTRY keyed
-    // `%get:a`. The property name itself has no data slot, so after the
-    // crossing the value carries a key Node never had and lacks the one
-    // Node answers — silently, at every dyn surface: Object.keys/
-    // getOwnPropertyNames/for-in/spread/Object.assign list `%get:a`,
-    // JSON.stringify drops the member, `in` says false, util.inspect
-    // prints the marker, and a dyn record check reads the member as
-    // ABSENT (required threw `got undefined`, OPTIONAL built the
-    // undefined arm and said nothing). The docstring on accessorSlotProp
-    // already states the rule — "accessor-carrying shapes are never
-    // JSON-safe or dyn-convertible" — and this is the line that makes it
-    // true again.
-    //
-    // The reason recorded here used to be "the dyn object model has no
-    // representation for an ENUMERABLE accessor". That is no longer the
-    // blocker: it has one (scr_dyn_acc_slot). What stands now is
-    // narrower and is in the CONVERTER, not the model — the record-to-dyn
-    // walk would have to install a real accessor whose getter CALLS the
-    // shape's `%get:x` closure slot with the crossing object as `this`,
-    // and nothing in that walk builds a closure. Materializing the
-    // getter's VALUE instead is still the wrong trade, for the reasons
-    // below it: key order, util.inspect's `[Getter]`, and the getter's
-    // call count and timing.
-    if (shapeHasAccessorSlots(shape)) return false;
+    // ACCESSOR SLOTS (`%get:x` / `%set:x`, accessorSlotProp) cross only as
+    // real accessors: the record-to-dyn walker installs each one through the
+    // runtime's accessor define (scr_dyn_obj_define_accessor), boxing the
+    // closure as a dyn function, and places the property at its declared
+    // position (keyOrder). A stranded box would make the property read
+    // throw, so each accessor closure must box for real (checked below).
+    // The reverse direction stays refused (canDynCheckTo), and a checked
+    // cast of the crossed value into a DATA record copies its members
+    // (see the accessor notes in the change report).
+    // An accessor-carrying shape crosses only when the walker can build the
+    // whole object: the mapper recorded the literal's key order, and the
+    // shape is a plain literal (no owned-mask instance, no completed-literal
+    // liveness, no overflow store, no tuple). Anything else keeps the fence.
+    if (shapeHasAccessorSlots(shape) && !accessorShapeCrosses(shape)) return false;
     if (visiting.has(t.shapeId)) return true;
     visiting.add(t.shapeId);
     try {
+      // An ACCESSOR slot must box for real: a stranded getter would be a
+      // property whose read throws, which is a runtime throw in place of a
+      // refusal. So its closure has to be callable through dyn.
+      if (shapeHasAccessorSlots(shape)) {
+        return shape.fields.every((f) =>
+          accessorSlotProp(f.name) !== null
+            ? canBoxFuncIntoDyn(f.type, getRecord, getUnion, visiting)
+            : f.type.kind === "func" || canConvertToDyn(f.type, getRecord, getUnion, visiting));
+      }
       // A FUNCTION field boxes either way: with its dyn call thunk when the
       // signature has one, and STRANDED — present, uncallable through the
       // dyn side — when it does not. The record is being CARRIED here (an
