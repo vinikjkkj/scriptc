@@ -860,27 +860,30 @@ static void scr_dgram_read(ScrDgramSocket *s) {
 
 /* ── dns.lookup ──────────────────────────────────────────────────────── */
 
-/* The Error a dns.lookup failure delivers: Node's dnsException shape,
- * message "getaddrinfo <CODE> <hostname>" with `code` = <CODE>. The
- * runtime hands the adapter only the message (ScrDnsLookupFn), so the
- * code is read back from it: the token between "getaddrinfo " and the
- * next space is always one of ENOTFOUND / EAI_AGAIN / EAI_FAIL. errno,
- * syscall and hostname have no slot on ScrError (name/message/code only)
- * and stay absent — a residual divergence, recorded in the slice report. */
+/* The Error a dns.lookup failure delivers: Node's dnsException shape.
+ * Message "getaddrinfo <CODE> <hostname>"; `code` = <CODE>; errno = the
+ * libuv value of that code (UV_EAI_* -30xx, negative, as Node reports);
+ * syscall "getaddrinfo"; hostname. The runtime hands the adapter only the
+ * message (ScrDnsLookupFn), so all four are read back from it: the code is
+ * the token after "getaddrinfo ", the hostname is everything after it. */
 ScrError *scr_dns_error_new(ScrStr *msg /*borrowed*/) {
   ScrError *e = scr_error_new(SCR_ERR_ERROR, msg);
   const char *sp = strchr(msg->data, ' ');
-  if (sp) {
-    const char *code = sp + 1;
-    const char *end = strchr(code, ' ');
-    size_t n = end ? (size_t)(end - code) : strlen(code);
-    char buf[32];
-    if (n > 0 && n < sizeof buf) {
-      memcpy(buf, code, n);
-      buf[n] = '\0';
-      scr_error_set_code(e, buf);
-    }
-  }
+  if (!sp) return e;
+  const char *code = sp + 1;
+  const char *end = strchr(code, ' ');
+  if (!end) return e;
+  size_t n = (size_t)(end - code);
+  char buf[32];
+  if (n == 0 || n >= sizeof buf) return e;
+  memcpy(buf, code, n);
+  buf[n] = '\0';
+  scr_error_set_code(e, buf);
+  double errno_val =
+      strcmp(buf, "ENOTFOUND") == 0 ? -3008.0 /* UV_EAI_NONAME */
+      : strcmp(buf, "EAI_AGAIN") == 0 ? -3001.0 /* UV_EAI_AGAIN */
+      : -3004.0; /* UV_EAI_FAIL */
+  scr_error_set_ext_dns(e, errno_val, "getaddrinfo", end + 1);
   return e;
 }
 

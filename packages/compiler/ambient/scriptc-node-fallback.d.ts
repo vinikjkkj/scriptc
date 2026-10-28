@@ -24,6 +24,15 @@
  * errno/syscall/path/dest read through the lowering (errno is libuv's
  * negative number; a member the throw site did not stamp reads undefined). */
 declare namespace NodeJS {
+  /* NodeJS.ErrnoException: the Error shape the fs and dns failures carry
+   * (@types/node's member set; hostname is the dns failure's). */
+  interface ErrnoException extends Error {
+    errno?: number;
+    code?: string;
+    path?: string;
+    syscall?: string;
+    hostname?: string;
+  }
   /* The process introspection records — named interfaces so the type
    * mapper interns their record shapes (the RemoteInfo pattern; the
    * names match @types/node's, so the mappings hold when it adopts). */
@@ -3326,7 +3335,7 @@ declare module "node:dgram" {
 declare module "dns" {
   export function lookup(
     hostname: string,
-    callback: (err: Error | null, address: string, family: number) => void,
+    callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
   ): void;
   export function lookup(
     hostname: string,
@@ -3334,7 +3343,7 @@ declare module "dns" {
      * lowered option ({ family: 4 }); hints/all/order/verbatim fence by
      * name; undocumented keys drop like Node. */
     options: { family: number; [option: string]: unknown },
-    callback: (err: Error | null, address: string, family: number) => void,
+    callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
   ): void;
 }
 declare module "node:dns" {

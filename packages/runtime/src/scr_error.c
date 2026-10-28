@@ -299,6 +299,7 @@ typedef struct ScrErrExt {
   ScrStr *syscall;
   ScrStr *path;
   ScrStr *dest;
+  ScrStr *hostname; /* the dns failure's hostname (NULL elsewhere) */
   struct ScrErrExt *next;
 } ScrErrExt;
 
@@ -314,6 +315,7 @@ static void scr_err_ext_drop(ScrError *e) {
       scr_str_release(x->syscall);
       scr_str_release(x->path);
       scr_str_release(x->dest);
+      scr_str_release(x->hostname);
       free(x);
       scr_err_ext_count--;
       return;
@@ -376,6 +378,23 @@ static void scr_error_set_ext_val(ScrError *e, double errno_val, const char *sys
 
 void scr_error_set_ext(ScrError *e, int err_no, const char *syscall, const char *path, const char *dest) {
   scr_error_set_ext_val(e, scr_uv_errno(err_no), syscall, path, dest);
+}
+
+/* A dns.lookup failure's extension: errno is the libuv value itself
+ * (already negative, e.g. UV_EAI_NONAME -3008), syscall "getaddrinfo", and
+ * the hostname Node sets as an own property. */
+void scr_error_set_ext_dns(ScrError *e, double errno_val, const char *syscall, const char *hostname) {
+  scr_error_set_ext_val(e, errno_val, syscall, NULL, NULL);
+  scr_err_ext_head->hostname = scr_str_new(hostname, strlen(hostname));
+}
+
+/* The hostname extension (borrowed), or NULL. */
+const ScrStr *scr_error_ext_hostname(const ScrError *e) {
+  if (scr_err_ext_count == 0) return NULL;
+  for (ScrErrExt *x = scr_err_ext_head; x != NULL; x = x->next) {
+    if (x->e == e) return x->hostname;
+  }
+  return NULL;
 }
 
 /* Borrowed views of the stamped properties; false when the error carries

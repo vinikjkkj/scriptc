@@ -798,7 +798,8 @@ ScrDyn *scr_error_ext_dyn(ScrError *e, const ScrStr *key) {
   if (!scr_error_ext_get(e, &err_no, &sys, &path, &dest)) return scr_dyn_retain(scr_dyn_undefined());
   const char *k = key->data;
   if (strcmp(k, "errno") == 0) return scr_dyn_new_num(err_no);
-  const ScrStr *v = strcmp(k, "syscall") == 0 ? sys : strcmp(k, "path") == 0 ? path : strcmp(k, "dest") == 0 ? dest : NULL;
+  const ScrStr *v = strcmp(k, "syscall") == 0 ? sys : strcmp(k, "path") == 0 ? path : strcmp(k, "dest") == 0 ? dest
+                    : strcmp(k, "hostname") == 0 ? scr_error_ext_hostname(e) : NULL;
   return v != NULL ? scr_dyn_new_str((ScrStr *)v) : scr_dyn_retain(scr_dyn_undefined());
 }
 
