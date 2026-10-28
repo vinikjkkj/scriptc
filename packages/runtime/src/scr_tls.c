@@ -1575,7 +1575,9 @@ static ScrDyn *scr_tls_time_dyn(const mbedtls_x509_time *t) {
 /* The subject / issuer name as Node's object: short attribute names, repeated
  * attributes as arrays. */
 static ScrDyn *scr_tls_name_dyn(const mbedtls_x509_name *head) {
-  ScrDyn *obj = scr_dyn_new_obj();
+  /* Node builds subject/issuer with a null prototype (util.inspect prints
+   * [Object: null prototype]) */
+  ScrDyn *obj = scr_dyn_new_obj_null_proto();
   for (const mbedtls_x509_name *n = head; n != NULL; n = n->next) {
     const char *sn = NULL;
     if (n->oid.p == NULL || n->val.p == NULL) continue;
