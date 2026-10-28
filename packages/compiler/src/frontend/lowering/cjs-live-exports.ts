@@ -121,9 +121,8 @@ export function exportObjectUseOf(r: ts.Expression): "write" | "escape" | "read"
   }
   // Read-only operators: `'k' in o`, `typeof o`, `!o`, and every equality test (identity is refused separately).
   if (ts.isBinaryExpression(p) && p.right === node && p.operatorToken.kind === ts.SyntaxKind.InKeyword) return "read";
-  if (ts.isBinaryExpression(p) && (p.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
-      p.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
-      p.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken || p.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken)) return "read";
+  // Equality tests compare IDENTITY: both sides are the module's one bag (liveIdentityRefOf), so the object is
+  // a value that must be live.
   if (ts.isTypeOfExpression(p) || (ts.isPrefixUnaryExpression(p) && p.operator === ts.SyntaxKind.ExclamationToken)) return "read";
   return "escape";
 }
@@ -174,7 +173,10 @@ function requireTargetOfSpec(L: Lowerer, from: ts.SourceFile, spec: string): ts.
   const dep = isRelativeSpecifier(spec)
     ? resolveImport(L.program, from, spec) ?? null
     : npmStaticDepSf7(L.program, from, spec);
-  return dep !== null && isCjsJsFile(dep) ? dep : null;
+  if (dep === null) return null;
+  // An npm package's entry is its declaration (`index.d.ts`); the module object is the compiled twin.
+  const js = dep.isDeclarationFile ? L.declTwinSourceOf(dep) : dep;
+  return js !== null && isCjsJsFile(js) ? js : null;
 }
 
 const escapeMemo = new WeakMap<ts.Program, Set<ts.SourceFile>>();
@@ -200,7 +202,7 @@ function outsideEscapesOf(L: Lowerer): Set<ts.SourceFile> {
       // A direct `require(spec).k = v` (or `.__defineSetter__`, `++`, `delete`) writes the export object too.
       if (ts.isCallExpression(n)) {
         const spec = requireSpecOf(n);
-        if (spec !== null && exportObjectUseOf(n) === "write") {
+        if (spec !== null && (exportObjectUseOf(n) === "write" || exportObjectUseOf(n) === "escape")) {
           const dep = requireTargetOfSpec(L, f, spec);
           if (dep !== null) out.add(dep);
         }
@@ -282,9 +284,22 @@ export function liveExportsOf(L: Lowerer, sf: ts.SourceFile): boolean {
   return r;
 }
 
-/** The bag of a live module as a DYN value (the module's export object). */
+/** The bag of a live module as a DYN value (the module's export object). A reference from ANOTHER module
+ * (a require binding, possibly a function-local `require` that never ran the module's init) runs the module's
+ * init first: the bag is created there (lower-modules.ts), so the reference must see it created. The module's
+ * own references (`loc.file` is the module) read its bag directly, since the module is initializing. */
 export function liveBagRef(L: Lowerer, sf: ts.SourceFile, loc: SrcLoc): IrExpr {
-  return { kind: "varRef", localId: cjsExportsBagOf(L, sf), type: DYN, loc };
+  const bag: IrExpr = { kind: "varRef", localId: cjsExportsBagOf(L, sf), type: DYN, loc };
+  const init = L.initNameOf.get(sf);
+  if (loc.file === sf.fileName || init === undefined || L.asyncInitFiles.has(sf)) return bag;
+  L.noteEdge(init);
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "exprStmt", expr: { kind: "call", callee: init, args: [], type: VOID, loc }, loc }],
+    result: bag,
+    type: DYN,
+    loc,
+  };
 }
 
 /** The live module a requirer's namespace binding (`const m = require("./x")`)
@@ -294,7 +309,12 @@ export function liveDepOfBinding(L: Lowerer, recv: ts.Expression): ts.SourceFile
   if (!ts.isIdentifier(recv) || !L.cjsLocalModuleBindingOf(recv)) return null;
   const dep = L.cjsBindingRequireDepOf(recv);
   if (dep === null) return null;
-  return liveTwinOf(L, dep);
+  const live = liveTwinOf(L, dep);
+  // A module the program graph does not load (a `require` only nested functions name: no top-level edge)
+  // has no init to run at the reference, so its bag may not exist yet. Such a binding keeps the static path's
+  // refusal rather than reading a bag nothing created; an async-init module has no synchronous init either.
+  if (live === null || L.initNameOf.get(live) === undefined || L.asyncInitFiles.has(live)) return null;
+  return live;
 }
 
 /** The LIVE compiled module a requirer's binding resolves to: the module itself when it is a
@@ -522,12 +542,22 @@ export function liveKeyOf(L: Lowerer, arg: ts.Expression): IrExpr | null {
   return key.type.kind === "string" ? key : null;
 }
 
-/** A reference to a LIVE export object used where identity is compared (`m === n`, `m !== n`): the bag is the
- * object, but the refusal of identity over a require value stands (the test contract, require-node-parity). */
-export function isRequireValueRef(L: Lowerer, e: ts.Expression): boolean {
-  if (!ts.isIdentifier(e)) return false;
-  if (liveDepOfBinding(L, e) !== null) return true;
-  const sym = L.checker.getSymbolAtLocation(e);
-  const decl = sym ? L.checker.declarationsOf(sym).find(ts.isVariableDeclaration) : undefined;
-  return decl !== undefined && decl.initializer !== undefined && isLiveExportValue(L, decl.initializer);
+/** The DYN bag of a LIVE export object reference (`require` binding, the module's own `exports` /
+ * `module.exports`, or an alias variable holding one), or null. Identity compares of these are exact: every
+ * reference to one module is the same bag object. */
+export function liveIdentityRefOf(L: Lowerer, e: ts.Expression, loc: SrcLoc): IrExpr | null {
+  let x: ts.Expression = e;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  const dep = liveDepOfBinding(L, x);
+  if (dep !== null) return liveBagRef(L, dep, loc);
+  if (isLiveExportValue(L, x)) return liveBagRef(L, x.getSourceFile(), loc);
+  if (ts.isIdentifier(x)) {
+    const sym = L.checker.getSymbolAtLocation(x);
+    const decl = sym ? L.checker.declarationsOf(sym).find(ts.isVariableDeclaration) : undefined;
+    if (decl !== undefined && decl.initializer !== undefined && isLiveExportValue(L, decl.initializer)) {
+      const lowered = L.lowerExpr(x);
+      if (lowered.type.kind === "dyn") return lowered;
+    }
+  }
+  return null;
 }
