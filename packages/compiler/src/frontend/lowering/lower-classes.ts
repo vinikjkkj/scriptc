@@ -110,7 +110,7 @@ function classOrderedNames(
   }
   const out: string[] = [];
   for (const f of fieldOrder) {
-    if (f.redeclared === true || declared.has(f.name) || params.has(f.name)) continue;
+    if (f.redeclared === true || params.has(f.name)) continue;
     if (f.name.startsWith("%") || f.name.startsWith("#")) continue;
     if (!out.includes(f.name)) out.push(f.name);
   }
@@ -9603,7 +9603,22 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       }
       // An own-shadow flag starts false by the zero of its slot; its initializer would note the
       // flag in the instance order at construction, before any key the program wrote.
-      if (!f.initializer || f.name.startsWith("#__sc_own$")) continue;
+      if (!f.initializer) {
+        // Node defines a declared field with no initializer as undefined here, in declaration order.
+        const decl = info.decl;
+        const member = decl?.members.find((m) => ts.isPropertyDeclaration(m) && ts.isIdentifier(m.name) && m.name.text === f.name && m.initializer === undefined);
+        if (member !== undefined && !f.name.startsWith("#__sc_own$")) {
+          out.push({
+            kind: "ordNote",
+            obj: { kind: "varRef", localId: thisLocal.id, type: thisType, loc: locOf(member) },
+            className: info.def.name,
+            field: f.name,
+            loc: locOf(member),
+          });
+        }
+        continue;
+      }
+      if (f.name.startsWith("#__sc_own$")) continue;
       L.stats.statementsTotal++;
       L.bumpFileStat(locOf(f.initializer).file, "total");
       try {

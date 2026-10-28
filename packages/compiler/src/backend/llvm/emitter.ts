@@ -6926,6 +6926,11 @@ class LlEmitter {
         B.line(`call void @scr_bytes_set_fast(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
         break;
       }
+      case "ordNote": {
+        const obj = this.emitExpr(s.obj);
+        this.noteOrderWrite(obj.name, s.className, s.field);
+        break;
+      }
       case "fieldSet":
       case "recordSet": {
         // Evaluation order: obj, then value. New value moved in; the old

@@ -872,6 +872,12 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         E.line(`scr_bytes_set_inl(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
         break;
       }
+      case "ordNote": {
+        const obj = E.emitExpr(s.obj);
+        const ord = orderRecordPlanCached(E.mod.classes ?? []).ordinalOf(s.className, s.field);
+        if (ord !== null) E.line(`scr_ord_note(${obj.name}->${ORD_MEMBER}, ${ord});${E.srcComment(s.loc)}`);
+        break;
+      }
       case "fieldSet":
       case "recordSet": {
         // Evaluation order: obj, then value. New value moved in; the old
