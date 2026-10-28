@@ -10333,7 +10333,8 @@ bool scr_tls_sock_authorized(ScrNetSocket *s);
  * (tls.connect's `session`). getSession answers +1 bytes or NULL (undefined). */
 bool scr_tls_sock_session_reused(ScrNetSocket *s);
 ScrBytes *scr_tls_sock_get_session(ScrNetSocket *s);
-
+/* TLSSocket.getPeerCertificate(detailed): the peer certificate object (+1), or {} */
+ScrDyn *scr_tls_sock_peer_cert(ScrNetSocket *s, bool detailed);
 ScrStr *scr_tls_sock_auth_error(ScrNetSocket *s); /* +1 or NULL */
 void scr_tls_sock_on_secure_connect(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once);
 void scr_tls_sock_on_session(ScrNetSocket *s, ScrClosure *cb /*moves*/, void *fn, bool once);

@@ -1556,6 +1556,20 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
     const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
     return { kind: "libCall", fn: "tls.sockSessionReused", args: [receiver], type: BOOL, loc };
   }
+  if (name === "getPeerCertificate") {
+    // TLSSocket.getPeerCertificate(detailed?): the peer certificate as
+    // Node's object (checked-dynamic: PeerCertificate is a dyn type here),
+    // or {} with no peer certificate. `detailed` is accepted and changes no
+    // member the peer chain can show.
+    if (args.length > 1) {
+      L.noLowering(`getPeerCertificate with ${args.length} arguments`, call, "the form is getPeerCertificate(detailed?)");
+    }
+    const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
+    const detailed: IrExpr = args.length === 1
+      ? L.lowerExprExpecting(args[0]!, BOOL)
+      : boolLit(false, loc);
+    return { kind: "libCall", fn: "tls.sockPeerCert", args: [receiver, detailed], type: DYN, loc };
+  }
   if (name === "getSession") {
     // TLSSocket.getSession(): the serialized session as a Buffer, or
     // undefined (no session yet, or a server socket).
