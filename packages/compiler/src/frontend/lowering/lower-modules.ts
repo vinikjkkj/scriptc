@@ -27,7 +27,7 @@ import { irAlwaysExits, dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLit
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { dynImportBindingDepOf } from "./lower-island.js";
 import { bufferSpeciesAliasDecl } from "./lower-containers.js";
-import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibBufferVarAliasDecl, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
+import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibBufferVarAliasDecl, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
