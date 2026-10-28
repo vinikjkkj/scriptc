@@ -12931,6 +12931,45 @@ export class Lowerer {
     return "narrow";
   }
 
+  /** Does the consumer of an element read take a DECLARED `T | undefined`
+   * slot, so the read's miss can be the union's undefined arm instead of a
+   * trap? The three consumers the lowering can type exactly: a `return`
+   * whose enclosing function declares the union, an annotated variable
+   * declaration, and an argument whose resolved parameter is declared with
+   * the union. The consumer's own IR type must be a union that carries both
+   * the element arm and the undefined arm; anything else keeps the trap. */
+  consumerAdmitsUndefined(node: ts.Expression, elem: IrType): boolean {
+    let p: ts.Node = node;
+    while (ts.isParenthesizedExpression(p.parent)) p = p.parent;
+    const par = p.parent;
+    if (!par) return false;
+    const declares = (t: IrType | null): boolean => {
+      if (t === null || t.kind !== "union") return false;
+      return this.armTag(t.unionId, UNDEFINED_T) >= 0 && this.armTag(t.unionId, elem) >= 0;
+    };
+    if (ts.isReturnStatement(par) && par.expression === p) {
+      let fn: ts.Node | undefined = par.parent;
+      while (fn !== undefined && !ts.isFunctionLike(fn)) fn = fn.parent;
+      if (fn === undefined || ts.isConstructorDeclaration(fn)) return false;
+      const retT = (fn as ts.SignatureDeclaration).type;
+      if (retT === undefined) return false;
+      return declares(this.mapTypeOf(this.typeOf(retT)));
+    }
+    if (ts.isVariableDeclaration(par) && par.initializer === p && par.type !== undefined) {
+      return declares(this.mapTypeOf(this.typeOf(par.type)));
+    }
+    if (ts.isCallExpression(par) && par.arguments.includes(p as ts.Expression) && !par.questionDotToken) {
+      const idx = par.arguments.indexOf(p as ts.Expression);
+      const sig = this.checker.getResolvedSignature(par);
+      const params = sig?.getParameters() ?? [];
+      if (idx >= params.length) return false;
+      const decl = this.checker.valueDeclarationOf(params[idx]!);
+      if (decl === undefined || !ts.isParameter(decl) || decl.dotDotDotToken !== undefined) return false;
+      return declares(this.mapTypeOf(this.checker.getTypeOfSymbol(params[idx]!)));
+    }
+    return false;
+  }
+
   /** The string `+` node `plus` has its RESULT consumed as text, so the
    * number NaN that `undefined + undefined` really is can ride as the text
    * "NaN" (lowerLyingPlus). A parent `+` qualifies only against a string

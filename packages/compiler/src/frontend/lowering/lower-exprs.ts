@@ -14359,6 +14359,16 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // trap, because its slot is typed T and has no representation for it.
     if (arr.type.kind === "array") {
       const cx = L.classifyLyingRead(expr);
+      // A consumer whose declared type admits undefined (a `T | undefined`
+      // return, annotation or parameter) takes the miss as the union's
+      // undefined arm: the same safe read the npm-static path uses.
+      if (
+        cx === "narrow" && index.type.kind === "f64" &&
+        L.consumerAdmitsUndefined(expr, arr.type.elem)
+      ) {
+        const safe = lowerNpmStaticSafeIndexRead(L, arr as IrExpr & { type: { kind: "array" } }, index, locOf(expr));
+        if (safe) return safe;
+      }
       if (cx !== "narrow") {
         const tol = lowerOobTolerantIndexRead(L, arr as IrExpr & { type: { kind: "array" } }, index, locOf(expr), cx, cx === "peel" && L.isStringifyingConsumer(expr));
         if (tol) return tol;
