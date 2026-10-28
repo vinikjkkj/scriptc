@@ -3215,6 +3215,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14152-ee-subclass-for-in-keys.js": {
+   "order": [
+    "<repo>/tests/corpus/14152-ee-subclass-for-in-keys.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1420-number-statics.ts": {
    "order": [
     "<repo>/tests/corpus/1420-number-statics.ts"
