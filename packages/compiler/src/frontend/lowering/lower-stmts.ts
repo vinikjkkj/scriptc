@@ -21,6 +21,7 @@ import { lowerWrtcWrite } from "./lower-wrtc.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
+import { isHoleFlaggedRef } from "./hole-flag.js";
 import { bufferSpeciesAliasDecl, ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfUnionContainer, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
 import { jsLetWidened, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
@@ -7392,7 +7393,9 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
               const provenTruncation =
                 !growable && ts.isExpressionStatement(expr.parent) && ts.isIdentifier(expr.left.expression) &&
                 isProvenPrefixTruncation(expr.parent, expr.left.expression.text);
-              if (!growable && !provenTruncation) {
+              // STEP 2a: a flagged number[] grows with holes (scr_arr_f64 setLength, emitters).
+              const holeGrowable = elem.kind === "f64" && isHoleFlaggedRef(L, expr.left.expression);
+              if (!growable && !provenTruncation && !holeGrowable) {
                 L.noLowering(
                   `assigning '.length' on '${L.fmt(elem)}'-element arrays`,
                   expr.left,
@@ -8607,7 +8610,9 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     const index = L.lowerExpr(target.argumentExpression);
     return typedArray
       ? { kind: "bytesSet", arr: recv, index, value, loc }
-      : { kind: "arraySet", arr: recv, index, value, loc };
+      : isHoleFlaggedRef(L, target.expression)
+        ? { kind: "arraySet", arr: recv, index, value, holeGrow: true, loc }
+        : { kind: "arraySet", arr: recv, index, value, loc };
   }
   function lowerCompoundToTarget(L: Lowerer, expr: ts.BinaryExpression, compound: CompoundOp,
     target: { id: string; type: IrType },): IrStmt {
