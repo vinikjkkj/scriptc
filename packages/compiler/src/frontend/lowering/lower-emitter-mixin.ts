@@ -74,6 +74,16 @@ function unwrapCallee(e: ts.Expression): ts.Expression {
 function helperFunctionOf(L: Lowerer, sym: ts.Symbol | undefined, depth = 0): ts.Node | null {
   if (!sym || depth > 3) return null;
   for (const d of L.checker.declarationsOf(sym)) {
+    // A helper shipped as a declaration (provenance: the .d.ts of the npm
+    // package): its body lives in the compiled JS twin, read by name.
+    if (ts.isFunctionDeclaration(d) && d.getSourceFile().isDeclarationFile) {
+      const twin = d.name ? L.declTwinSourceOf(d.getSourceFile()) : null;
+      const fn = twin?.statements.find(
+        (st): st is ts.FunctionDeclaration => ts.isFunctionDeclaration(st) && st.name?.text === d.name?.text,
+      );
+      if (fn !== undefined) return fn;
+      continue;
+    }
     if (ts.isFunctionDeclaration(d)) return d;
     if (ts.isVariableDeclaration(d) && d.initializer && (ts.isFunctionExpression(d.initializer) || ts.isArrowFunction(d.initializer))) return d.initializer;
     if (ts.isBinaryExpression(d) && ts.isIdentifier(d.right)) {
