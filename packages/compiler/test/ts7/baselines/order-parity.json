@@ -4417,6 +4417,20 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15280-require-absent-construct/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15280-require-absent-construct/cf.cjs",
+    "<repo>/tests/corpus/15280-require-absent-construct/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15281-require-absent-call-member/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15281-require-absent-call-member/cf.cjs",
+    "<repo>/tests/corpus/15281-require-absent-call-member/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/15102-cjs-identity-stored-copy/main.cjs": {
    "order": [
     "<repo>/tests/corpus/15102-cjs-identity-stored-copy/store.cjs",
