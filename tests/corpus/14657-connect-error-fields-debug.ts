@@ -20,6 +20,14 @@ const report = (tag: string, e: any, port: number) => {
     for (let i = 0; i < e.errors.length; i++) fields(tag + ".errors[" + i + "]", e.errors[i], port);
   }
 };
+const p1 = net.connect(1, "127.0.0.1");
+const t0 = Date.now();
+p1.on("error", (e: unknown) => {
+  console.log("p1 code", (e as any).code);
+  console.log("p1 elapsed-bucket-ms", Math.round((Date.now() - t0) / 100) * 100);
+  runProbe();
+});
+function runProbe() {
 const probe = net.createServer(() => {});
 probe.listen(0, "127.0.0.1", () => {
   const port = (probe.address() as { port: number }).port;
@@ -44,3 +52,4 @@ probe.listen(0, "127.0.0.1", () => {
     });
   });
 });
+}
