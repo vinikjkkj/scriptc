@@ -388,7 +388,7 @@ function inspectExpr(
   loc: SrcLoc,
 ): IrExpr {
   if (t.kind === "object" && jsHierarchyHasInferredFields(L, t.className)) {
-    return { kind: "libCall", fn: "insp.dynS", args: [{ kind: "dynFrom", value, type: DYN, loc }, depth], type: STRING, loc };
+    return { kind: "libCall", fn: "insp.dyn", args: [{ kind: "dynFrom", value, type: DYN, loc }, recurse, depth], type: STRING, loc };
   }
   switch (t.kind) {
     case "f64":
