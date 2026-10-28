@@ -33,7 +33,7 @@ import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf, liveAccessorTargetOf } from "./cjs-live-exports.js";
-import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
+import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -1112,6 +1112,8 @@ export function irAlwaysExits(s: IrStmt | readonly IrStmt[]): boolean {
 }
 
 export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | null {
+    // `({ encrypt } = subtle);` as a statement: the assignment destructuring is checked here (lower-exprs.ts).
+    if (ts.isExpressionStatement(stmt) && ts.isBinaryExpression(stmt.expression)) refuseUnloweredWebCryptoAssign(L, stmt.expression);
     if (ts.isVariableStatement(stmt)) {
       // `declare const` — ambient: no storage, no init (collectGlobals
       // skipped it; reads throw Node's ReferenceError at the access).
@@ -1601,6 +1603,10 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
    * test, surplus packing, dynamic lookup). */
   export function lowerDestructuringDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt[] {
     const loc = locOf(decl);
+    // `const { encrypt } = subtle`: a WebCrypto member with no lowering refuses at the binding (lower-exprs.ts).
+    if (ts.isObjectBindingPattern(decl.name) && decl.initializer !== undefined) {
+      refuseUnloweredWebCryptoPattern(L, decl.name, decl.initializer);
+    }
     if (!decl.initializer) {
       // tsc already rejects this (TS1182); defensive.
       L.unsupported("SC1031", decl);
@@ -4615,6 +4621,10 @@ function evolvedLetType(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
     // A helper unrolled into accessors of a class (registerHelperAccessors): its body is never a value.
     if (L.helperDecls.has(decl)) return null;
+    // `const { encrypt } = subtle`: a WebCrypto member with no lowering refuses at the binding (lower-exprs.ts).
+    if (ts.isObjectBindingPattern(decl.name) && decl.initializer !== undefined) {
+      refuseUnloweredWebCryptoPattern(L, decl.name, decl.initializer);
+    }
     // --provenance-sources: an elided pure-annotated dead const emits
     // nothing (collectGlobals registered no global by the same test —
     // see provenanceElidedConstDecl). Checked FIRST: the mixin/alias
@@ -11093,6 +11103,7 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
   }
 
   export function lowerForIn(L: Lowerer, stmt: ts.ForInStatement): IrStmt {
+    refuseWebCryptoIntrospection(L, stmt.expression, "for...in");
     const labels = L.takeLabels();
     const loc = locOf(stmt);
     // `require('buffer')` as a value (the module object, a checked-dynamic record of its fourteen
