@@ -823,6 +823,20 @@ export interface GenericClassInfo {
         const decl = definePropTableSiteOf(L, n);
         if (decl) out.add(decl);
       }
+      // `x.k = v` in JavaScript where x's class never declares k: JS stores
+      // an own property on the instance, which a compiled layout can hold
+      // only in the run-time table (lowerUndeclaredMemberWrite writes it
+      // there). The class needs the table whether or not its package is
+      // opted into the implicit-any lane: a provenance-verified package
+      // (pg-pool's PendingItem) is no less JavaScript than a --npm-static one.
+      if (
+        ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(n.left) && n.left.questionDotToken === undefined &&
+        isJsSourceFile(n.left.getSourceFile())
+      ) {
+        const decl = undeclaredWriteClassOf(L, n.left);
+        if (decl) out.add(decl);
+      }
       ts.forEachChild(n, visit);
     };
     for (const sf of L.fileTag.keys()) {
@@ -830,6 +844,18 @@ export interface GenericClassInfo {
       ts.forEachChild(sf, visit);
     }
     return out;
+  }
+
+  /** The JavaScript class whose instance `access.expression` is, when the
+   * class does not declare the member `access` writes. The checker's type
+   * only (the scan runs before any lowering): a member the checker already
+   * knows (a field, a method, an accessor) is not undeclared. */
+  function undeclaredWriteClassOf(L: Lowerer, access: ts.PropertyAccessExpression): ts.ClassDeclaration | null {
+    const cls = receiverClassDeclOfAny(L, access.expression);
+    if (cls === null || !ts.isClassDeclaration(cls) || !isJsSourceFile(cls.getSourceFile())) return null;
+    const recvT = L.checker.getTypeAtLocation(access.expression);
+    if (L.checker.getPropertyOfType(recvT, access.name.text) !== undefined) return null;
+    return cls;
   }
 
   export function definePropSlotSiteOf(L: Lowerer, call: ts.CallExpression): DefinePropSlotSite | null {
