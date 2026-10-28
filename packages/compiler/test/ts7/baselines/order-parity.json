@@ -4457,6 +4457,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15200-webcrypto-digest-family.js": {
+   "order": [
+    "<repo>/tests/corpus/15200-webcrypto-digest-family.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15201-webcrypto-hmac-sign.js": {
+   "order": [
+    "<repo>/tests/corpus/15201-webcrypto-hmac-sign.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15202-webcrypto-pbkdf2-derive.js": {
+   "order": [
+    "<repo>/tests/corpus/15202-webcrypto-pbkdf2-derive.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15203-webcrypto-random-uuid.js": {
+   "order": [
+    "<repo>/tests/corpus/15203-webcrypto-random-uuid.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15204-webcrypto-pg-shape.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15204-webcrypto-pg-shape.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15205-webcrypto-subtle-identity.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15205-webcrypto-subtle-identity.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15206-webcrypto-hash-agreement.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15206-webcrypto-hash-agreement.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1521-fs-lstat-lock.ts": {
    "order": [
     "<repo>/tests/corpus/1521-fs-lstat-lock.ts"
