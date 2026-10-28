@@ -1809,6 +1809,10 @@ double scr_math_ceil(double x);
 
 double scr_arr_get_f64(ScrArr *a, double i); /* trap OOB */
 double scr_arr_get_f64_nan(ScrArr *a, double i); /* NaN on a miss */
+/* STEP 2a flagged number[] reads: a hole or a miss is the marker (Node: undefined). */
+double scr_arr_get_f64_hole(ScrArr *a, double i);
+/* STEP 2a flagged number[] write: past the end fills the gap with holes. */
+void scr_arr_set_f64_hole(ScrArr *a, double i, double v);
 bool scr_arr_get_bool(ScrArr *a, double i);  /* trap OOB */
 /* `a[i]` names an element: an integer index in [0, len). Inline and branch-
  * predicted for the HIT: the miss (Node's undefined) is the cold side of
@@ -8625,6 +8629,8 @@ static inline double scr_num_canon(double x) {
 }
 /* The marker as a value: what `undefined` is in a number-typed slot. */
 static inline double scr_num_undef(void) { return scr_num_from_bits(SCR_NUM_UNDEF_BITS); }
+/* The absent element of a flagged number[] (growth fills with it). */
+static inline double scr_num_hole(void) { return scr_num_from_bits(SCR_NUM_HOLE_BITS); }
 
 size_t scr_f64_to_str(double x, char *buf);
 
