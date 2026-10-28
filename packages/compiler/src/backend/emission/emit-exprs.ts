@@ -1194,6 +1194,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // Ref-element reads return +1 (the runtime retains); newTemp
         // registers the owned temp in the frame like any other.
         const acc = elemAccess(e.arr.type.elem);
+        if (e.holeOnMiss) return E.newTemp(e.type, `scr_arr_get_f64_hole(${arr.name}, ${idx.name})`);
         if (e.nanOnMiss) return E.newTemp(e.type, `scr_arr_get_f64_nan(${arr.name}, ${idx.name})`);
         if (e.tryRef) return E.newTemp(e.type, `scr_arr_try_ref(${arr.name}, ${idx.name})`);
         if (e.inRange && acc === "f64") return E.newTemp(e.type, `scr_arr_nochk_f64(${arr.name}, ${idx.name})`);
@@ -1280,7 +1281,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // runtime fact, so both are emitted.
             const want = E.emitExpr(e.args[0]!);
             const elemT = e.receiver.type.elem;
-            const fill = E.absentElemC(elemT);
+            // STEP 2a: a flagged number[] grows with holes (the marker).
+            const fill = elemT.kind === "f64" ? "scr_num_hole()" : E.absentElemC(elemT);
             // ArraySetLength's validity gate FIRST: a negative, fractional,
             // NaN or >= 2^32 length is Node's catchable RangeError and the
             // array is left untouched, so the pending check sits between
@@ -2926,6 +2928,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // (bigint's ScrBigInt*, keyobj's ScrKeyObject*) falling through to
         // the throw; vAdapters is the single RC-adapter registry that
         // answers for all of them.
+        // STEP 2a: a flagged number[] read wrapped into a union: the marker is
+        // Node's undefined, so the union takes its undefined arm, not the number arm.
+        if (arm.kind === "f64" && e.value.kind === "arrayGet" && e.value.holeOnMiss) {
+          const undefTag = E.undefinedArmTag({ kind: "union", unionId: e.unionId } as IrType);
+          if (undefTag >= 0) {
+            return E.newTemp(
+              e.type,
+              `(scr_num_is_undef(${v.name}) ? (${cType(e.type).trim()})${E.unitInstanceRef(e.unionId, undefTag)} : scr_union_new_f64(${e.tag}, ${v.name}))`,
+            );
+          }
+        }
         if (arm.kind === "f64") return E.newTemp(e.type, `scr_union_new_f64(${e.tag}, ${v.name})`);
         if (arm.kind === "bool") return E.newTemp(e.type, `scr_union_new_bool(${e.tag}, ${v.name})`);
         E.moveTemp(v);

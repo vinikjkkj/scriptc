@@ -2680,7 +2680,8 @@ export type IrStmt =
    * are [0, length]; i == length appends (JS would create a hole past that —
    * scriptc traps instead, see SEMANTICS.md). Ownership of a refcounted
    * value MOVES into the array; the replaced element is released. */
-  | { kind: "arraySet"; arr: IrExpr; index: IrExpr; value: IrExpr; loc: SrcLoc }
+  /** holeGrow (number elements, STEP 2a): a write past the end of a flagged array fills the gap with holes. */
+  | { kind: "arraySet"; arr: IrExpr; index: IrExpr; value: IrExpr; holeGrow?: true; loc: SrcLoc }
   /** The TOMBSTONE write `a[i] = null as unknown as T` — arraySet with the
    * element type's ABSENT value, the one arrayNewLen fills with (the
    * interned undefined arm for unions carrying one, NULL for every other
@@ -7156,7 +7157,9 @@ export type IrExpr =
       /** REFERENCE elements only: a miss (no such index, or a hole) answers
        * NULL instead of trapping; a hit is the same +1 read. The consumer
        * tests the binding it lands in for NULL (varRef nullTest). */
-      tryRef?: true; loc: SrcLoc }
+      tryRef?: true;
+      /** NUMBER elements of a flagged array (STEP 2a): a hole reads as the marker, and so does a miss. */
+      holeOnMiss?: true; loc: SrcLoc }
   /** Array method/property on an array receiver: `length` (f64), `push`
    * (VARIADIC like JS — zero or more elem-typed args; every argument
    * evaluates before any appends, then each appends in order; returns the

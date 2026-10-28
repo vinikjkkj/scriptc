@@ -6906,6 +6906,11 @@ class LlEmitter {
         const acc = elemAccess(s.arr.type.elem);
         if (acc === "ref") this.moveTemp(v);
         const argTy = acc === "f64" ? "double" : acc === "bool" ? "i1" : "ptr";
+        if (s.holeGrow) {
+          this.declare(`declare void @scr_arr_set_f64_hole(ptr, double, double)`);
+          B.line(`call void @scr_arr_set_f64_hole(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
+          break;
+        }
         this.declare(`declare void @scr_arr_set_${acc}(ptr, double, ${argTy === "i1" ? "i1 zeroext" : argTy})`);
         B.line(`call void @scr_arr_set_${acc}(ptr ${arr.name}, double ${idx.name}, ${argTy} ${v.name})`);
         break;
@@ -8469,7 +8474,7 @@ class LlEmitter {
           B.line(`${v} = icmp ne i64 ${w}, 0`);
           return { name: v, type: e.type };
         }
-        const getFn = e.nanOnMiss ? "scr_arr_get_f64_nan" : e.tryRef ? "scr_arr_try_ref" : `scr_arr_get_${acc}`;
+        const getFn = e.holeOnMiss ? "scr_arr_get_f64_hole" : e.nanOnMiss ? "scr_arr_get_f64_nan" : e.tryRef ? "scr_arr_try_ref" : `scr_arr_get_${acc}`;
         this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @${getFn}(ptr, double)`);
         const t = B.tmp();
         B.line(`${t} = call ${accTy} @${getFn}(ptr ${arr.name}, double ${idx.name})`);
@@ -8850,6 +8855,35 @@ class LlEmitter {
         if (arm.kind === "void") {
           this.emitExpr(e.value);
           return this.own({ name: this.unitInstanceRef(e.unionId, e.tag), type: e.type });
+        }
+        // STEP 2a: a flagged number[] read wrapped into a union: the marker is
+        // Node's undefined, so the union takes its undefined arm (immortal unit).
+        if (arm.kind === "f64" && e.value.kind === "arrayGet" && e.value.holeOnMiss) {
+          const undefTag = this.undefinedArmTag({ kind: "union", unionId: e.unionId } as IrType);
+          if (undefTag >= 0) {
+            const B2 = this.B;
+            const mv = this.emitExpr(e.value);
+            const bits = B2.tmp();
+            B2.line(`${bits} = bitcast double ${mv.name} to i64`);
+            const isU = B2.tmp();
+            B2.line(`${isU} = icmp eq i64 ${bits}, 9222246136947990017`);
+            const slot = B2.slot();
+            B2.entryAllocas.push(`${slot} = alloca ptr`);
+            const lu = B2.newLabel("uw.u");
+            const lb = B2.newLabel("uw.b");
+            const le = B2.newLabel("uw.e");
+            B2.condBr(isU, lu, lb);
+            B2.startBlock(lu);
+            B2.line(`store ptr ${this.unitInstanceRef(e.unionId, undefTag)}, ptr ${slot}`);
+            B2.br(le);
+            B2.startBlock(lb);
+            B2.line(`store ptr ${this.unionNewOwned(e.tag, mv)}, ptr ${slot}`);
+            B2.br(le);
+            B2.startBlock(le);
+            const out = B2.tmp();
+            B2.line(`${out} = load ptr, ptr ${slot}`);
+            return this.own({ name: out, type: e.type });
+          }
         }
         const v = this.emitExpr(e.value);
         if (isRefCounted(arm)) this.moveTemp(v);
@@ -14358,7 +14392,8 @@ class LlEmitter {
         // so both are emitted: truncate first, then the grow loop, whose
         // bound is already satisfied when the truncate did the work.
         const want = this.emitExpr(e.args[0]!);
-        const fill = this.absentElemLl(e.receiver.type.elem);
+        // STEP 2a: a flagged number[] grows with holes (the marker NaN payload).
+        const fill = e.receiver.type.elem.kind === "f64" ? "0x7FFC00000000DE02" : this.absentElemLl(e.receiver.type.elem);
         // ArraySetLength's validity gate FIRST: a negative, fractional, NaN
         // or >= 2^32 length is Node's catchable RangeError and the array is
         // left untouched, so the pending check sits between the gate and
