@@ -521,3 +521,13 @@ export function liveKeyOf(L: Lowerer, arg: ts.Expression): IrExpr | null {
   }
   return key.type.kind === "string" ? key : null;
 }
+
+/** A reference to a LIVE export object used where identity is compared (`m === n`, `m !== n`): the bag is the
+ * object, but the refusal of identity over a require value stands (the test contract, require-node-parity). */
+export function isRequireValueRef(L: Lowerer, e: ts.Expression): boolean {
+  if (!ts.isIdentifier(e)) return false;
+  if (liveDepOfBinding(L, e) !== null) return true;
+  const sym = L.checker.getSymbolAtLocation(e);
+  const decl = sym ? L.checker.declarationsOf(sym).find(ts.isVariableDeclaration) : undefined;
+  return decl !== undefined && decl.initializer !== undefined && isLiveExportValue(L, decl.initializer);
+}
