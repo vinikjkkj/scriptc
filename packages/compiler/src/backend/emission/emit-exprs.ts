@@ -5856,8 +5856,6 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // The TLSSocket member surface on the socket kind.
           case "tls.sockAuthorized":
             return finish(`scr_tls_sock_authorized(${arg(0)})`);
-          case "tls.sockSessionReused":
-            return finish(`scr_tls_sock_session_reused(${arg(0)})`);
           case "tls.sockAuthError": {
             // string | null: the verify-failure code string, or the null
             // arm when authorized / never verified (Node's value shape).

@@ -2901,15 +2901,6 @@ bool scr_tls_sock_authorized(ScrNetSocket *s) {
          mbedtls_ssl_get_verify_result(&t->ssl) == 0;
 }
 
-/* Node's isSessionReused(): true when the handshake resumed a session. The
- * runtime never resumes: a client offers no session and a server issues and
- * accepts none (divergence 55, SEMANTICS.md), so every handshake here is a
- * full one and the answer is false. Pinned by corpus 14458. */
-bool scr_tls_sock_session_reused(ScrNetSocket *s) {
-  (void)s;
-  return false;
-}
-
 ScrStr *scr_tls_sock_auth_error(ScrNetSocket *s) {
   ScrTlsSock *t = scr_tls_sock_of(s);
   if (t == NULL || !t->established || t->cli == NULL || !t->cli->verify_recorded ||

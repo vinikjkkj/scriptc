@@ -1546,16 +1546,6 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
     const fn: IrLibFn = name === "pause" ? "net.sockPause" : "net.sockResume";
     return { kind: "libCall", fn, args: [receiver], type: NETSOCKET_T, loc };
   }
-  if (name === "isSessionReused") {
-    // TLSSocket.isSessionReused(): Node's answer for a resumed session. This
-    // runtime never resumes (no session is offered or accepted; divergence 55),
-    // so the answer is false on every socket it runs (scr_tls.c).
-    if (args.length !== 0) {
-      L.noLowering(`isSessionReused with ${args.length} arguments`, call, "the form is isSessionReused()");
-    }
-    const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
-    return { kind: "libCall", fn: "tls.sockSessionReused", args: [receiver], type: BOOL, loc };
-  }
   if (name === "setNoDelay") {
     // TCP_NODELAY on the live fd; missing/undefined means true (Node).
     // Answers the socket, Node's chaining.
