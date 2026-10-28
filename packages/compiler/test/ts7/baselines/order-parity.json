@@ -4366,6 +4366,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15045-instof-error-buffer-dyn/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15045-instof-error-buffer-dyn/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15046-instof-passthrough-dyn/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15046-instof-passthrough-dyn/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/15060-cjs-require-or-operand/main.js": {
    "order": [
     "<repo>/tests/corpus/15060-cjs-require-or-operand/m.js",
