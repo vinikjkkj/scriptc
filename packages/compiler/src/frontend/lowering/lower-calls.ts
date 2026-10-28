@@ -11730,6 +11730,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (target?.type.kind !== "dyn") return null;
     const key = L.lowerExprExpecting(call.arguments[1]!, STRING);
     if (key.type.kind !== "string") return null;
+    markDescriptorMapLiterals(L, call.arguments[2]!, 0);
     const desc = L.lowerExprExpecting(call.arguments[2]!, DYN);
     if (desc.type.kind !== "dyn") return null;
     if (process.env["SCRIPTC_DEFPROP_WHY"]) {
