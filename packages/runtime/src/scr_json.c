@@ -692,7 +692,8 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
     visit(scr_dyn_ext(d)->extras, ctx);
     break;
   case SCR_DYN_OBJ:
-    for (size_t i = 0; i < d->v.obj.len; i++) visit(d->v.obj.entries[i].value, ctx);
+    for (size_t i = 0; i < d->v.obj.len; i++)
+      if (!d->v.obj.entries[i].value_borrowed) visit(d->v.obj.entries[i].value, ctx);
     /* The [[Prototype]] link and the non-enumerable/ACCESSOR table. The
      * table is where a getter/setter pair lives (an OBJ dyn of ARR dyn
      * entries holding two FUNC dyns), which is the edge that makes an
@@ -897,7 +898,7 @@ void scr_dyn_release(ScrDyn *d) {
     for (size_t i = 0; i < d->v.obj.len; i++) {
       if (!d->v.obj.entries[i].key_static)
         scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
-      scr_dyn_release(d->v.obj.entries[i].value);
+      if (!d->v.obj.entries[i].value_borrowed) scr_dyn_release(d->v.obj.entries[i].value);
     }
     /* The [[Prototype]] link, the NON-ENUMERABLE table and the slot
      * table are owned; the constructor NAME is a static literal. The
@@ -1690,11 +1691,13 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
        * dyn values were invisible to the collector; a double decrement now
        * that they are nodes. */
       ScrDyn *old = e->value;
+      bool old_owned = !e->value_borrowed;
       e->value = value;
+      e->value_borrowed = 0;
       /* the surviving entry keeps its own, equal key; the loser's bytes
        * go back only if this call owned them */
       if (!key_static) scr_json_key_free(key, key_len);
-      scr_dyn_release(old);
+      if (old_owned) scr_dyn_release(old);
       return;
     }
   }
@@ -1736,6 +1739,7 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
   e->key = key;
   e->key_len = (uint32_t)key_len;
   e->key_static = key_static;
+  e->value_borrowed = 0;
   e->value = value;
 }
 
@@ -4379,6 +4383,25 @@ void scr_dyn_obj_set(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value
   scr_dyn_obj_put(obj, copy, key_len, value);
 }
 
+/* A NON-OWNING member: `value` is stored without a reference, so the holder's
+ * release never releases it, the cycle walk never traces it, and an overwrite
+ * or delete skips it. Used for the one back-reference a value can hold to its
+ * own holder (the peer certificate's self-issued issuerCertificate): the
+ * holder is `value` itself, so the only way to reach the member is through a
+ * live holder, and reads hand out a reference only through that holder.
+ * scr_runtime.h states the contract. */
+void scr_dyn_obj_set_borrowed(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value) {
+  scr_dyn_obj_set(obj, key, key_len, scr_dyn_retain(value)); /* the store takes one ... */
+  value->rc--; /* ... and the member does not keep it: give that reference back */
+  for (size_t i = obj->v.obj.len; i-- > 0;) {
+    ScrDynEntry *e = &obj->v.obj.entries[i];
+    if (e->value == value && e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
+      e->value_borrowed = 1;
+      return;
+    }
+  }
+}
+
 /* The same store for a key the COMPILER already put in the image: the
  * bytes are pointed at, not copied, and no free site will ever hand them
  * back. scr_runtime.h states what `key` must outlive. */
@@ -6997,11 +7020,12 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
       /* unlink before release: the entry must be out of the table before
        * the value's release can trigger a collection */
       ScrDyn *old = e->value;
+      bool old_owned = !e->value_borrowed;
       if (!e->key_static) scr_json_key_free(e->key, e->key_len);
       memmove(&obj->v.obj.entries[i], &obj->v.obj.entries[i + 1],
               (obj->v.obj.len - i - 1) * sizeof *obj->v.obj.entries);
       obj->v.obj.len--;
-      scr_dyn_release(old);
+      if (old_owned) scr_dyn_release(old);
       return;
     }
   }
