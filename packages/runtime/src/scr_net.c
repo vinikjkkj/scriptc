@@ -3418,6 +3418,18 @@ static void scr_net_sock_dial_next(ScrNetSocket *s) {
 static void scr_net_sock_attempt_timeout(ScrNetSocket *s) {
   s->dial_timer_armed = false;
   if (!s->connecting || s->fd < 0 || s->dial_i >= s->dial_n) return;
+  /* The kernel may already hold this attempt's verdict (a refusal the readiness
+   * poll has not reported yet): that verdict is the attempt's own Error, not
+   * ETIMEDOUT. Same chain step as a verdict from the poll. */
+  int so = 0;
+  socklen_t sl = sizeof so;
+  if (getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &so, &sl) == 0 && so != 0) {
+    scr_net_sock_connect_done_err(s, so);
+    return;
+  }
+  /* The abandoned attempt is an entry of `errors` with the same fields as any
+   * other attempt (errno, code, syscall, address, port), not a message alone. */
+  scr_net_dial_log(s, ETIMEDOUT, s->peer_ip, s->peer_port);
   char msg[128];
   snprintf(msg, sizeof msg, "connect ETIMEDOUT %s:%d", s->peer_ip, s->peer_port);
   scr_str_release(s->dial_err);
@@ -4577,9 +4589,11 @@ static void scr_net_sweep(void) {
       sock->pending_obj = NULL;
       /* Node: an error from an unconnected socket finds it destroyed */
       if (sock->ns_state == SCR_NET_NS_IDLE) sock->ns_state = SCR_NET_NS_CLOSED;
-      if (obj == NULL && sock->dial_nerrs >= 2) {
+      if (obj == NULL && sock->dial_n >= 2 && sock->dial_nerrs >= 1) {
         /* autoSelectFamily tried several addresses and every one failed: Node's
-         * AggregateError (empty message, the attempts in `errors`) */
+         * AggregateError (empty message, the attempts in `errors`). Keyed on the
+         * chain's length, not on the logged count: an attempt that was never
+         * logged still makes the chain an AggregateError. */
         obj = scr_net_dial_aggregate(sock);
         scr_str_release(msg);
         msg = scr_str_new("", 0);
