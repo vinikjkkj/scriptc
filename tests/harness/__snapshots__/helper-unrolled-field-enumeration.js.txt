@@ -26,19 +26,12 @@ helper-unrolled-field-enumeration.js:30:28 - error SC1090: JSON.stringify of 'Co
      |                            ^
   31 | for (const k in c) console.log(k);
 
-helper-unrolled-field-enumeration.js:31:17 - error SC1052: for-in over class instances (which keys exist on an instance depends on runtime property creation the class model does not track — for-in over records and arrays compiles) are not supported yet
+helper-unrolled-field-enumeration.js:31:17 - error SC1052: for-in over class instances whose class chain roots in a runtime stream, emitter or error class, or carries a run-time property table (the runtime fences their key walk) is not supported yet
 
   30 | console.log(JSON.stringify(c));
   31 | for (const k in c) console.log(k);
      |                 ^
   32 | console.log(c);
-
-helper-unrolled-field-enumeration.js:32:1 - error SC1090: console.log/util.inspect of an instance of 'Col' (a class with helper-unrolled fields: their own-key insertion order is not tracked yet) is not supported yet
-
-  31 | for (const k in c) console.log(k);
-  32 | console.log(c);
-     | ^~~~~~~~~~~~~~
-  33 | const s = { ...c };
 
 helper-unrolled-field-enumeration.js:33:13 - error SC1090: an object spread of an instance of a class with helper-unrolled fields (their own-key insertion order is not tracked yet) are not supported yet
 
