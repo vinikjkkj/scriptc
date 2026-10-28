@@ -5698,6 +5698,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           }
           case "tls.sockSessionReused":
             return finish(`scr_tls_sock_session_reused(${arg(0)})`);
+          case "tls.sockPeerCert":
+            return finish(`scr_tls_sock_peer_cert(${arg(0)}, ${arg(1)})`);
           case "tls.sockGetSession": {
             // Buffer | undefined: +1 bytes or NULL, NULL takes the undefined arm.
             if (e.type.kind !== "union") throw new Error("emitter bug: tls.sockGetSession result is not a union");

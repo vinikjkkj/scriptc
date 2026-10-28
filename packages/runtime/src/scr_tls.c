@@ -1432,71 +1432,425 @@ static void scr_id_cert_fields(const ScrDyn *cert, ScrIdList *cns, const char **
   }
 }
 
-/* The peer certificate as Node's getPeerCertificate() presents the fields
- * the identity check reads: `subject` (short attribute names, repeated
- * attributes as arrays) and `subjectaltname` (DNS and IP entries). Other
- * PeerCertificate members are not built. */
-static ScrDyn *scr_tls_peer_cert_dyn(const mbedtls_x509_crt *crt) {
-  ScrDyn *cert = scr_dyn_new_obj();
-  ScrDyn *subj = scr_dyn_new_obj();
-  if (crt != NULL) {
-    for (const mbedtls_x509_name *n = &crt->subject; n != NULL; n = n->next) {
-      const char *sn = NULL;
-      if (n->oid.p == NULL || n->val.p == NULL) continue;
-      if (mbedtls_oid_get_attr_short_name(&n->oid, &sn) != 0 || sn == NULL) continue;
-      size_t kl = strlen(sn);
-      ScrDyn *v = scr_id_dyn_str((const char *)n->val.p, n->val.len);
-      const ScrDyn *prev = scr_dyn_obj_get(subj, sn, kl);
-      if (prev == NULL) {
-        scr_dyn_obj_set(subj, sn, kl, v);
-      } else if (prev->kind == SCR_DYN_ARR) {
-        scr_dyn_arr_push((ScrDyn *)prev, v);
-      } else {
-        ScrDyn *arr = scr_dyn_new_arr();
-        scr_dyn_arr_push(arr, scr_dyn_retain((ScrDyn *)prev));
-        scr_dyn_arr_push(arr, v);
-        scr_dyn_obj_set(subj, sn, kl, arr);
-      }
+/* ── the peer certificate (getPeerCertificate) ──────────────────────── */
+
+/* One DER TLV at *p (bounded by end): tag, content, length. Short and long
+ * lengths; high-tag-number forms are refused (no X.509 member uses one). */
+static bool scr_der_tlv(const unsigned char **p, const unsigned char *end, unsigned *tag,
+                        const unsigned char **v, size_t *vlen) {
+  if (*p >= end) return false;
+  unsigned t = *(*p)++;
+  if ((t & 0x1f) == 0x1f || *p >= end) return false;
+  size_t len = *(*p)++;
+  if (len & 0x80) {
+    size_t nb = len & 0x7f;
+    if (nb == 0 || nb > sizeof(size_t) || (size_t)(end - *p) < nb) return false;
+    len = 0;
+    for (size_t i = 0; i < nb; i++) len = (len << 8) | *(*p)++;
+  }
+  if ((size_t)(end - *p) < len) return false;
+  *tag = t;
+  *v = *p;
+  *vlen = len;
+  *p += len;
+  return true;
+}
+
+/* The dotted text of an OID's DER content (1.2.840.113549.1.1.1). */
+static void scr_der_oid_text(const unsigned char *v, size_t n, char out[128]) {
+  size_t o = 0;
+  unsigned long long acc = 0;
+  bool first = true;
+  out[0] = '\0';
+  for (size_t i = 0; i < n && o < 100; i++) {
+    acc = (acc << 7) | (v[i] & 0x7f);
+    if (v[i] & 0x80) continue;
+    if (first) {
+      unsigned long long a = acc < 80 ? acc / 40 : 2, b = acc < 80 ? acc % 40 : acc - 80;
+      o += (size_t)snprintf(out + o, 128 - o, "%llu.%llu", a, b);
+      first = false;
+    } else {
+      o += (size_t)snprintf(out + o, 128 - o, ".%llu", acc);
+    }
+    acc = 0;
+  }
+}
+
+/* The extnValue (DER content of the OCTET STRING) of the certificate's
+ * extension `oid` (dotted), or false. v3_ext's content is the Extensions
+ * SEQUENCE (mbedtls_x509_get_ext strips the [3] tag). */
+static bool scr_tls_ext_value(const mbedtls_x509_crt *crt, const char *oid,
+                              const unsigned char **val, size_t *vlen) {
+  if (crt->v3_ext.p == NULL || crt->v3_ext.len == 0) return false;
+  const unsigned char *p = crt->v3_ext.p, *end = p + crt->v3_ext.len;
+  unsigned t;
+  const unsigned char *v;
+  size_t n;
+  if (!scr_der_tlv(&p, end, &t, &v, &n)) return false;
+  p = v;
+  end = v + n;
+  while (p < end) {
+    const unsigned char *ev, *q, *qe, *oidv, *cv;
+    size_t en, oidn, cn;
+    unsigned et, ot, ct;
+    if (!scr_der_tlv(&p, end, &et, &ev, &en)) return false;
+    q = ev;
+    qe = ev + en;
+    if (!scr_der_tlv(&q, qe, &ot, &oidv, &oidn)) return false;
+    char txt[128];
+    scr_der_oid_text(oidv, oidn, txt);
+    if (!scr_der_tlv(&q, qe, &ct, &cv, &cn)) return false;
+    if (ct == 0x01) { /* critical BOOLEAN: the OCTET STRING follows */
+      if (!scr_der_tlv(&q, qe, &ct, &cv, &cn)) return false;
+    }
+    if (strcmp(txt, oid) == 0) {
+      *val = cv;
+      *vlen = cn;
+      return true;
     }
   }
-  scr_dyn_obj_set(cert, "subject", 7, subj);
+  return false;
+}
+
+/* Uppercase hex of a byte run. `trim`: leading zero bytes dropped (a BIGNUM's
+ * text, keeping one byte for zero). `colons`: "AB:CD" (a fingerprint). */
+static ScrDyn *scr_tls_hex_dyn(const unsigned char *p, size_t n, bool trim, bool colons) {
+  size_t s = 0;
+  if (trim) while (s + 1 < n && p[s] == 0) s++;
+  size_t cnt = n - s;
+  size_t cap = cnt * 3 + 3;
+  char *out = malloc(cap);
+  if (!out) scr_tls_oom();
+  size_t o = 0;
+  static const char HEX[] = "0123456789ABCDEF";
+  for (size_t i = 0; i < cnt; i++) {
+    if (colons && i > 0) out[o++] = ':';
+    out[o++] = HEX[p[s + i] >> 4];
+    out[o++] = HEX[p[s + i] & 0x0f];
+  }
+  if (cnt == 0) out[o++] = '0', out[o++] = '0';
+  ScrDyn *d = scr_id_dyn_str(out, o);
+  free(out);
+  return d;
+}
+
+/* An mbedTLS MPI as the minimal hex text (no leading zero digits). */
+static ScrDyn *scr_tls_mpi_hex_dyn(const mbedtls_mpi *X, const char *prefix) {
+  size_t cap = mbedtls_mpi_size(X) * 2 + 4;
+  char *buf = malloc(cap);
+  if (!buf) scr_tls_oom();
+  size_t olen = 0;
+  if (mbedtls_mpi_write_string(X, 16, buf, cap, &olen) != 0) {
+    free(buf);
+    return scr_dyn_new_null();
+  }
+  /* mbedTLS writes whole bytes (a leading "0" digit for 0x10001); Node's text
+   * has no leading zero digit, so drop them (one digit stays). */
+  size_t lead = 0;
+  while (lead + 1 < olen - 1 && buf[lead] == '0') lead++;
+  size_t digits = olen > 0 ? olen - 1 - lead : 0;
+  size_t pl = strlen(prefix);
+  char *full = malloc(pl + digits + 1);
+  if (!full) scr_tls_oom();
+  memcpy(full, prefix, pl);
+  memcpy(full + pl, buf + lead, digits);
+  ScrDyn *d = scr_id_dyn_str(full, pl + digits);
+  free(full);
+  free(buf);
+  return d;
+}
+
+/* Node's validFrom / validTo text: "Oct 28 05:30:12 2026 GMT" (OpenSSL's
+ * ASN1_TIME_print: the day is space-padded to two columns). */
+static ScrDyn *scr_tls_time_dyn(const mbedtls_x509_time *t) {
+  static const char *const MON[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  char buf[64];
+  int mi = t->mon >= 1 && t->mon <= 12 ? t->mon - 1 : 0;
+  int n = snprintf(buf, sizeof buf, "%s %2d %02d:%02d:%02d %d GMT", MON[mi], t->day, t->hour,
+                   t->min, t->sec, t->year);
+  return scr_id_dyn_str(buf, (size_t)n);
+}
+
+/* The subject / issuer name as Node's object: short attribute names, repeated
+ * attributes as arrays. */
+static ScrDyn *scr_tls_name_dyn(const mbedtls_x509_name *head) {
+  ScrDyn *obj = scr_dyn_new_obj();
+  for (const mbedtls_x509_name *n = head; n != NULL; n = n->next) {
+    const char *sn = NULL;
+    if (n->oid.p == NULL || n->val.p == NULL) continue;
+    if (mbedtls_oid_get_attr_short_name(&n->oid, &sn) != 0 || sn == NULL) continue;
+    size_t kl = strlen(sn);
+    ScrDyn *v = scr_id_dyn_str((const char *)n->val.p, n->val.len);
+    const ScrDyn *prev = scr_dyn_obj_get(obj, sn, kl);
+    if (prev == NULL) {
+      scr_dyn_obj_set(obj, sn, kl, v);
+    } else if (prev->kind == SCR_DYN_ARR) {
+      scr_dyn_arr_push((ScrDyn *)prev, v);
+    } else {
+      ScrDyn *arr = scr_dyn_new_arr();
+      scr_dyn_arr_push(arr, scr_dyn_retain((ScrDyn *)prev));
+      scr_dyn_arr_push(arr, v);
+      scr_dyn_obj_set(obj, sn, kl, arr);
+    }
+  }
+  return obj;
+}
+
+/* subjectaltname: OpenSSL's text ("DNS:a, IP Address:1.2.3.4"), or undefined. */
+static ScrDyn *scr_tls_san_dyn(const mbedtls_x509_crt *crt) {
   ScrIdBuf san = {0};
-  if (crt != NULL) {
-    for (const mbedtls_x509_sequence *s = &crt->subject_alt_names; s != NULL; s = s->next) {
-      if (s->buf.p == NULL) continue;
-      int tag = s->buf.tag & MBEDTLS_ASN1_TAG_VALUE_MASK;
-      ScrIdBuf one = {0};
-      if (tag == MBEDTLS_X509_SAN_DNS_NAME) {
-        scr_id_buf_lit(&one, "DNS:");
-        scr_id_buf_add(&one, (const char *)s->buf.p, s->buf.len);
-      } else if (tag == MBEDTLS_X509_SAN_IP_ADDRESS && (s->buf.len == 4 || s->buf.len == 16)) {
-        /* OpenSSL's rendering (Node's subjectaltname text): dotted quad for
-         * IPv4; IPv6 as eight uncompressed upper-case groups ("2001:DB8:0:...:1") */
-        char txt[80];
-        const unsigned char *b = s->buf.p;
-        if (s->buf.len == 4) {
-          snprintf(txt, sizeof txt, "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
-        } else {
-          size_t o = 0;
-          for (int g = 0; g < 8; g++) {
-            o += (size_t)snprintf(txt + o, sizeof txt - o, "%s%X", g ? ":" : "", (b[2 * g] << 8) | b[2 * g + 1]);
-          }
+  for (const mbedtls_x509_sequence *s = &crt->subject_alt_names; s != NULL; s = s->next) {
+    if (s->buf.p == NULL) continue;
+    int tag = s->buf.tag & MBEDTLS_ASN1_TAG_VALUE_MASK;
+    ScrIdBuf one = {0};
+    if (tag == MBEDTLS_X509_SAN_DNS_NAME) {
+      scr_id_buf_lit(&one, "DNS:");
+      scr_id_buf_add(&one, (const char *)s->buf.p, s->buf.len);
+    } else if (tag == MBEDTLS_X509_SAN_IP_ADDRESS && (s->buf.len == 4 || s->buf.len == 16)) {
+      /* OpenSSL's rendering: dotted quad for IPv4; IPv6 as eight uncompressed
+       * upper-case groups ("2001:DB8:0:...:1") */
+      char txt[80];
+      const unsigned char *b = s->buf.p;
+      if (s->buf.len == 4) {
+        snprintf(txt, sizeof txt, "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
+      } else {
+        size_t o = 0;
+        for (int g = 0; g < 8; g++) {
+          o += (size_t)snprintf(txt + o, sizeof txt - o, "%s%X", g ? ":" : "", (b[2 * g] << 8) | b[2 * g + 1]);
         }
-        scr_id_buf_lit(&one, "IP Address:");
-        scr_id_buf_add(&one, txt, strlen(txt));
       }
-      /* other GeneralName kinds are not rendered (see the header comment) */
-      if (one.n == 0) {
-        free(one.s);
-        continue;
-      }
-      if (san.n > 0) scr_id_buf_lit(&san, ", ");
-      scr_id_buf_add(&san, one.s, one.n);
+      scr_id_buf_lit(&one, "IP Address:");
+      scr_id_buf_add(&one, txt, strlen(txt));
+    }
+    if (one.n == 0) {
       free(one.s);
+      continue;
+    }
+    if (san.n > 0) scr_id_buf_lit(&san, ", ");
+    scr_id_buf_add(&san, one.s, one.n);
+    free(one.s);
+  }
+  ScrDyn *out = san.n > 0 ? scr_id_dyn_str(san.s, san.n) : scr_dyn_undefined();
+  free(san.s);
+  return out;
+}
+
+/* infoAccess: { 'OCSP - URI': [...], 'CA Issuers - URI': [...] } from the
+ * Authority Information Access extension (1.3.6.1.5.5.7.1.1), or undefined. */
+static ScrDyn *scr_tls_info_access_dyn(const mbedtls_x509_crt *crt) {
+  const unsigned char *v;
+  size_t vn;
+  if (!scr_tls_ext_value(crt, "1.3.6.1.5.5.7.1.1", &v, &vn)) return scr_dyn_undefined();
+  const unsigned char *p = v, *end = v + vn;
+  unsigned t;
+  const unsigned char *sv;
+  size_t sn;
+  if (!scr_der_tlv(&p, end, &t, &sv, &sn)) return scr_dyn_undefined();
+  ScrDyn *obj = scr_dyn_new_obj();
+  p = sv;
+  end = sv + sn;
+  while (p < end) {
+    const unsigned char *dv;
+    size_t dn;
+    unsigned dt;
+    if (!scr_der_tlv(&p, end, &dt, &dv, &dn)) break;
+    const unsigned char *q = dv, *qe = dv + dn, *mv, *uv;
+    size_t mn, un;
+    unsigned mt, ut;
+    if (!scr_der_tlv(&q, qe, &mt, &mv, &mn)) break;
+    if (!scr_der_tlv(&q, qe, &ut, &uv, &un)) break;
+    if (ut != 0x86) continue; /* only a uniformResourceIdentifier location */
+    char oid[128];
+    scr_der_oid_text(mv, mn, oid);
+    const char *name = strcmp(oid, "1.3.6.1.5.5.7.48.1") == 0 ? "OCSP"
+                       : strcmp(oid, "1.3.6.1.5.5.7.48.2") == 0 ? "CA Issuers"
+                                                                  : NULL;
+    char key[160];
+    int kn = snprintf(key, sizeof key, "%s - URI", name != NULL ? name : oid);
+    ScrDyn *uri = scr_id_dyn_str((const char *)uv, un);
+    const ScrDyn *prev = scr_dyn_obj_get(obj, key, (size_t)kn);
+    if (prev == NULL) {
+      ScrDyn *arr = scr_dyn_new_arr();
+      scr_dyn_arr_push(arr, uri);
+      scr_dyn_obj_set(obj, key, (size_t)kn, arr);
+    } else {
+      scr_dyn_arr_push((ScrDyn *)prev, uri);
     }
   }
-  if (san.n > 0) scr_dyn_obj_set(cert, "subjectaltname", 14, scr_id_dyn_str(san.s, san.n));
-  free(san.s);
+  return obj;
+}
+
+/* ext_key_usage: the extended key usage OIDs (dotted), or undefined. */
+static ScrDyn *scr_tls_eku_dyn(const mbedtls_x509_crt *crt) {
+  const unsigned char *v;
+  size_t vn;
+  if (!scr_tls_ext_value(crt, "2.5.29.37", &v, &vn)) return scr_dyn_undefined();
+  const unsigned char *p = v, *end = v + vn;
+  unsigned t;
+  const unsigned char *sv;
+  size_t sn;
+  if (!scr_der_tlv(&p, end, &t, &sv, &sn)) return scr_dyn_undefined();
+  ScrDyn *arr = scr_dyn_new_arr();
+  p = sv;
+  end = sv + sn;
+  while (p < end) {
+    const unsigned char *ov;
+    size_t on;
+    unsigned ot;
+    if (!scr_der_tlv(&p, end, &ot, &ov, &on)) break;
+    char oid[128];
+    scr_der_oid_text(ov, on, oid);
+    scr_dyn_arr_push(arr, scr_id_dyn_str(oid, strlen(oid)));
+  }
+  return arr;
+}
+
+/* A Buffer of the given bytes (+1 dyn). */
+static ScrDyn *scr_tls_buffer_dyn(const unsigned char *p, size_t n) {
+  ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)n));
+  if (n > 0) memcpy(b->data, p, n);
+  ScrDyn *d = scr_dyn_new_buffer_copy(b);
+  scr_bytes_release(b);
+  return d;
+}
+
+/* The bit-string CONTENT (without the unused-bits octet) of an
+ * SubjectPublicKeyInfo's key, or false. */
+static bool scr_tls_spki_bits(const mbedtls_x509_crt *crt, const unsigned char **v, size_t *vn) {
+  if (crt->pk_raw.p == NULL) return false;
+  const unsigned char *p = crt->pk_raw.p, *end = p + crt->pk_raw.len;
+  unsigned t;
+  const unsigned char *sv;
+  size_t sn;
+  if (!scr_der_tlv(&p, end, &t, &sv, &sn)) return false;
+  p = sv;
+  end = sv + sn;
+  const unsigned char *av;
+  size_t an;
+  if (!scr_der_tlv(&p, end, &t, &av, &an)) return false; /* AlgorithmIdentifier */
+  const unsigned char *bv;
+  size_t bn;
+  if (!scr_der_tlv(&p, end, &t, &bv, &bn) || bn < 1) return false; /* BIT STRING */
+  *v = bv + 1;
+  *vn = bn - 1;
+  return true;
+}
+
+/* The named-curve names of an EC key: OpenSSL's short name (asn1Curve) and
+ * the NIST name (nistCurve, NIST curves only). NULL = not nameable here. */
+static bool scr_tls_curve_names(mbedtls_ecp_group_id id, const char **asn1, const char **nist) {
+  switch (id) {
+    case MBEDTLS_ECP_DP_SECP256R1: *asn1 = "prime256v1"; *nist = "P-256"; return true;
+    case MBEDTLS_ECP_DP_SECP384R1: *asn1 = "secp384r1"; *nist = "P-384"; return true;
+    case MBEDTLS_ECP_DP_SECP521R1: *asn1 = "secp521r1"; *nist = "P-521"; return true;
+    case MBEDTLS_ECP_DP_SECP256K1: *asn1 = "secp256k1"; *nist = NULL; return true;
+    case MBEDTLS_ECP_DP_BP256R1: *asn1 = "brainpoolP256r1"; *nist = NULL; return true;
+    case MBEDTLS_ECP_DP_BP384R1: *asn1 = "brainpoolP384r1"; *nist = NULL; return true;
+    case MBEDTLS_ECP_DP_BP512R1: *asn1 = "brainpoolP512r1"; *nist = NULL; return true;
+    default: *asn1 = NULL; *nist = NULL; return false;
+  }
+}
+
+/* A certificate's fingerprint: the digest of its DER, uppercase, colon-separated. */
+static ScrDyn *scr_tls_fp_dyn(const mbedtls_x509_crt *c, int bits) {
+  unsigned char d[64];
+  size_t n = 0;
+  if (bits == 1) {
+    (void)mbedtls_sha1(c->raw.p, c->raw.len, d);
+    n = 20;
+  } else if (bits == 256) {
+    (void)mbedtls_sha256(c->raw.p, c->raw.len, d, 0);
+    n = 32;
+  } else {
+    (void)mbedtls_sha512(c->raw.p, c->raw.len, d, 0);
+    n = 64;
+  }
+  return scr_tls_hex_dyn(d, n, false, true);
+}
+
+/* The certificate object as Node's getPeerCertificate(true) presents it: the
+ * 20 members, every one present (an absent member is undefined), in Node's
+ * key order. `chain` is the peer chain's head; the issuer is found in it.
+ * A self-issued certificate's issuerCertificate is the object itself: a
+ * NON-OWNING back-reference (scr_dyn_obj_set_borrowed), so the object is
+ * released without a cycle and reads reach it only through a live holder. */
+static ScrDyn *scr_tls_cert_obj(const mbedtls_x509_crt *c, const mbedtls_x509_crt *chain, int depth) {
+  ScrDyn *cert = scr_dyn_new_obj();
+  scr_dyn_obj_set(cert, "subject", 7, scr_tls_name_dyn(&c->subject));
+  scr_dyn_obj_set(cert, "issuer", 6, scr_tls_name_dyn(&c->issuer));
+  scr_dyn_obj_set(cert, "subjectaltname", 14, scr_tls_san_dyn(c));
+  scr_dyn_obj_set(cert, "infoAccess", 10, scr_tls_info_access_dyn(c));
+  scr_dyn_obj_set(cert, "ca", 2, scr_dyn_new_bool(mbedtls_x509_crt_get_ca_istrue(c) == 1));
+
+  mbedtls_pk_type_t kt = mbedtls_pk_get_type(&c->pk);
+  const char *asn1 = NULL, *nist = NULL;
+  if (kt == MBEDTLS_PK_RSA) {
+    mbedtls_mpi N, E;
+    mbedtls_mpi_init(&N);
+    mbedtls_mpi_init(&E);
+    if (mbedtls_rsa_export(mbedtls_pk_rsa(c->pk), &N, NULL, NULL, NULL, &E) == 0) {
+      scr_dyn_obj_set(cert, "modulus", 7, scr_tls_mpi_hex_dyn(&N, ""));
+      scr_dyn_obj_set(cert, "exponent", 8, scr_tls_mpi_hex_dyn(&E, "0x"));
+    } else {
+      scr_dyn_obj_set(cert, "modulus", 7, scr_dyn_undefined());
+      scr_dyn_obj_set(cert, "exponent", 8, scr_dyn_undefined());
+    }
+    mbedtls_mpi_free(&N);
+    mbedtls_mpi_free(&E);
+    /* an RSA key's pubkey is the whole SubjectPublicKeyInfo */
+    scr_dyn_obj_set(cert, "pubkey", 6, scr_tls_buffer_dyn(c->pk_raw.p, c->pk_raw.len));
+  } else {
+    scr_dyn_obj_set(cert, "modulus", 7, scr_dyn_undefined());
+    scr_dyn_obj_set(cert, "exponent", 8, scr_dyn_undefined());
+    const unsigned char *bv = NULL;
+    size_t bn = 0;
+    if (scr_tls_spki_bits(c, &bv, &bn)) {
+      scr_dyn_obj_set(cert, "pubkey", 6, scr_tls_buffer_dyn(bv, bn));
+    } else {
+      scr_dyn_obj_set(cert, "pubkey", 6, scr_dyn_undefined());
+    }
+  }
+  scr_dyn_obj_set(cert, "bits", 4, scr_dyn_new_num((double)mbedtls_pk_get_bitlen(&c->pk)));
+  scr_dyn_obj_set(cert, "valid_from", 10, scr_tls_time_dyn(&c->valid_from));
+  scr_dyn_obj_set(cert, "valid_to", 8, scr_tls_time_dyn(&c->valid_to));
+  scr_dyn_obj_set(cert, "fingerprint", 11, scr_tls_fp_dyn(c, 1));
+  scr_dyn_obj_set(cert, "fingerprint256", 14, scr_tls_fp_dyn(c, 256));
+  scr_dyn_obj_set(cert, "fingerprint512", 14, scr_tls_fp_dyn(c, 512));
+  scr_dyn_obj_set(cert, "ext_key_usage", 13, scr_tls_eku_dyn(c));
+  scr_dyn_obj_set(cert, "serialNumber", 12, scr_tls_hex_dyn(c->serial.p, c->serial.len, true, false));
+  scr_dyn_obj_set(cert, "raw", 3, scr_tls_buffer_dyn(c->raw.p, c->raw.len));
+  if ((kt == MBEDTLS_PK_ECKEY || kt == MBEDTLS_PK_ECDSA) &&
+      scr_tls_curve_names(mbedtls_pk_ec(c->pk)->grp.id, &asn1, &nist)) {
+    scr_dyn_obj_set(cert, "asn1Curve", 9, scr_id_dyn_str(asn1, strlen(asn1)));
+    scr_dyn_obj_set(cert, "nistCurve", 9,
+                    nist != NULL ? scr_id_dyn_str(nist, strlen(nist)) : scr_dyn_undefined());
+  } else {
+    scr_dyn_obj_set(cert, "asn1Curve", 9, scr_dyn_undefined());
+    scr_dyn_obj_set(cert, "nistCurve", 9, scr_dyn_undefined());
+  }
+
+  /* issuerCertificate: self-issued -> this object (non-owning); otherwise the
+   * chain member whose subject is this certificate's issuer, built the same
+   * way; otherwise undefined (the issuer was not presented). */
+  bool self_issued = c->issuer_raw.len == c->subject_raw.len &&
+                     memcmp(c->issuer_raw.p, c->subject_raw.p, c->subject_raw.len) == 0;
+  if (self_issued) {
+    scr_dyn_obj_set_borrowed(cert, "issuerCertificate", 17, cert);
+  } else {
+    const mbedtls_x509_crt *up = NULL;
+    for (const mbedtls_x509_crt *n = chain; n != NULL && up == NULL; n = n->next) {
+      if (n != c && n->subject_raw.len == c->issuer_raw.len &&
+          memcmp(n->subject_raw.p, c->issuer_raw.p, c->issuer_raw.len) == 0) {
+        up = n;
+      }
+    }
+    if (up != NULL && depth < 8) {
+      scr_dyn_obj_set(cert, "issuerCertificate", 17, scr_tls_cert_obj(up, chain, depth + 1));
+    } else {
+      scr_dyn_obj_set(cert, "issuerCertificate", 17, scr_dyn_undefined());
+    }
+  }
   return cert;
 }
 
@@ -1574,7 +1928,8 @@ static bool scr_tls_ident_run(ScrTlsSock *t) {
   if (mbedtls_ssl_get_verify_result(&t->ssl) & MBEDTLS_X509_BADCERT_NOT_TRUSTED) return true;
   ScrDyn *args[2];
   args[0] = scr_id_dyn_str(cli->verify_name, strlen(cli->verify_name));
-  args[1] = scr_tls_peer_cert_dyn(mbedtls_ssl_get_peer_cert(&t->ssl));
+  const mbedtls_x509_crt *pc = mbedtls_ssl_get_peer_cert(&t->ssl);
+  args[1] = pc != NULL ? scr_tls_cert_obj(pc, pc, 0) : scr_dyn_new_obj();
   ScrDyn *r = scr_dyn_call(cli->identity, args, 2, "checkServerIdentity");
   scr_dyn_release(args[0]);
   scr_dyn_release(args[1]);
@@ -2986,6 +3341,18 @@ ScrBytes *scr_tls_sock_get_session(ScrNetSocket *s) {
   return scr_tls_session_bytes(t);
 }
 
+/* getPeerCertificate(): the peer's certificate object, or {} (no peer
+ * certificate yet, or none presented). Node's `detailed` flag changes nothing
+ * the peer chain can show here: both answer the same members. */
+ScrDyn *scr_tls_sock_peer_cert(ScrNetSocket *s, bool detailed) {
+  (void)detailed;
+  ScrTlsSock *t = scr_tls_sock_of(s);
+  const mbedtls_x509_crt *crt = t != NULL ? mbedtls_ssl_get_peer_cert(&t->ssl) : NULL;
+  if (crt == NULL) return scr_dyn_new_obj();
+  return scr_tls_cert_obj(crt, crt, 0);
+}
+
+
 bool scr_tls_sock_authorized(ScrNetSocket *s) {
   ScrTlsSock *t = scr_tls_sock_of(s);
   return t != NULL && t->established && t->cli != NULL && t->cli->verify_recorded &&
@@ -3069,11 +3436,31 @@ static bool scr_tls_dynh_invoke(ScrNetSocket *s, const char *method, ScrDyn *con
   (void)args;
   (void)argc;
   if (scr_tls_sock_of(s) == NULL) return false;
+  /* the members a dynamic receiver answers with the same values the static
+   * lowering does (scr_tls_sock_peer_cert, _session_reused, _get_session) */
+  if (strcmp(method, "getPeerCertificate") == 0) {
+    *out = scr_tls_sock_peer_cert(s, argc > 0 && scr_tls_dyn_truthy(args[0]));
+    return true;
+  }
+  if (strcmp(method, "isSessionReused") == 0) {
+    *out = scr_dyn_new_bool(scr_tls_sock_session_reused(s));
+    return true;
+  }
+  if (strcmp(method, "getSession") == 0) {
+    ScrBytes *b = scr_tls_sock_get_session(s);
+    if (b == NULL) {
+      *out = scr_dyn_undefined();
+    } else {
+      *out = scr_dyn_new_buffer_copy(b);
+      scr_bytes_release(b);
+    }
+    return true;
+  }
   static const char *const tls_methods[] = {
-    "getPeerCertificate", "getCertificate", "getCipher", "getProtocol", "getSession",
+    "getCertificate", "getCipher", "getProtocol",
     "getTLSTicket", "getEphemeralKeyInfo", "getFinished", "getPeerFinished",
     "getSharedSigalgs", "getPeerX509Certificate", "getX509Certificate",
-    "exportKeyingMaterial", "isSessionReused", "renegotiate", "setMaxSendFragment",
+    "exportKeyingMaterial", "renegotiate", "setMaxSendFragment",
     "enableTrace", "disableRenegotiation", "setServername", "setSession", NULL,
   };
   for (size_t i = 0; tls_methods[i] != NULL; i++) {

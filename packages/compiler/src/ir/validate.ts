@@ -830,6 +830,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "tls.sockAuthorized": { argTypes: [NETSOCKET_T], result: BOOL },
   "tls.sockSessionReused": { argTypes: [NETSOCKET_T], result: BOOL },
   "tls.sockGetSession": { argTypes: [NETSOCKET_T], result: VOID },
+  "tls.sockPeerCert": { argTypes: [NETSOCKET_T, BOOL], result: DYN },
   "tls.sockAuthError": { argTypes: [NETSOCKET_T], result: VOID },
   "tls.sockOnSecureConnect": { argTypes: [NETSOCKET_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "tls.sockOnSession": { argTypes: [NETSOCKET_T, null, BOOL], result: VOID },
