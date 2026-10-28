@@ -1,9 +1,11 @@
 // The constructor's `new Array(count)` throws RangeError for a negative count,
 // and the caller never gets a message object.
 class Msg {
+  public readonly count: number
   public readonly ids: number[]
-  constructor(public readonly count: number) {
-    this.ids = new Array(this.count)
+  constructor(count: number) {
+    this.count = count
+    this.ids = new Array(count)
   }
 }
 function parse(n: number): Msg {

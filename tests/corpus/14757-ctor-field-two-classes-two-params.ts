@@ -1,7 +1,11 @@
 // Two classes, each with its own parameter position and its own fill site.
 class Head {
+  public readonly tag: string
+  public readonly n: number
   public readonly fields: number[]
-  constructor(public readonly tag: string, public readonly n: number) {
+  constructor(tag: string, n: number) {
+    this.tag = tag
+    this.n = n
     this.fields = new Array(n)
   }
 }
