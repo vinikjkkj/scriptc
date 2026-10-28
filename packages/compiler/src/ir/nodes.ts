@@ -4656,6 +4656,7 @@ export type IrLibFn =
   | "http.clientSignal"
   | "http.clientDestroy"
   | "http.clientDestroyErr"
+  | "http.clientDestroyDyn"
   | "http.clientPipeFrom"
   | "http.clientDestroyed"
   | "http.clientOnResponse"
@@ -10914,7 +10915,7 @@ export function moduleUsesDestroyDyn(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && node.fn === "stream.destroyDyn") {
+    if (node.kind === "libCall" && (node.fn === "stream.destroyDyn" || node.fn === "http.clientDestroyDyn")) {
       found = true;
       return;
     }
@@ -10934,7 +10935,7 @@ export function moduleUsesInspect(mod: IrModule): boolean {
     }
     const node = v as { kind?: unknown; fn?: unknown };
     if (node.kind === "libCall" && typeof node.fn === "string" &&
-        (node.fn.startsWith("insp.") || node.fn === "stream.destroyDyn")) {
+        (node.fn.startsWith("insp.") || node.fn === "stream.destroyDyn" || node.fn === "http.clientDestroyDyn")) {
       found = true;
       return;
     }

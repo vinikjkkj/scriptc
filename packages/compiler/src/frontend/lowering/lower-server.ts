@@ -4570,6 +4570,10 @@ function lowerHttpClientMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     const receiver = L.lowerExpr(access.expression);
     if (args.length === 1) {
+      // A dynamic argument (an 'error' listener's parameter is checked-dynamic,
+      // so `req.destroy(err)` inside one lands here): the runtime applies Node's
+      // `if (err)` and carries a non-Error value through the error slot, as
+      // stream.destroyDyn does for streams.
       // destroy(err) emits the GIVEN object on the request — Node keeps its
       // identity, name, code and own properties, so the error travels as an
       // object and not as a message string (rebuilding it from `.message`
@@ -4577,6 +4581,9 @@ function lowerHttpClientMethodCall(L: Lowerer, call: ts.CallExpression,
       // The root check is the stream lane's, verbatim: only an
       // %Error-hierarchy instance has the layout the runtime slot expects.
       const err = L.lowerExpr(args[0]!);
+      if (err.type.kind === "dyn") {
+        return { kind: "libCall", fn: "http.clientDestroyDyn", args: [receiver, err], type: VOID, loc };
+      }
       if (!errorRootedType(L, err.type)) {
         L.noLowering(
           `destroy with a '${L.fmt(err.type)}' argument`,

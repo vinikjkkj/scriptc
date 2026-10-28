@@ -1147,6 +1147,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "http.clientEndDyn": "scr_http_client_end_dynv",
   "http.clientDestroy": "scr_http_client_destroy",
   "http.clientDestroyErr": "scr_http_client_destroy_err",
+  "http.clientDestroyDyn": "scr_http_client_destroy_dyn",
   "http.clientPipeFrom": "scr_http_client_pipe_from",
   // The `signal` option: (ScrAbortSignal *, ScrHttpClientReq *) ->
   // ScrHttpClientReq * (+1, the same handle). The generic path maps the
