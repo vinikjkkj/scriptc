@@ -3209,6 +3209,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/14151-js-class-inferred-field-order.js": {
+   "order": [
+    "<repo>/tests/corpus/14151-js-class-inferred-field-order.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1420-number-statics.ts": {
    "order": [
     "<repo>/tests/corpus/1420-number-statics.ts"
@@ -3422,6 +3428,36 @@
   "<repo>/tests/corpus/1447-stdin-closed-events.ts": {
    "order": [
     "<repo>/tests/corpus/1447-stdin-closed-events.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14470-oob-annotated-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/14470-oob-annotated-return.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14471-oob-union-param.ts": {
+   "order": [
+    "<repo>/tests/corpus/14471-oob-union-param.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14472-oob-boolean-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/14472-oob-boolean-return.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14473-oob-nullish-default.ts": {
+   "order": [
+    "<repo>/tests/corpus/14473-oob-nullish-default.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/14474-oob-annotated-return-twice.ts": {
+   "order": [
+    "<repo>/tests/corpus/14474-oob-annotated-return-twice.ts"
    ],
    "diags": []
   },
@@ -18764,36 +18800,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/14470-oob-annotated-return.ts": {
-    "order": [
-      "<repo>/tests/corpus/14470-oob-annotated-return.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14471-oob-union-param.ts": {
-    "order": [
-      "<repo>/tests/corpus/14471-oob-union-param.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14472-oob-boolean-return.ts": {
-    "order": [
-      "<repo>/tests/corpus/14472-oob-boolean-return.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14473-oob-nullish-default.ts": {
-    "order": [
-      "<repo>/tests/corpus/14473-oob-nullish-default.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/14474-oob-annotated-return-twice.ts": {
-    "order": [
-      "<repo>/tests/corpus/14474-oob-annotated-return-twice.ts"
-    ],
-    "diags": []
   }
  }
 }

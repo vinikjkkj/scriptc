@@ -354,6 +354,28 @@ function isNumberFlag(L: Lowerer, t: IrType, v: () => IrExpr, loc: SrcLoc): IrEx
 /** The rendering of one value of type `t` at runtime depth `recurse`
  * with the depth budget `depth` — a direct scalar libCall or a call of
  * the interned per-type helper. */
+/** True when a class's hierarchy (the class, its bases and its subclasses) has a
+ * JS-source class: a JS class's inferred fields are created by assignment, so their
+ * insertion order is per instance (ir/nodes.ts orderRecordPlanOf). Such values print
+ * through the runtime's dyn inspector, which walks the member table in that order;
+ * the static printer walks the layout order and would be wrong for them. */
+function jsHierarchyHasInferredFields(L: Lowerer, className: string): boolean {
+  let root: ClassInfo | undefined = L.classes.get(className);
+  if (root === undefined) return false;
+  let guard = 0;
+  while (root.base !== null && guard++ < 1000) root = root.base;
+  const seen = new Set<string>();
+  const stack: ClassInfo[] = [root];
+  while (stack.length > 0) {
+    const c = stack.pop()!;
+    if (seen.has(c.def.name)) continue;
+    seen.add(c.def.name);
+    if (c.decl != null && isJsSourceFile(c.decl.getSourceFile())) return true;
+    for (const sub of c.subclasses) stack.push(sub);
+  }
+  return false;
+}
+
 function inspectExpr(
   L: Lowerer,
   t: IrType,
@@ -362,6 +384,9 @@ function inspectExpr(
   depth: IrExpr,
   loc: SrcLoc,
 ): IrExpr {
+  if (t.kind === "object" && jsHierarchyHasInferredFields(L, t.className)) {
+    return { kind: "libCall", fn: "insp.dynS", args: [{ kind: "dynFrom", value, type: DYN, loc }, depth], type: STRING, loc };
+  }
   switch (t.kind) {
     case "f64":
       return { kind: "libCall", fn: "insp.f64", args: [value], type: STRING, loc };

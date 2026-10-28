@@ -3445,9 +3445,60 @@ ScrDyn *scr_dyn_shadow_method(const char *name) {
   return scr_dyn_new_func(clo, scr_shadow_method_thunk, 0, "()", name);
 }
 
+/* The i-th member of an instance in its OWN-PROPERTY order. Static members
+ * (ordk 0: declared fields and methods) keep table order and come first; the
+ * inferred fields follow in the order the instance wrote them (its record),
+ * then the ones it has not written yet, in table order (those are absent until
+ * written, so every walk hides them). Positions cover all nmembers exactly. */
+static bool ord_written(const uint8_t *rec, uint8_t k) {
+  for (uint8_t j = 1; j <= rec[0]; j++) if (rec[j] == k) return true;
+  return false;
+}
 const ScrDynClassMember *scr_dyn_objinst_member_at(const ScrDyn *d, size_t i) {
   const ScrDynClass *c = scr_dyn_objinst_class_of(d);
-  return i < c->nmembers ? &c->members[i] : NULL;
+  if (i >= c->nmembers) return NULL;
+  if (c->nord == 0) return &c->members[i];
+  const uint8_t *rec = (const uint8_t *)d->v.inst.o + c->ord_off;
+  size_t nstat = 0;
+  for (size_t k = 0; k < c->nmembers; k++) if (c->members[k].ordk == 0) nstat++;
+  if (i < nstat) {
+    size_t seen = 0;
+    for (size_t k = 0; k < c->nmembers; k++) {
+      if (c->members[k].ordk != 0) continue;
+      if (seen == i) return &c->members[k];
+      seen++;
+    }
+    return NULL;
+  }
+  size_t j = i - nstat;
+  if (j < rec[0]) {
+    uint8_t want = (uint8_t)(rec[1 + j] + 1);
+    for (size_t k = 0; k < c->nmembers; k++) if (c->members[k].ordk == want) return &c->members[k];
+    return NULL;
+  }
+  size_t t = j - rec[0];
+  for (size_t k = 0; k < c->nmembers; k++) {
+    uint8_t ok = c->members[k].ordk;
+    if (ok == 0 || ord_written(rec, (uint8_t)(ok - 1))) continue;
+    if (t == 0) return &c->members[k];
+    t--;
+  }
+  return NULL;
+}
+
+void scr_ord_note(uint8_t *rec, uint8_t k) {
+  if (ord_written(rec, k)) return;
+  rec[0]++;
+  rec[rec[0]] = k;
+}
+
+void scr_ord_forget(uint8_t *rec, uint8_t k) {
+  for (uint8_t j = 1; j <= rec[0]; j++) {
+    if (rec[j] != k) continue;
+    for (uint8_t m = j; m < rec[0]; m++) rec[m] = rec[m + 1];
+    rec[0]--;
+    return;
+  }
 }
 
 bool scr_dyn_objinst_has_members(const ScrDyn *d) {

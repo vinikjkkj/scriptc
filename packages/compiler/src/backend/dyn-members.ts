@@ -24,6 +24,7 @@
  */
 import {
   CLASS_PROPS_FIELD,
+  type OrdPlan,
   parseOwnShadowField,
   canConvertToDyn,
   canDynCheckTo,
@@ -42,6 +43,17 @@ import {
  * structural shape rather than either concrete type is what lets this
  * module be the single answer without either backend importing the
  * other. */
+/** The module's inferred-field order plan (ir/nodes.ts orderRecordPlanOf),
+ * registered by each backend before it emits a module: the member rows read it
+ * for their ordinals (ordk). Null outside a module emission. */
+let ORDER_PLAN: OrdPlan | null = null;
+export function setDynOrderPlan(plan: OrdPlan | null): void {
+  ORDER_PLAN = plan;
+}
+export function getDynOrderPlan(): OrdPlan | null {
+  return ORDER_PLAN;
+}
+
 export interface DynMemberClass {
   readonly def: IrClassDef;
   readonly base: DynMemberClass | null;
@@ -51,7 +63,7 @@ export type DynMemberRow =
   /** A declared FIELD: the emitter reads the struct slot and boxes it
    * through the toDyn walker the type already has. Enumerable — this is
    * what Object.keys and JSON.stringify report. */
-  | { kind: "field"; name: string; type: IrType; absentWhenUndefined: boolean }
+  | { kind: "field"; name: string; type: IrType; absentWhenUndefined: boolean; ordk: number }
   /** A GETTER (`get:prop`): the emitter calls `fn` with the instance and
    * boxes the result. NOT enumerable, matching JS. */
   | { kind: "accessor"; name: string; fn: IrFunction; isStatic?: true; enumerable?: true }
@@ -253,7 +265,8 @@ export function dynMemberTable(
       continue;
     }
     seen.add(f.name);
-    rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true });
+    const ordinal = ORDER_PLAN?.ordinalOf(cls.def.name, f.name) ?? null;
+    rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true, ordk: ordinal === null ? 0 : ordinal + 1 });
     pushShadows(f.name);
   }
   // A property whose predecessor field has no dyn row still exists; it goes

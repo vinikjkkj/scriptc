@@ -20,7 +20,8 @@
  * embed runtime registry/state slots and their surfaces are async-shaped);
  * the emitter refuses them by name before anything here runs. */
 import type { IrClassDef, IrFunction, IrModule, IrType } from "../../ir/nodes.js";
-import { isRefCounted, moduleUsesCtorName, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
+import { isRefCounted, moduleUsesCtorName, ORD_MEMBER, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
+import { getDynOrderPlan } from "../dyn-members.js";
 import {
   mangleClassGcFree,
   mangleClassNew,
@@ -203,12 +204,29 @@ function fieldBase(meta: LlClassMeta): number {
   return emitterRooted(meta) ? 4 : 2;
 }
 
+/** One slot for the per-instance order record (ir/nodes.ts ORD_MEMBER) when the
+ * class's hierarchy has inferred fields: it sits at fieldBase, and the fields
+ * after it. */
+function recShift(meta: LlClassMeta): number {
+  return (getDynOrderPlan()?.recordBytes(meta.def.name) ?? 0) > 0 ? 1 : 0;
+}
+/** The GEP index of the order record in a class struct, or -1 when none. */
+export function llOrdIndexOf(meta: LlClassMeta): number {
+  return recShift(meta) === 1 ? fieldBase(meta) : -1;
+}
+/** The record's byte count for a class's hierarchy (0 = none). */
+export function llOrdBytesOf(className: string): number {
+  return getDynOrderPlan()?.recordBytes(className) ?? 0;
+}
+export { ORD_MEMBER };
+
 /** A field's GEP index inside its class struct: rc at 0, the vtable word
- * at 1 on hierarchy members, then the flattened field list. */
+ * at 1 on hierarchy members, then the order record (if any), then the
+ * flattened field list. */
 export function classFieldIndex(meta: LlClassMeta, field: string): { index: number; type: IrType } {
   const idx = meta.def.fields.findIndex((f) => f.name === field);
   if (idx < 0) throw new Error(`llvm emitter bug: unknown field ${field} on class ${meta.def.name}`);
-  return { index: fieldBase(meta) + idx, type: meta.def.fields[idx]!.type };
+  return { index: fieldBase(meta) + recShift(meta) + idx, type: meta.def.fields[idx]!.type };
 }
 
 /** What class emission needs beyond ShapeHost: interned unit instances for
@@ -294,7 +312,8 @@ export function emitClassShapes(
       : emitterRooted(meta) ? ["ptr", "ptr", "ptr"]
       : ["ptr"]
       : [];
-    const members = [...prefix, ...fieldTys];
+    const ordBytes = llOrdBytesOf(cls.name);
+    const members = [...prefix, ...(ordBytes > 0 ? [`[${ordBytes} x i8]`] : []), ...fieldTys];
     typeDefs.push(
       `%${mangleClassStruct(cls.name)} = type { i64${members.length ? ", " + members.join(", ") : ""} } ` +
         `; class ${cls.name}${meta.hierarchy ? " (vt at 1)" : ""}${streamRooted(meta) ? " (ScrStream prefix at 2)" : emitterRooted(meta) ? " (ScrEmitter prefix at 2)" : ""} { ${cls.fields.map((f) => f.name).join("; ")} }`,
@@ -351,7 +370,7 @@ export function emitClassShapes(
     const traced = host.tracedShapes.has(`object:${cls.name}`);
     const isEmitterRooted = emitterRooted(meta);
     const isStreamRooted = streamRooted(meta);
-    const fieldIndex = (i: number): number => fieldBase(meta) + i;
+    const fieldIndex = (i: number): number => fieldBase(meta) + recShift(meta) + i;
     const refFields = cls.fields
       .map((f, i) => ({ ...f, index: fieldIndex(i) }))
       .filter((f) => isRefCounted(f.type));
