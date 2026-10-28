@@ -19752,6 +19752,30 @@
     "<repo>/tests/corpus/15046-instof-passthrough-dyn/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/15300-buffer-from-value-bytea.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15300-buffer-from-value-bytea.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15301-buffer-from-value-overloads.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15301-buffer-from-value-overloads.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15302-buffer-from-value-errors.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15302-buffer-from-value-errors.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15303-buffer-from-value-identity.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15303-buffer-from-value-identity.cjs"
+   ],
+   "diags": []
   }
  }
 }
