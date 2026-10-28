@@ -4,7 +4,7 @@
 // data before end, then the child's exit.
 import { spawn } from "node:child_process";
 
-const child = spawn("/bin/sh", ["-c", "printf 'alpha\\nbeta\\n'"], { stdio: ["ignore", "pipe", "ignore"] });
+const child = spawn("node", ["-e", "process.stdout.write('alpha\\nbeta\\n')"], { stdio: ["ignore", "pipe", "ignore"] });
 let bytes = 0;
 (child.stdout as NodeJS.ReadableStream)
   .on("data", (chunk: Buffer) => {
