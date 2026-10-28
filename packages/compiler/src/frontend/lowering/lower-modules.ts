@@ -2151,6 +2151,17 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             } catch (e) {
               if (!(e instanceof PoisonError)) throw e;
             }
+          } else if (isFunctionCtorNew(L, rhs)) {
+            // `module.exports = new Ctor(...)` where Ctor is an ES5 constructor
+            // FUNCTION (pg's index.js: `const PG = function (…) {…}`). Such an
+            // `new` is the per-use dyn box (proto-class.ts: a fresh OBJ linked to
+            // Ctor.prototype, `this.x = …` landing on it), so the whole export is
+            // one DYN value: a const export global keyed by this statement, the
+            // same storage the root path gives a dyn root. Requirers read it
+            // through the checker's export= symbol, as for the scalar case.
+            const g: IrGlobal = { id: `%g.${tag}exports`, name: "exports", type: DYN, mutable: false };
+            L.globalsByDeclNode.set(cjs.expr, g);
+            L.globalsList.push(g);
           } else if (ts.isIdentifier(rhs) && wholeExportRootNeedsStorage(L, rhs, cjs.expr)) {
             // `module.exports = <root>` over a module-scope VARIABLE the
             // alias path cannot carry — THE WHOLE-EXPORT ROOT'S STORAGE.
@@ -4472,4 +4483,24 @@ export function collectDeclTwinExportBridges(L: Lowerer, parts: FileParts[]): vo
     }
     if (bridges.length > 0) L.twinExportBridges.set(twin, bridges);
   }
+}
+
+/** `new Ctor(...)` where Ctor names a plain FUNCTION (a FunctionDeclaration, or a
+   * variable initialized by a function expression), not a class: the ES5
+   * constructor pattern a JS file uses, whose instances are dyn boxes. */
+function isFunctionCtorNew(L: Lowerer, e: ts.Expression): boolean {
+  let x: ts.Expression = e;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  if (!ts.isNewExpression(x) || !ts.isIdentifier(x.expression)) return false;
+  const sym = L.resolveValueSymbol(x.expression);
+  if (!sym) return false;
+  for (const d of L.checker.declarationsOf(sym)) {
+    if (ts.isFunctionDeclaration(d)) return true;
+    if (ts.isVariableDeclaration(d) && d.initializer !== undefined) {
+      let init: ts.Expression = d.initializer;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      if (ts.isFunctionExpression(init)) return true;
+    }
+  }
+  return false;
 }
