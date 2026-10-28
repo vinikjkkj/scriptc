@@ -2682,7 +2682,7 @@ ScrStream *scr_stream_new_readable_dyn(ScrDyn *opts) {
   ScrClosure *destroy = scr_stream_dynopt_pick(o.destroy, (void *)&scr_stream_dynopt_destroy_inv, NULL, NULL, &dinv);
   ScrStream *s = scr_stream_new_readable(o.rhwm, o.auto_destroy, o.emit_close,
       read, (ScrStreamReadInv)rinv, destroy, (ScrStreamErrInv)dinv);
-  if (o.objmode) scr_stream_set_objmode(s, o.rhwm);
+  if (o.objmode) scr_stream_release(scr_stream_set_objmode(s, o.rhwm)); /* chain result is +1: dropped here */
   scr_stream_dynopt_apply_enc(s, o.enc);
   return s;
 }
@@ -2756,7 +2756,7 @@ void scr_stream_init_readable_dyn(ScrStream *s, ScrDyn *opts,
   ScrClosure *destroy = scr_stream_dynopt_pick(o.destroy, (void *)&scr_stream_dynopt_destroy_inv, destroy_fb, (void *)destroy_fb_inv, &dinv);
   scr_stream_init_readable(s, o.rhwm, o.auto_destroy, o.emit_close,
       read, (ScrStreamReadInv)rinv, destroy, (ScrStreamErrInv)dinv);
-  if (o.objmode) scr_stream_set_objmode(s, o.rhwm);
+  if (o.objmode) scr_stream_release(scr_stream_set_objmode(s, o.rhwm)); /* chain result is +1: dropped here */
   scr_stream_dynopt_apply_enc(s, o.enc);
 }
 
