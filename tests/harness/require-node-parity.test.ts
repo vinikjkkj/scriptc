@@ -100,6 +100,17 @@ interface Program {
 
 const RUNS: readonly Program[] = [
   {
+    // A required module used as a VALUE: its identity is exact. The module is one live bag (cjs-live-exports.ts),
+    // so a copy compares equal to the require, as Node answers (15102/15103 cover the stored-copy shapes).
+    name: "a literal relative require used as a value",
+    src:
+      "var m = require('./m.cjs');\n" +
+      "var n = m;\n" +
+      "try { console.log('GOT', String(m === n)) } catch (e) { console.log('threw', e.code) }\n",
+    stdout: "GOT true\n",
+    exit: 0,
+  },
+  {
     // 'node:' serves BUILTINS ONLY, and that makes it the one refusing
     // class whose whole answer is a NAME TABLE: no filesystem, no module
     // value. A name Node's own builtinModules carries is a module and
@@ -709,20 +720,6 @@ const FENCED: readonly {
     // nothing is printed at all. It used to print "threw SC2020 threw SC2020 threw SC2020\n"
     stdout: "",
     fatal: true,
-  },
-  {
-    // The wall, named: a required module used AS A VALUE. Everything in
-    // this list needs it, and it is the reason a run-time specifier that
-    // DOES resolve cannot be served.
-    // A required table's members and key walks compile, and so does IDENTITY of the module
-    // object: the module is one live bag, and a stored copy compares equal to the require (15102/15103).
-    name: "a literal relative require used as a value",
-    src:
-      "var m = require('./m.cjs');\n" +
-      "var n = m;\n" +
-      "try { console.log('GOT', String(m === n)) } catch (e) { console.log('threw', e.code) }\n",
-    nodeSays: "GOT true",
-    stdout: "GOT true\n",
   },
   {
     // The four properties Node DEFINES on the CommonJS `require`
