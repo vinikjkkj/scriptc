@@ -6012,13 +6012,13 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * poisoning, so a static whose type has no lowering at all is not
    * collected and keeps the use-site fence it has today. */
   /** An initializer-less static whose declared type has a plain slot kind
-   * (number, string, boolean, object, record) and no undefined arm: the
+   * (number, string, boolean, object, record, or a class value) and no undefined arm: the
    * slot widens to `T | undefined` (see the collection site). */
   function staticTypeWidens(L: Lowerer, member: ts.PropertyDeclaration): boolean {
     if (member.initializer !== undefined || member.postfixToken?.kind === ts.SyntaxKind.QuestionToken) return false;
     const mapped = L.mapTypeOf(L.typeOf(member.name));
     return mapped !== null && (mapped.kind === "f64" || mapped.kind === "string" || mapped.kind === "bool" ||
-      mapped.kind === "object" || mapped.kind === "record");
+      mapped.kind === "object" || mapped.kind === "record" || mapped.kind === "classval");
   }
 
   function staticTypeAdmitsUndefined(L: Lowerer, member: ts.PropertyDeclaration): boolean {
