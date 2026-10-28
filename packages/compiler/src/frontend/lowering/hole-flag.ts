@@ -17,12 +17,31 @@
 // refused at compile time (SC2020, with the reason).
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { isProvenPrefixTruncation } from "./lower-classes.js";
 
 const FLAGGED = new WeakMap<ts.SourceFile, Set<ts.Symbol>>();
 
 function isNumberArrayReceiver(L: Lowerer, node: ts.Expression): boolean {
   const t = L.mapTypeOf(L.typeOf(node));
   return t !== null && t.kind === "array" && t.elem.kind === "f64";
+}
+
+/** A `.length =` write that main's lowering REFUSES (lower-stmts.ts, the
+ * SC2020 "assigning '.length' on 'number'-element arrays" fence). Main lowers
+ * two shapes and they must stay untouched: the literal clear `= 0` (the splice)
+ * and a proven prefix truncation (lower-classes.ts). Only the rest is flagged. */
+function isRefusedLengthWrite(n: ts.BinaryExpression): boolean {
+  if (ts.isNumericLiteral(n.right) && n.right.text === "0") return false;
+  const stmt = n.parent;
+  if (
+    ts.isExpressionStatement(stmt) &&
+    ts.isPropertyAccessExpression(n.left) &&
+    ts.isIdentifier(n.left.expression) &&
+    isProvenPrefixTruncation(stmt, n.left.expression.text)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /** The flagged symbols of one source file: every identifier X such that the
@@ -43,7 +62,8 @@ function flaggedSymbolsOf(L: Lowerer, sf: ts.SourceFile): Set<ts.Symbol> {
       n.left.name.text === "length" &&
       !n.left.questionDotToken &&
       ts.isIdentifier(n.left.expression) &&
-      isNumberArrayReceiver(L, n.left.expression)
+      isNumberArrayReceiver(L, n.left.expression) &&
+      isRefusedLengthWrite(n)
     ) {
       const sym = L.checker.getSymbolAtLocation(n.left.expression);
       if (sym) out.add(sym);
