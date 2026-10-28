@@ -23,8 +23,8 @@ async function main() {
     () => subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 1 }, pk, 7),
     () => subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 1 }, pk, null),
     () => subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 1 }, hmacKey, 256),
-    () => subtle.importKey('raw', te.encode('p'), 'PBKDF2', true, ['deriveBits']),
-    () => subtle.importKey('raw', te.encode('p'), 'PBKDF2', false, ['sign']),
+    async () => { await subtle.importKey('raw', te.encode('p'), 'PBKDF2', true, ['deriveBits']) },
+    async () => { await subtle.importKey('raw', te.encode('p'), 'PBKDF2', false, ['sign']) },
   ]
   for (const t of tries) {
     try {
