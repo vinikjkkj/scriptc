@@ -20524,6 +20524,12 @@
     "<repo>/tests/corpus/15967-timers-promises-abort-reason-value.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/15968-timers-promises-warning-tick-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/15968-timers-promises-warning-tick-order.ts"
+   ],
+   "diags": []
   }
  }
 }
