@@ -2413,7 +2413,16 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
 /* 2026-10-28 (aggregate): RE-RECORDED 133_782 -> 133_814 (+32). AggregateError is a runtime error kind (SCR_ERR_AGGREGATE): its
  * name-table entry, its ScrVt, and the kind's prototype rule are in the always-linked scr_error.c and scr_json.c. Inherent to the
  * kind, measured on the same zig 0.16.0 x86_64-windows-gnu lane, --backend c. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_814 : null;
+/* 2026-10-28 (tlssess, rebased onto main f099273b2): RE-RECORDED 133_814 -> 133_750 (-64). Main f099273b2 itself measures 133,686 on
+ * this lane (zig x86_64-windows-gnu via SCRIPTC_CC=zigcc and SCRIPTC_TARGET, --backend c, the one-line regex probe the
+ * suite builds), so the old 133,814 record was already 128 high before this change. What the 64 bytes buy, all in
+ * always-linked scr_net.c and scr_error.c: the connect-error fields and the timed-out attempt's own Error (dial_log, the
+ * attempt-timeout builder that answers a verdict the kernel already holds, the chain-length aggregate condition), and the
+ * win32 errno row for ETIMEDOUT. The loopback SIO_TCP_INITIAL_RTO ioctl in scr_w32_connect measured 0 bytes on this lane
+ * (the tip before that commit, 27860480b, also measures 133,750). NOT in this figure: pgwebcrypto's commits. The combined
+ * landing tree land-b89 (23727deb8) measures 134,118 on this lane (the figure its CI reported); that record belongs to
+ * whichever landing combines the two, and this tree's figure would fail it by 368. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_750 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
