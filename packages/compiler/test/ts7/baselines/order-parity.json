@@ -20476,6 +20476,36 @@
       "<repo>/tests/corpus/15859-date-parse-min-max-range.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/15900-weakmap-objectid-cache.ts": {
+    "order": [
+      "<repo>/tests/corpus/15900-weakmap-objectid-cache.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15901-weakmap-keys-die-and-release-their-entries.ts": {
+    "order": [
+      "<repo>/tests/corpus/15901-weakmap-keys-die-and-release-their-entries.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15902-weakmap-untyped-keys-follow-node.ts": {
+    "order": [
+      "<repo>/tests/corpus/15902-weakmap-untyped-keys-follow-node.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15903-weakmap-delete-and-inspect.ts": {
+    "order": [
+      "<repo>/tests/corpus/15903-weakmap-delete-and-inspect.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15904-weakmap-value-that-holds-its-key.ts": {
+    "order": [
+      "<repo>/tests/corpus/15904-weakmap-value-that-holds-its-key.ts"
+    ],
+    "diags": []
   }
  }
 }
