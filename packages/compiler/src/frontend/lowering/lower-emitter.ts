@@ -499,9 +499,17 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
         const notAnEmitter =
           resolved && recvT?.kind === "object" && !emitterRootedOrGrafted(L, L.classes.get(recvT.className));
         if (!notAnEmitter) {
+          const loopNames = resolved && nameT !== null && !nameT.isStringLiteralType() ? loopLiteralNamesOf(L, arg0) : null;
           if (resolved && nameT !== null && nameT.isStringLiteralType()) {
             registered.add(nameT.value);
             registeredKeys.add(evTableKey(recvT?.kind === "object" ? L.classes.get(recvT.className) : undefined, nameT.value));
+          }
+          else if (loopNames !== null) {
+            // A loop-bound name: its closed literal set registers each name.
+            for (const n of loopNames) {
+              registered.add(n);
+              registeredKeys.add(evTableKey(recvT?.kind === "object" ? L.classes.get(recvT.className) : undefined, n));
+            }
           }
           else {
             opaqueRegistration = true;
@@ -544,8 +552,11 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   for (const { node, info } of computedEmits) {
     const nameT = L.typeOf(node.arguments[0]!);
     let names: string[];
+    const loopNames = loopLiteralNamesOf(L, node.arguments[0]!);
     if (nameT.isUnionType() && ts.constituentTypes(nameT).every((c) => c.isStringLiteralType())) {
       names = ts.constituentTypes(nameT).map((c) => (c as unknown as { value: string }).value);
+    } else if (loopNames !== null) {
+      names = loopNames;
     } else {
       const root = emitterRootKey(info);
       names = [];
@@ -647,6 +658,37 @@ function eventNameOf(L: Lowerer, member: string, arg: ts.Expression): string {
     arg,
     "event names must be compile-time string literals (each event's argument tuple is unified statically; symbol names have no lowering)",
   );
+}
+
+/** The closed set of string values an event-name identifier can take, when the
+ * program proves it: a `const` loop binding of `for (const e of [...])` over an
+ * array literal whose elements are all string literals. A const loop binding
+ * is one value per iteration and is never reassigned, so the set is exact.
+ * Null for anything else (including an empty array: the loop body never runs,
+ * so no name is provably in use). */
+function loopLiteralNamesOf(L: Lowerer, e: ts.Expression): string[] | null {
+  let x = e;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  if (!ts.isIdentifier(x)) return null;
+  const sym = L.resolveValueSymbol(x);
+  if (!sym) return null;
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length !== 1) return null;
+  const d = decls[0]!;
+  if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name)) return null;
+  const list = d.parent;
+  if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) return null;
+  const stmt = list.parent;
+  if (!ts.isForOfStatement(stmt) || stmt.initializer !== list) return null;
+  let it: ts.Expression = stmt.expression;
+  while (ts.isParenthesizedExpression(it)) it = it.expression;
+  if (!ts.isArrayLiteralExpression(it) || it.elements.length === 0) return null;
+  const out = new Set<string>();
+  for (const el of it.elements) {
+    if (!ts.isStringLiteralLike(el)) return null;
+    out.add(el.text);
+  }
+  return [...out];
 }
 
 const strLit = (value: string, loc: SrcLoc): IrExpr => ({ kind: "strLit", value, type: STRING, loc });
@@ -1511,6 +1553,29 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     if (args.length < 2 || !extrasPure) {
       L.noLowering(`${member} with ${args.length} arguments`, call, "the supported form is (eventName, listener)");
     }
+    // A loop-bound name (for (const e of [literals])): one static registration
+    // per candidate name, selected by a string equality on the name. Exactly
+    // one arm runs per call, and the last candidate needs no test because the
+    // loop binding can only hold one of them.
+    const loopNames = nameLit === undefined ? loopLiteralNamesOf(L, args[0]!) : null;
+    if (loopNames !== null) {
+      const arms: IrExpr[] = [];
+      for (const n of loopNames) {
+        const arm = lowerEmitterMethodCall(L, call, access, info, superRecv, loweredRecv, n);
+        if (arm === null) return null;
+        arms.push(arm);
+      }
+      const nameIR = L.lowerExpr(args[0]!);
+      if (nameIR.type.kind !== "string") {
+        L.noLowering(`${member} with a '${L.fmt(nameIR.type)}' event name`, args[0]!);
+      }
+      let acc: IrExpr = arms[arms.length - 1]!;
+      for (let i = loopNames.length - 2; i >= 0; i--) {
+        const cond: IrExpr = { kind: "strEq", negated: false, left: nameIR, right: strLit(loopNames[i]!, loc), type: BOOL, loc };
+        acc = { kind: "ternary", cond, then: arms[i]!, else_: acc, type: arms[0]!.type, loc };
+      }
+      return acc;
+    }
     const name = nameLit ?? eventNameOf(L, member, args[0]!);
     const key = evTableKey(info, name);
     const registering = REGISTER_MEMBERS.has(member);
@@ -2355,6 +2420,11 @@ function computedEmitNames(L: Lowerer, info: ClassInfo, access: ts.PropertyAcces
   if (t.isUnionType() && ts.constituentTypes(t).every((c) => c.isStringLiteralType())) {
     return [...new Set(ts.constituentTypes(t).map((c) => (c as unknown as { value: string }).value))];
   }
+  // A loop-bound name carries exactly its literal set: 'error' is a candidate
+  // only when it is in that set (it is no candidate otherwise, so a multi-payload
+  // emit of another name does not meet the 'error' arm's single-payload rule).
+  const loopNames = loopLiteralNamesOf(L, nameArg);
+  if (loopNames !== null) return loopNames;
   if ((t.flags & ts.TypeFlags.StringLike) === 0) return null;
   const regs = emitterRegistrations(L);
   if (regs.opaque) {
