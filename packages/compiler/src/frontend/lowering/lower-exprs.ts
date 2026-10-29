@@ -19927,9 +19927,9 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
     ] as const) {
       if (!ts.isPropertyAccessExpression(a) || a.name.text !== "constructor" || a.questionDotToken) continue;
       const recvT = L.mapTypeOf(L.typeOf(a.expression));
-      if (recvT?.kind !== "union" && recvT?.kind !== "string" && recvT?.kind !== "f64" && recvT?.kind !== "bool") continue;
-      let wrapper: "String" | "Number" | "Boolean" | null = null;
-      if (ts.isIdentifier(b) && (b.text === "String" || b.text === "Number" || b.text === "Boolean")) {
+      if (recvT?.kind !== "union" && recvT?.kind !== "string" && recvT?.kind !== "f64" && recvT?.kind !== "bool" && recvT?.kind !== "bigint") continue;
+      let wrapper: "String" | "Number" | "Boolean" | "BigInt" | null = null;
+      if (ts.isIdentifier(b) && (b.text === "String" || b.text === "Number" || b.text === "Boolean" || b.text === "BigInt")) {
         if (L.isStdlibSymbol(L.checker.getSymbolAtLocation(b))) wrapper = b.text;
       }
       const yIsClass = wrapper === null && L.mapTypeOf(L.typeOf(b))?.kind === "classval";
@@ -19939,15 +19939,24 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
       if (!pureReemittable(value)) continue;
       let yValue: IrExpr | null = null;
       if (yIsClass) {
-        yValue = L.lowerExpr(b);
-        if (yValue.type.kind !== "classval") continue;
+        // The checker types Y a program class, but its lowering can be a dyn
+        // read: a class reached through a module namespace object (`C.Query`
+        // from a CommonJS `module.exports = {...}`) lowers as a dyn key read.
+        // Only the program-instance arms of a union need the class VALUE (their
+        // identity test); a scalar arm's constructor is a builtin wrapper, never
+        // a program class, so its answer is false whatever Y evaluates to. A
+        // dyn-lowered Y is therefore accepted only as a pure name chain (no
+        // calls, no index), and then only when no program-instance arm needs it.
+        const lowered = L.lowerExpr(b);
+        if (lowered.type.kind === "classval") yValue = lowered;
+        else if (!isPlainNameChain(b)) continue;
       }
       const isUnion = value.type.kind === "union";
       const unionId = value.type.kind === "union" ? value.type.unionId : "";
       const arms: IrType[] = value.type.kind === "union" ? (L.unions.get(unionId)?.arms ?? []) : [value.type];
       if (value.type.kind === "union" && arms.length === 0) continue;
-      const wrapperOf = (t: IrType): "String" | "Number" | "Boolean" | null =>
-        t.kind === "string" ? "String" : t.kind === "f64" ? "Number" : t.kind === "bool" ? "Boolean" : null;
+      const wrapperOf = (t: IrType): "String" | "Number" | "Boolean" | "BigInt" | null =>
+        t.kind === "string" ? "String" : t.kind === "f64" ? "Number" : t.kind === "bool" ? "Boolean" : t.kind === "bigint" ? "BigInt" : null;
       const terms: IrExpr[] = [];
       let fenced = false;
       arms.forEach((arm, tag) => {
@@ -19959,6 +19968,7 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
           return;
         }
         if (arm.kind === "object" && isProgramClassInstanceName(L, arm.className)) {
+          if (yIsClass && yValue === null) { fenced = true; return; } // identity needs the class value
           if (yValue === null || !isUnion) return; // a program instance is never a wrapper
           const narrowed: IrExpr = { kind: "unionNarrow", unionId, tag, value, type: arm, loc };
           const ctor: IrExpr = {
@@ -19998,6 +20008,18 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
       return negated ? { kind: "unary", op: "!", operand: acc, type: BOOL, loc } : acc;
     }
     return null;
+  }
+
+  /** An identifier or a property chain over identifiers (`A`, `A.B.C`): a read
+   * with no call, no optional link and no index, so it has no effect to keep. */
+  function isPlainNameChain(e: ts.Expression): boolean {
+    // Iterative: a long property chain must not recurse before the depth guard.
+    let cur: ts.Expression = e;
+    while (ts.isPropertyAccessExpression(cur)) {
+      if (cur.questionDotToken !== undefined) return false;
+      cur = cur.expression;
+    }
+    return ts.isIdentifier(cur);
   }
 
   /** A program class instance: a class the program declares, with no runtime-
