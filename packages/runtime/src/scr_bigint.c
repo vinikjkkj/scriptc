@@ -1025,6 +1025,7 @@ static const ScrDynBigOps scr_big_dyn_ops = {
   scr_big_rel_big,
   scr_big_rel_f64,
   scr_big_rel_str,
+  scr_big_to_f64,
 };
 
 ScrDyn *scr_dyn_from_big(ScrBigInt *b) {

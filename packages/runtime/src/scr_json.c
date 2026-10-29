@@ -4520,6 +4520,22 @@ static bool scr_dyn_is_prim(const ScrDyn *d) {
   }
 }
 
+/* Number(v) over a checked-dynamic value (dyn.numberOf): scr_dyn_to_number,
+ * except that a BigInt answers its nearest double (Number(5n) is 5, where the
+ * arithmetic conversion refuses it) and a Symbol throws the TypeError that
+ * Number() throws. Borrows; throws on the reference kinds as scr_dyn_to_number
+ * does. */
+double scr_dyn_number_of(const ScrDyn *d) {
+  /* A BIG value exists only when the gated bigint unit is linked, so its ops table is installed. */
+  if (d && d->kind == SCR_DYN_BIG) return scr_dyn_big_ops()->to_f64(d->v.big);
+  if (d && d->kind == SCR_DYN_HANDLE && d->v.handle.tag == SCR_DYNH_SYMBOL) {
+    static const char msg[] = "Cannot convert a Symbol value to a number";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return (double)NAN;
+  }
+  return scr_dyn_to_number(d);
+}
+
 /* ToNumber (ECMA-262 7.1.4) over a dyn value — the numeric sibling of
  * scr_dyn_truthy (ToBoolean) and scr_dyn_string_coerce (ToString), and the
  * conversion every arithmetic, bitwise and relational operator performs on
@@ -4544,6 +4560,14 @@ double scr_dyn_to_number(const ScrDyn *d) {
     case SCR_DYN_NULL: return 0.0;
     case SCR_DYN_UNDEF: return (double)NAN;
     case SCR_DYN_BIG: break; /* the documented BigInt refusal, unchanged */
+    case SCR_DYN_FUNC:
+      /* A function's ToPrimitive is its source text (Function.prototype
+       * .toString), which this build cannot always produce. The NUMBER of
+       * any function source text is NaN regardless of the text: it always
+       * starts with a keyword, an identifier or punctuation and carries a
+       * parameter list or an arrow, so it is never a StringToNumber literal.
+       * Answering NaN here is the exact result and avoids stringifying. */
+      return (double)NAN;
     default: {
       /* A REFERENCE kind. ToNumber's first step is ToPrimitive with the
        * NUMBER hint (7.1.4 step 1), which runs a user valueOf/toString;
@@ -6395,12 +6419,62 @@ static ScrDyn *scr_toprim_try(const ScrDyn *d, const char *name, size_t len) {
   return NULL;
 }
 
+/* One user method of a COMPILED class instance, by name, called with the
+ * instance as the receiver (ECMA-262 OrdinaryToPrimitive step 2.a-2.c). The
+ * member table is the one a dyn method call reads (scr_dyn_objinst_member_get),
+ * so a valueOf/toString the class declares answers here exactly as it answers
+ * `x.valueOf()` on a dyn receiver. *found is false when the table has no row
+ * of that name (the caller then keeps the rest of the protocol). Borrows the
+ * instance; +1 primitive, or NULL with *found true and no exception (the
+ * method answered an object), or NULL with the exception pending (it threw). */
+static ScrDyn *scr_toprim_objinst_try(const ScrDyn *d, const char *name, size_t len, bool *found) {
+  *found = false;
+  /* The member row is read here, not through scr_dyn_objinst_member_get:
+   * that lives in the gated dyn-invoke unit, which a program that never
+   * reaches a dyn method call does not link. A METHOD row runs with the
+   * instance as the receiver, the same entry the dyn call uses. */
+  const ScrDynClassMember *cm = scr_dyn_objinst_member(d, name, len);
+  if (cm == NULL || cm->call == NULL) return NULL; /* absent, or a data row */
+  *found = true;
+  ScrDyn *r = cm->call(d->v.inst.o, NULL, 0, name);
+  if (!r) return NULL; /* threw - pending */
+  if (scr_dyn_is_prim(r) || r->kind == SCR_DYN_BIG) return r; /* +1 */
+  scr_dyn_release(r);
+  return NULL;
+}
+
 ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
   if (d == NULL) {
     scr_dyn_check_fail(NULL, "a primitive value", d);
     return NULL;
   }
   if (scr_dyn_is_prim(d) || d->kind == SCR_DYN_BIG) return scr_dyn_retain((ScrDyn *)d);
+  /* A compiled class instance whose class DECLARES valueOf or toString: the
+   * member table carries the method, so the same protocol the OBJ arm runs
+   * below applies, method order by hint. */
+  if (d->kind == SCR_DYN_OBJINST) {
+    const char *first = hint == SCR_TOPRIM_STRING ? "toString" : "valueOf";
+    const char *second = hint == SCR_TOPRIM_STRING ? "valueOf" : "toString";
+    size_t fl = hint == SCR_TOPRIM_STRING ? 8 : 7;
+    size_t sl = hint == SCR_TOPRIM_STRING ? 7 : 8;
+    bool f1 = false, f2 = false;
+    ScrDyn *r = scr_toprim_objinst_try(d, first, fl, &f1);
+    if (r) return r;
+    if (scr_exc_pending()) return NULL;
+    r = scr_toprim_objinst_try(d, second, sl, &f2);
+    if (r) return r;
+    if (scr_exc_pending()) return NULL;
+    /* Both protocol methods answered objects only when the toString row
+     * exists and answered one: a missing valueOf is Object.prototype's, which
+     * answers the object itself, so the chain is exhausted. A missing
+     * toString falls through to the built-in table below, which is the
+     * "[object Object]" answer. */
+    if (hint == SCR_TOPRIM_STRING ? f1 : f2) {
+      static const char msg[] = "Cannot convert object to primitive value";
+      scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+      return NULL;
+    }
+  }
   /* Only SCR_DYN_OBJ carries a member table a user valueOf/toString can
    * live in; every other reference kind takes the built-in table below. */
   if (d->kind == SCR_DYN_OBJ) {
@@ -6428,16 +6502,17 @@ ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
       return NULL;
     }
   }
-  /* A compiled class instance has no member table to dispatch a user
-   * valueOf/toString through, so the built-in table below cannot answer for
-   * it and its arm there is a fence -- a fence whose wording names String().
-   * That wording is wrong HERE: every caller of this function is an operator
+  /* A compiled class instance WITH a member table answers through the
+   * toString arm of scr_dyn_to_string below (its own row, or the
+   * "[object Object]" constant). One WITHOUT a table keeps the fence here: a
+   * fence whose wording names String() in that arm, which is wrong for this
+   * caller, because every caller of this function is an operator
    * that wanted a PRIMITIVE (`+`, `<`, ToNumber, `==`), and none of them
    * asked for a string. Refuse in this function's own terms instead, which
    * also gets the error CLASS right: JS's own failure to convert an object
    * to a primitive is a TypeError, and scr_dyn_check_fail throws one.
    * Refusal before, refusal after -- only the message changes. */
-  if (d->kind == SCR_DYN_OBJINST) {
+  if (d->kind == SCR_DYN_OBJINST && !scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_error_rooted(d)) {
     scr_dyn_check_fail(NULL, "a primitive value", d);
     return NULL;
   }
