@@ -3593,6 +3593,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // `x.constructor.<member>` on a program class instance: the class value
       // is dyn (lowerInstanceConstructorRead), so the member reads through it
       // like any untyped receiver, whatever the checker's `Function` says.
+      // `prim.constructor.name` on a primitive (or a union of scalar arms): the
+      // builtin wrapper's name, per arm, as Node answers it.
+      {
+        const primName = lowerPrimCtorName(L, expr);
+        if (primName !== null) return L.maybeNarrow(primName, expr);
+      }
       if (isInstanceConstructorRead(L, expr.expression) && expr.questionDotToken === undefined) {
         const ctor = lowerInstanceConstructorRead(L, expr.expression);
         if (ctor !== null) {
@@ -19813,6 +19819,44 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       type: DYN,
       loc,
     };
+  }
+
+  /** `x.constructor.name` where x is a primitive (string, number, boolean, bigint)
+   * or a union of those arms: the name of the builtin wrapper that x's arm
+   * constructs ("String", "Number", "Boolean", "BigInt"), per arm. Any other arm
+   * or an effectful receiver keeps its fence (null). */
+  function lowerPrimCtorName(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.name.text !== "name" || expr.questionDotToken !== undefined) return null;
+    const c = expr.expression;
+    if (!ts.isPropertyAccessExpression(c) || c.name.text !== "constructor" || c.questionDotToken !== undefined) return null;
+    const recvT = L.mapTypeOf(L.typeOf(c.expression));
+    if (recvT?.kind !== "union" && recvT?.kind !== "string" && recvT?.kind !== "f64" && recvT?.kind !== "bool" && recvT?.kind !== "bigint") return null;
+    const value = L.lowerExpr(c.expression);
+    if (value.type.kind !== recvT.kind || !pureReemittable(value)) return null;
+    const loc = locOf(expr);
+    const nameOf = (t: IrType): string | null =>
+      t.kind === "string" ? "String" : t.kind === "f64" ? "Number" : t.kind === "bool" ? "Boolean" : t.kind === "bigint" ? "BigInt" : null;
+    if (value.type.kind !== "union") {
+      const n = nameOf(value.type);
+      return n === null ? null : { kind: "strLit", value: n, type: STRING, loc };
+    }
+    const unionId = value.type.unionId;
+    const arms = L.unions.get(unionId)?.arms ?? [];
+    if (arms.length === 0) return null;
+    const names = arms.map(nameOf);
+    if (names.some((n) => n === null)) return null;
+    let r: IrExpr = { kind: "strLit", value: names[names.length - 1]!, type: STRING, loc };
+    for (let tag = names.length - 2; tag >= 0; tag--) {
+      r = {
+        kind: "ternary",
+        cond: { kind: "unionIsTag", unionId, tag, negated: false, value, type: BOOL, loc },
+        then: { kind: "strLit", value: names[tag]!, type: STRING, loc },
+        else_: r,
+        type: STRING,
+        loc,
+      };
+    }
+    return r;
   }
 
   function lowerBytesCtorTest(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr | null {
