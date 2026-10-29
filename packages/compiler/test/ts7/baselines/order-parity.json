@@ -5516,6 +5516,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15726-object-is-dyn-regexp-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/15726-object-is-dyn-regexp-identity.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1573-promisify-execfile-env-spread.ts": {
    "order": [
     "<repo>/tests/corpus/1573-promisify-execfile-env-spread.ts"
