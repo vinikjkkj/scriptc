@@ -5908,6 +5908,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15968-timers-promises-warning-tick-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/15968-timers-promises-warning-tick-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1597-mjs-graph/main.mjs": {
    "order": [
     "<repo>/tests/corpus/1597-mjs-graph/util.mjs",
