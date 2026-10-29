@@ -5,6 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { canConvertToDyn, strandTrap } from "../../ir/nodes.js";
+import { isProvenBufferRefinement } from "../buffer-refinement.js";
 import { BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { checkedArmBridge, lowerUnionContainerDispatch, captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
@@ -8260,6 +8261,7 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
    * view-not-copy aliasing), so the two surfaces lower differently and the
    * declaration site is what tells them apart. */
   function bytesMemberDeclaredOnBuffer(L: Lowerer, access: ts.PropertyAccessExpression): boolean {
+    if (isBufferRefinementReceiver(L, access.expression)) return true;
     const nameSym = L.checker.getSymbolAtLocation(access.name);
     return nameSym !== undefined && L.checker.declarationsOf(nameSym).some(
       (d) => ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === "Buffer",
@@ -8348,13 +8350,29 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     return names.has(name);
   }
 
+  /** A receiver typed as a PROVEN Buffer refinement (`ArrayBufferView & Uint8Array &
+   * { write(...); ... }`, buffer-refinement.ts): its members are the native Buffer
+   * members of the same names, so the Buffer lowerings apply. */
+  function isBufferRefinementReceiver(L: Lowerer, expr: ts.Expression): boolean {
+    return isProvenBufferRefinement(
+      L.typeOf(expr),
+      L.checker,
+      L.loweringProgram,
+      L.isStdlibFile,
+      (p) => {
+        const m = L.mapTypeOf(p);
+        return m !== null && m.kind === "bytes" && m.elem === "u8";
+      },
+    );
+  }
+
   export function lowerBytesMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
     const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
     if (receiverIr?.kind !== "bytes") return null;
-    if (!L.isStdlibMember(access)) return null;
+    if (!L.isStdlibMember(access) && !isBufferRefinementReceiver(L, access.expression)) return null;
     const loc = locOf(call);
     const nArgs = call.arguments.length;
     // A Buffer/Uint8Array call of a name some write can own (see bytesOwnWriteNames): the call checks the value's own table first. The dyn method route
@@ -8523,12 +8541,7 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       // Buffer's toString(encoding?) — utf8 by default. A 0-arg toString
       // resolved against the plain Uint8Array interface is JS's
       // Array-toString (comma join), a different operation: fenced.
-      const declaredOnBuffer = (() => {
-        const nameSym = L.checker.getSymbolAtLocation(access.name);
-        return nameSym !== undefined && L.checker.declarationsOf(nameSym).some(
-          (d) => ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === "Buffer",
-        );
-      })();
+      const declaredOnBuffer = bytesMemberDeclaredOnBuffer(L, access);
       if (receiverIr.elem !== "u8" || !declaredOnBuffer) {
         L.noLowering(
           "typed-array toString",
@@ -8577,12 +8590,7 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     // TypedArray member — indexOf, includes, fill — the semantics differ,
     // so only Buffer-declared resolutions lower and u8 receivers gate the
     // rest).
-    const declOnBuffer = (() => {
-      const nameSym = L.checker.getSymbolAtLocation(access.name);
-      return nameSym !== undefined && L.checker.declarationsOf(nameSym).some(
-        (d) => ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === "Buffer",
-      );
-    })();
+    const declOnBuffer = bytesMemberDeclaredOnBuffer(L, access);
     if (declOnBuffer && receiverIr.elem === "u8") {
       const bufMethod = lowerBufferInstanceMethod(L, call, access, name, loc);
       if (bufMethod) return bufMethod;
