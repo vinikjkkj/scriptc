@@ -6369,6 +6369,8 @@ bool scr_dyn_typeof_is_object(const ScrDyn *d);
  * they keep the loud dynCheck throw that names the site. Args borrowed;
  * these throw only there (scr_exc_pending; scr_dyn_add answers NULL). */
 double scr_dyn_to_number(const ScrDyn *d);
+/* Number(v) over a checked-dynamic value (see dyn.numberOf): scr_dyn_to_number, with the BigInt arm answering its double and the Symbol arm the Number() TypeError. */
+double scr_dyn_number_of(const ScrDyn *d);
 ScrDyn *scr_dyn_add(const ScrDyn *a, const ScrDyn *b);
 bool scr_dyn_lt(const ScrDyn *a, const ScrDyn *b);
 bool scr_dyn_le(const ScrDyn *a, const ScrDyn *b);
@@ -7114,6 +7116,7 @@ typedef struct ScrDynBigOps {
   int (*rel_big)(const ScrBigInt *a, const ScrBigInt *b);  /* -1/0/1 by value */
   int (*rel_f64)(const ScrBigInt *b, double n);            /* -1/0/1 exact; 2 = NaN (unordered) */
   int (*rel_str)(const ScrBigInt *b, const ScrStr *s);     /* -1/0/1 via StringToBigInt; 2 = no BigInt */
+  double (*to_f64)(const ScrBigInt *b);                    /* Number(b): the nearest double, never throws */
 } ScrDynBigOps;
 
 /* Boxes 64 raw bits as the bigint they spell (signed: two's complement
