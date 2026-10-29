@@ -20476,6 +20476,54 @@
       "<repo>/tests/corpus/15859-date-parse-min-max-range.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/15960-timers-promises-value-scalars.ts": {
+   "order": [
+    "<repo>/tests/corpus/15960-timers-promises-value-scalars.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15961-timers-promises-value-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/15961-timers-promises-value-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15962-timers-promises-abort-preaborted.ts": {
+   "order": [
+    "<repo>/tests/corpus/15962-timers-promises-abort-preaborted.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15963-timers-promises-abort-midwait.ts": {
+   "order": [
+    "<repo>/tests/corpus/15963-timers-promises-abort-midwait.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15964-timers-promises-unref-exit.ts": {
+   "order": [
+    "<repo>/tests/corpus/15964-timers-promises-unref-exit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15965-timers-promises-delay-warning.ts": {
+   "order": [
+    "<repo>/tests/corpus/15965-timers-promises-delay-warning.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15966-timers-promises-value-dyn-loop.ts": {
+   "order": [
+    "<repo>/tests/corpus/15966-timers-promises-value-dyn-loop.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15967-timers-promises-abort-reason-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/15967-timers-promises-abort-reason-value.ts"
+   ],
+   "diags": []
   }
  }
 }
