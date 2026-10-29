@@ -6030,6 +6030,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16080-loop-name-emit-forwards.js": {
+   "order": [
+    "<repo>/tests/corpus/16080-loop-name-emit-forwards.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16081-loop-name-error-once.js": {
+   "order": [
+    "<repo>/tests/corpus/16081-loop-name-error-once.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16082-forward-var-listener-once.js": {
+   "order": [
+    "<repo>/tests/corpus/16082-forward-var-listener-once.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16083-forward-var-listener-remove.js": {
+   "order": [
+    "<repo>/tests/corpus/16083-forward-var-listener-remove.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16084-loop-name-off-by-identity.js": {
+   "order": [
+    "<repo>/tests/corpus/16084-loop-name-off-by-identity.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1609-assert-async.ts": {
    "order": [
     "<repo>/tests/corpus/1609-assert-async.ts"
