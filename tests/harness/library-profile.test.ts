@@ -456,6 +456,7 @@ describe("library profile fences", () => {
       "stdlib.date.newParts",
       "stdlib.date.newStr",
       "stdlib.date.now",
+      "stdlib.date.parse",
       "stdlib.date.set",
       "stdlib.date.toISOString",
       "stdlib.date.toString",

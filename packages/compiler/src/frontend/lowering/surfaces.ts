@@ -1150,6 +1150,13 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     note: "the global Promise used as a value fills a PromiseConstructor-typed slot; the singleton carries no members",
   },
   {
+    id: "stdlib.date.parse",
+    kind: "stdlib",
+    name: "Date.parse",
+    fns: ["date.parseGetTime"],
+    note: "Date.parse(string): V8's date-string parser, the one new Date(string) uses",
+  },
+  {
     id: "stdlib.date.UTC",
     kind: "stdlib",
     name: "Date.UTC",
@@ -1213,7 +1220,7 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     kind: "stdlib",
     name: "new Date(string)",
     fns: ["date.newStr"],
-    note: "the VALUE-constructing string form (distinct from stdlib.date.getTime's composed new Date(str).getTime()); runs the same bounded, explicit-offset-only grammar — an offset-less date-time answers NaN rather than consulting a local zone, so this reads no host state",
+    note: "the VALUE-constructing string form (distinct from stdlib.date.getTime's composed new Date(str).getTime()); runs the same date-string parser as Date.parse (V8's grammar; an offset-less date-time is local time, read through the zone table)",
   },
   {
     id: "stdlib.date.value",
