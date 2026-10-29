@@ -94,6 +94,8 @@ import {
   requireSpecOf,
   resolveImport,
   workspacePackageOfPath,
+  isCjsEmitImporter,
+  isExportEqualsModule,
 } from "../program.js";
 import { settleOrValueArms,
   containsRecord,
@@ -2431,6 +2433,39 @@ export class Lowerer {
    * value reference resolves through here, so it doubles as the flush
    * point for deferred collection diagnostics: resolving a reference to a
    * broken declaration reports what collection deferred. */
+  /** The `export =` module a destructured `require` binding element reads a
+   * member of (`const { m } = require("./lib")`), with the member name. A
+   * require is CommonJS by definition, so no importer gate applies. */
+  exportEqualsRequireDepOfBinding(el: ts.BindingElement): { dep: ts.SourceFile; name: string } | null {
+    if (!ts.isObjectBindingPattern(el.parent) || el.dotDotDotToken !== undefined) return null;
+    const decl = el.parent.parent;
+    if (!ts.isVariableDeclaration(decl) || decl.initializer === undefined) return null;
+    const spec = requireSpecOf(decl.initializer);
+    if (spec === null) return null;
+    const sf = decl.getSourceFile();
+    const dep = isRelativeSpecifier(spec) ? resolveImport(this.program, sf, spec) : this.bareRequireDepOf(sf, spec);
+    if (dep === null || !isExportEqualsModule(dep)) return null;
+    const key = el.propertyName ?? el.name;
+    if (key === undefined || !ts.isIdentifier(key)) return null;
+    return { dep, name: key.text };
+  }
+
+  /** The `export =` module a named import specifier binds a member of, when
+   * the importer is a CJS-run TS file (program.ts isCjsEmitImporter), with the
+   * member name. Null for every other import. */
+  exportEqualsNamedImportDepOf(spec: ts.ImportSpecifier): { dep: ts.SourceFile; name: string } | null {
+    const decl = spec.parent.parent.parent;
+    if (!ts.isImportDeclaration(decl) || !ts.isStringLiteral(decl.moduleSpecifier)) return null;
+    const sf = decl.getSourceFile();
+    if (!isCjsEmitImporter(sf)) return null;
+    const specText = decl.moduleSpecifier.text;
+    const dep = isRelativeSpecifier(specText)
+      ? resolveImport(this.program, sf, specText)
+      : this.bareRequireDepOf(sf, specText);
+    if (dep === null || !isExportEqualsModule(dep)) return null;
+    return { dep, name: (spec.propertyName ?? spec.name).text };
+  }
+
   resolveValueSymbol(ident: ts.Identifier): ts.Symbol | null {
     let symbol = this.checker.getSymbolAtLocation(ident);
     // A shorthand property's NAME resolves to the property symbol; the
@@ -2468,6 +2503,10 @@ export class Lowerer {
         }
       }
     }
+    // A NAMED import of a TS `export =` module, read by a CJS-run importer:
+    // the member is the exported value's own property (tsc's CJS emit reads
+    // `(0, m_1.name)`), i.e. the module's export-table entry, the same symbol
+    // a member access on the default import resolves to.
     if (!symbol) return null;
     // A destructured CJS require binding (`const { calc } = require("./m")`):
     // the checker answers an unresolved symbol for a member of a function-valued
@@ -2619,6 +2658,15 @@ export class Lowerer {
    * module-symbol exports map — present in tsgo even where no expando
    * property symbol exists at the attachment/use sites). */
   cjsModuleExportSymbol(sf: ts.SourceFile, name: string): ts.Symbol | undefined {
+    // A TS `export = x` module: its members are the properties of x (the
+    // exported value), the way Node's module.exports reads them.
+    if (isExportEqualsModule(sf)) {
+      for (const stmt of sf.statements) {
+        if (!ts.isExportAssignment(stmt) || !stmt.isExportEquals) continue;
+        const member = this.checker.getPropertyOfType(this.checker.getTypeAtLocation(stmt.expression), name);
+        if (member !== undefined) return member;
+      }
+    }
     const moduleSym = this.checker.getSymbolAtLocation(sf);
     const found = moduleSym?.getExports().get(name as ts.__String);
     if (found !== undefined) return found;

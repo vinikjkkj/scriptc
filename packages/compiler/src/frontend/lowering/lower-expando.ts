@@ -185,6 +185,10 @@ export function assertExpandoAccounting(c: typeof expandoCounters): void {
  * read becomes a hard "reading 'X' from a value of type '{ (…): …; X: … }'"
  * error, which is strictly worse than the fence it replaced). */
 function expandoFnSymbolOf(L: Lowerer, recv: ts.Expression): ts.Symbol | null {
+  if (ts.isIdentifier(recv)) {
+    const self = exportEqualsSelfMemberFnOf(L, recv);
+    if (self !== null) return self;
+  }
   if (!ts.isIdentifier(recv)) {
     if (
       !ts.isPropertyAccessExpression(recv) || recv.questionDotToken !== undefined ||
@@ -705,4 +709,67 @@ export function lowerExpandoAssignStmt(L: Lowerer, expr: ts.BinaryExpression): I
   if (!target) return null;
   const value = L.lowerExprExpecting(expr.right, target.type);
   return { kind: "assign", localId: target.id, value, loc: locOf(expr) };
+}
+
+/** A reference to a NAMED import binding of a TS `export =` module
+ * (`import { m } from "./lib"`, read by a CJS-run importer): the member `m` of
+ * the exported function, the module global `fn.m` reads (expandoMembers).
+ * tsc's CJS emit re-reads the property at every use (`(0, lib_1.m)(...)`),
+ * and so does the global. Null for every other identifier, and for a member
+ * the registry does not carry (the caller's fences answer those). */
+export function exportEqualsNamedMemberRead(L: Lowerer, ident: ts.Identifier): IrExpr | null {
+  const sym = L.checker.getSymbolAtLocation(ident);
+  const decls = sym ? L.checker.declarationsOf(sym) : [];
+  const spec = decls.find(ts.isImportSpecifier);
+  // `const { m } = require("./lib")` — the destructured CJS spelling of the
+  // same member read (a binding element of an object pattern).
+  const bindingEl = decls.find(ts.isBindingElement);
+  const named =
+    spec !== undefined ? L.exportEqualsNamedImportDepOf(spec) : bindingEl !== undefined ? L.exportEqualsRequireDepOfBinding(bindingEl) : null;
+  if (named === null) return null;
+  const stmt = named.dep.statements.find((s) => ts.isExportAssignment(s) && s.isExportEquals);
+  if (stmt === undefined || !ts.isExportAssignment(stmt)) return null;
+  let value: ts.Expression = stmt.expression;
+  while (ts.isParenthesizedExpression(value)) value = value.expression;
+  if (!ts.isIdentifier(value)) return null;
+  const fnSym = L.resolveValueSymbol(value);
+  if (!fnSym) return null;
+  const member = L.expandoMembers.get(fnSym)?.get(named.name);
+  if (!member) return null;
+  return { kind: "varRef", localId: member.global.id, type: member.global.type, loc: locOf(ident) };
+}
+
+/** The function an `export =` module exports, when its export value is a
+ * plain identifier naming a module-level function declaration. */
+function exportEqualsFnSymbolOf(L: Lowerer, dep: ts.SourceFile): ts.Symbol | null {
+  const stmt = dep.statements.find((s) => ts.isExportAssignment(s) && s.isExportEquals);
+  if (stmt === undefined || !ts.isExportAssignment(stmt)) return null;
+  let value: ts.Expression = stmt.expression;
+  while (ts.isParenthesizedExpression(value)) value = value.expression;
+  return ts.isIdentifier(value) ? L.resolveValueSymbol(value) : null;
+}
+
+/** A named import `{ m }` of an `export =` function whose member `m` is the
+ * function itself (`fn.m = fn` in the exporter): the reference IS the
+ * exported function, so its own member reads (`m.tag`, `m.default`) route to
+ * the function's registry exactly as `fn.tag` does. Null for every other
+ * reference. */
+export function exportEqualsSelfMemberFnOf(L: Lowerer, recv: ts.Identifier): ts.Symbol | null {
+  const alias = L.checker.getSymbolAtLocation(recv);
+  const spec = alias ? L.checker.declarationsOf(alias).find(ts.isImportSpecifier) : undefined;
+  if (spec === undefined) return null;
+  const named = L.exportEqualsNamedImportDepOf(spec);
+  if (named === null) return null;
+  const fnSym = exportEqualsFnSymbolOf(L, named.dep);
+  if (fnSym === null) return null;
+  const selfWrite = named.dep.statements.some((stmt) => {
+    if (!ts.isExpressionStatement(stmt) || !ts.isBinaryExpression(stmt.expression)) return false;
+    const e = stmt.expression;
+    if (e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false;
+    const l = e.left;
+    if (!ts.isPropertyAccessExpression(l) || !ts.isIdentifier(l.name) || l.name.text !== named.name) return false;
+    if (!ts.isIdentifier(l.expression) || !ts.isIdentifier(e.right)) return false;
+    return L.resolveValueSymbol(l.expression) === fnSym && L.resolveValueSymbol(e.right) === fnSym;
+  });
+  return selfWrite ? fnSym : null;
 }
