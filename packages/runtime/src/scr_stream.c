@@ -4779,6 +4779,10 @@ bool scr_stream_dyn_instanceof(const ScrDyn *d, double which) {
       return c == C_EMITTER;
     case SCR_DYNH_NET_SERVER: /* net.Server extends EventEmitter */
       return c == C_EMITTER || c == C_SERVER;
+    case SCR_DYNH_PROC_STREAM: { /* process.stdout/stderr: the stdio kind decides (scr_lib.c) */
+      const bool duplex = scr_process_stdio_is_duplex((double)(int)(uintptr_t)d->v.handle.ptr);
+      return c == C_STREAM || c == C_WRITABLE || c == C_EMITTER || (duplex && (c == C_READABLE || c == C_DUPLEX || c == C_SOCKET));
+    }
     default:
       return false;
   }

@@ -2915,6 +2915,19 @@ ScrStr *scr_atomics_wait(ScrBytes *arr, double idx, double expected, double time
 
 bool scr_process_is_tty(double fd) { return isatty((int)fd) != 0; }
 
+/* Node's stdio kind decides the class row of process.stdout/stderr
+ * (createWritableStdioStream): a TTY or a pipe/socket is a Socket-backed
+ * Duplex (Readable and Duplex true, net.Socket true); a regular file or a
+ * character device (libuv's UV_FILE) is a SyncWriteStream (Writable only).
+ * Measured on $NODE_CI v24.15.0 on Linux for pipe, file and TTY (stdout and
+ * stderr each). Windows: the same rule, not measured here. */
+bool scr_process_stdio_is_duplex(double fd) {
+  if (isatty((int)fd)) return true;
+  struct stat st;
+  if (fstat((int)fd, &st) != 0) return false; /* a dead fd: Node's dummy Writable */
+  return !(S_ISREG(st.st_mode) || S_ISCHR(st.st_mode));
+}
+
 /* Terminal width for process.stdout/stderr.columns: ioctl(TIOCGWINSZ) on
  * the stream's fd, exactly Node's tty.WriteStream source of truth. A
  * non-TTY stream, or a terminal that refuses the ioctl, answers -1 and

@@ -3469,6 +3469,7 @@ ScrStr *scr_atomics_wait(ScrBytes *arr, double idx, double expected, double time
  * non-TTY streams expose undefined (SEMANTICS.md). stdin_destroy is a
  * documented no-op. */
 bool scr_process_is_tty(double fd);
+bool scr_process_stdio_is_duplex(double fd);
 void scr_process_stdin_destroy(void);
 void scr_process_stdin_set_raw_mode(bool raw);
 
