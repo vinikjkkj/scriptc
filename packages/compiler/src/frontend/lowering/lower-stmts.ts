@@ -27,7 +27,7 @@ import { bufferSpeciesAliasDecl, ForOfIterProjection, lowerForOfArrayIter, lower
 import { jsLetWidened, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
-import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation, staticBagWrite } from "./lower-classes.js";
+import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation, staticBagWrite, superReturnStmt, lowerSuperFlagStatement } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
@@ -1127,7 +1127,11 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     }
     // The recognised applyMixin(Y, EventEmitter) graft: Y already carries the emitter slot (lower-emitter-mixin.ts).
     if (isEmitterMixinStatement(L, stmt)) return null;
-    if (ts.isExpressionStatement(stmt)) return L.lowerExprStatement(stmt.expression);
+    if (ts.isExpressionStatement(stmt)) {
+      const superStmt = lowerSuperFlagStatement(L, stmt);
+      if (superStmt !== null) return superStmt;
+      return L.lowerExprStatement(stmt.expression);
+    }
     // `export default <expr>` (top-level only — preflight admitted it):
     // the assignment of the module's pre-registered `default` global.
     if (ts.isExportAssignment(stmt) && !stmt.isExportEquals) {
@@ -1187,6 +1191,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     if (ts.isLabeledStatement(stmt)) return lowerLabeled(L, stmt);
     if (ts.isReturnStatement(stmt)) {
       L.rejectJumpCrossingFinally("return", stmt);
+      if (L.ctx.superFlag) return superReturnStmt(L, stmt, locOf(stmt));
       // `return a, b, v;` — the returned expression is a COMMA SEQUENCE, so
       // the leading operands run for effect in real statement position and
       // only the tail is the returned value. See returnSequenceOf.

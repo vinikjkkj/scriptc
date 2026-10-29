@@ -36,7 +36,7 @@ import { ambientErasedIdent, ambientNsRootOf, ambientUndefReadType, ambientUndef
 import { expandoMemberRead, expandoWritableTarget, exportEqualsNamedMemberRead } from "./lower-expando.js";
 import { LITERAL_IGNORED_KEYS, lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
-import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
+import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead, superGuardedThis } from "./lower-classes.js";
 import { jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
@@ -2430,7 +2430,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (local) {
         const detachedCls = detachedThisClassOf(local);
         if (detachedCls !== undefined) return detachedThisExpr(expr, local, detachedCls);
-        return { kind: "varRef", localId: local.id, type: local.type, loc };
+        const ref: IrExpr = { kind: "varRef", localId: local.id, type: local.type, loc };
+        // SUPER-FLAG constructor: the read throws until super() has run.
+        if (L.ctx.superFlag && local.id === L.ctx.superFlag.thisLocal.id) return superGuardedThis(L, ref, loc);
+        return ref;
       }
       // `this` in a plain JS FUNCTION (not a method): the AMBIENT
       // RECEIVER (libCall dyn.this — scr_dyn_this_get). Firing sites bind
