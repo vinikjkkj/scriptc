@@ -20256,6 +20256,18 @@
       "<repo>/tests/corpus/15819-stringify-space-and-allowlist-combined.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/15820-stringify-console-dropped-root.ts": {
+    "order": [
+      "<repo>/tests/corpus/15820-stringify-console-dropped-root.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15821-stringify-allowlist-proto-stand-in.ts": {
+    "order": [
+      "<repo>/tests/corpus/15821-stringify-allowlist-proto-stand-in.ts"
+    ],
+    "diags": []
   }
  }
 }
