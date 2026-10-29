@@ -7,6 +7,15 @@ weakmap-refused-keys.ts:52:17 - error SC1090: a WeakMap key of type 'Rec' on a t
 
   hint: a weak entry is keyed by ADDRESS, so the runtime must see the key die before its storage goes back — a number, a string, a boolean and a bigint have no address at all, a record is COPIED at the crossing, and a class instance can be emitted with no cycle header and never reach a free the runtime hooks. A Uint8Array, an array, or a value that is already 'unknown' all cross with their identity intact. Otherwise hold this key strongly in a Map
 
+weakmap-refused-keys.ts:61:17 - error SC1090: a WeakMap key of type 'Holder' on a table whose key type is 'object' (the key crosses into a dynamic value, and this kind arrives there with no address the runtime can watch die) is not supported yet
+
+  60 | }
+  61 | objectKeyed.set(new Holder(1), new Uint8Array([2]));
+     |                 ^~~~~~~~~~~~~
+  62 | 
+
+  hint: a weak entry is keyed by ADDRESS, so the runtime must see the key die before its storage goes back — a number, a string, a boolean and a bigint have no address at all, a record is COPIED at the crossing, and a class instance can be emitted with no cycle header and never reach a free the runtime hooks. A Uint8Array, an array, or a value that is already 'unknown' all cross with their identity intact. Otherwise hold this key strongly in a Map
+
 weakmap-refused-keys.ts:66:17 - error SC1090: a WeakMap key of type 'Map<string, number>' on a table whose key type is 'object' (the key crosses into a dynamic value, and this kind arrives there with no address the runtime can watch die) is not supported yet
 
   65 | const table = new Map<string, number>();
