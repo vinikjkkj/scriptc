@@ -4848,6 +4848,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15460-pgwritable-stdout-state-dyn.ts": {
+   "order": [
+    "<repo>/tests/corpus/15460-pgwritable-stdout-state-dyn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15461-pgwritable-stderr-warn-guard.ts": {
+   "order": [
+    "<repo>/tests/corpus/15461-pgwritable-stderr-warn-guard.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15462-pgwritable-dyn-state-agrees.ts": {
+   "order": [
+    "<repo>/tests/corpus/15462-pgwritable-dyn-state-agrees.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15463-pgwritable-stream-alias-state.ts": {
+   "order": [
+    "<repo>/tests/corpus/15463-pgwritable-stream-alias-state.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15464-pgwritable-stdio-instanceof.ts": {
+   "order": [
+    "<repo>/tests/corpus/15464-pgwritable-stdio-instanceof.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1547-computed-key-fold.ts": {
    "order": [
     "<repo>/tests/corpus/1547-computed-key-fold.ts"
@@ -19138,6 +19168,12 @@
   "<repo>/tests/fixtures/node-types/path-os.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/path-os.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
    ],
    "diags": []
   },
