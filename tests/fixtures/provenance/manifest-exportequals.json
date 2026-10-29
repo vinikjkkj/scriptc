@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "exportequals": {
+      "dir": "./attested-src/exportequals",
+      "commit": "0000000000000000000000000000000000000000",
+      "repo": "https://github.com/example/exportequals"
+    }
+  }
+}
