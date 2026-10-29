@@ -21,6 +21,7 @@ import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPat
 import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
 import { fenceDynRecordCasts } from "./dyn-record-fence.js";
+import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
 import type { EnumRefill, NullProtoPatch, OwnKeyPatch, SlotFilledPatch } from "./ir-patch.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -3609,6 +3610,17 @@ export class Lowerer {
         (d) => this.pushDiag(d),
       );
     }
+    // Object.create(null) converted into a typed record with declared members
+    // (null-proto-fence.ts): unconditional, the converter would throw at run time
+    // on an absent member where Node answers undefined.
+    fenceNullProtoRecordCasts(
+      {
+        shapeGet: (id) => this.shapes.get(id),
+        unionGet: (id) => this.unions.get(id),
+      },
+      { irVersion: 4, sourceFile: this.entry.fileName, functions, classes: artifacts.classes, globals: this.globalsList } as unknown as IrModule,
+      (d) => this.pushDiag(d),
+    );
     // Every shape a dynCheck MATERIALISES arms its hidden own-key mask —
     // after the whole walk, so the answer does not depend on whether the
     // cast was lowered before or after the surface that enumerates it.

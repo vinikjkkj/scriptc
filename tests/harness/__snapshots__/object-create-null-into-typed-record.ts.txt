@@ -1,0 +1,26 @@
+object-create-null-into-typed-record.ts:10:40 - error SC1090: Object.create(null) assigned to a typed record with declared member is not supported yet
+
+   9 | function parse(s: string): number { return s.length; }
+  10 | const EJSON: { parse: typeof parse } = Object.create(null);
+     |                                        ^~~~~~~~~~~~~~~~~~~
+  11 | EJSON.parse = parse;
+
+  hint: the record declares { parse }: a member must exist when the binding is initialised (a member not written yet is absent there, where Node reads undefined), and the record keeps the declared key order where Object.create(null) keeps the order the program writes. Leave the table untyped (const table = Object.create(null)), or type it as a dictionary (Record<string, T>).
+
+object-create-null-into-typed-record.ts:14:43 - error SC1090: Object.create(null) assigned to a typed record with declared member is not supported yet
+
+  13 | // Optional members still reorder Object.keys.
+  14 | const table: { a?: number; b?: number } = Object.create(null);
+     |                                           ^~~~~~~~~~~~~~~~~~~
+  15 | table.b = 2;
+
+  hint: the record declares { a, b }: a member must exist when the binding is initialised (a member not written yet is absent there, where Node reads undefined), and the record keeps the declared key order where Object.create(null) keeps the order the program writes. Leave the table untyped (const table = Object.create(null)), or type it as a dictionary (Record<string, T>).
+
+object-create-null-into-typed-record.ts:20:10 - error SC1090: Object.create(null) assigned to a typed record with declared member is not supported yet
+
+  19 | function make(): { a: number } {
+  20 |   return Object.create(null);
+     |          ^~~~~~~~~~~~~~~~~~~
+  21 | }
+
+  hint: the record declares { a }: a member must exist when the binding is initialised (a member not written yet is absent there, where Node reads undefined), and the record keeps the declared key order where Object.create(null) keeps the order the program writes. Leave the table untyped (const table = Object.create(null)), or type it as a dictionary (Record<string, T>).
