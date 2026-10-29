@@ -17855,12 +17855,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/a-compound-array-element-write-through-an-accessor-receiver.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/a-compound-array-element-write-through-an-accessor-receiver.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/a-dynamic-only-call-on-a-receiver-that-cannot-be-read.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-dynamic-only-call-on-a-receiver-that-cannot-be-read.ts"
@@ -20106,6 +20100,42 @@
     "<repo>/tests/corpus/15642-string-codepointat-dyn-receiver.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/15620-compound-operators-on-dyn-field-chain.ts": {
+    "order": [
+      "<repo>/tests/corpus/15620-compound-operators-on-dyn-field-chain.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15621-compound-element-side-effect-receiver-and-key-once.ts": {
+    "order": [
+      "<repo>/tests/corpus/15621-compound-element-side-effect-receiver-and-key-once.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15622-logical-assignment-on-dyn-and-typed-targets.ts": {
+    "order": [
+      "<repo>/tests/corpus/15622-logical-assignment-on-dyn-and-typed-targets.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15623-logical-assignment-through-accessors.ts": {
+    "order": [
+      "<repo>/tests/corpus/15623-logical-assignment-through-accessors.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15624-string-append-through-dyn-url-record.ts": {
+    "order": [
+      "<repo>/tests/corpus/15624-string-append-through-dyn-url-record.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15625-compound-element-write-through-accessor-receiver.ts": {
+    "order": [
+      "<repo>/tests/corpus/15625-compound-element-write-through-accessor-receiver.ts"
+    ],
+    "diags": []
   }
  }
 }
