@@ -8055,6 +8055,10 @@ static void scr_jb_put_dyn_keyed(ScrJsonBuf *b, const ScrDyn *d, const char *key
   scr_dyn_release(sub);
 }
 
+int scr_dyn_json_dropped(const ScrDyn *d) {
+  return d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_FUNC;
+}
+
 void scr_jb_put_dyn(ScrJsonBuf *b, const ScrDyn *d) {
   scr_jb_put_dyn_keyed(b, d, "", 0); /* JSON's root key */
 }

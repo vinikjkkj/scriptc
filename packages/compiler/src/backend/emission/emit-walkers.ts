@@ -1071,8 +1071,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // A NUMBER field may hold the NaN-marked undefined (scr_runtime.h), which
         // JSON drops like any undefined-valued own property: such a field makes
         // the shape droppable.
+        // A DYN field (program-authored `any` member) drops when it holds
+        // undefined or a function: scr_dyn_json_dropped, the object-member rule.
         const droppable =
-          emitFields.some((f) => E.undefinedArmTag(f.type) >= 0 || f.type.kind === "f64") ||
+          emitFields.some((f) => E.undefinedArmTag(f.type) >= 0 || f.type.kind === "f64" || f.type.kind === "dyn") ||
           !!shape.indexValue ||
           shape.ownmask === true;
         d.push(`  scr_jb_putc(b, '{');`);
@@ -1094,6 +1096,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // field drops like Node, and on a shape a crossing wrote, so
             // does a member the source object only INHERITED.
             let cond = ownPresentCondC(shape, f.name, "v", utag, true);
+            if (f.type.kind === "dyn") {
+              const notDropped = `!scr_dyn_json_dropped(v->${mangleField(f.name)})`;
+              cond = cond === null ? notDropped : `(${cond}) && ${notDropped}`;
+            }
             if (f.type.kind === "f64") {
               const notMarker = `!scr_num_is_undef(v->${mangleField(f.name)})`;
               cond = cond === null ? notMarker : `(${cond}) && ${notMarker}`;

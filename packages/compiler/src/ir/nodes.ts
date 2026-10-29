@@ -8586,7 +8586,6 @@ function isJsonSafeAt(
     case "sqliteStmt":
     case "childStream":
     case "procStream":
-    case "dyn":
     case "jsval":
     case "caught":
     case "promise":
@@ -8594,6 +8593,13 @@ function isJsonSafeAt(
     case "asyncGenerator":
     case "void":
       return false;
+    // A DYN value in record-field position (a program-authored `any` member,
+    // the native ScrDyn slot) serializes through the checked-dynamic tree,
+    // exactly as an overflow value does above. Array slots keep the refusal:
+    // an undefined element stringifies as null, not as a dropped key.
+    // ORCHESTRATOR EXTENSION (mgresp, 2026-10-29).
+    case "dyn":
+      return inRecordField;
     // Representable exactly as a union arm in record-field position (the
     // optional-field story above); bare undefined-armed unions stay fenced
     // out of both stringify and dynCheck (narrow with '!== undefined'
