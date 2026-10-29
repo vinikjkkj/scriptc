@@ -149,8 +149,13 @@ export interface CompileOptions {
    * .d.ts, unminified JS, no build-transform markers). A package whose
    * preflight refuses marks itself an offender and falls back to the
    * island (--dynamic) or the requires-dynamic diagnostic (static builds)
-   * — never a silent misbuild. Off by default: nothing changes without
-   * the flag. */
+   * — never a silent misbuild. DEFAULT (user directive 2026-10-30): when
+   * this option is omitted, every npm package the program reaches (its
+   * node_modules installs, provenance checkouts and workspace packages,
+   * transitively) is judged by the same bar and compiled statically where
+   * it passes; a package that fails it keeps today's path. An explicit
+   * list compiles exactly those packages (the earlier opt-in meaning, kept
+   * for existing scripts); "auto" is the direct-import scan. */
   npmStatic?: readonly string[] | "auto";
   /** Outbound native FFI manifest. Its signature-only TypeScript bindings
    * lower to direct C ABI calls, and its archive/system-library inputs are
@@ -411,14 +416,23 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   const npmSites = new Map<string, SrcLoc>();
   const judged = new Set<string>();
   let requested: string[] = [];
-  if (npmStatic === "auto" || npmStatic === "lib") {
+  // DEFAULT POSTURE (user directive, 2026-10-30: an npm package's JS plus its
+  // .d.ts must compile like typed TS by default, not per package via the
+  // flag). An undefined npmStatic discovers EVERY bare npm edge the program
+  // reaches, transitively (the lib-mode fixpoint below), judges each by the
+  // same eligibility bar, and keeps the ones that pass. A package that fails
+  // the bar falls back to today's path with its reason recorded. Unlike
+  // "lib", nothing here is build-stopping: the default never refuses a build
+  // that the explicit lanes would have compiled.
+  const defaultLane = npmStatic === undefined;
+  if (npmStatic === "auto" || npmStatic === "lib" || defaultLane) {
     const scout = loadProgram(entryPath);
     try {
       checkPreflight(scout);
       requested =
-        npmStatic === "lib"
-          ? detectAutoPackages(scout, statuses, "lib", judged, npmSites)
-          : detectAutoPackages(scout, statuses);
+        npmStatic === "auto"
+          ? detectAutoPackages(scout, statuses)
+          : detectAutoPackages(scout, statuses, "lib", judged, npmSites);
     } finally {
       scout.dispose();
     }
@@ -454,7 +468,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   // reloads; ineligible ones record the fallback status compileLibrary
   // refuses on. Bounded by the dependency count (every iteration settles
   // at least one new package for good).
-  if (npmStatic === "lib") {
+  if (npmStatic === "lib" || defaultLane) {
     for (;;) {
       const grown = detectAutoPackages(load, statuses, "lib", judged, npmSites);
       if (grown.length === 0) break;
@@ -1101,7 +1115,7 @@ async function earlyCacheOptionsFor(
     backend: opts.backend ?? null,
     npmStatic:
       opts.npmStatic === undefined
-        ? null
+        ? "default"
         : opts.npmStatic === "auto"
           ? "auto"
           : [...opts.npmStatic].sort(),
