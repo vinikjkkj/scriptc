@@ -1363,6 +1363,8 @@ function lowerListenerArg(
     }
   }
   const cb = L.lowerExpr(node);
+  // A bare name lowered checked-dynamic: the caller takes the dyn listener path.
+  if (cb.type.kind === "dyn" && ts.isIdentifier(node)) return cb;
   if (cb.type.kind !== "func") {
     L.noLowering(`'${member}' with a non-function listener`, node);
   }
@@ -1676,6 +1678,17 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       );
     }
     const cb = lowerListenerArg(L, member, name, args[1]!, tuple);
+    // A bare name whose binding lowered checked-dynamic: a JS `var` function
+    // read above its declaration (predeclareForwardVar widens the slot to dyn,
+    // since the early read must hold `undefined`). The checker still types the
+    // name as a function, so dynListenerFlavor could not see it; the dyn
+    // listener path takes the box as the entry's identity, exactly as for any
+    // other checked-dynamic listener value.
+    if (cb.type.kind === "dyn") {
+      return lowerDynListenerCall(
+        L, member, name, tuple, receiver, args[1]!, "dyn", registering, once, prepend, loc, false,
+      );
+    }
     return {
       kind: "libCall",
       fn: registering ? "emitter.on" : "emitter.off",
