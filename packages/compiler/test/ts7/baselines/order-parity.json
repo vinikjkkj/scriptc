@@ -20060,6 +20060,60 @@
    "<repo>/tests/corpus/15443-ctor-primitive-name.ts"
   ],
   "diags": []
- }
+ },
+  "<repo>/tests/corpus/15580-derived-super-in-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/15580-derived-super-in-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15581-derived-super-twice-after-base.ts": {
+   "order": [
+    "<repo>/tests/corpus/15581-derived-super-twice-after-base.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15582-derived-this-before-super-guard.ts": {
+   "order": [
+    "<repo>/tests/corpus/15582-derived-this-before-super-guard.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15583-derived-return-before-super.ts": {
+   "order": [
+    "<repo>/tests/corpus/15583-derived-return-before-super.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15584-derived-top-then-nested-super.ts": {
+   "order": [
+    "<repo>/tests/corpus/15584-derived-top-then-nested-super.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15585-derived-error-base-super-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/15585-derived-error-base-super-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15586-derived-super-arg-order-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/15586-derived-super-arg-order-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15587-derived-this-write-before-super.ts": {
+   "order": [
+    "<repo>/tests/corpus/15587-derived-this-write-before-super.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15588-derived-super-missing-path.ts": {
+   "order": [
+    "<repo>/tests/corpus/15588-derived-super-missing-path.ts"
+   ],
+   "diags": []
+  }
  }
 }
