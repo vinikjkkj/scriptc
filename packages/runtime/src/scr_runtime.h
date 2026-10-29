@@ -10509,6 +10509,12 @@ ScrDyn *scr_tls_check_server_identity_dyn(const ScrStr *host, const ScrDyn *cert
  * -- and a refcount alone would leak it. The abort REASON is not traced:
  * no ScrDyn tracing exists anywhere in this runtime. */
 typedef struct ScrAbortSignal ScrAbortSignal;
+/* timers/promises setTimeout(delay, value, options) (scr_abort.c). kind: 0 f64 (num),
+ * 1 bool (num != 0), 3 void, 4 ref (val owned, moved in; retain/release/trace are the
+ * value type's helpers). sig nullable and borrowed; refed = Node's options.ref (default true). */
+ScrPromise *scr_tp_set_timeout_v(double ms, int kind, double num, void *val,
+                                 void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace,
+                                 ScrAbortSignal *sig, bool refed);
 typedef struct ScrAbortController ScrAbortController;
 ScrAbortSignal *scr_abort_signal_new(void);
 ScrAbortSignal *scr_abort_signal_retain(ScrAbortSignal *s);

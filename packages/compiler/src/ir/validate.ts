@@ -1542,6 +1542,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "rl.onClose": { argTypes: [F64, null], result: VOID },
   "tp.setTimeout": { argTypes: [F64], result: { kind: "promise", inner: VOID } },
   "tp.setImmediate": { argTypes: [], result: { kind: "promise", inner: VOID } },
+  // timers/promises setTimeout(delay, value, options): the value is any type (its own promise inner)
+  "tp.setTimeoutV": { argTypes: [F64, null, BOOL], result: { kind: "promise", inner: VOID } },
+  "tp.setTimeoutVS": { argTypes: [F64, null, ABORTSIGNAL_T, BOOL], result: { kind: "promise", inner: VOID } },
+  "tp.setTimeoutVoid": { argTypes: [F64, BOOL], result: { kind: "promise", inner: VOID } },
+  "tp.setTimeoutVoidS": { argTypes: [F64, ABORTSIGNAL_T, BOOL], result: { kind: "promise", inner: VOID } },
   "dc.channel": { argTypes: [STRING], result: F64 },
   "dc.channelDyn": { argTypes: [STRING], result: DYN },
   "dc.tracingChannelDyn": { argTypes: [STRING], result: DYN },
@@ -5474,6 +5479,11 @@ function validateFunction(
             if (e.type.kind !== "promise") err(`libCall ${e.fn} must be a promise`, e.loc);
             break;
           }
+          // timers/promises setTimeout with a value: the promise's inner is the value's type.
+          if (e.fn === "tp.setTimeoutV" || e.fn === "tp.setTimeoutVS") {
+            if (e.type.kind !== "promise") err(`libCall ${e.fn} must be a promise`, e.loc);
+            break;
+          }
           if (!typeEquals(e.type, sig.result)) {
             err(`libCall ${e.fn} must be ${sig.result.kind}, got ${e.type.kind}`, e.loc);
           }
@@ -5579,7 +5589,7 @@ function validateFunction(
         const streamListenerResult =
           (e.fn === "stream.onData" || e.fn === "stream.onEnd") &&
           (e.type.kind === "void" || e.type.kind === "childStream");
-        if (e.fn === "dyn.adoptPromise" ? e.type.kind !== "promise" : !streamListenerResult && !typeEquals(e.type, sig.result)) {
+        if (e.fn === "dyn.adoptPromise" || e.fn === "tp.setTimeoutV" || e.fn === "tp.setTimeoutVS" || e.fn === "tp.setTimeoutVoid" || e.fn === "tp.setTimeoutVoidS" ? e.type.kind !== "promise" : !streamListenerResult && !typeEquals(e.type, sig.result)) {
           err(`libCall ${e.fn} must be ${sig.result.kind}, got ${e.type.kind}`, e.loc);
         }
         break;

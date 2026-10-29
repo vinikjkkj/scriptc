@@ -6825,6 +6825,37 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_tp_set_timeout(${arg(0)})`);
           case "tp.setImmediate":
             return finish(`scr_tp_set_immediate()`);
+          case "tp.setTimeoutVoid":
+          case "tp.setTimeoutVoidS": {
+            // undefined value: no payload, kind 3 (the void resolve).
+            const sigV = fn === "tp.setTimeoutVoidS" ? arg(1) : "NULL";
+            const refedV = arg(fn === "tp.setTimeoutVoidS" ? 2 : 1);
+            return finish(`scr_tp_set_timeout_v(${arg(0)}, 3, 0.0, NULL, NULL, NULL, NULL, ${sigV}, ${refedV})`);
+          }
+          case "tp.setTimeoutV":
+          case "tp.setTimeoutVS": {
+            // timers/promises setTimeout(delay, value[, options]) — the value/
+            // options form (scr_abort.c). Payload kind by the value's IR type:
+            // f64 (0), bool (1), void (3), anything else refcounted (4), whose
+            // owned temp moves into the runtime with the type's helpers.
+            const vT = e.args[1]!.type;
+            const sig = fn === "tp.setTimeoutVS" ? arg(2) : "NULL";
+            const refed = arg(fn === "tp.setTimeoutVS" ? 3 : 2);
+            if (vT.kind === "f64") {
+              return finish(`scr_tp_set_timeout_v(${arg(0)}, 0, ${arg(1)}, NULL, NULL, NULL, NULL, ${sig}, ${refed})`);
+            }
+            if (vT.kind === "bool") {
+              return finish(`scr_tp_set_timeout_v(${arg(0)}, 1, (${arg(1)}) ? 1.0 : 0.0, NULL, NULL, NULL, NULL, ${sig}, ${refed})`);
+            }
+            if (vT.kind === "void") {
+              return finish(`scr_tp_set_timeout_v(${arg(0)}, 3, 0.0, NULL, NULL, NULL, NULL, ${sig}, ${refed})`);
+            }
+            const va = vAdapters(vT);
+            E.moveTemp(args[1]!);
+            return finish(
+              `scr_tp_set_timeout_v(${arg(0)}, 4, 0.0, (void *)${arg(1)}, (void *(*)(void *))&${va.retain}, (void (*)(void *))&${va.release}, ${E.traceArgC(vT)}, ${sig}, ${refed})`,
+            );
+          }
           case "dc.channel":
             return finish(`scr_dc_channel(${arg(0)})`);
           case "dc.channelDyn":
