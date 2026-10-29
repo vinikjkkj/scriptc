@@ -1639,6 +1639,11 @@ export class Lowerer {
   /** Non-null while an instance body lowers: type-parameter symbol →
    * concrete IR type, consulted inside mapType's recursion. */
   typeParamBindings: Map<ts.Symbol, IrType> | null = null;
+  /** The CHECKER type of the generic-class instance whose members are being
+   * collected or lowered (`Collection<Document>`), installed beside
+   * typeParamBindings and null everywhere else. instantiatedParamType reads
+   * a member's parameter type through it when the declared type refuses. */
+  instanceTsRef: ts.Type | null = null;
   /** The ts-level twin of typeParamBindings, non-null while a CALL-keyed
    * instance body lowers: type-parameter symbol → the bound CHECKER type,
    * consulted where the mapped IrType has already widened away information
@@ -6576,6 +6581,66 @@ export class Lowerer {
     return found;
   };
 
+  /** The return type the checker gives a generic-class INSTANCE's method
+   * (`Promise<InsertOneResult<Document>>` for insertOne), read off the same
+   * instance checker type as instantiatedParamType. Null outside an
+   * instance, for other declarations, and for overloads. */
+  instantiatedReturnType(decl: ts.SignatureDeclaration): ts.Type | null {
+    const ref = this.instanceTsRef;
+    if (ref === null || !ts.isMethodDeclaration(decl) || !ts.isIdentifier(decl.name)) return null;
+    const cls = decl.parent;
+    const clsSym = ref.getSymbol();
+    if (clsSym === undefined || !this.checker.declarationsOf(clsSym).includes(cls)) return null;
+    const prop = this.checker.getPropertyOfType(ref, decl.name.text);
+    if (prop === undefined) return null;
+    const sig = this.checker.getCallSignatures(this.checker.getTypeOfSymbol(prop)).find(
+      (s) => this.checker.signatureDeclaration(s) === decl,
+    );
+    return sig === undefined ? null : this.checker.getReturnTypeOfSignature(sig);
+  }
+
+  /** The parameter type the checker gives a generic-class INSTANCE's method
+   * parameter, read off the instance's own checker type (`Collection<Document>`
+   * → insertOne's doc: `Document & { _id?: ObjectId }`), for a node that is
+   * such a parameter's declaration or a reference to it. The declared type
+   * (`OptionalUnlessRequiredId<TSchema>`) is a conditional the mapper keeps
+   * symbolic while TSchema is open; the checker has already substituted it.
+   * Null outside an instance, for other nodes, and for overloaded methods
+   * (the implementation signature is not in the instance's type). Consulted
+   * only after the declared type refused, so it never changes a mapping. */
+  instantiatedParamType(node: ts.Node): ts.Type | null {
+    const ref = this.instanceTsRef;
+    if (ref === null) return null;
+    // The method a node belongs to: the method itself, or the method that
+    // declares the parameter the node names (its declaration or a reference).
+    let param: ts.ParameterDeclaration | undefined;
+    let method: ts.Node | undefined;
+    if (ts.isMethodDeclaration(node)) method = node;
+    else {
+      if (ts.isParameter(node)) param = node;
+      else if (ts.isIdentifier(node) && ts.isParameter(node.parent) && node.parent.name === node) param = node.parent;
+      else if (ts.isIdentifier(node)) {
+        const sym = this.checker.getSymbolAtLocation(node);
+        const d = sym === undefined ? undefined : this.checker.valueDeclarationOf(sym);
+        if (d !== undefined && ts.isParameter(d)) param = d;
+      }
+      if (param === undefined) return null;
+      method = param.parent;
+    }
+    if (!ts.isMethodDeclaration(method!) || !ts.isIdentifier(method.name)) return null;
+    const cls = method.parent;
+    const clsSym = ref.getSymbol();
+    if (clsSym === undefined || !this.checker.declarationsOf(clsSym).includes(cls)) return null;
+    const prop = this.checker.getPropertyOfType(ref, method.name.text);
+    if (prop === undefined) return null;
+    const memberT = this.checker.getTypeOfSymbol(prop);
+    if (param === undefined) return memberT;
+    const sig = this.checker.getCallSignatures(memberT).find((s) => this.checker.signatureDeclaration(s) === method);
+    if (sig === undefined) return null;
+    const p = sig.getParameters()[method.parameters.indexOf(param)];
+    return p === undefined ? null : this.checker.getTypeOfSymbol(p);
+  }
+
   irTypeOf(node: ts.Node): IrType {
     // A binding whose value is a live export object is the DYN bag reference (cjs-live-exports.ts).
     if (ts.isIdentifier(node) && isLiveAliasName(this, node)) return DYN;
@@ -6583,7 +6648,13 @@ export class Lowerer {
     // A never-tainted JS type (neverTaintedJsType) maps — never rides as
     // f64 — but must not: pre-empt the mapping so the JS fallback below
     // answers instead.
-    const mapped = neverTaintedJsType(this, node, t) ? null : this.mapTypeOf(t);
+    let mapped = neverTaintedJsType(this, node, t) ? null : this.mapTypeOf(t);
+    if (!mapped) {
+      // The instance's own checker view of the parameter, when the declared
+      // type is a form the mapper keeps symbolic (see instantiatedParamType).
+      const inst = this.instantiatedParamType(node);
+      if (inst !== null) mapped = this.mapTypeOf(inst);
+    }
     if (!mapped) {
       // The checked-dynamic declaration fallback (dynFallbackType): a
       // JAVASCRIPT binding of any inference residue, or a TypeScript
@@ -14562,7 +14633,7 @@ export class Lowerer {
   }
 
   collectClassShapeInner(decl: ts.ClassLikeDeclaration, jsNameOverride?: string,
-    inst?: { family: ClassInfo; name: string; bindings: Map<ts.Symbol, IrType>; typeArgsText: string; ordinal: number },
+    inst?: { family: ClassInfo; name: string; bindings: Map<ts.Symbol, IrType>; typeArgsText: string; ordinal: number; tsRef?: ts.Type },
     mixin?: { base: ClassInfo; name: string; call: ts.CallExpression; bindings: Map<ts.Symbol, IrType>; context: string; ordinal: number },): void {
     return collectClassShapeInner(this, decl, jsNameOverride, inst, mixin);
   }

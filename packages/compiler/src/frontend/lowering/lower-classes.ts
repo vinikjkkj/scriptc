@@ -415,7 +415,7 @@ export interface ClassInfo {
    * for diagnostics, and the demand ordinal (only the FIRST instantiation
    * counts statements toward coverage — re-instantiations re-visit the
    * same source lines). */
-  genericInstance?: { family: ClassInfo; bindings: Map<ts.Symbol, IrType>; typeArgsText: string; ordinal: number };
+  genericInstance?: { family: ClassInfo; bindings: Map<ts.Symbol, IrType>; typeArgsText: string; ordinal: number; tsRef?: ts.Type };
   /** MIXIN instantiation (`%mx<start>.<name>` for `M(Base)` at one call
    * site): the call that minted it, the base-parameter type binding its
    * members lower under, the forwarding-constructor flag, and where its
@@ -3170,7 +3170,7 @@ export function collectClassShape(L: Lowerer, decl: ts.ClassDeclaration): void {
   }
 
 export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration, jsNameOverride?: string,
-    inst?: { family: ClassInfo; name: string; bindings: Map<ts.Symbol, IrType>; typeArgsText: string; ordinal: number },
+    inst?: { family: ClassInfo; name: string; bindings: Map<ts.Symbol, IrType>; typeArgsText: string; ordinal: number; tsRef?: ts.Type },
     /** MIXIN instantiation mode (lower-mixins.ts): the class inside a
      * mixin function, collected per call site — `base` is the ARGUMENT
      * class (the heritage clause names the mixin's parameter and is
@@ -5706,6 +5706,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           bindings: inst.bindings,
           typeArgsText: inst.typeArgsText,
           ordinal: inst.ordinal,
+          ...(inst.tsRef !== undefined ? { tsRef: inst.tsRef } : {}),
         };
       }
       if (mixin) {
@@ -5852,10 +5853,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const typeArgsText = `<${rendered.length > 80 ? rendered.slice(0, 77) + "..." : rendered}>`;
     const prevBindings = L.typeParamBindings;
     const prevContext = L.instantiationContext;
+    const prevTsRef = L.instanceTsRef;
     L.typeParamBindings = bindings;
     L.instantiationContext = `instantiating class '${gci.baseName}' with ${typeArgsText}`;
+    L.instanceTsRef = ref;
     try {
-      L.collectClassShapeInner(decl, undefined, { family: gci.family, name, bindings, typeArgsText, ordinal });
+      L.collectClassShapeInner(decl, undefined, { family: gci.family, name, bindings, typeArgsText, ordinal, tsRef: ref });
     } catch (e) {
       // Collection fenced under THESE bindings: the diagnostic (with the
       // instantiation context) is recorded; the type stays unmapped.
@@ -5865,6 +5868,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     } finally {
       L.typeParamBindings = prevBindings;
       L.instantiationContext = prevContext;
+      L.instanceTsRef = prevTsRef;
     }
     const info = L.classes.get(name);
     if (!info) {
@@ -5912,15 +5916,18 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const prevBindings = L.typeParamBindings;
     const prevContext = L.instantiationContext;
     const prevSuppress = L.suppressStats;
+    const prevTsRef = L.instanceTsRef;
     L.typeParamBindings = gi.bindings;
     L.instantiationContext = `instantiating class '${gi.family.generic?.baseName ?? info.def.jsName ?? ""}' with ${gi.typeArgsText}`;
     L.suppressStats = prevSuppress || gi.ordinal > 0;
+    L.instanceTsRef = gi.tsRef ?? null;
     try {
       return fn();
     } finally {
       L.typeParamBindings = prevBindings;
       L.instantiationContext = prevContext;
       L.suppressStats = prevSuppress;
+      L.instanceTsRef = prevTsRef;
     }
   }
 
