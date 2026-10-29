@@ -6374,6 +6374,13 @@ export type IrLibFn =
    * turns, Node's check phase). Neither throws. */
   | "tp.setTimeout"
   | "tp.setImmediate"
+  /** timers/promises setTimeout(delay, value[, options]) with a value or options:
+   * tp.setTimeoutV = [ms, value, refed], tp.setTimeoutVS = [ms, value, signal, refed]
+   * (scr_tp_set_timeout_v in scr_abort.c). The promise inner is the value type. */
+  | "tp.setTimeoutV"
+  | "tp.setTimeoutVS"
+  | "tp.setTimeoutVoid"
+  | "tp.setTimeoutVoidS"
   /** node:diagnostics_channel (scr_dc.c, linked when any dc.* appears —
    * the zlib gating precedent): a process-global name→channel registry;
    * channel values are f64 handles (types.ts maps Channel to F64, the
@@ -10105,6 +10112,30 @@ export function moduleUsesChildStream(mod: IrModule): boolean {
  * which is what makes a TYPE walk the precise gate here. Same generic
  * JSON walk as moduleUsesChildStream: `kind` discriminants live only on
  * IR objects, so user string VALUES can never false-positive. */
+/** The timers/promises value/options entries (tp.setTimeoutV and friends).
+ * scr_abort.c carries them and its warning path rides scr_async_dyn.c, so
+ * this gate also turns on the dyn-async unit. Same JSON walk as above. */
+export function moduleUsesTimersPromisesValue(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if ((v as { kind?: unknown }).kind === "libCall") {
+      const fn = (v as { fn?: unknown }).fn;
+      if (typeof fn === "string" && fn.startsWith("tp.setTimeoutV")) {
+        found = true;
+        return;
+      }
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
+}
+
 export function moduleUsesAbortSignal(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {
@@ -10117,6 +10148,15 @@ export function moduleUsesAbortSignal(mod: IrModule): boolean {
     if (k === "abortSignal" || k === "abortController") {
       found = true;
       return;
+    }
+    // The timers/promises value/options entry lives in scr_abort.c too, so
+    // it gates the unit even when no signal is passed (tp.setTimeoutV).
+    if (k === "libCall") {
+      const fn = (v as { fn?: unknown }).fn;
+      if (fn === "tp.setTimeoutV" || fn === "tp.setTimeoutVS" || fn === "tp.setTimeoutVoid" || fn === "tp.setTimeoutVoidS") {
+        found = true;
+        return;
+      }
     }
     for (const x of Object.values(v as Record<string, unknown>)) visit(x);
   };

@@ -772,10 +772,10 @@ declare module "timers" {
 /* node:timers/promises — the promisified pair the Node test harness leans
  * on (`await setTimeout(ms)` as a sleep). setTimeout's delay-only form and
  * setImmediate's bare form lower (a void promise the shared timer heap
- * settles); the resolve-value, options (AbortSignal), and setInterval
- * async-iterator forms are declared surface that fences per site. */
+ * settles); the resolve-value and options (AbortSignal, ref) forms lower
+ * through scr_tp_set_timeout_v; setInterval async-iterator forms fence per site. */
 declare module "node:timers/promises" {
-  export function setTimeout(delay?: number): Promise<void>;
+  export function setTimeout<T = void>(delay?: number, value?: T, options?: { signal?: AbortSignal; ref?: boolean }): Promise<T>;
   export function setImmediate(): Promise<void>;
   export function setInterval(delay?: number, value?: unknown, options?: unknown): unknown;
   export const scheduler: {

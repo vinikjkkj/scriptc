@@ -18502,6 +18502,50 @@ class LlEmitter {
       B.line(`${t} = call ptr @scr_object_ctor_name(ptr ${recv.name})`);
       return this.own({ name: t, type: e.type });
     }
+    // timers/promises setTimeout(delay, value[, options]) — the value/options
+    // form. The payload kind follows the value's IR type (see emit-exprs.ts's
+    // C arm, which this mirrors): f64 0, bool 1, void 3, refcounted 4 with the
+    // value's own RC entry points (an owned temp moved into the runtime).
+    if (e.fn === "tp.setTimeoutV" || e.fn === "tp.setTimeoutVS" || e.fn === "tp.setTimeoutVoid" || e.fn === "tp.setTimeoutVoidS") {
+      const withSig = e.fn === "tp.setTimeoutVS" || e.fn === "tp.setTimeoutVoidS";
+      const isVoidForm = e.fn === "tp.setTimeoutVoid" || e.fn === "tp.setTimeoutVoidS";
+      const targs = e.args.map((x) => this.emitExpr(x));
+      // Argument layout: [ms, value?, signal?, refed]; the void forms carry no value.
+      const vT = isVoidForm ? { kind: "void" as const } : e.args[1]!.type;
+      const refedArg = targs[targs.length - 1]!;
+      const sigOp = withSig ? targs[isVoidForm ? 1 : 2]!.name : "null";
+      let kind = 3;
+      let num = "0.0";
+      let val = "null";
+      let retainOp = "null";
+      let releaseOp = "null";
+      let traceOp = "null";
+      if (isVoidForm) {
+        kind = 3;
+      } else if (vT.kind === "f64") {
+        kind = 0;
+        num = targs[1]!.name;
+      } else if (vT.kind === "bool") {
+        kind = 1;
+        const w = B.tmp();
+        B.line(`${w} = uitofp i1 ${targs[1]!.name} to double`);
+        num = w;
+      } else if (vT.kind !== "void") {
+        kind = 4;
+        const va = vAdapters(this, vT);
+        this.moveTemp(targs[1]!);
+        val = targs[1]!.name;
+        retainOp = va.retain;
+        releaseOp = va.release;
+        traceOp = traceArg(this, vT);
+      }
+      this.declare(`declare ptr @scr_tp_set_timeout_v(double, i32, double, ptr, ptr, ptr, ptr, ptr, i1)`);
+      const t = B.tmp();
+      B.line(
+        `${t} = call ptr @scr_tp_set_timeout_v(double ${targs[0]!.name}, i32 ${kind}, double ${num}, ptr ${val}, ptr ${retainOp}, ptr ${releaseOp}, ptr ${traceOp}, ptr ${sigOp}, i1 zeroext ${refedArg.name})`,
+      );
+      return this.own({ name: t, type: e.type });
+    }
     const sym = LIB_FN_SYMS[e.fn];
     if (sym === undefined) throw new LlvmUnsupportedError(`libCall:${e.fn}`, e.loc);
     const tail = LIB_FN_TAIL[e.fn] ?? [];

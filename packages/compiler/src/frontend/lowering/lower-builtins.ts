@@ -1302,13 +1302,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (bi.module === "timers/promises") {
       const promiseVoid: IrType = { kind: "promise", inner: VOID };
       if (bi.member === "setTimeout") {
-        if (expr.arguments.length > 1) {
-          L.noLowering(
-            "timers/promises setTimeout with a resolve value or options",
-            expr.arguments[1]!,
-            "the lowered form is setTimeout(delay?) resolving undefined — resolve values and AbortSignal cancellation have no lowering",
-          );
-        }
+        if (expr.arguments.length > 1) return lowerTimersPromisesSetTimeoutValue(L, expr, loc);
         const ms: IrExpr = expr.arguments[0]
           ? L.lowerExprExpecting(expr.arguments[0], F64)
           : { kind: "numLit", value: 1, type: F64, loc };
@@ -12924,3 +12918,106 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
     }
   }
 
+/** node:timers/promises setTimeout(delay, value, options) — the value and
+ * options form. The promise carries the value's own IR type, so an `await`
+ * types as TypeScript's Promise<T> does. Arguments evaluate in Node's order:
+ * delay, value, then the options object's members. The options object must
+ * be a literal whose members are `signal` (an AbortSignal) and `ref` (a
+ * boolean), with `signal` written before `ref` when both appear, so the
+ * lowered argument order is the source order. Node defaults ref to true.
+ * The runtime entry (scr_tp_set_timeout_v, scr_abort.c) settles the promise
+ * with the value, rejects with an AbortError whose cause is the signal's
+ * reason, and removes the timer on abort. */
+function lowerTimersPromisesSetTimeoutValue(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr {
+  if (expr.arguments.length > 3 || expr.arguments.some((a) => ts.isSpreadElement(a))) {
+    L.noLowering(
+      "timers/promises setTimeout with more than three arguments or a spread",
+      expr,
+      "setTimeout(delay?, value?, options?) is the shape",
+    );
+  }
+  const [delayArg, valueArg, optionsArg] = expr.arguments;
+  const ms: IrExpr = delayArg
+    ? L.lowerExprExpecting(delayArg, F64)
+    : { kind: "numLit", value: 1, type: F64, loc };
+  const value = L.lowerExpr(valueArg!);
+  // A literal `undefined` value resolves to void: the void forms carry no
+  // value argument (a unit literal cannot ride as an IR argument). Any other
+  // unit-typed value is refused rather than dropped.
+  const voidValue = isUnitType(value.type);
+  if (voidValue && value.kind !== "unitLit") {
+    L.noLowering(
+      "timers/promises setTimeout with a non-literal undefined-typed value",
+      valueArg!,
+      "pass the value as a literal or omit it",
+    );
+  }
+  let signal: IrExpr | null = null;
+  let refed: IrExpr = { kind: "boolLit", value: true, type: BOOL, loc };
+  if (optionsArg) {
+    if (!ts.isObjectLiteralExpression(optionsArg)) {
+      L.noLowering(
+        "timers/promises setTimeout options that are not an object literal",
+        optionsArg,
+        "pass the options inline: { signal } and/or { ref }",
+      );
+    }
+    let sawRef = false;
+    for (const prop of optionsArg.properties) {
+      if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) {
+        L.noLowering(
+          "a timers/promises setTimeout option that is not a plain property",
+          prop,
+          "only { signal } and { ref } are supported",
+        );
+      }
+      const name = prop.name.text;
+      if (name === "signal" && !sawRef && signal === null) {
+        const s = L.lowerExpr(prop.initializer);
+        if (s.type.kind !== "abortSignal") {
+          L.noLowering(
+            `timers/promises setTimeout option 'signal' of type '${L.fmt(s.type)}'`,
+            prop.initializer,
+            "the signal must be an AbortSignal",
+          );
+        }
+        signal = s;
+      } else if (name === "ref" && !sawRef) {
+        sawRef = true;
+        const r = L.lowerExpr(prop.initializer);
+        if (r.type.kind !== "bool") {
+          L.noLowering(
+            `timers/promises setTimeout option 'ref' of type '${L.fmt(r.type)}'`,
+            prop.initializer,
+            "ref must be a boolean",
+          );
+        }
+        refed = r;
+      } else {
+        L.noLowering(
+          `timers/promises setTimeout option '${name}' (or out of order)`,
+          prop,
+          "the supported options are signal, then ref, each once",
+        );
+      }
+    }
+  }
+  if (voidValue) {
+    const args: IrExpr[] = signal ? [ms, signal, refed] : [ms, refed];
+    return {
+      kind: "libCall",
+      fn: signal ? "tp.setTimeoutVoidS" : "tp.setTimeoutVoid",
+      args,
+      type: { kind: "promise", inner: VOID },
+      loc,
+    };
+  }
+  const args: IrExpr[] = signal ? [ms, value, signal, refed] : [ms, value, refed];
+  return {
+    kind: "libCall",
+    fn: signal ? "tp.setTimeoutVS" : "tp.setTimeoutV",
+    args,
+    type: { kind: "promise", inner: value.type },
+    loc,
+  };
+}

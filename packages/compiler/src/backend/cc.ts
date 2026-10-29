@@ -44,6 +44,9 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // not have http), so neither may name the other — this TU names both and
   // is gated on the two together, the scr_cipher_key.c pattern.
   "scr_abort_http.c": ["scr_abort.c", "scr_http.c"],
+  // scr_abort.c's timers/promises value/options entry reports Node's delay
+  // warnings through scr_emit_warning (scr_async_dyn.c, the process 'warning' path).
+  "scr_abort.c": ["scr_async_dyn.c"],
   // Measured edges: scr_http_request_ex / scr_http_req_* / the client
   // listeners (scr_http.c), scr_tls_fetch_client_ctx and _wrap
   // (scr_tls.c), scr_url_new / scr_url_release (scr_url.c). The socket
