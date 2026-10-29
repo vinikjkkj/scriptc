@@ -6540,14 +6540,10 @@ export type IrLibFn =
    * filled. No arguments; the result is the `opaque` handle, never NULL. */
   | "opaque.promiseCtor"
   | "date.toISOString"
-  /** The composed `new Date(dateString).getTime()` read: one borrowed
-   * string, f64 milliseconds since epoch. The parsed grammar is BOUNDED
-   * (documented divergence — V8's parser accepts far more): the ASN.1
-   * validity shape X509Certificate.validFrom/validTo answer ("Jul  1
-   * 00:00:00 2026 GMT" — the portless cert-expiry read), and ECMA's own
-   * date-time string format (YYYY-MM-DD[THH:mm[:ss[.sss]]][Z|±HH:MM] —
-   * date-only forms are UTC, exactly the spec). Anything else is NaN,
-   * Node's invalid-date getTime. Never throws. */
+  /** The composed `new Date(dateString).getTime()` read and Date.parse(string): one borrowed
+   * string, f64 milliseconds since epoch. The parser is V8's (scr_lib.c): the ES5 ISO
+   * date-time grammar, then the legacy grammar V8 accepts, with a zone-less date-time read as
+   * local time. Never throws. */
   | "date.parseGetTime"
   /** `Date.UTC(...)` — seven f64 arguments (the frontend completes the
    * spec's defaults for omitted trailing parts: month 0, date 1, time
@@ -6566,8 +6562,8 @@ export type IrLibFn =
    * scr_lib.c). Never throws. */
   | "date.getHours"
   /** Date VALUES (scr_date.c). `date.new` TimeClips an f64 and comes back
-   * +1; `date.newStr` runs the SAME bounded grammar date.parseGetTime
-   * uses, so a value and a composed read of one string cannot disagree.
+   * +1; `date.newStr` runs the SAME parser date.parseGetTime uses, so a
+   * value and a composed read of one string cannot disagree.
    * `date.value` is getTime()/valueOf() over a borrowed receiver. The
    * seven UTC field reads take the TIME VALUE (composed with date.value
    * at the lowering), are pure arithmetic with no host state, and answer
@@ -11622,7 +11618,10 @@ export function moduleUsesDate(mod: IrModule): boolean {
     }
     if (
       node.kind === "libCall" &&
-      (node.fn === "date.getHours" || node.fn === "date.localTime" || node.fn === "date.tzOffset" || node.fn === "date.formatOpts" || node.fn === "date.formatOptsDyn")
+      (node.fn === "date.getHours" || node.fn === "date.localTime" || node.fn === "date.tzOffset" || node.fn === "date.formatOpts" || node.fn === "date.formatOptsDyn" ||
+        // The date-string parser (Date.parse, new Date(s).getTime()) converts a zone-less
+        // date-time through the zone table, so it links the Date unit (and with it the table).
+        node.fn === "date.parseGetTime")
     ) {
       found = true;
       return;
@@ -11801,6 +11800,9 @@ function dateGates(mod: IrModule): { fmt: boolean; dyn: boolean; tz: boolean; in
       intl = true;
       tz = true;
     }
+    // A date string with no offset is LOCAL time: the V8 parser (scr_lib.c) converts it through the
+    // zone table, which therefore links whenever the parse is reachable (date.parseGetTime).
+    if (node.kind === "libCall" && node.fn === "date.parseGetTime") tz = true;
     if (node.kind === "libCall" && node.fn === "date.set" && !isUtcSetOp((node as { args?: unknown[] }).args?.[1])) tz = true;
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };

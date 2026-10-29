@@ -8348,8 +8348,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // (may-throw seed set).
             return finish(`scr_date_to_iso(${arg(0)})`);
           case "date.parseGetTime":
-            // The bounded date-string parse (X509 validity + ECMA format);
-            // NaN elsewhere. Never throws.
+            // V8's date-string parse (scr_lib.c); NaN where V8 says NaN.
+            // Never throws.
             return finish(`scr_date_parse_get_time(${arg(0)})`);
           case "date.utc":
             // MakeDay/MakeTime/TimeClip over seven completed number
@@ -8376,8 +8376,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               `scr_date_set(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)})`,
             );
           case "date.newStr":
-            // Same, from the BOUNDED date-string grammar date.parseGetTime
-            // already runs -- an unparseable string is an invalid Date.
+            // Same, from the date-string parser date.parseGetTime runs --
+            // an unparseable string is an invalid Date.
             return finish(`scr_date_new_str(${arg(0)})`);
           case "date.value":
             // getTime()/valueOf(): the time value itself, borrowed receiver.
