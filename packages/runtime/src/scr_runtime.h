@@ -5973,6 +5973,8 @@ ScrDyn *scr_dyn_new_bool(bool b);
 ScrDyn *scr_dyn_new_num(double n);
 ScrDyn *scr_dyn_new_str(ScrStr *s);
 ScrDyn *scr_dyn_web_crypto(void); /* globalThis.crypto, the process singleton (+1) */
+extern ScrStr *(*scr_dyn_obj_tag_hook)(const ScrDyn *d);
+extern ScrStr *(*scr_insp_hook)(ScrDyn *d, const char *cn, double recurse, double depth);
 ScrDyn *scr_dyn_new_arr(void);
 /* An array's own NAMED properties (ext->extras; see ScrDynObjExt): the
  * extras object or NULL; a keyed read (+1 or NULL); a keyed write (value

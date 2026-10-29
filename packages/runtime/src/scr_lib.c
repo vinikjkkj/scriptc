@@ -4067,13 +4067,13 @@ static void scr_sha512_block(uint64_t h[8], const unsigned char *p) {
   h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
 }
 
-/* The SHA-512 compression under a given initial hash value (FIPS 180-4):
- * SHA-512 uses the 64-byte IV below, SHA-384 its own IV and the first 48
- * output bytes. */
-static size_t scr_sha512_iv_digest(const uint64_t iv[8], size_t outlen, const unsigned char *data, size_t len,
-                                   unsigned char out[64]) {
-  uint64_t h[8];
-  memcpy(h, iv, sizeof h);
+static size_t scr_sha512_digest(const unsigned char *data, size_t len, unsigned char out[64]) {
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_SHA512, (long long)len);
+#endif
+  uint64_t h[8] = {0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL, 0x3c6ef372fe94f82bULL,
+                   0xa54ff53a5f1d36f1ULL, 0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL,
+                   0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL};
   size_t i = 0;
   for (; i + 128 <= len; i += 128) scr_sha512_block(h, data + i);
   unsigned char tail[256];
@@ -4086,28 +4086,8 @@ static size_t scr_sha512_iv_digest(const uint64_t iv[8], size_t outlen, const un
   scr_be64_store(tail + pad - 8, (uint64_t)len * 8);
   scr_sha512_block(h, tail);
   if (pad == 256) scr_sha512_block(h, tail + 128);
-  unsigned char full[64];
-  for (int j = 0; j < 8; j++) scr_be64_store(full + j * 8, h[j]);
-  memcpy(out, full, outlen);
-  return outlen;
-}
-
-static size_t scr_sha512_digest(const unsigned char *data, size_t len, unsigned char out[64]) {
-#ifdef SCR_SHACEN_ON
-  scr_shacen_note(SCR_SHACEN_SHA512, (long long)len);
-#endif
-  static const uint64_t iv512[8] = {0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL, 0x3c6ef372fe94f82bULL,
-                                    0xa54ff53a5f1d36f1ULL, 0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL,
-                                    0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL};
-  return scr_sha512_iv_digest(iv512, 64, data, len, out);
-}
-
-/* SHA-384 (FIPS 180-4 section 5.3.4): SHA-512's compression, its own IV, 48 bytes out. */
-static size_t scr_sha384_digest(const unsigned char *data, size_t len, unsigned char out[64]) {
-  static const uint64_t iv384[8] = {0xcbbb9d5dc1059ed8ULL, 0x629a292a367cd507ULL, 0x9159015a3070dd17ULL,
-                                    0x152fecd8f70e5939ULL, 0x67332667ffc00b31ULL, 0x8eb44a8768581511ULL,
-                                    0xdb0c2e0d64f98fa7ULL, 0x47b5481dbefa4fa4ULL};
-  return scr_sha512_iv_digest(iv384, 48, data, len, out);
+  for (int j = 0; j < 8; j++) scr_be64_store(out + j * 8, h[j]);
+  return 64;
 }
 
 /* The digest's encoding: "hex" or "base64" (compiler-fenced literals). */
@@ -5710,17 +5690,6 @@ ScrArr *scr_set_to_arr_ref(const ScrMap *s) {
   return out;
 }
 
-
-/* The one-shot SHA-1/256/384/512 cores for the gated WebCrypto unit
- * (scr_webcrypto.c): the static digests above, by name. out holds 64 bytes. */
-size_t scr_wc_sha1(const unsigned char *d, size_t n, unsigned char out[64]) { return scr_sha1_digest(d, n, out); }
-size_t scr_wc_sha256(const unsigned char *d, size_t n, unsigned char out[64]) { return scr_sha256_digest(d, n, out); }
-size_t scr_wc_sha384(const unsigned char *d, size_t n, unsigned char out[64]) { return scr_sha384_digest(d, n, out); }
-size_t scr_wc_sha512(const unsigned char *d, size_t n, unsigned char out[64]) { return scr_sha512_digest(d, n, out); }
-
-/* The CryptoKey constructor name, by identity: scr_inspect.c renders a
- * CryptoKey through its members (Node's CryptoKey inspect hook). */
-const char scr_wc_key_cname[] = "CryptoKey";
 
 /* The numeric Stats fields by index (0..13, STATS_FIELD_INDEX's order): the
  * slot a read or a write lands on. */

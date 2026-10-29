@@ -65,7 +65,7 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   "scr_dc.c": ["scr_async_dyn.c"],
   // The WebCrypto unit: subtle promises (scr_dyn_new_promise) and the SHA-3
   // ExperimentalWarning (scr_emit_warning) both live in the async unit.
-  "scr_webcrypto.c": ["scr_async_dyn.c"],
+  "scr_webcrypto.c": ["scr_async_dyn.c", "scr_inspect.c"],
   // The three readiness-poller backends are selected together and each is
   // empty off its own platform, so naming all three is platform-neutral.
   "scr_dgram.c": ["scr_loop_kqueue.c", "scr_loop_epoll.c", "scr_loop_wsapoll.c"],
@@ -2500,7 +2500,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // under only one gate.
     ...(opts.asym && opts.cipher ? [rt(join(rtDir, "scr_cipher_key.c"))] : []),
     ...(opts.assert || regex || opts.symbol ? [rt(join(rtDir, "scr_assert.c"))] : []),
-    ...(opts.inspect ? [rt(join(rtDir, "scr_inspect.c"))] : []),
+    // scr_webcrypto.c stamps its CryptoKey with scr_inspect.c's name constant,
+    // so a WebCrypto program links the inspect unit too.
+    ...(opts.inspect || opts.webCrypto ? [rt(join(rtDir, "scr_inspect.c"))] : []),
     // scr_async_dyn.c calls the dispatch unit (a thenable's then is invoked
     // with this = the thenable: scr_dyn_invoke_key, the proxy and class
     // instance [[Get]]), so every binary that links the async unit links it.

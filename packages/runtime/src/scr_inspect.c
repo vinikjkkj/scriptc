@@ -25,8 +25,6 @@
  * ScrStr results return +1. Nothing here throws; OOM aborts. */
 #include "scr_runtime.h"
 
-extern const char scr_wc_key_cname[];
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -944,6 +942,8 @@ static ScrStr *insp_with_base(ScrStr *base, ScrDyn *obj, double recurse, double 
  * lives in the value, so the traversal lives here instead of a
  * synthesized helper. Same engine, same defaults. dyn-boxed bytes render
  * in the checked-dynamic tree's documented Uint8Array identity (SEMANTICS.md). */
+ScrStr *(*scr_insp_hook)(ScrDyn *d, const char *cn, double recurse, double depth) = NULL;
+
 ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
   switch (d->kind) {
     case SCR_DYN_NULL:
@@ -1062,26 +1062,12 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * where Node puts a seven-byte native state buffer. The rule is on
        * the KEY rather than on a shape because this walk knows no shapes;
        * slotStorageKey (ir/nodes.ts) is the other half of it. */
-      /* A WebCrypto CryptoKey (scr_lib.c) prints through Node's CryptoKey inspect
-       * hook: `CryptoKey ` followed by an inspection of its four members at the
-       * remaining depth minus one. Matched by the runtime's own name literal, by
-       * identity, so a user class named CryptoKey keeps the ordinary rule. */
-      if (cn == scr_wc_key_cname && recurse > depth) return scr_str_new("[CryptoKey]", 11);
-      if (cn == scr_wc_key_cname) {
-        ScrDyn *tmp = scr_dyn_new_obj();
-        static const char *const kmembers[4] = {"type", "extractable", "algorithm", "usages"};
-        static const char *const kslots[4] = {"%type", "%extractable", "%algorithm", "%usages"};
-        for (int k = 0; k < 4; k++) {
-          const ScrDyn *mv = scr_dyn_obj_slot_get(d, kslots[k], strlen(kslots[k]));
-          if (mv != NULL) scr_dyn_obj_set(tmp, kmembers[k], strlen(kmembers[k]), scr_dyn_retain((ScrDyn *)mv));
-        }
-        ScrStr *inner = scr_insp_dyn(tmp, 0, depth - 1); /* Node: the top-level depth less one, not the remaining one */
-        scr_dyn_release(tmp);
-        InspBuf kb = {0};
-        ib_cstr(&kb, "CryptoKey ");
-        ib_bytes(&kb, inner->data, inner->len);
-        scr_str_release(inner);
-        return ib_take(&kb);
+      /* The WebCrypto unit's inspect hook (scr_webcrypto.c renders a CryptoKey
+       * through Node's CryptoKey inspect hook); NULL in every program that never
+       * reads WebCrypto. */
+      if (scr_insp_hook != NULL) {
+        ScrStr *hooked = scr_insp_hook(d, cn, recurse, depth);
+        if (hooked != NULL) return hooked;
       }
       const size_t nsym = insp_slot_count(d);
       if (d->v.obj.len == 0 && nsym == 0) {
