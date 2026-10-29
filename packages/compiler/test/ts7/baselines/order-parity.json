@@ -20136,6 +20136,24 @@
       "<repo>/tests/corpus/15625-compound-element-write-through-accessor-receiver.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/15880-null-proto-untyped-table-is-exact.ts": {
+    "order": [
+      "<repo>/tests/corpus/15880-null-proto-untyped-table-is-exact.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15881-null-proto-write-before-typed-cast-is-exact.ts": {
+    "order": [
+      "<repo>/tests/corpus/15881-null-proto-write-before-typed-cast-is-exact.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/diagnostics/object-create-null-into-typed-record.ts": {
+    "order": [
+      "<repo>/tests/diagnostics/object-create-null-into-typed-record.ts"
+    ],
+    "diags": []
   }
  }
 }
