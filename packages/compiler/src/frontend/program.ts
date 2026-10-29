@@ -1010,10 +1010,28 @@ function isCjsJsFile7(sf: ts.SourceFile): boolean {
  * `import` lines plus `module.exports = profiles`). Its exports are the
  * module.exports object, exactly as for a .js file. A file with `export`
  * syntax stays ESM. */
+/** A TypeScript file whose only module syntax is `export = x` (the CJS
+ * whole-export). Its named members are properties of the exported value. */
+export function isExportEqualsModule(sf: ts.SourceFile): boolean {
+  return /\.ts$/.test(sf.fileName) && !sf.isDeclarationFile &&
+    sf.statements.some((stmt) => ts.isExportAssignment(stmt) && stmt.isExportEquals);
+}
+
+/** A TypeScript importer Node runs as CommonJS: a .ts file under a package
+ * that is not `"type": "module"`. (A .mts, or a .ts under a module package,
+ * is an ES module whose named import of a CJS module is Node's link check.) */
+export function isCjsEmitImporter(sf: ts.SourceFile): boolean {
+  return /\.ts$/.test(sf.fileName) && !sf.isDeclarationFile && nearestPackageTypeOf(sf.fileName) !== "module";
+}
+
 function isCjsTsFile7(sf: ts.SourceFile): boolean {
   if (!/\.ts$/.test(sf.fileName) || sf.isDeclarationFile) return false;
   let assigns = false;
   for (const stmt of sf.statements) {
+    if (ts.isExportAssignment(stmt) && stmt.isExportEquals) {
+      assigns = true;
+      continue;
+    }
     if (ts.isExportAssignment(stmt) || ts.isExportDeclaration(stmt)) return false;
     const mods = (stmt as { modifiers?: readonly ts.Node[] }).modifiers ?? [];
     if (mods.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return false;
@@ -2776,6 +2794,15 @@ function preflight7(load: LoadResult): {
     const prefix = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0]!;
     return isWorkspacePackageName(prefix);
   };
+  /* TS1203 "Export assignment cannot be used when targeting ECMAScript
+   * modules" fires on a TS `export = x` because the frontend forces the
+   * ESNext module world. `export = x` is the CommonJS module.exports
+   * assignment (exportEqualsModuleView), so the forced module world's
+   * objection is to a shape the lowering supports. Only .ts export=
+   * statements are forgiven; the rest of the checker stays on. */
+  const exportEqualsTsSuppressed = (d: ts.Diagnostic): boolean =>
+    d.code === 1203 && d.fileName !== undefined && d.pos !== undefined &&
+    /\.ts$/.test(d.fileName) && !/\.d\.ts$/.test(d.fileName);
   const errorsOf = (p: ts.Program): ts.Diagnostic[] => {
     const all = ts.getPreEmitDiagnostics(p);
     // First pass: every comment-side 2300's (file, name) — the partners
@@ -2796,7 +2823,8 @@ function preflight7(load: LoadResult): {
         !nodeModulesJsSuppressed(d) &&
         !namespaceCalleeSuppressed(p, d) &&
         !workspaceImplicitAnySuppressed(p, d) &&
-        !jsdocTypeSuppressed(p, d, commentDup),
+        !jsdocTypeSuppressed(p, d, commentDup) &&
+        !exportEqualsTsSuppressed(d),
     );
   };
 
@@ -2962,7 +2990,8 @@ function preflight7(load: LoadResult): {
       }
       if (ts.isExportAssignment(stmt)) {
         if (stmt.isExportEquals) {
-          diags.push(unsupportedDiag("SC1012", locOf7(stmt), "export = assignments"));
+          // `export = x` is the CommonJS module.exports assignment: the lowering
+          // maps it onto that path (exportEqualsModuleView). No refusal here.
         }
         continue;
       }
@@ -3787,7 +3816,23 @@ function cjsNamedImportLinkCheck(
     }
     entries.sort((a, b) => (a.local < b.local ? -1 : a.local > b.local ? 1 : 0));
     for (const e of entries) {
-      if (!visible(e.dep, e.exportName)) return { exportName: e.exportName, spec: e.spec, nameNode: e.nameNode, sf };
+      if (visible(e.dep, e.exportName)) continue;
+      // A TS `export = x` module: its named members are the properties of
+      // the exported value (the tsc CJS emit reads `(0, m_1.name)(...)`).
+      // A CJS-run importer reads them as properties; an ESM importer is
+      // Node's link-time SyntaxError, refused here at COMPILE time.
+      if (isExportEqualsModule(e.dep)) {
+        if (isCjsEmitImporter(sf)) continue;
+        diags.push(
+          unsupportedDiag(
+            "SC1013",
+            locOf7(e.nameNode),
+            `a named import of an 'export =' module from an ES module ('${e.spec}'): Node's ESM link refuses it (import the default and read '${e.exportName}' off it)`,
+          ),
+        );
+        continue;
+      }
+      return { exportName: e.exportName, spec: e.spec, nameNode: e.nameNode, sf };
     }
     for (const stmt of sf.statements) {
       if (!ts.isExportDeclaration(stmt) || stmt.isTypeOnly) continue;
@@ -4124,6 +4169,7 @@ export function exportsRebindInnerOf(e: ts.Expression): ts.BinaryExpression | nu
 }
 
 export function cjsWholeExportAssignmentOf(stmt: ts.Statement): ts.BinaryExpression | null {
+  if (ts.isExportAssignment(stmt)) return exportEqualsModuleView(stmt);
   if (!ts.isExpressionStatement(stmt)) return null;
   let found: ts.BinaryExpression | null = null;
   const scan = (e: ts.Expression): void => {
@@ -4209,6 +4255,37 @@ function staticElementKey(
  *             export, which the statement lowering fences by name.
  * Null for everything else. Callers gate on top-level position in a JS
  * module file — these forms anywhere else keep their generic fences. */
+/* TS `export = e` as the CommonJS whole-export it is. tsc emits exactly
+ * `module.exports = e` for it under module commonjs, and Node reads the
+ * module's surface from module.exports, so the statement is answered by the
+ * SAME records a JS `module.exports = e` statement gets (cjsExportAssignmentOf
+ * "table", cjsWholeExportAssignmentOf). The checker keeps seeing `export =`
+ * (its typing of importers is the real one); only the CJS predicates read
+ * this view. The view is a BinaryExpression whose positions and parent chain
+ * are the statement's, cached per statement so its identity is stable. */
+const exportEqualsViews = new WeakMap<ts.ExportAssignment, ts.BinaryExpression>();
+export function exportEqualsModuleView(stmt: ts.Statement): ts.BinaryExpression | null {
+  if (!ts.isExportAssignment(stmt) || !stmt.isExportEquals) return null;
+  const cached = exportEqualsViews.get(stmt);
+  if (cached !== undefined) return cached;
+  // The ts7 facade builds no nodes, so the view is the statement's own node
+  // (inherited methods, positions, parent chain) with the BinaryExpression
+  // fields it needs as own properties. `left` is the `module.exports` shape
+  // isModuleExportsAccess reads (module / exports identifiers).
+  const moduleIdent = { kind: ts.SyntaxKind.Identifier, text: "module" };
+  const exportsIdent = { kind: ts.SyntaxKind.Identifier, text: "exports" };
+  const left = { kind: ts.SyntaxKind.PropertyAccessExpression, expression: moduleIdent, name: exportsIdent, questionDotToken: undefined };
+  const view = Object.create(stmt) as ts.BinaryExpression;
+  Object.defineProperties(view, {
+    kind: { value: ts.SyntaxKind.BinaryExpression },
+    left: { value: left },
+    right: { value: stmt.expression },
+    operatorToken: { value: { kind: ts.SyntaxKind.EqualsToken } },
+  });
+  exportEqualsViews.set(stmt, view);
+  return view;
+}
+
 export function cjsExportAssignmentOf(stmt: ts.Statement):
   | { kind: "table"; obj: ts.ObjectLiteralExpression | null; expr: ts.BinaryExpression }
   | {
@@ -4219,6 +4296,11 @@ export function cjsExportAssignmentOf(stmt: ts.Statement):
       expr: ts.BinaryExpression;
     }
   | null {
+  if (ts.isExportAssignment(stmt)) {
+    const view = exportEqualsModuleView(stmt);
+    if (view === null) return null;
+    return { kind: "table", obj: ts.isObjectLiteralExpression(view.right) ? view.right : null, expr: view };
+  }
   if (!ts.isExpressionStatement(stmt)) return null;
   const e = stmt.expression;
   // `exports = module.exports = <obj>`: the whole-export replacement, spelled

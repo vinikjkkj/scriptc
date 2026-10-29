@@ -1292,6 +1292,10 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     // it in CJS-shaped modules/.d.ts): named, not the generic syntax
     // fence.
     if (ts.isExportAssignment(stmt) && stmt.isExportEquals) {
+      // The CommonJS whole-export (program.ts exportEqualsModuleView): the
+      // same statement lowering a JS `module.exports = e` takes.
+      const cjs = cjsExportAssignmentOf(stmt);
+      if (cjs !== null) return lowerCjsExportStatement(L, cjs);
       L.unsupported(
         "SC1090",
         stmt,
