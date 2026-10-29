@@ -10,13 +10,16 @@
  *     access -- lowerRecordFieldCall's own dyn-callee branch, a second,
  *     independent fix in the same change), and
  *
- *   - the BOUNDARY (a program-authored member of the identical shape, no
- *     .d.ts anywhere, must keep refusing -- the pinned regression this
- *     admission was built not to break is
- *     tests/diagnostics/any-outside-an-index-signature-still-has-no-
- *     representation.ts, but that fixture predates this feature and only
- *     exercises the refusal side; it was never wired to this gate by
- *     name).
+ *   - the PROGRAM-AUTHORED member of the identical shape (no .d.ts
+ *     anywhere) is admitted too, and must match Node exactly like the
+ *     .d.ts case. CHANGED 2026-10-29 (mgresp, orchestrator extension): the
+ *     refusal this file used to pin for a program-authored bare-`any`
+ *     member was a conservative guard, not a representation wall; a
+ *     refusal is an open defect under the no-best-effort rule. The member
+ *     is the native ScrDyn slot, not --dynamic and not QuickJS. The
+ *     fixture tests/diagnostics/any-outside-an-index-signature-still-has-
+ *     no-representation.ts still refuses every `any` shape outside a
+ *     record member (array elements, a literal's member).
  *
  * The local tests/corpus sweep is NOT this instrument: its 1876 programs
  * contain zero bare-`any` record members backed by a real .d.ts (every
@@ -87,7 +90,7 @@ const q = makePool({ host: "127.0.0.1", port: 3307, debug: (msg) => "echo:" + ms
 console.log(q.host, q.port, describe(q));
 `;
 
-describe("a bare `any` record member declared in a shipped .d.ts", () => {
+describe("a bare `any` record member (declared in a .d.ts or program-authored)", () => {
   test("admits a native (no --dynamic) record, and the typeof-narrowed function member is directly callable", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scr-anymember-dts-"));
     // The .d.ts carries ONLY the type -- exactly PoolOptions' own shape:
@@ -130,7 +133,7 @@ describe("a bare `any` record member declared in a shipped .d.ts", () => {
     expect(got).toBe(want);
   }, 120_000);
 
-  test("the IDENTICAL shape, program-authored (no .d.ts anywhere), still refuses", async () => {
+  test("the IDENTICAL shape, program-authored (no .d.ts anywhere), compiles and matches Node", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scr-anymember-plain-"));
     const src = join(dir, "main.ts");
     writeFileSync(
@@ -146,9 +149,27 @@ describe("a bare `any` record member declared in a shipped .d.ts", () => {
       outPath: join(dir, `prog${process.platform === "win32" ? ".exe" : ""}`),
       outDir: dir,
     });
-    expect(result.ok, "a program-authored bare-`any` member must still refuse").toBe(false);
     if (!result.ok) {
-      expect(result.diagnostics.some((d) => d.code === "SC2011")).toBe(true);
+      throw new Error(
+        `expected the program-authored shape to compile; got:\n` +
+          result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"),
+      );
     }
+    const oracleSrc = join(dir, "oracle.js");
+    writeFileSync(oracleSrc, ORACLE_JS);
+    const want = execFileSync(process.execPath, [oracleSrc], { encoding: "utf8", timeout: 120_000 });
+    let got = "";
+    let stderr = "";
+    let status = 0;
+    try {
+      got = execFileSync(result.binaryPath, { encoding: "utf8", timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] });
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string; stderr?: string };
+      status = err.status ?? -1;
+      got = err.stdout ?? "";
+      stderr = err.stderr ?? "";
+    }
+    expect(status, `exited ${status}; stderr:\n${stderr}`).toBe(0);
+    expect(got).toBe(want);
   }, 120_000);
 });
