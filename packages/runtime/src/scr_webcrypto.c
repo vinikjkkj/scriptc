@@ -91,6 +91,26 @@ static bool scr_wc_bytes_of(const ScrDyn *d, const unsigned char **p, size_t *n)
   return true;
 }
 
+/* The checks and the fill of getRandomValues, shared by the dyn method and the
+ * static libCall. Node's integer-typed test: Float16Array (SCR_BYTES_F16)
+ * is a float array, so it throws like Float32Array and Float64Array; an
+ * ArrayBuffer and a DataView are not typed arrays at all. Returns false with
+ * the Node error thrown. */
+static bool scr_wc_fill_random(ScrBytes *b) {
+  if (b == NULL || b->elem == SCR_BYTES_F32 || b->elem == SCR_BYTES_F64 ||
+      b->elem == SCR_BYTES_F16 || b->elem == SCR_BYTES_BUF || scr_bytes_is_dataview(b)) {
+    scr_throw_domex("TypeMismatchError", "The data argument must be an integer-type TypedArray");
+    return false;
+  }
+  size_t n = b->len * scr_bytes_elem_size(b->elem);
+  if (n > 65536) {
+    scr_throw_domex("QuotaExceededError", "The requested length exceeds 65,536 bytes");
+    return false;
+  }
+  if (n > 0) arc4random_buf(b->data, n);
+  return true;
+}
+
 static ScrDyn *scr_wc_get_random_values(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   (void)clo;
   if (argc < 1) {
@@ -99,20 +119,21 @@ static ScrDyn *scr_wc_get_random_values(ScrClosure *clo, ScrDyn *const *args, si
     return NULL;
   }
   const ScrDyn *ta = args[0];
-  if (ta == NULL || ta->kind != SCR_DYN_BYTES || ta->v.bytes == NULL ||
-      ta->v.bytes->elem == SCR_BYTES_F32 || ta->v.bytes->elem == SCR_BYTES_F64 ||
-      ta->v.bytes->elem == SCR_BYTES_BUF || scr_bytes_is_dataview(ta->v.bytes)) {
+  if (ta == NULL || ta->kind != SCR_DYN_BYTES || ta->v.bytes == NULL) {
     scr_throw_domex("TypeMismatchError", "The data argument must be an integer-type TypedArray");
     return NULL;
   }
-  ScrBytes *b = ta->v.bytes;
-  size_t n = b->len * scr_bytes_elem_size(b->elem);
-  if (n > 65536) {
-    scr_throw_domex("QuotaExceededError", "The requested length exceeds 65,536 bytes");
-    return NULL;
-  }
-  if (n > 0) arc4random_buf(b->data, n);
+  if (!scr_wc_fill_random(ta->v.bytes)) return NULL;
   return scr_dyn_retain((ScrDyn *)ta);
+}
+
+/* crypto.getRandomValues(a) over a static typed array (the libCall the
+ * lowering emits for a call whose argument is statically a typed array). The
+ * argument is borrowed; the answer is the SAME array, retained (+1), so
+ * `getRandomValues(a) === a` holds as it does in Node. */
+ScrBytes *scr_crypto_get_random_values(ScrBytes *b) {
+  if (!scr_wc_fill_random(b)) return NULL;
+  return scr_bytes_retain(b);
 }
 
 static ScrDyn *scr_wc_random_uuid(ScrClosure *clo, ScrDyn *const *args, size_t argc) {

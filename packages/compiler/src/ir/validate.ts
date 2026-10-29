@@ -1031,6 +1031,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // Any two bytes values (the widths fold at runtime); byte-length
   // mismatch throws rather than answering.
   "crypto.timingSafeEqual": { argTypes: [null, null], result: BOOL },
+  // The argument's own typed array (kind and element checked in the libCall case).
+  "crypto.getRandomValues": { argTypes: [null], result: BYTES_U8_T },
   "crypto.randomBytesToString": { argTypes: [F64, STRING], result: STRING },
   "crypto.randomBytes": { argTypes: [F64], result: BYTES_U8 },
   "crypto.randomFillDeferred": {
@@ -4483,6 +4485,14 @@ function validateFunction(
           const [ta, tb] = [e.args[0]?.type, e.args[1]?.type];
           if (ta?.kind !== "bytes" || tb?.kind !== "bytes") {
             err(`libCall crypto.timingSafeEqual: expected two bytes values, got ${ta?.kind} and ${tb?.kind}`, e.loc);
+          }
+          break;
+        }
+        if (e.fn === "crypto.getRandomValues") {
+          // The answer is the argument itself (Node's identity), so its type is the argument's type.
+          const t = e.args[0]?.type;
+          if (t?.kind !== "bytes" || e.type.kind !== "bytes" || e.type.elem !== t.elem) {
+            err(`libCall crypto.getRandomValues: expected one bytes value answered at its own type, got ${t?.kind}`, e.loc);
           }
           break;
         }

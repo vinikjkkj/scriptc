@@ -4956,6 +4956,11 @@ export type IrLibFn =
    * randomBytesToString (which keeps its one-libCall lowering — the two
    * coexist: the composed form never materializes the Buffer). */
   | "crypto.randomBytes"
+  /** crypto.getRandomValues(a) on a STATIC integer typed array (the lowering of `crypto.getRandomValues(a)` in a
+   * TypeScript source, and the JavaScript call over a typed array): the runtime fills `a` from the CSPRNG and answers
+   * the SAME array (Node identity). Node's checks run in the runtime (TypeMismatchError for non-integer element
+   * types, QuotaExceededError past 65,536 bytes). Result type = argument type. */
+  | "crypto.getRandomValues"
   /** crypto.randomInt(min, max): a uniform integer in [min, max) by
    * rejection sampling. Throws Node's range errors (safe-integer bounds,
    * max > min, a range at or under 2^48). */
@@ -10886,7 +10891,7 @@ export function moduleUsesWebCrypto(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && node.fn === "dyn.webCrypto") {
+    if (node.kind === "libCall" && (node.fn === "dyn.webCrypto" || node.fn === "crypto.getRandomValues")) {
       found = true;
       return;
     }
@@ -11254,6 +11259,8 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     "dyn.bufferValue",
     // WebCrypto (globalThis.crypto.subtle): the subtle members answer promises of the dyn tree (scr_lib.c).
     "dyn.webCrypto",
+    // crypto.getRandomValues (static): its link set is scr_webcrypto.c, which rides scr_async_dyn.c.
+    "crypto.getRandomValues",
     // dns.lookup's empty-name DEP0118 goes through the warning channel (scr_dgram.c).
     "dns.lookup",
   ]);
@@ -13332,6 +13339,8 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
+  // crypto.getRandomValues: Node's TypeMismatchError and QuotaExceededError (scr_webcrypto.c).
+  "crypto.getRandomValues",
   "net.sockConnect", "net.sockConnectCb",
   // crypto.publicEncrypt, RSA-OAEP/SHA-1 only (scr_rsa_pubenc.c). The RSA
   // key is a REMOTE peer's, not local configuration -- bad/unparseable key
