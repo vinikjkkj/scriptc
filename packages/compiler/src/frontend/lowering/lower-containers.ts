@@ -3651,6 +3651,31 @@ function lowerOptionalDefaultArg(
     return { kind: "call", callee: name, args: [receiver, index], type: resultT, loc };
   }
 
+/** The mapper of a three-argument Array.from ignores its thisArg: an arrow
+   * (its `this` is lexical), or a function expression/declaration whose own
+   * body never names `this` (nested arrows included, nested functions not). */
+  function arrayFromThisArgIgnorable(fn: ts.Expression): boolean {
+    if (ts.isArrowFunction(fn)) return true;
+    if (!ts.isFunctionExpression(fn)) return false;
+    let reads = false;
+    const visit = (n: ts.Node): void => {
+      if (reads) return;
+      if (n.kind === ts.SyntaxKind.ThisKeyword) { reads = true; return; }
+      // A nested function or class binds its own `this`.
+      if (n !== fn && (ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n))) return;
+      ts.forEachChild(n, visit);
+    };
+    ts.forEachChild(fn, visit);
+    return !reads;
+  }
+
+  /** A thisArg whose evaluation has no effect: a name, `this`, or a literal. */
+  function arrayFromThisArgPure(e: ts.Expression): boolean {
+    return ts.isIdentifier(e) || e.kind === ts.SyntaxKind.ThisKeyword ||
+      e.kind === ts.SyntaxKind.NullKeyword || e.kind === ts.SyntaxKind.TrueKeyword ||
+      e.kind === ts.SyntaxKind.FalseKeyword || ts.isStringLiteral(e) || ts.isNumericLiteral(e);
+  }
+
 /** `Array.from({ length: n }, mapfn)` — the counted-generation idiom — on
    * THE stdlib Array global. The source must be an OBJECT LITERAL whose
    * single property is `length` (the shape the idiom always spells; the
@@ -3664,12 +3689,34 @@ function lowerOptionalDefaultArg(
    * no mapper) keeps the fence. Null when the callee isn't an
    * Array-static access. */
   export function lowerArrayFromCall(L: Lowerer, call: ts.CallExpression,
-    access: ts.PropertyAccessExpression,): IrExpr | null {
+    access: ts.PropertyAccessExpression,
+    argsOverride?: readonly ts.Expression[],): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
     if (!L.isStdlibGlobal(access.expression, "Array")) return null;
     if (access.name.text !== "from") return null;
     const loc = locOf(call);
-    const args = call.arguments;
+    // `Array.from(src, mapfn, thisArg)`: the mapper's `this` is thisArg only
+    // for a plain function that READS `this`. An arrow ignores it, and a
+    // function that never names `this` cannot tell it apart, so the thisArg
+    // is unobservable there and the call lowers as the two-argument form. The
+    // thisArg must itself be side-effect free (a name, a literal, `this`): the
+    // lowering evaluates the source and the mapper first, so an effectful
+    // thisArg would reorder. Anything else keeps a named refusal.
+    if (argsOverride === undefined && call.arguments.length === 3) {
+      const mapper = call.arguments[1]!;
+      const thisArg = call.arguments[2]!;
+      if (!arrayFromThisArgIgnorable(mapper) || !arrayFromThisArgPure(thisArg)) {
+        L.noLowering(
+          "Array.from with a thisArg",
+          call,
+          "the mapper must be an arrow function or a function that never reads 'this', and thisArg " +
+            "a plain name, literal or 'this' (a function that reads 'this' needs the thisArg bound to it, which " +
+            "this lowering does not do yet)",
+        );
+      }
+      return lowerArrayFromCall(L, call, access, call.arguments.slice(0, 2));
+    }
+    const args = argsOverride ?? call.arguments;
     // MAPPER-LESS `Array.from({ length: n })` (usually with an explicit
     // type argument — the pMap results-array idiom): a length-n array of
     // ABSENT slots, filled by index before any read. Union elements with
