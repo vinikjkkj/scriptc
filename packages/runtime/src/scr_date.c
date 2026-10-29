@@ -103,10 +103,10 @@ ScrDate *scr_date_new(double ms) {
 }
 
 /* new Date(dateString).  The grammar is NOT widened here: this is the
- * same bounded parse scr_date_parse_get_time already ships for the
- * composed form, so the value form and the composed form cannot drift
- * apart.  An unparseable string yields NaN -- an invalid Date, exactly
- * as in Node.  The string is BORROWED (the scr_url_new convention). */
+ * same parser scr_date_parse_get_time is for the composed form, so the
+ * value form and the composed form cannot drift apart.  An unparseable
+ * string yields NaN -- an invalid Date, exactly as in Node.  The string
+ * is BORROWED (the scr_url_new convention). */
 ScrDate *scr_date_new_str(ScrStr *s) {
   return scr_date_new(scr_date_parse_get_time(s));
 }
@@ -303,21 +303,8 @@ static double scr_date_make_date(double day, double time) {
   return isfinite(tv) ? tv : NAN;
 }
 
-static double scr_date_local_to_utc(double tl) {
-  if (!isfinite(tl)) return NAN;
-  double o1, o2;
-  if (!scr_date_tza(tl - 86400000.0, &o1)) return NAN;
-  if (!scr_date_tza(tl + 86400000.0, &o2)) return NAN;
-  double u1 = tl - o1;
-  if (o1 == o2) return u1;
-  double u2 = tl - o2, chk;
-  int v1 = scr_date_tza(u1, &chk) && chk == o1;
-  int v2 = scr_date_tza(u2, &chk) && chk == o2;
-  if (v1 && v2) return u1 < u2 ? u1 : u2;
-  if (v1) return u1;
-  if (v2) return u2;
-  return u1;
-}
+/* scr_date_local_to_utc (UTC of a local time value) lives in scr_lib.c, next to
+ * the one date-string parser that shares it. */
 
 /* new Date(y, mo, d, h, mi, s, ms): the 2-digit-year rule, then local time. */
 ScrDate *scr_date_new_parts(double y, double mo, double d, double h, double mi, double s, double ms) {

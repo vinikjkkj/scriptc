@@ -8751,7 +8751,7 @@ ScrStr *scr_intl_default_locale(void);
  * Date values HAVE a representation -- ScrDate { size_t rc; double ms },
  * declared below and constructed by scr_date_new (scr_date.c). What is
  * declared HERE is the composed slice only: Date.now(), toISOString over
- * a millisecond time value, the bounded parse, Date.UTC, and the
+ * a millisecond time value, the date-string parse, Date.UTC, and the
  * local-time getHours. The value constructors and the seven UTC field
  * reads are declared further down with the rest of the value surface. */
 double scr_date_now(void); /* integer ms since epoch, like Node */
@@ -8759,8 +8759,8 @@ double scr_date_now(void); /* integer ms since epoch, like Node */
  * 0–9999). THROWS Node's "Invalid time value" RangeError on NaN or
  * |ms| > 8.64e15 and returns NULL; +1 otherwise. */
 ScrStr *scr_date_to_iso(double ms);
-/* new Date(dateString).getTime(): the BOUNDED parse (the X509 validity
- * shape + ECMA's format with an explicit offset); NaN elsewhere. */
+/* new Date(dateString).getTime() and Date.parse(dateString): V8's date-string
+ * parser (scr_lib.c), the time value V8 gives the string, NaN where V8 says NaN. */
 double scr_date_parse_get_time(ScrStr *s);
 /* Date.UTC over already-number arguments (frontend completes the spec's
  * defaults): MakeDay/MakeTime/TimeClip exactly — 0–99 maps to 1900+year,
@@ -11303,7 +11303,7 @@ void scr_date_release_v(void *p);
 
 /* -- Date VALUES (scr_date.c, behind the moduleUsesDate link gate) -----
  * scr_date_new TimeClips its argument and comes back +1; the string form
- * runs the SAME bounded grammar scr_date_parse_get_time already ships, so
+ * runs the SAME parser scr_date_parse_get_time is, so
  * the value and composed forms cannot drift.  scr_date_value is
  * getTime()/valueOf() over a BORROWED receiver.  The seven UTC field
  * reads are pure arithmetic over the time value -- no host state, so no
@@ -11337,6 +11337,9 @@ double scr_date_local_time(double ms);
 double scr_date_tz_offset(double ms);
 /* new Date(y, mo, d, h, mi, s, ms): LOCAL wall time, 2-digit-year rule, +1. */
 ScrDate *scr_date_new_parts(double y, double mo, double d, double h, double mi, double s, double ms);
+/* UTC of a local time value (scr_lib.c): the zone conversion both new Date(y, m, d, ...) and
+ * the local date-time strings of Date.parse use. NaN when the zone cannot answer. */
+double scr_date_local_to_utc(double tl);
 /* Every setter (opcode table in scr_date.c): mutates the handle, returns the
  * new time value. Borrowed receiver; never throws. */
 double scr_date_set(ScrDate *dt, double op, double argc, double a0, double a1, double a2, double a3);
