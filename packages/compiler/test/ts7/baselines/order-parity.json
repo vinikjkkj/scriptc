@@ -5360,6 +5360,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15744-array-from-dyn-object-array-like.js": {
+   "order": [
+    "<repo>/tests/corpus/15744-array-from-dyn-object-array-like.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15745-array-from-dyn-iterator-protocol.js": {
+   "order": [
+    "<repo>/tests/corpus/15745-array-from-dyn-iterator-protocol.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15746-array-from-dyn-kinds-and-primitives.js": {
+   "order": [
+    "<repo>/tests/corpus/15746-array-from-dyn-kinds-and-primitives.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15747-array-from-three-argument-this-arg.js": {
+   "order": [
+    "<repo>/tests/corpus/15747-array-from-three-argument-this-arg.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1565-spawn-pipe-streams.ts": {
    "order": [
     "<repo>/tests/corpus/1565-spawn-pipe-streams.ts"
