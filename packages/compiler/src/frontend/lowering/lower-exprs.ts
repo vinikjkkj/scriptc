@@ -5371,6 +5371,11 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
       // narrowing has exactly one possible meaning -- see soleSolidArm.
       // Without this, a guard-narrowed or overload-pinned `child.stdout`
       // stays union-typed and re-tag-fences (SC2003) at its use.
+      // A checker type of dyn (`unknown` / `any`) is not a narrowing: it names
+      // the whole value, undefined arm included, so no sole-arm proof exists.
+      // Bridging it threw `undefined is not representable in the target
+      // union` for `(d as { _id?: unknown })._id` where Node answers undefined.
+      if (narrowed.kind === "dyn") return expr;
       const sole = soleSolidArm(L, expr.type.unionId);
       if (sole !== null) return checkedArmBridge(L, expr, sole, expr.loc);
       return expr;
