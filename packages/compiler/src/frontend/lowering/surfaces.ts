@@ -871,6 +871,13 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
   tls: {
     checkServerIdentity: { fn: "tls.checkServerIdentity", params: [STRING, DYN], result: DYN },
   },
+  // node:tty: isatty(fd) is the isatty(3) read that process.stdin/stdout/
+  // stderr.isTTY already lowers to (process.isTTY). The runtime answers
+  // Node's own guard (an integer fd in 0..2147483647; anything else is
+  // false) so the row is the whole truth about the call.
+  tty: {
+    isatty: { fn: "process.isTTY", params: [F64], result: BOOL },
+  },
   https: {},
   // node:dgram and node:dns lower ENTIRELY through the dgram spoke
   // (lower-dgram.ts — createSocket's option literal, dns.lookup's
@@ -1056,6 +1063,9 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
  *                                 row is not the whole call */
 export const BUILTIN_MEMBER_FN_VALUES: Record<string, ReadonlySet<string> | undefined> = {
   tls: new Set(["checkServerIdentity"]),
+  // tty.isatty: the same row the call form uses (process.isTTY), so the
+  // value is the interned closure over it.
+  tty: new Set(["isatty"]),
   // Every fs entry here is a single libCall over scalar parameters with no
   // arm in lowerBuiltinModuleCall: the option-form members (readFileSync,
   // writeFileSync, mkdirSync, rmSync, readdirSync, accessSync,
