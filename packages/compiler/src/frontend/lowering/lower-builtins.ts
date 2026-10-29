@@ -9808,6 +9808,24 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       }
       return { kind: "libCall", fn: "date.utc", args, type: F64, loc };
     }
+    // Date.parse(string): the same V8 date-string parser new Date(string)
+    // uses (scr_date_parse_get_time, scr_lib.c), so the value is V8's for
+    // every string. A non-string argument (tsc accepts any value) is fenced:
+    // its ToString is not modelled here.
+    if (L.stdlibGlobalMember(access, "Date") === "parse") {
+      if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) {
+        L.noLowering(`Date.parse with ${call.arguments.length} arguments`, call);
+      }
+      const arg = L.lowerExpr(call.arguments[0]!);
+      if (arg.type.kind !== "string") {
+        L.noLowering(
+          `Date.parse of '${L.fmt(arg.type)}' values`,
+          call.arguments[0]!,
+          "Date.parse takes a string — narrow the union to string first",
+        );
+      }
+      return { kind: "libCall", fn: "date.parseGetTime", args: [arg], type: F64, loc };
+    }
     if (
       access.name.text !== "toISOString" &&
       access.name.text !== "getTime" &&
@@ -9838,12 +9856,9 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     if (access.name.text === "getTime") {
       // The composed `new Date(x).getTime()` read — the Date value
       // between the two never materializes (the toISOString precedent).
-      // new Date().getTime() IS Date.now(); the STRING form parses the
-      // bounded date-string grammar (the X509 validity shape portless's
-      // cert-expiry check reads, plus ECMA's own date-time format) and
-      // answers NaN elsewhere — a documented divergence from V8's wider
-      // parser. The ms form is pointless composition; the fence points at
-      // the value.
+      // new Date().getTime() IS Date.now(); the STRING form is V8's date
+      // parser (scr_date_parse_get_time), the same one Date.parse uses. The
+      // ms form is pointless composition; the fence points at the value.
       if (call.arguments.length !== 0) {
         L.noLowering("getTime with arguments", call);
       }
