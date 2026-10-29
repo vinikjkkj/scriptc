@@ -200,6 +200,11 @@ struct ScrStreamState {
     size_t n, cap, head;
     int corked;
     bool writing, wsync, need_drain, after_scheduled;
+    /* Transform (Node's kCallback): the readable length at _write entry,
+     * and whether a completed transform callback is parked until the
+     * readable side is read below its highWaterMark */
+    size_t tlen_entry;
+    bool theld;
     bool ending, finished, prefinished, final_called, finish_scheduled;
     ScrClosure *inflight_cb; /* owned or NULL */
     ScrClosure *write_cb;
@@ -856,8 +861,13 @@ static void scr_stream_call_read(ScrStream *s) {
   }
   if (st->r.read_cb == NULL) {
     /* transform reads are push-driven; the attempt still clears the
-     * initial sync flag (Node's Transform._read ran) */
+     * initial sync flag (Node's Transform._read ran). Node's _read also
+     * releases a parked transform callback (kCallback) below the hwm. */
     st->r.in_read_sync = false;
+    if (st->w.theld && st->r.length < st->r.hwm) {
+      st->w.theld = false;
+      scr_stream_write_done(s, NULL);
+    }
     return;
   }
   st->r.reading = true;
@@ -1957,6 +1967,7 @@ static void scr_stream_do_write(ScrStream *s, ScrBytes *chunk /*moves*/, ScrClos
       scr_error_release(e);
       return;
     }
+    st->w.tlen_entry = st->r.length;
     st->transform_inv(st->transform_cb, s, chunk);
     scr_bytes_release(chunk);
     st->w.wsync = false;
@@ -3680,6 +3691,15 @@ void scr_stream_transform_done(ScrStream *s, ScrError *err /*moves*/, ScrBytes *
   if (data_str) scr_str_release(data_str);
   if (scr_exc_pending()) {
     if (err) scr_error_release(err);
+    return;
+  }
+  /* Node's Transform._write callback gate: the write completes at once
+   * unless the stream is ending, nothing was pushed by this transform, or
+   * the readable side is still below its highWaterMark. Otherwise the
+   * completion parks until the readable side is read (see call_read). */
+  if (!err && !s->st->w.ending && s->st->r.length != s->st->w.tlen_entry &&
+      s->st->r.length >= s->st->r.hwm) {
+    s->st->w.theld = true;
     return;
   }
   scr_stream_write_done(s, err);
