@@ -20136,6 +20136,126 @@
       "<repo>/tests/corpus/15625-compound-element-write-through-accessor-receiver.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/15800-stringify-replacer-fn-dyn-root.ts": {
+    "order": [
+      "<repo>/tests/corpus/15800-stringify-replacer-fn-dyn-root.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15801-stringify-replacer-tojson-first.ts": {
+    "order": [
+      "<repo>/tests/corpus/15801-stringify-replacer-tojson-first.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15802-stringify-replacer-undefined-drops.ts": {
+    "order": [
+      "<repo>/tests/corpus/15802-stringify-replacer-undefined-drops.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15803-stringify-allowlist-order-dedupe.ts": {
+    "order": [
+      "<repo>/tests/corpus/15803-stringify-allowlist-order-dedupe.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15804-stringify-space-number-clamp.ts": {
+    "order": [
+      "<repo>/tests/corpus/15804-stringify-space-number-clamp.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15805-stringify-space-string-truncate.ts": {
+    "order": [
+      "<repo>/tests/corpus/15805-stringify-space-string-truncate.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15806-stringify-replacer-with-space-nested.ts": {
+    "order": [
+      "<repo>/tests/corpus/15806-stringify-replacer-with-space-nested.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15807-stringify-union-replacer-space.ts": {
+    "order": [
+      "<repo>/tests/corpus/15807-stringify-union-replacer-space.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15808-stringify-cycle-with-replacer.ts": {
+    "order": [
+      "<repo>/tests/corpus/15808-stringify-cycle-with-replacer.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15809-stringify-bigint-with-replacer.ts": {
+    "order": [
+      "<repo>/tests/corpus/15809-stringify-bigint-with-replacer.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15810-stringify-replacer-throws.ts": {
+    "order": [
+      "<repo>/tests/corpus/15810-stringify-replacer-throws.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15811-stringify-static-record-replacer.ts": {
+    "order": [
+      "<repo>/tests/corpus/15811-stringify-static-record-replacer.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15812-stringify-toJSON-class-replacer.ts": {
+    "order": [
+      "<repo>/tests/corpus/15812-stringify-toJSON-class-replacer.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15813-stringify-date-replacer.ts": {
+    "order": [
+      "<repo>/tests/corpus/15813-stringify-date-replacer.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15814-stringify-buffer-replacer-space.ts": {
+    "order": [
+      "<repo>/tests/corpus/15814-stringify-buffer-replacer-space.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15815-stringify-collections-replacer.ts": {
+    "order": [
+      "<repo>/tests/corpus/15815-stringify-collections-replacer.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15816-stringify-symbol-and-function-drop.ts": {
+    "order": [
+      "<repo>/tests/corpus/15816-stringify-symbol-and-function-drop.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15817-stringify-root-replacer-scalars.ts": {
+    "order": [
+      "<repo>/tests/corpus/15817-stringify-root-replacer-scalars.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15818-stringify-nested-replacer-keys.ts": {
+    "order": [
+      "<repo>/tests/corpus/15818-stringify-nested-replacer-keys.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15819-stringify-space-and-allowlist-combined.ts": {
+    "order": [
+      "<repo>/tests/corpus/15819-stringify-space-and-allowlist-combined.ts"
+    ],
+    "diags": []
   }
  }
 }
