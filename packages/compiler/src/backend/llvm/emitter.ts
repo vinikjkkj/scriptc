@@ -890,6 +890,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   // the generic path emits the standard pending check). typeof and the
   // ambient-this read never throw. The fs dyn read is the sync-fs story.
   "json.parse": "scr_json_parse",
+  "json.stringifyRepl": "scr_json_stringify_repl2",
+  "json.stringifyReplSpace": "scr_json_stringify_repl",
   "json.parseRevive": "scr_json_parse_revive",
   /* better-sqlite3 over the vendored amalgamation (scr_sqlite.c). Every
    * one of the executors and the two lifecycle members is in the

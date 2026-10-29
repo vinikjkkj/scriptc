@@ -5286,6 +5286,333 @@ ScrStr *scr_dyn_format_j(const ScrDyn *d) {
   return scr_jb_finish(&b);
 }
 
+/* ── JSON.stringify(value, replacer, space) over the dyn tree ───────────
+ * The replacer/space spellings the one-argument serializer refuses at
+ * compile time (SC2020) lower to this walk. It keeps the spec's
+ * SerializeJSONProperty order: toJSON first, then the replacer function
+ * (this = holder, args = key, value), then the drop/emit decision, which
+ * is made BEFORE anything is written so an omitted member leaves no key
+ * behind. A PropertyList (array replacer) keeps its order, dedupes by
+ * first occurrence, and applies to objects only. The gap (space) is
+ * ToIntegerOrInfinity clamped to 0..10 spaces for a number and the first
+ * 10 UTF-16 units for a string. Borrows all three arguments; +1 result,
+ * or NULL with the exception pending. A dropped root answers the text
+ * "undefined", the dyn-root convention of scr_dyn_format_j. */
+typedef struct {
+  ScrDyn *fn;         /* replacer function, borrowed; NULL when none */
+  ScrStr **allow;     /* PropertyList, owned; NULL when none */
+  size_t nallow;
+  ScrStr *gap;        /* owned; NULL = compact */
+  ScrJsonBuf *b;
+} ScrJRepl;
+
+static void jr_indent(ScrJRepl *cx, size_t depth) {
+  for (size_t i = 0; i < depth; i++) scr_jb_write(cx->b, cx->gap->data, cx->gap->len);
+}
+
+/* SerializeJSONProperty up to the emit decision: the value after toJSON
+ * and the replacer, or NULL for an absent position / pending exception.
+ * `value` is borrowed; the result is +1. */
+/* Buffer.prototype.toJSON's answer: the plain object {type, data}, which
+ * is then the value the replacer and the members see. +1. */
+static ScrDyn *jr_buffer_form(const ScrDyn *v) {
+  ScrDyn *obj = scr_dyn_new_obj();
+  ScrStr *t = scr_str_new("Buffer", 6);
+  scr_dyn_obj_set(obj, "type", 4, scr_dyn_new_str(t));
+  scr_str_release(t);
+  ScrDyn *arr = scr_dyn_new_arr();
+  const ScrBytes *b = v->v.bytes;
+  for (size_t i = 0; i < b->len; i++) scr_dyn_arr_push(arr, scr_dyn_new_num(scr_bytes_get(b, (double)i)));
+  scr_dyn_obj_set(obj, "data", 4, arr);
+  return obj;
+}
+
+/* A plain typed array's own member named `key`, when it is a canonical
+ * index inside the length; NULL (undefined) otherwise. +1. */
+static ScrDyn *jr_bytes_get(const ScrDyn *v, const ScrStr *key) {
+  if (key->len == 0 || key->len > 15) return NULL;
+  if (key->len > 1 && key->data[0] == '0') return NULL;
+  double idx = 0;
+  for (size_t i = 0; i < key->len; i++) {
+    if (key->data[i] < '0' || key->data[i] > '9') return NULL;
+    idx = idx * 10 + (key->data[i] - '0');
+  }
+  if (idx >= (double)v->v.bytes->len) return NULL;
+  return scr_dyn_new_num(scr_bytes_get(v->v.bytes, idx));
+}
+
+static ScrDyn *jr_resolve(ScrJRepl *cx, ScrDyn *holder, const ScrStr *key, ScrDyn *value) {
+  ScrDyn *sub = scr_dyn_json_tojson(value, key->data, key->len); /* +1 or NULL */
+  if (sub == NULL && scr_exc_pending()) return NULL;
+  if (sub == NULL && value->kind == SCR_DYN_BYTES && value->buffer) sub = jr_buffer_form(value);
+  ScrDyn *v = sub != NULL ? sub : scr_dyn_retain(value);
+  if (cx->fn != NULL) {
+    ScrStr *ks = scr_str_new(key->data, key->len);
+    ScrDyn *args[2];
+    args[0] = scr_dyn_new_str(ks); /* RETAINS ks */
+    scr_str_release(ks);
+    args[1] = v;
+    scr_dyn_this_push_dyn(holder);
+    ScrDyn *r = scr_dyn_call(cx->fn, args, 2, "JSON.stringify replacer");
+    scr_dyn_this_pop();
+    scr_dyn_release(args[0]);
+    scr_dyn_release(v);
+    if (r == NULL) return NULL; /* the replacer threw */
+    v = r;
+  }
+  if (scr_dyn_json_absent(v) || (v->kind == SCR_DYN_HANDLE && scr_dyn_is_symbol(v))) {
+    scr_dyn_release(v);
+    return NULL;
+  }
+  return v;
+}
+
+static void jr_emit(ScrJRepl *cx, ScrDyn *v, size_t depth);
+
+/* SerializeJSONArray. `v` is +1 and released here. */
+static void jr_array(ScrJRepl *cx, ScrDyn *v, size_t depth) {
+  if (!scr_jb_enter(cx->b, v, true)) {
+    scr_dyn_release(v);
+    return;
+  }
+  scr_jb_putc(cx->b, '[');
+  const size_t alen = (size_t)scr_dyn_arr_len(v); /* read ONCE, as V8 does */
+  bool any = false;
+  for (size_t i = 0; i < alen; i++) {
+    char ik[32];
+    int ikn = snprintf(ik, sizeof ik, "%zu", i);
+    ScrStr *k = scr_str_new(ik, (size_t)ikn);
+    ScrDyn *el = scr_dyn_arr_at(v, (double)i); /* +1; undefined past a shrink */
+    ScrDyn *r = jr_resolve(cx, v, k, el);
+    scr_dyn_release(el);
+    scr_str_release(k);
+    if (r == NULL && scr_exc_pending()) break;
+    if (any) scr_jb_putc(cx->b, ',');
+    any = true;
+    if (cx->gap != NULL) {
+      scr_jb_putc(cx->b, '\n');
+      jr_indent(cx, depth + 1);
+    }
+    if (r == NULL) {
+      scr_jb_puts(cx->b, "null");
+    } else {
+      scr_jb_edge_idx(cx->b, i);
+      jr_emit(cx, r, depth + 1);
+    }
+    if (scr_exc_pending()) break;
+  }
+  if (any && cx->gap != NULL) {
+    scr_jb_putc(cx->b, '\n');
+    jr_indent(cx, depth);
+  }
+  scr_jb_putc(cx->b, ']');
+  scr_jb_leave(cx->b);
+  scr_dyn_release(v);
+}
+
+/* SerializeJSONObject. The key list is the PropertyList when one was
+ * given, else the own enumerable keys in JS order, snapshot BEFORE any
+ * replacer runs. `v` is +1 and released here. */
+static void jr_object(ScrJRepl *cx, ScrDyn *v, size_t depth) {
+  const void *ident = v->kind == SCR_DYN_OBJINST ? (const void *)v->v.inst.o : (const void *)v;
+  if (!scr_jb_enter(cx->b, ident, false)) {
+    scr_dyn_release(v);
+    return;
+  }
+  ScrDyn *keys = NULL;
+  size_t nkeys = cx->nallow;
+  if (cx->allow == NULL) {
+    if (v->kind == SCR_DYN_BYTES) {
+      /* a plain typed array's own enumerable keys are its indices */
+      keys = scr_dyn_new_arr();
+      for (size_t i = 0; i < v->v.bytes->len; i++) {
+        char ik[32];
+        int ikn = snprintf(ik, sizeof ik, "%zu", i);
+        ScrStr *ks = scr_str_new(ik, (size_t)ikn);
+        scr_dyn_arr_push(keys, scr_dyn_new_str(ks));
+        scr_str_release(ks);
+      }
+    } else if (v->kind == SCR_DYN_OBJINST) {
+      keys = scr_dyn_new_arr();
+      const size_t inm = scr_dyn_objinst_member_count(v);
+      for (size_t i = 0; i < inm; i++) {
+        const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
+        if (!m->enumerable || m->get == NULL) continue;
+        ScrStr *mk = scr_str_new(m->name, m->len);
+        scr_dyn_arr_push(keys, scr_dyn_new_str(mk));
+        scr_str_release(mk);
+      }
+    } else {
+      keys = scr_dyn_obj_keys(v); /* +1; lists accessors without running them */
+      if (keys == NULL) {
+        scr_jb_leave(cx->b);
+        scr_dyn_release(v);
+        return;
+      }
+    }
+    nkeys = (size_t)scr_dyn_arr_len(keys);
+  }
+  scr_jb_putc(cx->b, '{');
+  bool any = false;
+  for (size_t i = 0; i < nkeys; i++) {
+    const ScrStr *k = cx->allow != NULL ? cx->allow[i] : keys->v.arr.items[i]->v.str;
+    ScrDyn *mv = NULL;
+    if (v->kind == SCR_DYN_OBJINST) {
+      const ScrDynClassMember *cm = scr_dyn_objinst_member(v, k->data, k->len);
+      mv = (cm != NULL && cm->get != NULL) ? cm->get(v->v.inst.o) : scr_dyn_retain(scr_dyn_undefined());
+    } else if (v->kind == SCR_DYN_BYTES) {
+      mv = jr_bytes_get(v, k);
+      if (mv == NULL) mv = scr_dyn_retain(scr_dyn_undefined());
+    } else {
+      mv = scr_dyn_obj_key_get(v, k->data, k->len); /* [[Get]]; NULL = absent or pending */
+      if (mv == NULL) {
+        if (scr_exc_pending()) break;
+        mv = scr_dyn_retain(scr_dyn_undefined());
+      }
+    }
+    if (mv == NULL) break;
+    ScrDyn *r = jr_resolve(cx, v, k, mv);
+    scr_dyn_release(mv);
+    if (r == NULL && scr_exc_pending()) break;
+    if (r == NULL) continue;
+    if (any) scr_jb_putc(cx->b, ',');
+    any = true;
+    if (cx->gap != NULL) {
+      scr_jb_putc(cx->b, '\n');
+      jr_indent(cx, depth + 1);
+    }
+    scr_jb_put_json_str(cx->b, k);
+    scr_jb_putc(cx->b, ':');
+    if (cx->gap != NULL) scr_jb_putc(cx->b, ' ');
+    scr_jb_edge_key(cx->b, k);
+    jr_emit(cx, r, depth + 1);
+    if (scr_exc_pending()) break;
+  }
+  if (any && cx->gap != NULL) {
+    scr_jb_putc(cx->b, '\n');
+    jr_indent(cx, depth);
+  }
+  scr_jb_putc(cx->b, '}');
+  scr_jb_leave(cx->b);
+  if (keys != NULL) scr_dyn_release(keys);
+  scr_dyn_release(v);
+}
+
+/* Writes one resolved value (+1, consumed). */
+static void jr_emit(ScrJRepl *cx, ScrDyn *v, size_t depth) {
+  if (SCR_STACK_LOW()) {
+    scr_stack_exhausted();
+    scr_dyn_release(v);
+    return;
+  }
+  switch (v->kind) {
+  case SCR_DYN_ARR:
+    jr_array(cx, v, depth);
+    return;
+  case SCR_DYN_OBJ:
+    jr_object(cx, v, depth);
+    return;
+  case SCR_DYN_BYTES:
+    if (!v->buffer) { /* a plain typed array: index-keyed, like a plain object */
+      jr_object(cx, v, depth);
+      return;
+    }
+    break;
+  case SCR_DYN_OBJINST:
+    if (scr_dyn_objinst_enumerable(v)) {
+      jr_object(cx, v, depth);
+      return;
+    }
+    break;
+  case SCR_DYN_BIG:
+    scr_dyn_big_json_throw(); /* TypeError: a BigInt is never JSON */
+    scr_dyn_release(v);
+    return;
+  default:
+    break;
+  }
+  /* Scalars, and the kinds whose own writer is compact (see the report's
+   * residual list): scr_dyn_json_write_raw is the answer for them. */
+  scr_dyn_json_write_raw(cx->b, v);
+  scr_dyn_release(v);
+}
+
+ScrStr *scr_json_stringify_repl(ScrDyn *value, ScrDyn *replacer, ScrDyn *space) {
+  ScrJRepl cx;
+  memset(&cx, 0, sizeof cx);
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  cx.b = &b;
+  if (replacer != NULL) {
+    if (replacer->kind == SCR_DYN_FUNC ||
+        (replacer->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(replacer, "function"))) {
+      cx.fn = replacer;
+    } else if (replacer->kind == SCR_DYN_ARR) {
+      const size_t rn = (size_t)scr_dyn_arr_len(replacer);
+      for (size_t i = 0; i < rn; i++) {
+        ScrDyn *it = replacer->v.arr.items[i];
+        ScrStr *s = NULL;
+        if (it->kind == SCR_DYN_STR) s = scr_str_new(it->v.str->data, it->v.str->len);
+        else if (it->kind == SCR_DYN_NUM) s = scr_dyn_string_coerce(it); /* ToString(number) */
+        if (s == NULL) continue;
+        bool dup = false;
+        for (size_t j = 0; j < cx.nallow && !dup; j++) {
+          dup = cx.allow[j]->len == s->len && memcmp(cx.allow[j]->data, s->data, s->len) == 0;
+        }
+        if (dup) {
+          scr_str_release(s);
+          continue;
+        }
+        cx.allow = (ScrStr **)realloc(cx.allow, (cx.nallow + 1) * sizeof *cx.allow);
+        if (cx.allow == NULL) scr_json_oom();
+        cx.allow[cx.nallow++] = s;
+      }
+    }
+  }
+  if (space != NULL) {
+    if (space->kind == SCR_DYN_NUM) {
+      double n = space->v.num;
+      if (!(n >= 1)) n = 0; /* NaN, negatives and sub-1 mean compact */
+      if (n > 10) n = 10;
+      size_t sp = (size_t)n;
+      if (sp > 0) {
+        char spaces[16];
+        memset(spaces, ' ', sp);
+        cx.gap = scr_str_new(spaces, sp);
+      }
+    } else if (space->kind == SCR_DYN_STR) {
+      ScrStr *g = scr_str_slice(space->v.str, 0, 10);
+      if (g->len > 0) cx.gap = g;
+      else scr_str_release(g);
+    }
+  }
+  ScrDyn *wrap = scr_dyn_new_obj(); /* the root's holder: { "": value } */
+  scr_dyn_obj_set(wrap, "", 0, scr_dyn_retain(value));
+  ScrStr *empty = scr_str_new("", 0);
+  ScrDyn *root = jr_resolve(&cx, wrap, empty, value);
+  bool absent = root == NULL;
+  if (root != NULL) jr_emit(&cx, root, 0);
+  scr_str_release(empty);
+  scr_dyn_release(wrap);
+  ScrStr *out = NULL;
+  if (scr_exc_pending()) {
+    scr_jb_dispose(&b);
+  } else if (absent) {
+    scr_jb_dispose(&b);
+    out = scr_str_new("undefined", 9);
+  } else {
+    out = scr_jb_finish(&b);
+  }
+  for (size_t j = 0; j < cx.nallow; j++) scr_str_release(cx.allow[j]);
+  free(cx.allow);
+  if (cx.gap != NULL) scr_str_release(cx.gap);
+  return out;
+}
+
+ScrStr *scr_json_stringify_repl2(ScrDyn *value, ScrDyn *replacer) {
+  return scr_json_stringify_repl(value, replacer, NULL);
+}
+
 /* An %Error instance as a dyn object ({name, message[, code]}) — the
  * checked-dynamic boundary's error shape (the exception-snapshot
  * convention emit-walkers uses). Borrows e; +1 result.

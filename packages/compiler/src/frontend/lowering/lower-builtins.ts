@@ -4678,6 +4678,27 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     const member = L.stdlibGlobalMember(access, "JSON");
     if (member === null) return null;
     const loc = locOf(call);
+    if (
+      member === "stringify" &&
+      call.arguments.length >= 2 &&
+      call.arguments.length <= 3 &&
+      !call.arguments.some((a) => ts.isSpreadElement(a)) &&
+      !stringifyCompileTimeForm(call)
+    ) {
+      // JSON.stringify(value, replacer[, space]) with a replacer or a
+      // non-literal space: the walk runs in the runtime
+      // (scr_json_stringify_repl), which keeps the spec's order (toJSON,
+      // then the replacer with this = holder, then the drop/emit decision),
+      // the PropertyList, and the gap clamp. The value crosses as a dyn
+      // root, the same boundary as a dyn-root stringify (see below).
+      const value = L.lowerExprExpecting(call.arguments[0]!, DYN);
+      const replacer = L.lowerExprExpecting(call.arguments[1]!, DYN);
+      if (call.arguments.length === 2) {
+        return { kind: "libCall", fn: "json.stringifyRepl", args: [value, replacer], type: STRING, loc };
+      }
+      const space = L.lowerExprExpecting(call.arguments[2]!, DYN);
+      return { kind: "libCall", fn: "json.stringifyReplSpace", args: [value, replacer, space], type: STRING, loc };
+    }
     if (member === "parse" && call.arguments.length === 2 && !call.arguments.some((a) => ts.isSpreadElement(a))) {
       // JSON.parse(text, reviver): the walk runs in the runtime
       // (scr_json_parse_revive), calling the reviver with (key, value,
@@ -4824,6 +4845,31 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       return node;
     }
     return null; // unknown members are tsc errors before lowering
+  }
+
+/** True when `JSON.stringify(v, replacer[, space])` is one of the spellings
+   * the compile-time serializer owns: a `null`/`undefined` replacer and a
+   * space that is a literal (or absent). Everything else takes the runtime
+   * walk (scr_json_stringify_repl). Mirrors stringifySpaceIndent's accepts. */
+  function stringifyCompileTimeForm(call: ts.CallExpression): boolean {
+    const unwrap = (e: ts.Expression): ts.Expression =>
+      ts.isParenthesizedExpression(e) ? unwrap(e.expression) : e;
+    const nullish = (e: ts.Expression): boolean => {
+      const u = unwrap(e);
+      return u.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(u) && u.text === "undefined");
+    };
+    if (!nullish(call.arguments[1]!)) return false;
+    if (call.arguments.length === 2) return true;
+    const space = unwrap(call.arguments[2]!);
+    return (
+      nullish(space) ||
+      ts.isNumericLiteral(space) ||
+      ts.isStringLiteral(space) ||
+      ts.isNoSubstitutionTemplateLiteral(space) ||
+      (ts.isPrefixUnaryExpression(space) &&
+        space.operator === ts.SyntaxKind.MinusToken &&
+        ts.isNumericLiteral(unwrap(space.operand)))
+    );
   }
 
 /** The compile-time indent of a `JSON.stringify(v[, replacer[, space]])`

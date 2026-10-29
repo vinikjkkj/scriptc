@@ -5359,6 +5359,10 @@ void scr_dyn_trace_v(void *o, ScrTraceVisit visit, void *ctx);
  * compiler-emitted pending checks — json.parse is in the may-throw seed). */
 ScrDyn *scr_json_parse(ScrStr *text);
 ScrDyn *scr_json_parse_revive(ScrStr *text, ScrDyn *reviver);
+/* JSON.stringify(value, replacer, space) over the dyn tree: the replacer/space
+ * spellings. Borrows all three; +1, or NULL with the exception pending. */
+ScrStr *scr_json_stringify_repl(ScrDyn *value, ScrDyn *replacer, ScrDyn *space);
+ScrStr *scr_json_stringify_repl2(ScrDyn *value, ScrDyn *replacer);
 
 /* BORROWED member lookup on a SCR_DYN_OBJ; NULL when the key is absent.
  * OWN members only — the prototype chain is scr_dyn_proto_get's. */

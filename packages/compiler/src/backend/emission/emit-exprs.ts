@@ -3589,6 +3589,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "json.parseRevive":
             // Borrowed text and reviver; +1 result, or a pending throw.
             return finish(`scr_json_parse_revive(${arg(0)}, ${arg(1)})`);
+          case "json.stringifyRepl":
+            // Borrowed value and replacer; +1 text, or a pending throw.
+            return finish(`scr_json_stringify_repl2(${arg(0)}, ${arg(1)})`);
+          case "json.stringifyReplSpace":
+            return finish(`scr_json_stringify_repl(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "json.parse":
             // Borrows the text; returns +1 on a fresh dyn, or throws a
             // catchable SyntaxError-shaped string (may-throw seed set).

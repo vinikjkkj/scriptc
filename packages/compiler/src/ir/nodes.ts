@@ -3327,6 +3327,8 @@ export type IrLibFn =
   | "island.castFail"
   | "json.parse"
   | "json.parseRevive"
+  | "json.stringifyRepl"
+  | "json.stringifyReplSpace"
   /* ── better-sqlite3 over the vendored amalgamation (scr_sqlite.c) ────
    * The whole surface the static lane serves, and nothing beside it: a
    * member with no entry here has no lowering, and lower-sqlite.ts
@@ -13483,6 +13485,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "island.castFail",
   "json.parse",
   "json.parseRevive",
+  // A replacer function can throw, and a BigInt or a cycle reached through
+  // the walk throws Node's TypeError (scr_json_stringify_repl).
+  "json.stringifyRepl",
+  "json.stringifyReplSpace",
   /* Every SQLite entry point that reaches the engine can raise the
    * SqliteError-shaped throw, and the binder can raise the TypeError and
    * the two RangeErrors before the engine is reached. The four pure
