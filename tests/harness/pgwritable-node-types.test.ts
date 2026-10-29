@@ -1,6 +1,6 @@
 /* process.stdout / process.stderr WriteStream state reads under REAL
  * @types/node (the typed surface, not the fallback declarations the corpus
- * compiles against). The fixture reads writable, writableHighWaterMark,
+ * compiles against). The fixture reads writable,
  * writableEnded/Finished/ObjectMode/Corked, destroyed and closed on the
  * typed stream, through a let alias, and through the instanceof Stream
  * guard of the pgpass warn idiom. Its stdout must match Node byte for byte.
