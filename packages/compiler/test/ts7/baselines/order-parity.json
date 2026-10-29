@@ -20000,6 +20000,30 @@
     "<repo>/tests/corpus/15482-builtin-comma-tls-connect.cjs"
    ],
    "diags": []
-  }
+  },
+ "<repo>/tests/corpus/15440-ctor-primitive-class-compare.ts": {
+  "order": [
+   "<repo>/tests/corpus/15440-ctor-primitive-class-compare.ts"
+  ],
+  "diags": []
+ },
+ "<repo>/tests/corpus/15441-ctor-union-class-compare.ts": {
+  "order": [
+   "<repo>/tests/corpus/15441-ctor-union-class-compare.ts"
+  ],
+  "diags": []
+ },
+ "<repo>/tests/corpus/15442-ctor-class-through-namespace.ts": {
+  "order": [
+   "<repo>/tests/corpus/15442-ctor-class-through-namespace.ts"
+  ],
+  "diags": []
+ },
+ "<repo>/tests/corpus/15443-ctor-primitive-name.ts": {
+  "order": [
+   "<repo>/tests/corpus/15443-ctor-primitive-name.ts"
+  ],
+  "diags": []
+ }
  }
 }
