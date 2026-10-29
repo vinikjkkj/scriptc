@@ -13,7 +13,8 @@
  *   ("x.0", "x.1" for shadowing); the IR is scope-flat.
  */
 import { stdlibBufferTypes } from "../buffer-refinement.js";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { isRelativeSpecifier } from "../shared.js";
 import type { RequireThrowCtx } from "../require-throws.js";
 import type { CjsExportRecord } from "./cjs-export-record.js";
@@ -66,6 +67,7 @@ import type {
   SrcLoc,
 } from "../../ir/nodes.js";
 import { GRAFTED_EMITTER_CLASSES } from "../../ir/nodes.js";
+import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
@@ -3324,6 +3326,68 @@ export class Lowerer {
     return collectJsonRequires(this, parts);
   }
 
+  /** Orchestrator extension (2026-10-29), not a language rule: a dyn-source
+   * Array.from walks an object's iterator, and a GENERATOR held in the dynamic
+   * tree is a stranded box (canBoxFuncIntoDyn is false: it cannot be called
+   * through dyn). So a program that boxes a generator function or method into
+   * dyn is refused at compile time at every dyn-source Array.from, naming the
+   * boxing site, instead of the run-time "cannot be called through it" error.
+   * A program without such a box is not touched. */
+  fenceDynArrFromOnStrandedBox(functions: readonly IrFunction[]): void {
+    const arrFromSites: SrcLoc[] = [];
+    const boxSites: SrcLoc[] = [];
+    const seen = new Set<object>();
+    const getRecord = (id: string): IrRecordShape | undefined => this.shapes.get(id);
+    const getUnion = (id: string): IrUnionDef | undefined => this.unions.get(id);
+    const generatorStranded = (t: IrType, visiting: Set<string>): boolean => {
+      if (t.kind === "func") {
+        return t.ret.kind === "generator" && !canBoxFuncIntoDyn(t, getRecord, getUnion);
+      }
+      if (t.kind === "record") {
+        if (visiting.has(t.shapeId)) return false;
+        visiting.add(t.shapeId);
+        return (getRecord(t.shapeId)?.fields ?? []).some((f) => generatorStranded(f.type, visiting));
+      }
+      if (t.kind === "union") {
+        const def = getUnion(t.unionId);
+        return (def?.arms ?? []).some((a) => generatorStranded(a, visiting));
+      }
+      if (t.kind === "array") return generatorStranded(t.elem, visiting);
+      return false;
+    };
+    const visit = (n: unknown): void => {
+      if (n === null || typeof n !== "object" || seen.has(n)) return;
+      seen.add(n);
+      if (Array.isArray(n)) {
+        for (const x of n) visit(x);
+        return;
+      }
+      const node = n as { kind?: unknown; loc?: SrcLoc; value?: { type?: IrType } };
+      if (node.kind === "dynArrFrom" && node.loc) arrFromSites.push(node.loc);
+      if (node.kind === "dynFrom" && node.loc && node.value?.type && generatorStranded(node.value.type, new Set())) {
+        boxSites.push(node.loc);
+      }
+      for (const [k, v] of Object.entries(n)) {
+        if (k !== "loc" && k !== "type") visit(v);
+      }
+    };
+    visit(functions);
+    if (arrFromSites.length === 0 || boxSites.length === 0) return;
+    const box = boxSites[0]!;
+    let where = `offset ${box.start}`;
+    try {
+      const text = readFileSync(box.file, "utf8");
+      where = `${basename(box.file)}:${text.slice(0, box.start).split("\n").length}`;
+    } catch {
+      // A virtual file: the offset is the position the compiler has.
+    }
+    for (const loc of arrFromSites) {
+      this.pushDiag(unsupportedDiag("SC1090", loc,
+        `Array.from over an untyped value in a program that boxes a generator into the dynamic tree (at ${where})`,
+        "a generator held in the dynamic tree cannot be called, so the iterator this Array.from would run is " +
+          "refused here; remove the generator box, or iterate the value by a static type"));
+    }
+  }
   run(): LowerResult {
     // COLLECTION, tapped as one bucket. The per-file buckets below cover
     // the bodies; collection covers everything before the first body, and
@@ -3497,6 +3561,7 @@ export class Lowerer {
     // needs no interning, so it only has to wait for the WRITE SET, which
     // is not complete until the last body is lowered.
     this.reportRecordWidthCopies(functions);
+    this.fenceDynArrFromOnStrandedBox(functions);
 
     if (this.remainder) {
       // Deferred collection diagnostics nothing flushed — declarations no
