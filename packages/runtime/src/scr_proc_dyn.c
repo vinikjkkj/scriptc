@@ -109,12 +109,14 @@ static const char *const scr_ps_ladder_names[] = {
     "on", "once", "off", "addListener", "removeListener", "removeAllListeners", "prependListener",
     "prependOnceListener", "emit", "listeners", "rawListeners", "listenerCount", "eventNames",
     "setMaxListeners", "getMaxListeners", "end", "cork", "uncork", "destroy", "pipe", "unpipe",
-    "setDefaultEncoding", "_write", "_writev", "_destroy", "writableLength", "writableHighWaterMark",
-    "writableEnded", "writableFinished", "writableNeedDrain", "writableCorked", "writableObjectMode",
-    "writableAborted", "closed", "errored", "destroyed", "constructor", "getColorDepth", "hasColors",
+    "setDefaultEncoding", "_write", "_writev", "_destroy", "writableLength", "writableNeedDrain",
+    "writableAborted", "errored", "constructor", "getColorDepth", "hasColors",
     "getWindowSize", "clearLine", "clearScreenDown", "cursorTo", "moveCursor", "isRaw", "setRawMode",
     "_type", "_isStdio", "_handle", "_writableState",
 };
+static bool scr_ps_key_is(const char *k, size_t n, const char *lit) {
+  return strlen(lit) == n && memcmp(lit, k, n) == 0;
+}
 static bool scr_ps_is_ladder(const char *k, size_t n) {
   for (size_t i = 0; i < sizeof scr_ps_ladder_names / sizeof scr_ps_ladder_names[0]; i++) {
     if (strlen(scr_ps_ladder_names[i]) == n && memcmp(scr_ps_ladder_names[i], k, n) == 0) return true;
@@ -172,7 +174,16 @@ static ScrDyn *scr_ps_dynh_get(void *h, const char *key, size_t key_len) {
     ScrDyn *m = scr_dyn_obj_own_data(own, key, key_len);
     if (m != NULL) return scr_dyn_retain(m);
   }
+  /* The WriteStream state reads the typed surface answers the same way
+   * (lower-builtins.ts PROC_STREAM_STATE_BOOL / _NUM, measured on Node
+   * v24.15.0): writable is true; nothing can end, cork or destroy a
+   * process stream here, so the rest hold their initial values. */
   if (key_len == 8 && memcmp(key, "writable", 8) == 0) return scr_dyn_new_bool(true);
+  if (scr_ps_key_is(key, key_len, "writableEnded") || scr_ps_key_is(key, key_len, "writableFinished") ||
+      scr_ps_key_is(key, key_len, "writableObjectMode") || scr_ps_key_is(key, key_len, "destroyed") ||
+      scr_ps_key_is(key, key_len, "closed")) return scr_dyn_new_bool(false);
+  if (scr_ps_key_is(key, key_len, "writableHighWaterMark")) return scr_dyn_new_num(65536.0);
+  if (scr_ps_key_is(key, key_len, "writableCorked")) return scr_dyn_new_num(0.0);
   if (key_len == 2 && memcmp(key, "fd", 2) == 0) return scr_dyn_new_num((double)fd);
   if (key_len == 5 && memcmp(key, "write", 5) == 0) return scr_ps_write_method();
   if (key_len == 5 && memcmp(key, "isTTY", 5) == 0) return scr_dyn_new_bool(scr_process_is_tty((double)fd));

@@ -3412,6 +3412,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         L.lowerProcessProperty(expr) ??
         lowerNavigatorProperty(L, expr) ??
         L.lowerProcessStreamProperty(expr) ??
+        L.lowerProcStreamStateProperty(expr) ??
         L.lowerFsConstantsProperty(expr) ??
         // http2.constants.NGHTTP2_CANCEL (any constants-object spelling):
         // the baked-literal table.
