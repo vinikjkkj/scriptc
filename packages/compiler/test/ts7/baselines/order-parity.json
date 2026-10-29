@@ -20022,5 +20022,12 @@
    ],
    "diags": []
   }
+,
+  "<repo>/tests/corpus/15541-bson-shape-getters-instanceof.ts": {
+   "order": [
+    "<repo>/tests/corpus/15541-bson-shape-getters-instanceof.ts"
+   ],
+   "diags": []
+  }
  }
 }
