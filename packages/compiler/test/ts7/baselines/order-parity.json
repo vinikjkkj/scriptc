@@ -5336,6 +5336,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15740-array-from-dyn-string-code-points.js": {
+   "order": [
+    "<repo>/tests/corpus/15740-array-from-dyn-string-code-points.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15741-array-from-dyn-map-index-and-array-like.js": {
+   "order": [
+    "<repo>/tests/corpus/15741-array-from-dyn-map-index-and-array-like.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15742-array-from-dyn-nullish-and-kinds.js": {
+   "order": [
+    "<repo>/tests/corpus/15742-array-from-dyn-nullish-and-kinds.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15743-array-from-dyn-mapper-result-kinds.js": {
+   "order": [
+    "<repo>/tests/corpus/15743-array-from-dyn-mapper-result-kinds.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1565-spawn-pipe-streams.ts": {
    "order": [
     "<repo>/tests/corpus/1565-spawn-pipe-streams.ts"
