@@ -25,7 +25,7 @@ class Node1 {
   }
 }
 
-const index = new WeakMap<Node1, any>();
+const index = new WeakMap();
 
 const root = new Node1("root");
 const child = new Node1("child");

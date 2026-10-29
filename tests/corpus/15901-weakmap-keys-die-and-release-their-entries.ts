@@ -23,7 +23,7 @@ class Id {
 }
 
 const ITER = 60000;
-const cache = new WeakMap<Id, Uint8Array>();
+const cache = new WeakMap();
 
 let strangers = 0;
 let hits = 0;

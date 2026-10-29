@@ -15,7 +15,7 @@ class Tag {
   }
 }
 
-const seen = new WeakMap<Tag, string>();
+const seen = new WeakMap();
 const a = new Tag("a");
 const b = new Tag("b");
 const c = new Tag("c");

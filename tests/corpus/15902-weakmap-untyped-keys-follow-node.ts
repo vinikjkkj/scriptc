@@ -18,7 +18,7 @@ class Id {
   }
 }
 
-const w = new WeakMap<object, string>();
+const w = new WeakMap();
 const live = new Id(5);
 w.set(live, "five");
 
