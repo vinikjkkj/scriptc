@@ -5480,6 +5480,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15720-math-fround-edges.ts": {
+   "order": [
+    "<repo>/tests/corpus/15720-math-fround-edges.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15721-math-fround-coercion.ts": {
+   "order": [
+    "<repo>/tests/corpus/15721-math-fround-coercion.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15722-object-is-dyn-numbers.ts": {
+   "order": [
+    "<repo>/tests/corpus/15722-object-is-dyn-numbers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15723-object-is-dyn-kinds.ts": {
+   "order": [
+    "<repo>/tests/corpus/15723-object-is-dyn-kinds.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15724-webidl-float-converters.js": {
+   "order": [
+    "<repo>/tests/corpus/15724-webidl-float-converters.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15725-math-fround-value-uses.ts": {
+   "order": [
+    "<repo>/tests/corpus/15725-math-fround-value-uses.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1573-promisify-execfile-env-spread.ts": {
    "order": [
     "<repo>/tests/corpus/1573-promisify-execfile-env-spread.ts"
