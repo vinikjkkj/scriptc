@@ -1,0 +1,7 @@
+arg 2
+base 2
+arg 1
+base 1
+arg 2
+base 2
+ReferenceError Super constructor may only be called once
