@@ -7588,13 +7588,18 @@ let digestInputValueDispatches = 0;
   export function lowerProcessStreamProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (L.chainBlocked(expr)) return null;
     const member = expr.name.text;
-    if (member !== "isTTY" && member !== "columns") return null;
+    if (member !== "isTTY" && member !== "columns" && member !== "fd") return null;
     let recv: ts.Expression = expr.expression;
     while (ts.isParenthesizedExpression(recv) || ts.isAsExpression(recv) || ts.isTypeAssertion(recv)) recv = recv.expression;
     if (!ts.isPropertyAccessExpression(recv)) return null;
     const stream = L.stdlibGlobalMember(recv, "process");
     if (stream !== "stdin" && stream !== "stdout" && stream !== "stderr") return null;
     const loc = locOf(expr);
+    // process.stdin/stdout/stderr.fd: Node's standard descriptors, 0/1/2, a
+    // constant read (the same fd literal the isTTY read below asks isatty(3) about).
+    if (member === "fd") {
+      return { kind: "numLit", value: stream === "stdin" ? 0 : stream === "stdout" ? 1 : 2, type: F64, loc };
+    }
     const fd: IrExpr = {
       kind: "numLit",
       value: stream === "stdin" ? 0 : stream === "stdout" ? 1 : 2,
