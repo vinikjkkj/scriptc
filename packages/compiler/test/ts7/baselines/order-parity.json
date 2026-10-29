@@ -20867,6 +20867,30 @@
     "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-zero-arg-listener.js"
    ],
    "diags": []
-  }
+  },
+ "<repo>/tests/corpus/16320-random-bytes-bson-shape.ts": {
+   "order": [
+     "<repo>/tests/corpus/16320-random-bytes-bson-shape.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16321-webcrypto-get-random-values-static-arrays.cjs": {
+   "order": [
+     "<repo>/tests/corpus/16321-webcrypto-get-random-values-static-arrays.cjs"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16322-globalthis-crypto-destructure-alias.ts": {
+   "order": [
+     "<repo>/tests/corpus/16322-globalthis-crypto-destructure-alias.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16323-random-bytes-mongodb-shape.cjs": {
+   "order": [
+     "<repo>/tests/corpus/16323-random-bytes-mongodb-shape.cjs"
+   ],
+   "diags": []
+ }
  }
 }
