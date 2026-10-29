@@ -22,7 +22,7 @@ import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCa
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
-import { refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer } from "./lower-exprs.js";
+import { refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, lowerWebCryptoMemberCall, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -4380,6 +4380,14 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     refuseUnloweredSubtleCall(L, expr);
     refuseWebCryptoDestructuredArgs(L, expr);
     refuseWebCryptoOwnKeys(L, expr);
+    // A SubtleCrypto receiver the checker types (TypeScript, or a JavaScript
+    // binding over the typed global) and that does not lower as a dyn value:
+    // the dyn WebCrypto route (lower-exprs.ts lowerWebCryptoMemberCall). A dyn
+    // receiver keeps its own dynInvoke lowering below.
+    if (ts.isPropertyAccessExpression(expr.expression) && probeLower(L, expr.expression.expression)?.type.kind !== "dyn") {
+      const webCryptoCall = lowerWebCryptoMemberCall(L, expr);
+      if (webCryptoCall !== null) return webCryptoCall;
+    }
     {
       const graftCtor = emitterCtorCallOnGraft(L, expr);
       if (graftCtor !== null) return graftCtor;

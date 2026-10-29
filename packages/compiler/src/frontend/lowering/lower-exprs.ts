@@ -804,6 +804,37 @@ export function refuseUnloweredSubtleCall(L: Lowerer, call: ts.CallExpression): 
   }
 }
 
+/** A call of a served SubtleCrypto member on the WebCrypto singleton's `.subtle`, spelled as a
+ * member chain (`crypto.subtle.digest(...)`, `globalThis.crypto.subtle.sign(...)`) in a
+ * TypeScript source, where the checker types the receiver SubtleCrypto. The call takes the route
+ * a JavaScript receiver takes: a dynInvoke on the dyn `subtle` member of the singleton
+ * (dyn.webCrypto). A receiver that is a binding (`const subtle = ...`, a destructured member)
+ * is NOT this form: it keeps its own lowering, so the opaque-token refusal stays where it is.
+ * Null for anything else. */
+export function lowerWebCryptoMemberCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  const callee = call.expression;
+  if (!ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined || call.questionDotToken !== undefined) return null;
+  if (call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+  const sub = callee.expression;
+  if (!ts.isPropertyAccessExpression(sub) || sub.questionDotToken !== undefined || sub.name.text !== "subtle") return null;
+  if (!isWebCryptoValueExpr(L, sub.expression)) return null;
+  if (webCryptoKindOf(L, sub) !== "SubtleCrypto" || unservedWebCryptoMember("SubtleCrypto", callee.name.text)) return null;
+  const loc = locOf(call);
+  const singleton: IrExpr = L.dynamic
+    ? L.lowerExprExpecting(sub.expression, DYN)
+    : { kind: "libCall", fn: "dyn.webCrypto", args: [], type: DYN, loc: locOf(sub.expression) };
+  const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+  return {
+    kind: "dynInvoke",
+    recv: { kind: "dynKeyGet", key: { kind: "strLit", value: "subtle", type: STRING, loc: locOf(sub.name) }, value: singleton, type: DYN, loc: locOf(sub) },
+    method: callee.name.text,
+    calleeName: callee.getText(),
+    args,
+    type: DYN,
+    loc,
+  };
+}
+
 /** The members of a WebCrypto interface the runtime does not serve. */
 function unservedWebCryptoMember(kind: string, name: string): boolean {
   return kind === "SubtleCrypto" ? !SUBTLE_LOWERED_MEMBERS.has(name) : !CRYPTO_LOWERED_MEMBERS.has(name);

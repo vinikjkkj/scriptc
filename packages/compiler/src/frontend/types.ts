@@ -4378,6 +4378,20 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return { kind: "object", className: "%Error" };
   }
+  // CryptoKey and its KeyAlgorithm are the runtime's WebCrypto unit values
+  // (scr_webcrypto.c), reached through the dyn tree. The TYPE maps to dyn, so a
+  // typed binding of a key (`const k = await crypto.subtle.importKey(...)`) keeps
+  // the key object itself: a typed record would copy its fields and lose the key
+  // kind that sign() checks. The SubtleCrypto and Crypto types keep their own
+  // mapping (the member-call route is lowerWebCryptoMemberCall).
+  if (
+    (psym?.name === "CryptoKey" || psym?.name === "KeyAlgorithm") &&
+    checker.declarationsOf(psym).some(
+      (d) => (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) && ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return { kind: "dyn" };
+  }
   // http.Agent / https.Agent — the Agent VALUE is a checked-dynamic
   // handle (new http.Agent lowers to the dyn handle whose members
   // dispatch through the handle ops), so the TYPE maps to dyn: a typed
