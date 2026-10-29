@@ -11031,6 +11031,8 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
     if (
       (node.kind === "libCall" && (node.fn === "dyn.adoptPromise" || node.fn === "async.awaitDyn")) ||
       node.kind === "dynInvoke" ||
+      // Array.from over a dyn source: scr_dyn_arr_from lives in this unit.
+      node.kind === "dynArrFrom" ||
       // The keyed/dot READ on a dyn value. `sc_dyn_key_get` now asks
       // scr_dyn_intrinsic_method_get whether the receiver's PROTOTYPE has
       // the name before answering undefined — Object.prototype's methods

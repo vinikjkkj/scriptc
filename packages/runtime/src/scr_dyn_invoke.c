@@ -4663,3 +4663,250 @@ void scr_dyn_capture_stack(ScrDyn *target) {
   scr_dyn_obj_define_hidden_data(target, "stack", 5, value, true, true);
   scr_dyn_release(value);
 }
+
+/* ── Array.from(src) with NO mapper, over a checked-dynamic source ──────
+ * The untyped JS value whose kind only the run time knows. JS's own steps:
+ *   - an ITERABLE source (its Symbol.iterator answers a function) is walked
+ *     by that iterator: strings by code POINT (astral characters arrive
+ *     whole), arrays element by element, a Map's [key, value] pairs, a Set's
+ *     values, typed arrays by element, and any other object by calling its
+ *     own [Symbol.iterator]() and its next() until done;
+ *   - otherwise an ARRAY-LIKE: `length` through ToLength (absent, NaN and
+ *     negatives are 0, so []), then Get(o, ToString(i)) for each index, where
+ *     a missing index is undefined;
+ *   - a DataView or an ArrayBuffer has no iterator and no length: [];
+ *   - nullish throws V8's not-iterable TypeError;
+ *   - a number, boolean or bigint has no length: [];
+ *   - a function's length is its arity: that many undefineds.
+ * A promise has no length and no iterator: []. A proxy, a class instance and
+ * a native handle read `length` and the indices through their own keyed
+ * reads (the same ones sc_dyn_key_get calls for those kinds).
+ * Always returns a fresh dyn array (+1). A throw leaves the exception pending
+ * and returns the array so far, which the caller's pending check unwinds.
+ * Borrows src. */
+
+#define SCR_AF_ITER_PREFIX "__@iterator@"
+#define SCR_AF_ITER_PREFIX_LEN 11
+
+/* d[key] for the object-like kinds, +1, or NULL with the exception pending. */
+static ScrDyn *scr_af_key_read(ScrDyn *d, const char *key, size_t kl) {
+  ScrDyn *m = NULL;
+  switch (d->kind) {
+  case SCR_DYN_OBJ:
+    return scr_dyn_obj_key_get(d, key, kl);
+  case SCR_DYN_OBJINST: {
+    ScrStr *k = scr_str_new(key, kl);
+    m = scr_dyn_objinst_member_get(d, k);
+    if (m == NULL && !scr_exc_pending()) m = scr_dyn_objinst_miss(d, k);
+    scr_str_release(k);
+    break;
+  }
+  case SCR_DYN_PROXY: {
+    ScrStr *k = scr_str_new(key, kl);
+    m = scr_dyn_proxy_get(d, k);
+    scr_str_release(k);
+    break;
+  }
+  case SCR_DYN_HANDLE: {
+    ScrStr *k = scr_str_new(key, kl);
+    m = scr_dyn_handle_key_get(d, k);
+    scr_str_release(k);
+    break;
+  }
+  default:
+    break; /* a promise, or any kind with no keyed member here: undefined */
+  }
+  if (m == NULL && !scr_exc_pending()) m = scr_dyn_retain(scr_dyn_undefined());
+  return m;
+}
+
+/* The NAME of a symbol-keyed Symbol.iterator member of an object-like value
+ * (`__@iterator@<id>`), a malloc'd copy with *out_len set, or NULL when the
+ * value carries none. The name is the checker's, so it is matched by its
+ * prefix: the id differs per program and the prefix never does. */
+static char *scr_af_iter_key(const ScrDyn *d, size_t *out_len) {
+  const ScrDynEntry *tabs[2] = {NULL, NULL};
+  size_t n_tabs = 0;
+  if (d->kind == SCR_DYN_OBJ) {
+    if (d->v.obj.len > 0) { tabs[n_tabs] = d->v.obj.entries; n_tabs++; }
+    const ScrDyn *hid = scr_dyn_ext(d)->hidden;
+    if (hid != NULL && hid->kind == SCR_DYN_OBJ) {
+      for (uint32_t i = 0; i < hid->v.obj.len; i++) {
+        const ScrDynEntry *e = &hid->v.obj.entries[i];
+        if (e->key_len >= SCR_AF_ITER_PREFIX_LEN && memcmp(e->key, SCR_AF_ITER_PREFIX, SCR_AF_ITER_PREFIX_LEN) == 0) {
+          char *out = (char *)malloc(e->key_len + 1);
+          if (out == NULL) return NULL;
+          memcpy(out, e->key, e->key_len);
+          out[e->key_len] = '\0';
+          *out_len = e->key_len;
+          return out;
+        }
+      }
+    }
+    for (uint32_t i = 0; i < d->v.obj.len; i++) {
+      const ScrDynEntry *e = &d->v.obj.entries[i];
+      if (e->key_len >= SCR_AF_ITER_PREFIX_LEN && memcmp(e->key, SCR_AF_ITER_PREFIX, SCR_AF_ITER_PREFIX_LEN) == 0) {
+        char *out = (char *)malloc(e->key_len + 1);
+        if (out == NULL) return NULL;
+        memcpy(out, e->key, e->key_len);
+        out[e->key_len] = '\0';
+        *out_len = e->key_len;
+        return out;
+      }
+    }
+    return NULL;
+  }
+  if (d->kind == SCR_DYN_OBJINST) {
+    const ScrDynClass *cls = scr_dyn_objinst_class_of(d);
+    if (cls == NULL || cls->members == NULL) return NULL;
+    for (size_t i = 0; i < cls->nmembers; i++) {
+      const ScrDynClassMember *m = &cls->members[i];
+      /* A class's symbol member is spelled `sym:<name>` in its member table
+       * (the emitter's spelling), so Symbol.iterator is exactly "sym:iterator". */
+      if (m->call != NULL && m->len == sizeof "sym:iterator" - 1 &&
+          memcmp(m->name, "sym:iterator", sizeof "sym:iterator" - 1) == 0) {
+        char *out = (char *)malloc(m->len + 1);
+        if (out == NULL) return NULL;
+        memcpy(out, m->name, m->len);
+        out[m->len] = '\0';
+        *out_len = m->len;
+        return out;
+      }
+    }
+  }
+  return NULL;
+}
+
+/* Walks an ITERATOR the object's own [Symbol.iterator]() returned, into out.
+ * `key` names the method; the calls go by name so each runs with the right
+ * receiver. Returns with the exception pending on any throw. */
+static void scr_af_drain_iterator(ScrDyn *src, const char *key, size_t kl, ScrDyn *out) {
+  ScrDyn *it = scr_dyn_invoke(src, key, NULL, 0, "Array.from");
+  if (it == NULL) return;
+  if (!scr_dyn_typeof_is_object(it)) {
+    scr_dyn_release(it);
+    scr_throw_error_msg(SCR_ERR_TYPE, "Result of the Symbol.iterator method is not an object",
+                        strlen("Result of the Symbol.iterator method is not an object"));
+    return;
+  }
+  for (;;) {
+    ScrDyn *r = scr_dyn_invoke(it, "next", NULL, 0, "Array.from");
+    if (r == NULL) break;
+    if (!scr_dyn_typeof_is_object(r)) {
+      scr_dyn_release(r);
+      scr_throw_error_msg(SCR_ERR_TYPE, "Iterator result is not an object",
+                          strlen("Iterator result is not an object"));
+      break;
+    }
+    ScrDyn *done = scr_af_key_read(r, "done", 4);
+    if (done == NULL) { scr_dyn_release(r); break; }
+    bool stop = scr_dyn_truthy(done);
+    scr_dyn_release(done);
+    if (stop) { scr_dyn_release(r); break; }
+    ScrDyn *v = scr_af_key_read(r, "value", 5);
+    scr_dyn_release(r);
+    if (v == NULL) break;
+    scr_dyn_arr_push(out, v);
+  }
+  scr_dyn_release(it);
+  (void)kl;
+}
+
+ScrDyn *scr_dyn_arr_from(const ScrDyn *src) {
+  ScrDyn *out = scr_dyn_new_arr();
+  if (src->kind == SCR_DYN_ARR) {
+    SCR_VIEW_FRESH(src);
+    for (size_t i = 0; i < src->v.arr.len; i++) {
+      scr_dyn_arr_push(out, scr_dyn_retain(src->v.arr.items[i]));
+    }
+    return out;
+  }
+  if (scr_dyn_is_iterable_dynmap(src)) {
+    ScrDyn *snap = scr_dyn_map_snapshot(src, 0);
+    for (size_t i = 0; i < snap->v.arr.len; i++) {
+      scr_dyn_arr_push(out, scr_dyn_retain(snap->v.arr.items[i]));
+    }
+    scr_dyn_release(snap);
+    return out;
+  }
+  if (src->kind == SCR_DYN_STR) {
+    double len = scr_str_utf16_len(src->v.str);
+    for (double at = 0; at < len;) {
+      ScrStr *cp = scr_str_cp_at(src->v.str, at);
+      at += scr_str_utf16_len(cp);
+      scr_dyn_arr_push(out, scr_dyn_new_str(cp));
+      scr_str_release(cp);
+    }
+    return out;
+  }
+  if (src->kind == SCR_DYN_BYTES) {
+    if (src->v.bytes != NULL && src->v.bytes->flavor == SCR_BF_DATAVIEW) return out; /* no iterator, no length */
+    for (size_t i = 0; i < src->v.bytes->len; i++) {
+      scr_dyn_arr_push(out, scr_dyn_bytes_elem(src->v.bytes, i));
+    }
+    return out;
+  }
+  if (src->kind == SCR_DYN_UNDEF || src->kind == SCR_DYN_NULL) {
+    /* V8's kind word: "undefined", or "object null" for null. */
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, src->kind == SCR_DYN_UNDEF ? "undefined" : "object null");
+    scr_jb_puts(&b, " is not iterable (cannot read property Symbol(Symbol.iterator))");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return out;
+  }
+  if (src->kind == SCR_DYN_BOOL || src->kind == SCR_DYN_NUM || src->kind == SCR_DYN_BIG ||
+      src->kind == SCR_DYN_ARRBUF || src->kind == SCR_DYN_MAP) {
+    /* primitives, buffers and the non-iterable (weak) collections have no
+     * length and no iterator here: []. */
+    return out;
+  }
+  if (src->kind == SCR_DYN_FUNC) {
+    ScrDyn *lenv = scr_dyn_fn_get(src, "length", 6);
+    if (lenv == NULL) return out;
+    double raw = scr_dyn_to_number(lenv);
+    scr_dyn_release(lenv);
+    if (scr_exc_pending()) return out;
+    double flen = (raw != raw) ? 0.0 : trunc(raw);
+    if (flen <= 0.0) return out;
+    for (size_t i = 0; i < (size_t)flen; i++) scr_dyn_arr_push(out, scr_dyn_retain(scr_dyn_undefined()));
+    return out;
+  }
+  /* The object-like kinds: OBJ, OBJINST, PROXY, HANDLE, PROMISE. */
+  size_t kl = 0;
+  char *ikey = scr_af_iter_key(src, &kl);
+  if (ikey != NULL) {
+    ScrDyn *fn = scr_af_key_read((ScrDyn *)src, ikey, kl);
+    bool callable = fn != NULL && fn->kind != SCR_DYN_UNDEF && fn->kind != SCR_DYN_NULL;
+    if (fn != NULL) scr_dyn_release(fn);
+    if (callable) {
+      scr_af_drain_iterator((ScrDyn *)src, ikey, kl, out);
+      free(ikey);
+      return out;
+    }
+    /* A nullish @@iterator member is the same as none: JS falls through to
+     * the array-like read below. */
+  }
+  free(ikey);
+  ScrDyn *lenv = scr_af_key_read((ScrDyn *)src, "length", 6);
+  if (lenv == NULL) return out; /* a getter threw: pending */
+  double raw = scr_dyn_to_number(lenv);
+  scr_dyn_release(lenv);
+  if (scr_exc_pending()) return out;
+  /* ToLength (7.1.20): NaN and every negative answer 0; a fraction truncates. */
+  double len = (raw != raw) ? 0.0 : trunc(raw);
+  if (len <= 0.0) return out;
+  if (len > 4294967295.0) {
+    scr_throw_error_msg(SCR_ERR_RANGE, "Invalid array length", strlen("Invalid array length"));
+    return out;
+  }
+  for (size_t i = 0; i < (size_t)len; i++) {
+    char key[24];
+    int ml = snprintf(key, sizeof key, "%llu", (unsigned long long)i);
+    ScrDyn *v = ml > 0 ? scr_af_key_read((ScrDyn *)src, key, (size_t)ml) : NULL;
+    if (v == NULL) return out; /* an accessor threw: pending */
+    scr_dyn_arr_push(out, v);
+  }
+  return out;
+}
+
