@@ -6394,6 +6394,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16280-covariant-return-subclass-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/16280-covariant-return-subclass-instance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16281-covariant-return-three-level-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/16281-covariant-return-three-level-chain.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1629-require-main-filename.cjs": {
    "order": [
     "<repo>/tests/corpus/1629-require-main-filename.cjs"
