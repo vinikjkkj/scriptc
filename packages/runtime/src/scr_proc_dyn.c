@@ -110,7 +110,7 @@ static const char *const scr_ps_ladder_names[] = {
     "prependOnceListener", "emit", "listeners", "rawListeners", "listenerCount", "eventNames",
     "setMaxListeners", "getMaxListeners", "end", "cork", "uncork", "destroy", "pipe", "unpipe",
     "setDefaultEncoding", "_write", "_writev", "_destroy", "writableLength", "writableNeedDrain",
-    "writableAborted", "errored", "constructor", "getColorDepth", "hasColors",
+    "writableHighWaterMark", "writableAborted", "errored", "constructor", "getColorDepth", "hasColors",
     "getWindowSize", "clearLine", "clearScreenDown", "cursorTo", "moveCursor", "isRaw", "setRawMode",
     "_type", "_isStdio", "_handle", "_writableState",
 };
@@ -182,7 +182,6 @@ static ScrDyn *scr_ps_dynh_get(void *h, const char *key, size_t key_len) {
   if (scr_ps_key_is(key, key_len, "writableEnded") || scr_ps_key_is(key, key_len, "writableFinished") ||
       scr_ps_key_is(key, key_len, "writableObjectMode") || scr_ps_key_is(key, key_len, "destroyed") ||
       scr_ps_key_is(key, key_len, "closed")) return scr_dyn_new_bool(false);
-  if (scr_ps_key_is(key, key_len, "writableHighWaterMark")) return scr_dyn_new_num(65536.0);
   if (scr_ps_key_is(key, key_len, "writableCorked")) return scr_dyn_new_num(0.0);
   if (key_len == 2 && memcmp(key, "fd", 2) == 0) return scr_dyn_new_num((double)fd);
   if (key_len == 5 && memcmp(key, "write", 5) == 0) return scr_ps_write_method();
