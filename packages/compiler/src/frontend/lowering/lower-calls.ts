@@ -22,7 +22,7 @@ import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCa
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
-import { refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer } from "./lower-exprs.js";
+import { lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -4377,6 +4377,11 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     }
     // SubtleCrypto / Crypto members with no lowering, refused by name (lower-exprs.ts).
     if (ts.isPropertyAccessExpression(expr.expression)) refuseUnloweredWebCrypto(L, expr.expression);
+    // `crypto.getRandomValues(a)` over a static typed array: one libCall answering `a` (lower-exprs.ts).
+    {
+      const fill = lowerWebCryptoGetRandomValues(L, expr);
+      if (fill !== null) return fill;
+    }
     refuseUnloweredSubtleCall(L, expr);
     refuseWebCryptoDestructuredArgs(L, expr);
     refuseWebCryptoOwnKeys(L, expr);

@@ -9944,6 +9944,8 @@ ScrPromise *scr_fsp_read_file_bytes(ScrStr *path); /* +1 */
 /* crypto.randomBytes(n) → a real u8 Buffer. Out-of-range n THROWS Node's
  * RangeError catchably (same check as scr_crypto_random_string). */
 ScrBytes *scr_crypto_random_bytes(double n);
+/* crypto.getRandomValues(a) over a static integer typed array: fills it, answers it (+1). Throws Node's TypeMismatchError / QuotaExceededError. scr_webcrypto.c (gated). */
+ScrBytes *scr_crypto_get_random_values(ScrBytes *b);
 ScrPromise *scr_crypto_random_bytes_async(double n);
 /* crypto.randomFill(buf, offset, size, cb): fills the range from the same
  * CSPRNG and defers `done` — the compiler's ZERO-argument thunk, which

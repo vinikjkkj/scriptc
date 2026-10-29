@@ -34,7 +34,7 @@ import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf, liveAccessorTargetOf } from "./cjs-live-exports.js";
-import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
+import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCryptoGlobalDestructure, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -1618,6 +1618,8 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
    * are fenced — each would need machinery beyond a read (an undefined
    * test, surplus packing, dynamic lookup). */
   export function lowerDestructuringDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt[] {
+    // `const { crypto } = globalThis as {...}` (TypeScript): an alias of the WebCrypto singleton, no storage.
+    if (webCryptoGlobalDestructure(L, decl)) return [];
     const loc = locOf(decl);
     // `const { encrypt } = subtle`: a WebCrypto member with no lowering refuses at the binding (lower-exprs.ts).
     if (ts.isObjectBindingPattern(decl.name) && decl.initializer !== undefined) {
@@ -4635,6 +4637,7 @@ function evolvedLetType(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean
 }
 
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
+    if (webCryptoGlobalDestructure(L, decl)) return null;
     refuseWebCryptoFlowsAt(L, decl);
     // A helper unrolled into accessors of a class (registerHelperAccessors): its body is never a value.
     if (L.helperDecls.has(decl)) return null;

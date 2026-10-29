@@ -612,6 +612,74 @@ function helperFieldEnumerationFence(L: Lowerer, expr: ts.Expression): void {
 }
 
 
+/** `W.getRandomValues(a)` on the WebCrypto singleton (`crypto`, `globalThis.crypto`, or a binding
+ * destructured from globalThis, see webCryptoGlobalDestructure) over a STATIC typed array. The
+ * runtime fills `a` from the CSPRNG and answers `a` itself, so the call is one libCall typed as
+ * its argument (Node's identity). Node's own checks run in the runtime. Any other shape (a dynamic
+ * argument, more arguments) keeps the call's existing lowering: null. */
+export function lowerWebCryptoGetRandomValues(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  let callee: ts.Expression = call.expression;
+  while (ts.isParenthesizedExpression(callee) || ts.isNonNullExpression(callee)) callee = callee.expression;
+  if (!ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined) return null;
+  if (callee.name.text !== "getRandomValues" || call.arguments.length !== 1) return null;
+  if (webCryptoKindOf(L, callee.expression) !== "Crypto") return null;
+  const arg = call.arguments[0]!;
+  if (ts.isSpreadElement(arg) || L.mapTypeOf(L.typeOf(arg))?.kind !== "bytes") return null;
+  const a = L.lowerExpr(arg);
+  if (a.type.kind !== "bytes") {
+    L.unsupported("SC1090", arg, "crypto.getRandomValues over a value that is not a typed array");
+    return null;
+  }
+  return { kind: "libCall", fn: "crypto.getRandomValues", args: [a], type: a.type, loc: locOf(call) };
+}
+
+/** Reading `crypto` as a VALUE in a TypeScript source: the global, or a binding destructured from
+ * globalThis. The WebCrypto singleton, the same value the JavaScript read lowers to. */
+function webCryptoIdentifierValue(L: Lowerer, expr: ts.Expression, loc: SrcLoc): IrExpr | null {
+  if (isJsSourceFile(expr.getSourceFile()) || L.dynamic || stdlibGlobalNameOf(L, expr) !== "crypto") return null;
+  return { kind: "libCall", fn: "dyn.webCrypto", args: [], type: DYN, loc };
+}
+
+/** `typeof W.getRandomValues` / `typeof W.randomUUID` on the WebCrypto singleton: both are functions
+ * in Node, and the receiver is a name chain (no effect to keep), so the answer is 'function'. */
+function webCryptoMethodTypeof(L: Lowerer, e0: ts.Expression): boolean {
+  const peel = (x: ts.Expression): ts.Expression => {
+    let y = x;
+    while (ts.isParenthesizedExpression(y) || ts.isAsExpression(y) || ts.isNonNullExpression(y)) y = y.expression;
+    return y;
+  };
+  const e = peel(e0);
+  if (!ts.isPropertyAccessExpression(e) || e.questionDotToken !== undefined) return false;
+  if (e.name.text !== "getRandomValues" && e.name.text !== "randomUUID") return false;
+  const r = peel(e.expression);
+  for (let c: ts.Expression = r; ; ) {
+    if (ts.isIdentifier(c)) break;
+    if (!ts.isPropertyAccessExpression(c) || c.questionDotToken !== undefined) return false;
+    c = peel(c.expression);
+  }
+  return webCryptoKindOf(L, r) === "Crypto";
+}
+
+/** `const { crypto } = globalThis as {...}` in a TypeScript source: the one destructured binding the
+ * WebCrypto singleton takes (how a library reaches globalThis.crypto without the lib.dom declaration).
+ * The binding is an alias of the global, like `const p = globalThis.process`: no storage, and its
+ * uses lower as the global. Any other pattern (more elements, a default, a rest, another key, a
+ * `let`) is not this form: false, and keeps its own fence. */
+export function webCryptoGlobalDestructure(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+  if (!ts.isObjectBindingPattern(decl.name) || decl.initializer === undefined) return false;
+  if (isJsSourceFile(decl.getSourceFile())) return false;
+  if (!ts.isVariableDeclarationList(decl.parent) || (decl.parent.flags & ts.NodeFlags.Const) === 0) return false;
+  if (decl.name.elements.length !== 1) return false;
+  const el = decl.name.elements[0]!;
+  if (el.dotDotDotToken !== undefined || el.initializer !== undefined || el.name === undefined || !ts.isIdentifier(el.name)) return false;
+  const key: ts.Node = el.propertyName ?? el.name;
+  if (!ts.isIdentifier(key) || key.text !== "crypto") return false;
+  if (stdlibGlobalNameOf(L, decl.initializer) !== "globalThis") return false;
+  const sym = L.checker.getSymbolAtLocation(el.name);
+  if (sym === undefined) return false;
+  L.stdlibGlobalAliases.set(sym, "crypto");
+  return true;
+}
 /** WebCrypto members with no lowering are refused at COMPILE time, by name.
  * The lowered SubtleCrypto members are digest, importKey, sign and deriveBits
  * (runtime: scr_lib.c, the WebCrypto block); the lowered Crypto members are
@@ -1359,6 +1427,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           if (answer !== null) return { kind: "strLit", value: answer, type: STRING, loc };
         }
       }
+      // `typeof crypto.getRandomValues === 'function'`: a WebCrypto method is a function in Node (webCryptoMethodTypeof).
+      if (webCryptoMethodTypeof(L, expr.expression)) return { kind: "strLit", value: "function", type: STRING, loc };
       // `typeof process.hrtime` / `process.nextTick`: a member of Node's `process`
       // whose declared type is callable IS a function in Node (the environment
       // probes `typeof process.hrtime === "function"`), and `typeof` needs no value.
@@ -2024,6 +2094,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (ts.isIdentifier(expr)) {
         const dc = dynReceiverCallbackValue(L, expr, loc);
         if (dc !== null) return dc;
+      }
+      // `crypto` as a VALUE in a TypeScript source (the global, or a binding destructured from
+      // globalThis): the WebCrypto singleton. See webCryptoIdentifierValue.
+      {
+        const wcv = ts.isIdentifier(expr) ? webCryptoIdentifierValue(L, expr, loc) : null;
+        if (wcv !== null) return wcv;
       }
       // The primitive constructors as VALUES (`const f = String`, an
       // option table's `type: Boolean` field, `opt.type === Number`): the
@@ -2810,6 +2886,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     }
     if (ts.isPropertyAccessExpression(expr)) {
       refuseUnloweredWebCrypto(L, expr);
+      // `globalThis.crypto` as a VALUE in a TypeScript source: the WebCrypto singleton (webCryptoIdentifierValue).
+      if (ts.isPropertyAccessExpression(expr) && expr.name.text === "crypto") {
+        const wcv = webCryptoIdentifierValue(L, expr, loc);
+        if (wcv !== null) return wcv;
+      }
       // A prototype DATUM of a paired class, read through a value whose checker type does
       // not declare it (the declaration file names no `isPoint`): the lowering would answer
       // the absent read `undefined`, where Node answers the constant. Refused loudly.

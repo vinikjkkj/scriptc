@@ -687,6 +687,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dgram.onClose": "scr_dgram_on_close",
   "dgram.onConnect": "scr_dgram_on_connect",
   "crypto.randomBytes": "scr_crypto_random_bytes",
+  "crypto.getRandomValues": "scr_crypto_get_random_values",
   "crypto.randomInt": "scr_crypto_random_int",
   "crypto.randomIntAsync": "scr_crypto_random_int_async",
   "crypto.randomBytesAsync": "scr_crypto_random_bytes_async",

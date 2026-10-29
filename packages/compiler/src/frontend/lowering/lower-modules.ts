@@ -15,7 +15,7 @@ import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
 import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsKeyedForEachOf, cjsWholeExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import { cjsExportRecordOf, cjsExportRecordInit, cjsExportRecordCreate } from "./cjs-export-record.js";
 import { liveExportsOf } from "./cjs-live-exports.js";
-import { cjsExportsBagOf, isWebCryptoValueExpr } from "./lower-exprs.js";
+import { cjsExportsBagOf, isWebCryptoValueExpr, webCryptoGlobalDestructure } from "./lower-exprs.js";
 import { npmStaticDepSf7, resolveProjectImportSf7 } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
@@ -2372,6 +2372,9 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               }
               return true;
             }
+            // `const { crypto } = globalThis as {...}` at file scope: the WebCrypto singleton alias, no
+            // global storage (lower-exprs.ts webCryptoGlobalDestructure).
+            if (webCryptoGlobalDestructure(L, decl)) return true;
             // A NULLISH generic binding at file scope (`export const Mixin:
             // MixinHelperFunc = null as any`): no storage — reads know the
             // value (lower-exprs/lower-calls claim them); the statement
