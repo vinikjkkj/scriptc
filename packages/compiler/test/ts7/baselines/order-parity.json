@@ -5456,6 +5456,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15920-transform-objmode-framer.ts": {
+    "order": [
+      "<repo>/tests/corpus/15920-transform-objmode-framer.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15921-transform-objmode-error.ts": {
+    "order": [
+      "<repo>/tests/corpus/15921-transform-objmode-error.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/15922-transform-objmode-hwm.ts": {
+    "order": [
+      "<repo>/tests/corpus/15922-transform-objmode-hwm.ts"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/1571-optional-call-tostring-tail.ts": {
    "order": [
     "<repo>/tests/corpus/1571-optional-call-tostring-tail.ts"
