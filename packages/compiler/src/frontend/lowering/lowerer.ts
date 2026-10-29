@@ -3335,20 +3335,26 @@ export class Lowerer {
    * A program without such a box is not touched. */
   fenceDynArrFromOnStrandedBox(functions: readonly IrFunction[]): void {
     const arrFromSites: SrcLoc[] = [];
-    const boxSites: SrcLoc[] = [];
+    // Boxed values are collected first; the generator walk runs only when the
+    // program has a dyn-source Array.from to fence, so other programs pay nothing.
+    const boxCandidates: { loc: SrcLoc; type: IrType }[] = [];
     const seen = new Set<object>();
     const getRecord = (id: string): IrRecordShape | undefined => this.shapes.get(id);
     const getUnion = (id: string): IrUnionDef | undefined => this.unions.get(id);
+    // Every record and union is entered once per query: a recursive union or
+    // record (an arm that reaches itself) must end the walk, not overflow it.
     const generatorStranded = (t: IrType, visiting: Set<string>): boolean => {
       if (t.kind === "func") {
         return t.ret.kind === "generator" && !canBoxFuncIntoDyn(t, getRecord, getUnion);
       }
       if (t.kind === "record") {
-        if (visiting.has(t.shapeId)) return false;
-        visiting.add(t.shapeId);
+        if (visiting.has("r:" + t.shapeId)) return false;
+        visiting.add("r:" + t.shapeId);
         return (getRecord(t.shapeId)?.fields ?? []).some((f) => generatorStranded(f.type, visiting));
       }
       if (t.kind === "union") {
+        if (visiting.has("u:" + t.unionId)) return false;
+        visiting.add("u:" + t.unionId);
         const def = getUnion(t.unionId);
         return (def?.arms ?? []).some((a) => generatorStranded(a, visiting));
       }
@@ -3364,16 +3370,18 @@ export class Lowerer {
       }
       const node = n as { kind?: unknown; loc?: SrcLoc; value?: { type?: IrType } };
       if (node.kind === "dynArrFrom" && node.loc) arrFromSites.push(node.loc);
-      if (node.kind === "dynFrom" && node.loc && node.value?.type && generatorStranded(node.value.type, new Set())) {
-        boxSites.push(node.loc);
+      if (node.kind === "dynFrom" && node.loc && node.value?.type) {
+        boxCandidates.push({ loc: node.loc, type: node.value.type });
       }
       for (const [k, v] of Object.entries(n)) {
         if (k !== "loc" && k !== "type") visit(v);
       }
     };
     visit(functions);
-    if (arrFromSites.length === 0 || boxSites.length === 0) return;
-    const box = boxSites[0]!;
+    if (arrFromSites.length === 0) return;
+    const boxHit = boxCandidates.find((c) => generatorStranded(c.type, new Set()));
+    if (boxHit === undefined) return;
+    const box = boxHit.loc;
     let where = `offset ${box.start}`;
     try {
       const text = readFileSync(box.file, "utf8");
