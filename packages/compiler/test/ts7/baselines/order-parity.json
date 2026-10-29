@@ -19982,6 +19982,20 @@
     "<repo>/tests/diagnostics/webcrypto-flow-unawaited-importkey.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/15560-cjs-chained-table-namespace/main.js": {
+   "order": [
+    "<repo>/tests/corpus/15560-cjs-chained-table-namespace/utils.js",
+    "<repo>/tests/corpus/15560-cjs-chained-table-namespace/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15561-cjs-rebind-table-namespace/main.js": {
+   "order": [
+    "<repo>/tests/corpus/15561-cjs-rebind-table-namespace/utils.js",
+    "<repo>/tests/corpus/15561-cjs-rebind-table-namespace/main.js"
+   ],
+   "diags": []
   }
  }
 }
