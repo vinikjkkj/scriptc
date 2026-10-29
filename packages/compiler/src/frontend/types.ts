@@ -7,6 +7,7 @@ import { isJsSourceFile } from "./program.js";
 import { dynBuiltinFnType, dynBuiltinSigOfType } from "./dyn-builtin-sigs.js";
 import { isSqliteTypesPath } from "./shared.js";
 import { isProvenanceSourceFile } from "./provenance-registry.js";
+import { bytesRefinementProven, type StdlibBufferTypes } from "./buffer-refinement.js";
 import { accessorSlotProp, armDiscrimLits, armLitsConflict, builtinRenderingKey, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
@@ -1609,6 +1610,11 @@ export interface TypeMapperCtx {
    * pinned instantiation they describe; null when ambiguous or when no
    * part names a mixin class node (lower-mixins.ts). */
   mixinIntersectionInstance?: (widened: ts.Type) => IrType | null;
+  /** The standard library's global Buffer (instance and value types), or null
+   * when the program has none. Read by the byte-refinement proof
+   * (buffer-refinement.ts): an intersection of a byte view with members the
+   * global Buffer provably has maps to the native Buffer representation. */
+  stdlibBuffer?: (() => StdlibBufferTypes | null) | undefined;
   /** True for the STANDARD LIBRARY's files — the shipped ambient .d.ts or a
    * lib.*.d.ts bundled with typescript (program.isSourceFileDefaultLibrary).
    * Map/RegExp/Promise recognition needs declaration provenance: the name
@@ -2841,6 +2847,22 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // part must be a plain object refinement — no call/construct signatures,
   // no class identity of its own.
   if (widened.isIntersectionType()) {
+    // BYTE REFINEMENT (bson's `ArrayBufferView & Uint8Array & { write(...);
+    // swap32(...) }`): a byte view refined by members the global Buffer
+    // provably has. The value IS a Buffer (a u8 bytes value); the refinement
+    // is type-level only. The proof checks that every member name the
+    // refinement lists is a Buffer member (or a byte-view member) with the same
+    // callability, and that toStringTag is typed string | undefined; see
+    // buffer-refinement.ts for what is and is not re-proven.
+    if (ctx.stdlibBuffer !== undefined) {
+      const isBytes = (p: ts.Type): boolean => {
+        const m = mapType(p, ctx);
+        return m !== null && m.kind === "bytes" && m.elem === "u8";
+      };
+      if (bytesRefinementProven(widened, checker, isBytes, ctx.stdlibBuffer())) {
+        return bytesOf("u8");
+      }
+    }
     // `string & {}` — the literal-union-with-autocomplete idiom
     // (`'NONE' | 'CAPPED' | (string & {})`, written so editors still
     // suggest the named members while any string is accepted). The empty

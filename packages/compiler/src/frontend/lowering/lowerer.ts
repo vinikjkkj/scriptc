@@ -12,6 +12,7 @@
  * - Lexical scoping is resolved here: locals get function-unique ids
  *   ("x.0", "x.1" for shadowing); the IR is scope-flat.
  */
+import { stdlibBufferTypes } from "../buffer-refinement.js";
 import { appendFileSync } from "node:fs";
 import { isRelativeSpecifier } from "../shared.js";
 import type { RequireThrowCtx } from "../require-throws.js";
@@ -2363,6 +2364,7 @@ export class Lowerer {
           ? { kind: "object", className: this.mixinTypeContext.className }
           : null,
       mixinIntersectionInstance: (widened) => mixinIntersectionInstanceType(this, widened),
+      stdlibBuffer: () => stdlibBufferTypes(this.loweringProgram, this.checker, this.isStdlibFile),
       isStdlibFile: this.isStdlibFile,
       isNpmFile: this.isNpmFile,
       dynamic: this.dynamic,
