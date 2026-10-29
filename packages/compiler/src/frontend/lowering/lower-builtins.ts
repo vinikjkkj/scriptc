@@ -10514,6 +10514,167 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     return { kind: "libCall", fn: "string.fromCharCode", args: [packed], type: STRING, loc };
   }
 
+/** `const stringFromCharCode = String.fromCharCode;` — a module-level
+   * const bound to the String global's fromCharCode, every reference to
+   * which is a CALL (punycode.js: `stringFromCharCode(cp)` at each code
+   * unit it emits). The member has no value form (a variadic builtin
+   * method, lower-island's mathStaticFnValueOf keeps its own fence for
+   * the same reason), so the binding is not given storage. Each call is
+   * lowered as `String.fromCharCode(...)` itself, which is exact because
+   * the binding IS that function for its whole life: a never-reassigned
+   * const, initialized with the String global's own member.
+   *
+   * The binding is admitted only when no use could observe a missing
+   * value or run code before the binding exists (TDZ): the declaration is
+   * a plain (non-exported) module-level const in a file with no import
+   * declarations, every statement before it is inert (function and
+   * object-creation only, no call, no getter, no coercion of an object),
+   * and every reference is the callee of a call. Anything else keeps the
+   * SC2020 member fence on the initializer. Null when the identifier is
+   * not such a binding. */
+const stringCallAliasCache = new WeakMap<ts.Symbol, ts.PropertyAccessExpression | null>();
+function stringCallAliasOfSymbol(L: Lowerer, sym: ts.Symbol): ts.PropertyAccessExpression | null {
+  if (stringCallAliasCache.has(sym)) return stringCallAliasCache.get(sym) ?? null;
+  const found = computeStringCallAlias(L, sym);
+  stringCallAliasCache.set(sym, found);
+  return found;
+}
+
+/** The String.fromCharCode member a call-only alias binding names, or null. */
+export function stringFromCharCodeCallAliasOf(L: Lowerer, id: ts.Identifier): ts.PropertyAccessExpression | null {
+  const sym = L.resolveValueSymbol(id);
+  return sym ? stringCallAliasOfSymbol(L, sym) : null;
+}
+
+/** The statement-level twin: true when `decl` is the declaration such a
+ * binding names, so the statement registers no global and emits nothing. */
+export function isStringCallAliasDecl(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+  if (!ts.isIdentifier(decl.name)) return false;
+  const sym = L.checker.getSymbolAtLocation(decl.name);
+  return sym ? stringCallAliasOfSymbol(L, sym) !== null : false;
+}
+
+function computeStringCallAlias(L: Lowerer, sym: ts.Symbol): ts.PropertyAccessExpression | null {
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length !== 1) return null;
+  const d = decls[0];
+  if (d === undefined || !ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name) || d.initializer === undefined) return null;
+  if ((ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const) === 0) return null;
+  let init: ts.Expression = d.initializer;
+  while (
+    ts.isParenthesizedExpression(init) || ts.isAsExpression(init) ||
+    ts.isSatisfiesExpression(init) || ts.isAssertionExpression(init) || ts.isNonNullExpression(init)
+  ) {
+    init = init.expression;
+  }
+  if (!ts.isPropertyAccessExpression(init) || !ts.isIdentifier(init.expression)) return null;
+  if (init.name.text !== "fromCharCode" || L.stdlibGlobalMember(init, "String") !== "fromCharCode") return null;
+  const stmt = d.parent.parent;
+  if (!ts.isVariableStatement(stmt) || !ts.isSourceFile(stmt.parent)) return null;
+  if (ts.getModifiers(stmt)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) === true) return null;
+  const sf = stmt.parent;
+  if (sf.statements.some((s) => ts.isImportDeclaration(s) || ts.isImportEqualsDeclaration(s))) return null;
+  const idx = sf.statements.indexOf(stmt);
+  for (let i = 0; i < idx; i++) {
+    if (!inertAliasStatement(L, sf.statements[i]!)) return null;
+  }
+  let ok = true;
+  const name = d.name.text;
+  const visit = (n: ts.Node): void => {
+    if (!ok) return;
+    if (ts.isIdentifier(n) && n.text === name && n !== d.name) {
+      if (ts.isShorthandPropertyAssignment(n.parent)) {
+        ok = false;
+        return;
+      }
+      if (L.checker.getSymbolAtLocation(n) === sym) {
+        const p = n.parent;
+        if (!(ts.isCallExpression(p) && p.expression === n)) ok = false;
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return ok ? init : null;
+}
+
+/** A top-level statement that runs no user code and coerces no object,
+ * for the TDZ rule of computeStringCallAlias. Function declarations and
+ * closure/regex/object creation are inert; a call, a `new`, a class (its
+ * static blocks run), a getter-capable property read off a non-stdlib
+ * value, an object-to-primitive operator, or a property write is not. */
+function inertAliasStatement(L: Lowerer, s: ts.Statement): boolean {
+  if (ts.isFunctionDeclaration(s) || ts.isEmptyStatement(s)) return true;
+  if (ts.isExpressionStatement(s)) return ts.isStringLiteral(s.expression) || inertAliasExpr(L, s.expression);
+  if (ts.isVariableStatement(s)) {
+    return s.declarationList.declarations.every((d) => d.initializer === undefined || inertAliasExpr(L, d.initializer));
+  }
+  return false;
+}
+
+function primitiveAliasType(L: Lowerer, e: ts.Expression): boolean {
+  const flags = ts.TypeFlags.NumberLike | ts.TypeFlags.StringLike | ts.TypeFlags.BooleanLike |
+    ts.TypeFlags.BigIntLike | ts.TypeFlags.Undefined | ts.TypeFlags.Null;
+  const t = L.typeOf(e);
+  if (t.isUnionType()) return ts.constituentTypes(t).every((u) => (u.flags & flags) !== 0);
+  return (t.flags & flags) !== 0;
+}
+
+function inertAliasExpr(L: Lowerer, e: ts.Expression): boolean {
+  if (
+    ts.isNumericLiteral(e) || ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e) ||
+    ts.isBigIntLiteral(e) || ts.isRegularExpressionLiteral(e) || ts.isIdentifier(e) ||
+    e.kind === ts.SyntaxKind.TrueKeyword || e.kind === ts.SyntaxKind.FalseKeyword ||
+    e.kind === ts.SyntaxKind.NullKeyword || ts.isFunctionExpression(e) || ts.isArrowFunction(e)
+  ) {
+    return true;
+  }
+  if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e) || ts.isSatisfiesExpression(e)) {
+    return inertAliasExpr(L, e.expression);
+  }
+  if (ts.isPrefixUnaryExpression(e)) {
+    return e.operator !== ts.SyntaxKind.MinusMinusToken && e.operator !== ts.SyntaxKind.PlusPlusToken
+      ? primitiveAliasType(L, e.operand) && inertAliasExpr(L, e.operand)
+      : false;
+  }
+  if (ts.isBinaryExpression(e)) {
+    const op = e.operatorToken.kind;
+    if (op === ts.SyntaxKind.EqualsToken) {
+      return ts.isIdentifier(e.left) && inertAliasExpr(L, e.right);
+    }
+    if (op === ts.SyntaxKind.InstanceOfKeyword || op === ts.SyntaxKind.InKeyword) return false;
+    if (op === ts.SyntaxKind.AmpersandAmpersandToken || op === ts.SyntaxKind.BarBarToken ||
+        op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.CommaToken) {
+      return inertAliasExpr(L, e.left) && inertAliasExpr(L, e.right);
+    }
+    return primitiveAliasType(L, e.left) && primitiveAliasType(L, e.right) &&
+      inertAliasExpr(L, e.left) && inertAliasExpr(L, e.right);
+  }
+  if (ts.isConditionalExpression(e)) {
+    return inertAliasExpr(L, e.condition) && inertAliasExpr(L, e.whenTrue) && inertAliasExpr(L, e.whenFalse);
+  }
+  if (ts.isArrayLiteralExpression(e)) {
+    return e.elements.every((x) => !ts.isSpreadElement(x) && inertAliasExpr(L, x));
+  }
+  if (ts.isObjectLiteralExpression(e)) {
+    return e.properties.every((p) => {
+      if (ts.isMethodDeclaration(p)) return ts.isIdentifier(p.name) || ts.isStringLiteral(p.name);
+      if (ts.isShorthandPropertyAssignment(p)) return true;
+      if (ts.isPropertyAssignment(p)) {
+        return (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) || ts.isNumericLiteral(p.name)) &&
+          inertAliasExpr(L, p.initializer);
+      }
+      return false;
+    });
+  }
+  if (ts.isPropertyAccessExpression(e)) {
+    // A read off a stdlib global (Math.floor, Number.MAX_SAFE_INTEGER) runs
+    // no user code; any other read may be a getter.
+    return ts.isIdentifier(e.expression) && L.isStdlibSymbol(L.resolveValueSymbol(e.expression) ?? undefined);
+  }
+  return false;
+}
+
 /** `s.lastIndexOf(needle)` on string receivers — a libCall (scr_lib.c)
    * rather than a strIntrinsic, but the same UTF-16 index semantics as
    * indexOf. The lib's fromIndex parameter has no lowering (Node clamps
