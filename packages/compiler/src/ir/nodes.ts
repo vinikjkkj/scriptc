@@ -57,12 +57,12 @@ export type IrType =
    * key would let a later object land on the address and read the dead
    * key's value. Keys are therefore restricted to kinds whose death
    * reaches a chokepoint the runtime owns on EVERY route
-   * (`isSupportedWeakKey`: bytes and arrays today — a traced array's two
-   * routes converge on scr_cyc_free, which is hooked). Records, class
-   * instances and the dyn are still refused, for reasons of their own that
-   * the predicate spells out. Values are held
-   * STRONGLY — ephemerons are not implemented, so a value that reaches
-   * its own key keeps both alive. See the head of scr_weak.c. */
+   * (`isSupportedWeakKey`: bytes, arrays, user class instances (cycle-headed
+   * by the weak-key fixpoint) and the dyn, which is keyed on its payload).
+   * Records are refused: they width-coerce. Values are held STRONGLY, so a
+   * value that reaches its own key keeps the pair alive until the table is
+   * released; ephemerons are not implemented (the collector cannot see
+   * through a table). See the head of scr_weak.c. */
   | { kind: "weakmap"; key: IrType; value: IrType }
   /** ES `Set<T>` — heap, refcounted, insertion-ordered. Map's sibling with
    * the value slot removed: ONE runtime representation (the backend lowers
@@ -895,7 +895,58 @@ export function isSupportedWeakKey(t: IrType): boolean {
   // and the emitter routes get/set/has through scr_weak_dyn_*, which pick
   // the address and its stamp together from the value in hand.
   if (t.kind === "dyn") return true;
+  // A CLASS INSTANCE. An acyclic class is calloc'd with no cycle header, so
+  // its death never reaches scr_cyc_free. The fixpoint now FORCES every
+  // user class traced whenever the module holds a weak table keyed on an
+  // object or a dyn (moduleUsesObjectWeakKeys), which gives its instances a
+  // header the death hook can stamp. The runtime's own classes (errors,
+  // the emitter, streams) keep their fixed layouts and stay refused.
+  if (t.kind === "object") return !isRuntimeRootedClassName(t.className);
   return false;
+}
+
+/** Is `name` a class the runtime itself lays out (an error, the emitter, a
+ * stream)? Those never take the compiler-emitted allocation the weak-key
+ * fixpoint forces, so they are never weak keys. */
+export function isRuntimeRootedClassName(name: string): boolean {
+  return RUNTIME_ERROR_CLASSES.has(name) || name === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(name);
+}
+
+/** A WeakMap VALUE the weak table can hold: a refcounted kind, or a dyn
+ * (`any`), whose retain/release pair is the checked-dynamic one. A dyn
+ * value is not refcounted in isRefCounted's sense (no container release
+ * is emitted for it on the strong paths), so the weak admission names it
+ * explicitly instead of widening isRefCounted for every caller. */
+export function isSupportedWeakValue(t: IrType): boolean {
+  if (t.kind === "dyn") return true;
+  return isSupportedMapValue(t) && isRefCounted(t);
+}
+
+/** Does the module hold a WeakMap whose key is a dyn or a class instance?
+ * Such a table can receive ANY user class instance as a key, so the trace
+ * fixpoint keeps every user class cycle-headed (its cls->cyc flag is then 1,
+ * which is what the runtime checks before stamping an instance key). Same
+ * walk shape as moduleUsesWeakMap. */
+export function moduleUsesObjectWeakKeys(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const k = (v as { kind?: unknown; key?: unknown }).kind;
+    if (k === "weakmap") {
+      const key = (v as { key: IrType }).key;
+      if (key && (key.kind === "dyn" || key.kind === "object")) {
+        found = true;
+        return;
+      }
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
 }
 
 export function setOf(elem: IrType): IrType {

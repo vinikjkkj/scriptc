@@ -4,7 +4,7 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { canConvertToDyn, strandTrap } from "../../ir/nodes.js";
+import { canConvertToDyn, isRuntimeRootedClassName, strandTrap } from "../../ir/nodes.js";
 import { isProvenBufferRefinement } from "../buffer-refinement.js";
 import { BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
@@ -4084,11 +4084,15 @@ function lowerOptionalDefaultArg(
     // about. JS withholds them for the same reason, so refusing them here
     // matches the language rather than restricting it.
     if (receiverIr?.kind === "weakmap") {
-      if (name !== "get" && name !== "set" && name !== "has") {
+      // size, clear and iteration are NOT offered: a count or an enumeration
+      // would report entries whose keys may already be gone, and JS does not
+      // offer them on a WeakMap either. delete IS offered by JS and answers
+      // whether the key was present.
+      if (name !== "get" && name !== "set" && name !== "has" && name !== "delete") {
         L.noLowering(
           `WeakMap.${name}`,
           access,
-          "a weak collection answers get/set/has only — size, clear, delete and " +
+          "a weak collection answers get/set/has/delete only — size, clear and " +
             "iteration would have to report entries whose keys may already be gone, " +
             "and JS does not offer them on a WeakMap either",
         );
@@ -4106,11 +4110,16 @@ function lowerOptionalDefaultArg(
       if (name === "has") {
         return { kind: "mapIntrinsic", method: "has", receiver: wRecv, args: [wKey], type: BOOL, loc: wLoc };
       }
+      if (name === "delete") {
+        return { kind: "mapIntrinsic", method: "delete", receiver: wRecv, args: [wKey], type: BOOL, loc: wLoc };
+      }
       // `get` answers `V | undefined` exactly as a Map's does: the miss is
       // the undefined arm, and because `undefined` sorts last in canonical
       // arm order a union V keeps its own tags.
       const wType = L.irTypeOf(call);
-      if (wType.kind !== "union") L.badType(call, L.typeOf(call));
+      // A dyn VALUE (`WeakMap<K, any>`) reads as dyn: the checked-dynamic
+      // undefined arm is the dyn itself, not a union with a tag.
+      if (wType.kind !== "union" && !(wType.kind === "dyn" && receiverIr.value.kind === "dyn")) L.badType(call, L.typeOf(call));
       return { kind: "mapIntrinsic", method: "get", receiver: wRecv, args: [wKey], type: wType, loc: wLoc };
     }
     if (receiverIr?.kind !== "map") {
@@ -4263,13 +4272,15 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
  * load-bearing one -- which is also why scr_weak_dyn_set is registered in
  * computeMayThrow: without that the throw it raises is swallowed at the
  * `put(...)` call boundary. */
-const WEAK_DYN_KEY_ARG_KINDS = new Set(["dyn", "bytes", "array"]);
+const WEAK_DYN_KEY_ARG_KINDS = new Set(["dyn", "bytes", "array", "object"]);
 
 function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): void {
   const argT = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.typeOf(arg)));
   if (argT === null || typeEquals(argT, keyT)) return;
   if (keyT.kind === "dyn") {
-    if (WEAK_DYN_KEY_ARG_KINDS.has(argT.kind)) return;
+    // A runtime-laid-out class (an error, the emitter, a stream) is never
+    // cycle-headed by the weak-key fixpoint, so it stays refused here.
+    if (WEAK_DYN_KEY_ARG_KINDS.has(argT.kind) && !(argT.kind === "object" && isRuntimeRootedClassName(argT.className))) return;
     L.unsupported(
       "SC1090",
       arg,

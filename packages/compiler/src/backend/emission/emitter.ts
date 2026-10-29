@@ -36,7 +36,7 @@ import type {
 import { DYN, funcOf, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import { setDynOrderPlan } from "../dyn-members.js";
-import { orderRecordPlanCached } from "../../ir/nodes.js";
+import { orderRecordPlanCached, isRuntimeRootedClassName, moduleUsesObjectWeakKeys } from "../../ir/nodes.js";
 import {
   mangleAsyncSpawn,
   mangleGenSpawn,
@@ -1195,6 +1195,12 @@ export class CEmitter {
       members.push(s);
     }
     for (const u of mod.unions ?? []) this.tracedUnions.add(u.id);
+    // A weak table keyed on a dyn or an object can receive any user class
+    // instance, so every user class stays cycle-headed (see the note on
+    // moduleUsesObjectWeakKeys). Runtime-laid-out classes are excluded.
+    const forceWeakKeyClasses = moduleUsesObjectWeakKeys(mod);
+    const isUserClassKey = (key: string): boolean =>
+      key.startsWith("object:") && !isRuntimeRootedClassName(key.slice("object:".length));
     const cycleCapable = (t: IrType): boolean => {
       switch (t.kind) {
         case "func":
@@ -1247,7 +1253,8 @@ export class CEmitter {
       for (const members of units.values()) {
         if (
           this.tracedShapes.has(members[0]!.key) &&
-          !members.some((s) => s.fields.some((f) => cycleCapable(f.type)))
+          !members.some((s) => s.fields.some((f) => cycleCapable(f.type))) &&
+          !(forceWeakKeyClasses && members.some((s) => isUserClassKey(s.key)))
         ) {
           for (const s of members) this.tracedShapes.delete(s.key);
           shrunk = true;

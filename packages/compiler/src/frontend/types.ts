@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs";
 import * as ts from "./ts7/adapter.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isUnitType, JSVAL, mapOf, weakMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isSupportedWeakValue, isUnitType, JSVAL, mapOf, weakMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
 import { dynBuiltinFnType, dynBuiltinSigOfType } from "./dyn-builtin-sigs.js";
@@ -3614,9 +3614,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("WeakMap")) {
     const wargs = checker.getTypeArguments(widened as ts.TypeReference);
     if (wargs.length === 2) {
-      const wkey = mapType(wargs[0]!, ctx);
-      const wval = mapType(wargs[1]!, ctx);
-      if (wkey && isSupportedWeakKey(wkey) && wval && isSupportedMapValue(wval) && isRefCounted(wval)) {
+      // `WeakKey` is the lib's alias for `object | symbol`. Its object arm
+      // is the dyn (keyed on each value's payload, as bare `object` is), and
+      // a symbol key is refused by weakKeyArgIsIdentity at the argument, so
+      // the table's key is the dyn. Named here because a union of the two
+      // does not map to a single IR kind.
+      const wkey = checker.typeToString(wargs[0]!) === "WeakKey" ? DYN : mapType(wargs[0]!, ctx);
+      // An `any` VALUE (JavaScript's `new WeakMap()` is WeakMap<WeakKey, any>)
+      // is the dyn: mapType answers null for a bare `any` outside a dynamic
+      // context, and the checked-dynamic box is what the table holds.
+      const wval = (wargs[1]!.flags & ts.TypeFlags.Any) !== 0 ? DYN : mapType(wargs[1]!, ctx);
+      if (wkey && isSupportedWeakKey(wkey) && wval && isSupportedWeakValue(wval)) {
         return weakMapOf(wkey, wval);
       }
     }

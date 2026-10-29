@@ -11,7 +11,7 @@
  * Anything outside the tier refuses loudly (LlvmUnsupportedError naming
  * the type kind) — the tables never guess. */
 import type { IrModule, IrRecordShape, IrType } from "../../ir/nodes.js";
-import { DYN, funcOf, isRefCounted, mapOf, ownMaskBytes, ownMaskKeyBit, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, VOID } from "../../ir/nodes.js";
+import { DYN, funcOf, isRefCounted, isRuntimeRootedClassName, mapOf, moduleUsesObjectWeakKeys, ownMaskBytes, ownMaskKeyBit, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, VOID } from "../../ir/nodes.js";
 import {
   mangleClassRelease,
   mangleClassTrace,
@@ -135,12 +135,19 @@ export function computeTraced(mod: IrModule): { shapes: Set<string>; unions: Set
     }
   };
   let shrunk = true;
+  // A weak table keyed on a dyn or an object can receive any user class
+  // instance, so every user class stays cycle-headed (emitter.ts's C twin
+  // carries the same rule; moduleUsesObjectWeakKeys says why).
+  const forceWeakKeyClasses = moduleUsesObjectWeakKeys(mod);
+  const isUserClassKey = (key: string): boolean =>
+    key.startsWith("object:") && !isRuntimeRootedClassName(key.slice("object:".length));
   while (shrunk) {
     shrunk = false;
     for (const members of units.values()) {
       if (
         tracedShapes.has(members[0]!.key) &&
-        !members.some((s) => s.fields.some((f) => cycleCapable(f.type)))
+        !members.some((s) => s.fields.some((f) => cycleCapable(f.type))) &&
+        !(forceWeakKeyClasses && members.some((s) => isUserClassKey(s.key)))
       ) {
         for (const s of members) tracedShapes.delete(s.key);
         shrunk = true;
