@@ -129,20 +129,27 @@ stdlib-fence.ts:51:15 - error SC2020: '.indexOf with 2 arguments' is part of the
 
   hint: the fromIndex parameter has no lowering — slice first, or loop
 
-stdlib-fence.ts:75:15 - error SC2020: 'Object.is over a dynamic operand' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:61:18 - error SC1090: JSON.stringify with a replacer function (or a root that can be undefined): Node returns the undefined value, not a string, when the root is dropped — only a console argument takes that width is not supported yet
 
-  74 | // unions needing narrowing.
-  75 | const dynIs = Object.is(JSON.parse("1") as unknown, 1);
+  60 | const toStringify = { a: 1 };
+  61 | const replaced = JSON.stringify(toStringify, (_k, v) => v);
+     |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  62 | const width = 2;
+
+stdlib-fence.ts:76:15 - error SC2020: 'Object.is over a dynamic operand' is part of the standard library types but has no scriptc lowering yet
+
+  75 | // unions needing narrowing.
+  76 | const dynIs = Object.is(JSON.parse("1") as unknown, 1);
      |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  76 | function pick(a: string | number, b: number | boolean): boolean {
+  77 | function pick(a: string | number, b: number | boolean): boolean {
 
   hint: validate/narrow the value first (strict equality's rule) — SameValue only differs from === on numbers (NaN, ±0)
 
-stdlib-fence.ts:77:10 - error SC2020: 'Object.is over these union operands' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:78:10 - error SC2020: 'Object.is over these union operands' is part of the standard library types but has no scriptc lowering yet
 
-  76 | function pick(a: string | number, b: number | boolean): boolean {
-  77 |   return Object.is(a, b); // partially-overlapping unions: narrow first
+  77 | function pick(a: string | number, b: number | boolean): boolean {
+  78 |   return Object.is(a, b); // partially-overlapping unions: narrow first
      |          ^~~~~~~~~~~~~~~
-  78 | }
+  79 | }
 
   hint: union-typed comparisons need one comparable shape (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms)
