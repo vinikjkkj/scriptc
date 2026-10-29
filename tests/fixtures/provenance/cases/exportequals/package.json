@@ -1,0 +1,4 @@
+{
+  "type": "commonjs",
+  "dependencies": { "exportequals": "1.6.1" }
+}
