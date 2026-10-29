@@ -44,9 +44,10 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // not have http), so neither may name the other — this TU names both and
   // is gated on the two together, the scr_cipher_key.c pattern.
   "scr_abort_http.c": ["scr_abort.c", "scr_http.c"],
-  // scr_abort.c's timers/promises value/options entry reports Node's delay
-  // warnings through scr_emit_warning (scr_async_dyn.c, the process 'warning' path).
-  "scr_abort.c": ["scr_async_dyn.c"],
+  // The timers/promises value/options entry (scr_tp_value.c): it names
+  // scr_abort_signal_* (scr_abort.c) and reports Node's delay warnings through
+  // scr_emit_warning (scr_async_dyn.c). Its gate (tpValue) implies both.
+  "scr_tp_value.c": ["scr_abort.c", "scr_async_dyn.c"],
   // Measured edges: scr_http_request_ex / scr_http_req_* / the client
   // listeners (scr_http.c), scr_tls_fetch_client_ctx and _wrap
   // (scr_tls.c), scr_url_new / scr_url_release (scr_url.c). The socket
@@ -522,6 +523,9 @@ export interface CcOptions {
    * symbols, so the emitted TU is the only caller and it names them
    * exactly when an abortSignal-typed slot exists. */
   abortSignal?: boolean;
+  /** The program calls timers/promises setTimeout with a value or options
+   * (tp.setTimeoutV*): compiles scr_tp_value.c (implies scr_abort.c, scr_async_dyn.c). */
+  tpValue?: boolean;
   /** The program has a static-fetch value anywhere
    * (moduleUsesFetchStatic on the IR): compiles scr_fetch_static.c, and
    * with it the whole net/http/tls/url/zlib stack it stands on. The gate
@@ -1776,6 +1780,9 @@ export interface LibArchiveOptions {
   cipher?: boolean;
   copying?: boolean;
   abortSignal?: boolean;
+  /** The program calls timers/promises setTimeout with a value or options
+   * (tp.setTimeoutV*): compiles scr_tp_value.c, which implies scr_abort.c and scr_async_dyn.c. */
+  tpValue?: boolean;
   /** A process stream value is boxed into the dyn tree: links scr_proc_dyn.c (the same gate as the program lane). */
   procDyn?: boolean;
 }
@@ -2343,7 +2350,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const stream = (opts.stream ?? false) || httpBody;
   /* The seam implies its two halves: a wrong `false` here would be an
    * undefined symbol at the very end of the build naming no gate. */
-  const abortSignal = (opts.abortSignal ?? false) || abortHttp;
+  const tpValue = opts.tpValue ?? false;
+  const abortSignal = (opts.abortSignal ?? false) || abortHttp || tpValue;
   const http = (opts.http ?? false) || tls || http2 || nativeFetch || netIsland || wsGlobal || abortHttp || httpBody || fetchStatic;
   const net = (opts.net ?? false) || http || tls || http2 || nativeFetch || netIsland || wsGlobal || fetchStatic;
   /* scr_url.c's gate closes over every unit that calls into it, the `net`
@@ -2509,13 +2517,13 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // scr_async_dyn.c calls the dispatch unit (a thenable's then is invoked
     // with this = the thenable: scr_dyn_invoke_key, the proxy and class
     // instance [[Get]]), so every binary that links the async unit links it.
-    ...(opts.dynInvoke || opts.dynAsync || opts.dc ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),
+    ...(opts.dynInvoke || opts.dynAsync || opts.dc || tpValue ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),
     ...(opts.dynClass ? [rt(join(rtDir, "scr_dyn_class.c"))] : []),
     ...(opts.dynExt ? [rt(join(rtDir, "scr_dyn_ext.c"))] : []),
     ...(opts.bufferVal ? [rt(join(rtDir, "scr_buffer_val.c"))] : []),
     ...(opts.bytesOwn ? [rt(join(rtDir, "scr_bytes_own.c"))] : []),
     ...(opts.dc ? [rt(join(rtDir, "scr_dc.c"))] : []),
-    ...(opts.dynAsync || opts.dynInvoke || opts.dc ? [rt(join(rtDir, "scr_async_dyn.c"))] : []),
+    ...(opts.dynAsync || opts.dynInvoke || opts.dc || tpValue ? [rt(join(rtDir, "scr_async_dyn.c"))] : []),
     ...(opts.webCrypto ? [rt(join(rtDir, "scr_webcrypto.c"))] : []),
     // The zlib UNIT (scr_zlib.c) gates on zlib.* IR use; the LINK (system
     // libz on hosts, the vendored per-target objects on cross builds)
@@ -2561,6 +2569,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // comments), so qs does not imply the url gate.
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),
     ...(abortSignal ? [rt(join(rtDir, "scr_abort.c"))] : []),
+    ...(tpValue ? [rt(join(rtDir, "scr_tp_value.c"))] : []),
     ...(abortHttp ? [rt(join(rtDir, "scr_abort_http.c"))] : []),
     // The static fetch and the conjunction seam that gives it `signal`.
     // The seam is the scr_cipher_key.c / scr_abort_http.c shape: it links
