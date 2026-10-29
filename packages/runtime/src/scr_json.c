@@ -5464,10 +5464,21 @@ static void jr_object(ScrJRepl *cx, ScrDyn *v, size_t depth) {
       mv = jr_bytes_get(v, k);
       if (mv == NULL) mv = scr_dyn_retain(scr_dyn_undefined());
     } else {
-      mv = scr_dyn_obj_key_get(v, k->data, k->len); /* [[Get]]; NULL = absent or pending */
+      mv = scr_dyn_obj_key_get(v, k->data, k->len); /* [[Get]]; NULL only with a pending exception */
       if (mv == NULL) {
         if (scr_exc_pending()) break;
         mv = scr_dyn_retain(scr_dyn_undefined());
+      }
+      if (cx->allow != NULL && mv->kind == SCR_DYN_UNDEF && k->len == 9 &&
+          memcmp(k->data, "__proto__", 9) == 0 && !scr_dyn_is_null_proto(v) &&
+          !scr_dyn_obj_has_own_prop(v, k->data, k->len)) {
+        /* [[Get]] of "__proto__" on an ordinary object is Object.prototype,
+         * whose own "__proto__" is null: Node serializes {"__proto__":null}
+         * for it. The stand-in holds that one member. */
+        scr_dyn_release(mv);
+        ScrDyn *stand = scr_dyn_new_obj();
+        scr_dyn_obj_set(stand, "__proto__", 9, scr_dyn_new_null());
+        mv = stand;
       }
     }
     if (mv == NULL) break;
@@ -5537,7 +5548,12 @@ static void jr_emit(ScrJRepl *cx, ScrDyn *v, size_t depth) {
   scr_dyn_release(v);
 }
 
-ScrStr *scr_json_stringify_repl(ScrDyn *value, ScrDyn *replacer, ScrDyn *space) {
+/* The walk behind every replacer/space spelling. *absent is set (and NULL
+ * returned, no exception pending) when the ROOT is dropped: the replacer or
+ * the value answered undefined. The string wrappers below decide what that
+ * means for their destination. Borrows all three; +1 text or NULL. */
+static ScrStr *scr_json_repl_core(ScrDyn *value, ScrDyn *replacer, ScrDyn *space, bool *absent) {
+  *absent = false;
   ScrJRepl cx;
   memset(&cx, 0, sizeof cx);
   ScrJsonBuf b;
@@ -5590,16 +5606,16 @@ ScrStr *scr_json_stringify_repl(ScrDyn *value, ScrDyn *replacer, ScrDyn *space) 
   scr_dyn_obj_set(wrap, "", 0, scr_dyn_retain(value));
   ScrStr *empty = scr_str_new("", 0);
   ScrDyn *root = jr_resolve(&cx, wrap, empty, value);
-  bool absent = root == NULL;
+  bool dropped = root == NULL;
   if (root != NULL) jr_emit(&cx, root, 0);
   scr_str_release(empty);
   scr_dyn_release(wrap);
   ScrStr *out = NULL;
   if (scr_exc_pending()) {
     scr_jb_dispose(&b);
-  } else if (absent) {
+  } else if (dropped) {
     scr_jb_dispose(&b);
-    out = scr_str_new("undefined", 9);
+    *absent = true;
   } else {
     out = scr_jb_finish(&b);
   }
@@ -5609,8 +5625,38 @@ ScrStr *scr_json_stringify_repl(ScrDyn *value, ScrDyn *replacer, ScrDyn *space) 
   return out;
 }
 
+/* The STRING destination: a dropped root is the text "undefined". The
+ * lowering only reaches this for shapes whose root cannot be dropped. */
+ScrStr *scr_json_stringify_repl(ScrDyn *value, ScrDyn *replacer, ScrDyn *space) {
+  bool absent = false;
+  ScrStr *out = scr_json_repl_core(value, replacer, space, &absent);
+  if (absent) return scr_str_new("undefined", 9);
+  return out;
+}
+
 ScrStr *scr_json_stringify_repl2(ScrDyn *value, ScrDyn *replacer) {
   return scr_json_stringify_repl(value, replacer, NULL);
+}
+
+/* The DYN destination (console arguments): a string, or the undefined VALUE
+ * when the root is dropped — Node's answer, not the text. +1, or NULL with
+ * the exception pending. */
+static ScrDyn *scr_json_repl_dyn_of(ScrStr *out, bool dropped) {
+  if (out == NULL) {
+    if (!dropped) return NULL;
+    return scr_dyn_retain(scr_dyn_undefined());
+  }
+  ScrDyn *d = scr_dyn_new_str(out); /* RETAINS out */
+  scr_str_release(out);
+  return d;
+}
+ScrDyn *scr_json_stringify_repl_dyn(ScrDyn *value, ScrDyn *replacer, ScrDyn *space) {
+  bool dropped = false;
+  ScrStr *out = scr_json_repl_core(value, replacer, space, &dropped);
+  return scr_json_repl_dyn_of(out, dropped);
+}
+ScrDyn *scr_json_stringify_repl_dyn2(ScrDyn *value, ScrDyn *replacer) {
+  return scr_json_stringify_repl_dyn(value, replacer, NULL);
 }
 
 /* An %Error instance as a dyn object ({name, message[, code]}) — the

@@ -109,6 +109,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // JSON.stringify(value, replacer[, space]) over the dyn tree (borrowed args).
   "json.stringifyRepl": { argTypes: [DYN, DYN], result: STRING },
   "json.stringifyReplSpace": { argTypes: [DYN, DYN, DYN], result: STRING },
+  // The same walk for a console argument: the undefined VALUE when the root is dropped.
+  "json.stringifyReplDyn": { argTypes: [DYN, DYN], result: DYN },
+  "json.stringifyReplDynSpace": { argTypes: [DYN, DYN, DYN], result: DYN },
   /* better-sqlite3 (scr_sqlite.c). open's three flags are the option
    * record's readonly / fileMustExist / timeout, already folded to
    * literals by the lowering — the runtime re-validates timeout because

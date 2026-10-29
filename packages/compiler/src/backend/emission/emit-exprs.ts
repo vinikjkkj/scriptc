@@ -3594,6 +3594,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_json_stringify_repl2(${arg(0)}, ${arg(1)})`);
           case "json.stringifyReplSpace":
             return finish(`scr_json_stringify_repl(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "json.stringifyReplDyn":
+            return finish(`scr_json_stringify_repl_dyn2(${arg(0)}, ${arg(1)})`);
+          case "json.stringifyReplDynSpace":
+            return finish(`scr_json_stringify_repl_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "json.parse":
             // Borrows the text; returns +1 on a fresh dyn, or throws a
             // catchable SyntaxError-shaped string (may-throw seed set).

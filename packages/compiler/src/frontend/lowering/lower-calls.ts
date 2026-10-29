@@ -29,7 +29,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerDateLocaleFormat, lowerNumberLocaleFormat } from "./lower-numfmt.js";
-import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerRandomBytesCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerErrorCaptureStackTraceCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
+import { replStringifyConsoleArg, lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerRandomBytesCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerErrorCaptureStackTraceCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
@@ -4759,7 +4759,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // `undefined` there and the formatter below renders that arm as
         // the word Node prints (spawnResStreamArg). Null everywhere else,
         // and the property access answers at its own width.
-        const raw = spawnResStreamArg(L, a) ?? jsonStringifySpawnStreamArg(L, a) ?? L.lowerExpr(a);
+        const raw = spawnResStreamArg(L, a) ?? jsonStringifySpawnStreamArg(L, a) ?? replStringifyConsoleArg(L, a) ?? L.lowerExpr(a);
         const lowered = argHoist.take(a, L.recordKeyReadAtSlotWidth(raw, DYN) ?? narrowBridgeDyn(raw) ?? raw);
         if (lowered.type.kind === "jsval") {
           // Node prints objects with util.inspect formatting, which

@@ -892,6 +892,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "json.parse": "scr_json_parse",
   "json.stringifyRepl": "scr_json_stringify_repl2",
   "json.stringifyReplSpace": "scr_json_stringify_repl",
+  "json.stringifyReplDyn": "scr_json_stringify_repl_dyn2",
+  "json.stringifyReplDynSpace": "scr_json_stringify_repl_dyn",
   "json.parseRevive": "scr_json_parse_revive",
   /* better-sqlite3 over the vendored amalgamation (scr_sqlite.c). Every
    * one of the executors and the two lifecycle members is in the

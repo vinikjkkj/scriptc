@@ -5363,6 +5363,8 @@ ScrDyn *scr_json_parse_revive(ScrStr *text, ScrDyn *reviver);
  * spellings. Borrows all three; +1, or NULL with the exception pending. */
 ScrStr *scr_json_stringify_repl(ScrDyn *value, ScrDyn *replacer, ScrDyn *space);
 ScrStr *scr_json_stringify_repl2(ScrDyn *value, ScrDyn *replacer);
+ScrDyn *scr_json_stringify_repl_dyn(ScrDyn *value, ScrDyn *replacer, ScrDyn *space);
+ScrDyn *scr_json_stringify_repl_dyn2(ScrDyn *value, ScrDyn *replacer);
 
 /* BORROWED member lookup on a SCR_DYN_OBJ; NULL when the key is absent.
  * OWN members only — the prototype chain is scr_dyn_proto_get's. */

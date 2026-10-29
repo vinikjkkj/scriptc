@@ -4685,19 +4685,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       !call.arguments.some((a) => ts.isSpreadElement(a)) &&
       !stringifyCompileTimeForm(call)
     ) {
-      // JSON.stringify(value, replacer[, space]) with a replacer or a
-      // non-literal space: the walk runs in the runtime
-      // (scr_json_stringify_repl), which keeps the spec's order (toJSON,
-      // then the replacer with this = holder, then the drop/emit decision),
-      // the PropertyList, and the gap clamp. The value crosses as a dyn
-      // root, the same boundary as a dyn-root stringify (see below).
-      const value = L.lowerExprExpecting(call.arguments[0]!, DYN);
-      const replacer = L.lowerExprExpecting(call.arguments[1]!, DYN);
-      if (call.arguments.length === 2) {
-        return { kind: "libCall", fn: "json.stringifyRepl", args: [value, replacer], type: STRING, loc };
-      }
-      const space = L.lowerExprExpecting(call.arguments[2]!, DYN);
-      return { kind: "libCall", fn: "json.stringifyReplSpace", args: [value, replacer, space], type: STRING, loc };
+      return lowerStringifyRepl(L, call, false);
     }
     if (member === "parse" && call.arguments.length === 2 && !call.arguments.some((a) => ts.isSpreadElement(a))) {
       // JSON.parse(text, reviver): the walk runs in the runtime
@@ -4847,11 +4835,145 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return null; // unknown members are tsc errors before lowering
   }
 
+  /** The PropertyList fence's plainness test: every node the allow-list's
+   * [[Get]] can read is a record, array, scalar, union, undefined/null, or a
+   * function. A class instance, Map/Set, ArrayBuffer, typed array, dyn/jsval
+   * value, handle or promise answers prototype getters (Map.size,
+   * byteLength, length, a class accessor) that this walk does not model,
+   * so an allow-list over one of them is refused at compile time. */
+  export function replPlainDataType(L: Lowerer, t: IrType, visiting: Set<string> = new Set()): boolean {
+    switch (t.kind) {
+      case "f64":
+      case "string":
+      case "bool":
+      case "undefinedT":
+      case "nullT":
+      case "func":
+        return true;
+      case "array":
+        return replPlainDataType(L, t.elem, visiting);
+      case "record": {
+        const shape = L.shapes.get(t.shapeId);
+        if (shape === undefined) return false;
+        const key = `r:${t.shapeId}`;
+        if (visiting.has(key)) return true; // the recursive knot: the rest of the graph decides
+        visiting.add(key);
+        if (!shape.fields.every((f) => replPlainDataType(L, f.type, visiting))) return false;
+        return shape.indexValue === undefined || replPlainDataType(L, shape.indexValue, visiting);
+      }
+      case "union": {
+        const def = L.unions.get(t.unionId);
+        if (def === undefined) return false;
+        const key = `u:${t.unionId}`;
+        if (visiting.has(key)) return true;
+        visiting.add(key);
+        return def.arms.every((a) => replPlainDataType(L, a, visiting));
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** True when the root can be dropped by the walk itself: undefined, a
+   * function, a dyn/jsval (which may hold undefined), or a union with one of
+   * those arms. Node returns the undefined VALUE for a dropped root. */
+  function replRootMayBeUndefined(L: Lowerer, t: IrType): boolean {
+    switch (t.kind) {
+      case "undefinedT":
+      case "func":
+      case "dyn":
+      case "jsval":
+        return true;
+      case "union": {
+        const def = L.unions.get(t.unionId);
+        if (def === undefined) return true;
+        return def.arms.some((a) => a.kind === "undefinedT" || a.kind === "func" || a.kind === "dyn" || a.kind === "jsval");
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** `JSON.stringify(value, replacer[, space])` with a replacer or a
+   * non-literal space, through the runtime walk (scr_json_stringify_repl).
+   *
+   * The checker types the call `string`, but Node returns the undefined
+   * VALUE when the replacer (or a root that is undefined, a function or a
+   * dyn holding one) drops the root. That result is taken at the undefined
+   * width ONLY as a console argument, where the formatter prints `undefined`
+   * as Node does (the DYN destination below). Any other destination is a
+   * compile-time refusal: a wider value there would be a silent divergence.
+   *
+   * A PropertyList (array replacer) reads each listed key by [[Get]], so it
+   * is refused over a value that is not plain data (replPlainDataType). */
+  export function lowerStringifyRepl(L: Lowerer, call: ts.CallExpression, consoleArg: boolean): IrExpr {
+    const loc = locOf(call);
+    const replNode = call.arguments[1]!;
+    let hasFn = false;
+    let hasAllow = false;
+    const replT = L.checker.getTypeAtLocation(replNode);
+    const members: readonly ts.Type[] = replT.isUnionType() ? ts.constituentTypes(replT) : [replT];
+    for (const m of members) {
+      if (m.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) {
+        hasFn = true;
+        hasAllow = true;
+      } else if (L.checker.getCallSignatures(m).length > 0) {
+        hasFn = true;
+      } else if (
+        (m.flags &
+          (ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.StringLike |
+            ts.TypeFlags.NumberLike | ts.TypeFlags.BooleanLike)) === 0
+      ) {
+        hasAllow = true; // an array (or object) member: Node reads a PropertyList from it
+      }
+    }
+    const valueIr = L.lowerExpr(call.arguments[0]!);
+    if (hasAllow && !replPlainDataType(L, valueIr.type)) {
+      L.unsupported(
+        "SC1090",
+        call,
+        `JSON.stringify with a PropertyList (array replacer) over '${L.fmt(valueIr.type)}': Node reads each listed key by [[Get]], so prototype getters and exotic state (Map.size, ArrayBuffer byteLength, typed-array length, a class accessor) would answer there — pass a plain record or array`,
+      );
+      return { kind: "strLit", value: "", type: STRING, loc };
+    }
+    const mayUndef = hasFn || replRootMayBeUndefined(L, valueIr.type);
+    if (mayUndef && !consoleArg) {
+      L.unsupported(
+        "SC1090",
+        call,
+        "JSON.stringify with a replacer function (or a root that can be undefined): Node returns the undefined value, not a string, when the root is dropped — only a console argument takes that width",
+      );
+      return { kind: "strLit", value: "", type: STRING, loc };
+    }
+    const hasSpace = call.arguments.length === 3;
+    const valueDyn = L.coerceToExpected(valueIr, DYN);
+    const replDyn = L.coerceToExpected(L.lowerExpr(replNode), DYN);
+    const args: IrExpr[] = [valueDyn, replDyn];
+    if (hasSpace) args.push(L.coerceToExpected(L.lowerExpr(call.arguments[2]!), DYN));
+    const fn = mayUndef
+      ? hasSpace ? "json.stringifyReplDynSpace" : "json.stringifyReplDyn"
+      : hasSpace ? "json.stringifyReplSpace" : "json.stringifyRepl";
+    return { kind: "libCall", fn, args, type: mayUndef ? DYN : STRING, loc };
+  }
+
+  /** The console-argument rung: a replacer-form JSON.stringify call taken at
+   * the undefined width its destination can print. Null for every other
+   * argument, which keeps its existing lowering. */
+  export function replStringifyConsoleArg(L: Lowerer, node: ts.Expression): IrExpr | null {
+    if (!ts.isCallExpression(node) || node.arguments.length < 2 || node.arguments.length > 3) return null;
+    if (node.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    if (!ts.isPropertyAccessExpression(node.expression)) return null;
+    if (L.chainBlocked(node)) return null;
+    if (L.stdlibGlobalMember(node.expression, "JSON") !== "stringify") return null;
+    if (stringifyCompileTimeForm(node)) return null;
+    return lowerStringifyRepl(L, node, true);
+  }
+
 /** True when `JSON.stringify(v, replacer[, space])` is one of the spellings
    * the compile-time serializer owns: a `null`/`undefined` replacer and a
    * space that is a literal (or absent). Everything else takes the runtime
    * walk (scr_json_stringify_repl). Mirrors stringifySpaceIndent's accepts. */
-  function stringifyCompileTimeForm(call: ts.CallExpression): boolean {
+  export function stringifyCompileTimeForm(call: ts.CallExpression): boolean {
     const unwrap = (e: ts.Expression): ts.Expression =>
       ts.isParenthesizedExpression(e) ? unwrap(e.expression) : e;
     const nullish = (e: ts.Expression): boolean => {
