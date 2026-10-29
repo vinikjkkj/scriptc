@@ -19983,5 +19983,12 @@
    ],
    "diags": []
   }
+,
+  "<repo>/tests/corpus/15540-this-indexed-abstract-base.ts": {
+   "order": [
+    "<repo>/tests/corpus/15540-this-indexed-abstract-base.ts"
+   ],
+   "diags": []
+  }
  }
 }
