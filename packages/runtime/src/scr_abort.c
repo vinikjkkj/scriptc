@@ -561,6 +561,34 @@ static void scr_tp_on_abort(void *ctx) {
   scr_tp_pend_release(q);
 }
 
+/* A queued delay warning: the name is a static string, the message owned. */
+typedef struct ScrTpWarn {
+  size_t rc;
+  const char *name;
+  ScrStr *msg;
+} ScrTpWarn;
+
+static void scr_tp_warn_release(ScrTpWarn *w) {
+  if (--w->rc != 0) return;
+  scr_str_release(w->msg);
+  free(w);
+}
+
+static void *scr_tp_warn_retain_v(void *p) {
+  ((ScrTpWarn *)p)->rc++;
+  return p;
+}
+
+static void scr_tp_warn_release_v(void *p) { scr_tp_warn_release((ScrTpWarn *)p); }
+
+/* The queued tick: emits through the runtime's warning path (listeners,
+ * then the default stderr report). The box's get is a +1 released here. */
+static void scr_tp_warn_fire(ScrClosure *self) {
+  ScrTpWarn *w = (ScrTpWarn *)scr_box_get_ref(self->caps[0]);
+  scr_emit_warning(w->name, NULL, w->msg);
+  scr_tp_warn_release(w);
+}
+
 /* Node's Timeout-constructor warnings for a delay outside [1, TIMEOUT_MAX]
  * (0 and fractions below 1 coerce silently; undefined never reaches here).
  * The message carries Node's detail line; the dispatch is the runtime's
@@ -584,9 +612,17 @@ static void scr_tp_delay_warn(double after) {
   } else {
     return;
   }
-  ScrStr *m = scr_str_new(buf, strlen(buf));
-  scr_emit_warning(name, NULL, m);
-  scr_str_release(m);
+  /* Node's emitWarning defers the dispatch with process.nextTick at the
+   * call, so the warning rides the user tick queue in call order. */
+  ScrTpWarn *w = calloc(1, sizeof *w);
+  if (!w) scr_trap("scriptc: out of memory\n");
+  w->rc = 1;
+  w->name = name;
+  w->msg = scr_str_new(buf, strlen(buf));
+  ScrClosure *clo = scr_closure_new((void *)scr_tp_warn_fire, 1);
+  clo->caps[0] = scr_box_new_obj(scr_tp_warn_retain_v, scr_tp_warn_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], w);
+  scr_next_tick(clo);
 }
 
 ScrPromise *scr_tp_set_timeout_v(double ms, int kind, double num, void *val,
