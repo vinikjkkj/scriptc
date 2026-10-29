@@ -20844,6 +20844,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16300-webcrypto-sigv4-hash-dict.js": {
+   "order": [
+    "<repo>/tests/corpus/16300-webcrypto-sigv4-hash-dict.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16301-webcrypto-hash-dict-usage.js": {
+   "order": [
+    "<repo>/tests/corpus/16301-webcrypto-hash-dict-usage.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-error-listener.js": {
    "order": [
     "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-error-listener.js"
