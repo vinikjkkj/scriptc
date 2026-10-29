@@ -2460,6 +2460,13 @@
       "note": "compiles statically at arity 1"
     },
     {
+      "id": "stdlib.math.fround",
+      "kind": "stdlib",
+      "name": "Math.fround",
+      "status": "static",
+      "note": "compiles statically at arity 1"
+    },
+    {
       "id": "stdlib.math.hypot",
       "kind": "stdlib",
       "name": "Math.hypot",
