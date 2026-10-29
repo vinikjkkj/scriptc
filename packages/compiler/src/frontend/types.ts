@@ -5331,10 +5331,24 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       sigDeclForRet !== undefined &&
       ((sigDeclForRet.getSourceFile().isDeclarationFile && !ctx.isStdlibFile(sigDeclForRet.getSourceFile())) ||
         isProvenanceSourceFile(sigDeclForRet.getSourceFile().fileName));
+    // LIBRARY-AUTHOR any[] RETURN (the array twin of the bare-`any` return
+    // above): a signature declared in a package's .d.ts (or its provenance
+    // source) that returns `any[]` is the library's lazy `any` one array
+    // layer out, the same reading the `any[]` member rule (mapType's
+    // declMember branch) takes. pg-types' `arrayParser: (...) => any[]` is
+    // the motivating case: the namespace export is typed whole, so this
+    // return refused every require('pg-types') value. Program-authored
+    // signatures keep the global refusal (libraryAnyReturn is false there).
+    const libraryAnyArrayReturn =
+      libraryAnyReturn &&
+      checker.isArrayType(retT) &&
+      ((checker.getTypeArguments(retT as ts.TypeReference)[0]?.flags ?? 0) & ts.TypeFlags.Any) !== 0;
     const ret =
       retT.flags & ts.TypeFlags.Never
         ? VOID
-        : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral || libraryAnyReturn || (!ctx.dynamic && spellsAnyReturn(sigDeclForRet)) || (!ctx.dynamic && truthinessCallbackReturn(sigDeclForRet))) && (retT.flags & ts.TypeFlags.Any) !== 0
+        : libraryAnyArrayReturn
+          ? DYN
+          : (ctx.unionArmAnyReturn === true || fromUncompiledCallableLiteral || libraryAnyReturn || (!ctx.dynamic && spellsAnyReturn(sigDeclForRet)) || (!ctx.dynamic && truthinessCallbackReturn(sigDeclForRet))) && (retT.flags & ts.TypeFlags.Any) !== 0
           ? DYN
           : mapType(retT, ctx);
     if (!ret) {
