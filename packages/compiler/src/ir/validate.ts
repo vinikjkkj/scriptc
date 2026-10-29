@@ -5593,7 +5593,7 @@ function validateFunction(
         // walker serializes it (scr_dyn_format_j), no emitted serializer.
         if (
           e.value.type.kind !== "dyn" &&
-          !isJsonSafeType(e.value.type, (id) => records.get(id), (id) => unions.get(id), true)
+          !isJsonSafeType(e.value.type, (id) => records.get(id), (id) => unions.get(id), true, true)
         ) {
           err(`jsonStringify of non-JSON-safe type ${e.value.type.kind}`, e.loc);
         }
