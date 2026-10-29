@@ -2913,7 +2913,15 @@ ScrStr *scr_atomics_wait(ScrBytes *arr, double idx, double expected, double time
 
 /* ── the tty probes ──────────────────────────────────────────────────── */
 
-bool scr_process_is_tty(double fd) { return isatty((int)fd) != 0; }
+/* Node's isatty answer for any number (tty.isatty and the process.stdio
+ * isTTY reads share this): an integer fd in 0..2147483647 asks isatty(3);
+ * anything else (fraction, NaN, out of range) is false, never a truncated fd. */
+bool scr_process_is_tty(double fd) {
+  if (!(fd >= 0.0 && fd <= 2147483647.0)) return false;
+  int i = (int)fd;
+  if ((double)i != fd) return false;
+  return isatty(i) != 0;
+}
 
 /* Terminal width for process.stdout/stderr.columns: ioctl(TIOCGWINSZ) on
  * the stream's fd, exactly Node's tty.WriteStream source of truth. A
