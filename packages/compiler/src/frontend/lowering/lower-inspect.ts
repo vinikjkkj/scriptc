@@ -274,6 +274,10 @@ function inspectSupport(L: Lowerer, t: IrType, visiting: Set<string>, out: { rec
       visiting.delete(t.shapeId);
       return null;
     }
+    case "weakmap":
+      // Node cannot enumerate a weak collection: its inspect is the fixed
+      // `WeakMap { <items unknown> }`, whatever the key and value kinds.
+      return null;
     case "map": {
       const keyWhy = inspectSupport(L, t.key, visiting, out);
       if (keyWhy !== null) return keyWhy;
@@ -865,6 +869,9 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       }
       break;
     }
+    case "weakmap":
+      body = [ret(str("WeakMap { <items unknown> }", loc))];
+      break;
     case "map":
     case "set": {
       const isMap = t.kind === "map";

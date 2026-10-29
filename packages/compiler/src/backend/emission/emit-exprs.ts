@@ -1784,7 +1784,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             throw new Error("emitter bug: seeded WeakMap construction");
           }
           const wvNew = e.type.value;
-          const wrcNew = isRefCounted(wvNew) ? vAdapters(wvNew) : null;
+          const wrcNew = isRefCounted(wvNew) || wvNew.kind === "dyn" ? vAdapters(wvNew) : null;
           // The key's own stamp. Per-kind because each writes a field only
           // that type has; picking wrong is a stray store, not a bad answer.
           const wkNew = e.type.key;
@@ -1827,6 +1827,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // pointer was buying: an arm cannot pick a stamp for a struct
             // it did not just read the kind of.
             wMark = "NULL";
+          } else if (wkNew.kind === "object") {
+            // A CLASS INSTANCE key. The weak-key fixpoint keeps every user
+            // class cycle-headed (emitter.ts forceWeakKeyClasses), so the
+            // stamp goes in the collector header, read by scr_cyc_free.
+            wMark = "&scr_cyc_weak_mark";
           } else {
             throw new Error(`emitter bug: WeakMap key kind ${wkNew.kind} has no stamp`);
           }
@@ -1909,6 +1914,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           switch (e.method) {
             case "get": {
               const wk = E.emitExpr(e.args[0]!);
+              if (e.type.kind === "dyn") {
+                // A dyn VALUE: the +1 entry on a hit, the immortal undefined
+                // on a miss (the dyn-valued map's convention).
+                const wt = E.newTemp(e.type, `(ScrDyn *)scr_weak${wDyn}_get_ref(${r.name}, ${wk.name})`);
+                E.line(`if (!${wt.name}) ${wt.name} = scr_dyn_undefined();`);
+                return wt;
+              }
               if (e.type.kind !== "union") {
                 throw new Error("emitter bug: WeakMap get result is not a union");
               }
@@ -1956,6 +1968,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             case "has": {
               const wk = E.emitExpr(e.args[0]!);
               return E.newTemp(e.type, `scr_weak${wDyn}_has(${r.name}, ${wk.name})`);
+            }
+            case "delete": {
+              const wk = E.emitExpr(e.args[0]!);
+              return E.newTemp(e.type, `scr_weak${wDyn}_delete(${r.name}, ${wk.name})`);
             }
             default:
               throw new Error(`emitter bug: WeakMap.${e.method} reached the emitter`);

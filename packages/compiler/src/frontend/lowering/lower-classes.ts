@@ -8,7 +8,7 @@ import { appliesEmitterMixin, EMITTER_MIXIN_FIELD } from "./lower-emitter-mixin.
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { ctorFieldFillProven } from "./ctor-fill-proof.js";
-import { GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isSupportedWeakValue, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
 import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitInstanceLike, implicitMonoFile, omittedArgFor, type GenericFnInfo, type GenericInstance, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
@@ -11988,8 +11988,14 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         // stdlib constructor chokepoint already carries the honest hint;
         // route there instead.
         if (symbol?.name === "WeakMap") {
-          const weakKeyIr = targs[0] ? L.mapTypeOf(targs[0]) : null;
-          const weakValIr = targs[1] ? L.mapTypeOf(targs[1]) : null;
+          // `WeakKey` (the lib's object | symbol alias) is the dyn key, as
+          // in types.ts's WeakMap arm; an `any` value is the dyn too.
+          const weakKeyIr = targs[0]
+            ? (L.checker.typeToString(targs[0]) === "WeakKey" ? DYN : L.mapTypeOf(targs[0]))
+            : null;
+          const weakValIr = targs[1]
+            ? ((targs[1].flags & ts.TypeFlags.Any) !== 0 ? DYN : L.mapTypeOf(targs[1]))
+            : null;
           // THE REVERSAL. WEAK_COLLECTION_HINTS said weak collections
           // "observe garbage collection, which reference counting never
           // exposes". The second half of that is false: scr_bytes_release
@@ -12002,8 +12008,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           // that does not exist yet, not about reference counting as such.
           if (
             targs[0] && weakKeyIr && isSupportedWeakKey(weakKeyIr) &&
-            targs[1] && weakValIr && isSupportedMapValue(weakValIr) &&
-            isRefCounted(weakValIr)
+            targs[1] && weakValIr && isSupportedWeakValue(weakValIr)
           ) {
             return { kind: "mapNew", type: weakMapOf(weakKeyIr, weakValIr), loc };
           }

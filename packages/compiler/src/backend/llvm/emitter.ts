@@ -14757,7 +14757,9 @@ class LlEmitter {
     if ((e.seed?.length ?? 0) !== 0) throw new Error("llvm emitter bug: seeded WeakMap construction");
     const B = this.B;
     const value = e.type.value;
-    const rc = isRefCounted(value) ? vAdapters(this, value) : { retain: "null", release: "null" };
+    // A dyn VALUE (`any`) holds through the checked-dynamic retain/release
+    // pair; isSupportedWeakValue (ir/nodes.ts) is the admission.
+    const rc = isRefCounted(value) || value.kind === "dyn" ? vAdapters(this, value) : { retain: "null", release: "null" };
     const key = e.type.key;
     let mark: string;
     if (key.kind === "bytes") {
@@ -14765,6 +14767,12 @@ class LlEmitter {
       this.declare(`declare void ${mark}(ptr)`);
     } else if (key.kind === "array") {
       mark = traceAdapter(this, key.elem) !== null ? "@scr_cyc_weak_mark" : "@scr_arr_weak_mark";
+      this.declare(`declare void ${mark}(ptr)`);
+    } else if (key.kind === "object") {
+      // A class instance key: every user class is cycle-headed by the
+      // weak-key fixpoint (shapes.ts forceWeakKeyClasses), so its stamp is
+      // the collector header's.
+      mark = "@scr_cyc_weak_mark";
       this.declare(`declare void ${mark}(ptr)`);
     } else if (key.kind === "dyn") {
       mark = "null";
@@ -14801,6 +14809,21 @@ class LlEmitter {
     const k = this.emitExpr(e.args[0]!);
     switch (e.method) {
       case "get": {
+        if (e.type.kind === "dyn") {
+          // A dyn VALUE (`any`): the +1 entry on a hit, the immortal
+          // undefined on a miss -- the dyn-valued map's convention.
+          this.declare(`declare ptr @scr_weak${dyn}_get_ref(ptr, ptr)`);
+          this.declare(`declare ptr @scr_dyn_undefined()`);
+          const raw = B.tmp();
+          B.line(`${raw} = call ptr @scr_weak${dyn}_get_ref(ptr ${recv.name}, ptr ${k.name})`);
+          const und = B.tmp();
+          const isnull = B.tmp();
+          const t = B.tmp();
+          B.line(`${und} = call ptr @scr_dyn_undefined()`);
+          B.line(`${isnull} = icmp eq ptr ${raw}, null`);
+          B.line(`${t} = select i1 ${isnull}, ptr ${und}, ptr ${raw}`);
+          return this.own({ name: t, type: e.type });
+        }
         if (e.type.kind !== "union") throw new Error("llvm emitter bug: WeakMap get result is not a union");
         const def = this.unionsById.get(e.type.unionId);
         const undefTag = this.undefinedArmTag(e.type);
@@ -14843,6 +14866,15 @@ class LlEmitter {
         // cannot throw at all, so the check is the dyn arm's alone.
         if (dyn !== "") this.emitPendingCheck();
         return { name: "", type: e.type };
+      }
+      case "delete": {
+        // scr_weak_delete returns a C `int` (true when present), like has.
+        this.declare(`declare i32 @scr_weak${dyn}_delete(ptr, ptr)`);
+        const raw = B.tmp();
+        const t = B.tmp();
+        B.line(`${raw} = call i32 @scr_weak${dyn}_delete(ptr ${recv.name}, ptr ${k.name})`);
+        B.line(`${t} = icmp ne i32 ${raw}, 0`);
+        return { name: t, type: e.type };
       }
       case "has": {
         // scr_weak_has returns a C `int`, NOT the zero-extended i1 the
