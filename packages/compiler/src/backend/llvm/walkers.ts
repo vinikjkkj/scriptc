@@ -270,8 +270,9 @@ export class LlWalkers {
     // not to have been the source object's own key (emit-walkers.ts's row).
     // A NUMBER field may hold the NaN-marked undefined (scr_runtime.h): JSON
     // drops it like any undefined-valued own property.
+    // A DYN field drops when it holds undefined or a function (scr_dyn_json_dropped).
     const droppable =
-      emitFields.some((f) => this.host.undefinedArmTag(f.type) >= 0 || f.type.kind === "f64") ||
+      emitFields.some((f) => this.host.undefinedArmTag(f.type) >= 0 || f.type.kind === "f64" || f.type.kind === "dyn") ||
       !!shape.indexValue ||
       shape.ownmask === true;
     this.putc(B, "%b", "123"); // '{'
@@ -318,6 +319,19 @@ export class LlWalkers {
           else {
             const both = B.tmp();
             B.line(`${both} = and i1 ${present}, ${notMarker}`);
+            present = both;
+          }
+        }
+        if (f.type.kind === "dyn") {
+          this.host.declare(`declare i32 @scr_dyn_json_dropped(ptr)`);
+          const dr = B.tmp();
+          B.line(`${dr} = call i32 @scr_dyn_json_dropped(ptr ${v})`);
+          const kept = B.tmp();
+          B.line(`${kept} = icmp eq i32 ${dr}, 0`);
+          if (present === null) present = kept;
+          else {
+            const both = B.tmp();
+            B.line(`${both} = and i1 ${present}, ${kept}`);
             present = both;
           }
         }

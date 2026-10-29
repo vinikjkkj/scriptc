@@ -7427,6 +7427,8 @@ void scr_dyn_isl_tostr_buf(ScrJsonBuf *b, const ScrDyn *d);
  * dyn leaves the compiler cannot type: object members holding undefined
  * DROP, array slots holding undefined print null (exactly Node). */
 void scr_jb_put_dyn(ScrJsonBuf *b, const ScrDyn *d);
+/* A declared dyn record field JSON.stringify drops: undefined and functions. */
+int scr_dyn_json_dropped(const ScrDyn *d);
 ScrStr *scr_jb_finish(ScrJsonBuf *b); /* returns +1; frees the buffer */
 
 void *scr_dyn_retain_v(void *d);
