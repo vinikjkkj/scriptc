@@ -8382,8 +8382,8 @@ function truthinessCallbackReturn(decl: ts.Node | undefined): boolean {
   return ts.isPropertyAccessExpression(callee) && TRUTHINESS_CALLBACK_METHODS.has(callee.name.text);
 }
 
-// Only the ARRAY spellings (`any[]`, `Array<any>`): a program-authored bare `any` member keeps its refusal
-// (anymember-dts-admission pins it).
+// Spelled `any` members (`any`, `any | undefined`, `any[]`, `Array<any>`): the checked-dynamic slot.
+// EXTENSION (mgresp, 2026-10-29): bare `any` joins the array spellings; it was refused before.
 function declSpellsAny(decls: readonly ts.Node[]): boolean {
   if (decls.length === 0) return false;
   return decls.every((d) => {
@@ -8391,6 +8391,14 @@ function declSpellsAny(decls: readonly ts.Node[]): boolean {
     let tn: ts.TypeNode | undefined = d.type;
     while (tn !== undefined && ts.isParenthesizedTypeNode(tn)) tn = tn.type;
     if (tn === undefined) return false;
+    // `any` / `any | undefined` spelled as a member: the checked-dynamic slot,
+    // the same reading a spelled `any` binding takes (dynFallbackType).
+    if (tn.kind === ts.SyntaxKind.AnyKeyword) return true;
+    if (ts.isUnionTypeNode(tn)) {
+      const arms = tn.types.map((a) => a.kind);
+      return arms.includes(ts.SyntaxKind.AnyKeyword) &&
+        arms.every((k) => k === ts.SyntaxKind.AnyKeyword || k === ts.SyntaxKind.UndefinedKeyword || k === ts.SyntaxKind.NullKeyword);
+    }
     if (ts.isArrayTypeNode(tn)) return tn.elementType.kind === ts.SyntaxKind.AnyKeyword;
     return (
       ts.isTypeReferenceNode(tn) && ts.isIdentifier(tn.typeName) && tn.typeName.text === "Array" &&
