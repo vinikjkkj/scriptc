@@ -1,0 +1,8 @@
+emit-apply-argument-list-reaches-typed-plain-emitter.js:4:13 - error SC2020: ''emit' applied to a dynamic argument list on 'ready', which reaches a typed listener registered at emit-apply-argument-list-reaches-typed-plain-emitter.js@71' is part of the standard library types but has no scriptc lowering yet
+
+  3 | em.on("ready", () => console.log("zero-arg"));
+  4 | console.log(em.emit.apply(em, ["ready", 1]));
+    |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  5 | 
+
+  hint: Node spreads the list into each listener call, and a listener registered without a dynamic box (typed parameters, or none at all) cannot take a dynamic list at run time. Leave the listener's parameters unannotated so it is checked-dynamic, or emit with literal arguments
