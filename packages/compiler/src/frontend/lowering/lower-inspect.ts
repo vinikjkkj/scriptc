@@ -1414,11 +1414,22 @@ function parseInspectOptions(L: Lowerer, node: ts.Expression | undefined, recurs
       if (numeric() !== 80) {
         L.noLowering("util.inspect with a non-default breakLength option", value, "only the default breakLength: 80 is lowered");
       }
+    } else if (key === "showHidden" || key === "sorted" || key === "numericSeparator") {
+      // The default values (false) are the rendering Node already gives.
+      if (value.kind !== ts.SyntaxKind.FalseKeyword) {
+        L.noLowering(`util.inspect with ${key}: true`, value, `the ${key} rendering has no lowering — only ${key}: false`);
+      }
+    } else if (key === "maxArrayLength" || key === "maxStringLength") {
+      // The defaults (100 items, 10000 characters) are the lowered truncation.
+      const want = key === "maxArrayLength" ? 100 : 10000;
+      if (numeric() !== want) {
+        L.noLowering(`util.inspect with a non-default ${key} option`, value, `only the default ${key}: ${want} is lowered`);
+      }
     } else {
       L.noLowering(
         `util.inspect with the '${key}' option`,
         prop,
-        "the lowered options are depth (numeric literal or null), colors: false, compact: 3, and breakLength: 80",
+        "the lowered options are depth (numeric literal or null), colors: false, compact: 3, breakLength: 80, showHidden/sorted/numericSeparator: false, and maxArrayLength: 100 / maxStringLength: 10000",
       );
     }
   }
@@ -1594,16 +1605,17 @@ function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
 /** %O (depth 2) / %o (showHidden, depth 4) — inspect with the spec's
  * option deltas; %o fences over arrays (showHidden adds their hidden
  * [length] entry, which has no lowering). */
-function formatOArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc, hoist?: ArgHoist): IrExpr {
+function formatOArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc, hoist: ArgHoist | undefined, isO: boolean): IrExpr {
   const lowered = L.lowerExpr(node);
   const value = hoist ? hoist.take(node, lowered) : lowered;
+  const spec = isO ? "o" : "O";
   if (value.type.kind === "bytes") {
-    L.noLowering(`util.format %${depth === 4 ? "o" : "O"} of typed-array values`, node, "pass util.inspect(buf) explicitly");
+    L.noLowering(`util.format %${spec} of typed-array values`, node, "pass util.inspect(buf) explicitly");
   }
   const walk = { recursive: false };
   const reason = inspectSupport(L, value.type, new Set(), walk);
-  if (reason !== null) L.noLowering(`util.format %${depth === 4 ? "o" : "O"} of '${L.fmt(value.type)}' values`, node, reason);
-  if (depth === 4 && typeTreeHasArray(L, value.type, new Set())) {
+  if (reason !== null) L.noLowering(`util.format %${spec} of '${L.fmt(value.type)}' values`, node, reason);
+  if (isO && typeTreeHasArray(L, value.type, new Set())) {
     L.noLowering(
       "util.format %o over arrays",
       node,
@@ -1625,16 +1637,32 @@ export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
 
 function lowerFormatCallIn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc, withOptions: boolean, hoist: ArgHoist): IrExpr {
   const argNodes = [...expr.arguments];
+  // The rest-argument and %O depth: Node passes the options to every inspect
+  // call, so a literal `depth` moves them (%s is always depth 0, %o always 4).
+  let baseDepth = 2;
   if (withOptions) {
     const opts = argNodes.shift();
-    if (!opts || !ts.isObjectLiteralExpression(opts) || opts.properties.length > 0) {
+    if (!opts) {
+      L.noLowering("util.formatWithOptions without an options argument", expr, "pass the options object (or {})");
+    }
+    if (!ts.isObjectLiteralExpression(opts)) {
       L.noLowering(
-        "util.formatWithOptions with a non-empty options literal",
-        opts ?? expr,
-        "only the empty literal {} (the defaults — exactly util.format) is lowered",
+        "util.formatWithOptions with a non-literal options argument",
+        opts,
+        "the options must be an object literal so depth and colors resolve at compile time; a runtime options object has no lowering",
       );
     }
+    baseDepth = parseInspectOptions(L, opts, false);
   }
+  const depthOnlyRuntime = (): void => {
+    if (withOptions && baseDepth !== 2) {
+      L.noLowering(
+        "util.formatWithOptions with a depth option over a runtime argument list",
+        expr,
+        "the runtime formatter renders at the default depth 2 — pass the format string and arguments literally",
+      );
+    }
+  };
   if (argNodes.length === 0) return str("", loc);
   const first = argNodes[0]!;
   const firstIsLiteral = ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first);
@@ -1648,13 +1676,14 @@ function lowerFormatCallIn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc, wit
     const firstT = L.mapTypeOf(L.typeOf(first));
     const mayFormat = firstT === null || firstT.kind === "string" || firstT.kind === "dyn" || firstT.kind === "union";
     if (argNodes.some((a) => ts.isSpreadElement(a)) || (argNodes.length > 1 && mayFormat)) {
+      depthOnlyRuntime();
       return { kind: "libCall", fn: "insp.format", args: [dynRestPack(L, argNodes, expr, loc)], type: STRING, loc };
     }
   }
 
   /** The rest-args tail: ` ` + (strings verbatim, everything else
    * inspected at the default depth). */
-  const restArg = (node: ts.Expression): IrExpr => formatSArg(L, node, 2, loc, false, hoist);
+  const restArg = (node: ts.Expression): IrExpr => formatSArg(L, node, baseDepth, loc, false, hoist);
 
   if (!firstIsLiteral) {
     const firstT = L.mapTypeOf(L.typeOf(first));
@@ -1764,10 +1793,10 @@ function lowerFormatCallIn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc, wit
         L.noteKeyEnumeration(value, loc, "util.format %j");
         return { kind: "jsonStringify", value, type: STRING, loc };
       }
-      case 79: // %O — inspect at the defaults
-        return formatOArg(L, node, 2, loc, hoist);
-      case 111: // %o — showHidden semantics; depth 4
-        return formatOArg(L, node, 4, loc, hoist);
+      case 79: // %O — inspect with the options (default depth 2)
+        return formatOArg(L, node, baseDepth, loc, hoist, false);
+      case 111: // %o — showHidden and showProxy with depth 4, whatever the options say
+        return formatOArg(L, node, 4, loc, hoist, true);
     }
     throw new Error("unreachable format spec");
   };
