@@ -2002,6 +2002,59 @@ const redundNote = (globalThis as { __REDUND_NOTE__?: (op: string, key?: unknown
 /** Unions whose dyn-array probe is on the stack (see the probe in mapTypeInner's union rule). */
 const dynArrayProbing = new Set<ts.Type>();
 
+/** Set once per program load (program.ts): true when some TypeScript source
+ * writes an untyped `new WeakMap()`. Only then does the untyped table shape
+ * (WeakMap<WeakKey, any>) and the class-instance / any-valued shapes that go
+ * with it get the weak representation. In every other program the mapping is
+ * exactly the base one, so JavaScript's own `new WeakMap()` (typed the same
+ * way by the checker) keeps its dyn-flavoured route. */
+let tsUntypedWeakAdmission = false;
+export function tsUntypedWeakAdmissionOn(): boolean {
+  return tsUntypedWeakAdmission;
+}
+export function setTsUntypedWeakAdmission(on: boolean): void {
+  tsUntypedWeakAdmission = on;
+}
+export function programHasTsUntypedWeakNew(program: ts.Program): boolean {
+  for (const sf of program.getSourceFiles()) {
+    if (sf.isDeclarationFile || /\.(m|c)?jsx?$/.test(sf.fileName)) continue;
+    if (/new\s+WeakMap\s*\(\s*\)/.test(sf.text)) return true;
+  }
+  return false;
+}
+
+/** The weak table a `WeakMap<K, V>` lowers to, or null (refused or strong).
+ * `mapOne` maps one type argument. With no admission flag, or for any shape
+ * that is not the untyped / any-valued one, this is the base predicate
+ * verbatim. The untyped shape is `WeakKey` keys or `any` values; under the
+ * flag it also admits class-instance keys and dyn values (the refused
+ * shapes). A class-instance key with a concrete value stays on the strong
+ * Map it always rode. */
+export function admitWeakTableIr(
+  checker: ts.TypeChecker,
+  keyTs: ts.Type,
+  valTs: ts.Type,
+  mapOne: (t: ts.Type) => IrType | null,
+): { key: IrType; value: IrType } | null {
+  const keyIsWeakKey = checker.typeToString(keyTs) === "WeakKey";
+  const valIsAny = (valTs.flags & ts.TypeFlags.Any) !== 0;
+  if (tsUntypedWeakAdmission && (keyIsWeakKey || valIsAny)) {
+    const key = keyIsWeakKey ? DYN : mapOne(keyTs);
+    const value = valIsAny ? DYN : mapOne(valTs);
+    if (key && isSupportedWeakKey(key) && value && isSupportedWeakValue(value)) {
+      return { key, value };
+    }
+    return null;
+  }
+  const key = mapOne(keyTs);
+  const value = mapOne(valTs);
+  if (key && (key.kind === "bytes" || key.kind === "array" || key.kind === "dyn") && value &&
+      isSupportedMapValue(value) && isRefCounted(value)) {
+    return { key, value };
+  }
+  return null;
+}
+
 export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (mapTypeDepth >= MAP_TYPE_MAX_DEPTH) return null;
   const slots = process.env.SCRIPTC_NO_MEMO ? undefined : mapTypeMemo.get(type);
@@ -3614,19 +3667,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("WeakMap")) {
     const wargs = checker.getTypeArguments(widened as ts.TypeReference);
     if (wargs.length === 2) {
-      // `WeakKey` is the lib's alias for `object | symbol`. Its object arm
-      // is the dyn (keyed on each value's payload, as bare `object` is), and
-      // a symbol key is refused by weakKeyArgIsIdentity at the argument, so
-      // the table's key is the dyn. Named here because a union of the two
-      // does not map to a single IR kind.
-      const wkey = checker.typeToString(wargs[0]!) === "WeakKey" ? DYN : mapType(wargs[0]!, ctx);
-      // An `any` VALUE (JavaScript's `new WeakMap()` is WeakMap<WeakKey, any>)
-      // is the dyn: mapType answers null for a bare `any` outside a dynamic
-      // context, and the checked-dynamic box is what the table holds.
-      const wval = (wargs[1]!.flags & ts.TypeFlags.Any) !== 0 ? DYN : mapType(wargs[1]!, ctx);
-      if (wkey && isSupportedWeakKey(wkey) && wval && isSupportedWeakValue(wval)) {
-        return weakMapOf(wkey, wval);
-      }
+      const admitted = admitWeakTableIr(checker, wargs[0]!, wargs[1]!, (t) => mapType(t, ctx));
+      if (admitted) return weakMapOf(admitted.key, admitted.value);
     }
   }
   // KNOWN LIVE DEFECT, and it predates this change rather than being

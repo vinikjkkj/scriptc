@@ -8,11 +8,11 @@ import { appliesEmitterMixin, EMITTER_MIXIN_FIELD } from "./lower-emitter-mixin.
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { ctorFieldFillProven } from "./ctor-fill-proof.js";
-import { GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isSupportedWeakValue, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
 import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitInstanceLike, implicitMonoFile, omittedArgFor, type GenericFnInfo, type GenericInstance, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
-import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
+import { admitWeakTableIr, isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
@@ -11988,13 +11988,12 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         // stdlib constructor chokepoint already carries the honest hint;
         // route there instead.
         if (symbol?.name === "WeakMap") {
-          // `WeakKey` (the lib's object | symbol alias) is the dyn key, as
-          // in types.ts's WeakMap arm; an `any` value is the dyn too.
-          const weakKeyIr = targs[0]
-            ? (L.checker.typeToString(targs[0]) === "WeakKey" ? DYN : L.mapTypeOf(targs[0]))
-            : null;
-          const weakValIr = targs[1]
-            ? ((targs[1].flags & ts.TypeFlags.Any) !== 0 ? DYN : L.mapTypeOf(targs[1]))
+          const weakKeyIr = targs[0] ? L.mapTypeOf(targs[0]) : null;
+          // The admission is shared with types.ts (admitWeakTableIr): the
+          // untyped shape is weak only in a program that writes one in
+          // TypeScript, and every other shape keeps its base predicate.
+          const weakAdmitted = targs[0] && targs[1]
+            ? admitWeakTableIr(L.checker, targs[0], targs[1], (t) => L.mapTypeOf(t))
             : null;
           // THE REVERSAL. WEAK_COLLECTION_HINTS said weak collections
           // "observe garbage collection, which reference counting never
@@ -12006,11 +12005,8 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           // runtime owns. Every other key still takes the hint below, and
           // takes it truthfully: it is a statement about a collector hook
           // that does not exist yet, not about reference counting as such.
-          if (
-            targs[0] && weakKeyIr && isSupportedWeakKey(weakKeyIr) &&
-            targs[1] && weakValIr && isSupportedWeakValue(weakValIr)
-          ) {
-            return { kind: "mapNew", type: weakMapOf(weakKeyIr, weakValIr), loc };
+          if (weakAdmitted !== null) {
+            return { kind: "mapNew", type: weakMapOf(weakAdmitted.key, weakAdmitted.value), loc };
           }
           if (!targs[0] || !weakKeyIr || !isSupportedMapKey(weakKeyIr) || weakKeyIr.kind === "dyn") {
             L.noLowering("new WeakMap", expr, WEAK_COLLECTION_HINTS.WeakMap, symbol);
