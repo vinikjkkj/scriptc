@@ -69,10 +69,10 @@ const thened = work().then((v) => v + 1, () => 0);
 const caught = work().catch(() => 0);
 const resolved = Promise.resolve(1);
 
-// Object.is lowers over one comparable kind; the unlowered forms fence
-// by name — a validate-first dynamic operand and partially-overlapping
-// unions needing narrowing.
-const dynIs = Object.is(JSON.parse("1") as unknown, 1);
+// Object.is lowers over one comparable kind and over dynamic operands
+// (SameValue); the unlowered forms fence by name — a prototype read on a
+// dynamic value, and partially-overlapping unions needing narrowing.
+const dynIs = Object.getPrototypeOf(JSON.parse("1") as unknown);
 function pick(a: string | number, b: number | boolean): boolean {
   return Object.is(a, b); // partially-overlapping unions: narrow first
 }

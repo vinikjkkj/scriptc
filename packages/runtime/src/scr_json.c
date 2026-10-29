@@ -9080,6 +9080,14 @@ ScrDyn *scr_json_parse_revive(ScrStr *text, ScrDyn *reviver) {
 void *scr_dyn_retain_v(void *d) { return scr_dyn_retain((ScrDyn *)d); }
 void scr_dyn_release_v(void *d) { scr_dyn_release((ScrDyn *)d); }
 
+/* Object.is over two dyn values (SameValue): the number arm is
+ * scr_num_same_value, every other arm is the === answer, which already
+ * coincides with SameValue for every kind other than NUMBER. */
+bool scr_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
+  if (a->kind == SCR_DYN_NUM && b->kind == SCR_DYN_NUM) return scr_num_same_value(a->v.num, b->v.num);
+  return scr_dyn_strict_eq(a, b);
+}
+
 /* JS === over two dyn values: scalars by value (NaN false, ±0 equal via
  * C ==; strings bytewise), units by kind, everything reference-shaped by
  * node IDENTITY (the checked-dynamic tree's object identity). Never throws. */
