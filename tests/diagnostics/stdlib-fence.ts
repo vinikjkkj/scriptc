@@ -16,7 +16,7 @@ const isArr = Array.isArray([1]);
 const merged = Object.assign({}, { a: 1 }); // the empty-target literal-source shape lowers now (it IS the source literal)
 const aliasedAssign = Object.assign(merged, { b: 2 }); // aliased targets stay fenced (real mutation of a live object)
 const refl = Reflect.has({ a: 1 }, "a");
-const parsedMs = Date.parse("2024-01-01");
+const nowFn = Date.now;
 const fmt = new Intl.NumberFormat();
 
 // Constructors.
