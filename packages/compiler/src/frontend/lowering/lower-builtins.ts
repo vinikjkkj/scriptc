@@ -7631,7 +7631,9 @@ let digestInputValueDispatches = 0;
    * destroy or cork the stream. The runtime twin is scr_ps_dynh_get
    * (scr_proc_dyn.c), so the typed and dynamic reads agree.
    *
-   * NOT here, on purpose: writableLength and writableNeedDrain. Node's
+   * NOT here, on purpose: writableHighWaterMark (65536 on Linux for pipe,
+   * file and TTY, but 16384 on Windows: it depends on the platform, so it keeps
+   * its fence rather than a constant), writableLength and writableNeedDrain. Node's
    * pipe stdout queues what the kernel does not take at once (a 1 MiB
    * write leaves writableLength 1048576 and writableNeedDrain true), so a
    * constant would be a silent divergence; they keep their SC2020 / SC1090
@@ -7646,7 +7648,6 @@ let digestInputValueDispatches = 0;
     ["closed", false],
   ]);
   const PROC_STREAM_STATE_NUM: ReadonlyMap<string, number> = new Map([
-    ["writableHighWaterMark", 65536],
     ["writableCorked", 0],
   ]);
 

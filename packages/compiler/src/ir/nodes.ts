@@ -9963,7 +9963,7 @@ export const PROC_STREAM_LADDER_NAMES: ReadonlySet<string> = new Set([
   "prependOnceListener", "emit", "listeners", "rawListeners", "listenerCount", "eventNames",
   "setMaxListeners", "getMaxListeners", "end", "cork", "uncork", "destroy", "pipe", "unpipe",
   "setDefaultEncoding", "_write", "_writev", "_destroy", "writableLength", "writableNeedDrain",
-  "writableAborted", "errored", "constructor", "getColorDepth", "hasColors",
+  "writableHighWaterMark", "writableAborted", "errored", "constructor", "getColorDepth", "hasColors",
   "getWindowSize", "clearLine", "clearScreenDown", "cursorTo", "moveCursor", "isRaw", "setRawMode",
   "_type", "_isStdio", "_handle", "_writableState",
 ]);
