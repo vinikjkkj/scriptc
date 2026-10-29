@@ -312,6 +312,11 @@ export interface FnCtx {
    * doesn't implement; see rejectJumpCrossingFinally). Per function: a
    * nested function's jumps never bind to enclosing constructs. */
   ctl: { kind: "loop" | "switch" | "block" | "tryFinally" | "finallyBlock"; labels?: string[] }[];
+  /** A derived constructor in SUPER-FLAG mode (a super() call outside the
+   * top-level statement list: lower-classes superIsNested). `flag` is the
+   * runtime bool that records whether super() has run; `thisLocal` is the
+   * constructor's `this`, whose reads it guards. Absent everywhere else. */
+  superFlag?: { flag: IrLocal; thisLocal: IrLocal };
 }
 
 /** The symbol an identifier READS. In the shorthand `{ name }` the identifier

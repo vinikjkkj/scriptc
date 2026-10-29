@@ -8952,6 +8952,28 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
           body.push(...L.fieldInitStmts(info, thisLocal));
           body.push(...paramPropInitStmts(L, info, thisLocal));
           if (info.ctor.body) body.push(...L.lowerStmts(info.ctor.body.statements));
+        } else if (info.ctor.body && superIsNested(info.ctor.body)) {
+          // SUPER-FLAG mode: the bool starts false; the end of the body
+          // throws if super never ran (a path that falls off the end).
+          const loc = locOf(info.ctor);
+          const flagLocal: IrLocal = {
+            id: `superDone.${L.ctx.locals.length}`,
+            name: "superDone",
+            type: BOOL,
+            mutable: true,
+          };
+          L.ctx.locals.push(flagLocal);
+          if (closureMentionsThis(info.ctor.body)) {
+            L.unsupported(
+              "SC1090",
+              info.ctor,
+              "a closure reading 'this' in a constructor whose super() is conditional (or that returns before super)",
+            );
+          }
+          L.ctx.superFlag = { flag: flagLocal, thisLocal };
+          body.push({ kind: "varDecl", localId: flagLocal.id, init: { kind: "boolLit", value: false, type: BOOL, loc }, loc });
+          body.push(...L.lowerDerivedCtorBody(info, thisLocal));
+          body.push(superNotRunGuard(flagLocal, SUPER_BEFORE_THIS_MSG, loc));
         } else if (info.ctor.body) {
           body.push(...L.lowerDerivedCtorBody(info, thisLocal));
         }
@@ -9787,6 +9809,229 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     return out;
   }
 
+/** Node's two derived-constructor ReferenceError messages (V8 wording). */
+  export const SUPER_TWICE_MSG = "Super constructor may only be called once";
+  export const SUPER_BEFORE_THIS_MSG =
+    "Must call super constructor in derived class before accessing 'this' or returning from derived constructor";
+
+  /** Does this derived constructor call super() anywhere but as a top-level
+   * statement of its body (a conditional arm, a nested block, an expression),
+   * or whose body has a return (which can leave before the super): such a
+   * constructor runs in SUPER-FLAG mode: a runtime bool records whether
+   * super() has run, so every path gets Node's exact answer (one super per
+   * path; a second call and a `this` read or return before it throw). A
+   * constructor whose supers are all top-level and that has no return keeps
+   * the static lowering. The
+   * walk is iterative (an explicit stack) so it runs before the depth guard. */
+  export function superIsNested(body: ts.Block): boolean {
+    let total = 0;
+    let returns = false;
+    const stack: ts.Node[] = [body];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.SuperKeyword) total++;
+      if (ts.isReturnStatement(n)) returns = true;
+      ts.forEachChild(n, (c) => {
+        stack.push(c);
+      });
+    }
+    let top = 0;
+    for (const stmt of body.statements) {
+      if (
+        ts.isExpressionStatement(stmt) &&
+        ts.isCallExpression(stmt.expression) &&
+        stmt.expression.expression.kind === ts.SyntaxKind.SuperKeyword
+      ) {
+        top++;
+      }
+    }
+    // A return can leave before the (top-level) super: the flag guards it.
+    return total > top || returns;
+  }
+
+  /** `throw new ReferenceError(message)` as a statement. */
+  function refErrorThrow(message: string, loc: SrcLoc): IrStmt {
+    return {
+      kind: "throw",
+      value: {
+        kind: "libCall",
+        fn: "error.new",
+        args: [{ kind: "strLit", value: message, type: STRING, loc }],
+        type: { kind: "object", className: "%ReferenceError" },
+        loc,
+      },
+      loc,
+    };
+  }
+
+  /** Does a closure (arrow or function) inside this constructor body mention
+   * `this`? Its `this` is a captured copy the super-flag guard does not reach,
+   * so such a constructor is refused at compile time rather than reading a
+   * half-built object. Iterative walk (runs before the depth guard). */
+  export function closureMentionsThis(body: ts.Block): boolean {
+    const stack: ts.Node[] = [body];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (
+        ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n)
+      ) {
+        const inner: ts.Node[] = [n];
+        while (inner.length > 0) {
+          const m = inner.pop()!;
+          if (m.kind === ts.SyntaxKind.ThisKeyword) return true;
+          ts.forEachChild(m, (c) => {
+            inner.push(c);
+          });
+        }
+        continue;
+      }
+      ts.forEachChild(n, (c) => {
+        stack.push(c);
+      });
+    }
+    return false;
+  }
+
+  /** `if (cond) throw ReferenceError(message)`. */
+  function refErrorIf(cond: IrExpr, message: string, loc: SrcLoc): IrStmt {
+    return { kind: "if", cond, then: [refErrorThrow(message, loc)], else_: null, loc };
+  }
+
+  /** `if (!flag) throw ReferenceError(message)`: the guard every `this` read,
+   * every bare return and the constructor's end run in SUPER-FLAG mode. */
+  export function superNotRunGuard(flag: IrLocal, message: string, loc: SrcLoc): IrStmt {
+    return refErrorIf(
+      { kind: "unary", op: "!", operand: { kind: "varRef", localId: flag.id, type: BOOL, loc }, type: BOOL, loc },
+      message,
+      loc,
+    );
+  }
+
+  /** One super() call in SUPER-FLAG mode, in Node's order: the arguments
+   * evaluate into temporaries, THEN the already-bound check runs (a second
+   * super() throws only after its arguments ran), then the base constructor
+   * over the same `this`, the flag is set, and the field initializers and
+   * parameter properties run (super returned). */
+  export function nestedSuperStmts(L: Lowerer, info: ClassInfo,
+    flag: IrLocal,
+    thisLocal: IrLocal,
+    superCall: ts.CallExpression,
+    forward: IrExpr[] | undefined,
+    loc: SrcLoc,
+    node: ts.Node,): IrStmt[] {
+    const base = superBaseOf(info)!;
+    if (base.builtinStream) {
+      L.unsupported(
+        "SC1090",
+        superCall,
+        "super() into a stream base outside a top-level constructor statement",
+      );
+    }
+    if (base.builtinEmitter && superCall.arguments.length > 0) {
+      // @types/node admits super({ captureRejections }) — no lowering.
+      L.unsupported("SC1090", superCall, "EventEmitter constructor options ('captureRejections')");
+    }
+    const args = forward !== undefined
+      ? forward
+      : base.builtinError
+        ? [L.errorMessageArg(superCall.arguments, loc, node)]
+        : base.builtinEmitter
+          ? []
+          : L.completeArgs(superCall.arguments, base.ctorParams, loc, node);
+    const out: IrStmt[] = [];
+    const temps: IrExpr[] = args.map((a, i) => {
+      const local: IrLocal = {
+        id: `superArg${i}.${L.ctx.locals.length}`,
+        name: `superArg${i}`,
+        type: a.type,
+        mutable: false,
+      };
+      L.ctx.locals.push(local);
+      out.push({ kind: "varDecl", localId: local.id, init: a, loc });
+      return { kind: "varRef", localId: local.id, type: a.type, loc };
+    });
+    // A second super(): Node evaluates the arguments, constructs the base
+    // (its side effects run), THEN the bind check throws. Field initializers
+    // never run on that path.
+    const tempRefs = (): IrExpr[] => temps.map((t) => ({ ...t }));
+    out.push({
+      kind: "if",
+      cond: { kind: "varRef", localId: flag.id, type: BOOL, loc },
+      then: [L.superCallStmt(info, thisLocal, tempRefs(), loc), refErrorThrow(SUPER_TWICE_MSG, loc)],
+      else_: null,
+      loc,
+    });
+    out.push(L.superCallStmt(info, thisLocal, tempRefs(), loc));
+    out.push({ kind: "assign", localId: flag.id, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc });
+    out.push(...L.fieldInitStmts(info, thisLocal));
+    out.push(...paramPropInitStmts(L, info, thisLocal));
+    return out;
+  }
+
+  /** A bare `return;` in SUPER-FLAG mode: the guard, then the return. A
+   * return WITH a value is refused (an object return from a derived
+   * constructor without super has its own rules, not lowered here). */
+  export function superReturnStmt(L: Lowerer, stmt: ts.ReturnStatement, loc: SrcLoc): IrStmt {
+    const sf = L.ctx.superFlag!;
+    if (stmt.expression !== undefined) {
+      L.unsupported(
+        "SC1090",
+        stmt,
+        "return with a value in a derived constructor whose super() is not a top-level statement",
+      );
+    }
+    return {
+      kind: "block",
+      body: [
+        superNotRunGuard(sf.flag, SUPER_BEFORE_THIS_MSG, loc),
+        { kind: "return", value: null, loc },
+      ],
+      loc,
+    };
+  }
+
+  /** An expression-statement `super(...)` in SUPER-FLAG mode (any nesting):
+   * the statement form of nestedSuperStmts, as a block. Null for every other
+   * statement. Super calls in expression position stay refused (the check
+   * needs a statement; seqExpr is straight-line only). */
+  export function lowerSuperFlagStatement(L: Lowerer, stmt: ts.ExpressionStatement): IrStmt | null {
+    const sf = L.ctx.superFlag;
+    const info = L.currentClass;
+    const e = stmt.expression;
+    if (!sf || !info || !ts.isCallExpression(e) || e.expression.kind !== ts.SyntaxKind.SuperKeyword) return null;
+    const loc = locOf(stmt);
+    return {
+      kind: "block",
+      body: nestedSuperStmts(L, info, sf.flag, sf.thisLocal, e, undefined, loc, stmt),
+      loc,
+    };
+  }
+
+  /** A `this` read in SUPER-FLAG mode: the value while super() has run, else
+   * Node's ReferenceError (a throw expression, kind 5 = ReferenceError). */
+  export function superGuardedThis(L: Lowerer, ref: IrExpr & { kind: "varRef" }, loc: SrcLoc): IrExpr {
+    const sf = L.ctx.superFlag!;
+    return {
+      kind: "ternary",
+      cond: { kind: "varRef", localId: sf.flag.id, type: BOOL, loc },
+      then: ref,
+      else_: {
+        // error.nodeThrow with kind SCR_ERR_REFERENCE (5): throws, never yields.
+        kind: "libCall",
+        fn: "error.nodeThrow",
+        args: [
+          { kind: "numLit", value: 5, type: F64, loc },
+          { kind: "strLit", value: "", type: STRING, loc },
+          { kind: "strLit", value: SUPER_BEFORE_THIS_MSG, type: STRING, loc },
+        ],
+        type: ref.type,
+        loc,
+      },
+      type: ref.type,
+      loc,
+    };
+  }
+
 /** A derived constructor's body: statements lower as usual EXCEPT the
    * top-level `super(...)` statement, which becomes a direct call to the
    * base constructor over the same `this`, immediately followed by this
@@ -9817,6 +10062,13 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         L.bumpFileStat(locOf(stmt).file, "total");
       }
       try {
+        if (L.ctx.superFlag) {
+          // SUPER-FLAG mode (superIsNested): the same invocation with the
+          // runtime bool — a second super() throws, never a double construct.
+          superSeen = true;
+          out.push(...nestedSuperStmts(L, info, L.ctx.superFlag.flag, thisLocal, superCall, forward, locOf(stmt), stmt));
+          continue;
+        }
         if (superSeen) L.unsupported("SC1090", stmt, "multiple super() calls");
         superSeen = true;
         const base = superBaseOf(info)!;
@@ -9871,7 +10123,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         }
       }
     }
-    if (!superSeen) {
+    if (!superSeen && !L.ctx.superFlag) {
       // tsc guarantees the call exists somewhere; if it wasn't a top-level
       // statement the per-site rejection above already fired — this is the
       // constructor-level backstop so a half-initialized ctor never emits.
