@@ -23,6 +23,7 @@ import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, unboundMethodThunk, undefinedArmedInAnswer } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
+import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
@@ -4321,8 +4322,45 @@ function lowerDynCallArgs(L: Lowerer, args: ts.NodeArray<ts.Expression>): IrExpr
   });
 }
 
+/** TypeScript's CommonJS emit calls an imported member through a comma
+ * indirection, `(0, mod_1.fn)(args)` (the `this`-free call). When the left
+ * operand has no effect (a literal or `void <literal>`), that callee is the
+ * member access on the right, and the call is the plain `mod.fn(args)`. The
+ * right operand is returned, or null for every other callee. */
+export function commaIndirectMemberCallee(callee: ts.Expression): ts.PropertyAccessExpression | null {
+  let e: ts.Expression = callee;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.CommaToken) return null;
+  let left: ts.Expression = e.left;
+  while (ts.isParenthesizedExpression(left)) left = left.expression;
+  if (ts.isVoidExpression(left)) left = left.expression;
+  const pure = ts.isNumericLiteral(left) || ts.isStringLiteral(left) ||
+    left.kind === ts.SyntaxKind.NullKeyword || left.kind === ts.SyntaxKind.TrueKeyword ||
+    left.kind === ts.SyntaxKind.FalseKeyword;
+  if (!pure) return null;
+  let right: ts.Expression = e.right;
+  while (ts.isParenthesizedExpression(right)) right = right.expression;
+  if (!ts.isPropertyAccessExpression(right) || right.questionDotToken !== undefined) return null;
+  return right;
+}
+
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
+    // `(0, mod_1.fn)(args)` on a builtin module namespace: the same lowering as
+    // `mod_1.fn(args)`. The receiver is dropped on purpose (module functions are
+    // plain functions in Node). An Object.prototype method reached this way is
+    // the one member whose plain call depends on the receiver (`buffer.hasOwnProperty`),
+    // so it stays out and keeps its own fence.
+    {
+      const indirect = expr.questionDotToken === undefined ? commaIndirectMemberCallee(expr.expression) : null;
+      if (indirect !== null) {
+        const bi = L.builtinMemberOf(indirect);
+        if (bi !== null && !OBJECT_PROTOTYPE_METHODS.has(bi.member)) {
+          const served = L.lowerNamespaceBuiltinCall(expr, indirect);
+          if (served) return served;
+        }
+      }
+    }
     // `X(...)` where X is a member Node's own resolution of the required module
     // does not define: Node evaluates the arguments and throws "X is not a
     // function" (lower-require-absent.ts).

@@ -687,7 +687,7 @@ function widthCensus(kind: string, fromId: string, toId: string, dropped: string
  * compiler ever reads the output back. It never fails a build. */
 /** Object.prototype methods the buffer module object answers when called through the namespace
  * (`buffer.hasOwnProperty(k)`, safer-buffer). Measured in the probe set; the rest keep their fence. */
-const OBJECT_PROTOTYPE_METHODS: ReadonlySet<string> = new Set(["hasOwnProperty"]);
+export const OBJECT_PROTOTYPE_METHODS: ReadonlySet<string> = new Set(["hasOwnProperty"]);
 const lowerProfile = new Map<string, number>();
 export function lowerProfileOn(): boolean {
   const v = process.env["SCRIPTC_LOWER_PROFILE"];
