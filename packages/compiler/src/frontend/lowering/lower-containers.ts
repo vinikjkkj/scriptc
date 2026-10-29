@@ -8899,7 +8899,11 @@ function lowerBufferInstanceMethod(L: Lowerer, call: ts.CallExpression,
     const offset: IrExpr = idxNodes[0]
       ? L.lowerExprExpecting(idxNodes[0], F64)
       : { kind: "numLit", value: 0, type: F64, loc };
-    const lenArgs = idxNodes[1] ? [L.lowerExprExpecting(idxNodes[1], F64)] : [];
+    // An explicit `undefined` length (bson: `write(s, offset, undefined, 'utf8')`)
+    // is the omitted length: Node takes `this.length - offset` for both, so the
+    // literal is dropped instead of being lowered into a number slot.
+    const undefLen = idxNodes[1] !== undefined && ts.isIdentifier(idxNodes[1]) && idxNodes[1].text === "undefined";
+    const lenArgs = idxNodes[1] && !undefLen ? [L.lowerExprExpecting(idxNodes[1], F64)] : [];
     if (encNode !== undefined && !encIsLiteral) {
       const encDyn = L.lowerExprExpecting(encNode, STRING);
       const receiver = L.lowerExpr(access.expression);
