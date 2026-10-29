@@ -531,6 +531,18 @@ static ScrWeakDynKey scr_weak_dyn_key(const ScrDyn *d) {
             "one address would name two JS values that '===' tells apart by kind";
     return k;
   case SCR_DYN_OBJINST:
+    /* A COLLECTOR-OWNED instance (cls->cyc: the class is cycle-headed, which
+     * the compiler's weak-key fixpoint forces for every user class when a
+     * table is keyed on a dyn or an object). Its header is where the stamp
+     * goes, and the key is the instance itself: the box retains the
+     * instance, so the box is a boundary artifact and not the identity -- the
+     * same rule the dyn-land OBJ arm follows. An ACYCLIC instance (cyc == 0)
+     * has no header to stamp and stays refused below. */
+    if (d->v.inst.cls != NULL && d->v.inst.cls->cyc) {
+      k.addr = d->v.inst.o;
+      k.mark = scr_cyc_weak_mark;
+      return k;
+    }
     k.what = "a class instance";
     k.why = "an ACYCLIC class is emitted with calloc and a lean one-word header and never "
             "reaches scr_cyc_free, and which classes those are is a module-level fixpoint";
@@ -596,6 +608,23 @@ void *scr_weak_dyn_get_ref(ScrWeakMap *m, const ScrDyn *key) {
 int scr_weak_dyn_has(ScrWeakMap *m, const ScrDyn *key) {
   ScrWeakDynKey k = scr_weak_dyn_key(key);
   return k.addr == NULL ? 0 : scr_weak_has(m, k.addr);
+}
+
+/* delete(): true when the key was present. Node answers false, and does not
+ * throw, for a key the table can never hold, so an unwatched or primitive
+ * key is simply absent here. A key that IS present was admitted by set(),
+ * so its address is watched and this is the one removal path besides the
+ * death hook. */
+int scr_weak_delete(ScrWeakMap *m, const void *key) {
+  size_t s;
+  if (key == NULL || !scr_weak_slot(m, key, &s, 0)) return 0;
+  scr_weak_drop(m, key);
+  return 1;
+}
+
+int scr_weak_dyn_delete(ScrWeakMap *m, const ScrDyn *key) {
+  ScrWeakDynKey k = scr_weak_dyn_key(key);
+  return k.addr == NULL ? 0 : scr_weak_delete(m, k.addr);
 }
 
 /* Keys keep their mark for as long as they exist, even after every map

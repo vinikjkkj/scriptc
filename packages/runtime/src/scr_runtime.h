@@ -9121,6 +9121,7 @@ ScrWeakMap *scr_weak_new(void *(*val_retain)(void *), void (*val_release)(void *
 void scr_weak_set(ScrWeakMap *m, void *key, void *val); /* key borrowed, val retained */
 void *scr_weak_get_ref(ScrWeakMap *m, const void *key); /* +1, NULL when absent */
 int scr_weak_has(ScrWeakMap *m, const void *key);
+int scr_weak_delete(ScrWeakMap *m, const void *key); /* true when present */
 ScrWeakMap *scr_weak_retain(ScrWeakMap *m);
 void scr_weak_release(ScrWeakMap *m);
 void *scr_weak_retain_v(void *m);
@@ -9202,6 +9203,7 @@ void scr_cyc_weak_mark(void *key);
 void scr_weak_dyn_set(ScrWeakMap *m, ScrDyn *key, void *val);
 void *scr_weak_dyn_get_ref(ScrWeakMap *m, const ScrDyn *key); /* +1 or NULL */
 int scr_weak_dyn_has(ScrWeakMap *m, const ScrDyn *key);
+int scr_weak_dyn_delete(ScrWeakMap *m, const ScrDyn *key);
 
 /* The static object a boundary copy was made FROM, borrowed, or NULL when
  * this node is not a marked copy or its origin is gone. scr_dyn_origin_take
