@@ -40,27 +40,6 @@ inheritance.ts:60:3 - error SC1090: overriding a method with a different signatu
      |   ^~~~
   61 |     return other.name;
 
-inheritance.ts:67:3 - error SC1090: super() calls anywhere but as a top-level constructor statement is not supported yet
-
-  66 | class Conditional extends Animal {
-  67 |   constructor(flag: boolean) {
-     |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  68 |     if (flag) {
-
-inheritance.ts:69:7 - error SC1090: super() calls anywhere but as a top-level constructor statement is not supported yet
-
-  68 |     if (flag) {
-  69 |       super();
-     |       ^~~~~~~
-  70 |     } else {
-
-inheritance.ts:71:7 - error SC1090: super() calls anywhere but as a top-level constructor statement is not supported yet
-
-  70 |     } else {
-  71 |       super();
-     |       ^~~~~~~
-  72 |     }
-
 inheritance.ts:78:13 - error SC1090: 'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet
 
   77 | const rec = { name: "r" };
