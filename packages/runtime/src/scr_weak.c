@@ -240,15 +240,23 @@ int scr_weak_has(ScrWeakMap *m, const void *key) {
   return scr_weak_slot(m, key, &s, 0);
 }
 
-/* Remove one key. Used by delete and by the death hook. */
+/* Remove one key. Used by delete and by the death hook.
+ *
+ * The ENTRY IS REMOVED BEFORE ITS VALUE IS RELEASED. A value's release can
+ * reach the key's own death (a value that holds its key) and re-enter this
+ * table through scr_weak_key_died; with the entry already a tombstone that
+ * re-entry finds nothing, where releasing first would release the same
+ * value twice. */
 static void scr_weak_drop(ScrWeakMap *m, const void *key) {
   size_t s;
+  void *v;
   if (!scr_weak_slot(m, key, &s, 0)) return;
-  if (m->val_release && m->tab[s].val) m->val_release(m->tab[s].val);
+  v = m->tab[s].val;
   m->tab[s].key = SCR_WEAK_TOMB;
   m->tab[s].val = NULL;
   m->used--;
   m->tomb++;
+  if (m->val_release && v) m->val_release(v);
 }
 
 /* THE DEATH HOOK. Called the moment a key stops being that key and BEFORE
@@ -272,16 +280,23 @@ void scr_weak_release(ScrWeakMap *m) {
   if (--m->rc == 0) {
     ScrWeakMap **pp = &scr_weak_live;
     size_t i;
-    for (i = 0; i < m->cap; i++) {
-      void *k = m->tab[i].key;
-      if (k == NULL || k == SCR_WEAK_TOMB) continue;
-      if (m->val_release && m->tab[i].val) m->val_release(m->tab[i].val);
-    }
-    /* Off the live list BEFORE the free, or a death arriving from one of
-     * the value releases above would walk a half-torn map. */
+    /* Off the live list FIRST. A value's release can drop the last reference
+     * to a key this table holds (a value that points back at its key), and
+     * that key's death walks the live list: it must not find this half-torn
+     * map. Each entry is then cleared BEFORE its value is released, so a
+     * re-entrant death cannot release the same value a second time. */
     while (*pp != NULL) {
       if (*pp == m) { *pp = m->next; break; }
       pp = &(*pp)->next;
+    }
+    for (i = 0; i < m->cap; i++) {
+      void *k = m->tab[i].key;
+      void *v;
+      if (k == NULL || k == SCR_WEAK_TOMB) continue;
+      v = m->tab[i].val;
+      m->tab[i].key = SCR_WEAK_TOMB;
+      m->tab[i].val = NULL;
+      if (m->val_release && v) m->val_release(v);
     }
     free(m->tab);
     free(m);
