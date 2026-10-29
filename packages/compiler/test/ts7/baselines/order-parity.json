@@ -20476,6 +20476,24 @@
       "<repo>/tests/corpus/15859-date-parse-min-max-range.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/16060-mongo-insertone-document-schema.ts": {
+   "order": [
+    "<repo>/tests/corpus/16060-mongo-insertone-document-schema.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16061-mongo-insertone-typed-schema.ts": {
+   "order": [
+    "<repo>/tests/corpus/16061-mongo-insertone-typed-schema.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16062-mongo-insertone-id-only.ts": {
+   "order": [
+    "<repo>/tests/corpus/16062-mongo-insertone-id-only.ts"
+   ],
+   "diags": []
   }
  }
 }
