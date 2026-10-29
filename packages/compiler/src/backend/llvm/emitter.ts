@@ -310,6 +310,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "math.pow": "scr_math_pow",
   "math.clz32": "scr_math_clz32",
   "math.imul": "scr_math_imul",
+  "math.fround": "scr_math_fround",
   // decodeUriComponent is NOT here: it throws (MAY_THROW_LIB_FNS), so it
   // refuses by name like the rest of the throwing tier.
   "str.encodeUriComponent": "scr_str_encode_uri_component",

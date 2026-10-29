@@ -550,6 +550,9 @@ export const STATIC_MATH_FNS: Record<string, { fn: IrLibFn; arity: number } | un
   // ToUint32 wraps are written down, and nothing in the lib declares
   // another arity for it. Reached by mysql2's parser_cache hash.
   imul: { fn: "math.imul", arity: 2 },
+  // fround: the binary32 rounding of a number (a float32 round trip). The
+  // webidl-conversions float converters are built out of it.
+  fround: { fn: "math.fround", arity: 1 },
 };
 
 /** Math's number CONSTANTS, and their exact double values — the same

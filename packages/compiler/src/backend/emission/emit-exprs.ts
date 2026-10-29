@@ -4048,6 +4048,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // Math.imul — the ToUint32 product as an int32 (scr_lib.c).
           case "math.imul":
             return finish(`scr_math_imul(${arg(0)}, ${arg(1)})`);
+          // Math.fround — the binary32 rounding (scr_lib.c). Borrow nothing; no throw.
+          case "math.fround":
+            return finish(`scr_math_fround(${arg(0)})`);
           // Math.abs — C fabs IS the JS operation. Math.round — the JS
           // half-toward-+Infinity rule (scr_lib.c; C round() differs on
           // halves and naive floor(x+0.5) drifts at the epsilon boundary).

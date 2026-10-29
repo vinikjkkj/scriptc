@@ -3724,6 +3724,11 @@ export type IrLibFn =
    * int32 (scr_lib.c: the same ToUint32 wrap clz32 uses, then one
    * unsigned multiply, whose overflow C defines). Never throws. */
   | "math.imul"
+  /** `Math.fround(x)` — the nearest binary32 value to x, ties to even, as a
+   * double (ECMA-262 21.3.2.17; scr_lib.c). NaN and ±Infinity pass through,
+   * the sign of zero survives, overflow past the binary32 midpoint answers
+   * ±Infinity. Never throws. */
+  | "math.fround"
   /** The static global parsers/tests (scr_string.c). num.parseInt is
    * ECMA-262 19.2.5 exactly — JS whitespace, sign, ToInt32 radix (the
    * frontend completes an omitted radix to 0 = the spec's "undefined":
