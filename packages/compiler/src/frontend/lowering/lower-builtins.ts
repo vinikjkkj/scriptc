@@ -7621,6 +7621,58 @@ let digestInputValueDispatches = 0;
     return { kind: "libCall", fn: "process.columns", args: [fd], type: want, loc };
   }
 
+/** The WriteStream state reads on a first-class process-stream value
+   * (procStream: process.stdout/stderr, or a variable holding one, typed
+   * `WriteStream & { fd: 1 | 2 }` by @types/node). Each value is the one
+   * Node answers on EVERY stdio kind it can be (pipe, file, TTY), measured
+   * on $NODE_CI v24.15.0, and each stays constant across the whole
+   * supported surface: the only writes are the static/dyn write (a
+   * synchronous write(2), so nothing ever queues) and nothing can end,
+   * destroy or cork the stream. The runtime twin is scr_ps_dynh_get
+   * (scr_proc_dyn.c), so the typed and dynamic reads agree.
+   *
+   * NOT here, on purpose: writableLength and writableNeedDrain. Node's
+   * pipe stdout queues what the kernel does not take at once (a 1 MiB
+   * write leaves writableLength 1048576 and writableNeedDrain true), so a
+   * constant would be a silent divergence; they keep their SC2020 / SC1090
+   * fences. writableAborted and errored are unlowered for the same kind of
+   * reason (writableAborted is undefined on a pipe and false on a file). */
+  const PROC_STREAM_STATE_BOOL: ReadonlyMap<string, boolean> = new Map([
+    ["writable", true],
+    ["writableEnded", false],
+    ["writableFinished", false],
+    ["writableObjectMode", false],
+    ["destroyed", false],
+    ["closed", false],
+  ]);
+  const PROC_STREAM_STATE_NUM: ReadonlyMap<string, number> = new Map([
+    ["writableHighWaterMark", 65536],
+    ["writableCorked", 0],
+  ]);
+
+  export function lowerProcStreamStateProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    const name = expr.name.text;
+    const isBool = PROC_STREAM_STATE_BOOL.has(name);
+    const num = PROC_STREAM_STATE_NUM.get(name);
+    if (!isBool && num === undefined) return null;
+    if (L.chainBlocked(expr)) return null;
+    if (L.mapTypeOf(L.typeOf(expr.expression))?.kind !== "procStream") return null;
+    if (!L.isStdlibMember(expr)) return null;
+    const loc = locOf(expr);
+    const value: IrExpr = isBool
+      ? { kind: "boolLit", value: PROC_STREAM_STATE_BOOL.get(name)!, type: BOOL, loc }
+      : { kind: "numLit", value: num!, type: F64, loc };
+    // The receiver is evaluated for its side effects, as the read would be.
+    const recv = L.lowerExpr(expr.expression);
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: recv, loc }],
+      result: value,
+      type: value.type,
+      loc,
+    };
+  }
+
 /** `process.versions.node` / `.openssl` in ANY spelling the access chain
    * admits: the plain one, `process?.versions?.node`, and the read off a
    * SNAPSHOT alias (`const p = (globalThis as ...).process` — zapo's
