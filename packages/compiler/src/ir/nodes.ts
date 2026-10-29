@@ -8477,8 +8477,9 @@ export function isJsonSafeType(
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
   dateOk = false,
+  dynFieldsOk = false,
 ): boolean {
-  return isJsonSafeAt(t, getRecord, getUnion, false, new Set(), dateOk);
+  return isJsonSafeAt(t, getRecord, getUnion, false, new Set(), dateOk, dynFieldsOk);
 }
 
 /** The recursion behind isJsonSafeType. `inRecordField` is the ONE position
@@ -8496,6 +8497,7 @@ function isJsonSafeAt(
   inRecordField: boolean,
   visiting: Set<string>,
   dateOk: boolean,
+  dynFieldsOk: boolean,
 ): boolean {
   switch (t.kind) {
     case "f64":
@@ -8503,7 +8505,7 @@ function isJsonSafeAt(
     case "bool":
       return true;
     case "array":
-      return isJsonSafeAt(t.elem, getRecord, getUnion, false, visiting, dateOk);
+      return isJsonSafeAt(t.elem, getRecord, getUnion, false, visiting, dateOk, dynFieldsOk);
     case "record": {
       const shape = getRecord(t.shapeId);
       if (!shape) return false;
@@ -8515,7 +8517,7 @@ function isJsonSafeAt(
       // TUPLE positions are array slots, not droppable object keys: an
       // undefined-armed position would stringify as `null` in JS (not
       // drop), so tuples keep the array rule for their fields.
-      if (!shape.fields.every((f) => isJsonSafeAt(f.type, getRecord, getUnion, !shape.tuple, visiting, dateOk))) {
+      if (!shape.fields.every((f) => isJsonSafeAt(f.type, getRecord, getUnion, !shape.tuple, visiting, dateOk, dynFieldsOk))) {
         return false;
       }
       // Overflow values sit in record-key position too: dyn is JSON-safe
@@ -8523,7 +8525,7 @@ function isJsonSafeAt(
       // like any undefined-valued key), everything else follows the
       // record-field rule.
       if (shape.indexValue && shape.indexValue.kind !== "dyn") {
-        return isJsonSafeAt(shape.indexValue, getRecord, getUnion, true, visiting, dateOk);
+        return isJsonSafeAt(shape.indexValue, getRecord, getUnion, true, visiting, dateOk, dynFieldsOk);
       }
       return true;
     }
@@ -8533,7 +8535,7 @@ function isJsonSafeAt(
       const key = `${t.unionId}:${inRecordField}`;
       if (visiting.has(key)) return true; // the recursive knot, union-flavored
       visiting.add(key);
-      return def.arms.every((a) => isJsonSafeAt(a, getRecord, getUnion, inRecordField, visiting, dateOk));
+      return def.arms.every((a) => isJsonSafeAt(a, getRecord, getUnion, inRecordField, visiting, dateOk, dynFieldsOk));
     }
     case "func":
     case "object":
@@ -8593,13 +8595,14 @@ function isJsonSafeAt(
     case "asyncGenerator":
     case "void":
       return false;
-    // A DYN value in record-field position (a program-authored `any` member,
-    // the native ScrDyn slot) serializes through the checked-dynamic tree,
-    // exactly as an overflow value does above. Array slots keep the refusal:
-    // an undefined element stringifies as null, not as a dropped key.
+    // A DYN value in record-field position serializes through the checked-
+    // dynamic tree, exactly as an overflow value does above, but ONLY for
+    // JSON.stringify (dynFieldsOk): the same predicate also gates the checked
+    // casts, where a dyn-field record must keep the dyn value, not dynCheck
+    // into the record. Array slots keep the refusal (undefined -> null).
     // ORCHESTRATOR EXTENSION (mgresp, 2026-10-29).
     case "dyn":
-      return inRecordField;
+      return dynFieldsOk && inRecordField;
     // Representable exactly as a union arm in record-field position (the
     // optional-field story above); bare undefined-armed unions stay fenced
     // out of both stringify and dynCheck (narrow with '!== undefined'

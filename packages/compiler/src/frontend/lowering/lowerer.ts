@@ -6384,6 +6384,7 @@ export class Lowerer {
       (id) => this.shapes.get(id),
       (id) => this.unions.get(id),
       true,
+      true,
     );
   }
 
