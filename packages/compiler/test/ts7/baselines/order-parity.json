@@ -18516,6 +18516,12 @@
     }
    ]
   },
+  "<repo>/tests/diagnostics/mixin-dyn-flow-refused/main.js": {
+   "order": [
+    "<repo>/tests/diagnostics/mixin-dyn-flow-refused/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/mixins.ts": {
    "order": [
     "<repo>/tests/diagnostics/mixins.ts"
