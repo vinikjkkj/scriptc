@@ -316,6 +316,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "math.log": { argTypes: [F64], result: F64 },
   "math.clz32": { argTypes: [F64], result: F64 },
   "math.imul": { argTypes: [F64, F64], result: F64 },
+  "math.fround": { argTypes: [F64], result: F64 },
   "math.min": { argTypes: [F64, F64], result: F64 },
   "math.max": { argTypes: [F64, F64], result: F64 },
   "math.random": { argTypes: [], result: F64 },

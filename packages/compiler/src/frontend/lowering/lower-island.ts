@@ -1838,7 +1838,18 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
         return acc;
       }
       if (call.arguments.length === staticMath.arity) {
-        const args = call.arguments.map((a) => L.lowerExprExpecting(a, F64));
+        // Math.fround over an untyped (dyn) argument is ToNumber, spelled the
+        // way unary plus spells it (dyn.toNumber): fround accepts any value,
+        // so the checked cast lowerExprExpecting would emit is wrong for a
+        // non-number argument (it refuses where JS converts).
+        const args = call.arguments.map((a) => {
+          if (staticMath.fn !== "math.fround") return L.lowerExprExpecting(a, F64);
+          const raw = L.lowerExpr(a);
+          if (raw.type.kind === "dyn") {
+            return { kind: "libCall", fn: "dyn.toNumber", args: [raw], type: F64, loc } as IrExpr;
+          }
+          return L.coerceInto(a, raw, F64);
+        });
         return { kind: "libCall", fn: staticMath.fn, args, type: F64, loc };
       }
     }

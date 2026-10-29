@@ -1695,6 +1695,8 @@ double scr_math_pow(double x, double y);
 double scr_math_clz32(double x);
 /* Math.imul — ToInt32(ToUint32(a) * ToUint32(b)), the 32-bit product. */
 double scr_math_imul(double a, double b);
+/* Math.fround — the nearest binary32 value (ties to even), as a double. */
+double scr_math_fround(double x);
 
 /* ── the integer-domain fast arms ───────────────────────────────────────
  *

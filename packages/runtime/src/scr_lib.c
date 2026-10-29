@@ -3465,6 +3465,19 @@ double scr_math_imul(double a, double b) {
   return (double)(int32_t)(uint32_t)(x * y);
 }
 
+/* Math.fround — ECMA-262 21.3.2.17: the nearest binary32 value to x, ties to
+ * even. A double-to-float conversion IS that rounding (IEEE-754 Annex F) for
+ * every finite value below the overflow midpoint, subnormals included, and
+ * the sign of zero survives the cast. NaN and ±Infinity are returned as they
+ * are. From the midpoint 2^128 - 2^103 up the nearest-even binary32 is 2^128,
+ * which no float holds, so the answer is ±Infinity; the explicit guard keeps
+ * that case from resting on the (undefined-by-C-standard) out-of-range cast. */
+double scr_math_fround(double x) {
+  if (x != x || x - x != 0) return x;
+  if (fabs(x) >= 0x1.0p128 - 0x1.0p103) return copysign(INFINITY, x);
+  return (double)(float)x;
+}
+
 double scr_math_random(void) {
   uint64_t r;
   arc4random_buf(&r, sizeof r);
