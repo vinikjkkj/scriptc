@@ -28,22 +28,22 @@ stdlib-fence.ts:18:14 - error SC2020: 'Reflect.has' is part of the standard libr
   17 | const aliasedAssign = Object.assign(merged, { b: 2 }); // aliased targets stay fenced (real mutation of a live object)
   18 | const refl = Reflect.has({ a: 1 }, "a");
      |              ^~~~~~~~~~~
-  19 | const parsedMs = Date.parse("2024-01-01");
+  19 | const nowFn = Date.now;
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-stdlib-fence.ts:19:18 - error SC2020: 'Date.parse' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:19:15 - error SC2020: 'Date.now' is part of the standard library types but has no scriptc lowering yet
 
   18 | const refl = Reflect.has({ a: 1 }, "a");
-  19 | const parsedMs = Date.parse("2024-01-01");
-     |                  ^~~~~~~~~~
+  19 | const nowFn = Date.now;
+     |               ^~~~~~~~
   20 | const fmt = new Intl.NumberFormat();
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
 stdlib-fence.ts:20:7 - error SC2020: 'NumberFormat' is part of the standard library types but has no scriptc lowering yet
 
-  19 | const parsedMs = Date.parse("2024-01-01");
+  19 | const nowFn = Date.now;
   20 | const fmt = new Intl.NumberFormat();
      |       ^~~
   21 | 
@@ -52,7 +52,7 @@ stdlib-fence.ts:20:7 - error SC2020: 'NumberFormat' is part of the standard libr
 
 stdlib-fence.ts:20:13 - error SC1090: constructing values other than classes declared in the program is not supported yet
 
-  19 | const parsedMs = Date.parse("2024-01-01");
+  19 | const nowFn = Date.now;
   20 | const fmt = new Intl.NumberFormat();
      |             ^~~~~~~~~~~~~~~~~~~~~~~
   21 | 
