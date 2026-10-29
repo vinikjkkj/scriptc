@@ -5456,24 +5456,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/15920-transform-objmode-framer.ts": {
-    "order": [
-      "<repo>/tests/corpus/15920-transform-objmode-framer.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15921-transform-objmode-error.ts": {
-    "order": [
-      "<repo>/tests/corpus/15921-transform-objmode-error.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15922-transform-objmode-hwm.ts": {
-    "order": [
-      "<repo>/tests/corpus/15922-transform-objmode-hwm.ts"
-    ],
-    "diags": []
-  },
   "<repo>/tests/corpus/1571-optional-call-tostring-tail.ts": {
    "order": [
     "<repo>/tests/corpus/1571-optional-call-tostring-tail.ts"
@@ -5636,9 +5618,129 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15840-date-parse-iso-date-only.ts": {
+   "order": [
+    "<repo>/tests/corpus/15840-date-parse-iso-date-only.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15841-date-parse-iso-utc-datetime.ts": {
+   "order": [
+    "<repo>/tests/corpus/15841-date-parse-iso-utc-datetime.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15842-date-parse-iso-offsets.ts": {
+   "order": [
+    "<repo>/tests/corpus/15842-date-parse-iso-offsets.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15843-date-parse-fraction-digits.ts": {
+   "order": [
+    "<repo>/tests/corpus/15843-date-parse-fraction-digits.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15844-date-parse-local-datetime.ts": {
+   "order": [
+    "<repo>/tests/corpus/15844-date-parse-local-datetime.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15845-date-parse-expanded-years.ts": {
+   "order": [
+    "<repo>/tests/corpus/15845-date-parse-expanded-years.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15846-date-parse-out-of-range.ts": {
+   "order": [
+    "<repo>/tests/corpus/15846-date-parse-out-of-range.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15847-date-parse-invalid.ts": {
+   "order": [
+    "<repo>/tests/corpus/15847-date-parse-invalid.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15848-date-parse-rfc2822.ts": {
+   "order": [
+    "<repo>/tests/corpus/15848-date-parse-rfc2822.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15849-date-parse-slash-and-named-month.ts": {
+   "order": [
+    "<repo>/tests/corpus/15849-date-parse-slash-and-named-month.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1585-union-field-conditional-ctor.ts": {
    "order": [
     "<repo>/tests/corpus/1585-union-field-conditional-ctor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15850-date-parse-legacy-ampm-zones.ts": {
+   "order": [
+    "<repo>/tests/corpus/15850-date-parse-legacy-ampm-zones.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15851-date-parse-ejson-date-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/15851-date-parse-ejson-date-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15852-date-parse-composed-gettime.ts": {
+   "order": [
+    "<repo>/tests/corpus/15852-date-parse-composed-gettime.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15853-date-parse-dst-gap-overlap.ts": {
+   "order": [
+    "<repo>/tests/corpus/15853-date-parse-dst-gap-overlap.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15854-date-parse-leap-rollover.ts": {
+   "order": [
+    "<repo>/tests/corpus/15854-date-parse-leap-rollover.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15855-date-parse-hour-24.ts": {
+   "order": [
+    "<repo>/tests/corpus/15855-date-parse-hour-24.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15856-date-parse-whitespace-unicode.ts": {
+   "order": [
+    "<repo>/tests/corpus/15856-date-parse-whitespace-unicode.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15857-date-parse-cert-validity.ts": {
+   "order": [
+    "<repo>/tests/corpus/15857-date-parse-cert-validity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15858-date-parse-narrowed-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/15858-date-parse-narrowed-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15859-date-parse-min-max-range.ts": {
+   "order": [
+    "<repo>/tests/corpus/15859-date-parse-min-max-range.ts"
    ],
    "diags": []
   },
@@ -5681,6 +5783,24 @@
   "<repo>/tests/corpus/1592-js-classes.js": {
    "order": [
     "<repo>/tests/corpus/1592-js-classes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15920-transform-objmode-framer.ts": {
+   "order": [
+    "<repo>/tests/corpus/15920-transform-objmode-framer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15921-transform-objmode-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/15921-transform-objmode-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15922-transform-objmode-hwm.ts": {
+   "order": [
+    "<repo>/tests/corpus/15922-transform-objmode-hwm.ts"
    ],
    "diags": []
   },
@@ -5733,6 +5853,30 @@
   "<repo>/tests/corpus/1600-assert-passing.ts": {
    "order": [
     "<repo>/tests/corpus/1600-assert-passing.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16000-typed-from-string-map.ts": {
+   "order": [
+    "<repo>/tests/corpus/16000-typed-from-string-map.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16001-typed-u16-from-u8-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/16001-typed-u16-from-u8-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16002-typed-from-f32-wrap.ts": {
+   "order": [
+    "<repo>/tests/corpus/16002-typed-from-f32-wrap.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16003-fromcharcode-const-alias.ts": {
+   "order": [
+    "<repo>/tests/corpus/16003-fromcharcode-const-alias.ts"
    ],
    "diags": []
   },
@@ -20356,126 +20500,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/15840-date-parse-iso-date-only.ts": {
-    "order": [
-      "<repo>/tests/corpus/15840-date-parse-iso-date-only.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15841-date-parse-iso-utc-datetime.ts": {
-    "order": [
-      "<repo>/tests/corpus/15841-date-parse-iso-utc-datetime.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15842-date-parse-iso-offsets.ts": {
-    "order": [
-      "<repo>/tests/corpus/15842-date-parse-iso-offsets.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15843-date-parse-fraction-digits.ts": {
-    "order": [
-      "<repo>/tests/corpus/15843-date-parse-fraction-digits.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15844-date-parse-local-datetime.ts": {
-    "order": [
-      "<repo>/tests/corpus/15844-date-parse-local-datetime.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15845-date-parse-expanded-years.ts": {
-    "order": [
-      "<repo>/tests/corpus/15845-date-parse-expanded-years.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15846-date-parse-out-of-range.ts": {
-    "order": [
-      "<repo>/tests/corpus/15846-date-parse-out-of-range.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15847-date-parse-invalid.ts": {
-    "order": [
-      "<repo>/tests/corpus/15847-date-parse-invalid.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15848-date-parse-rfc2822.ts": {
-    "order": [
-      "<repo>/tests/corpus/15848-date-parse-rfc2822.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15849-date-parse-slash-and-named-month.ts": {
-    "order": [
-      "<repo>/tests/corpus/15849-date-parse-slash-and-named-month.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15850-date-parse-legacy-ampm-zones.ts": {
-    "order": [
-      "<repo>/tests/corpus/15850-date-parse-legacy-ampm-zones.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15851-date-parse-ejson-date-shape.ts": {
-    "order": [
-      "<repo>/tests/corpus/15851-date-parse-ejson-date-shape.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15852-date-parse-composed-gettime.ts": {
-    "order": [
-      "<repo>/tests/corpus/15852-date-parse-composed-gettime.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15853-date-parse-dst-gap-overlap.ts": {
-    "order": [
-      "<repo>/tests/corpus/15853-date-parse-dst-gap-overlap.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15854-date-parse-leap-rollover.ts": {
-    "order": [
-      "<repo>/tests/corpus/15854-date-parse-leap-rollover.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15855-date-parse-hour-24.ts": {
-    "order": [
-      "<repo>/tests/corpus/15855-date-parse-hour-24.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15856-date-parse-whitespace-unicode.ts": {
-    "order": [
-      "<repo>/tests/corpus/15856-date-parse-whitespace-unicode.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15857-date-parse-cert-validity.ts": {
-    "order": [
-      "<repo>/tests/corpus/15857-date-parse-cert-validity.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15858-date-parse-narrowed-union.ts": {
-    "order": [
-      "<repo>/tests/corpus/15858-date-parse-narrowed-union.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15859-date-parse-min-max-range.ts": {
-    "order": [
-      "<repo>/tests/corpus/15859-date-parse-min-max-range.ts"
-    ],
-    "diags": []
   }
  }
 }
