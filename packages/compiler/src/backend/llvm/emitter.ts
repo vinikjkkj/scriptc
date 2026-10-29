@@ -11275,9 +11275,11 @@ class LlEmitter {
         let test: string;
         if (st.kind === "dyn") {
           // dyn vs dyn: whole-dyn strict equality.
-          this.declare(`declare zeroext i1 @scr_dyn_strict_eq(ptr, ptr)`);
+          // Object.is (sameValue) answers SameValue on the number arm.
+          const dynEq = e.sameValue ? "scr_dyn_same_value" : "scr_dyn_strict_eq";
+          this.declare(`declare zeroext i1 @${dynEq}(ptr, ptr)`);
           test = B.tmp();
-          B.line(`${test} = call zeroext i1 @scr_dyn_strict_eq(ptr ${l.name}, ptr ${r.name})`);
+          B.line(`${test} = call zeroext i1 @${dynEq}(ptr ${l.name}, ptr ${r.name})`);
           // It REFUSES two RegExp handles (interned literals make pointer
           // identity a wrong boolean) — the C emitter's fallible arm.
           this.emitPendingCheck();
@@ -11305,7 +11307,12 @@ class LlEmitter {
             B.line(`${pv} = getelementptr inbounds i8, ptr ${d.name}, i64 16 ; ->v.num`);
             const nv = B.tmp();
             B.line(`${nv} = load double, ptr ${pv}`);
-            B.line(`${eq} = fcmp oeq double ${nv}, ${s.name}`);
+            if (e.sameValue) {
+              this.declare(`declare zeroext i1 @scr_num_same_value(double, double)`);
+              B.line(`${eq} = call zeroext i1 @scr_num_same_value(double ${nv}, double ${s.name})`);
+            } else {
+              B.line(`${eq} = fcmp oeq double ${nv}, ${s.name}`);
+            }
           } else {
             B.line(`${pv} = getelementptr inbounds i8, ptr ${d.name}, i64 16 ; ->v.b`);
             const raw = B.tmp();

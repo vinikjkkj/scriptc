@@ -3172,15 +3172,21 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const l = E.emitExpr(e.left);
         const r = E.emitExpr(e.right);
         const [d, s, st] = e.left.type.kind === "dyn" ? [l, r, e.right.type] : [r, l, e.left.type];
+        // sameValue (Object.is): the number arm is SameValue (NaN equals
+        // NaN, +0 differs from -0); every other arm is === already.
         const test =
           st.kind === "dyn"
             ? // dyn vs dyn: whole-dyn strict equality (scalars by value,
               // units by kind, reference kinds by node identity).
-              `scr_dyn_strict_eq(${l.name}, ${r.name})`
+              e.sameValue
+              ? `scr_dyn_same_value(${l.name}, ${r.name})`
+              : `scr_dyn_strict_eq(${l.name}, ${r.name})`
             : st.kind === "string"
             ? `(${d.name}->kind == SCR_DYN_STR && scr_str_eq(${d.name}->v.str, ${s.name}))`
             : st.kind === "f64"
-              ? `(${d.name}->kind == SCR_DYN_NUM && ${d.name}->v.num == ${s.name})`
+              ? e.sameValue
+                ? `(${d.name}->kind == SCR_DYN_NUM && scr_num_same_value(${d.name}->v.num, ${s.name}))`
+                : `(${d.name}->kind == SCR_DYN_NUM && ${d.name}->v.num == ${s.name})`
               : `(${d.name}->kind == SCR_DYN_BOOL && ${d.name}->v.b == ${s.name})`;
         // dyn-vs-dyn goes through scr_dyn_strict_eq, which REFUSES two
         // RegExp handles (interned literals make pointer identity a wrong

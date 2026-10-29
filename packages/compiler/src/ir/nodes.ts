@@ -7960,7 +7960,7 @@ export type IrExpr =
    * value, units by kind, reference kinds by node identity — JS-exact
    * within the checked-dynamic tree's aliasing story). Both operands are borrowed,
    * nothing allocates, never throws. Result is bool. */
-  | { kind: "dynScalarEq"; left: IrExpr; right: IrExpr; negated?: true; type: IrType; loc: SrcLoc }
+  | { kind: "dynScalarEq"; left: IrExpr; right: IrExpr; negated?: true; sameValue?: true; type: IrType; loc: SrcLoc }
   /** Statements inside an expression: `stmts` run in order, then `result`
    * is the expression's value — the lift behind assignment-as-expression
    * forms whose statement lowering needs temps and writes (destructuring

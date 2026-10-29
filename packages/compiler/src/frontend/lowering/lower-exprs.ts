@@ -19810,6 +19810,24 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     );
   }
 
+  /** Object.is over a dyn operand (SameValue on the checked-dynamic box): the
+   * operand as one side of the runtime's dyn SameValue, or null when its kind
+   * has no exact dyn box (the caller keeps its fence). Scalars compare by kind
+   * and payload. Every other kind boxes exactly where === boxes it (the dyn
+   * arms of lowerBinary): handles, functions, class values, maps, sets,
+   * bigints, scalar-armed unions and program objects, each by identity or by
+   * value as the box carries it. */
+  export function sameValueDynOperand(L: Lowerer, e: IrExpr): IrExpr | null {
+    if (e.type.kind === "dyn" || e.type.kind === "f64" || e.type.kind === "string" || e.type.kind === "bool") return e;
+    const boxed: IrExpr = { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
+    const t = e.type;
+    if (t.kind === "bigint" || t.kind === "classval" || t.kind === "map" || t.kind === "set" || DYN_HANDLE_KINDS.has(t.kind)) return boxed;
+    if (t.kind === "func" && canBoxFuncIntoDyn(t, (id) => L.shapes.get(id), (id) => L.unions.get(id))) return boxed;
+    if (t.kind === "union" && scalarArmsUnion(L, t.unionId)) return boxed;
+    if (t.kind === "object" && !RUNTIME_ERROR_CLASSES.has(t.className)) return boxed;
+    return null;
+  }
+
   function lowerInstanceConstructorRead(L: Lowerer, expr: ts.Expression): IrExpr | null {
     if (!isInstanceConstructorRead(L, expr)) return null;
     const loc = locOf(expr);

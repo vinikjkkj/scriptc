@@ -6404,6 +6404,11 @@ bool scr_dyn_is_buffer(const ScrDyn *d, const ScrStr *why);
 /* JS === over two dyn values: scalars by value, units by kind, everything
  * reference-shaped by node identity. Borrowed; never throws. */
 bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b);
+/* Object.is over two dyn values: SameValue, which is scr_dyn_strict_eq arm
+ * for arm except that two NUMBER boxes compare by scr_num_same_value (NaN
+ * equals NaN, +0 differs from -0). Borrowed; the RegExp refusal is the same
+ * one scr_dyn_strict_eq states. */
+bool scr_dyn_same_value(const ScrDyn *a, const ScrDyn *b);
 /* Prototype-method dispatch on a dyn receiver (`recv.m(...)` where `m` is
  * a name a dyn-representable prototype declares — push/slice/forEach/
  * apply/...): implemented (kind, name) pairs run JS-exact semantics; a

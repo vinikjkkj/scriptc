@@ -21,7 +21,7 @@ import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCa
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
-import { refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, unboundMethodThunk, undefinedArmedInAnswer } from "./lower-exprs.js";
+import { refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -12649,6 +12649,26 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       }
       if (lk === "bool" && rk === "bool") {
         return { kind: "bin", op: "===", left, right, type: BOOL, loc };
+      }
+      // A dyn operand (unknown/any) is SameValue over the checked-dynamic
+      // box: a unit literal is the kind test (dynTest, as === lowers it), and
+      // any other pair whose kinds have an exact dyn box rides the runtime's
+      // dyn SameValue (dynScalarEq's sameValue arm: NaN equals NaN, +0 differs
+      // from -0, every other kind answers === already). jsval (the embedded
+      // engine's values) and the kinds sameValueDynOperand refuses keep the
+      // validate-first fence below.
+      if ((lk === "dyn" || rk === "dyn") && lk !== "jsval" && rk !== "jsval") {
+        if (left.kind === "unitLit" && right.type.kind === "dyn") {
+          return { kind: "dynTest", test: left.unit, value: right, type: BOOL, loc };
+        }
+        if (right.kind === "unitLit" && left.type.kind === "dyn") {
+          return { kind: "dynTest", test: right.unit, value: left, type: BOOL, loc };
+        }
+        const dynL = sameValueDynOperand(L, left);
+        const dynR = sameValueDynOperand(L, right);
+        if (dynL && dynR) {
+          return { kind: "dynScalarEq", left: dynL, right: dynR, sameValue: true, type: BOOL, loc };
+        }
       }
       const unitTest = L.lowerUnitComparison(left, right, false, loc);
       if (unitTest) return unitTest;
