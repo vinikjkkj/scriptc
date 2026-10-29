@@ -19850,6 +19850,36 @@
     "<repo>/tests/corpus/15305-buffer-from-direct-dyn.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/diagnostics/webcrypto-flow-any-parameter.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/webcrypto-flow-any-parameter.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/webcrypto-flow-any-return.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/webcrypto-flow-any-return.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/webcrypto-flow-any-store.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/webcrypto-flow-any-store.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/webcrypto-flow-dynamic-callee.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/webcrypto-flow-dynamic-callee.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/webcrypto-flow-unawaited-importkey.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/webcrypto-flow-unawaited-importkey.cjs"
+   ],
+   "diags": []
   }
  }
 }
