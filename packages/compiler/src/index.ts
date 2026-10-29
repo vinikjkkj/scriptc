@@ -24,7 +24,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleUsesTimersPromisesValue, moduleUsesDestroyDyn, moduleUsesHttpDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesWebCrypto, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
+import { moduleUsesDestroyDyn, moduleUsesTimersPromisesValue, moduleUsesHttpDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesWebCrypto, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
   moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc , moduleBoxesProcStream, procStreamLibWriteFence} from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -835,7 +835,7 @@ function programNativeFeatures(
     // The link switch for scr_async_dyn.c: the checked-dynamic async
     // surfaces (cc.ts also pulls it under the dynInvoke/dc gates).
     // scr_buffer_val.c's Blob methods return promises (scr_dyn_new_promise).
-    dynAsync: moduleUsesDynAsync(mod) || moduleUsesBufferValue(mod) || moduleUsesTimersPromisesValue(mod),
+    dynAsync: moduleUsesDynAsync(mod) || moduleUsesBufferValue(mod),
     // The link switch for scr_webcrypto.c: the dyn.webCrypto libCall (the
     // WebCrypto object and its SubtleCrypto surface). Its promises and the
     // SHA-3 warning come from scr_async_dyn.c, which cc.ts links alongside.
@@ -953,6 +953,7 @@ function programNativeFeatures(
     // anywhere on the IR. The unit was unconditional until the value
     // surface made its size matter -- see cc.ts's CcOptions comment.
     abortSignal: moduleUsesAbortSignal(mod),
+    tpValue: moduleUsesTimersPromisesValue(mod),
     // The link switch for scr_fetch_static.c and the whole
     // net/http/tls/url/zlib stack under it: a static-fetch value
     // anywhere on the IR. A program that never writes `fetch` links
@@ -2153,6 +2154,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
     zlib: moduleUsesZlib(mod),
     copying: moduleUsesCopying(mod),
     abortSignal: moduleUsesAbortSignal(mod),
+    tpValue: moduleUsesTimersPromisesValue(mod),
     procDyn: moduleBoxesProcStream(mod),
   });
 
