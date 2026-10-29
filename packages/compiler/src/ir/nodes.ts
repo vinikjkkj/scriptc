@@ -8049,6 +8049,12 @@ export type IrExpr =
    * and uses only the validation. Value is borrowed; the result is owned
    * (+1). */
   | { kind: "dynIterN"; value: IrExpr; count: number; type: IrType; loc: SrcLoc }
+  /** `Array.from(src)` with no mapper over an untyped (checked-dynamic) source
+   * in a JS file: the runtime's array-from walk (scr_dyn_arr_from) — string
+   * code points, an array's copy, a Map/Set/typed-array's values, or an
+   * array-like's `length` and indices. Value is borrowed; the result is a
+   * fresh dyn array (+1) and the walk can throw (nullish, a getter). */
+  | { kind: "dynArrFrom"; value: IrExpr; type: IrType; loc: SrcLoc }
   /** The OVERFLOW key list of an index-signature record, in JS OWN-KEY
    * order (canonical array indices ascending first, then insertion order —
    * the runtime's scr_map_keys_js_order): a fresh string[] snapshot, the

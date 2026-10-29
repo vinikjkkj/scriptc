@@ -11498,6 +11498,17 @@ class LlEmitter {
         this.emitPendingCheck();
         return out;
       }
+      case "dynArrFrom": {
+        // Array.from(src) with no mapper over a dyn source: the C runtime's
+        // array-from walk, called directly (the same runtime the C lane links).
+        const v = this.emitExpr(e.value);
+        this.declare(`declare ptr @scr_dyn_arr_from(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_dyn_arr_from(ptr ${v.name})`);
+        const out = this.own({ name: t, type: e.type });
+        this.emitPendingCheck();
+        return out;
+      }
       case "jsMarshal":
         return this.emitJsMarshal(e);
       case "jsOp":

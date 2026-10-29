@@ -198,6 +198,7 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           break;
         case "dynDestrCheck":
         case "dynIterN":
+        case "dynArrFrom":
           // Destructuring guards throw V8's TypeErrors on nullish /
           // non-iterable sources.
           f.throws = true;

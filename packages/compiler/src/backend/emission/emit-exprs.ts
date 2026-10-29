@@ -384,6 +384,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const helper = dynIterNHelper(E);
         return E.fallibleTemp(e.type, `${helper}(${v.name}, ${e.count})`);
       }
+      case "dynArrFrom": {
+        // Array.from(src) with no mapper over a dyn source: the runtime's
+        // array-from walk (borrowed operand, owned fresh array, throws pending).
+        const v = E.emitExpr(e.value);
+        return E.fallibleTemp(e.type, `scr_dyn_arr_from(${v.name})`);
+      }
       case "toBool": {
         // JS ToBoolean. The operand temp (for strings: owned by the current
         // frame) is only read here and released at statement end as usual.

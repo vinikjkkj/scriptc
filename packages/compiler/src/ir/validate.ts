@@ -2446,6 +2446,12 @@ function validateFunction(
         if (!Number.isInteger(e.count) || e.count < 0) err("dynIterN count must be a non-negative integer", e.loc);
         break;
       }
+      case "dynArrFrom": {
+        checkExpr(e.value);
+        if (e.value.type.kind !== "dyn") err("dynArrFrom value must be dyn", e.loc);
+        if (e.type.kind !== "dyn") err("dynArrFrom must produce a dyn array", e.loc);
+        break;
+      }
       case "toBool":
         checkExpr(e.operand);
         if (

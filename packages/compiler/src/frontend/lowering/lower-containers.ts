@@ -3781,6 +3781,14 @@ function lowerOptionalDefaultArg(
           return mapIterDrainHelperCall(L, src, src.type, "entries", mapped, mapped, loc);
         }
       }
+      // `Array.from(d)` over an UNTYPED (checked-dynamic) source in a JS file: the
+      // value's kind is only known at run time (a string, an array-like record, a
+      // Map or Set, a number), so the runtime walks it (scr_dyn_arr_from) into the
+      // dyn array the call's own dyn type names. The walk is Array.from's own:
+      // string code points, array-like length and indices, [] for a number.
+      if (src.type.kind === "dyn" && isJsSourceFile(call.getSourceFile())) {
+        return { kind: "dynArrFrom", value: src, type: DYN, loc };
+      }
       L.noLowering(
         "Array.from with this argument shape",
         call,
@@ -3818,6 +3826,16 @@ function lowerOptionalDefaultArg(
         fenceArrayFromResult(L, call, fnRet);
         const helper = arrayHofHelper(L, "map", elem, fnRet, arity, loc);
         return { kind: "call", callee: helper, args: [base, fnArg], type: arrayOf(fnRet), loc };
+      }
+      // `Array.from(d, mapfn)` over an UNTYPED source in a JS file: the array-from
+      // walk (dynArrFrom) builds the dyn array, then the checked-dynamic map runs
+      // the mapper over it with (element, index) exactly as Array.from does. The
+      // result is a dyn array (JS-exact element values, whatever the mapper returns).
+      if (base === null && src.type.kind === "dyn" && isJsSourceFile(call.getSourceFile())) {
+        const { fnArg } = hofCallbackArg(L, args[1]!, [DYN], arrayOf(DYN));
+        const boxed: IrExpr = { kind: "dynFrom", value: fnArg, type: DYN, loc };
+        const recv: IrExpr = { kind: "dynArrFrom", value: src, type: DYN, loc };
+        return { kind: "dynInvoke", recv, method: "map", calleeName: "Array.from", args: [boxed], type: DYN, loc };
       }
       L.noLowering(
         "Array.from with this argument shape",

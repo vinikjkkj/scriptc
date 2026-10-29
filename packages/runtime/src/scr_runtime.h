@@ -6157,6 +6157,12 @@ void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item);
  * nullish sources spell the spread expression (`what`), everything else is
  * the generic "Spread syntax requires ..." text. Borrows src. */
 void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what);
+/* Array.from(src) with no mapper over a checked-dynamic source: a fresh dyn
+ * array (+1) of the iterable's values or the array-like's indices (see the
+ * definition in scr_json.c). Borrows src. A throw (nullish source, a
+ * getter, an unsupported kind) leaves the exception pending and returns the
+ * array so far, so the caller's pending check is the only check it owes. */
+ScrDyn *scr_dyn_arr_from(const ScrDyn *src);
 /* Destructuring pack over a dyn source: iterable kinds (arrays, strings by
  * code point, bytes) collect into a fresh array (+1); every other kind
  * throws V8's destructuring TypeError — `msg` verbatim when non-empty (the
