@@ -5594,6 +5594,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15820-number-of-union-class-valueof.ts": {
+   "order": [
+    "<repo>/tests/corpus/15820-number-of-union-class-valueof.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15821-number-of-dyn-kinds.ts": {
+   "order": [
+    "<repo>/tests/corpus/15821-number-of-dyn-kinds.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1583-loops-and-stream-captures.ts": {
    "order": [
     "<repo>/tests/corpus/1583-loops-and-stream-captures.ts"
@@ -5621,6 +5633,18 @@
   "<repo>/tests/corpus/1587-any-field-unassigned.ts": {
    "order": [
     "<repo>/tests/corpus/1587-any-field-unassigned.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15880-null-proto-untyped-table-is-exact.ts": {
+   "order": [
+    "<repo>/tests/corpus/15880-null-proto-untyped-table-is-exact.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15881-null-proto-write-before-typed-cast-is-exact.ts": {
+   "order": [
+    "<repo>/tests/corpus/15881-null-proto-write-before-typed-cast-is-exact.ts"
    ],
    "diags": []
   },
@@ -19348,6 +19372,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/object-create-null-into-typed-record.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/object-create-null-into-typed-record.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/optional-fields.ts": {
    "order": [
     "<repo>/tests/diagnostics/optional-fields.ts"
@@ -20308,18 +20338,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
- "<repo>/tests/corpus/15820-number-of-union-class-valueof.ts": {
-  "order": [
-   "<repo>/tests/corpus/15820-number-of-union-class-valueof.ts"
-  ],
-  "diags": []
- },
- "<repo>/tests/corpus/15821-number-of-dyn-kinds.ts": {
-  "order": [
-   "<repo>/tests/corpus/15821-number-of-dyn-kinds.ts"
-  ],
-  "diags": []
- }
+  }
  }
 }
