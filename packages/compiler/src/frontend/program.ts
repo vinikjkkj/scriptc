@@ -4171,11 +4171,39 @@ export function isCjsWholeExportAssign(e: ts.Expression): e is ts.BinaryExpressi
  * holds when the body finishes. */
 export function exportsRebindInnerOf(e: ts.Expression): ts.BinaryExpression | null {
   while (ts.isParenthesizedExpression(e)) e = e.expression;
+  const chained = chainedExportsRebindView(e);
+  if (chained !== null) return chained;
   if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
   if (!ts.isIdentifier(e.left) || e.left.text !== "exports") return null;
   let r: ts.Expression = e.right;
   while (ts.isParenthesizedExpression(r)) r = r.expression;
   return isCjsWholeExportAssign(r) ? r : null;
+}
+
+/** The chained spelling `module.exports = exports = X`: the one value is
+ * assigned to both bindings, so it is the same whole-export replacement as
+ * `exports = module.exports = X` (exportsRebindInnerOf). The recognizers read
+ * it through this view, a `module.exports = X` binary whose positions and
+ * parent chain are the original node's (Object.create, as
+ * exportEqualsModuleView does). Without the view a literal table written in
+ * this spelling is not recognized: its statement fences as "'module.exports ='
+ * with a non-literal value", and a requirer's `ns.f` read fences as "a binding
+ * form with no lowering" (whatwg-url's utils.isObject). */
+const chainedRebindViews = new WeakMap<ts.BinaryExpression, ts.BinaryExpression>();
+export function chainedExportsRebindView(e: ts.Expression): ts.BinaryExpression | null {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
+  if (!isModuleExportsAccess(e.left)) return null;
+  let r: ts.Expression = e.right;
+  while (ts.isParenthesizedExpression(r)) r = r.expression;
+  if (!ts.isBinaryExpression(r) || r.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
+  if (!ts.isIdentifier(r.left) || r.left.text !== "exports") return null;
+  const cached = chainedRebindViews.get(e);
+  if (cached !== undefined) return cached;
+  const view = Object.create(e) as ts.BinaryExpression;
+  Object.defineProperty(view, "right", { value: r.right });
+  chainedRebindViews.set(e, view);
+  return view;
 }
 
 export function cjsWholeExportAssignmentOf(stmt: ts.Statement): ts.BinaryExpression | null {
@@ -4189,7 +4217,9 @@ export function cjsWholeExportAssignmentOf(stmt: ts.Statement): ts.BinaryExpress
       scan(e.right);
       return;
     }
-    if (isCjsWholeExportAssign(e)) found = e;
+    const chained = chainedExportsRebindView(e);
+    if (chained !== null) found = chained;
+    else if (isCjsWholeExportAssign(e)) found = e;
     else {
       const rebind = exportsRebindInnerOf(e);
       if (rebind !== null) found = rebind;
@@ -4313,7 +4343,8 @@ export function cjsExportAssignmentOf(stmt: ts.Statement):
     return { kind: "table", obj: ts.isObjectLiteralExpression(view.right) ? view.right : null, expr: view };
   }
   if (!ts.isExpressionStatement(stmt)) return null;
-  const e = stmt.expression;
+  // `module.exports = exports = <obj>` reads as its `module.exports = <obj>` view.
+  const e = chainedExportsRebindView(stmt.expression) ?? stmt.expression;
   // `exports = module.exports = <obj>`: the whole-export replacement, spelled
   // with the `exports` binding rebound too (ioredis's index.js). The inner
   // assignment is the statement's whole-export; after it `exports` and
@@ -4488,10 +4519,25 @@ export function isCjsExportTableLiteral(obj: ts.ObjectLiteralExpression): boolea
   ) {
     return isJsSourceFile(assign.parent.parent);
   }
-  const decl = obj.parent;
-  if (!ts.isVariableDeclaration(decl) || decl.initializer !== obj) return false;
   const sf = obj.getSourceFile();
   if (!isJsSourceFile(sf)) return false;
+  // The rebind spellings (`exports = module.exports = {…}` and the chained
+  // `module.exports = exports = {…}`): the literal sits inside a top-level
+  // statement whose kept whole-export record names it. The first branch
+  // cannot see them: its literal's parent is the inner assignment, not a
+  // statement, so the table was never the effective one and a requirer's
+  // `ns.f` read fenced (whatwg-url's utils.isObject).
+  for (let top: ts.Node = obj; top.parent !== undefined; top = top.parent) {
+    if (!ts.isSourceFile(top.parent)) continue;
+    if (ts.isExpressionStatement(top) && ts.isBinaryExpression(top.expression)) {
+      const cjs = cjsExportAssignmentOf(top);
+      if (cjs?.kind === "table" && cjsExportDiscardReason(top) === null &&
+          cjsExportTargetLiteral(cjs.expr.right, sf) === obj) return true;
+    }
+    break;
+  }
+  const decl = obj.parent;
+  if (!ts.isVariableDeclaration(decl) || decl.initializer !== obj) return false;
   for (const stmt of sf.statements) {
     const cjs = cjsExportAssignmentOf(stmt);
     if (cjs?.kind === "table" && cjsExportDiscardReason(stmt) === null) {
