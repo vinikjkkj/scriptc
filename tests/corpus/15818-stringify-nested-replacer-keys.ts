@@ -2,9 +2,8 @@
 // for an element, at every depth.
 const walk: unknown = { a: { b: [{ c: 1 }, { c: 2 }] }, d: 3 };
 const keys: string[] = [];
-const out = JSON.stringify(walk, (k: string, v: unknown) => {
+console.log(JSON.stringify(walk, (k: string, v: unknown) => {
   keys.push(k);
   return v;
-}, 1);
-console.log(out);
+}, 1));
 console.log(keys.join(","));
