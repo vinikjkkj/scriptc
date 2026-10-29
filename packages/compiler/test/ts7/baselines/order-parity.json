@@ -5880,6 +5880,145 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16120-dyn-optional-absent-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/16120-dyn-optional-absent-read.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16121-dyn-optional-present.ts": {
+   "order": [
+    "<repo>/tests/corpus/16121-dyn-optional-present.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16122-dyn-explicit-undefined-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/16122-dyn-explicit-undefined-member.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16123-dyn-optional-nested-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16123-dyn-optional-nested-absent.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16124-dyn-optional-array-of-records.ts": {
+   "order": [
+    "<repo>/tests/corpus/16124-dyn-optional-array-of-records.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16125-objectid-optional-cast-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16125-objectid-optional-cast-absent.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16126-objectid-optional-cast-present.ts": {
+   "order": [
+    "<repo>/tests/corpus/16126-objectid-optional-cast-present.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16127-number-optional-cast-unknown-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16127-number-optional-cast-unknown-absent.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16128-union-undefined-member-cast-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16128-union-undefined-member-cast-absent.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16129-optional-object-to-unknown-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/16129-optional-object-to-unknown-field.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16130-cast-unknown-member-present.ts": {
+   "order": [
+    "<repo>/tests/corpus/16130-cast-unknown-member-present.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16131-cast-unknown-keys-present.ts": {
+   "order": [
+    "<repo>/tests/corpus/16131-cast-unknown-keys-present.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16132-cast-unknown-optional-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/16132-cast-unknown-optional-chain.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16133-cast-unknown-typeof-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16133-cast-unknown-typeof-absent.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16134-cast-unknown-array-of-docs.ts": {
+   "order": [
+    "<repo>/tests/corpus/16134-cast-unknown-array-of-docs.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16135-cast-unknown-nested-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/16135-cast-unknown-nested-record.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16136-cast-unknown-number-arith-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16136-cast-unknown-number-arith-absent.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16137-cast-unknown-union-undefined-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16137-cast-unknown-union-undefined-absent.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16138-cast-unknown-class-member-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16138-cast-unknown-class-member-absent.ts"
+   ],
+   "diags": []
+  },
+
+  "<repo>/tests/corpus/16139-cast-unknown-absent-then-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/16139-cast-unknown-absent-then-write.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1601-assert-fail-exit.ts": {
    "order": [
     "<repo>/tests/corpus/1601-assert-fail-exit.ts"
