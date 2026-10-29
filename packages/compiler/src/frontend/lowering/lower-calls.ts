@@ -1445,7 +1445,13 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     ) {
       return DYN;
     }
-    const returnType = L.mapTypeOf(retTsType);
+    let returnType = L.mapTypeOf(retTsType);
+    if (!returnType) {
+      // The instance's own checker view of the return (see instantiatedReturnType):
+      // the declared return names a conditional over the class's type parameter.
+      const instRet = L.instantiatedReturnType(decl);
+      if (instRet !== null) returnType = L.mapTypeOf(instRet);
+    }
     if (!returnType) {
       // JS inference residue (an `any` return, an unmappable union): the
       // checked-dynamic fallback, exactly the declaration story in
