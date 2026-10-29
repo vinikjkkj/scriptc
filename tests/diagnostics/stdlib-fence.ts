@@ -54,8 +54,8 @@ nums.forEach((x) => console.log(x), { unused: true }); // thisArg lowers now (co
 const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
 const rev = JSON.parse("1", (_k, v) => v); // the reviver form lowers now (corpus 8835)
 // (stringify with a null replacer + LITERAL space now lowers — the pretty
-// battery lives in the corpus; function replacers and non-literal spaces
-// stay fenced.)
+// battery lives in the corpus; function replacers and non-literal spaces now
+// lower through the runtime walk too, corpus 15800-15819.)
 const toStringify = { a: 1 };
 const replaced = JSON.stringify(toStringify, (_k, v) => v);
 const width = 2;

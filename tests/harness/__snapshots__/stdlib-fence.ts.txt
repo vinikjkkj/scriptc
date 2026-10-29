@@ -129,24 +129,6 @@ stdlib-fence.ts:51:15 - error SC2020: '.indexOf with 2 arguments' is part of the
 
   hint: the fromIndex parameter has no lowering — slice first, or loop
 
-stdlib-fence.ts:60:18 - error SC2020: 'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet
-
-  59 | const toStringify = { a: 1 };
-  60 | const replaced = JSON.stringify(toStringify, (_k, v) => v);
-     |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  61 | const width = 2;
-
-  hint: the serializer is type-directed — shape the value before stringifying
-
-stdlib-fence.ts:62:16 - error SC2020: 'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet
-
-  61 | const width = 2;
-  62 | const spaced = JSON.stringify(toStringify, null, width);
-     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  63 | 
-
-  hint: the serializer is type-directed — shape the value before stringifying
-
 stdlib-fence.ts:75:15 - error SC2020: 'Object.is over a dynamic operand' is part of the standard library types but has no scriptc lowering yet
 
   74 | // unions needing narrowing.
