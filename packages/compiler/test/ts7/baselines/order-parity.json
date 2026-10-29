@@ -5118,6 +5118,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15540-this-indexed-abstract-base.ts": {
+   "order": [
+    "<repo>/tests/corpus/15540-this-indexed-abstract-base.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15541-bson-shape-getters-instanceof.ts": {
+   "order": [
+    "<repo>/tests/corpus/15541-bson-shape-getters-instanceof.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1555-index-spread-into-declared.ts": {
    "order": [
     "<repo>/tests/corpus/1555-index-spread-into-declared.ts"
@@ -5153,6 +5165,60 @@
   "<repo>/tests/corpus/1558-any-joins-and-dyn-validation.ts": {
    "order": [
     "<repo>/tests/corpus/1558-any-joins-and-dyn-validation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15580-derived-super-in-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/15580-derived-super-in-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15581-derived-super-twice-after-base.ts": {
+   "order": [
+    "<repo>/tests/corpus/15581-derived-super-twice-after-base.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15582-derived-this-before-super-guard.ts": {
+   "order": [
+    "<repo>/tests/corpus/15582-derived-this-before-super-guard.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15583-derived-return-before-super.ts": {
+   "order": [
+    "<repo>/tests/corpus/15583-derived-return-before-super.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15584-derived-top-then-nested-super.ts": {
+   "order": [
+    "<repo>/tests/corpus/15584-derived-top-then-nested-super.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15585-derived-error-base-super-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/15585-derived-error-base-super-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15586-derived-super-arg-order-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/15586-derived-super-arg-order-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15587-derived-this-write-before-super.ts": {
+   "order": [
+    "<repo>/tests/corpus/15587-derived-this-write-before-super.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15588-derived-super-missing-path.ts": {
+   "order": [
+    "<repo>/tests/corpus/15588-derived-super-missing-path.ts"
    ],
    "diags": []
   },
@@ -5192,6 +5258,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15620-compound-operators-on-dyn-field-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/15620-compound-operators-on-dyn-field-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15621-compound-element-side-effect-receiver-and-key-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/15621-compound-element-side-effect-receiver-and-key-once.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15622-logical-assignment-on-dyn-and-typed-targets.ts": {
+   "order": [
+    "<repo>/tests/corpus/15622-logical-assignment-on-dyn-and-typed-targets.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15623-logical-assignment-through-accessors.ts": {
+   "order": [
+    "<repo>/tests/corpus/15623-logical-assignment-through-accessors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15624-string-append-through-dyn-url-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/15624-string-append-through-dyn-url-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15625-compound-element-write-through-accessor-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/15625-compound-element-write-through-accessor-receiver.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1563-forof-iterator-projections.ts": {
    "order": [
     "<repo>/tests/corpus/1563-forof-iterator-projections.ts"
@@ -5213,6 +5315,24 @@
   "<repo>/tests/corpus/1564-string-raw.ts": {
    "order": [
     "<repo>/tests/corpus/1564-string-raw.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15640-string-codepointat-index-kinds.ts": {
+   "order": [
+    "<repo>/tests/corpus/15640-string-codepointat-index-kinds.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15641-string-codepointat-consumers.ts": {
+   "order": [
+    "<repo>/tests/corpus/15641-string-codepointat-consumers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15642-string-codepointat-dyn-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/15642-string-codepointat-dyn-receiver.ts"
    ],
    "diags": []
   },
@@ -5243,6 +5363,30 @@
   "<repo>/tests/corpus/1568-x509-fingerprint.ts": {
    "order": [
     "<repo>/tests/corpus/1568-x509-fingerprint.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15680-tty-isatty-value.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15680-tty-isatty-value.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15681-tty-isatty-call.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15681-tty-isatty-call.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15682-tty-isatty-stored-fn.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15682-tty-isatty-stored-fn.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15683-tty-isatty-bad-fd.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15683-tty-isatty-bad-fd.cjs"
    ],
    "diags": []
   },
@@ -20068,98 +20212,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  }
-,
-  "<repo>/tests/corpus/15540-this-indexed-abstract-base.ts": {
-   "order": [
-    "<repo>/tests/corpus/15540-this-indexed-abstract-base.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15680-tty-isatty-value.cjs": {
-   "order": [
-    "<repo>/tests/corpus/15680-tty-isatty-value.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15681-tty-isatty-call.cjs": {
-   "order": [
-    "<repo>/tests/corpus/15681-tty-isatty-call.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15682-tty-isatty-stored-fn.cjs": {
-   "order": [
-    "<repo>/tests/corpus/15682-tty-isatty-stored-fn.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15683-tty-isatty-bad-fd.cjs": {
-   "order": [
-    "<repo>/tests/corpus/15683-tty-isatty-bad-fd.cjs"
-   ],
-   "diags": []
-  }
-,
-  "<repo>/tests/corpus/15541-bson-shape-getters-instanceof.ts": {
-   "order": [
-    "<repo>/tests/corpus/15541-bson-shape-getters-instanceof.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15640-string-codepointat-index-kinds.ts": {
-   "order": [
-    "<repo>/tests/corpus/15640-string-codepointat-index-kinds.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15641-string-codepointat-consumers.ts": {
-   "order": [
-    "<repo>/tests/corpus/15641-string-codepointat-consumers.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15642-string-codepointat-dyn-receiver.ts": {
-   "order": [
-    "<repo>/tests/corpus/15642-string-codepointat-dyn-receiver.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15620-compound-operators-on-dyn-field-chain.ts": {
-    "order": [
-      "<repo>/tests/corpus/15620-compound-operators-on-dyn-field-chain.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15621-compound-element-side-effect-receiver-and-key-once.ts": {
-    "order": [
-      "<repo>/tests/corpus/15621-compound-element-side-effect-receiver-and-key-once.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15622-logical-assignment-on-dyn-and-typed-targets.ts": {
-    "order": [
-      "<repo>/tests/corpus/15622-logical-assignment-on-dyn-and-typed-targets.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15623-logical-assignment-through-accessors.ts": {
-    "order": [
-      "<repo>/tests/corpus/15623-logical-assignment-through-accessors.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15624-string-append-through-dyn-url-record.ts": {
-    "order": [
-      "<repo>/tests/corpus/15624-string-append-through-dyn-url-record.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/15625-compound-element-write-through-accessor-receiver.ts": {
-    "order": [
-      "<repo>/tests/corpus/15625-compound-element-write-through-accessor-receiver.ts"
-    ],
-    "diags": []
   }
  }
 }
