@@ -937,8 +937,12 @@ export function moduleUsesObjectWeakKeys(mod: IrModule): boolean {
     }
     const k = (v as { kind?: unknown; key?: unknown }).kind;
     if (k === "weakmap") {
-      const key = (v as { key: IrType }).key;
-      if (key && (key.kind === "dyn" || key.kind === "object")) {
+      const wm = v as { key: IrType; value: IrType };
+      // Only the admitted shapes force the trace: a class-instance key, or
+      // a dyn key with a dyn value (the untyped table). A dyn key over a
+      // concrete value (WeakMap<object, Uint8Array>) was always a table of
+      // its own and keeps its classes as they were.
+      if (wm.key && (wm.key.kind === "object" || (wm.key.kind === "dyn" && wm.value?.kind === "dyn"))) {
         found = true;
         return;
       }

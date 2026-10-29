@@ -13,7 +13,7 @@ import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { DYN_DISPATCH_METHODS, islandPrimitiveExit } from "./lower-calls.js";
 import { dynAssertionReceiver, foldedStringKeyOf } from "./lower-exprs.js";
-import { typeKey } from "../types.js";
+import { tsUntypedWeakAdmissionOn, typeKey } from "../types.js";
 import { dynUndefinedExpr, nodeThrowExpr, own, WidthLift } from "./lowerer.js";
 import { dynBuiltinHofCallback } from "./lower-fnvalue.js";
 
@@ -4101,7 +4101,7 @@ function lowerOptionalDefaultArg(
       const wLoc = locOf(call);
       const wRecv = L.lowerExpr(access.expression);
       if (wRecv.type.kind !== "weakmap") return null;
-      weakKeyArgIsIdentity(L, call.arguments[0]!, receiverIr.key);
+      weakKeyArgIsIdentity(L, call.arguments[0]!, receiverIr.key, receiverIr.value.kind === "dyn");
       const wKey = L.lowerExprExpecting(call.arguments[0]!, receiverIr.key);
       if (name === "set") {
         const wVal = L.lowerExprExpecting(call.arguments[1]!, receiverIr.value);
@@ -4274,13 +4274,17 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
  * `put(...)` call boundary. */
 const WEAK_DYN_KEY_ARG_KINDS = new Set(["dyn", "bytes", "array", "object"]);
 
-function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): void {
+function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType, valueDyn: boolean): void {
   const argT = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.typeOf(arg)));
   if (argT === null || typeEquals(argT, keyT)) return;
   if (keyT.kind === "dyn") {
     // A runtime-laid-out class (an error, the emitter, a stream) is never
     // cycle-headed by the weak-key fixpoint, so it stays refused here.
-    if (WEAK_DYN_KEY_ARG_KINDS.has(argT.kind) && !(argT.kind === "object" && isRuntimeRootedClassName(argT.className))) return;
+    // A class instance crosses only into the untyped table (dyn key, dyn value)
+    // of a program that admits it (types.ts admitWeakTableIr); every other
+    // dyn-keyed table refuses it, as it always did.
+    const objectArgOk = argT.kind !== "object" || (tsUntypedWeakAdmissionOn() && valueDyn);
+    if (WEAK_DYN_KEY_ARG_KINDS.has(argT.kind) && objectArgOk && !(argT.kind === "object" && isRuntimeRootedClassName(argT.className))) return;
     L.unsupported(
       "SC1090",
       arg,
