@@ -3802,6 +3802,14 @@ function lowerOptionalDefaultArg(
       else if (src.type.kind === "array") base = src; // map reads fresh and builds fresh
       else if (src.type.kind === "set") {
         base = { kind: "setIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(src.type.elem), loc };
+      } else if (
+        // `Array.from(view, fn)` over a numeric typed array: the element list
+        // (Node reads length and indices, as the one-argument form does) and the
+        // mapper over (element, index). DataView/ArrayBufferView keep the fence.
+        src.type.kind === "bytes" && ARRAY_FROM_NUMERIC_VIEW.has(src.type.elem) &&
+        !/DataView|ArrayBufferView/.test(L.checker.typeToString(L.typeOf(args[0]!)))
+      ) {
+        base = { kind: "bytesIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(F64), loc };
       }
       if (base !== null && base.type.kind === "array") {
         const elem = base.type.elem;
@@ -9501,11 +9509,52 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         }
       }
     }
+    // `T.from(string, (c, i) => f64)`: the code-point walk (the string
+    // iterator the spec's IteratorToList takes), the mapper over (c, i) in
+    // order with an f64 result, then the constructor's own element
+    // conversion on the mapped number[] — exactly what `new T(number[])`
+    // does, so the intermediate array is unobservable (the mapper is the
+    // only user code, and it runs at the same points). A string-valued or
+    // dyn-valued mapper keeps the fence: its result would need a ToNumber
+    // at the store, which can run user code.
+    if (
+      args.length === 2 && !ts.isSpreadElement(args[0]!) && !ts.isSpreadElement(args[1]!) &&
+      !ts.isObjectLiteralExpression(args[0]!) && L.mapTypeOf(L.typeOf(args[0]!))?.kind === "string"
+    ) {
+      const probe = probeLower(L, args[1]!);
+      const fnT = probe?.type.kind === "func" ? probe.type : null;
+      if (
+        fnT !== null && fnT.ret.kind === "f64" && fnT.params.length <= 2 &&
+        (fnT.params.length < 1 || fnT.params[0]!.kind === "string") &&
+        (fnT.params.length < 2 || fnT.params[1]!.kind === "f64")
+      ) {
+        const src = L.lowerExpr(args[0]!);
+        const base = strCharsCall(L, src, loc);
+        const { fnArg, arity } = hofCallbackArg(L, args[1]!, [STRING], arrayOf(STRING));
+        const helper = arrayHofHelper(L, "map", STRING, F64, arity, loc);
+        const mapped: IrExpr = { kind: "call", callee: helper, args: [base, fnArg], type: arrayOf(F64), loc };
+        return markFlavor({ kind: "bytesNew", source: mapped, type, loc }, "plain", loc);
+      }
+      return null;
+    }
     if (args.length !== 1 || ts.isSpreadElement(args[0]!)) return null; // mapFn / spread → the fence
     const argNode = args[0]!;
     const src = L.lowerExpr(argNode);
     if (typeEquals(src.type, type) || (src.type.kind === "array" && src.type.elem.kind === "f64")) {
       return markFlavor({ kind: "bytesNew", source: src, type, loc }, "plain", loc);
+    }
+    // A CROSS-KIND numeric typed array (`Uint16Array.from(uint8array)`): the
+    // spec's IteratorToList yields each element as a Number and the target
+    // stores ToUint16 of it. Every element of the numeric views is exactly
+    // an f64, so the element list (toArray) and the constructor's conversion
+    // on it are the same walk. DataView and ArrayBuffer views have no
+    // iterator, and bigint views would throw: both keep the fence.
+    if (
+      src.type.kind === "bytes" && ARRAY_FROM_NUMERIC_VIEW.has(src.type.elem) &&
+      !/DataView|ArrayBufferView/.test(L.checker.typeToString(L.typeOf(argNode)))
+    ) {
+      const values: IrExpr = { kind: "bytesIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(F64), loc };
+      return markFlavor({ kind: "bytesNew", source: values, type, loc }, "plain", loc);
     }
     return null; // every other source keeps the SC2020 member fence
   }
