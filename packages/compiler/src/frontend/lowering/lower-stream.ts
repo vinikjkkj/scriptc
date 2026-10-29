@@ -719,6 +719,9 @@ function parseStreamOptions(
       }
       case "readableHighWaterMark":
         out.hwmR = L.lowerExprExpecting(value, F64);
+        // An explicit readable hwm also overrides objectMode's default of
+        // 16 (Node's getHighWaterMark reads readableHighWaterMark first).
+        out.hwmGiven = true;
         break;
       case "writableHighWaterMark":
         out.hwmW = L.lowerExprExpecting(value, F64);
@@ -740,6 +743,13 @@ function parseStreamOptions(
         // The READABLE class's objectMode: whole-value entries (dyn lane).
         // Writable and duplex objectMode stay fenced until their write side is.
         if (value.kind === ts.SyntaxKind.TrueKeyword && ctorName === "Readable" && name !== "writableObjectMode") {
+          out.objectMode = true;
+          break;
+        }
+        // Transform's readable half only (`readableObjectMode: true`): the
+        // write side stays byte mode, so a Transform's objectMode is the
+        // readable flag alone. `objectMode: true` (both sides) stays fenced.
+        if (value.kind === ts.SyntaxKind.TrueKeyword && ctorName === "Transform" && name === "readableObjectMode") {
           out.objectMode = true;
           break;
         }
@@ -1099,7 +1109,7 @@ export function lowerStreamSuperCall(L: Lowerer, info: ClassInfo, base: ClassInf
     }
   }
   const parsed = streamCtorArgs(L, cls, argNodes[0], thisType, loc, fallback);
-  if (parsed.objectMode) {
+  if (parsed.objectMode && cls !== "%Transform") {
     L.noLowering(`super(options) with objectMode in a ${cls.slice(1)} subclass`, blame, "objectMode is lowered for `new Readable(options)` construction only");
   }
   if (parsed.badEncoding !== null) {
@@ -1116,6 +1126,15 @@ export function lowerStreamSuperCall(L: Lowerer, info: ClassInfo, base: ClassInf
     expr: { kind: "libCall", fn: `${shape.fn}.init` as IrLibFn, args: [thisRef(), ...parsed.args], type: VOID, loc },
     loc,
   }];
+  if (parsed.objectMode) {
+    // The readable-side objectMode flag after init (before any push), the
+    // same runtime call the construction form chains.
+    out.push({
+      kind: "exprStmt",
+      expr: { kind: "libCall", fn: "readable.objectMode", args: [thisRef(), f64Lit(parsed.hwmGiven ? 0 : -1, loc)], type: thisType, loc },
+      loc,
+    });
+  }
   if (parsed.pushEncoding !== null) {
     out.push({
       kind: "exprStmt",
