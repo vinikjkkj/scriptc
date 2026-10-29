@@ -1,0 +1,9 @@
+modes true false
+hwm 16 65536
+data 8 8 17
+data 12 12 34
+data 20 20 51
+ended
+end 3
+finish
+close
