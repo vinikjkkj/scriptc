@@ -20230,6 +20230,18 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  }
+  },
+ "<repo>/tests/corpus/15820-number-of-union-class-valueof.ts": {
+  "order": [
+   "<repo>/tests/corpus/15820-number-of-union-class-valueof.ts"
+  ],
+  "diags": []
+ },
+ "<repo>/tests/corpus/15821-number-of-dyn-kinds.ts": {
+  "order": [
+   "<repo>/tests/corpus/15821-number-of-dyn-kinds.ts"
+  ],
+  "diags": []
+ }
  }
 }
