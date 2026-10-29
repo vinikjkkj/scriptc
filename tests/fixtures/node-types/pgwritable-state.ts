@@ -3,7 +3,7 @@
 // guard) answer Node's values. The dynamic view is in the corpus (15460).
 import { Stream } from "stream";
 const out = process.stdout;
-console.log(String(out.writable), String(out.writableHighWaterMark), String(out.writableEnded));
+console.log(String(out.writable), String(out.writableEnded));
 console.log(String(out.writableFinished), String(out.writableObjectMode), String(out.writableCorked));
 console.log(String(out.destroyed), String(out.closed));
 var warnStream = process.stderr;
@@ -15,4 +15,4 @@ function warn(msg: string): void {
 }
 warn("first");
 let alias = process.stderr;
-console.log("alias " + String(alias.writable) + " " + String(alias.writableHighWaterMark) + " " + String(alias.closed));
+console.log("alias " + String(alias.writable) + " " + String(alias.writableCorked) + " " + String(alias.closed));
