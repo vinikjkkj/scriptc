@@ -7831,7 +7831,17 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const retWidened = !retExact && slot.ret.kind === "dyn" && own.ret.kind !== "dyn" &&
       (own.ret.kind === "void" ||
         canConvertToDyn(own.ret, (id) => L.shapes.get(id), (id) => L.unions.get(id)));
-    if (!retExact && !retWidened) return null;
+    // COVARIANT CLASS return: an override that returns an instance of a
+    // SUBCLASS of the slot's declared class (mysql2's PoolConnection#promise
+    // answers a PromisePoolConnection where Connection#promise answers a
+    // PromiseConnection). A subclass instance keeps the base class's field
+    // prefix (the upcast is a reinterpret), so the thunk spelled at the slot
+    // hands back the same pointer under the base type. Only object-to-object
+    // with a strict subclass; an inverse (base answered where the slot names
+    // the subclass), a union, a record or a primitive stays refused.
+    const retClassWidened = !retExact && slot.ret.kind === "object" && own.ret.kind === "object" &&
+      isSubclassOf(L, own.ret.className, slot.ret.className);
+    if (!retExact && !retWidened && !retClassWidened) return null;
     return retExact && arityExact ? "exact" : "widened";
   }
 
@@ -7934,9 +7944,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // A void override under a value slot answers undefined: the call is a
     // statement, and the thunk returns the slot's undefined.
     const voidUnderValue = own.ret.kind === "void" && slot.sig.ret.kind !== "void";
+    // A covariant class return (overrideSlotFit): the subclass instance is
+    // handed back under the slot's base class type, an upcast reinterpret.
+    const covariantObject = slot.sig.ret.kind === "object" && own.ret.kind === "object" &&
+      !typeEquals(slot.sig.ret, own.ret);
     const value: IrExpr = typeEquals(slot.sig.ret, own.ret) || voidUnderValue
       ? call
-      : { kind: "dynFrom", value: call, type: DYN, loc };
+      : covariantObject && slot.sig.ret.kind === "object"
+        ? upcastTo(L, call, slot.sig.ret.className)
+        : { kind: "dynFrom", value: call, type: DYN, loc };
     const thunkBody: IrStmt[] = [];
     if (slot.sig.ret.kind === "void") thunkBody.push({ kind: "exprStmt", expr: value, loc });
     else if (voidUnderValue) {
