@@ -6508,6 +6508,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16420-npmdefault-class-runtime-props/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/16420-npmdefault-class-runtime-props/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1643-metadata-dyn-return.cjs": {
    "order": [
     "<repo>/tests/corpus/1643-metadata-dyn-return.cjs"
