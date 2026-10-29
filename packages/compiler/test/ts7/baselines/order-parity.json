@@ -20088,6 +20088,24 @@
     "<repo>/tests/corpus/15541-bson-shape-getters-instanceof.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/15640-string-codepointat-index-kinds.ts": {
+   "order": [
+    "<repo>/tests/corpus/15640-string-codepointat-index-kinds.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15641-string-codepointat-consumers.ts": {
+   "order": [
+    "<repo>/tests/corpus/15641-string-codepointat-consumers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15642-string-codepointat-dyn-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/15642-string-codepointat-dyn-receiver.ts"
+   ],
+   "diags": []
   }
  }
 }
