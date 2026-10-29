@@ -2,6 +2,7 @@
  * argument completion (optional/default/rest, explicit-undefined ≡ omission),
  * function/lambda lowering and signature collection, and monomorphizing
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
+import { stringFromCharCodeCallAliasOf } from "./lower-builtins.js";
 import { lowerAbsentRequireCall } from "./lower-require-absent.js";
 import * as ts from "../ts7/adapter.js";
 import { defineAccessorCallOf, liveBagRef, liveDefinePropOf, liveDepOfBinding, liveExportsOf } from "./cjs-live-exports.js";
@@ -5818,6 +5819,15 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // typeof tests) applies inside it, tsc's call-site narrowing types
     // the guarded branch, and a body construct with no caught lowering
     // fences per site at its own location.
+    // A call through a call-only `const f = String.fromCharCode` alias (lower-builtins.ts):
+    // the call lowers as the member's own call, the binding having no value.
+    if (ts.isIdentifier(expr.expression)) {
+      const aliasAccess = stringFromCharCodeCallAliasOf(L, expr.expression);
+      if (aliasAccess !== null) {
+        const lowered = L.lowerStringStaticCall(expr, aliasAccess);
+        if (lowered !== null) return lowered;
+      }
+    }
     if (ts.isIdentifier(expr.expression) && expr.arguments.length === 1) {
       const caughtArg = L.caughtLocalOf(expr.arguments[0]!);
       if (caughtArg) {

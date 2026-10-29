@@ -45,6 +45,7 @@ import { lowerAbsentGlobal, lowerAbsentLocal } from "./lower-absent.js";
 import { deadBranchSkippable, relativeRequireRefusal, statementAlwaysThrowsOnRequire } from "../require-throws.js";
 import { refusalMessage } from "./lower-requirestack.js";
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
+import { isStringCallAliasDecl } from "./lower-builtins.js";
 
 /** `const X = /* @__PURE__ *\/ makeX()` at a module's top level: every
  * declarator initialized by a call (or `new`) carrying the bundler PURE
@@ -4647,6 +4648,9 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // probes below would otherwise claim the call-initializer shape and
     // put its fences on the build.
     if (provenanceElidedConstDecl(L, decl)) return null;
+    // `const f = String.fromCharCode` whose every reference is a call (lower-builtins.ts):
+    // the binding has no storage; each call lowers as the member's own call.
+    if (isStringCallAliasDecl(L, decl)) return null;
 
     // A TRAP declaration — the initializer's chain roots at an
     // ambient-undefined name (`declare function factory...; const make =

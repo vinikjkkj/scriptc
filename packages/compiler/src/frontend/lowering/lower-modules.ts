@@ -2,6 +2,7 @@
  * program-collection pass (signatures, classes, globals — reachability
  * seeds), npm/JSON import collection, per-file %init functions, %main, and
  * the module artifacts (globals, embedded npm tables) the IR module carries. */
+import { isStringCallAliasDecl } from "./lower-builtins.js";
 import * as ts from "../ts7/adapter.js";
 import { poisonedRecordShapeDiag } from "../../diagnostics/diagnostic.js";
 import type { Lowerer } from "./lowerer.js";
@@ -2325,6 +2326,8 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // probes below would otherwise claim the call-initializer shape
         // and put its fences on the build.
         if (provenanceElidedConstDecl(L, decl)) continue;
+        // A call-only `String.fromCharCode` alias has no storage (lower-builtins.ts).
+        if (isStringCallAliasDecl(L, decl)) continue;
         // `var Buffer = require("buffer").Buffer` (or `const B = Buffer`) at file scope: the
         // Buffer class under another name. Checked before the probes below, which would
         // otherwise lower the initializer's property access (stdlibBufferVarAliasDecl).
