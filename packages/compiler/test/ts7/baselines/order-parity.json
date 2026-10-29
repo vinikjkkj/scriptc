@@ -5354,6 +5354,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/15660-mongo-ondemand-cross-module-cache/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15660-mongo-ondemand-cross-module-cache/document.ts",
+    "<repo>/tests/corpus/15660-mongo-ondemand-cross-module-cache/responses.ts",
+    "<repo>/tests/corpus/15660-mongo-ondemand-cross-module-cache/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15661-mongo-abstract-handleok-instances/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15661-mongo-abstract-handleok-instances/document.ts",
+    "<repo>/tests/corpus/15661-mongo-abstract-handleok-instances/responses.ts",
+    "<repo>/tests/corpus/15661-mongo-abstract-handleok-instances/operation.ts",
+    "<repo>/tests/corpus/15661-mongo-abstract-handleok-instances/count.ts",
+    "<repo>/tests/corpus/15661-mongo-abstract-handleok-instances/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15662-any-spelled-record-member-field/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15662-any-spelled-record-member-field/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15663-any-slot-observables/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15663-any-slot-observables/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15664-any-slot-json-drop/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/15664-any-slot-json-drop/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1567-server-close-override.ts": {
    "order": [
     "<repo>/tests/corpus/1567-server-close-override.ts"
