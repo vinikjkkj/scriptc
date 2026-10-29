@@ -779,7 +779,8 @@ export function refuseUnloweredSubtleCall(L: Lowerer, call: ts.CallExpression): 
     if (obj === null) return provableString(L, e) !== null; /* a bare name has no hash to check */
     const h = memberOf(obj, "hash");
     if (h === undefined) return true;
-    const hv = provableString(L, h);
+    // The hash is a name or a { name } dictionary (HmacImportParams.hash: HashAlgorithmIdentifier).
+    const hv = algNameOf(h);
     return hv !== null && SERVED_HASHES.has(hv.toLowerCase());
   };
   if (name === "sign") {
