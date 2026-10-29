@@ -9085,6 +9085,14 @@ void scr_dyn_release_v(void *d) { scr_dyn_release((ScrDyn *)d); }
  * coincides with SameValue for every kind other than NUMBER. */
 bool scr_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
   if (a->kind == SCR_DYN_NUM && b->kind == SCR_DYN_NUM) return scr_num_same_value(a->v.num, b->v.num);
+  /* Two RegExp boxes: plain object identity. Every evaluation of a regex
+   * literal that is not an in-place receiver (lower-exprs fresh:true) makes a
+   * new heap clone (scr_regex_clone), so the handle pointer is the object's
+   * identity: two evaluations of one literal are two pointers, one object is
+   * one pointer. The strict-equality refusal is NOT taken here. */
+  if (a->kind == SCR_DYN_HANDLE && b->kind == SCR_DYN_HANDLE &&
+      a->v.handle.tag == SCR_DYNH_REGEX && b->v.handle.tag == SCR_DYNH_REGEX)
+    return a->v.handle.ptr == b->v.handle.ptr;
   return scr_dyn_strict_eq(a, b);
 }
 
