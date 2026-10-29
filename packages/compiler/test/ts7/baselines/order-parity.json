@@ -19982,6 +19982,24 @@
     "<repo>/tests/diagnostics/webcrypto-flow-unawaited-importkey.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/15480-builtin-comma-createhash.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15480-builtin-comma-createhash.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15481-builtin-comma-createconnection.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15481-builtin-comma-createconnection.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15482-builtin-comma-tls-connect.cjs": {
+   "order": [
+    "<repo>/tests/corpus/15482-builtin-comma-tls-connect.cjs"
+   ],
+   "diags": []
   }
  }
 }
