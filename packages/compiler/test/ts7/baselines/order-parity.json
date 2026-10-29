@@ -20476,6 +20476,126 @@
       "<repo>/tests/corpus/15859-date-parse-min-max-range.ts"
     ],
     "diags": []
+  },
+  "<repo>/tests/corpus/16100-format-opts-depth0.ts": {
+   "order": [
+    "<repo>/tests/corpus/16100-format-opts-depth0.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16101-format-opts-depth1.ts": {
+   "order": [
+    "<repo>/tests/corpus/16101-format-opts-depth1.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16102-format-opts-depth-null.ts": {
+   "order": [
+    "<repo>/tests/corpus/16102-format-opts-depth-null.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16103-format-opts-depth-infinity.ts": {
+   "order": [
+    "<repo>/tests/corpus/16103-format-opts-depth-infinity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16104-format-opts-default-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/16104-format-opts-default-keys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16105-format-opts-rest-depth-objects.ts": {
+   "order": [
+    "<repo>/tests/corpus/16105-format-opts-rest-depth-objects.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16106-format-opts-percent-o-depth.ts": {
+   "order": [
+    "<repo>/tests/corpus/16106-format-opts-percent-o-depth.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16107-format-opts-percent-s-depth.ts": {
+   "order": [
+    "<repo>/tests/corpus/16107-format-opts-percent-s-depth.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16108-format-opts-numeric-specs.ts": {
+   "order": [
+    "<repo>/tests/corpus/16108-format-opts-numeric-specs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16109-format-opts-percent-c-literal.ts": {
+   "order": [
+    "<repo>/tests/corpus/16109-format-opts-percent-c-literal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16110-format-opts-empty-literal.ts": {
+   "order": [
+    "<repo>/tests/corpus/16110-format-opts-empty-literal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16111-format-opts-spread-runtime.ts": {
+   "order": [
+    "<repo>/tests/corpus/16111-format-opts-spread-runtime.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16112-format-opts-large-depth-null.ts": {
+   "order": [
+    "<repo>/tests/corpus/16112-format-opts-large-depth-null.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16113-format-opts-union-depth.ts": {
+   "order": [
+    "<repo>/tests/corpus/16113-format-opts-union-depth.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16114-format-opts-class-depth.ts": {
+   "order": [
+    "<repo>/tests/corpus/16114-format-opts-class-depth.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16115-format-opts-array-depth.ts": {
+   "order": [
+    "<repo>/tests/corpus/16115-format-opts-array-depth.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16116-format-opts-map-set-depth.ts": {
+   "order": [
+    "<repo>/tests/corpus/16116-format-opts-map-set-depth.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16117-format-opts-string-escapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/16117-format-opts-string-escapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16118-format-opts-number-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/16118-format-opts-number-forms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16119-format-opts-console-parity.ts": {
+   "order": [
+    "<repo>/tests/corpus/16119-format-opts-console-parity.ts"
+   ],
+   "diags": []
   }
  }
 }
