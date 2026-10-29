@@ -23629,6 +23629,98 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
       e.name.text === "prototype" && ts.isIdentifier(e.expression);
   }
 
+/** True when a strict subclass of `info` declares `name` as a PLAIN (typed) method (thunkrecv). */
+function descendantDeclaresPlainMethod(info: ClassInfo, name: string): boolean {
+  for (const s of info.subclasses) {
+    if (s.methods.has(name) || descendantDeclaresPlainMethod(s, name)) return true;
+  }
+  return false;
+}
+
+/** True when a strict subclass of `info` declares `name` as a GENERIC (untyped-parameter) method (thunkrecv). */
+function descendantDeclaresGenericMethod(info: ClassInfo, name: string): boolean {
+  for (const s of info.subclasses) {
+    if (s.genericMethods?.get(name) !== undefined || descendantDeclaresGenericMethod(s, name)) return true;
+  }
+  return false;
+}
+
+/** The field a subclass-declared method value is stored to, when the read is exactly
+ * `this.F = this.m;` (thunkrecv). Null for any other use of the read (a comparison, a
+ * return, an argument, a store on another object, a local). */
+function storedFieldOfMethodRead(expr: ts.PropertyAccessExpression): string | null {
+  const bin = expr.parent;
+  if (!ts.isBinaryExpression(bin) || bin.operatorToken.kind !== ts.SyntaxKind.EqualsToken || bin.right !== expr) return null;
+  if (!ts.isExpressionStatement(bin.parent)) return null;
+  const left = bin.left;
+  if (!ts.isPropertyAccessExpression(left) || left.expression.kind !== ts.SyntaxKind.ThisKeyword) return null;
+  return left.name.text;
+}
+
+/** True when a class that reads `method` as undefined (the base itself, or a strict subclass with no
+ * declarer of `method` between it and the base) is constructed somewhere in the program (thunkrecv).
+ * Names are matched textually (conservative). Iterative walk. */
+function silentReceiverInstantiated(L: Lowerer, info: ClassInfo, method: string): boolean {
+  const names = new Set<string>();
+  const add = (c: ClassInfo): void => {
+    names.add(c.def.name);
+    if (c.def.jsName !== undefined) names.add(c.def.jsName);
+  };
+  const declaresOnPath = (s: ClassInfo): boolean => {
+    for (let c: ClassInfo | null = s; c !== null && c !== info; c = c.base) {
+      if (c.methods.has(method) || c.genericMethods?.has(method) === true) return true;
+    }
+    return false;
+  };
+  add(info);
+  const walk = (c: ClassInfo): void => {
+    for (const s of c.subclasses) {
+      if (!declaresOnPath(s)) add(s);
+      walk(s);
+    }
+  };
+  walk(info);
+  const stack: ts.Node[] = [];
+  for (const sf of L.program.getSourceFiles()) stack.push(sf);
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && names.has(n.expression.text)) return true;
+    ts.forEachChild(n, (c) => {
+      stack.push(c);
+    });
+  }
+  return false;
+}
+
+/** Closed-world check (thunkrecv): every read of property `field` in the program is a CALL on `this`
+ * (`this.F(...)`) or a truthiness test; a write to it is harmless (it stores a value, it does not read one). Any other read, a write or call on
+ * another receiver, a string-keyed element access, a shorthand or destructuring use of the name is a
+ * way the stored method value could reach another receiver, so the thunk is refused. Iterative walk. */
+function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
+  const stack: ts.Node[] = [];
+  for (const sf of L.program.getSourceFiles()) stack.push(sf);
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (ts.isPropertyAccessExpression(n) && n.name.text === field) {
+      const p = n.parent;
+      const okWrite = ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.left === n;
+      const okCall = ts.isCallExpression(p) && p.expression === n && n.expression.kind === ts.SyntaxKind.ThisKeyword;
+      const okTest = (ts.isPrefixUnaryExpression(p) && p.operator === ts.SyntaxKind.ExclamationToken) ||
+        (ts.isIfStatement(p) && p.expression === n) || (ts.isConditionalExpression(p) && p.condition === n);
+      if (!(okWrite || okCall || okTest)) return false;
+    } else if (ts.isElementAccessExpression(n) && ts.isStringLiteralLike(n.argumentExpression) && n.argumentExpression.text === field) {
+      return false;
+    } else if ((ts.isShorthandPropertyAssignment(n) || ts.isBindingElement(n)) && n.name && ts.isIdentifier(n.name) && n.name.text === field) {
+      return false;
+    }
+    ts.forEachChild(n, (c) => {
+      stack.push(c);
+    });
+  }
+  return true;
+}
+
+
 /** `return this.readField` / `this.next = this.start`: a class METHOD read as
    * a VALUE in a JavaScript file. JS hands out the prototype's function with
    * no receiver bound (mysql2's command state machine stores one and invokes
@@ -23979,6 +24071,18 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
     };
     walk(info, 1);
     if (decls.length === 0) return null;
+    // Narrowed fence (thunkrecv). (1) A GENERIC declarer (untyped parameters) is not in `decls`, so the
+    // thunk would skip it and call the typed declarer for every receiver (the wrong binary: Query.start(p)
+    // with Hs.start()): refused. (2) The thunk dispatches on the CALL receiver, so it is exact only while
+    // the stored value never leaves its receiver: the read must be `this.F = this.m;` and F only used on
+    // `this` (see fieldOnlyUsedOnThis). Anything else is refused, the caller's SC1090.
+    if (descendantDeclaresGenericMethod(info, method)) return null;
+    const storedField = storedFieldOfMethodRead(expr);
+    if (storedField === null || !fieldOnlyUsedOnThis(L, storedField)) return null;
+    // (3) An instance with no declarer between it and the base (the base itself, or a subclass chain that
+    // never declares `method`) answers undefined for the read in JS; the thunk would hand it a function
+    // (a plain Plain instance, run() then sees the stored method). Refused when such a class is constructed.
+    if (silentReceiverInstantiated(L, info, method)) return null;
     const first = decls[0]!.sig;
     for (const d of decls) {
       if (d.sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable")) || d.sig.params.length !== first.params.length) return null;
@@ -24282,6 +24386,13 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
       const baseInfo = L.classes.get(receiverIr.className) ?? null;
       const viaSubclass = baseInfo === null ? null : lowerUnboundSubclassMethodValue(L, expr, baseInfo);
       if (viaSubclass !== null) return viaSubclass;
+      // A method only a SUBCLASS declares, read as a value off this class (thunkrecv): the thunk is
+      // refused above, and the fallthrough below would answer the instance's property table (undefined)
+      // where JS answers the method. Refused here, at compile time.
+      if (baseInfo !== null && descendantDeclaresPlainMethod(baseInfo, expr.name.text)) {
+        L.unsupported("SC1090", expr, `reading '${expr.name.text}' from a value of type '${L.checker.typeToString(L.typeOf(expr.expression))}' (a method declared only by a subclass, read as a value)`);
+        return dynUndefinedExpr(locOf(expr));
+      }
     }
     // `C.prototype.missing` -- a member the class neither declares nor
     // inherits: JavaScript answers undefined (mysql2's binary_row fills a type
