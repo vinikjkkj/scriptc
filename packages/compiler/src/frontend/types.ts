@@ -2269,6 +2269,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       return viaSideTable;
     }
   }
+  // `this["k"]` over the polymorphic `this` of a class (bson's abstract
+  // BSONValue: `get [bsonType](): this["_bsontype"]`). The checker keeps it
+  // symbolic in the declaring class; the class is registered only if its
+  // members map, so one such annotation rejected the whole base and every
+  // subclass then refused "extending classes not declared in the program".
+  const viaThisIndexed = mapThisIndexedAccess(type, ctx);
+  if (viaThisIndexed !== null) return viaThisIndexed;
   const widened = checker.getBaseTypeOfLiteralType(type);
   const flags = widened.flags;
 
@@ -6354,6 +6361,33 @@ function mapGenericAwaitedAlias(type: ts.Type, ctx: TypeMapperCtx): IrType | nul
  * the same access against the concrete T, so the shapes intern equal);
  * disagreeing fields would need a union whose arms this relation cannot
  * vouch for — those stay unmapped, keeping their fences. */
+/** `this["k"]` over the polymorphic `this` of a class declaration, where k
+ * names a member of that class. Every subclass override is a subtype of the
+ * declared member (TypeScript's override rule), so the declared member's type
+ * bounds every value the read can name. Answered only when that member maps to
+ * a primitive representation (string, number, boolean): every subtype of such
+ * a member shares that representation, so no upcast is involved. Object-typed
+ * members keep refusing. */
+function mapThisIndexedAccess(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
+  const { checker } = ctx;
+  if (!type.isIndexedAccessType()) return null;
+  const obj = type.getObjectType();
+  if (!(obj.flags & ts.TypeFlags.TypeParameter)) return null;
+  const idx = type.getIndexType();
+  if (!idx.isStringLiteralType()) return null;
+  const sym = obj.getSymbol();
+  if (!sym) return null;
+  // The this-type's symbol IS the class symbol; a named type parameter's
+  // symbol declares a TypeParameter node, which this rule must not claim.
+  const decls = checker.declarationsOf(sym);
+  if (decls.length === 0 || !decls.every((d) => ts.isClassDeclaration(d) || ts.isClassExpression(d))) return null;
+  const prop = checker.getPropertyOfType(checker.getDeclaredTypeOfSymbol(sym), idx.value);
+  if (!prop) return null;
+  const memberT = mapType(checker.getTypeOfSymbol(prop), ctx);
+  if (memberT === null) return null;
+  return memberT.kind === "string" || memberT.kind === "f64" || memberT.kind === "bool" ? memberT : null;
+}
+
 function mapGenericIndexedAccess(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const { resolveTypeParam, shapes } = ctx;
   if (!resolveTypeParam || !type.isIndexedAccessType()) return null;
