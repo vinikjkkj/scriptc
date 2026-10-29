@@ -9826,13 +9826,16 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
   export function superIsNested(body: ts.Block): boolean {
     let total = 0;
     let returns = false;
-    const stack: ts.Node[] = [body];
+    // A return leaves THIS constructor only when it is not inside a nested
+    // function: the walk tracks whether it is under one.
+    const stack: { node: ts.Node; nested: boolean }[] = [{ node: body, nested: false }];
     while (stack.length > 0) {
-      const n = stack.pop()!;
+      const { node: n, nested } = stack.pop()!;
       if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.SuperKeyword) total++;
-      if (ts.isReturnStatement(n)) returns = true;
+      if (ts.isReturnStatement(n) && !nested) returns = true;
+      const inner = nested || ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n);
       ts.forEachChild(n, (c) => {
-        stack.push(c);
+        stack.push({ node: c, nested: inner });
       });
     }
     let top = 0;
