@@ -5225,7 +5225,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // and every arm below is what it was.
       {
         const atWidth = L.numberConvAtDynWidth(arg);
-        if (atWidth) return { kind: "libCall", fn: "dyn.toNumber", args: [atWidth], type: F64, loc };
+        if (atWidth) return { kind: "libCall", fn: "dyn.numberOf", args: [atWidth], type: F64, loc };
       }
       if (arg.type.kind === "f64") return { kind: "libCall", fn: "num.canon", args: [arg], type: F64, loc }; // a marker is ToNumber NaN (scr_runtime.h)
       if (arg.type.kind === "bool") {
@@ -5272,28 +5272,30 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // anyOrigin is the discriminator rather than a syntactic test for the
       // `unknown` keyword, because it is the same question the any-tier
       // fence (anyOpFence) already asks, so the two cannot drift apart.
-      if (
-        arg.type.kind === "dyn" &&
-        (isJsSourceFile(expr.getSourceFile()) || !L.anyOrigin(argNode))
-      ) {
-        return { kind: "libCall", fn: "dyn.toNumber", args: [arg], type: F64, loc };
-      }
-      // The `any` tier's own words. `Number of unknown values` was the text
-      // for BOTH tiers, and it is now false for one of them: an `unknown`
-      // converts here. A reader with an `any` was told the conversion has no
-      // lowering while the same call on the same runtime value one line
-      // away compiled. Name the tier, and give advice that was compiled and
-      // run before it was written down: `Number(x as unknown)` takes the
-      // ToNumber path, because the cast makes the argument's checker type
-      // `unknown` and anyOrigin answers false for it.
+      //
+      // TS `any` takes the same route (2026-10-29, mgnumconv). Its value is
+      // the same checked-dynamic tree; the refusal that stood here sent
+      // `Number(JSON.parse(s).expires_in)` (mongodb azure_machine_workflow.ts:54)
+      // to a deferred engine that a static build does not include. ToNumber
+      // needs no engine: scr_dyn_to_number answers every primitive kind and
+      // runs ToPrimitive over the reference kinds. The `anyOrigin` split is
+      // gone for Number only; the binary operators keep their own fences.
       if (arg.type.kind === "dyn") {
-        L.noLowering(
-          "Number of an 'any'-typed value",
-          argNode,
-          "an 'unknown' converts here (ECMA-262 ToNumber, the same one the arithmetic operators run) — " +
-            "cast it first: Number(x as unknown). 'any' defers to the embedded dynamic engine, " +
-            "which a static build does not include",
-        );
+        return { kind: "libCall", fn: "dyn.numberOf", args: [arg], type: F64, loc };
+      }
+      // A union of statically-typed arms (numbers, strings, booleans,
+      // null/undefined and class instances whose valueOf or toString the
+      // program declares): one tag-tested helper, Node's ToNumber per arm.
+      // An arm with no such reading keeps the refusal below.
+      if (arg.type.kind === "union") {
+        const helper = numberUnionHelper(L, arg.type, loc);
+        if (helper !== null) return { kind: "call", callee: helper, args: [arg], type: F64, loc };
+      }
+      // A class instance on its own (not inside a union) takes the same
+      // ToPrimitive(number) conversion as a union arm.
+      if (arg.type.kind === "object") {
+        const conv = classInstanceToNumberIR(L, arg, loc);
+        if (conv !== null) return conv;
       }
       L.noLowering(
         `Number of ${L.fmt(arg.type)} values`,
@@ -8219,6 +8221,148 @@ const inliningPredicates = new Set<ts.Symbol>();
     return L.findMethodOn(info, "valueOf") !== null ||
       findGenericMethodOn(L, info, "valueOf") !== null ||
       L.overrideBelow(info, "valueOf");
+  }
+
+  /** `obj.valueOf()` as a dispatch over a CLASS INSTANCE: the same
+   * source-declared, concrete method classToStringDispatch calls for
+   * toString, with the declared return type. Null (a fence, never a guess)
+   * when the method cannot be called from here: generic, runtime-provided,
+   * abstract with no concrete override, a vtable slot the view does not fit,
+   * or a required parameter. */
+  export function classValueOfDispatch(L: Lowerer, recv: IrExpr, loc: SrcLoc): IrExpr | null {
+    if (recv.type.kind !== "object") return null;
+    const info = L.classes.get(recv.type.className);
+    if (!info || (!info.decl && info.protoClass !== true)) return null;
+    if (findGenericMethodOn(L, info, "valueOf") !== null) return null;
+    const found = L.findMethodOn(info, "valueOf");
+    if (!found || found.declarer.builtinError) return null;
+    const virtual = L.overrideBelow(info, "valueOf");
+    if (found.sig.abstract === true && !virtual) return null;
+    if (virtual && !virtualViewFitsSlot(L, info, "valueOf")) return null;
+    const absent: IrExpr[] = [];
+    for (const p of found.sig.params) {
+      if (p.mode !== "omittable") return null;
+      const a = omittedArgFor(L, p.type, loc);
+      if (!a) return null;
+      absent.push(a);
+    }
+    if (virtual) {
+      L.noteVirtualEdge(info, "valueOf");
+      return { kind: "virtualCall", className: info.def.name, method: "valueOf",
+        args: [L.upcastTo(recv, info.def.name), ...absent], type: found.sig.ret, loc };
+    }
+    L.noteEdge(`%${found.declarer.def.name}.valueOf`);
+    return { kind: "call", callee: `%${found.declarer.def.name}.valueOf`,
+      args: [L.upcastTo(recv, found.declarer.def.name), ...absent], type: found.sig.ret, loc };
+  }
+
+  /** ToNumber of ONE statically-typed scalar arm (ECMA-262 7.1.4): number
+   * itself, boolean 1/0, string through StringToNumber, undefined NaN, null
+   * +0. A scalar-only union recurses through its own helper. Null for any
+   * other kind (the caller keeps its fence). */
+  export function scalarToNumberIR(L: Lowerer, v: IrExpr, loc: SrcLoc): IrExpr | null {
+    const t = v.type;
+    if (t.kind === "f64") return { kind: "libCall", fn: "num.canon", args: [v], type: F64, loc };
+    if (t.kind === "bool") {
+      return { kind: "ternary", cond: v, then: { kind: "numLit", value: 1, type: F64, loc },
+        else_: { kind: "numLit", value: 0, type: F64, loc }, type: F64, loc };
+    }
+    if (t.kind === "string") return { kind: "libCall", fn: "num.fromString", args: [v], type: F64, loc };
+    if (t.kind === "undefinedT") return { kind: "numLit", value: NaN, type: F64, loc };
+    if (t.kind === "nullT") return { kind: "numLit", value: 0, type: F64, loc };
+    if (t.kind === "union") {
+      // Only a union of scalars: a class arm inside a valueOf's own answer
+      // would re-enter the same helper without end.
+      const def = L.unions.get(t.unionId);
+      if (!def || !def.arms.every((a) => a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
+        a.kind === "undefinedT" || a.kind === "nullT")) return null;
+      const helper = numberUnionHelper(L, t, loc);
+      return helper === null ? null : { kind: "call", callee: helper, args: [v], type: F64, loc };
+    }
+    return null;
+  }
+
+  /** ToNumber of a CLASS INSTANCE: ToPrimitive with the NUMBER hint, which
+   * asks valueOf first and falls to toString when valueOf answers an object
+   * (or is Object.prototype's, which answers the object itself). A declared
+   * valueOf that answers a scalar is converted from that scalar; anything
+   * else takes the toString answer, which is exactly classInstanceToString
+   * (a dispatch, or the constant "[object Object]" for a class with no
+   * toString anywhere, whose ToNumber is NaN). A Symbol.toPrimitive member
+   * is refused earlier in class lowering. Null keeps the fence. */
+  export function classInstanceToNumberIR(L: Lowerer, recv: IrExpr, loc: SrcLoc): IrExpr | null {
+    const direct = classInstanceToNumberStatic(L, recv, loc);
+    if (direct !== null) return direct;
+    // The static reading cannot close: a valueOf typed `object` (DYN in the
+    // IR) may answer a primitive at run time, or a toString the class does
+    // not carry statically. The class value crosses into the checked-dynamic
+    // tree and the runtime runs the same ToPrimitive over its member table
+    // (scr_dyn_to_primitive). Only a source-declared class with a boxable
+    // identity takes it; a class the box cannot carry keeps the fence.
+    if (recv.type.kind !== "object") return null;
+    const info = L.classes.get(recv.type.className);
+    if (info?.decl && canBoxClassIntoDyn(recv.type.className)) {
+      return { kind: "libCall", fn: "dyn.numberOf", args: [{ kind: "dynFrom", value: recv, type: DYN, loc }], type: F64, loc };
+    }
+    return null;
+  }
+
+  function classInstanceToNumberStatic(L: Lowerer, recv: IrExpr, loc: SrcLoc): IrExpr | null {
+    if (classHasOwnValueOf(L, recv.type)) {
+      const r = classValueOfDispatch(L, recv, loc);
+      if (r === null) return null;
+      if (r.type.kind === "dyn") return null;
+      if (r.type.kind !== "object" && r.type.kind !== "record") {
+        return scalarToNumberIR(L, r, loc);
+      }
+    }
+    const s = classInstanceToString(L, recv, loc);
+    if (s === null) return null;
+    return { kind: "libCall", fn: "num.fromString", args: [s], type: F64, loc };
+  }
+
+  /** Number(v) over a UNION of statically-typed arms: one lifted helper per
+   * union type, a tag-tested chain over the arms. Scalar arms convert as
+   * scalarToNumberIR does; a class-instance arm converts through its own
+   * ToPrimitive (classInstanceToNumberIR). Any other arm kind returns null,
+   * which keeps the refusal for that union. */
+  export function numberUnionHelper(L: Lowerer, t: IrType, loc: SrcLoc): string | null {
+    if (t.kind !== "union") return null;
+    const key = `nfnum:${JSON.stringify(t)}`;
+    const existing = L.arrHofHelpers.get(key);
+    if (existing) return existing;
+    const def = L.unions.get(t.unionId);
+    if (!def || def.arms.length === 0) return null;
+    const v: IrExpr = { kind: "varRef", localId: "v.0", type: t, loc };
+    let out: IrExpr | null = null;
+    for (let i = def.arms.length - 1; i >= 0; i--) {
+      const arm = def.arms[i]!;
+      const picked: IrExpr = { kind: "unionNarrow", unionId: t.unionId, tag: i, value: v, type: arm, loc };
+      let val: IrExpr | null;
+      if (arm.kind === "object") val = classInstanceToNumberIR(L, picked, loc);
+      else val = scalarToNumberIR(L, picked, loc);
+      if (val === null) return null;
+      out = out === null ? val : {
+        kind: "ternary",
+        cond: { kind: "unionIsTag", unionId: t.unionId, tag: i, negated: false, value: v, type: BOOL, loc },
+        then: val,
+        else_: out,
+        type: F64,
+        loc,
+      };
+    }
+    if (out === null) return null;
+    const name = `%nfnum.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, name);
+    L.liftedFns.push({
+      name,
+      params: [{ localId: "v.0", name: "v", type: t }],
+      returnType: F64,
+      locals: [{ id: "v.0", name: "v", type: t, mutable: false }],
+      body: [{ kind: "return", value: out, loc }],
+      loc,
+    });
+    return name;
   }
 
 /** pureReceiverNode plus the empty object literal — the default-toString
@@ -15982,4 +16126,5 @@ function bufOnlyDynCall(L: Lowerer, call: ts.CallExpression, access: ts.Property
   };
   return L.coerceInto(call, dynCall, want);
 }
+
 

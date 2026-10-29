@@ -5634,6 +5634,8 @@ export type IrLibFn =
    * ("expected number at $, got object") that names the site. Borrows;
    * throws only on those kinds (may-throw seed set). */
   | "dyn.toNumber"
+  /** Number(v) over a checked-dynamic value: the same ToNumber as dyn.toNumber, except a BigInt answers its nearest double (Number(5n) is 5; the arithmetic conversion refuses it) and a Symbol throws the TypeError Number() throws. Borrows; throws on the reference kinds like dyn.toNumber. */
+  | "dyn.numberOf"
   /** JS `+` over checked-dynamic operands (ECMA-262 13.15.3,
    * ApplyStringOrNumericBinaryOperator): ToPrimitive both with no hint,
    * then EITHER side being a String makes it CONCATENATION of the two
@@ -13530,6 +13532,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // reference kinds, whose ToPrimitive would need a prototype chain the
   // dyn model does not hold.
   "dyn.toNumber",
+  "dyn.numberOf",
   "dyn.add",
   "dyn.lt",
   "dyn.le",

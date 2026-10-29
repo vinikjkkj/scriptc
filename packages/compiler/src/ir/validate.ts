@@ -192,6 +192,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // because its result kind is a runtime property of the operands
   // (either side a string makes it concatenation).
   "dyn.toNumber": { argTypes: [DYN], result: F64 },
+  "dyn.numberOf": { argTypes: [DYN], result: F64 },
   "dyn.add": { argTypes: [DYN, DYN], result: DYN },
   "dyn.lt": { argTypes: [DYN, DYN], result: BOOL },
   "dyn.le": { argTypes: [DYN, DYN], result: BOOL },
