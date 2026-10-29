@@ -7434,7 +7434,7 @@ const DYN_PROTO_METHOD_NAMES = new Set<string>([
   // shared constant: they are dyn-CLAIMED (the dispatch set below) and
   // the claim runs first — the filter/flatMap arrangement.
   ...STRING_HTML_METHODS,
-  "codePointAt", "isWellFormed", "localeCompare", "normalize", "toLocaleLowerCase", "toLocaleUpperCase", "toWellFormed",
+  "isWellFormed", "localeCompare", "normalize", "toLocaleLowerCase", "toLocaleUpperCase", "toWellFormed",
   // Number.prototype
   "toExponential", "toFixed", "toPrecision",
 ]);
@@ -7552,7 +7552,7 @@ const DYN_STRING_ONLY_METHODS = new Set([
   "charCodeAt", "charAt", "startsWith", "endsWith", "substring", "substr", "repeat",
   "trim", "trimStart", "trimEnd", "split", "padStart", "padEnd",
   "toLowerCase", "toUpperCase", "normalize", "replace", "replaceAll", "match", "matchAll",
-  "search",
+  "search", "codePointAt",
 ]);
 
 /** `Array.isArray(v)` — a real runtime test on `unknown` values (the checked-dynamic tree's

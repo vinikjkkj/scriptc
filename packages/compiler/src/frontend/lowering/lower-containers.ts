@@ -7441,6 +7441,122 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     return { name, params, returnType: STRING, locals, body, loc };
   }
 
+  /** `s.codePointAt(i)` — String.prototype.codePointAt (ECMA-262
+   * 22.1.3.4) lowered to an interned `%str.codePointAt.<n>` helper that
+   * answers the `number | undefined` union. Built ENTIRELY from the
+   * existing string intrinsics (length, charCodeAt) and the ToNumber-
+   * ToIntegerOrInfinity arithmetic `.at` uses, so both backends get it
+   * for free and no new runtime unit exists:
+   *   - the index is ToIntegerOrInfinity(i): NaN → 0, fractions truncate
+   *     toward zero (`codePointAt(-0.5)` is index 0), and an index outside
+   *     [0, length) — ±Infinity included — is the undefined arm;
+   *   - the unit at the index is charCodeAt; a LEAD surrogate directly
+   *     followed by a TRAIL one combines into the astral code point; any
+   *     other unit (a trail half read on its own, an ASCII or BMP unit)
+   *     answers its own code unit. */
+  function codePointAtHelper(L: Lowerer, resultT: { kind: "union"; unionId: string }, loc: SrcLoc): string {
+    const key = `codePointAt:${resultT.unionId}`;
+    const existing = L.arrHofHelpers.get(key);
+    if (existing) return existing;
+    const name = `%str.codePointAt.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, name);
+    const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const bin = (op: "+" | "-" | "*" | "<" | ">=", left: IrExpr, right: IrExpr): IrExpr =>
+      ({ kind: "bin", op, left, right, type: op === "+" || op === "-" || op === "*" ? F64 : BOOL, loc });
+    const s = ref("s.0", STRING);
+    const i = ref("i.0", F64);
+    const n = ref("n.0", F64);
+    const t = ref("t.0", F64);
+    const c = ref("c.0", F64);
+    const d = ref("d.0", F64);
+    const unitAt = (at: IrExpr): IrExpr => ({ kind: "strIntrinsic", method: "charCodeAt", receiver: s, args: [at], type: F64, loc });
+    const undefTag = L.armTag(resultT.unionId, UNDEFINED_T);
+    const foundTag = L.armTag(resultT.unionId, F64);
+    const miss: IrExpr = {
+      kind: "unionWrap", unionId: resultT.unionId, tag: undefTag,
+      value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: resultT, loc,
+    };
+    const found = (value: IrExpr): IrExpr =>
+      ({ kind: "unionWrap", unionId: resultT.unionId, tag: foundTag, value, type: resultT, loc });
+    const floorOf = (e: IrExpr): IrExpr => ({ kind: "libCall", fn: "math.floor", args: [e], type: F64, loc });
+    const ifStmt = (cond: IrExpr, then: IrStmt[]): IrStmt => ({ kind: "if", cond, then, else_: null, loc });
+    const body: IrStmt[] = [
+      { kind: "varDecl", localId: "n.0", init: { kind: "strIntrinsic", method: "length", receiver: s, args: [], type: F64, loc }, loc },
+      // ToIntegerOrInfinity(i), exactly as lowerNpmStaticSafeIndexRead does it.
+      { kind: "varDecl", localId: "t.0", init: floorOf(i), loc },
+      ifStmt(bin("<", i, num(0)), [{ kind: "assign", localId: "t.0", value: bin("-", num(0), floorOf(bin("-", num(0), i))), loc }]),
+      ifStmt({ kind: "libCall", fn: "num.isNaN", args: [i], type: BOOL, loc }, [{ kind: "assign", localId: "t.0", value: num(0), loc }]),
+      ifStmt(bin("<", t, num(0)), [{ kind: "return", value: miss, loc }]),
+      ifStmt(bin(">=", t, n), [{ kind: "return", value: miss, loc }]),
+      { kind: "varDecl", localId: "c.0", init: unitAt(t), loc },
+      { kind: "varDecl", localId: "d.0", init: num(0), loc },
+      // A lead surrogate (D800..DBFF) followed by a trail one (DC00..DFFF).
+      ifStmt(bin(">=", c, num(0xD800)), [
+        ifStmt(bin("<", c, num(0xDC00)), [
+          ifStmt(bin("<", bin("+", t, num(1)), n), [
+            { kind: "assign", localId: "d.0", value: unitAt(bin("+", t, num(1))), loc },
+            ifStmt(bin(">=", d, num(0xDC00)), [
+              ifStmt(bin("<", d, num(0xE000)), [{
+                kind: "return",
+                value: found(bin("+", bin("+", bin("*", bin("-", c, num(0xD800)), num(0x400)), bin("-", d, num(0xDC00))), num(0x10000))),
+                loc,
+              }]),
+            ]),
+          ]),
+        ]),
+      ]),
+      { kind: "return", value: found(c), loc },
+    ];
+    L.liftedFns.push({
+      name,
+      params: [
+        { localId: "s.0", name: "s", type: STRING },
+        { localId: "i.0", name: "i", type: F64 },
+      ],
+      returnType: resultT,
+      locals: [
+        { id: "s.0", name: "s", type: STRING, mutable: false },
+        { id: "i.0", name: "i", type: F64, mutable: false },
+        { id: "n.0", name: "n", type: F64, mutable: false },
+        { id: "t.0", name: "t", type: F64, mutable: true },
+        { id: "c.0", name: "c", type: F64, mutable: false },
+        { id: "d.0", name: "d", type: F64, mutable: true },
+      ],
+      body,
+      loc,
+    });
+    return name;
+  }
+
+  /** `s.codePointAt(i)` on a string receiver (the call form only). Null when
+   * the receiver is not a plain string or the member is not the stdlib's;
+   * the caller then keeps the generic fence. The index is ToNumber'd when
+   * it is dyn (a JS `any` index) and otherwise must already be a number. */
+  export function lowerCodePointAtCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression, dynReceiver?: () => IrExpr,): IrExpr | null {
+    if (dynReceiver === undefined) {
+      if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "string") return null;
+      if (!L.isStdlibMember(access)) return null;
+    }
+    const loc = locOf(call);
+    if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) {
+      L.noLowering(`.codePointAt with ${call.arguments.length} argument${call.arguments.length === 1 ? "" : "s"} on strings`, call);
+    }
+    // A dyn receiver arrives pre-validated as a string (dynStringReceiver).
+    const receiver = dynReceiver ? dynReceiver() : L.lowerExpr(access.expression);
+    let index = L.lowerExpr(call.arguments[0]!);
+    if (index.type.kind === "dyn") {
+      index = { kind: "libCall", fn: "dyn.toNumber", args: [index], type: F64, loc };
+    } else if (index.type.kind !== "f64") {
+      L.noLowering(`.codePointAt on a '${L.fmt(index.type)}' index (pass a number)`, call.arguments[0]!);
+    }
+    const resultT = L.withUndefinedArm(F64);
+    if (resultT.kind !== "union") throw new Error("emitter bug: codePointAt result is not a union");
+    const helper = codePointAtHelper(L, resultT, loc);
+    return { kind: "call", callee: helper, args: [receiver, index], type: resultT, loc };
+  }
+
 /** `s.slice(1, 4)` and friends → strIntrinsic. Null when this isn't an
    * ambient string method call (caller keeps its generic rejection). Missing
    * optional arguments are omitted from `args` — the backend fills the
@@ -7452,6 +7568,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     dynReceiver?: () => IrExpr,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
     if (dynReceiver === undefined && access.name.text === "localeCompare") return lowerLocaleCompareCall(L, call, access);
+    if (access.name.text === "codePointAt") return lowerCodePointAtCall(L, call, access, dynReceiver);
     const entry = own(STR_METHODS, access.name.text);
     if (!entry) return null;
     // A validated dyn receiver (`pkg.name.replace(...)` on a JSON.parse
