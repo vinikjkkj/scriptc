@@ -33,7 +33,7 @@ import { unsupportedModuleFeatureOf } from "../shared.js";
 import { FN_CTOR_EXPORT_GLOBALS, declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf, jsonRequireTypeOverride } from "./lower-modules.js";
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
 import { ambientErasedIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
-import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
+import { expandoMemberRead, expandoWritableTarget, exportEqualsNamedMemberRead } from "./lower-expando.js";
 import { LITERAL_IGNORED_KEYS, lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
@@ -1651,6 +1651,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       L.unsupported("SC1090", expr, "typeof expressions on statically-typed values");
     }
     if (ts.isIdentifier(expr)) {
+      // A NAMED import of a TS `export =` module read by a CJS-run importer:
+      // every reference is the exported value's member (lower-expando.ts).
+      const namedRead = exportEqualsNamedMemberRead(L, expr);
+      if (namedRead !== null) return namedRead;
       if (L.isSelfReference(expr)) {
         return { kind: "selfRef", type: L.ctx.selfType!, loc };
       }
