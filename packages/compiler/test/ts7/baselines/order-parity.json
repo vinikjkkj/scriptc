@@ -6406,6 +6406,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16282-covariant-return-eventemitter-rooted.ts": {
+   "order": [
+    "<repo>/tests/corpus/16282-covariant-return-eventemitter-rooted.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16283-covariant-return-stream-rooted.ts": {
+   "order": [
+    "<repo>/tests/corpus/16283-covariant-return-stream-rooted.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1629-require-main-filename.cjs": {
    "order": [
     "<repo>/tests/corpus/1629-require-main-filename.cjs"
