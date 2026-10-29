@@ -8102,6 +8102,8 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
         // on the non-nullish path is the same box. Property targets keep a
         // distinct fence: accessors would make the always-write observable.
         if (!ts.isIdentifier(expr.left)) {
+          const logical = lowerLogicalAssignStmt(L, expr, "??");
+          if (logical !== null) return logical;
           L.unsupported(
             "SC1090",
             expr.left,
@@ -8175,6 +8177,9 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
         opKind <= ts.SyntaxKind.LastCompoundAssignment
       ) {
         // Everything else is covered above; what remains is &&= and ||=.
+        const logicalOp = opKind === ts.SyntaxKind.BarBarEqualsToken ? "||" : "&&";
+        const logical = lowerLogicalAssignStmt(L, expr, logicalOp);
+        if (logical !== null) return logical;
         L.unsupported("SC1090", expr, "logical assignment (&&=, ||=) — write the if out");
       }
     }
@@ -8467,30 +8472,45 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     rhsNode: ts.Expression | null,
   ): IrStmt | null {
     if (target.questionDotToken !== undefined) return null;
-    if (!repeatableRecvExpr(L, target.expression)) return null;
-    if (!repeatableIndexExpr(target.argumentExpression)) return null;
     const loc = locOf(node);
-    const read0 = L.lowerExpr(target);
-    // An index-signature read answers an ABSENT key with undefined in JS
-    // (`c[k] += 1` stores NaN, `s[k] += "!"` stores "undefined!"); the typed
-    // read has no undefined to answer with, so combine over the dyn-width
-    // read and let the element write coerce the result into its slot.
-    const wide = L.recordKeyReadAtSlotWidth(read0, DYN);
-    const read = wide ?? read0;
-    const rhs: IrExpr = rhsNode !== null ? L.lowerExpr(rhsNode) : { kind: "numLit", value: 1, type: F64, loc };
-    const combined = compoundCombine(L, compound, read, rhs, read.type, node, target, rhsNode ?? target, loc);
-    if (!combined) return null;
-    const value = combined.toSlot(combined.natural);
+    // JS evaluates `o` and `k` ONCE, then reads `o[k]`, the right operand, combines and stores. A receiver
+    // or index that is not repeatable is pinned into a hidden local ahead of the read (the same hoist
+    // lowerElemValuePosition makes); a repeatable one is lowered again by the read and the write, which
+    // is unobservable for a field chain.
+    const stmts: IrStmt[] = [];
+    const pinned: ts.Node[] = [];
+    const hoist = (e: ts.Expression, name: string): void => {
+      const ir = L.lowerExpr(e);
+      const tmp = L.declareHiddenLocal(name, ir.type);
+      stmts.push({ kind: "varDecl", localId: tmp.id, init: ir, loc });
+      L.preLowered.set(e, { kind: "varRef", localId: tmp.id, type: ir.type, loc });
+      pinned.push(e);
+    };
     const key: ts.Node = rhsNode ?? node;
-    const fake = Object.create(node, {
-      left: { value: target },
-      right: { value: key },
-    }) as ts.BinaryExpression;
-    L.preLowered.set(key, value);
     try {
-      return L.lowerElementWrite(fake);
+      if (!repeatableRecvExpr(L, target.expression)) hoist(target.expression, "%elRecv");
+      if (!repeatableIndexExpr(target.argumentExpression)) hoist(target.argumentExpression, "%elIdx");
+      const read0 = L.lowerExpr(target);
+      // An index-signature read answers an ABSENT key with undefined in JS
+      // (`c[k] += 1` stores NaN, `s[k] += "!"` stores "undefined!"); the typed
+      // read has no undefined to answer with, so combine over the dyn-width
+      // read and let the element write coerce the result into its slot.
+      const wide = L.recordKeyReadAtSlotWidth(read0, DYN);
+      const read = wide ?? read0;
+      const rhs: IrExpr = rhsNode !== null ? L.lowerExpr(rhsNode) : { kind: "numLit", value: 1, type: F64, loc };
+      const combined = compoundCombine(L, compound, read, rhs, read.type, node, target, rhsNode ?? target, loc);
+      if (!combined) return null;
+      const value = combined.toSlot(combined.natural);
+      const fake = Object.create(node, {
+        left: { value: target },
+        right: { value: key },
+      }) as ts.BinaryExpression;
+      L.preLowered.set(key, value);
+      pinned.push(key);
+      const write = L.lowerElementWrite(fake);
+      return stmts.length > 0 ? { kind: "block", body: [...stmts, write], loc } : write;
     } finally {
-      L.preLowered.delete(key);
+      for (const p of pinned) L.preLowered.delete(p);
     }
   }
 
@@ -8612,12 +8632,94 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     }
   }
 
+  /** `t op= e` for the logical operators (`||=`, `&&=`, `??=`) on a target that is not a plain local
+   * (a field, a dyn field, an element) and on a local under `||=` / `&&=`, as a STATEMENT.
+   *
+   * JS: evaluate the target's object and key ONCE, read the target, test the read, and ONLY when the test
+   * asks for it evaluate `e` and store. The desugar: pin an unrepeatable receiver / key into hidden locals
+   * (the same pins the compound paths use), read the target into a hidden local, then `if (test(read)) <t = e>`
+   * where `<t = e>` is the ordinary assignment lowering, so the store keeps every target rule (accessors,
+   * dyn keyed stores, typed-array coercion) and its receiver/key come from the same pins. A test that can never
+   * fire (`??=` on a type with no nullish arm) emits the read alone. Null leaves the caller's fence in place. */
+  function lowerLogicalAssignStmt(L: Lowerer, expr: ts.BinaryExpression, op: "||" | "&&" | "??"): IrStmt | null {
+    const loc = locOf(expr);
+    const target = expr.left;
+    if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
+      if (target.questionDotToken !== undefined) return null;
+      if (target.expression.kind === ts.SyntaxKind.SuperKeyword) return null;
+    }
+    const stmts: IrStmt[] = [];
+    const pinned: ts.Node[] = [];
+    const hoist = (e: ts.Expression, name: string): void => {
+      const ir = L.lowerExpr(e);
+      if (isUnitType(ir.type)) throw new Error("unit");
+      const tmp = L.declareHiddenLocal(name, ir.type);
+      stmts.push({ kind: "varDecl", localId: tmp.id, init: ir, loc });
+      L.preLowered.set(e, { kind: "varRef", localId: tmp.id, type: ir.type, loc });
+      pinned.push(e);
+    };
+    try {
+      if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
+        if (!repeatableRecvExpr(L, target.expression)) hoist(target.expression, "%logRecv");
+        if (ts.isElementAccessExpression(target) && !repeatableIndexExpr(target.argumentExpression)) {
+          hoist(target.argumentExpression, "%logKey");
+        }
+      }
+      const cur = L.lowerExpr(target);
+      const curLocal = L.declareHiddenLocal("%logCur", cur.type);
+      stmts.push({ kind: "varDecl", localId: curLocal.id, init: cur, loc });
+      const curRef = (): IrExpr => ({ kind: "varRef", localId: curLocal.id, type: cur.type, loc });
+      let cond: IrExpr | null;
+      if (op === "??") {
+        cond = nullishTestOf(L, cur.type, curRef, loc);
+      } else {
+        // ToBoolean: a dyn value asks the runtime kind test (toBool's operand is typed).
+        const truthy: IrExpr = cur.type.kind === "dyn"
+          ? { kind: "dynTest", test: "truthy", value: curRef(), type: BOOL, loc }
+          : { kind: "toBool", operand: curRef(), type: BOOL, loc };
+        cond = op === "||" ? { kind: "unary", op: "!", operand: truthy, type: BOOL, loc } : truthy;
+      }
+      if (cond === null) return { kind: "block", body: stmts, loc };
+      // The store: the plain `t = e` assignment, lowered through the statement path.
+      const assignNode = Object.create(expr, {
+        operatorToken: { value: Object.create(expr.operatorToken, { kind: { value: ts.SyntaxKind.EqualsToken } }) },
+      }) as ts.BinaryExpression;
+      const store = lowerExprStatement(L, assignNode);
+      stmts.push({ kind: "if", cond, then: [store], else_: null, loc });
+      return { kind: "block", body: stmts, loc };
+    } catch (e) {
+      if (e instanceof Error && e.message === "unit") return null;
+      throw e;
+    } finally {
+      for (const p of pinned) L.preLowered.delete(p);
+    }
+  }
+
+  /** The test `v == null` (undefined or null) on a value of type `t`, or null when no value of `t` can be
+   * nullish (the checker's word, which decides `??=` statically: JS then never stores). */
+  function nullishTestOf(L: Lowerer, t: IrType, ref: () => IrExpr, loc: SrcLoc): IrExpr | null {
+    if (t.kind === "dyn") return { kind: "dynTest", test: "nullish", value: ref(), type: BOOL, loc };
+    if (t.kind !== "union") return null;
+    const def = L.unions.get(t.unionId);
+    if (!def) return null;
+    let out: IrExpr | null = null;
+    for (const arm of def.arms) {
+      if (!isUnitType(arm)) continue;
+      const tag = L.armTag(t.unionId, arm);
+      if (tag < 0) return null;
+      const test: IrExpr = { kind: "unionIsTag", unionId: t.unionId, tag, negated: false, value: ref(), type: BOOL, loc };
+      out = out === null ? test : { kind: "logical", op: "||", left: out, right: test, type: BOOL, loc };
+    }
+    return out;
+  }
+
   function lowerElemCompound(L: Lowerer, expr: ts.BinaryExpression, compound: CompoundOp): IrStmt | null {
     const target = expr.left as ts.ElementAccessExpression;
     if (target.questionDotToken !== undefined) return null;
     const recvNode = target.expression;
-    if (!repeatableRecvExpr(L, recvNode)) return null;
-    if (!repeatableIndexExpr(target.argumentExpression)) return null;
+    if (!repeatableRecvExpr(L, recvNode) || !repeatableIndexExpr(target.argumentExpression)) {
+      return lowerElemCompoundGeneral(L, expr, target, compound, expr.right);
+    }
     const recv = L.lowerExpr(recvNode);
     const numericArray = recv.type.kind === "array" && recv.type.elem.kind === "f64";
     // bytes<buf> is an ArrayBuffer: opaque, no elements to index.

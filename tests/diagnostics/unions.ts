@@ -90,8 +90,8 @@ function mixedDefault(x: string | undefined): string | number {
 }
 console.log(mixedDefault("s"));
 
-// `??=` writes through variables only; property targets could have
-// accessors, where assign-always vs assign-when-nullish is observable.
+// `??=` on a property target stores only when the slot is nullish: a getter and
+// setter pair is read once and written only on that arm (the store is conditional).
 const holder: { slot?: string } = {};
 holder.slot ??= "v";
 
