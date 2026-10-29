@@ -118,7 +118,7 @@ stdlib-fence.ts:44:14 - error SC2020: 'string.toLocaleUpperCase' is part of the 
      |              ^~~~~~~~~~~~~~~~~~~~~~~
   45 | const limited = "a,b,c".split(",", 2); // the string-separator split lowers; the limit form stays fenced
 
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String and the composed new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone
 
 stdlib-fence.ts:51:15 - error SC2020: '.indexOf with 2 arguments' is part of the standard library types but has no scriptc lowering yet
 
