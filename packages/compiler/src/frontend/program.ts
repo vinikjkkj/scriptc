@@ -1013,8 +1013,17 @@ function isCjsJsFile7(sf: ts.SourceFile): boolean {
 /** A TypeScript file whose only module syntax is `export = x` (the CJS
  * whole-export). Its named members are properties of the exported value. */
 export function isExportEqualsModule(sf: ts.SourceFile): boolean {
+  return exportEqualsIsCjs(sf) && sf.statements.some((stmt) => ts.isExportAssignment(stmt) && stmt.isExportEquals);
+}
+
+/** THE GATE for `export =` as CommonJS (orchestrator decision): only a .ts
+ * served through provenance (an npm dependency's own source, e.g. saslprep)
+ * under a package that is not "type": "module" is a CommonJS module whose
+ * `export =` is module.exports. Everywhere else (the repo's ESM tree, user
+ * files) `export =` keeps main's refusals: SC0001 (TS1203) and SC1012. */
+export function exportEqualsIsCjs(sf: ts.SourceFile): boolean {
   return /\.ts$/.test(sf.fileName) && !sf.isDeclarationFile &&
-    sf.statements.some((stmt) => ts.isExportAssignment(stmt) && stmt.isExportEquals);
+    isProvenanceSourceFile(sf.fileName) && nearestPackageTypeOf(sf.fileName) !== "module";
 }
 
 /** A TypeScript importer Node runs as CommonJS: a .ts file under a package
@@ -1028,7 +1037,7 @@ function isCjsTsFile7(sf: ts.SourceFile): boolean {
   if (!/\.ts$/.test(sf.fileName) || sf.isDeclarationFile) return false;
   let assigns = false;
   for (const stmt of sf.statements) {
-    if (ts.isExportAssignment(stmt) && stmt.isExportEquals) {
+    if (ts.isExportAssignment(stmt) && stmt.isExportEquals && exportEqualsIsCjs(sf)) {
       assigns = true;
       continue;
     }
@@ -2800,9 +2809,11 @@ function preflight7(load: LoadResult): {
    * assignment (exportEqualsModuleView), so the forced module world's
    * objection is to a shape the lowering supports. Only .ts export=
    * statements are forgiven; the rest of the checker stays on. */
-  const exportEqualsTsSuppressed = (d: ts.Diagnostic): boolean =>
-    d.code === 1203 && d.fileName !== undefined && d.pos !== undefined &&
-    /\.ts$/.test(d.fileName) && !/\.d\.ts$/.test(d.fileName);
+  const exportEqualsTsSuppressed = (p: ts.Program, d: ts.Diagnostic): boolean => {
+    if (d.code !== 1203 || d.fileName === undefined || d.pos === undefined) return false;
+    const sf = p.getSourceFile(d.fileName);
+    return sf !== undefined && exportEqualsIsCjs(sf);
+  };
   const errorsOf = (p: ts.Program): ts.Diagnostic[] => {
     const all = ts.getPreEmitDiagnostics(p);
     // First pass: every comment-side 2300's (file, name) — the partners
@@ -2824,7 +2835,7 @@ function preflight7(load: LoadResult): {
         !namespaceCalleeSuppressed(p, d) &&
         !workspaceImplicitAnySuppressed(p, d) &&
         !jsdocTypeSuppressed(p, d, commentDup) &&
-        !exportEqualsTsSuppressed(d),
+        !exportEqualsTsSuppressed(p, d),
     );
   };
 
@@ -2989,9 +3000,8 @@ function preflight7(load: LoadResult): {
         continue;
       }
       if (ts.isExportAssignment(stmt)) {
-        if (stmt.isExportEquals) {
-          // `export = x` is the CommonJS module.exports assignment: the lowering
-          // maps it onto that path (exportEqualsModuleView). No refusal here.
+        if (stmt.isExportEquals && !exportEqualsIsCjs(sf)) {
+          diags.push(unsupportedDiag("SC1012", locOf7(stmt), "export = assignments"));
         }
         continue;
       }
@@ -4266,6 +4276,7 @@ function staticElementKey(
 const exportEqualsViews = new WeakMap<ts.ExportAssignment, ts.BinaryExpression>();
 export function exportEqualsModuleView(stmt: ts.Statement): ts.BinaryExpression | null {
   if (!ts.isExportAssignment(stmt) || !stmt.isExportEquals) return null;
+  if (!exportEqualsIsCjs(stmt.getSourceFile())) return null;
   const cached = exportEqualsViews.get(stmt);
   if (cached !== undefined) return cached;
   // The ts7 facade builds no nodes, so the view is the statement's own node
