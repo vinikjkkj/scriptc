@@ -20088,6 +20088,24 @@
     "<repo>/tests/corpus/15541-bson-shape-getters-instanceof.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/15701-bson-buffer-write-undefined-length.ts": {
+   "order": [
+    "<repo>/tests/corpus/15701-bson-buffer-write-undefined-length.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15702-bson-buffer-codecs-edges.ts": {
+   "order": [
+    "<repo>/tests/corpus/15702-bson-buffer-codecs-edges.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15703-bson-ambient-buffer-alias.ts": {
+   "order": [
+    "<repo>/tests/corpus/15703-bson-ambient-buffer-alias.ts"
+   ],
+   "diags": []
   }
  }
 }
