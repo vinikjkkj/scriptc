@@ -12,6 +12,7 @@ import { STR_INTRINSIC_SIGS } from "../../ir/validate.js";
 import { definePropTableDecline } from "./lower-classes.js";
 import { isJsSourceFile, isNodeTypesPath, locOf, requireSpecOf } from "../program.js";
 import { canonicalBuiltinModule } from "../shared.js";
+import { ambientBufferProven } from "../buffer-refinement.js";
 
 /** Statement-level constructs rejected wholesale, keyed by syntax kind. */
 export const UNSUPPORTED_STMT: Partial<Record<ts.SyntaxKind, { code: keyof typeof UNSUPPORTED; feature?: string }>> = {
@@ -2219,6 +2220,11 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       // file's own export, so provenance and name check out exactly like
       // the bare-global spelling. A user module re-exporting its own
       // `Buffer` resolves to a user-file declaration and still misses.
+      // A program's AMBIENT `declare const Buffer: T` (bson's
+      // `declare const Buffer: NodeJsBufferConstructor`): the declaration emits
+      // nothing, so the reference IS the global Buffer. Provable only when T's
+      // members are all members of the global Buffer value (buffer-refinement.ts).
+      if (ambientBufferProven(L, symbol)) return "Buffer";
       const resolved = symbol.flags & ts.SymbolFlags.Alias ? L.checker.getAliasedSymbol(symbol) : symbol;
       if (!L.isStdlibSymbol(resolved)) return null;
       return resolved.name === "global" ? "globalThis" : resolved.name;

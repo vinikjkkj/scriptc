@@ -44,6 +44,7 @@ import { cjsHiddenAccessorExport, cjsInsertionOrderOf, isCjsJsFile, isNodeEsmFil
 import { nearestPackageTypeOf, nearestPkgJsonPath } from "../resolve.js";
 import { F64, IrExpr, IrStmt, IrType, STRING } from "../../ir/nodes.js";
 import { normalize as nativePath } from "node:path";
+import { ambientBufferProven } from "../buffer-refinement.js";
 
 /** True when this module declaration produces NO runtime construct at all:
  * ambient (`declare namespace/module`, `declare global`, string-named
@@ -732,6 +733,10 @@ export function ambientUndefVarRootOf(L: Lowerer, e: ts.Expression): ts.Identifi
     if (L.isStdlibSymbol(sym)) return null;
     if (ambientUndefinedFnSymbolOf(L, root) !== null) return root;
     if (ambientUndefinedClassSymbolOf(L, root) !== null) return root;
+    // `declare const Buffer: T` is NOT undefined at run time: Node defines the
+    // global Buffer and erasure leaves the reference to it (buffer-refinement.ts
+    // proves T's members are the global's).
+    if (ambientBufferProven(L, sym)) return null;
     const decls = L.checker.declarationsOf(sym);
     if (decls.length === 0) return null;
     for (const d of decls) {
