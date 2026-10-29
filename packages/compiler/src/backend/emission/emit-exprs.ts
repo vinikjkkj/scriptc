@@ -7334,6 +7334,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // take the loud dynCheck throw (may-throw seed set).
           case "dyn.toNumber":
             return finish(`scr_dyn_to_number(${arg(0)})`);
+          case "dyn.numberOf":
+            return finish(`scr_dyn_number_of(${arg(0)})`);
           case "dyn.add":
             return finish(`scr_dyn_add(${arg(0)}, ${arg(1)})`);
           case "dyn.lt":

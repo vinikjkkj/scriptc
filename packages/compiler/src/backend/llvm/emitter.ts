@@ -329,6 +329,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // standard pending check after each — one C symbol per operator so the
   // call needs no synthesized constant argument.
   "dyn.toNumber": "scr_dyn_to_number",
+  "dyn.numberOf": "scr_dyn_number_of",
   "dyn.add": "scr_dyn_add",
   "dyn.lt": "scr_dyn_lt",
   "dyn.le": "scr_dyn_le",
