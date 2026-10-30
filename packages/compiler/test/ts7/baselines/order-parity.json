@@ -21041,6 +21041,48 @@
      "<repo>/tests/corpus/16706-socket-timeout-warning-order.ts"
    ],
    "diags": []
+ },
+ "<repo>/tests/corpus/16707-socket-timeout-callback.ts": {
+   "order": [
+     "<repo>/tests/corpus/16707-socket-timeout-callback.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16708-socket-timeout-callback-zero.ts": {
+   "order": [
+     "<repo>/tests/corpus/16708-socket-timeout-callback-zero.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16709-socket-timeout-chain.ts": {
+   "order": [
+     "<repo>/tests/corpus/16709-socket-timeout-chain.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16710-socket-timeout-callback-throws.ts": {
+   "order": [
+     "<repo>/tests/corpus/16710-socket-timeout-callback-throws.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16711-socket-timeout-callback-destroyed.ts": {
+   "order": [
+     "<repo>/tests/corpus/16711-socket-timeout-callback-destroyed.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16712-socket-timeout-callback-overflow.ts": {
+   "order": [
+     "<repo>/tests/corpus/16712-socket-timeout-callback-overflow.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16713-socket-timeout-callback-pre-dial.ts": {
+   "order": [
+     "<repo>/tests/corpus/16713-socket-timeout-callback-pre-dial.ts"
+   ],
+   "diags": []
  }
  }
 }
