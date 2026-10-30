@@ -1714,17 +1714,23 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
     return { kind: "libCall", fn: "net.sockSetEncoding", args: [receiver, enc], type: VOID, loc };
   }
   if (name === "setTimeout") {
-    requireStatementPosition(L, call, "socket.setTimeout(...)");
-    if (args.length !== 1) {
+    // setTimeout(ms[, callback]) answers the socket (`return this`). The
+    // callback is a once('timeout') listener, registered only for a nonzero
+    // delay (Node removes it for 0); both forms validate the delay first.
+    if (args.length !== 1 && args.length !== 2) {
       L.noLowering(
         `setTimeout with ${args.length} arguments`,
         call,
-        "the supported form is setTimeout(ms) — register the callback separately: socket.once('timeout', ...)",
+        "the supported forms are setTimeout(ms) and setTimeout(ms, callback)",
       );
     }
     const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
     const ms = L.lowerExprExpecting(args[0]!, F64);
-    return { kind: "libCall", fn: "net.sockSetTimeout", args: [receiver, ms], type: VOID, loc };
+    if (args.length === 1) {
+      return { kind: "libCall", fn: "net.sockSetTimeout", args: [receiver, ms], type: NETSOCKET_T, loc };
+    }
+    const { cb } = lowerCallbackArg(L, args[1]!, "setTimeout callbacks", 0, () => false, "use ()", []);
+    return { kind: "libCall", fn: "net.sockSetTimeoutOn", args: [receiver, ms, cb], type: NETSOCKET_T, loc };
   }
   if (name === "pause" || name === "resume") {
     // Flow control (the struct's flag comments in scr_net.c): pause holds

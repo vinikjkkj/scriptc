@@ -1113,7 +1113,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "net.sockDestroyed": "scr_net_sock_destroyed",
   "net.sockWritable": "scr_net_sock_writable",
   "net.sockSetEncoding": "scr_net_sock_set_encoding",
-  "net.sockSetTimeout": "scr_net_sock_set_timeout",
+  "net.sockSetTimeout": "scr_net_sock_set_timeout_ret",
+  "net.sockSetTimeoutOn": "scr_net_sock_set_timeout_on",
   "net.sockUnshift": "scr_net_sock_unshift_bytes",
   "net.sockPause": "scr_net_sock_pause",
   "net.sockResume": "scr_net_sock_resume",
@@ -17856,6 +17857,19 @@ class LlEmitter {
       this.declare("declare void @scr_net_sock_on_close(ptr, ptr, ptr, i1 zeroext)");
       B.line(`call void @scr_net_sock_on_close(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr ${adapter === null ? "null" : "@" + adapter}, i1 ${args[2]!.name})`);
       return { name: "", type: e.type };
+    }
+    if (e.fn === "net.sockSetTimeoutOn") {
+      // socket.setTimeout(ms, cb): the callback is moved into the runtime
+      // (it registers or releases it on every path); the answer is the
+      // socket (+1), and the throw check follows the call.
+      const args = e.args.map((x) => this.emitExpr(x));
+      this.moveTemp(args[2]!);
+      this.declare(`declare ptr @scr_net_sock_set_timeout_on(ptr, double, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_net_sock_set_timeout_on(ptr ${args[0]!.name}, double ${args[1]!.name}, ptr ${args[2]!.name})`);
+      const out = this.own({ name: t, type: e.type });
+      this.emitPendingCheck();
+      return out;
     }
     if (
       e.fn === "net.serverOnClose" || e.fn === "net.serverOnListening" ||

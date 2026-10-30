@@ -3712,6 +3712,35 @@ void scr_net_sock_on_timeout(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool onc
   scr_net_ls_add(&s->timeout_ls, cb, NULL, once);
 }
 
+/* socket.setTimeout(ms) as an expression: Node answers the socket (`return
+ * this`). The +1 answer is what the lowering's temp owns. */
+ScrNetSocket *scr_net_sock_set_timeout_ret(ScrNetSocket *s, double ms) {
+  scr_net_sock_set_timeout(s, ms);
+  if (scr_exc_pending()) return NULL;
+  return scr_net_sock_retain(s);
+}
+
+/* socket.setTimeout(ms, cb) (Node's setStreamTimeout): a destroyed stream
+ * returns with nothing validated or registered. Otherwise the delay is
+ * validated first (a throw registers nothing), then the timer arms, and cb
+ * registers as a once('timeout') listener only when the delay is nonzero
+ * (Node's msecs === 0 branch removes it instead). */
+ScrNetSocket *scr_net_sock_set_timeout_on(ScrNetSocket *s, double ms, ScrClosure *cb /*moves*/) {
+  if (scr_net_sock_destroyed(s)) {
+    scr_closure_release(cb);
+    return scr_net_sock_retain(s);
+  }
+  double v = ms;
+  if (!scr_net_timer_duration(&v, "msecs")) {
+    scr_closure_release(cb);
+    return NULL;
+  }
+  scr_net_sock_set_timeout(s, v); /* v is already clamped: no second warning */
+  if (v == 0) scr_closure_release(cb);
+  else scr_net_sock_on_timeout(s, cb, true);
+  return scr_net_sock_retain(s);
+}
+
 /* socket.remoteAddress: the peer's address (+1), cached at first read
  * (Node's _getpeername cache: a value read while connected survives
  * destroy), or NULL — the undefined arm — for a never-read socket after

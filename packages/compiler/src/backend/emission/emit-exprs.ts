@@ -5697,9 +5697,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "http.reqSetEncoding":
             return finish(`scr_http_req_set_encoding(${arg(0)}, ${arg(1)})`);
           case "net.sockSetTimeout":
-            // Node's getTimerDuration throws ERR_OUT_OF_RANGE synchronously:
-            // the bare-statement form carries the pending check (may-throw set).
-            return stmt(`scr_net_sock_set_timeout(${arg(0)}, ${arg(1)})`);
+            // Node's getTimerDuration throws ERR_OUT_OF_RANGE synchronously and
+            // answers the socket (`return this`): the pending check and the
+            // socket temp come from finish().
+            return finish(`scr_net_sock_set_timeout_ret(${arg(0)}, ${arg(1)})`);
+          case "net.sockSetTimeoutOn": {
+            const cb = args[2]!;
+            E.moveTemp(cb);
+            return finish(`scr_net_sock_set_timeout_on(${arg(0)}, ${arg(1)}, ${cb.name})`);
+          }
           case "net.sockOnTimeout": {
             const cb = args[1]!;
             E.moveTemp(cb);

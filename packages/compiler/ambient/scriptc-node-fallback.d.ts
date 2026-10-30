@@ -2264,7 +2264,7 @@ declare module "net" {
     /* socket→socket, and socket→response (the extended-CONNECT bridge
      * leg: raw chunks become response body writes; EOF ends it). */
     pipe(destination: Socket | import("http").ServerResponse | import("http2").Http2ServerResponse): void;
-    setTimeout(ms: number): void;
+    setTimeout(ms: number, callback?: () => void): this;
     /* The paused-mode demux surface: once('readable') + read(1) +
      * unshift — read answers exactly n buffered bytes or null. */
     read(size?: number): Buffer | null;

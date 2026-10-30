@@ -10292,6 +10292,9 @@ void scr_net_sock_dial_start(ScrNetSocket *s);
  * TimeoutOverflowWarning and clamps *ms. False with the throw pending. */
 bool scr_net_timer_duration(double *ms, const char *name);
 void scr_net_sock_set_timeout(ScrNetSocket *s, double ms);
+/* The expression forms: the socket answers (+1); NULL with a throw pending. */
+ScrNetSocket *scr_net_sock_set_timeout_ret(ScrNetSocket *s, double ms);
+ScrNetSocket *scr_net_sock_set_timeout_on(ScrNetSocket *s, double ms, ScrClosure *cb /*moves*/);
 void scr_net_sock_on_timeout(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once);
 ScrStr *scr_net_sock_remote_address(ScrNetSocket *s); /* +1 or NULL (undefined arm) */
 bool scr_net_sock_encrypted(ScrNetSocket *s); /* true = TLS transport (false maps to the undefined arm) */

@@ -4490,6 +4490,7 @@ export type IrLibFn =
    * may throw). */
   | "http.resWriteHeadDyn"
   | "net.sockSetTimeout"
+  | "net.sockSetTimeoutOn"
   /** setEncoding('utf8') — 'data' delivers strings inside the chunk-encoding window; other real encodings fence loudly, unknown names throw ERR_UNKNOWN_ENCODING (may throw). */
   | "net.sockSetEncoding"
   | "http.reqSetEncoding"
@@ -13370,10 +13371,11 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // crypto.getRandomValues: Node's TypeMismatchError and QuotaExceededError (scr_webcrypto.c).
   "crypto.getRandomValues",
   "net.sockConnect", "net.sockConnectCb",
-  // socket.setTimeout(ms): Node validates the delay (getTimerDuration:
+  // socket.setTimeout(ms[, cb]): Node validates the delay (getTimerDuration:
   // ERR_OUT_OF_RANGE for negative / NaN / infinite, msecs) and throws
   // synchronously; the runtime answers with the pending exception.
   "net.sockSetTimeout",
+  "net.sockSetTimeoutOn",
   // crypto.publicEncrypt, RSA-OAEP/SHA-1 only (scr_rsa_pubenc.c). The RSA
   // key is a REMOTE peer's, not local configuration -- bad/unparseable key
   // material, a non-RSA key, or an OAEP-too-long input throws a catchable
