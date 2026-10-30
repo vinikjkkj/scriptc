@@ -459,6 +459,17 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   // island with a note, never a failed gate. Explicit opt-ins degrade
   // exactly like auto's — "the user asked for these packages" buys the
   // attempt, not a broken build.
+  // --provenance-sources: an attested package reaches the program as a cache
+  // checkout (<cache>/<sha>/…), not under node_modules, so the discovery above
+  // never sees it (resolveNpmImport answers null for registered specifiers).
+  // The default posture names every attested package: its identity is known
+  // to the provenance registry, and implicitMonoFile keys the lane on that
+  // identity for cache paths (lower-calls.ts). Explicit lists are unchanged.
+  if (defaultLane) {
+    for (const p of provenanceSources()?.packages ?? []) {
+      if (!requested.includes(p.name)) requested.push(p.name);
+    }
+  }
   let load = loadProgram(entryPath, { npmStatic: requested });
   let preflight = checkPreflight(load);
   // Library mode's fixpoint: the opted-in packages' files joined the
@@ -564,6 +575,13 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       load = loadProgram(entryPath, { npmStatic: effective });
       preflight = checkPreflight(load);
     }
+  }
+  // A package the discovery judged ineligible BEFORE the provenance names
+  // joined the set (its bare edge had no .d.ts) must not also report a
+  // fallback once it compiles statically: one status per package.
+  for (let i = statuses.length - 1; i >= 0; i--) {
+    const st = statuses[i]!;
+    if (st.status === "fallback" && effective.has(st.package)) statuses.splice(i, 1);
   }
   for (const p of requested) {
     if (effective.has(p)) statuses.push({ package: p, status: "static" });
