@@ -2301,15 +2301,6 @@ declare module "net" {
     once(event: "session", listener: (session: Buffer) => void): void;
   }
   export interface Server {
-    /* server.timeout (http.Server): the idle timer each accepted socket
-     * arms; 0 = none. Assignment is unvalidated (Node's plain property). */
-    timeout: number;
-    /* server.keepAliveTimeout (http.Server): the idle clock (plus 1000 ms) a
-     * keep-alive connection arms after each response; 0 = none; default 5000. */
-    keepAliveTimeout: number;
-    /* server.setTimeout(ms[, cb]) (http.Server): sets timeout, the callback
-     * a persistent 'timeout' listener; answers the server. */
-    setTimeout(ms: number, callback?: () => void): this;
     /* Node answers the server itself (`return this` chaining). */
     listen(port: number, callback?: () => void): Server;
     /* The positional bind address (the options form's host in argument
@@ -2411,15 +2402,28 @@ declare module "http" {
   /* IncomingMessage IS a Readable (see the interface below); the pipe
    * overload it inherits is typed in Writable. */
   import { Readable, Writable } from "stream";
-  export type Server = NetServer;
+  /* http.Server: a net.Server plus the HTTP server's own members (Node's
+   * http.Server.prototype). A plain net.Server has none of them, so the
+   * members exist only on this type: a net.Server value refuses at build. */
+  export interface Server extends NetServer {
+    /* server.timeout: the idle timer each accepted socket arms; 0 = none.
+     * Assignment is unvalidated (Node's plain property). */
+    timeout: number;
+    /* server.keepAliveTimeout: the idle clock (plus 1000 ms) a keep-alive
+     * connection arms after each response; 0 = none; default 5000. */
+    keepAliveTimeout: number;
+    /* server.setTimeout(ms[, cb]): sets timeout; the callback is a persistent
+     * 'timeout' listener; answers the server. */
+    setTimeout(ms: number, callback?: () => void): this;
+  }
   /* The Server VALUE — Node's constructor works with and without `new`
    * (test/parallel's http.Server(fn) spelling); both route to the
    * createServer lowering. */
   export const Server: {
-    new (requestListener?: (req: IncomingMessage, res: ServerResponse) => void): NetServer;
-    new (options: ServerOptions, requestListener?: (req: IncomingMessage, res: ServerResponse) => void): NetServer;
-    (requestListener?: (req: IncomingMessage, res: ServerResponse) => void): NetServer;
-    (options: ServerOptions, requestListener?: (req: IncomingMessage, res: ServerResponse) => void): NetServer;
+    new (requestListener?: (req: IncomingMessage, res: ServerResponse) => void): Server;
+    new (options: ServerOptions, requestListener?: (req: IncomingMessage, res: ServerResponse) => void): Server;
+    (requestListener?: (req: IncomingMessage, res: ServerResponse) => void): Server;
+    (options: ServerOptions, requestListener?: (req: IncomingMessage, res: ServerResponse) => void): Server;
   };
   /* The options-record stance (the RequestOptions precedent): every
    * documented key typechecks; the lowering's option walk decides per

@@ -1,0 +1,13 @@
+net-server-timeout-refused.ts:6:5 - error SC0001: Property 'timeout' does not exist on type 'Server'.
+
+  5 | const srv = net.createServer(() => {});
+  6 | srv.timeout = 5;
+    |     ^~~~~~~
+  7 | console.log("timeout", srv.timeout);
+
+net-server-timeout-refused.ts:7:28 - error SC0001: Property 'timeout' does not exist on type 'Server'.
+
+  6 | srv.timeout = 5;
+  7 | console.log("timeout", srv.timeout);
+    |                            ^~~~~~~
+  8 | srv.close();
