@@ -734,7 +734,6 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       }
     }
   };
-  type LowerOpts = Parameters<Frontend["lower"]>[0];
   return {
     preflight,
     entryText: () => finalLoad.entry.text,
