@@ -5336,54 +5336,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/15740-array-from-dyn-string-code-points.js": {
-   "order": [
-    "<repo>/tests/corpus/15740-array-from-dyn-string-code-points.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15741-array-from-dyn-map-index-and-array-like.js": {
-   "order": [
-    "<repo>/tests/corpus/15741-array-from-dyn-map-index-and-array-like.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15742-array-from-dyn-nullish-and-kinds.js": {
-   "order": [
-    "<repo>/tests/corpus/15742-array-from-dyn-nullish-and-kinds.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15743-array-from-dyn-mapper-result-kinds.js": {
-   "order": [
-    "<repo>/tests/corpus/15743-array-from-dyn-mapper-result-kinds.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15744-array-from-dyn-object-array-like.js": {
-   "order": [
-    "<repo>/tests/corpus/15744-array-from-dyn-object-array-like.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15745-array-from-dyn-iterator-protocol.js": {
-   "order": [
-    "<repo>/tests/corpus/15745-array-from-dyn-iterator-protocol.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15746-array-from-dyn-kinds-and-primitives.js": {
-   "order": [
-    "<repo>/tests/corpus/15746-array-from-dyn-kinds-and-primitives.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/15747-array-from-three-argument-this-arg.js": {
-   "order": [
-    "<repo>/tests/corpus/15747-array-from-three-argument-this-arg.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/1565-spawn-pipe-streams.ts": {
    "order": [
     "<repo>/tests/corpus/1565-spawn-pipe-streams.ts"
@@ -5591,6 +5543,54 @@
   "<repo>/tests/corpus/1574-promise-all-tuple-literal.ts": {
    "order": [
     "<repo>/tests/corpus/1574-promise-all-tuple-literal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15740-array-from-dyn-string-code-points.js": {
+   "order": [
+    "<repo>/tests/corpus/15740-array-from-dyn-string-code-points.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15741-array-from-dyn-map-index-and-array-like.js": {
+   "order": [
+    "<repo>/tests/corpus/15741-array-from-dyn-map-index-and-array-like.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15742-array-from-dyn-nullish-and-kinds.js": {
+   "order": [
+    "<repo>/tests/corpus/15742-array-from-dyn-nullish-and-kinds.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15743-array-from-dyn-mapper-result-kinds.js": {
+   "order": [
+    "<repo>/tests/corpus/15743-array-from-dyn-mapper-result-kinds.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15744-array-from-dyn-object-array-like.js": {
+   "order": [
+    "<repo>/tests/corpus/15744-array-from-dyn-object-array-like.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15745-array-from-dyn-iterator-protocol.js": {
+   "order": [
+    "<repo>/tests/corpus/15745-array-from-dyn-iterator-protocol.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15746-array-from-dyn-kinds-and-primitives.js": {
+   "order": [
+    "<repo>/tests/corpus/15746-array-from-dyn-kinds-and-primitives.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/15747-array-from-three-argument-this-arg.js": {
+   "order": [
+    "<repo>/tests/corpus/15747-array-from-three-argument-this-arg.js"
    ],
    "diags": []
   },
@@ -6012,145 +6012,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/16120-dyn-optional-absent-read.ts": {
-   "order": [
-    "<repo>/tests/corpus/16120-dyn-optional-absent-read.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16121-dyn-optional-present.ts": {
-   "order": [
-    "<repo>/tests/corpus/16121-dyn-optional-present.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16122-dyn-explicit-undefined-member.ts": {
-   "order": [
-    "<repo>/tests/corpus/16122-dyn-explicit-undefined-member.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16123-dyn-optional-nested-absent.ts": {
-   "order": [
-    "<repo>/tests/corpus/16123-dyn-optional-nested-absent.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16124-dyn-optional-array-of-records.ts": {
-   "order": [
-    "<repo>/tests/corpus/16124-dyn-optional-array-of-records.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16125-objectid-optional-cast-absent.ts": {
-   "order": [
-    "<repo>/tests/corpus/16125-objectid-optional-cast-absent.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16126-objectid-optional-cast-present.ts": {
-   "order": [
-    "<repo>/tests/corpus/16126-objectid-optional-cast-present.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16127-number-optional-cast-unknown-absent.ts": {
-   "order": [
-    "<repo>/tests/corpus/16127-number-optional-cast-unknown-absent.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16128-union-undefined-member-cast-absent.ts": {
-   "order": [
-    "<repo>/tests/corpus/16128-union-undefined-member-cast-absent.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16129-optional-object-to-unknown-field.ts": {
-   "order": [
-    "<repo>/tests/corpus/16129-optional-object-to-unknown-field.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16130-cast-unknown-member-present.ts": {
-   "order": [
-    "<repo>/tests/corpus/16130-cast-unknown-member-present.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16131-cast-unknown-keys-present.ts": {
-   "order": [
-    "<repo>/tests/corpus/16131-cast-unknown-keys-present.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16132-cast-unknown-optional-chain.ts": {
-   "order": [
-    "<repo>/tests/corpus/16132-cast-unknown-optional-chain.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16133-cast-unknown-typeof-absent.ts": {
-   "order": [
-    "<repo>/tests/corpus/16133-cast-unknown-typeof-absent.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16134-cast-unknown-array-of-docs.ts": {
-   "order": [
-    "<repo>/tests/corpus/16134-cast-unknown-array-of-docs.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16135-cast-unknown-nested-record.ts": {
-   "order": [
-    "<repo>/tests/corpus/16135-cast-unknown-nested-record.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16136-cast-unknown-number-arith-absent.ts": {
-   "order": [
-    "<repo>/tests/corpus/16136-cast-unknown-number-arith-absent.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16137-cast-unknown-union-undefined-absent.ts": {
-   "order": [
-    "<repo>/tests/corpus/16137-cast-unknown-union-undefined-absent.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16138-cast-unknown-class-member-absent.ts": {
-   "order": [
-    "<repo>/tests/corpus/16138-cast-unknown-class-member-absent.ts"
-   ],
-   "diags": []
-  },
-
-  "<repo>/tests/corpus/16139-cast-unknown-absent-then-write.ts": {
-   "order": [
-    "<repo>/tests/corpus/16139-cast-unknown-absent-then-write.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/1601-assert-fail-exit.ts": {
    "order": [
     "<repo>/tests/corpus/1601-assert-fail-exit.ts"
@@ -6271,6 +6132,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16120-dyn-optional-absent-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/16120-dyn-optional-absent-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16121-dyn-optional-present.ts": {
+   "order": [
+    "<repo>/tests/corpus/16121-dyn-optional-present.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16122-dyn-explicit-undefined-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/16122-dyn-explicit-undefined-member.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16123-dyn-optional-nested-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16123-dyn-optional-nested-absent.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16124-dyn-optional-array-of-records.ts": {
+   "order": [
+    "<repo>/tests/corpus/16124-dyn-optional-array-of-records.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16125-objectid-optional-cast-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16125-objectid-optional-cast-absent.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16126-objectid-optional-cast-present.ts": {
+   "order": [
+    "<repo>/tests/corpus/16126-objectid-optional-cast-present.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16127-number-optional-cast-unknown-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16127-number-optional-cast-unknown-absent.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16128-union-undefined-member-cast-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16128-union-undefined-member-cast-absent.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16129-optional-object-to-unknown-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/16129-optional-object-to-unknown-field.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1613-cjs-esm-proxy-named/main.mjs": {
    "order": [
     "<repo>/tests/corpus/1613-cjs-esm-proxy-named/table.cjs",
@@ -6278,9 +6199,93 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16130-cast-unknown-member-present.ts": {
+   "order": [
+    "<repo>/tests/corpus/16130-cast-unknown-member-present.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16131-cast-unknown-keys-present.ts": {
+   "order": [
+    "<repo>/tests/corpus/16131-cast-unknown-keys-present.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16132-cast-unknown-optional-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/16132-cast-unknown-optional-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16133-cast-unknown-typeof-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16133-cast-unknown-typeof-absent.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16134-cast-unknown-array-of-docs.ts": {
+   "order": [
+    "<repo>/tests/corpus/16134-cast-unknown-array-of-docs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16135-cast-unknown-nested-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/16135-cast-unknown-nested-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16136-cast-unknown-number-arith-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16136-cast-unknown-number-arith-absent.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16137-cast-unknown-union-undefined-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16137-cast-unknown-union-undefined-absent.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16138-cast-unknown-class-member-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/16138-cast-unknown-class-member-absent.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16139-cast-unknown-absent-then-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/16139-cast-unknown-absent-then-write.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1614-js-fence-dodges.cjs": {
    "order": [
     "<repo>/tests/corpus/1614-js-fence-dodges.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16140-emitapply-apply-untyped-listeners.js": {
+   "order": [
+    "<repo>/tests/corpus/16140-emitapply-apply-untyped-listeners.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16141-emitapply-arguments-forward-untyped.js": {
+   "order": [
+    "<repo>/tests/corpus/16141-emitapply-arguments-forward-untyped.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16142-emitapply-const-name-untyped.js": {
+   "order": [
+    "<repo>/tests/corpus/16142-emitapply-const-name-untyped.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16143-emitapply-spread-list-untyped.js": {
+   "order": [
+    "<repo>/tests/corpus/16143-emitapply-spread-list-untyped.js"
    ],
    "diags": []
   },
@@ -6436,6 +6441,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16300-webcrypto-sigv4-hash-dict.js": {
+   "order": [
+    "<repo>/tests/corpus/16300-webcrypto-sigv4-hash-dict.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16301-webcrypto-hash-dict-usage.js": {
+   "order": [
+    "<repo>/tests/corpus/16301-webcrypto-hash-dict-usage.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1631-inspect-arrays.ts": {
    "order": [
     "<repo>/tests/corpus/1631-inspect-arrays.ts"
@@ -6445,6 +6462,30 @@
   "<repo>/tests/corpus/1632-inspect-records.ts": {
    "order": [
     "<repo>/tests/corpus/1632-inspect-records.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16320-random-bytes-bson-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/16320-random-bytes-bson-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16321-webcrypto-get-random-values-static-arrays.cjs": {
+   "order": [
+    "<repo>/tests/corpus/16321-webcrypto-get-random-values-static-arrays.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16322-globalthis-crypto-destructure-alias.ts": {
+   "order": [
+    "<repo>/tests/corpus/16322-globalthis-crypto-destructure-alias.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16323-random-bytes-mongodb-shape.cjs": {
+   "order": [
+    "<repo>/tests/corpus/16323-random-bytes-mongodb-shape.cjs"
    ],
    "diags": []
   },
@@ -6553,6 +6594,24 @@
   "<repo>/tests/corpus/1650-ee-prepend.ts": {
    "order": [
     "<repo>/tests/corpus/1650-ee-prepend.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16500-timer-delay-warnings-global.ts": {
+   "order": [
+    "<repo>/tests/corpus/16500-timer-delay-warnings-global.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16501-timer-delay-warnings-modules.ts": {
+   "order": [
+    "<repo>/tests/corpus/16501-timer-delay-warnings-modules.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16502-timer-delay-warnings-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/16502-timer-delay-warnings-order.ts"
    ],
    "diags": []
   },
@@ -6665,9 +6724,93 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16700-socket-timeout-validation.ts": {
+   "order": [
+    "<repo>/tests/corpus/16700-socket-timeout-validation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16701-socket-timeout-destroyed.ts": {
+   "order": [
+    "<repo>/tests/corpus/16701-socket-timeout-destroyed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16702-socket-timeout-overflow-listener.ts": {
+   "order": [
+    "<repo>/tests/corpus/16702-socket-timeout-overflow-listener.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16703-socket-timeout-pre-dial.ts": {
+   "order": [
+    "<repo>/tests/corpus/16703-socket-timeout-pre-dial.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16704-http-request-timeout-validation.ts": {
+   "order": [
+    "<repo>/tests/corpus/16704-http-request-timeout-validation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16705-http-request-timeout-overflow.ts": {
+   "order": [
+    "<repo>/tests/corpus/16705-http-request-timeout-overflow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16706-socket-timeout-warning-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/16706-socket-timeout-warning-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16707-socket-timeout-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/16707-socket-timeout-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16708-socket-timeout-callback-zero.ts": {
+   "order": [
+    "<repo>/tests/corpus/16708-socket-timeout-callback-zero.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16709-socket-timeout-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/16709-socket-timeout-chain.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1671-symbol-typeof.ts": {
    "order": [
     "<repo>/tests/corpus/1671-symbol-typeof.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16710-socket-timeout-callback-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/16710-socket-timeout-callback-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16711-socket-timeout-callback-destroyed.ts": {
+   "order": [
+    "<repo>/tests/corpus/16711-socket-timeout-callback-destroyed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16712-socket-timeout-callback-overflow.ts": {
+   "order": [
+    "<repo>/tests/corpus/16712-socket-timeout-callback-overflow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16713-socket-timeout-callback-pre-dial.ts": {
+   "order": [
+    "<repo>/tests/corpus/16713-socket-timeout-callback-pre-dial.ts"
    ],
    "diags": []
   },
@@ -17086,6 +17229,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8730-text-decoder-fatal-and-bom.ts": {
+   "order": [
+    "<repo>/tests/corpus/8730-text-decoder-fatal-and-bom.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8731-text-encoder-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/8731-text-encoder-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8732-bson-shadow-codec-globals.ts": {
+   "order": [
+    "<repo>/tests/corpus/8732-bson-shadow-codec-globals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8733-text-decoder-flags-through-any.ts": {
+   "order": [
+    "<repo>/tests/corpus/8733-text-decoder-flags-through-any.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8740-annotated-any-container-beats-its-seed.js": {
    "order": [
     "<repo>/tests/corpus/8740-annotated-any-container-beats-its-seed.js"
@@ -17358,9 +17525,45 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8810-text-decoder-single-byte-encodings.ts": {
+   "order": [
+    "<repo>/tests/corpus/8810-text-decoder-single-byte-encodings.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8811-text-decoder-utf16-bom-and-surrogates.ts": {
+   "order": [
+    "<repo>/tests/corpus/8811-text-decoder-utf16-bom-and-surrogates.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8812-text-decoder-whatwg-labels.ts": {
+   "order": [
+    "<repo>/tests/corpus/8812-text-decoder-whatwg-labels.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8813-text-decoder-typed-array-inputs.ts": {
+   "order": [
+    "<repo>/tests/corpus/8813-text-decoder-typed-array-inputs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8814-text-decoder-codec-inspect-through-any.ts": {
+   "order": [
+    "<repo>/tests/corpus/8814-text-decoder-codec-inspect-through-any.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8820-class-instance-writes-through-untyped-slot.js": {
    "order": [
     "<repo>/tests/corpus/8820-class-instance-writes-through-untyped-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8820-text-decoder-stream-scenarios.ts": {
+   "order": [
+    "<repo>/tests/corpus/8820-text-decoder-stream-scenarios.ts"
    ],
    "diags": []
   },
@@ -17370,15 +17573,33 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8821-text-decoder-stream-chunked-fuzz.ts": {
+   "order": [
+    "<repo>/tests/corpus/8821-text-decoder-stream-chunked-fuzz.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8822-class-fields-take-any-value-written-through-untyped-code.js": {
    "order": [
     "<repo>/tests/corpus/8822-class-fields-take-any-value-written-through-untyped-code.js"
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8822-text-decoder-stream-through-any.ts": {
+   "order": [
+    "<repo>/tests/corpus/8822-text-decoder-stream-through-any.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8823-delete-of-a-field-through-untyped-slot.js": {
    "order": [
     "<repo>/tests/corpus/8823-delete-of-a-field-through-untyped-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8823-text-decoder-composed-stream.ts": {
+   "order": [
+    "<repo>/tests/corpus/8823-text-decoder-composed-stream.ts"
    ],
    "diags": []
   },
@@ -19172,6 +19393,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-error-listener.js": {
+   "order": [
+    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-error-listener.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-meta-listener.js": {
+   "order": [
+    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-meta-listener.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-typed-plain-emitter.js": {
+   "order": [
+    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-typed-plain-emitter.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-zero-arg-listener.js": {
+   "order": [
+    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-zero-arg-listener.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/emitter-projection-declines.ts": {
    "order": [
     "<repo>/tests/diagnostics/emitter-projection-declines.ts"
@@ -20945,246 +21190,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/16140-emitapply-apply-untyped-listeners.js": {
-   "order": [
-    "<repo>/tests/corpus/16140-emitapply-apply-untyped-listeners.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/16141-emitapply-arguments-forward-untyped.js": {
-   "order": [
-    "<repo>/tests/corpus/16141-emitapply-arguments-forward-untyped.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/16142-emitapply-const-name-untyped.js": {
-   "order": [
-    "<repo>/tests/corpus/16142-emitapply-const-name-untyped.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/16143-emitapply-spread-list-untyped.js": {
-   "order": [
-    "<repo>/tests/corpus/16143-emitapply-spread-list-untyped.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/16300-webcrypto-sigv4-hash-dict.js": {
-   "order": [
-    "<repo>/tests/corpus/16300-webcrypto-sigv4-hash-dict.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/16301-webcrypto-hash-dict-usage.js": {
-   "order": [
-    "<repo>/tests/corpus/16301-webcrypto-hash-dict-usage.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-error-listener.js": {
-   "order": [
-    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-error-listener.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-meta-listener.js": {
-   "order": [
-    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-meta-listener.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-typed-plain-emitter.js": {
-   "order": [
-    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-typed-plain-emitter.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-zero-arg-listener.js": {
-   "order": [
-    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-zero-arg-listener.js"
-   ],
-   "diags": []
-  },
- "<repo>/tests/corpus/16320-random-bytes-bson-shape.ts": {
-   "order": [
-     "<repo>/tests/corpus/16320-random-bytes-bson-shape.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16321-webcrypto-get-random-values-static-arrays.cjs": {
-   "order": [
-     "<repo>/tests/corpus/16321-webcrypto-get-random-values-static-arrays.cjs"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16322-globalthis-crypto-destructure-alias.ts": {
-   "order": [
-     "<repo>/tests/corpus/16322-globalthis-crypto-destructure-alias.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16323-random-bytes-mongodb-shape.cjs": {
-   "order": [
-     "<repo>/tests/corpus/16323-random-bytes-mongodb-shape.cjs"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16500-timer-delay-warnings-global.ts": {
-   "order": [
-     "<repo>/tests/corpus/16500-timer-delay-warnings-global.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16501-timer-delay-warnings-modules.ts": {
-   "order": [
-     "<repo>/tests/corpus/16501-timer-delay-warnings-modules.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16502-timer-delay-warnings-order.ts": {
-   "order": [
-     "<repo>/tests/corpus/16502-timer-delay-warnings-order.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8730-text-decoder-fatal-and-bom.ts": {
-   "order": [
-     "<repo>/tests/corpus/8730-text-decoder-fatal-and-bom.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8731-text-encoder-members.ts": {
-   "order": [
-     "<repo>/tests/corpus/8731-text-encoder-members.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8732-bson-shadow-codec-globals.ts": {
-   "order": [
-     "<repo>/tests/corpus/8732-bson-shadow-codec-globals.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8733-text-decoder-flags-through-any.ts": {
-   "order": [
-     "<repo>/tests/corpus/8733-text-decoder-flags-through-any.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8810-text-decoder-single-byte-encodings.ts": {
-   "order": [
-     "<repo>/tests/corpus/8810-text-decoder-single-byte-encodings.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8811-text-decoder-utf16-bom-and-surrogates.ts": {
-   "order": [
-     "<repo>/tests/corpus/8811-text-decoder-utf16-bom-and-surrogates.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8812-text-decoder-whatwg-labels.ts": {
-   "order": [
-     "<repo>/tests/corpus/8812-text-decoder-whatwg-labels.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8813-text-decoder-typed-array-inputs.ts": {
-   "order": [
-     "<repo>/tests/corpus/8813-text-decoder-typed-array-inputs.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8814-text-decoder-codec-inspect-through-any.ts": {
-   "order": [
-     "<repo>/tests/corpus/8814-text-decoder-codec-inspect-through-any.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16700-socket-timeout-validation.ts": {
-   "order": [
-     "<repo>/tests/corpus/16700-socket-timeout-validation.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16701-socket-timeout-destroyed.ts": {
-   "order": [
-     "<repo>/tests/corpus/16701-socket-timeout-destroyed.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16702-socket-timeout-overflow-listener.ts": {
-   "order": [
-     "<repo>/tests/corpus/16702-socket-timeout-overflow-listener.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16703-socket-timeout-pre-dial.ts": {
-   "order": [
-     "<repo>/tests/corpus/16703-socket-timeout-pre-dial.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16704-http-request-timeout-validation.ts": {
-   "order": [
-     "<repo>/tests/corpus/16704-http-request-timeout-validation.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16705-http-request-timeout-overflow.ts": {
-   "order": [
-     "<repo>/tests/corpus/16705-http-request-timeout-overflow.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16706-socket-timeout-warning-order.ts": {
-   "order": [
-     "<repo>/tests/corpus/16706-socket-timeout-warning-order.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16707-socket-timeout-callback.ts": {
-   "order": [
-     "<repo>/tests/corpus/16707-socket-timeout-callback.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16708-socket-timeout-callback-zero.ts": {
-   "order": [
-     "<repo>/tests/corpus/16708-socket-timeout-callback-zero.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16709-socket-timeout-chain.ts": {
-   "order": [
-     "<repo>/tests/corpus/16709-socket-timeout-chain.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16710-socket-timeout-callback-throws.ts": {
-   "order": [
-     "<repo>/tests/corpus/16710-socket-timeout-callback-throws.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16711-socket-timeout-callback-destroyed.ts": {
-   "order": [
-     "<repo>/tests/corpus/16711-socket-timeout-callback-destroyed.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16712-socket-timeout-callback-overflow.ts": {
-   "order": [
-     "<repo>/tests/corpus/16712-socket-timeout-callback-overflow.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/16713-socket-timeout-callback-pre-dial.ts": {
-   "order": [
-     "<repo>/tests/corpus/16713-socket-timeout-callback-pre-dial.ts"
-   ],
-   "diags": []
- }
+  }
  }
 }
