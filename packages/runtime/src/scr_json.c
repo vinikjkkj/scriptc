@@ -6478,20 +6478,21 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
      * its absence from the table is the absence of the method. Only a
      * class with NO table keeps the fence: there the box still cannot
      * tell an override from an absence. */
-    const ScrDynClassMember *ts = scr_dyn_objinst_member(d, "toString", 8);
-    if (ts != NULL && ts->call != NULL) {
-      ScrDyn *r = ts->call(d->v.inst.o, NULL, 0, "toString");
-      if (r == NULL) return scr_str_new("", 0); /* threw -- pending */
-      ScrStr *s = scr_dyn_to_string(r, NULL);
-      scr_dyn_release(r);
-      return s;
+    if (!scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_error_rooted(d)) {
+      scr_dyn_objinst_fence(d, "String()");
+      return scr_str_new("", 0); /* the pending throw wins */
     }
-    /* An Error-rooted instance renders Error.prototype.toString ("name:
-     * message"), the runtime's own routine over the cells it holds. */
-    if (scr_dyn_objinst_error_rooted(d)) return scr_error_to_string((ScrError *)d->v.inst.o);
-    if (scr_dyn_objinst_has_members(d)) return scr_str_new("[object Object]", 15);
-    scr_dyn_objinst_fence(d, "String()");
-    return scr_str_new("", 0); /* the pending throw wins */
+    /* ToString(object) is ToPrimitive with the STRING hint, then ToString:
+     * the user toString first, then valueOf when toString answers an
+     * object (`toString(){return {}}` with `valueOf(){return 7}` is "7"),
+     * then the built-in table. The protocol lives in scr_dyn_to_primitive,
+     * which reads the same member table, so this arm and `+` and `%s` share
+     * one answer per hint. A throw leaves the exception pending. */
+    ScrDyn *p = scr_dyn_to_primitive(d, SCR_TOPRIM_STRING);
+    if (p == NULL) return scr_str_new("", 0); /* pending */
+    ScrStr *ps = scr_dyn_string_coerce(p);
+    scr_dyn_release(p);
+    return ps;
   }
   case SCR_DYN_BIG:
     /* The DIGITS, with no suffix: String(5n) is "5" and only
@@ -6823,9 +6824,16 @@ ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
     ScrDyn *r = scr_toprim_objinst_try(d, first, fl, &f1);
     if (r) return r;
     if (scr_exc_pending()) return NULL;
-    r = scr_toprim_objinst_try(d, second, sl, &f2);
-    if (r) return r;
-    if (scr_exc_pending()) return NULL;
+    /* STRING hint with no user toString: Object.prototype.toString is the
+     * first method and it answers a PRIMITIVE ("[object Object]"), so
+     * ToPrimitive stops there and a user valueOf is never consulted. The
+     * DEFAULT hint's first method is valueOf, whose missing form answers the
+     * object itself, so toString still gets its turn after it. */
+    if (hint != SCR_TOPRIM_STRING || f1) {
+      r = scr_toprim_objinst_try(d, second, sl, &f2);
+      if (r) return r;
+      if (scr_exc_pending()) return NULL;
+    }
     /* Both protocol methods answered objects only when the toString row
      * exists and answered one: a missing valueOf is Object.prototype's, which
      * answers the object itself, so the chain is exhausted. A missing
@@ -6888,7 +6896,15 @@ ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
     return ops->invoke(d->v.handle.ptr, (ScrDyn *)d, "valueOf", NULL, 0, "valueOf");
   }
   {
-    ScrStr *s = scr_dyn_to_string(d, NULL);
+    /* A class instance reaches here with NO user valueOf/toString answering
+     * a primitive. scr_dyn_to_string's OBJINST arm is the protocol itself
+     * (it calls back into this function), so the built-in table is spelled
+     * out here instead: Error.prototype's form, or the "[object Object]"
+     * constant that Object.prototype.toString gives a class with members. */
+    ScrStr *s = d->kind == SCR_DYN_OBJINST
+                  ? (scr_dyn_objinst_error_rooted(d) ? scr_error_to_string((ScrError *)d->v.inst.o)
+                                                     : scr_str_new("[object Object]", 15))
+                  : scr_dyn_to_string(d, NULL);
     if (!s) return NULL; /* pending (an OBJINST fence, a throwing member) */
     ScrDyn *out = scr_dyn_new_str(s); /* retains s into the node */
     scr_str_release(s);
@@ -6934,6 +6950,17 @@ bool scr_dyn_loose_eq_num(double n, const ScrDyn *d) {
 }
 
 ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {
+  if (d->kind == SCR_DYN_OBJINST) {
+    /* `+` on a class instance: ToPrimitive with the DEFAULT hint (a user
+     * valueOf before toString), then ToString of that primitive. The member
+     * table carries both methods, so scr_dyn_to_primitive answers the
+     * whole protocol; this only stringifies its answer. */
+    ScrDyn *p = scr_dyn_to_primitive(d, SCR_TOPRIM_DEFAULT);
+    if (p == NULL) return NULL; /* pending */
+    ScrStr *ps = scr_dyn_string_coerce(p);
+    scr_dyn_release(p);
+    return ps;
+  }
   if (d->kind != SCR_DYN_OBJ) return scr_dyn_string_coerce(d);
   ScrDyn *m = scr_dyn_obj_own_data(d, "valueOf", 7); /* borrowed */
   if (!m) m = scr_dyn_proto_get(d, "valueOf", 7);
