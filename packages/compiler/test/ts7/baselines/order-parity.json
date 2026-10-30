@@ -7577,6 +7577,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/18100-https-typed-options-cb-request.ts": {
+   "order": [
+    "<repo>/tests/corpus/18100-https-typed-options-cb-request.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18101-https-typed-options-cb-arity.ts": {
+   "order": [
+    "<repo>/tests/corpus/18101-https-typed-options-cb-arity.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1811-stream-option-value-callbacks.cjs": {
    "order": [
     "<repo>/tests/corpus/1811-stream-option-value-callbacks.cjs"
