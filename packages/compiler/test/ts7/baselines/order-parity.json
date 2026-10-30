@@ -17633,6 +17633,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8829-text-decoder-codec-concat-chain-no-overrun.ts": {
+   "order": [
+    "<repo>/tests/corpus/8829-text-decoder-codec-concat-chain-no-overrun.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8830-bigint-from-a-string.js": {
    "order": [
     "<repo>/tests/corpus/8830-bigint-from-a-string.js"
