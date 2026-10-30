@@ -1,0 +1,8 @@
+h2-response-settimeout-refused.ts:6:3 - error SC2020: 'ServerResponse.setTimeout on an Http2ServerResponse' is part of the standard library types but has no scriptc lowering yet
+
+  5 | const server = http2.createServer((req: http2.Http2ServerRequest, res: http2.Http2ServerResponse) => {
+  6 |   res.setTimeout(20, () => console.log("fired"));
+    |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  7 |   res.end("ok");
+
+  hint: the h2 stream's idle timer is not modeled; setTimeout is supported on http/1 requests and responses

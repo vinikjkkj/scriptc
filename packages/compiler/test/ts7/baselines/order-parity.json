@@ -19939,6 +19939,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/h2-response-settimeout-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/h2-response-settimeout-refused.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/helper-unrolled-field-enumeration.js": {
    "order": [
     "<repo>/tests/diagnostics/helper-unrolled-field-enumeration.js"
