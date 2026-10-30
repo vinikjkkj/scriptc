@@ -383,6 +383,16 @@ interface Ctx {
    * Without this a suspension in the try reports an EMPTY live set — the
    * use-after-free direction. */
   finallys: Set<string>[];
+  /** Live-in of every handler an exception raised at the current position
+   * can enter: each enclosing catch body (for a point inside its try body)
+   * and each enclosing finally body. A suspension RESUMES with a rejection
+   * pending, and the rejection transfers control to the handler, which then
+   * reads locals the normal continuation may have overwritten before reading
+   * them -- `let f = false; try { await rejected; f = true; } catch {}` then
+   * reading `f`. The normal path alone reports `f` dead across the await, the
+   * frame does not carry it, and the handler reads an uninitialised slot. So
+   * every point is live over these sets as well. Innermost last. */
+  handlers: Set<string>[];
 }
 
 /** Live set at a loop's exit (for `break`) and at its header (for
@@ -425,6 +435,9 @@ function recordPoints(
   // A boxed target is written THROUGH its box, so the box pointer is live
   // across a suspension sitting in the value being stored.
   for (const b of boxedUse) if (ctx.boxed.has(b)) base.add(b);
+  // A rejection resumed into a handler: the handler's reads are live across
+  // the suspension whatever the normal continuation does (see Ctx.handlers).
+  for (const h of ctx.handlers) for (const id of h) base.add(id);
   for (const e of exprs) {
     const susps = suspensionsOf(e);
     if (susps.length === 0) continue;
@@ -578,7 +591,16 @@ function recordPoints(
   }
 }
 
-/** Backward over a statement list: the live-in, given `liveOut`. */
+/** Run `f` with `h` pushed as a handler live-in (see Ctx.handlers). */
+function withHandler<T>(ctx: Ctx, h: Set<string>, f: () => T): T {
+  ctx.handlers.push(h);
+  try {
+    return f();
+  } finally {
+    ctx.handlers.pop();
+  }
+}
+
 /** Run `f` with recording suppressed — used for fixpoint iterations. */
 function quiet<T>(ctx: Ctx, f: () => T): T {
   const was = ctx.recording;
@@ -590,6 +612,7 @@ function quiet<T>(ctx: Ctx, f: () => T): T {
   }
 }
 
+/** Backward over a statement list: the live-in, given `liveOut`. */
 function backStmts(
   ctx: Ctx,
   stmts: readonly IrStmt[],
@@ -900,12 +923,25 @@ function backStmt(
       // A try that HAS a finally also blocks its try/catch bodies: unwinding
       // out of them runs the finally with the exception still pending.
       try {
-        const catchLive =
-          s.catchBody === null ? new Set<string>() : backStmts(ctx, s.catchBody, afterFinally, loops);
+        // A point in the catch body raises into the finally (if any) and then
+        // outward, never into this catch: its handler is the finally alone.
+        const catchBody = s.catchBody;
+        let catchLive = new Set<string>();
+        if (catchBody !== null) {
+          const h = s.finallyBody === null ? new Set<string>() : afterFinally;
+          catchLive = withHandler(ctx, h, () => backStmts(ctx, catchBody, afterFinally, loops));
+        }
         if (s.catchLocalId !== null && !ctx.boxed.has(s.catchLocalId)) {
           catchLive.delete(s.catchLocalId);
         }
-        const tryLive = backStmts(ctx, s.tryBody, union(afterFinally, catchLive), loops);
+        // A point in the try body raises into the catch (if any), and into the
+        // finally (if any) on its way out: both are its handlers.
+        const tryHandler = new Set<string>();
+        if (catchBody !== null) for (const id of catchLive) tryHandler.add(id);
+        if (s.finallyBody !== null) for (const id of afterFinally) tryHandler.add(id);
+        const tryLive = withHandler(ctx, tryHandler, () =>
+          backStmts(ctx, s.tryBody, union(afterFinally, catchLive), loops),
+        );
         return union(tryLive, catchLive);
       } finally {
         ctx.tryDepth--;
@@ -978,6 +1014,7 @@ export function suspensionLiveness(fn: IrFunction): FnLiveness | null {
     points: [],
     recording: true,
     finallys: [],
+    handlers: [],
     forOfDepth: 0,
     loopDepth: 0,
     tryDepth: 0,
