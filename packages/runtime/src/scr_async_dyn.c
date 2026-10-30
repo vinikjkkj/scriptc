@@ -7,21 +7,14 @@
  * over the fiber-carried snapshots (the always-linked core keeps only
  * the active slot + RC pair), the unhandled-rejection listener registry
  * (installed into scr_report_unhandled_rejections' hook at
- * registration), and the process-warning channel (emitWarning + the
- * 'warning' listeners + Node's stderr report). */
+ * registration), and process.emitWarning's argument grammar. The warning
+ * channel itself (listeners, the stderr report, the timer delay warnings)
+ * lives in scr_async.c, always linked. */
 #include "scr_runtime.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef _WIN32
-#include <process.h>
-#define SCR_WARN_PID() ((long)_getpid())
-#else
-#include <unistd.h>
-#define SCR_WARN_PID() ((long)getpid())
-#endif
 
 static void scr_ad_oom(void) {
   fputs("scriptc: out of memory\n", stderr);
@@ -488,108 +481,6 @@ ScrDyn *scr_await_dyn_value(ScrDyn *v) {
   return scr_dyn_retain(v);
 }
 
-/* ── process warnings (emitWarning + the 'warning' event) ─────────────
- * Gated with the rest of this TU (a deprecation-emitting unit's gate
- * must imply the dynAsync link). Listeners are dyn functions; emission
- * is SYNCHRONOUS at the
- * call (Node defers a tick through nextTick — the MaxListenersExceeded
- * precedent, SEMANTICS.md 138) and the default stderr report always
- * prints (Node's own bootstrap listener; a compiled binary has no
- * --no-warnings). The warning VALUE is the dyn error encoding built over
- * an ScrError (identity-cached, so a listener comparing two deliveries
- * of one warning sees one object); a string `detail` joins the dyn node
- * and the report's second line, exactly Node. */
-static ScrDyn **scr_warn_listeners = NULL;
-static size_t scr_nwarn = 0, scr_warn_cap = 0;
-
-static void scr_warn_teardown(void) {
-  for (size_t i = 0; i < scr_nwarn; i++) scr_dyn_release(scr_warn_listeners[i]);
-  free(scr_warn_listeners);
-  scr_warn_listeners = NULL;
-  scr_nwarn = scr_warn_cap = 0;
-}
-
-void scr_process_on_warning(ScrDyn *fn) {
-  if (fn->kind != SCR_DYN_FUNC) {
-    const char *msg = "The \"listener\" argument must be of type function";
-    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, strlen(msg), "ERR_INVALID_ARG_TYPE");
-    return;
-  }
-  if (scr_nwarn == scr_warn_cap) {
-    scr_warn_cap = scr_warn_cap ? scr_warn_cap * 2 : 4;
-    scr_warn_listeners = realloc(scr_warn_listeners, scr_warn_cap * sizeof *scr_warn_listeners);
-    if (!scr_warn_listeners) {
-      fputs("scriptc: out of memory\n", stderr);
-      abort();
-    }
-  }
-  if (scr_nwarn == 0) atexit(scr_warn_teardown);
-  scr_warn_listeners[scr_nwarn++] = scr_dyn_retain(fn);
-}
-
-void scr_process_off_warning(ScrDyn *fn) {
-  for (size_t i = 0; i < scr_nwarn; i++) {
-    ScrDyn *l = scr_warn_listeners[i];
-    bool same = l == fn || (l->kind == SCR_DYN_FUNC && fn->kind == SCR_DYN_FUNC &&
-                            l->v.fn.clo == fn->v.fn.clo);
-    if (same) {
-      scr_dyn_release(l);
-      memmove(scr_warn_listeners + i, scr_warn_listeners + i + 1,
-              (scr_nwarn - i - 1) * sizeof *scr_warn_listeners);
-      scr_nwarn--;
-      return;
-    }
-  }
-}
-
-/* Dispatch + the default stderr report over a built warning dyn node.
- * Borrowed. A listener throw propagates (the dc publish stance). */
-static void scr_warning_dispatch(ScrDyn *w) {
-  for (size_t i = 0; i < scr_nwarn; i++) {
-    ScrDyn *r = scr_dyn_call(scr_warn_listeners[i], &w, 1, "listener");
-    if (r == NULL) return; /* pending exception propagates */
-    scr_dyn_release(r);
-  }
-  /* "(node:pid) [CODE] Name: message" + "\n<detail>" — Node's
-   * onWarning report. */
-  /* name/message live on the error encoding's prototype chain, not among
-   * its own members: the chain-aware data read finds them. */
-  const ScrDyn *en = scr_dyn_obj_data_get(w, "name", 4);
-  const ScrDyn *em = scr_dyn_obj_data_get(w, "message", 7);
-  const ScrDyn *ec = scr_dyn_obj_data_get(w, "code", 4);
-  const ScrDyn *ed = scr_dyn_obj_data_get(w, "detail", 6);
-  fflush(stdout);
-  fprintf(stderr, "(node:%ld) ", SCR_WARN_PID());
-  if (ec && ec->kind == SCR_DYN_STR) fprintf(stderr, "[%s] ", ec->v.str->data);
-  fprintf(stderr, "%s: %s",
-          (en && en->kind == SCR_DYN_STR) ? en->v.str->data : "Warning",
-          (em && em->kind == SCR_DYN_STR) ? em->v.str->data : "");
-  if (ed && ed->kind == SCR_DYN_STR) fprintf(stderr, "\n%s", ed->v.str->data);
-  fputc('\n', stderr);
-  /* Node's one-time trace hint, after the first report. */
-  static bool hinted = false;
-  if (!hinted) {
-    hinted = true;
-    /* Node names the flag by the FIRST report's kind and prints it once. */
-    fputs((en && en->kind == SCR_DYN_STR && strcmp(en->v.str->data, "DeprecationWarning") == 0)
-              ? "(Use `node --trace-deprecation ...` to show where the warning was created)\n"
-              : "(Use `node --trace-warnings ...` to show where the warning was created)\n",
-          stderr);
-  }
-}
-
-/* A warning built from C parts (the runtime deprecation sites): name
- * defaults to "Warning"; code/detail optional. Borrows message. */
-void scr_emit_warning(const char *name, const char *code, ScrStr *message) {
-  ScrError *e = scr_error_new(SCR_ERR_ERROR, message);
-  scr_str_release(e->name);
-  e->name = scr_str_new(name ? name : "Warning", strlen(name ? name : "Warning"));
-  if (code) e->code = scr_str_new(code, strlen(code));
-  ScrDyn *w = scr_dyn_from_error(e);
-  scr_error_release(e);
-  scr_warning_dispatch(w);
-  scr_dyn_release(w);
-}
 
 static void scr_warn_bad_arg(const char *arg, const char *want) {
   char buf[160];
