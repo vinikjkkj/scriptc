@@ -6719,9 +6719,111 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16800-timers-tp-interval-for-await-break.ts": {
+   "order": [
+    "<repo>/tests/corpus/16800-timers-tp-interval-for-await-break.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16801-timers-tp-interval-abort-in-body.ts": {
+   "order": [
+    "<repo>/tests/corpus/16801-timers-tp-interval-abort-in-body.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16802-timers-tp-interval-pre-aborted.ts": {
+   "order": [
+    "<repo>/tests/corpus/16802-timers-tp-interval-pre-aborted.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16803-timers-tp-interval-throw-and-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/16803-timers-tp-interval-throw-and-return.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16804-timers-tp-interval-omitted-arguments.ts": {
+   "order": [
+    "<repo>/tests/corpus/16804-timers-tp-interval-omitted-arguments.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16805-timers-tp-interval-unref-exit.ts": {
+   "order": [
+    "<repo>/tests/corpus/16805-timers-tp-interval-unref-exit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16806-timers-tp-interval-slow-consumer.ts": {
+   "order": [
+    "<repo>/tests/corpus/16806-timers-tp-interval-slow-consumer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16807-timers-tp-interval-microtask-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/16807-timers-tp-interval-microtask-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16808-timers-tp-interval-class-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/16808-timers-tp-interval-class-method.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16809-timers-tp-interval-named-import.ts": {
+   "order": [
+    "<repo>/tests/corpus/16809-timers-tp-interval-named-import.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1681-assert-funcs.ts": {
    "order": [
     "<repo>/tests/corpus/1681-assert-funcs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16810-timers-scheduler-wait-yield-abort.ts": {
+   "order": [
+    "<repo>/tests/corpus/16810-timers-scheduler-wait-yield-abort.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16811-timers-scheduler-namespace-loop.ts": {
+   "order": [
+    "<repo>/tests/corpus/16811-timers-scheduler-namespace-loop.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16812-timers-value-aliases-with-arguments.ts": {
+   "order": [
+    "<repo>/tests/corpus/16812-timers-value-aliases-with-arguments.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16813-timers-value-clear-aliases.ts": {
+   "order": [
+    "<repo>/tests/corpus/16813-timers-value-clear-aliases.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16814-timers-undefined-delay-callback-args.ts": {
+   "order": [
+    "<repo>/tests/corpus/16814-timers-undefined-delay-callback-args.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16815-timers-undefined-delay-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/16815-timers-undefined-delay-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16817-timers-tp-undefined-delay.ts": {
+   "order": [
+    "<repo>/tests/corpus/16817-timers-tp-undefined-delay.ts"
    ],
    "diags": []
   },
