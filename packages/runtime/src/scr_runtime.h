@@ -10251,6 +10251,7 @@ ScrNetSocket *scr_net_connect(double port, ScrStr *host /*borrowed, nullable*/, 
  * ERR_INVALID_ARG_TYPE) and is then inert — the single dial has nothing
  * to time. +1, or NULL with the throw pending. */
 ScrNetSocket *scr_net_connect_attempt(double port, ScrStr *host /*borrowed*/, const ScrDyn *t /*borrowed*/);
+ScrNetSocket *scr_net_connect_timed(double port, ScrStr *host /*borrowed, nullable*/, double ms, ScrClosure *cb /*moves, nullable*/); /* +1 */
 /* net.connect/createConnection over a RUNTIME argument (a computed-key bag, a
  * value of unknown type): Node-order validation, then the dial. +1 socket, or
  * NULL with the exception pending. Borrowed. */
@@ -10768,6 +10769,13 @@ void scr_http2_stream_undef_call(ScrStr *member);
  * server) the closure releases unregistered: 'request' never fires
  * there, like Node. */
 void scr_http_server_on_request(ScrNetServer *s, ScrClosure *cb /*moves*/, ScrHttpReqFn fn, bool once);
+void scr_http_server_set_timeout(ScrNetServer *s, double ms, ScrClosure *cb /*moves, nullable*/);
+double scr_http_server_get_timeout(ScrNetServer *s);
+ScrNetServer *scr_net_server_set_timeout_ret(ScrNetServer *s, double ms, ScrClosure *cb /*moves, nullable*/); /* +1 */
+double scr_net_server_timeout_get(ScrNetServer *s);
+ScrNetServer *scr_http_server_keepalive_new_ret(ScrNetServer *s, double ms); /* +1 or NULL (throw pending) */
+ScrNetServer *scr_net_server_keepalive_set_ret(ScrNetServer *s, double ms); /* +1 */
+double scr_net_server_keepalive_get(ScrNetServer *s);
 ScrStr *scr_http_req_url(ScrHttpReq *r);      /* +1 */
 ScrStr *scr_http_req_method(ScrHttpReq *r);   /* +1 */
 ScrStr *scr_http_req_header(ScrHttpReq *r, ScrStr *name /*borrowed*/); /* +1 or NULL (undefined arm) */
@@ -10840,6 +10848,7 @@ void scr_http_req_resume(ScrHttpReq *r);
  * socket's idle timer; the flags back req.destroyed/req.readable. */
 void scr_http_req_pause(ScrHttpReq *r);
 void scr_http_req_set_timeout(ScrHttpReq *r, double ms, ScrClosure *cb /*moves, nullable*/);
+ScrHttpReq *scr_http_req_set_timeout_ret(ScrHttpReq *r, double ms, ScrClosure *cb /*moves, nullable*/); /* +1 or NULL (throw pending) */
 bool scr_http_req_destroyed_flag(ScrHttpReq *r);
 bool scr_http_req_readable(ScrHttpReq *r);
 /* flushHeaders/cork/uncork/writableCorked, the res.req backref, the
@@ -10851,6 +10860,7 @@ double scr_http_res_writable_corked(ScrHttpRes *r);
 bool scr_http_res_destroyed_flag(ScrHttpRes *r);
 void scr_http_res_set_req(ScrHttpRes *r, ScrHttpReq *req /*borrowed, nullable*/);
 void scr_http_res_set_timeout(ScrHttpRes *r, double ms, ScrClosure *cb /*moves, nullable*/);
+ScrHttpRes *scr_http_res_set_timeout_ret(ScrHttpRes *r, double ms, ScrClosure *cb /*moves, nullable*/); /* +1 or NULL (throw pending) */
 void scr_http_res_on_write_flush(ScrHttpRes *r, ScrClosure *cb /*moves*/);
 /* req.setEncoding(enc) — the socket twin's contract; may throw. */
 void scr_http_req_set_encoding(ScrHttpReq *r, ScrStr *enc /*borrowed*/);
@@ -10911,6 +10921,8 @@ void scr_http_client_end_bytes(ScrHttpClientReq *c, ScrBytes *data /*borrowed*/)
 void scr_http_client_write_dynv(ScrHttpClientReq *c, const ScrDyn *d /*borrowed*/);
 void scr_http_client_end_dynv(ScrHttpClientReq *c, const ScrDyn *d /*borrowed*/);
 void scr_http_client_set_timeout(ScrHttpClientReq *c, double ms);
+void scr_http_client_set_timeout_cb(ScrHttpClientReq *c, double ms, ScrClosure *cb /*moves, nullable*/);
+ScrHttpClientReq *scr_http_client_set_timeout_ret(ScrHttpClientReq *c, double ms, ScrClosure *cb /*moves, nullable*/); /* +1 or NULL */
 void scr_http_client_destroy(ScrHttpClientReq *c);
 /* readable.pipe(request): wraps the request in a native Writable adapter
  * and pipes into THAT, so the pipe's backpressure / end-propagation /

@@ -4214,6 +4214,10 @@ export type IrLibFn =
    * budget runs Node's validateInt32-from-1 ladder and is then inert —
    * the single dial has nothing to time). May-throw. */
   | "net.connectAttempt"
+  /** createConnection({ port, host, timeout }) with a number timeout: Node's truthiness
+   * (0 and NaN skip), the delay validates before the dial (may-throw). Args [port, host, ms]. */
+  | "net.connectTimed"
+  | "net.connectTimedCb"
   /** connect over a RUNTIME argument (a computed-key option bag, a value of
    * unknown type): Node's validation order, then the dial. May-throw. */
   | "net.connectDyn"
@@ -4537,6 +4541,14 @@ export type IrLibFn =
   | "net.sockDestroySoon"
   | "net.sockBytesWritten"
   | "net.serverRef"
+  /** server.setTimeout(ms[, cb]) and server.timeout = ms (Node: stored, validated per accepted socket) / server.timeout reads. */
+  | "net.serverSetTimeout"
+  | "net.serverSetTimeoutOn"
+  | "net.serverTimeoutGet"
+  /** createServer({ keepAliveTimeout }) (validated at construction, may-throw), server.keepAliveTimeout = ms and reads. */
+  | "http.serverKeepAlive"
+  | "net.serverKeepAliveSet"
+  | "net.serverKeepAliveGet"
   | "net.serverUnref"
   | "net.sockReadable"
   /** socket.on('finish', cb) / end(cb): fires once when the FIN goes out
@@ -4875,6 +4887,15 @@ export type IrLibFn =
   | "http.clientOnResponse"
   | "http.clientOnError"
   | "http.clientOnTimeout"
+  /** setTimeout(ms) / setTimeout(ms, cb) on a ClientRequest, IncomingMessage or ServerResponse
+   * (Node's delegations): the delay validates in the runtime (may-throw); the On forms take the callback
+   * (moves). Each answers the receiver. */
+  | "http.clientSetTimeout"
+  | "http.clientSetTimeoutOn"
+  | "http.reqSetTimeout"
+  | "http.reqSetTimeoutOn"
+  | "http.resSetTimeout"
+  | "http.resSetTimeoutOn"
   | "http.clientOnClose"
   /** fs/promises (scr_lib.c over scr_async.c's settled minting): the SAME
    * sync syscalls, wrapped in an ALREADY-SETTLED promise — failure
@@ -13973,6 +13994,15 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "net.connect",
   "net.connectCb",
   "net.connectAttempt",
+  "net.connectTimed",
+  "net.connectTimedCb",
+  "http.serverKeepAlive",
+  "http.clientSetTimeout",
+  "http.clientSetTimeoutOn",
+  "http.reqSetTimeout",
+  "http.reqSetTimeoutOn",
+  "http.resSetTimeout",
+  "http.resSetTimeoutOn",
   "net.connectDyn",
   "net.setAutoSelTimeout",
   "error.argTypeThrow",

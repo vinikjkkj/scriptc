@@ -722,6 +722,7 @@ function lowerNetConnectOptions(L: Lowerer, expr: ts.CallExpression, member: str
   let lookup: IrExpr | null = null;
   let autoSelect = false;
   let attempt: IrExpr | null = null;
+  let timeout: IrExpr | null = null;
   let optionThrow: IrExpr | null = null;
   const propThrow = (name: string, expected: string, got: IrExpr): IrExpr => ({
     kind: "libCall",
@@ -790,6 +791,15 @@ function lowerNetConnectOptions(L: Lowerer, expr: ts.CallExpression, member: str
         );
       }
       autoSelect = true;
+    } else if (key === "timeout") {
+      // Node: `if (options.timeout) socket.setTimeout(options.timeout)`.
+      // A number lowers (0 and NaN skip at runtime, the rest validate
+      // before the dial); other value types keep the named fence.
+      const raw = lowerVal();
+      if (raw.type.kind !== "f64") {
+        L.noLowering(`a ${member} 'timeout' option of '${L.fmt(raw.type)}' values`, prop, "the timeout is a number here");
+      }
+      timeout = raw;
     } else if (key === "autoSelectFamilyAttemptTimeout") {
       // The attempt budget validates at runtime (Node's validateInt32-
       // from-1 ladder) and is then inert — the single dial has nothing
@@ -819,7 +829,7 @@ function lowerNetConnectOptions(L: Lowerer, expr: ts.CallExpression, member: str
       L.noLowering(
         `${member} option '${key}'`,
         prop,
-        "port, host, autoSelectFamily, and lookup are the supported options",
+        "port, host, timeout, autoSelectFamily, and lookup are the supported options",
       );
     }
   }
@@ -831,11 +841,18 @@ function lowerNetConnectOptions(L: Lowerer, expr: ts.CallExpression, member: str
     L.noLowering(
       `${member} options without a port`,
       optsNode,
-      "the supported options object is { port, host?, autoSelectFamily?, lookup? }",
+      "the supported options object is { port, host?, timeout?, autoSelectFamily?, lookup? }",
     );
   }
   host ??= { kind: "strLit", value: "localhost", type: STRING, loc };
   if (attempt !== null) {
+    if (timeout !== null) {
+      L.noLowering(
+        `${member} with a timeout beside an autoSelectFamilyAttemptTimeout`,
+        expr,
+        "the validated-budget form is the bare options call — set the timeout with socket.setTimeout",
+      );
+    }
     if (lookup !== null || args.length !== 1) {
       L.noLowering(
         `${member} with an autoSelectFamilyAttemptTimeout beside a lookup or connect listener`,
@@ -844,6 +861,27 @@ function lowerNetConnectOptions(L: Lowerer, expr: ts.CallExpression, member: str
       );
     }
     return { kind: "libCall", fn: "net.connectAttempt", args: [port, host, attempt], type: NETSOCKET_T, loc };
+  }
+  if (timeout !== null) {
+    if (attempt !== null || lookup !== null) {
+      L.noLowering(
+        `${member} with a timeout beside an autoSelectFamily lookup or attempt budget`,
+        expr,
+        "the timeout form is { port, host?, timeout } with a connect listener at most",
+      );
+    }
+    if (args.length === 1) {
+      return { kind: "libCall", fn: "net.connectTimed", args: [port, host, timeout], type: NETSOCKET_T, loc };
+    }
+    if (args.length !== 2) {
+      L.noLowering(
+        `${member} with ${args.length} arguments`,
+        expr,
+        `the supported form is ${member}(options[, connectListener])`,
+      );
+    }
+    const { cb } = lowerCallbackArg(L, args[1]!, "connect listeners", 0, () => false, "use ()", []);
+    return { kind: "libCall", fn: "net.connectTimedCb", args: [port, host, timeout, cb], type: NETSOCKET_T, loc };
   }
   if (lookup !== null) {
     if (!autoSelect) {
@@ -1003,6 +1041,26 @@ export function lowerHttpResPropertyAssignment(L: Lowerer, left: ts.Expression,
   };
 }
 
+/** `server.timeout = ms` (Node's writable server property; no validation at
+ * assignment — the value validates per accepted socket). Routed from the
+ * property-assignment path beside the close override. */
+export function lowerServerTimeoutPropertyAssignment(L: Lowerer, left: ts.Expression,
+  right: ts.Expression, loc: SrcLoc,): IrStmt | null {
+  if (!ts.isPropertyAccessExpression(left) || left.questionDotToken) return null;
+  const name = left.name.text;
+  if (name !== "timeout" && name !== "keepAliveTimeout") return null;
+  if (L.mapTypeOf(L.typeOf(left.expression))?.kind !== "netServer") return null;
+  if (!L.isStdlibMember(left)) return null;
+  const receiver = handleReceiver(L, left.expression, NETSERVER_T);
+  const value = L.lowerExprExpecting(right, F64);
+  const fn: IrLibFn = name === "timeout" ? "net.serverSetTimeout" : "net.serverKeepAliveSet";
+  return {
+    kind: "exprStmt",
+    expr: { kind: "libCall", fn, args: [receiver, value], type: NETSERVER_T, loc },
+    loc,
+  };
+}
+
 /** Method calls on net.Server receivers: listen(port[, cb]), close([cb]),
  * on/once("connection" | "error" | "close", cb). address() alone fences
  * toward the composed address().port read. Null for other receivers. */
@@ -1013,6 +1071,20 @@ function lowerNetServerMethodCall(L: Lowerer, call: ts.CallExpression,
   const name = access.name.text;
   const loc = locOf(call);
   const args = call.arguments;
+  if (name === "setTimeout") {
+    // server.setTimeout(ms[, cb]) (Node: `this.timeout = msecs`, the
+    // callback a persistent 'timeout' listener, the answer the server).
+    if (args.length !== 1 && args.length !== 2) {
+      L.noLowering(`setTimeout with ${args.length} arguments`, call, "the supported forms are setTimeout(ms) and setTimeout(ms, callback)");
+    }
+    const receiver = handleReceiver(L, access.expression, NETSERVER_T);
+    const ms = L.lowerExprExpecting(args[0]!, F64);
+    if (args.length === 1) {
+      return { kind: "libCall", fn: "net.serverSetTimeout", args: [receiver, ms], type: NETSERVER_T, loc };
+    }
+    const { cb } = lowerCallbackArg(L, args[1]!, "server timeout callbacks", 0, () => false, "use ()", []);
+    return { kind: "libCall", fn: "net.serverSetTimeoutOn", args: [receiver, ms, cb], type: NETSERVER_T, loc };
+  }
   if (name === "ref" || name === "unref") {
     if (args.length !== 0) {
       L.noLowering(`${name} with ${args.length} arguments`, call, `the form is ${name}()`);
@@ -2496,6 +2568,15 @@ export function lowerServerProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
     const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc };
     return { kind: "libCall", fn: "http.reqHeader", args: [receiver, key], type: L.envValueType(), loc };
   }
+  if (recvKind === "netServer" && L.isStdlibMember(expr) && expr.name.text === "keepAliveTimeout") {
+    const receiver = handleReceiver(L, expr.expression, NETSERVER_T);
+    return { kind: "libCall", fn: "net.serverKeepAliveGet", args: [receiver], type: F64, loc };
+  }
+  if (recvKind === "netServer" && L.isStdlibMember(expr) && expr.name.text === "timeout") {
+    // server.timeout: the value the last setTimeout/assignment stored (0 = none).
+    const receiver = handleReceiver(L, expr.expression, NETSERVER_T);
+    return { kind: "libCall", fn: "net.serverTimeoutGet", args: [receiver], type: F64, loc };
+  }
   if (recvKind === "httpRes" && L.isStdlibMember(expr) && expr.name.text === "headersSent") {
     const receiver = handleReceiver(L, expr.expression, HTTPRES_T);
     return { kind: "libCall", fn: "http.resHeadersSent", args: [receiver], type: BOOL, loc };
@@ -2612,7 +2693,7 @@ function lowerRequestHandlerArg(L: Lowerer, node: ts.Expression): IrExpr {
  * joinDuplicateHeaders: true joins repeated request-header reads with
  * ", "). Other documented keys fence by name; unknown keys drop like
  * Node drops them. Answers whether joinDuplicateHeaders was requested. */
-function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): { joinDup: boolean } {
+function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): { joinDup: boolean; keepAlive: IrExpr | null } {
   if (!ts.isObjectLiteralExpression(node)) {
     L.noLowering(
       `${what} with a non-literal options argument`,
@@ -2621,6 +2702,7 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
     );
   }
   let joinDup = false;
+  let keepAlive: IrExpr | null = null;
   for (const prop of node.properties) {
     let initializer: ts.Expression | null;
     if (ts.isPropertyAssignment(prop) &&
@@ -2650,6 +2732,19 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
       }
       continue;
     }
+    if (key === "keepAliveTimeout") {
+      // A number: validated at construction (Node's validateInteger), then the
+      // idle clock of every keep-alive connection. The value is lowered as is.
+      if (initializer === null) {
+        L.noLowering(`${what} with a shorthand keepAliveTimeout option`, prop, "spell it out: keepAliveTimeout: ms");
+      }
+      const raw = L.lowerExpr(initializer);
+      if (raw.type.kind !== "f64") {
+        L.noLowering(`a ${what} 'keepAliveTimeout' option of '${L.fmt(raw.type)}' values`, prop, "the keepAliveTimeout is a number here");
+      }
+      keepAlive = raw;
+      continue;
+    }
     if (key === "joinDuplicateHeaders") {
       // Literal true/false: the flag decides parse-time read semantics,
       // so a runtime value would silently pick one — fence dynamics.
@@ -2668,11 +2763,11 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
     }
     fenceOrDropOptionKey(
       L, prop, key, what, HTTP_SERVER_DOCUMENTED_OPTIONS,
-      "requireHostHeader: false and joinDuplicateHeaders are the supported options",
+      "requireHostHeader: false, joinDuplicateHeaders, and keepAliveTimeout are the supported options",
     );
     // An undocumented key, dropped like Node drops it.
   }
-  return { joinDup };
+  return { joinDup, keepAlive };
 }
 
 /** The shared createServer([options][, handler]) shapes behind
@@ -2699,10 +2794,14 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
     if (ts.isObjectLiteralExpression(args[0]!)) optsNode = args[0]!;
     else handlerNode = args[0]!;
   }
-  const joinDup = optsNode !== null && lowerHttpServerOptions(L, optsNode, what).joinDup;
-  const server: IrExpr = handlerNode !== null
+  const httpOpts = optsNode !== null ? lowerHttpServerOptions(L, optsNode, what) : { joinDup: false, keepAlive: null };
+  const joinDup = httpOpts.joinDup;
+  let server: IrExpr = handlerNode !== null
     ? { kind: "libCall", fn: "http.createServer", args: [lowerRequestHandlerArg(L, handlerNode)], type: NETSERVER_T, loc }
     : { kind: "libCall", fn: "http.createServerEmpty", args: [], type: NETSERVER_T, loc };
+  if (httpOpts.keepAlive !== null) {
+    server = { kind: "libCall", fn: "http.serverKeepAlive", args: [server, httpOpts.keepAlive], type: NETSERVER_T, loc };
+  }
   if (!joinDup) return server;
   // The flag-setting composition: an interned helper takes the fresh
   // server, sets the parser flag, and answers it — one expression.
@@ -2763,7 +2862,9 @@ export function lowerHttpAgentNew(L: Lowerer, expr: ts.NewExpression): IrExpr | 
   let kaMsecs: IrExpr = numLit(-1);
   let maxSockets: IrExpr = numLit(-1);
   let maxFree: IrExpr = numLit(-1);
-  let timeout: IrExpr = numLit(-1);
+  // NaN = unset: Node arms nothing for a falsy agent timeout (0 / NaN / absent),
+  // so NaN is the exact "no timeout" value and -1 (truthy) stays a real throw.
+  let timeout: IrExpr = numLit(NaN);
   let port: IrExpr = numLit(-1);
   const args = expr.arguments ?? [];
   if (args.length > 1) {
@@ -4793,6 +4894,32 @@ function lowerClientHeadersOption(L: Lowerer, node: ts.Expression): IrExpr {
 /** Method calls on ClientRequest receivers: write/end/destroy and
  * on/once("response" | "error" | "timeout" | "close"). Null for other
  * receivers. */
+/** setTimeout(ms[, callback]) on a request, response or client request
+ * (Node answers the receiver: `return this`). The delay validates in the
+ * runtime (getTimerDuration, msecs) and the callback is a listener for the
+ * surface: once('timeout') on a ClientRequest, persistent on/once for the
+ * message and response delegations. Chaining keeps the handle type. */
+function lowerHttpSetTimeoutCall(L: Lowerer, call: ts.CallExpression,
+  access: ts.PropertyAccessExpression, handleT: IrType, fn: IrLibFn, fnOn: IrLibFn, member: string,
+): IrExpr {
+  const loc = locOf(call);
+  const args = call.arguments;
+  if (args.length !== 1 && args.length !== 2) {
+    L.noLowering(
+      `${member}.setTimeout with ${args.length} arguments`,
+      call,
+      "the supported forms are setTimeout(ms) and setTimeout(ms, callback)",
+    );
+  }
+  const receiver = L.lowerExpr(access.expression);
+  const ms = L.lowerExprExpecting(args[0]!, F64);
+  if (args.length === 1) {
+    return { kind: "libCall", fn, args: [receiver, ms], type: handleT, loc };
+  }
+  const { cb } = lowerCallbackArg(L, args[1]!, "setTimeout callbacks", 0, () => false, "use ()", []);
+  return { kind: "libCall", fn: fnOn, args: [receiver, ms, cb], type: handleT, loc };
+}
+
 function lowerHttpClientMethodCall(L: Lowerer, call: ts.CallExpression,
   access: ts.PropertyAccessExpression,): IrExpr | null {
   if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "httpClientReq") return null;
@@ -4800,6 +4927,9 @@ function lowerHttpClientMethodCall(L: Lowerer, call: ts.CallExpression,
   const name = access.name.text;
   const loc = locOf(call);
   const args = call.arguments;
+  if (name === "setTimeout") {
+    return lowerHttpSetTimeoutCall(L, call, access, HTTPCLIENTREQ_T, "http.clientSetTimeout", "http.clientSetTimeoutOn", "request");
+  }
   if (name === "write" || name === "end") {
     requireStatementPosition(L, call, `request.${name}(...)`);
     const minArgs = name === "write" ? 1 : 0;
@@ -5030,6 +5160,9 @@ function lowerHttpReqMethodCall(L: Lowerer, call: ts.CallExpression,
   const name = access.name.text;
   const loc = locOf(call);
   const args = call.arguments;
+  if (name === "setTimeout") {
+    return lowerHttpSetTimeoutCall(L, call, access, HTTPREQ_T, "http.reqSetTimeout", "http.reqSetTimeoutOn", "IncomingMessage");
+  }
   if (name === "resume" || name === "destroy") {
     requireStatementPosition(L, call, `req.${name}()`);
     if (args.length !== 0) {
@@ -5146,6 +5279,9 @@ function lowerHttpResMethodCall(L: Lowerer, call: ts.CallExpression,
   const name = access.name.text;
   const loc = locOf(call);
   const args = call.arguments;
+  if (name === "setTimeout") {
+    return lowerHttpSetTimeoutCall(L, call, access, HTTPRES_T, "http.resSetTimeout", "http.resSetTimeoutOn", "ServerResponse");
+  }
   if (name === "setHeader") {
     requireStatementPosition(L, call, "res.setHeader(...)");
     if (args.length !== 2) {

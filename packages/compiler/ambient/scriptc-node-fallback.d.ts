@@ -2301,6 +2301,15 @@ declare module "net" {
     once(event: "session", listener: (session: Buffer) => void): void;
   }
   export interface Server {
+    /* server.timeout (http.Server): the idle timer each accepted socket
+     * arms; 0 = none. Assignment is unvalidated (Node's plain property). */
+    timeout: number;
+    /* server.keepAliveTimeout (http.Server): the idle clock (plus 1000 ms) a
+     * keep-alive connection arms after each response; 0 = none; default 5000. */
+    keepAliveTimeout: number;
+    /* server.setTimeout(ms[, cb]) (http.Server): sets timeout, the callback
+     * a persistent 'timeout' listener; answers the server. */
+    setTimeout(ms: number, callback?: () => void): this;
     /* Node answers the server itself (`return this` chaining). */
     listen(port: number, callback?: () => void): Server;
     /* The positional bind address (the options form's host in argument
@@ -2358,12 +2367,14 @@ declare module "net" {
   export function connect(options: {
     port: number;
     host?: string;
+    timeout?: number;
     autoSelectFamily?: boolean;
     lookup?: LookupFunction;
   }, connectListener?: () => void): Socket;
   export function createConnection(options: {
     port: number;
     host?: string;
+    timeout?: number;
     autoSelectFamily?: boolean;
     lookup?: LookupFunction;
   }, connectListener?: () => void): Socket;
@@ -2448,6 +2459,9 @@ declare module "http" {
    * now a scriptc fence. */
   export interface IncomingMessage extends Readable {
     readonly url: string;
+    /* req.setTimeout(ms[, cb]): the connection socket's idle timer (Node answers
+     * the message); validated even after the message ended. */
+    setTimeout(ms: number, callback?: () => void): this;
     readonly method: string;
     readonly statusCode: number | undefined;
     readonly statusMessage: string | undefined;
@@ -2491,6 +2505,9 @@ declare module "http" {
   }
   export interface ServerResponse {
     readonly headersSent: boolean;
+    /* res.setTimeout(ms[, cb]): the socket's idle timer (Node answers the
+     * response). The callback is a persistent 'timeout' listener. */
+    setTimeout(ms: number, callback?: () => void): this;
     /* Node's writable head properties: the implicit head reads them. */
     statusCode: number;
     statusMessage: string;
@@ -2586,6 +2603,9 @@ declare module "http" {
     destroy(error?: Error): void;
     on(event: "response", listener: (res: IncomingMessage) => void): void;
     on(event: "upgrade", listener: (res: IncomingMessage, socket: Socket, head: Buffer) => void): void;
+    /* req.setTimeout(ms[, cb]): validates the delay (Node's getTimerDuration,
+     * msecs) unless the response already ended; cb is a once('timeout') listener. */
+    setTimeout(ms: number, callback?: () => void): this;
     on(event: "timeout" | "close", listener: () => void): void;
     on(event: "error", listener: (err: Error) => void): void;
     /* addListener IS on (Node aliases them) — the suite spells both. */

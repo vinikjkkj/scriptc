@@ -1137,6 +1137,9 @@ const LIB_FN_SYMS: Record<string, string> = {
   "net.sockRef": "scr_net_sock_ref",
   "net.sockUnref": "scr_net_sock_unref",
   "net.serverRef": "scr_net_server_ref",
+  "http.serverKeepAlive": "scr_http_server_keepalive_new_ret",
+  "net.serverKeepAliveSet": "scr_net_server_keepalive_set_ret",
+  "net.serverKeepAliveGet": "scr_net_server_keepalive_get",
   "net.serverUnref": "scr_net_server_unref",
   "net.sockDestroySoon": "scr_net_sock_destroy_soon",
   "net.sockBytesWritten": "scr_net_sock_bytes_written",
@@ -1492,6 +1495,7 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "sc.text", "sc.json", "sc.buffer",
   "net.listen", "net.listenCb", "net.listenOpts", "net.listenOptsCb",
   "net.connect", "net.connectCb", "net.connectLookup", "net.connectAttempt", "net.connectDyn",
+  "net.connectTimed", "net.connectTimedCb",
   // node:tls / node:https servers and the TLS client socket, and the
   // dgram calls that implicit-bind — emit-exprs.ts marks E.usesTimers on
   // exactly these, and a server whose loop never runs accepts nothing.
@@ -17933,6 +17937,69 @@ class LlEmitter {
       this.declare(`declare void @scr_net_server_on_connection(ptr, ptr, ptr, i1 zeroext)`);
       B.line(`call void @scr_net_server_on_connection(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${adapter}, i1 ${args[2]!.name})`);
       return { name: "", type: e.type };
+    }
+    if (
+      e.fn === "http.clientSetTimeout" || e.fn === "http.clientSetTimeoutOn" ||
+      e.fn === "http.reqSetTimeout" || e.fn === "http.reqSetTimeoutOn" ||
+      e.fn === "http.resSetTimeout" || e.fn === "http.resSetTimeoutOn"
+    ) {
+      // ClientRequest / IncomingMessage / ServerResponse setTimeout: the
+      // receiver answers (+1) and the callback (On forms) moves into the
+      // runtime, which registers or releases it on every path. The throw
+      // check follows the call.
+      const on = e.fn.endsWith("On");
+      const base = e.fn.startsWith("http.client") ? "scr_http_client" : e.fn.startsWith("http.req") ? "scr_http_req" : "scr_http_res";
+      const args = e.args.map((a) => this.emitExpr(a));
+      let cb = "null";
+      if (on) {
+        this.moveTemp(args[2]!);
+        cb = args[2]!.name;
+      }
+      this.declare(`declare ptr @${base}_set_timeout_ret(ptr, double, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @${base}_set_timeout_ret(ptr ${args[0]!.name}, double ${args[1]!.name}, ptr ${cb})`);
+      const out = this.own({ name: t, type: e.type });
+      this.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "net.serverSetTimeout" || e.fn === "net.serverSetTimeoutOn") {
+      // server.setTimeout: the callback (On form) moves into the runtime, the
+      // answer is the server (+1). No throw: the value validates per socket.
+      const on = e.fn === "net.serverSetTimeoutOn";
+      const args = e.args.map((a) => this.emitExpr(a));
+      let cb = "null";
+      if (on) {
+        this.moveTemp(args[2]!);
+        cb = args[2]!.name;
+      }
+      this.declare(`declare ptr @scr_net_server_set_timeout_ret(ptr, double, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_net_server_set_timeout_ret(ptr ${args[0]!.name}, double ${args[1]!.name}, ptr ${cb})`);
+      return this.own({ name: t, type: e.type });
+    }
+    if (e.fn === "net.serverTimeoutGet") {
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.declare(`declare double @scr_net_server_timeout_get(ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call double @scr_net_server_timeout_get(ptr ${args[0]!.name})`);
+      return { name: t, type: e.type };
+    }
+    if (e.fn === "net.connectTimed" || e.fn === "net.connectTimedCb") {
+      // createConnection({ timeout }): the delay validates before the dial;
+      // the callback (when present) moves into the runtime, which registers
+      // or releases it on every path. The throw check follows the call.
+      const args = e.args.map((a) => this.emitExpr(a));
+      let cb = "null";
+      if (e.fn === "net.connectTimedCb") {
+        this.moveTemp(args[3]!);
+        cb = args[3]!.name;
+      }
+      this.declare(`declare ptr @scr_net_connect_timed(double, ptr, double, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_net_connect_timed(double ${args[0]!.name}, ptr ${args[1]!.name}, double ${args[2]!.name}, ptr ${cb})`);
+      const out = this.own({ name: t, type: e.type });
+      this.emitPendingCheck();
+      return out;
     }
     if (e.fn === "net.connect" || e.fn === "net.connectCb") {
       const args = e.args.map((a) => this.emitExpr(a));

@@ -4965,6 +4965,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "net.connectDyn":
             E.usesTimers = true;
             return finish(`scr_net_connect_dyn(${arg(0)})`);
+          case "net.connectTimed":
+            // createConnection({ timeout }): the delay validates before the dial.
+            E.usesTimers = true;
+            return finish(`scr_net_connect_timed(${arg(0)}, ${arg(1)}, ${arg(2)}, NULL)`);
+          case "net.connectTimedCb": {
+            E.usesTimers = true;
+            const cb = args[3]!;
+            E.moveTemp(cb);
+            return finish(`scr_net_connect_timed(${arg(0)}, ${arg(1)}, ${arg(2)}, ${cb.name})`);
+          }
           case "net.connectAttempt":
             // The validated autoSelectFamilyAttemptTimeout form: Node's
             // range ladder runs first, the dial follows.
@@ -5037,6 +5047,21 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_net_sock_ref(${arg(0)})`);
           case "net.sockUnref":
             return finish(`scr_net_sock_unref(${arg(0)})`);
+          case "net.serverSetTimeout":
+            return finish(`scr_net_server_set_timeout_ret(${arg(0)}, ${arg(1)}, NULL)`);
+          case "net.serverSetTimeoutOn": {
+            const cb = args[2]!;
+            E.moveTemp(cb);
+            return finish(`scr_net_server_set_timeout_ret(${arg(0)}, ${arg(1)}, ${cb.name})`);
+          }
+          case "http.serverKeepAlive":
+            return finish(`scr_http_server_keepalive_new_ret(${arg(0)}, ${arg(1)})`);
+          case "net.serverKeepAliveSet":
+            return finish(`scr_net_server_keepalive_set_ret(${arg(0)}, ${arg(1)})`);
+          case "net.serverKeepAliveGet":
+            return finish(`scr_net_server_keepalive_get(${arg(0)})`);
+          case "net.serverTimeoutGet":
+            return finish(`scr_net_server_timeout_get(${arg(0)})`);
           case "net.serverRef":
             return finish(`scr_net_server_ref(${arg(0)})`);
           case "net.serverUnref":
@@ -6489,6 +6514,27 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "http.clientWriteBytes":
             E.line(`scr_http_client_write_bytes(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
+          case "http.clientSetTimeout":
+            return finish(`scr_http_client_set_timeout_ret(${arg(0)}, ${arg(1)}, NULL)`);
+          case "http.clientSetTimeoutOn": {
+            const cb = args[2]!;
+            E.moveTemp(cb);
+            return finish(`scr_http_client_set_timeout_ret(${arg(0)}, ${arg(1)}, ${cb.name})`);
+          }
+          case "http.reqSetTimeout":
+            return finish(`scr_http_req_set_timeout_ret(${arg(0)}, ${arg(1)}, NULL)`);
+          case "http.reqSetTimeoutOn": {
+            const cb = args[2]!;
+            E.moveTemp(cb);
+            return finish(`scr_http_req_set_timeout_ret(${arg(0)}, ${arg(1)}, ${cb.name})`);
+          }
+          case "http.resSetTimeout":
+            return finish(`scr_http_res_set_timeout_ret(${arg(0)}, ${arg(1)}, NULL)`);
+          case "http.resSetTimeoutOn": {
+            const cb = args[2]!;
+            E.moveTemp(cb);
+            return finish(`scr_http_res_set_timeout_ret(${arg(0)}, ${arg(1)}, ${cb.name})`);
+          }
           case "http.clientEnd":
             E.line(`scr_http_client_end(${arg(0)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };

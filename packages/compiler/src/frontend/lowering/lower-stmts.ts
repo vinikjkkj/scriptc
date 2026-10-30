@@ -29,7 +29,7 @@ import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
 import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation, staticBagWrite, superReturnStmt, lowerSuperFlagStatement } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
-import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
+import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment, lowerServerTimeoutPropertyAssignment } from "./lower-server.js";
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
@@ -7563,6 +7563,10 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
           {
             const resProp = lowerHttpResPropertyAssignment(L, expr.left, expr.right, locOf(expr));
             if (resProp) return resProp;
+          }
+          {
+            const srvTimeout = lowerServerTimeoutPropertyAssignment(L, expr.left, expr.right, locOf(expr));
+            if (srvTimeout) return srvTimeout;
           }
           // `h.K = v` on a CJS export ACCESSOR with a setter
           // (`Object.defineProperty(exports|module.exports, "K", { get, set })`):
