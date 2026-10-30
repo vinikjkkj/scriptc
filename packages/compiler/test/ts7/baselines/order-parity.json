@@ -7180,6 +7180,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/17300-weakmap-class-key-number-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/17300-weakmap-class-key-number-inspect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17301-weakmap-record-key-scalar-values-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/17301-weakmap-record-key-scalar-values-inspect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17302-weakmap-riding-map-string-tag.ts": {
+   "order": [
+    "<repo>/tests/corpus/17302-weakmap-riding-map-string-tag.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17303-weakmap-riding-map-mixed-positions.ts": {
+   "order": [
+    "<repo>/tests/corpus/17303-weakmap-riding-map-mixed-positions.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1731-symbol-field-shapes.cjs": {
    "order": [
     "<repo>/tests/corpus/1731-symbol-field-shapes.cjs"
