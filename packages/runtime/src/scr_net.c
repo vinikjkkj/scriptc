@@ -2305,6 +2305,7 @@ static void scr_net_sock_dial_peer(ScrNetSocket *s) {
     }
   }
   s->fd = fd;
+  if (s->timeout_ms > 0) scr_net_sock_timer_arm(s); /* a pre-dial setTimeout arms now */
   int rc = connect(fd, sa, salen);
   if (rc == 0) {
     /* Immediate success (loopback can): still async — the write filter
@@ -2350,6 +2351,7 @@ static void scr_net_dial_pipe(ScrNetSocket *s) {
   }
   scr_net_nonblock(fd);
   s->fd = fd;
+  if (s->timeout_ms > 0) scr_net_sock_timer_arm(s); /* a pre-dial setTimeout arms now */
   int rc = connect(fd, (struct sockaddr *)&su, sizeof su);
   if (rc == 0 || errno == EINPROGRESS) {
     s->connecting = true;
@@ -3396,6 +3398,7 @@ static bool scr_net_sock_dial_ip(ScrNetSocket *s, const ScrStr *ip) {
   if (rc == 0) scr_net_dial_log_clear(s); /* connected at once: no failed attempt to report */
   if (rc == 0 || errno == EINPROGRESS) {
     s->fd = fd;
+    if (s->timeout_ms > 0) scr_net_sock_timer_arm(s); /* a pre-dial setTimeout arms now */
     s->connecting = true;
     scr_net_sock_update_write(s);
     return true;
@@ -3654,10 +3657,45 @@ double scr_net_sock_bytes_written(ScrNetSocket *s) { return (double)s->bytes_wri
 /* socket.readable: true until the read half is done (peer FIN / destroy). */
 bool scr_net_sock_readable(ScrNetSocket *s) { return s->fd >= 0 && !s->rd_eof; }
 
-/* socket.setTimeout(ms): ms > 0 arms the idle timer NOW (Node starts the
- * clock at the call — connecting time counts), ms <= 0 disables. */
+/* Node's getTimerDuration(msecs, name) (lib/internal/timers.js): the one
+ * validator behind socket.setTimeout, the http request timeout option and
+ * the request/response setTimeout surfaces. A negative, NaN or infinite
+ * value throws ERR_OUT_OF_RANGE with the option's name; a value above
+ * 2^31-1 defers the TimeoutOverflowWarning (process.emitWarning's nextTick)
+ * and clamps. False with the throw pending. */
+bool scr_net_timer_duration(double *ms, const char *name) {
+  double v = *ms;
+  if (v < 0 || !isfinite(v)) {
+    char recv[48], msg[192];
+    scr_num_received(v, recv);
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"%s\" is out of range. It must be a non-negative finite number. Received %s",
+                       name, recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  if (v > 2147483647.0) {
+    char num[32], text[200];
+    scr_f64_to_str(v, num);
+    int len = snprintf(text, sizeof text,
+                       "%s does not fit into a 32-bit signed integer.\nTimer duration was truncated to 2147483647.",
+                       num);
+    scr_proc_warn_defer("TimeoutOverflowWarning", text, (size_t)len);
+    v = 2147483647.0;
+  }
+  *ms = v;
+  return true;
+}
+
+/* socket.setTimeout(ms) (Node's setStreamTimeout): a destroyed stream
+ * returns before any validation; otherwise the value is validated and
+ * clamped, 0 disables, and 0 < ms < 1 is 1 (Node's Timeout). The clock
+ * starts at the call; a socket not yet dialled arms at its dial instead. */
 void scr_net_sock_set_timeout(ScrNetSocket *s, double ms) {
-  if (ms > 0 && s->fd >= 0) {
+  if (scr_net_sock_destroyed(s)) return;
+  if (!scr_net_timer_duration(&ms, "msecs")) return;
+  if (ms > 0 && ms < 1) ms = 1;
+  if (ms > 0) {
     s->timeout_ms = ms;
     scr_net_sock_timer_arm(s);
   } else {

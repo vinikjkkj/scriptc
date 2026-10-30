@@ -3090,6 +3090,13 @@ static ScrHttpClientReq *scr_http_request_impl(ScrStr *host /*borrowed*/, double
     scr_str_release(msg);
     return NULL;
   }
+  /* Node's ClientRequest validates options.timeout synchronously (getTimerDuration
+   * with the name 'timeout'); the clamped value is what the socket arms. */
+  if (!scr_net_timer_duration(&timeout_ms, "timeout")) {
+    if (cb) scr_closure_release(cb);
+    if (presock) scr_net_sock_release(presock);
+    return NULL;
+  }
   scr_http_install();
   ScrHttpClientReq *c = calloc(1, sizeof *c);
   if (!c) scr_http_oom();
@@ -3172,6 +3179,13 @@ ScrHttpClientReq *scr_http_request_conn(ScrClosure *conn_cb /*moves*/, ScrStr *p
                                          ScrStr *method /*borrowed*/, double timeout_ms,
                                          ScrArr *header_pairs /*borrowed*/, bool auto_end,
                                          ScrClosure *cb /*moves, nullable*/, ScrHttpRespFn fn) {
+  /* Node validates options.timeout in the ClientRequest constructor, before
+   * the createConnection dialer runs; the clamped value rides on. */
+  if (!scr_net_timer_duration(&timeout_ms, "timeout")) {
+    scr_closure_release(conn_cb);
+    if (cb != NULL) scr_closure_release(cb);
+    return NULL;
+  }
   ScrNetSocket *sock = ((ScrNetSocket *(*)(ScrClosure *))conn_cb->fn)(conn_cb); /* +1 result */
   scr_closure_release(conn_cb);
   if (scr_exc_pending() || sock == NULL) {

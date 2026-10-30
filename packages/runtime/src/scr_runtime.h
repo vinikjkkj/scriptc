@@ -7839,6 +7839,11 @@ void scr_next_tick(ScrClosure *cb);
  * nextTicks run in true FIFO order (in Node they are the same queue).
  * Teardown drops markers without running them. */
 void scr_next_tick_raw(void (*fn)(void));
+/* Process warnings raised by the always-linked core (scr_net.c's timer
+ * validation). The hook is main's scr_emit_warning when the dyn-async channel
+ * is linked, else NULL and the default report is printed. Defer = nextTick. */
+void scr_proc_warn_set_hook(void (*fn)(const char *name, const char *code, ScrStr *message));
+void scr_proc_warn_defer(const char *name, const char *msg, size_t len);
 void scr_nticks_teardown(void);
 /* ── the events unit (scr_events.c — OPTIONAL, link-gated) ────────────
  * Process signal/exit events and the piped-stdin surface. The unit links
@@ -10282,6 +10287,10 @@ bool scr_net_sock_readable(ScrNetSocket *s);
  * registers "connecting" and buffers writes; dial_start runs the dial. */
 ScrNetSocket *scr_net_connect_deferred(double port, ScrStr *host /*borrowed, nullable*/); /* +1 */
 void scr_net_sock_dial_start(ScrNetSocket *s);
+/* Node's getTimerDuration(msecs, name): negative / NaN / infinite throws
+ * ERR_OUT_OF_RANGE (name is the option's), a value above 2^31-1 defers a
+ * TimeoutOverflowWarning and clamps *ms. False with the throw pending. */
+bool scr_net_timer_duration(double *ms, const char *name);
 void scr_net_sock_set_timeout(ScrNetSocket *s, double ms);
 void scr_net_sock_on_timeout(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once);
 ScrStr *scr_net_sock_remote_address(ScrNetSocket *s); /* +1 or NULL (undefined arm) */
