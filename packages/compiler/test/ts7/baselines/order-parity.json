@@ -6338,6 +6338,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16200-pct-s-dates-maps-arrays.ts": {
+   "order": [
+    "<repo>/tests/corpus/16200-pct-s-dates-maps-arrays.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16201-pct-s-null-proto-and-dyn.ts": {
+   "order": [
+    "<repo>/tests/corpus/16201-pct-s-null-proto-and-dyn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16202-pct-s-scalars-and-plain-objects.ts": {
+   "order": [
+    "<repo>/tests/corpus/16202-pct-s-scalars-and-plain-objects.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1621-cjs-require-cache-hit/main.js": {
    "order": [
     "<repo>/tests/corpus/1621-cjs-require-cache-hit/counter.js",
@@ -17825,6 +17843,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/8856-text-mb-two-byte-sweep.ts": {
+   "order": [
+    "<repo>/tests/corpus/8856-text-mb-two-byte-sweep.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8857-text-mb-families-smoke.ts": {
+   "order": [
+    "<repo>/tests/corpus/8857-text-mb-families-smoke.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8858-text-mb-chunked-stream-fuzz.ts": {
+   "order": [
+    "<repo>/tests/corpus/8858-text-mb-chunked-stream-fuzz.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8859-text-mb-stored-through-any.ts": {
+   "order": [
+    "<repo>/tests/corpus/8859-text-mb-stored-through-any.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/8860-text-mb-composed-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/8860-text-mb-composed-forms.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/8900-function-constructor-over-literal-text.js": {
    "order": [
     "<repo>/tests/corpus/8900-function-constructor-over-literal-text.js"
@@ -21232,36 +21280,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
- "<repo>/tests/corpus/8856-text-mb-two-byte-sweep.ts": {
-   "order": [
-     "<repo>/tests/corpus/8856-text-mb-two-byte-sweep.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8857-text-mb-families-smoke.ts": {
-   "order": [
-     "<repo>/tests/corpus/8857-text-mb-families-smoke.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8858-text-mb-chunked-stream-fuzz.ts": {
-   "order": [
-     "<repo>/tests/corpus/8858-text-mb-chunked-stream-fuzz.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8859-text-mb-stored-through-any.ts": {
-   "order": [
-     "<repo>/tests/corpus/8859-text-mb-stored-through-any.ts"
-   ],
-   "diags": []
- },
- "<repo>/tests/corpus/8860-text-mb-composed-forms.ts": {
-   "order": [
-     "<repo>/tests/corpus/8860-text-mb-composed-forms.ts"
-   ],
-   "diags": []
- }
+  }
  }
 }
