@@ -61,6 +61,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { F64, type IrExpr, type SrcLoc, STRING } from "../../ir/nodes.js";
 import { bindingNeverReassigned } from "./lower-calls.js";
+import { propertyNameText } from "./lowerer.js";
 
 /** A proven creation site: the function-like node the value was made at,
  * or a `bind` chain over one. */
@@ -197,14 +198,19 @@ function creationOf(L: Lowerer, node: ts.Node, seen: Set<ts.Symbol>): Creation |
     if (decls.length !== 1) return null;
     const d = decls[0];
     if (d === undefined) return null;
-    if (ts.isMethodDeclaration(d)) return { kind: "node", node: d, name: n.name.text };
+    // The DECLARED key names an anonymous function here, not the spelling at
+    // this use: `{ "q": () => 1 }` is "q" however the property is read.
+    const keyName = ts.isMethodDeclaration(d) || ts.isPropertyAssignment(d) || ts.isPropertyDeclaration(d)
+      ? propertyNameText(L, d.name)
+      : null;
+    if (ts.isMethodDeclaration(d)) return keyName === null ? null : { kind: "node", node: d, name: keyName };
     const init = ts.isPropertyAssignment(d) || ts.isPropertyDeclaration(d) ? d.initializer : undefined;
     if (init === undefined) return null;
     const inner = creationOf(L, init, seen);
     if (inner === null) return null;
     const lit = peel(init);
     if (inner.kind === "node" && inner.name === null && (ts.isArrowFunction(lit) || ts.isFunctionExpression(lit))) {
-      return { kind: "node", node: inner.node, name: n.name.text };
+      return keyName === null ? null : { kind: "node", node: inner.node, name: keyName };
     }
     return inner;
   }

@@ -1203,32 +1203,99 @@ function anyPiecedFuncType(L: Lowerer, node: ts.Node, t: ts.Type): IrType | null
  * their own name, anonymous function/arrow expressions their
  * NamedEvaluation home (a variable initializer or property assignment).
  * Null when nothing names the value (the box stays anonymous). */
-export function jsFuncNameOf(node: ts.Node): string | null {
+export function jsFuncNameOf(node: ts.Node, L?: Lowerer): string | null {
   let n: ts.Node = node;
   while (ts.isParenthesizedExpression(n)) n = n.expression;
   if (ts.isIdentifier(n)) return n.text;
   if (ts.isPropertyAccessExpression(n)) return n.name.text;
   if ((ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n)) && n.name) return n.name.text;
+  // `export default function () {}` names its value "default".
+  if (ts.isFunctionDeclaration(n) && !n.name && hasExportDefault(n)) return "default";
+  // A method keeps its own key, whatever shape the key has (`"q"() {}`,
+  // `[k]() {}`); accessors are not in this family (see lower-calls).
+  if (ts.isMethodDeclaration(n)) return propertyNameText(L, n.name);
   if (ts.isFunctionExpression(n) || ts.isArrowFunction(n)) {
+    // NamedEvaluation (ECMA-262 IsAnonymousFunctionDefinition): an anonymous
+    // function or arrow takes the name of the position it is the value of.
+    // The positions are the same in every engine, and the NAME is the
+    // function node's own property, so every position answers here.
     const p = n.parent;
     if (p && ts.isVariableDeclaration(p) && p.initializer === n && ts.isIdentifier(p.name)) {
       return p.name.text;
     }
-    if (p && ts.isPropertyAssignment(p) && p.initializer === n && ts.isIdentifier(p.name)) {
+    // A property's key, not the spelling at its use: `{ "q": () => 1 }` is
+    // "q", `{ 42: () => 1 }` is "42", `{ [k]: () => 1 }` is the key's string.
+    if (p && (ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p)) && p.initializer === n) {
+      return propertyNameText(L, p.name);
+    }
+    // A parameter's default (`function f(cb = () => 1)`) and a binding
+    // element's default (`const { d = () => 1 } = …`) name the binding.
+    if (p && (ts.isParameter(p) || ts.isBindingElement(p)) && p.initializer === n && p.name !== undefined && ts.isIdentifier(p.name)) {
       return p.name.text;
     }
-    // `mut = () => …`. NamedEvaluation covers assignment to a plain
-    // IdentifierReference and nothing else: `o.f = () => …` leaves the
-    // name empty in every engine, so a property target declines here.
+    // `export default () => 1` names its value "default".
+    if (p && ts.isExportAssignment(p) && !p.isExportEquals && p.expression === n) {
+      return "default";
+    }
+    // `mut = () => …`, and the logical assignments `||=` `&&=` `??=`. A
+    // property target declines: `o.f = () => …` leaves the name empty in
+    // every engine.
     if (
       p &&
       ts.isBinaryExpression(p) &&
-      p.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
       p.right === n &&
-      ts.isIdentifier(p.left)
+      ts.isIdentifier(p.left) &&
+      (p.operatorToken.kind === ts.SyntaxKind.EqualsToken ||
+        p.operatorToken.kind === ts.SyntaxKind.BarBarEqualsToken ||
+        p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken ||
+        p.operatorToken.kind === ts.SyntaxKind.QuestionQuestionEqualsToken)
     ) {
       return p.left.text;
     }
+  }
+  return null;
+}
+
+function hasExportDefault(n: ts.Node): boolean {
+  const mods = ts.canHaveModifiers(n) ? ts.getModifiers(n) : undefined;
+  return mods !== undefined && mods.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
+}
+
+/** The string a property name spells, as JS's ToPropertyKey gives it, or
+ * null when this compiler cannot prove it. Identifiers, string and
+ * no-substitution template keys, numeric keys (canonical ToString, so
+ * `1.50` is "1.5"), and private names (`#p`) are syntactic. A computed key
+ * needs the checker (`L`): a string or number LITERAL type is its value,
+ * and a unique symbol `Symbol("d")` is `[d]` (`Symbol()` is ""). A key
+ * that is none of these declines, so the caller keeps its refusal or its
+ * runtime-table answer rather than a wrong spelling. */
+export function propertyNameText(L: Lowerer | undefined, name: ts.PropertyName): string | null {
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) {
+    return name.text;
+  }
+  if (ts.isNumericLiteral(name)) return String(Number(name.text));
+  if (ts.isPrivateIdentifier(name)) return name.text.startsWith("#") ? name.text : `#${name.text}`;
+  if (ts.isComputedPropertyName(name) && L !== undefined) {
+    const t = L.checker.getTypeAtLocation(name.expression);
+    if (t.isStringLiteralType()) return t.value;
+    if (t.isNumberLiteralType()) return String(t.value);
+    if (t.flags & ts.TypeFlags.UniqueESSymbol) return uniqueSymbolKeyName(L, t.getSymbol());
+  }
+  return null;
+}
+
+/** `[description]` for a unique symbol declared as `const s = Symbol("d")`,
+ * "" for `Symbol()`, null for anything else (a symbol this file cannot
+ * read the description of). */
+function uniqueSymbolKeyName(L: Lowerer, sym: ts.Symbol | undefined): string | null {
+  const d = sym !== undefined ? L.checker.declarationsOf(sym)[0] : undefined;
+  if (d === undefined || !ts.isVariableDeclaration(d) || d.initializer === undefined) return null;
+  const init = d.initializer;
+  if (!ts.isCallExpression(init) || !ts.isIdentifier(init.expression) || init.expression.text !== "Symbol") return null;
+  if (init.arguments.length === 0) return "";
+  const arg = init.arguments[0]!;
+  if (init.arguments.length === 1 && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg))) {
+    return `[${arg.text}]`;
   }
   return null;
 }
@@ -1277,13 +1344,58 @@ export function jsFuncValueNameOf(L: Lowerer, node: ts.Node, seen?: Set<ts.Symbo
     n.expression.name.text === "bind" &&
     n.expression.questionDotToken === undefined
   ) {
-    return `bound ${jsFuncValueNameOf(L, n.expression.expression, seen) ?? ""}`;
+    return `bound ${bindTargetName(L, n.expression.expression, seen ?? new Set()) ?? ""}`;
   }
 
-  if (ts.isIdentifier(n)) {
-    return declaredFuncValueName(L, n, seen ?? new Set()) ?? jsFuncNameOf(n);
+  // A binding answers only through its declaration (declaredFuncValueName),
+  // and a function node answers for itself. Every other reference -- a
+  // parameter, a property read, an element read, a call result -- has no
+  // creation site this walk can prove, so it answers null and the box takes
+  // the NAME the closure's own body carries (the runtime's per-body table,
+  // keyed by the closure's entry point, scr_fn_name_of). That table is the
+  // NamedEvaluation name of the creation node, so it is right where a
+  // spelling at the use site (`o.h` for `{ h: f1 }`, `o["dyn"]`) is not.
+  if (ts.isIdentifier(n)) return declaredFuncValueName(L, n, seen ?? new Set());
+  if (
+    ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isFunctionDeclaration(n) ||
+    ts.isMethodDeclaration(n)
+  ) {
+    return jsFuncNameOf(n, L);
   }
-  return jsFuncNameOf(n);
+  return null;
+}
+
+/** The name a `.bind` TARGET contributes. A bind target that is a property
+ * read has no table entry of its own (the bound box is built here), so it
+ * takes the property's declared creation site: a method's key, or the
+ * initializer's NamedEvaluation name. Anything else is jsFuncValueNameOf. */
+function bindTargetName(L: Lowerer, node: ts.Expression, seen: Set<ts.Symbol>): string | null {
+  let t: ts.Node = node;
+  while (ts.isParenthesizedExpression(t)) t = t.expression;
+  if (ts.isPropertyAccessExpression(t) && t.questionDotToken === undefined) {
+    return propertyDeclaredName(L, L.checker.getSymbolAtLocation(t.name), seen);
+  }
+  if (ts.isElementAccessExpression(t) && t.questionDotToken === undefined) {
+    const at = L.checker.getTypeAtLocation(t.argumentExpression);
+    const key = at.isStringLiteralType() ? at.value : at.isNumberLiteralType() ? String(at.value) : null;
+    if (key === null) return null;
+    return propertyDeclaredName(L, L.checker.getPropertyOfType(L.typeOf(t.expression), key), seen);
+  }
+  return jsFuncValueNameOf(L, t, seen);
+}
+
+function propertyDeclaredName(L: Lowerer, psym: ts.Symbol | undefined, seen: Set<ts.Symbol>): string | null {
+  if (psym === undefined || seen.has(psym)) return null;
+  seen.add(psym);
+  const decls = L.checker.declarationsOf(psym);
+  if (decls.length !== 1) return null;
+  const d = decls[0];
+  if (d === undefined) return null;
+  if (ts.isMethodDeclaration(d)) return propertyNameText(L, d.name);
+  if ((ts.isPropertyAssignment(d) || ts.isPropertyDeclaration(d)) && d.initializer !== undefined) {
+    return jsFuncValueNameOf(L, d.initializer, seen);
+  }
+  return null;
 }
 
 /** The creation-site name reachable through an identifier's DECLARATION,
