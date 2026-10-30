@@ -16628,6 +16628,9 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
       const armed = stringConvArmBridge(L, e, node);
       if (armed) return { kind: "toString", operand: armed, type: STRING, loc: e.loc };
     }
+    // String(f) / `${f}` / "" + f over a function VALUE: its source text
+    // (Node's ToString calls Function.prototype.toString; fn-srctext.ts).
+    if (e.type.kind === "func") return { kind: "libCall", fn: "fn.text", args: [e], type: STRING, loc: e.loc };
     if (e.type.kind === "string") return e;
     // A void call's value is JS's undefined: it runs for effect, then the
     // text is "undefined" (String(f()) and `${f()}` over a void function).

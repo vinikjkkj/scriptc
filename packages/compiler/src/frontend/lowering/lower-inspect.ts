@@ -1872,6 +1872,8 @@ function sConversionHazard(L: Lowerer, t: IrType, seen: Set<string>): string | n
  * this function, every other arm through the top-level %s rule it always had
  * (formatValueExpr), so an f64 arm keeps formatNumber's -0. */
 function sUserStringExpr(L: Lowerer, t: IrType, value: IrExpr, node: ts.Expression, depth: number, loc: SrcLoc): IrExpr | null {
+  // A function value converts to its source text (String(f) is fn.text).
+  if (t.kind === "func") return { kind: "libCall", fn: "fn.text", args: [value], type: STRING, loc };
   if (t.kind === "union") {
     const arms = L.unions.get(t.unionId)?.arms;
     if (!arms || arms.length === 0) return null;
@@ -2036,6 +2038,8 @@ function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
   // build time (OPEN, fmttostr) rather than print the inspect form. dyn
   // arguments are NOT fenced: their conversion is the runtime's insp.fmtS,
   // and the class-instance loss at dyn boxing is a separate open item.
+  // A function VALUE in the %s position: Node's String(f), the source text.
+  if (sSpec && t.kind === "func") return { kind: "libCall", fn: "fn.text", args: [value], type: STRING, loc };
   if (sSpec) {
     const primChecker = t.kind === "record" ? null : toPrimitiveHazard(L, L.typeOf(node));
     const hazard = sConversionHazard(L, t, new Set()) ?? primChecker;

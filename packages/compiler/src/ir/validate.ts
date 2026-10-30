@@ -359,6 +359,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "sym.keyFor": { argTypes: [SYMBOL_T], result: VOID },
   "sym.desc": { argTypes: [SYMBOL_T], result: VOID },
   "sym.toString": { argTypes: [SYMBOL_T], result: STRING },
+  // Function.prototype.toString of a function VALUE (any func-typed operand;
+  // the arg is checked below, not by signature). Text answer: the program's
+  // own source text, or the native form, from the closure's entry point.
+  "fn.text": { argTypes: [], result: STRING },
   "url.new": { argTypes: [STRING], result: URL_T },
   "url.newRel": { argTypes: [STRING, URL_T], result: URL_T },
   "url.protocol": { argTypes: [URL_T], result: STRING },
@@ -4515,7 +4519,8 @@ function validateFunction(
           e.fn === "writable.write" ||
           e.fn === "writable.writeStr" || e.fn === "writable.writeU" ||
           e.fn === "writable.end" ||
-          e.fn === "readable.unpipe";
+          e.fn === "readable.unpipe" ||
+          e.fn === "fn.text";
         if (variadic
           ? e.args.length < sig.argTypes.length
           : e.args.length !== sig.argTypes.length) {
@@ -4526,6 +4531,9 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `libCall ${e.fn} arg ${i}`);
         });
+        if (e.fn === "fn.text" && e.args[0]?.type.kind !== "func") {
+          err(`libCall fn.text: expected a function value, got ${e.args[0]?.type.kind}`, e.loc);
+        }
         if (e.fn === "text.decodeState" || e.fn === "text.decodeFresh") {
           const ta = e.args[e.fn === "text.decodeState" ? 1 : 2]?.type;
           if (ta?.kind !== "bytes") err(`libCall ${e.fn}: expected a bytes value, got ${ta?.kind}`, e.loc);
