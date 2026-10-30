@@ -940,17 +940,13 @@ static ScrTimer scr_timer_pop(void) {
   return top;
 }
 
-/* ── process warnings (emitWarning + the 'warning' event) ─────────────
- * Always linked with the timer core: the delay warnings below are raised
- * from the setTimeout/setInterval entry points, which every program with
- * a timer reaches. Listeners are dyn functions; emission is SYNCHRONOUS at
- * the call (process.emitWarning defers its dispatch through nextTick: the
- * deferral is the caller's, see scr_timer_delay_warn). The default stderr
- * report always prints (a compiled binary has no --no-warnings). The
- * warning VALUE is the dyn error encoding built over an ScrError
- * (identity-cached, so a listener comparing two deliveries of one warning
- * sees one object); a string `detail` joins the dyn node and the report's
- * second line, exactly Node. */
+/* ── process warnings: the default stderr report ──────────────────────
+ * Always linked: the timer core raises Node's delay warnings from every
+ * setTimeout/setInterval entry point. The report is Node's onWarning line
+ * ("(node:pid) [CODE] Name: message", the detail line, and the one-time
+ * trace hint). The 'warning' listeners live in scr_async_dyn.c and register
+ * a hook here when the first one is added, so a program with no listener
+ * never links the dyn core for a timer warning. */
 #ifdef _WIN32
 #include <process.h>
 #define SCR_WARN_PID() ((long)_getpid())
@@ -958,97 +954,29 @@ static ScrTimer scr_timer_pop(void) {
 #define SCR_WARN_PID() ((long)getpid())
 #endif
 
-static ScrDyn **scr_warn_listeners = NULL;
-static size_t scr_nwarn = 0, scr_warn_cap = 0;
+static void (*scr_warn_listener_hook)(const char *name, const char *msg) = NULL;
 
-static void scr_warn_teardown(void) {
-  for (size_t i = 0; i < scr_nwarn; i++) scr_dyn_release(scr_warn_listeners[i]);
-  free(scr_warn_listeners);
-  scr_warn_listeners = NULL;
-  scr_nwarn = scr_warn_cap = 0;
+void scr_warn_set_listener_hook(void (*hook)(const char *name, const char *msg)) {
+  scr_warn_listener_hook = hook;
 }
 
-void scr_process_on_warning(ScrDyn *fn) {
-  if (fn->kind != SCR_DYN_FUNC) {
-    const char *msg = "The \"listener\" argument must be of type function";
-    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, strlen(msg), "ERR_INVALID_ARG_TYPE");
-    return;
-  }
-  if (scr_nwarn == scr_warn_cap) {
-    scr_warn_cap = scr_warn_cap ? scr_warn_cap * 2 : 4;
-    scr_warn_listeners = realloc(scr_warn_listeners, scr_warn_cap * sizeof *scr_warn_listeners);
-    if (!scr_warn_listeners) {
-      fputs("scriptc: out of memory\n", stderr);
-      abort();
-    }
-  }
-  if (scr_nwarn == 0) atexit(scr_warn_teardown);
-  scr_warn_listeners[scr_nwarn++] = scr_dyn_retain(fn);
-}
-
-void scr_process_off_warning(ScrDyn *fn) {
-  for (size_t i = 0; i < scr_nwarn; i++) {
-    ScrDyn *l = scr_warn_listeners[i];
-    bool same = l == fn || (l->kind == SCR_DYN_FUNC && fn->kind == SCR_DYN_FUNC &&
-                            l->v.fn.clo == fn->v.fn.clo);
-    if (same) {
-      scr_dyn_release(l);
-      memmove(scr_warn_listeners + i, scr_warn_listeners + i + 1,
-              (scr_nwarn - i - 1) * sizeof *scr_warn_listeners);
-      scr_nwarn--;
-      return;
-    }
-  }
-}
-
-/* Dispatch + the default stderr report over a built warning dyn node.
- * Borrowed. Node's order: the default report is the FIRST 'warning'
- * listener (registered at bootstrap), so the stderr report precedes every
- * user listener, and a user listener's throw propagates after it. */
-void scr_warning_dispatch(ScrDyn *w) {
-  /* name/message live on the error encoding's prototype chain, not among
-   * its own members: the chain-aware data read finds them. */
-  const ScrDyn *en = scr_dyn_obj_data_get(w, "name", 4);
-  const ScrDyn *em = scr_dyn_obj_data_get(w, "message", 7);
-  const ScrDyn *ec = scr_dyn_obj_data_get(w, "code", 4);
-  const ScrDyn *ed = scr_dyn_obj_data_get(w, "detail", 6);
+void scr_warn_report(const char *name, const char *code, const char *msg, const char *detail) {
   fflush(stdout);
-  /* "(node:pid) [CODE] Name: message" + "\n<detail>" — Node's onWarning report. */
   fprintf(stderr, "(node:%ld) ", SCR_WARN_PID());
-  if (ec && ec->kind == SCR_DYN_STR) fprintf(stderr, "[%s] ", ec->v.str->data);
-  fprintf(stderr, "%s: %s",
-          (en && en->kind == SCR_DYN_STR) ? en->v.str->data : "Warning",
-          (em && em->kind == SCR_DYN_STR) ? em->v.str->data : "");
-  if (ed && ed->kind == SCR_DYN_STR) fprintf(stderr, "\n%s", ed->v.str->data);
+  if (code) fprintf(stderr, "[%s] ", code);
+  fprintf(stderr, "%s: %s", name, msg);
+  if (detail) fprintf(stderr, "\n%s", detail);
   fputc('\n', stderr);
-  /* Node's one-time trace hint, after the first report. */
+  /* Node's one-time trace hint, after the first report. Node names the flag
+   * by the FIRST report's kind and prints it once. */
   static bool hinted = false;
   if (!hinted) {
     hinted = true;
-    /* Node names the flag by the FIRST report's kind and prints it once. */
-    fputs((en && en->kind == SCR_DYN_STR && strcmp(en->v.str->data, "DeprecationWarning") == 0)
+    fputs(strcmp(name, "DeprecationWarning") == 0
               ? "(Use `node --trace-deprecation ...` to show where the warning was created)\n"
               : "(Use `node --trace-warnings ...` to show where the warning was created)\n",
           stderr);
   }
-  for (size_t i = 0; i < scr_nwarn; i++) {
-    ScrDyn *r = scr_dyn_call(scr_warn_listeners[i], &w, 1, "listener");
-    if (r == NULL) return; /* pending exception propagates */
-    scr_dyn_release(r);
-  }
-}
-
-/* A warning built from C parts (the runtime deprecation sites): name
- * defaults to "Warning"; code/detail optional. Borrows message. */
-void scr_emit_warning(const char *name, const char *code, ScrStr *message) {
-  ScrError *e = scr_error_new(SCR_ERR_ERROR, message);
-  scr_str_release(e->name);
-  e->name = scr_str_new(name ? name : "Warning", strlen(name ? name : "Warning"));
-  if (code) e->code = scr_str_new(code, strlen(code));
-  ScrDyn *w = scr_dyn_from_error(e);
-  scr_error_release(e);
-  scr_warning_dispatch(w);
-  scr_dyn_release(w);
 }
 
 /* ── timer delay warnings (Node's Timeout constructor) ────────────────
@@ -1086,11 +1014,12 @@ static void *scr_timer_warn_retain_v(void *p) {
 
 static void scr_timer_warn_release_v(void *p) { scr_timer_warn_release((ScrTimerWarn *)p); }
 
-/* The queued tick: emits through the warning path (listeners, then the
- * default stderr report). The box's get is a +1 released here. */
+/* The queued tick: the default report, then the 'warning' listeners (the
+ * hook). The box's get is a +1 released here. */
 static void scr_timer_warn_fire(ScrClosure *self) {
   ScrTimerWarn *w = (ScrTimerWarn *)scr_box_get_ref(self->caps[0]);
-  scr_emit_warning(w->name, NULL, w->msg);
+  scr_warn_report(w->name, NULL, w->msg->data, NULL);
+  if (scr_warn_listener_hook != NULL) scr_warn_listener_hook(w->name, w->msg->data);
   scr_timer_warn_release(w);
 }
 

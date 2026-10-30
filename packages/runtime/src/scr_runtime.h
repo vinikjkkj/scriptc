@@ -7686,6 +7686,10 @@ void scr_process_emit_warning(ScrDyn *args);
 void scr_util_deprecation_warn(ScrDyn *args);
 void scr_emit_warning(const char *name, const char *code, ScrStr *message);
 void scr_warning_dispatch(ScrDyn *w); /* borrowed; report, then listeners */
+/* The always-linked stderr report (scr_async.c): Node's onWarning line and
+ * its one-time trace hint. The listener hook is set by the first listener. */
+void scr_warn_report(const char *name, const char *code, const char *msg, const char *detail);
+void scr_warn_set_listener_hook(void (*hook)(const char *name, const char *msg));
 /* The promise-or-absent await's unit arm: one microtask hop, like JS's
  * await of any non-thenable (and like awaiting a settled promise). */
 void scr_await_hop(void);
