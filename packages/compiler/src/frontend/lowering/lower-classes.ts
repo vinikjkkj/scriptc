@@ -9578,6 +9578,10 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         loc: locOf(entry.member),
       };
       if (isAsync) fn.async = true;
+      // A static METHOD's value is a function named by its key (JS:
+      // `static sm(){}` is "sm"); a static ACCESSOR keeps no jsName
+      // (its `get:`/`set:` IR name declines in irFunctionJsName).
+      if (entry.member.kind === ts.SyntaxKind.MethodDeclaration) fn.jsName = name;
       return fn;
     } catch (e) {
       // A poison OUTSIDE the per-statement catches (the this/super fence,
