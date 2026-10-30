@@ -10176,6 +10176,7 @@ void *scr_net_server_get_http_ctx(ScrNetServer *s);
  * drops its own request/upgrade/connect lists there (the settle-releases-
  * listeners story across the layer seam). */
 void scr_net_server_set_proto_settle(ScrNetServer *s, void (*fn)(void *));
+void scr_net_server_set_proto_close(ScrNetServer *s, void (*fn)(void *));
 bool scr_net_server_settled(ScrNetServer *s); /* 'close' already emitted */
 /* The dyn-dispatch hook for HTTP server events: scr_http.c registers it
  * at scr_http_dyn_install, and the netServer handle ops route
@@ -10777,6 +10778,11 @@ bool scr_http_req_complete(ScrHttpReq *r);
 void scr_http_dyn_install(void);
 
 ScrNetServer *scr_http_create_server(ScrClosure *handler /*moves, nullable*/, ScrHttpReqFn fn); /* +1 */
+/* createServer({ headersTimeout, requestTimeout, connectionsCheckingInterval }):
+ * flags bit 1 = requestTimeout given, 2 = headersTimeout, 4 = interval. Throws
+ * Node's ERR_OUT_OF_RANGE at construction for invalid values. */
+void scr_http_server_set_timeouts(ScrNetServer *s, double req, double hdr, double interval,
+                                  double flags);
 /* The unguarded h2-only stream call: throws Node's exact catchable
  * TypeError (member read on undefined). Borrows; never returns. */
 void scr_http2_stream_undef_call(ScrStr *member);
@@ -11596,6 +11602,10 @@ void scr_fetch_abort_install(void);
  * events hook, and `pollfd` exposes the unit's poller fd so the idle
  * poll(2) sleep wakes on socket readiness (-1 = no fd yet). */
 void scr_loop_set_net(bool (*pending)(void), void (*dispatch)(void), int (*pollfd)(void));
+/* The HTTP connections checker (scr_http.c): due() answers the next tick
+ * strictly after now (HUGE_VAL when none; a sleep cap only, never liveness),
+ * sweep() runs the expiry pass when that tick has come. */
+void scr_loop_set_http_timeouts(double (*due)(void), void (*sweep)(void));
 /* win32: the poller backend's readiness-driven idle wait (scr_platform.h).
  * Registered from scrp_poller_new; NULL everywhere else. */
 void scr_loop_set_netwait(bool (*fn)(double));

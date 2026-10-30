@@ -1443,12 +1443,16 @@ static void scr_http_cleanup_atexit(void) {
 
 /* One-time wiring into the net sweep (both createServer and request call
  * through here). */
+static double scr_http_timeouts_due(void);
+static void scr_http_timeouts_sweep(void);
+
 static void scr_http_install(void) {
   static bool installed = false;
   if (installed) return;
   installed = true;
   atexit(scr_http_cleanup_atexit);
   scr_net_set_proto_sweep(&scr_http_proto_pending, &scr_http_proto_sweep);
+  scr_loop_set_http_timeouts(&scr_http_timeouts_due, &scr_http_timeouts_sweep);
 }
 
 /* ── the per-connection parser ───────────────────────────────────────── */
@@ -1487,6 +1491,17 @@ typedef struct ScrHttpConn {
   struct ScrHttpClientReq *client; /* +1 in client mode; released at close */
   size_t idle_epoch; /* the epoch this connection last became idle in */
   bool ka_armed; /* Node's state.keepAliveTimeoutSet: the idle timer is the keep-alive one */
+  /* Node's per-parser timeout clock (server side only). msg_start is the
+   * scr_now_ms stamp the current message began: set at accept (a fresh
+   * connection is timed like a request, MEASURED) and at the first byte of
+   * the next message; 0 between messages (Node resets last_message_start_
+   * at message complete, so an idle keep-alive connection is not timed
+   * here). hdr_done: the head is complete, so headersTimeout no longer
+   * applies, while requestTimeout still counts from msg_start. */
+  double msg_start;
+  bool hdr_done;
+  bool on_tl; /* linked on scr_http_tl_head */
+  struct ScrHttpConn *tl_prev, *tl_next;
 } ScrHttpConn;
 
 /* Client-mode forward declarations (implementations live with the client
@@ -1513,6 +1528,13 @@ typedef struct ScrHttpSrvCtx {
   double timeout_ms;   /* server.timeout: applied to each accepted socket (0 = none) */
   double keep_alive_ms; /* server.keepAliveTimeout (Node default 5000; 0 = none) */
   bool join_dup; /* createServer({ joinDuplicateHeaders: true }) */
+  /* createServer's connection timeouts (Node's defaults; see
+   * scr_http_server_set_timeouts). hdr/req 0 = disabled. */
+  double hdr_ms, req_ms, interval_ms;
+  bool anchor_set; /* the checker grid's origin: the first accepted connection */
+  double anchor_ms;
+  double next_tick; /* this server's next checker tick (ms); the loop's sleep cap */
+  bool checker_on; /* false once server.close() ran (Node clears the checker) */
 } ScrHttpSrvCtx;
 
 static ScrHttpSrvCtx *scr_http_srv_ctx_retain(ScrHttpSrvCtx *ctx) {
@@ -1683,6 +1705,10 @@ static void scr_http_conn_body_done(ScrHttpConn *conn) {
     scr_http_client_response_done(conn);
     return;
   }
+  /* message complete: the timeout clock stops (Node's last_message_start_
+   * reset) — a slow handler after a full body is never timed out */
+  conn->msg_start = 0;
+  conn->hdr_done = false;
   ScrHttpReq *r = conn->req;
   if (r) {
     scr_http_req_retain(r);
@@ -1868,6 +1894,7 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len) {
   conn->res = res;
   conn->close_after = !req_keep_alive;
 
+  conn->hdr_done = true; /* the head is complete: headersTimeout stops here */
   if (chunked) {
     conn->state = SCR_HTTP_CHUNK_SIZE;
   } else if (content_length > 0) {
@@ -1922,6 +1949,9 @@ static void scr_http_conn_pump(ScrHttpConn *conn) {
       }
       /* between requests, or awaiting a head */
       if (conn->len == 0) return;
+      /* the first byte of a message starts its timeout clock (Node's
+       * on_message_begin); a fresh connection was stamped at accept */
+      if (!conn->client_mode && conn->msg_start == 0) conn->msg_start = scr_now_ms();
       /* find CRLFCRLF */
       char *hit = NULL;
       if (conn->len >= 4) {
@@ -2124,12 +2154,27 @@ static bool scr_http_conn_err(void *ctx, ScrStr *msg) {
   return true;
 }
 
+/* The server-side connections that carry a timeout clock (every accepted
+ * connection, linked at accept). One list for all servers: the checker
+ * walks it per loop turn. */
+static ScrHttpConn *scr_http_tl_head = NULL;
+
+static void scr_http_tl_unlink(ScrHttpConn *conn) {
+  if (!conn->on_tl) return;
+  if (conn->tl_prev) conn->tl_prev->tl_next = conn->tl_next;
+  else scr_http_tl_head = conn->tl_next;
+  if (conn->tl_next) conn->tl_next->tl_prev = conn->tl_prev;
+  conn->on_tl = false;
+  conn->tl_prev = conn->tl_next = NULL;
+}
+
 static void scr_http_conn_free(void *ctx) {
   ScrHttpConn *conn = (ScrHttpConn *)ctx;
   if (conn->client_mode) {
     scr_http_client_conn_free(conn);
     return;
   }
+  scr_http_tl_unlink(conn);
   scr_http_conn_drop_request(conn, false);
   if (conn->srv) scr_http_srv_ctx_release(conn->srv);
   free(conn->buf);
@@ -2175,6 +2220,8 @@ static void scr_http_conn_timeout(void *ctx) {
   if (!handled) scr_net_sock_destroy(conn->sock);
 }
 
+static double scr_http_tick_after(const ScrHttpSrvCtx *ctx, double now);
+
 /* The server's native connection hook: one parser per accepted socket.
  * Node's connectionListenerInternal: `if (server.timeout) socket.setTimeout(
  * server.timeout)` (truthy: NaN and 0 skip, a negative value throws here). */
@@ -2185,6 +2232,17 @@ static void scr_http_on_connection(void *ctx, ScrNetSocket *sock) {
   conn->sock = sock; /* borrowed — see the struct comment */
   conn->srv = scr_http_srv_ctx_retain(srv);
   conn->idle_epoch = scr_net_epoch_now();
+  conn->msg_start = scr_now_ms(); /* a fresh connection is timed from accept */
+  if (!srv->anchor_set) {
+    srv->anchor_set = true;
+    srv->anchor_ms = conn->msg_start;
+  }
+  if (srv->next_tick <= conn->msg_start) srv->next_tick = scr_http_tick_after(srv, conn->msg_start);
+  conn->on_tl = true;
+  conn->tl_prev = NULL;
+  conn->tl_next = scr_http_tl_head;
+  if (scr_http_tl_head) scr_http_tl_head->tl_prev = conn;
+  scr_http_tl_head = conn;
   scr_net_sock_set_native_reader(sock, &scr_http_conn_data, &scr_http_conn_eof,
                                   &scr_http_conn_closed, conn, &scr_http_conn_free);
   scr_net_sock_set_native_idle(sock, &scr_http_conn_idle);
@@ -2275,6 +2333,8 @@ void scr_http2_stream_undef_call(ScrStr *member) {
  * feed the parser; listen/close/address/'error' all ride the net surface.
  * A NULL handler (http2.createSecureServer's route) creates the server
  * with an empty 'request' list — server.on("request", ...) fills it. */
+static void scr_http_server_closing(void *p);
+
 ScrNetServer *scr_http_create_server(ScrClosure *handler /*moves, nullable*/, ScrHttpReqFn fn) {
   scr_http_install();
   ScrNetServer *s = scr_net_create_server(NULL, NULL);
@@ -2283,11 +2343,163 @@ ScrNetServer *scr_http_create_server(ScrClosure *handler /*moves, nullable*/, Sc
   ctx->proto = SCR_NET_PROTO_HTTP1;
   ctx->rc = 1;
   ctx->keep_alive_ms = 5000; /* Node's keepAliveTimeout default */
+  /* Node's defaults: headersTimeout = min(60000, requestTimeout),
+   * requestTimeout 300000, connectionsCheckingInterval 30000 */
+  ctx->req_ms = 300000.0;
+  ctx->hdr_ms = 60000.0;
+  ctx->interval_ms = 30000.0;
+  ctx->checker_on = true;
   if (handler != NULL) scr_net_ls_add(&ctx->request_ls, handler, (void *)fn, false);
   scr_net_server_set_native_conn(s, &scr_http_on_connection, ctx, &scr_http_srv_ctx_free);
   scr_net_server_set_http_ctx(s, ctx);
   scr_net_server_set_proto_settle(s, &scr_http_srv_ctx_settle);
+  scr_net_server_set_proto_close(s, &scr_http_server_closing);
   return s;
+}
+
+/* server.close(): Node's httpServerPreClose clears the connections checker,
+ * so no further timeout fires for this server (a stalled client then keeps
+ * the loop alive exactly as Node's does). */
+static void scr_http_server_closing(void *p) {
+  ((ScrHttpSrvCtx *)p)->checker_on = false;
+}
+
+/* ── the connections checker (Node's checkConnections) ─────────────────
+ * Node runs checkConnections on setInterval(connectionsCheckingInterval),
+ * unref'd: an expired connection is answered 408 (when no response head
+ * has gone out) and destroyed. The grid is anchored at the first accept,
+ * so a request expires at the first tick strictly past its window. The
+ * loop learns the next tick as a sleep cap only (scr_loop_set_http_timeouts)
+ * and never counts it as liveness, so the checker cannot hold the process. */
+
+static bool scr_http_conn_timed(const ScrHttpConn *c) {
+  const ScrHttpSrvCtx *ctx = c->srv;
+  return c->msg_start > 0 && ctx != NULL && ctx->checker_on && ctx->anchor_set &&
+         (ctx->hdr_ms > 0 || ctx->req_ms > 0);
+}
+
+static bool scr_http_conn_expired(const ScrHttpConn *c, double now) {
+  const ScrHttpSrvCtx *ctx = c->srv;
+  double age = now - c->msg_start;
+  if (ctx->hdr_ms > 0 && !c->hdr_done && age > ctx->hdr_ms) return true;
+  return ctx->req_ms > 0 && age > ctx->req_ms;
+}
+
+/* The first grid tick strictly after now for this server. */
+static double scr_http_tick_after(const ScrHttpSrvCtx *ctx, double now) {
+  double iv = ctx->interval_ms < 1.0 ? 1.0 : ctx->interval_ms;
+  double k = floor((now - ctx->anchor_ms) / iv) + 1.0;
+  return ctx->anchor_ms + k * iv;
+}
+
+static double scr_http_timeouts_due(void) {
+  double due = HUGE_VAL;
+  for (ScrHttpConn *c = scr_http_tl_head; c; c = c->tl_next) {
+    if (scr_http_conn_timed(c) && c->srv->next_tick < due) due = c->srv->next_tick;
+  }
+  return due;
+}
+
+/* One checker pass at the loop's clock. Only servers whose tick has come
+ * are checked: a connection expires at its own server's tick, as in Node's
+ * per-server setInterval. Expired connections leave the timed state before
+ * they are answered, so each is answered once. Then every server whose tick
+ * has passed advances to the first tick strictly after now. */
+static void scr_http_timeouts_sweep(void) {
+  double now = scr_now_ms();
+  size_t n = 0;
+  for (ScrHttpConn *c = scr_http_tl_head; c; c = c->tl_next) {
+    if (scr_http_conn_timed(c) && c->srv->next_tick <= now && scr_http_conn_expired(c, now)) n++;
+  }
+  if (n > 0) {
+    ScrHttpConn **hit = malloc(n * sizeof *hit);
+    if (!hit) scr_http_oom();
+    size_t k = 0;
+    for (ScrHttpConn *c = scr_http_tl_head; c && k < n; c = c->tl_next) {
+      if (scr_http_conn_timed(c) && c->srv->next_tick <= now && scr_http_conn_expired(c, now)) {
+        hit[k++] = c;
+      }
+    }
+    /* Node's socketOnError: the 408 goes out unless a response head is in
+     * flight on the socket (socket._httpMessage set and _headerSent): a
+     * finished response has detached, so a stalled request body after it
+     * still gets the 408. Then the socket is destroyed. */
+    static const char t408[] = "HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n";
+    for (size_t i = 0; i < k; i++) {
+      ScrHttpConn *c = hit[i];
+      c->msg_start = 0;
+      ScrNetSocket *sk = scr_net_sock_retain(c->sock);
+      bool answered = c->res != NULL && !c->res->finished && c->res->head_sent;
+      /* socket.writable: a response that ended with Connection: close has
+       * already half-closed the socket, so there is nothing to answer on */
+      bool ended = c->close_after && c->res != NULL && c->res->finished;
+      if (!answered && !ended) scr_net_sock_write_native(sk, t408, sizeof t408 - 1);
+      scr_net_sock_destroy(sk);
+      scr_net_sock_release(sk);
+    }
+    free(hit);
+  }
+  for (ScrHttpConn *c = scr_http_tl_head; c; c = c->tl_next) {
+    if (c->srv->next_tick <= now) c->srv->next_tick = scr_http_tick_after(c->srv, now);
+  }
+}
+
+/* createServer({ headersTimeout, requestTimeout, connectionsCheckingInterval })
+ * — the values the lowering passes after construction. flags: 1 = a
+ * requestTimeout was given, 2 = headersTimeout, 4 = connectionsCheckingInterval.
+ * Validation and messages are Node's (validateInteger, then the
+ * headersTimeout <= requestTimeout check), in Node's order. */
+static bool scr_http_timeout_valid(double v, const char *name) {
+  char recv[48], msg[200];
+  if (!isfinite(v) || v != floor(v)) {
+    scr_num_received(v, recv);
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"%s\" is out of range. It must be an integer. Received %s",
+                       name, recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  if (v < 0 || v > 9007199254740991.0) {
+    scr_num_received(v, recv);
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"%s\" is out of range. It must be >= 0 && <= 9007199254740991. Received %s",
+                       name, recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  return true;
+}
+
+void scr_http_server_set_timeouts(ScrNetServer *s, double req, double hdr, double interval,
+                                  double flags) {
+  ScrHttpSrvCtx *ctx = (ScrHttpSrvCtx *)scr_net_server_get_http_ctx(s);
+  if (ctx == NULL || ctx->proto != SCR_NET_PROTO_HTTP1) return;
+  bool has_req = ((int)flags & 1) != 0, has_hdr = ((int)flags & 2) != 0;
+  bool has_int = ((int)flags & 4) != 0;
+  double r = ctx->req_ms, h = ctx->hdr_ms;
+  if (has_req) {
+    if (!scr_http_timeout_valid(req, "requestTimeout")) return;
+    r = req;
+  }
+  if (has_hdr) {
+    if (!scr_http_timeout_valid(hdr, "headersTimeout")) return;
+    h = hdr;
+  } else if (has_req) {
+    h = r < 60000.0 ? r : 60000.0; /* Node: min(60000, requestTimeout) */
+  }
+  if (r > 0 && h > 0 && h > r) {
+    char recv[48], msg[200];
+    scr_num_received(h, recv);
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"headersTimeout\" is out of range. It must be <= requestTimeout. Received %s",
+                       recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return;
+  }
+  if (has_int && !scr_http_timeout_valid(interval, "connectionsCheckingInterval")) return;
+  ctx->req_ms = r;
+  ctx->hdr_ms = h;
+  if (has_int) ctx->interval_ms = interval;
 }
 
 /* createServer({ joinDuplicateHeaders: true, ... }): repeated request

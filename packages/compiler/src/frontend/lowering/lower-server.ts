@@ -2693,7 +2693,46 @@ function lowerRequestHandlerArg(L: Lowerer, node: ts.Expression): IrExpr {
  * joinDuplicateHeaders: true joins repeated request-header reads with
  * ", "). Other documented keys fence by name; unknown keys drop like
  * Node drops them. Answers whether joinDuplicateHeaders was requested. */
-function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): { joinDup: boolean; keepAlive: IrExpr | null } {
+/** The three timeout options createServer takes as numbers. Each value is
+ * an IR number (absent = undefined = Node's default). */
+interface HttpServerTimeoutArgs { req: IrExpr | null; hdr: IrExpr | null; interval: IrExpr | null }
+
+/** One timeout option's value. Literals, negated literals, number variables
+ * and shorthand names lower; anything else is a named refusal. These have
+ * no side effects, so the server construction and the value reads in the
+ * lifted call cannot reorder observably. */
+function lowerHttpServerTimeoutValue(L: Lowerer, prop: ts.ObjectLiteralElementLike, key: string,
+  initializer: ts.Expression | null, what: string): IrExpr | null {
+  if (initializer !== null && ts.isIdentifier(initializer) && initializer.text === "undefined") {
+    return null; /* undefined = the default, like an absent key */
+  }
+  const literalLike = initializer !== null && (
+    ts.isNumericLiteral(initializer) ||
+    (ts.isPrefixUnaryExpression(initializer) && initializer.operator === ts.SyntaxKind.MinusToken &&
+      ts.isNumericLiteral(initializer.operand)) ||
+    ts.isIdentifier(initializer));
+  if (initializer !== null && !literalLike) {
+    L.noLowering(
+      `${what} with a non-literal ${key} option`,
+      prop,
+      `pass ${key} as a number literal or a number variable (the value is read when the server is created)`,
+    );
+  }
+  const v = initializer !== null
+    ? L.lowerExpr(initializer)
+    : L.lowerShorthandValue(prop as ts.ShorthandPropertyAssignment);
+  if (v.type.kind !== "f64") {
+    L.noLowering(
+      `${what} with a ${key} option of '${L.fmt(v.type)}' values`,
+      prop,
+      `${key} must be a number (Node: validateInteger)`,
+    );
+  }
+  return v;
+}
+
+function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string):
+  { joinDup: boolean; keepAlive: IrExpr | null; timeouts: HttpServerTimeoutArgs | null } {
   if (!ts.isObjectLiteralExpression(node)) {
     L.noLowering(
       `${what} with a non-literal options argument`,
@@ -2703,6 +2742,8 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
   }
   let joinDup = false;
   let keepAlive: IrExpr | null = null;
+  const timeouts: HttpServerTimeoutArgs = { req: null, hdr: null, interval: null };
+  let anyTimeout = false;
   for (const prop of node.properties) {
     let initializer: ts.Expression | null;
     if (ts.isPropertyAssignment(prop) &&
@@ -2745,6 +2786,19 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
       keepAlive = raw;
       continue;
     }
+    if (key === "requestTimeout" || key === "headersTimeout" || key === "connectionsCheckingInterval") {
+      // The timeout surface (Node's connections checker): the values pass to
+      // the runtime after construction, which validates them exactly as
+      // Node's validateInteger does and enforces them (scr_http.c).
+      const v = lowerHttpServerTimeoutValue(L, prop, key, initializer, what);
+      if (v !== null) {
+        anyTimeout = true;
+        if (key === "requestTimeout") timeouts.req = v;
+        else if (key === "headersTimeout") timeouts.hdr = v;
+        else timeouts.interval = v;
+      }
+      continue;
+    }
     if (key === "joinDuplicateHeaders") {
       // Literal true/false: the flag decides parse-time read semantics,
       // so a runtime value would silently pick one — fence dynamics.
@@ -2767,7 +2821,63 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
     );
     // An undocumented key, dropped like Node drops it.
   }
-  return { joinDup, keepAlive };
+  return { joinDup, keepAlive, timeouts: anyTimeout ? timeouts : null };
+}
+
+/** The timeout composition: an interned helper takes the server and the
+ * three values (absent ones pass 0 under their flag bit), sets the
+ * connections checker, and answers the server. Flags: 1 requestTimeout,
+ * 2 headersTimeout, 4 connectionsCheckingInterval. Shared by http and https
+ * createServer (Node's https.Server takes the same options). */
+function wrapHttpServerTimeouts(L: Lowerer, server0: IrExpr, timeouts: HttpServerTimeoutArgs,
+  loc: SrcLoc): IrExpr {
+  const flags = (timeouts.req !== null ? 1 : 0) | (timeouts.hdr !== null ? 2 : 0) |
+    (timeouts.interval !== null ? 4 : 0);
+  const key = `server.timeouts.${flags}`;
+  const existing = L.arrHofHelpers.get(key);
+  const name = existing ?? `%server.timeouts.${flags}.${L.arrHofHelpers.size}`;
+  if (!existing) {
+    L.arrHofHelpers.set(key, name);
+    const sRef: IrExpr = { kind: "varRef", localId: "s.0", type: NETSERVER_T, loc };
+    const rRef: IrExpr = { kind: "varRef", localId: "r.0", type: F64, loc };
+    const hRef: IrExpr = { kind: "varRef", localId: "h.0", type: F64, loc };
+    const iRef: IrExpr = { kind: "varRef", localId: "i.0", type: F64, loc };
+    L.liftedFns.push({
+      name,
+      params: [
+        { localId: "s.0", name: "s", type: NETSERVER_T },
+        { localId: "r.0", name: "r", type: F64 },
+        { localId: "h.0", name: "h", type: F64 },
+        { localId: "i.0", name: "i", type: F64 },
+      ],
+      returnType: NETSERVER_T,
+      locals: [
+        { id: "s.0", name: "s", type: NETSERVER_T, mutable: false },
+        { id: "r.0", name: "r", type: F64, mutable: false },
+        { id: "h.0", name: "h", type: F64, mutable: false },
+        { id: "i.0", name: "i", type: F64, mutable: false },
+      ],
+      body: [
+        {
+          kind: "exprStmt",
+          expr: {
+            kind: "libCall", fn: "http.serverSetTimeouts",
+            args: [sRef, rRef, hRef, iRef, { kind: "numLit", value: flags, type: F64, loc }],
+            type: VOID, loc,
+          },
+          loc,
+        },
+        { kind: "return", value: sRef, loc },
+      ],
+      loc,
+    });
+  }
+  const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
+  return {
+    kind: "call", callee: name,
+    args: [server0, timeouts.req ?? zero, timeouts.hdr ?? zero, timeouts.interval ?? zero],
+    type: NETSERVER_T, loc,
+  };
 }
 
 /** The shared createServer([options][, handler]) shapes behind
@@ -2794,7 +2904,7 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
     if (ts.isObjectLiteralExpression(args[0]!)) optsNode = args[0]!;
     else handlerNode = args[0]!;
   }
-  const httpOpts = optsNode !== null ? lowerHttpServerOptions(L, optsNode, what) : { joinDup: false, keepAlive: null };
+  const httpOpts = optsNode !== null ? lowerHttpServerOptions(L, optsNode, what) : { joinDup: false, keepAlive: null, timeouts: null };
   const joinDup = httpOpts.joinDup;
   let server: IrExpr = handlerNode !== null
     ? { kind: "libCall", fn: "http.createServer", args: [lowerRequestHandlerArg(L, handlerNode)], type: NETSERVER_T, loc }
@@ -2802,6 +2912,7 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
   if (httpOpts.keepAlive !== null) {
     server = { kind: "libCall", fn: "http.serverKeepAlive", args: [server, httpOpts.keepAlive], type: NETSERVER_T, loc };
   }
+  if (httpOpts.timeouts !== null) server = wrapHttpServerTimeouts(L, server, httpOpts.timeouts, loc);
   if (!joinDup) return server;
   // The flag-setting composition: an interned helper takes the fresh
   // server, sets the parser flag, and answers it — one expression.
@@ -2997,7 +3108,8 @@ function lowerHttpModuleCall(L: Lowerer, expr: ts.CallExpression,
  * runtime-valued (dyn) entry rides the tls.pemDyn extraction, throwing
  * the fence at runtime for non-PEM kinds (the divergence-66 stance).
  * Every other key fences by name; SNICallback gets the pointed hint. */
-function lowerTlsServerOptions(L: Lowerer, node: ts.Expression, what: string): { cert: IrExpr; key: IrExpr } {
+function lowerTlsServerOptions(L: Lowerer, node: ts.Expression, what: string):
+  { cert: IrExpr; key: IrExpr; timeouts: HttpServerTimeoutArgs | null } {
   if (!ts.isObjectLiteralExpression(node)) {
     L.noLowering(
       `${what} with a non-literal options argument`,
@@ -3008,6 +3120,8 @@ function lowerTlsServerOptions(L: Lowerer, node: ts.Expression, what: string): {
   const loc = locOf(node);
   let cert: IrExpr | null = null;
   let key: IrExpr | null = null;
+  const timeouts: HttpServerTimeoutArgs = { req: null, hdr: null, interval: null };
+  let anyTimeout = false;
   for (const prop of node.properties) {
     let initializer: ts.Expression | null;
     if (ts.isPropertyAssignment(prop) &&
@@ -3023,6 +3137,19 @@ function lowerTlsServerOptions(L: Lowerer, node: ts.Expression, what: string): {
       );
     }
     const k = (prop.name as ts.Identifier | ts.StringLiteral).text;
+    if (what === "https.createServer" &&
+        (k === "requestTimeout" || k === "headersTimeout" || k === "connectionsCheckingInterval")) {
+      // https.Server takes the http server options: the connections checker
+      // (tls.Server ignores them, so only the https spelling lowers them).
+      const v = lowerHttpServerTimeoutValue(L, prop, k, ts.isPropertyAssignment(prop) ? prop.initializer : null, what);
+      if (v !== null) {
+        anyTimeout = true;
+        if (k === "requestTimeout") timeouts.req = v;
+        else if (k === "headersTimeout") timeouts.hdr = v;
+        else timeouts.interval = v;
+      }
+      continue;
+    }
     if (k !== "cert" && k !== "key") {
       const init = ts.isPropertyAssignment(prop) ? prop.initializer : null;
       if ((k === "ca" || k === "rejectUnauthorized") &&
@@ -3087,7 +3214,7 @@ function lowerTlsServerOptions(L: Lowerer, node: ts.Expression, what: string): {
       "the supported options object is { cert, key } (PEM strings or Buffers)",
     );
   }
-  return { cert, key };
+  return { cert, key, timeouts: anyTimeout ? timeouts : null };
 }
 
 /** The options argument of tls/https createServer, split three ways: an
@@ -3133,7 +3260,7 @@ function tlsLiteralHasUntypedMember(L: Lowerer, node: ts.ObjectLiteralExpression
 
 function lowerTlsServerOptionsOrDyn(
   L: Lowerer, node: ts.Expression, what: string,
-): { cert: IrExpr; key: IrExpr; dyn?: undefined } | { dyn: IrExpr } {
+): { cert: IrExpr; key: IrExpr; timeouts: HttpServerTimeoutArgs | null; dyn?: undefined } | { dyn: IrExpr } {
   if (ts.isObjectLiteralExpression(node) && isJsSourceFile(node.getSourceFile()) &&
       (tlsLiteralNeedsRuntimeWalk(node) || tlsLiteralHasUntypedMember(L, node))) {
     // The literal is boxed member by member (each value converts to the
@@ -3603,9 +3730,11 @@ function lowerHttpsModuleCall(L: Lowerer, expr: ts.CallExpression,
       );
     }
     const cb = lowerRequestHandlerArg(L, args[1]!);
-    return opts.dyn !== undefined
-      ? { kind: "libCall", fn: "https.createServerDynCb", args: [opts.dyn, cb], type: NETSERVER_T, loc }
-      : { kind: "libCall", fn: "https.createServer", args: [opts.cert, opts.key, cb], type: NETSERVER_T, loc };
+    if (opts.dyn !== undefined) {
+      return { kind: "libCall", fn: "https.createServerDynCb", args: [opts.dyn, cb], type: NETSERVER_T, loc };
+    }
+    const server: IrExpr = { kind: "libCall", fn: "https.createServer", args: [opts.cert, opts.key, cb], type: NETSERVER_T, loc };
+    return opts.timeouts !== null ? wrapHttpServerTimeouts(L, server, opts.timeouts, loc) : server;
   }
   if (bi.member === "request" || bi.member === "get") {
     return lowerHttpClientCall(L, expr, bi.member, loc, true);

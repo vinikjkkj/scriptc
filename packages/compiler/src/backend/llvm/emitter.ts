@@ -1206,6 +1206,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "http.resWriteHeadPairs": "scr_http_res_write_head_pairs",
   "http.resWriteHeadDyn": "scr_http_res_write_head_dyn",
   "http.serverJoinDupHeaders": "scr_http_server_join_duplicate_headers",
+  "http.serverSetTimeouts": "scr_http_server_set_timeouts",
   "http.clientWrite": "scr_http_client_write_str",
   "http.clientWriteBytes": "scr_http_client_write_bytes",
   "http.clientEnd": "scr_http_client_end",

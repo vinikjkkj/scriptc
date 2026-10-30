@@ -4217,6 +4217,14 @@ static bool (*scr_netwait_fn)(double) = NULL;
 
 void scr_loop_set_netwait(bool (*fn)(double)) { scr_netwait_fn = fn; }
 
+static double (*scr_http_due_fn)(void) = NULL;
+static void (*scr_http_sweep_fn)(void) = NULL;
+
+void scr_loop_set_http_timeouts(double (*due)(void), void (*sweep)(void)) {
+  scr_http_due_fn = due;
+  scr_http_sweep_fn = sweep;
+}
+
 void scr_loop_set_net(bool (*pending)(void), void (*dispatch)(void), int (*pollfd)(void)) {
   scr_net_pending_fn = pending;
   scr_net_dispatch_fn = dispatch;
@@ -4517,6 +4525,12 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
       }
       if (scr_ready_len > 0) continue;
     }
+    /* The HTTP connections checker: an expired request is answered 408 and
+     * destroyed before this turn's socket events, at its grid tick. */
+    if (scr_http_sweep_fn != NULL && scr_http_due_fn() <= scr_now_ms()) {
+      scr_http_sweep_fn();
+      if (scr_exc_pending()) return false;
+    }
     /* Net dispatch (scr_net.c, when linked): accepts, arrived data,
      * connect completions, and the deferred listening/error/close emits
      * fire now (macrotasks, like the events hook). Callbacks may enqueue
@@ -4750,6 +4764,11 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
     if (scr_island_deadline_fn != NULL) {
       double isl_due = scr_island_deadline_fn();
       if (isl_due < due) due = isl_due;
+    }
+    /* The HTTP checker's next grid tick (a sleep cap; never liveness). */
+    if (scr_http_due_fn != NULL) {
+      double http_due = scr_http_due_fn();
+      if (http_due < due) due = http_due;
     }
     /* Pending immediates are always-ready work: no sleep — run due timers
      * (Node's timers phase precedes check), then the check phase below. */

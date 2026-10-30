@@ -5674,6 +5674,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "http.serverJoinDupHeaders":
             E.line(`scr_http_server_join_duplicate_headers(${arg(0)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
+          case "http.serverSetTimeouts":
+            return finish(`scr_http_server_set_timeouts(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
           case "net.serverOnListening": {
             const cb = args[1]!;
             E.moveTemp(cb);
