@@ -7036,9 +7036,105 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16900-await-reject-try-flag-direct.ts": {
+   "order": [
+    "<repo>/tests/corpus/16900-await-reject-try-flag-direct.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16901-await-reject-try-flag-ctor.ts": {
+   "order": [
+    "<repo>/tests/corpus/16901-await-reject-try-flag-ctor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16902-await-reject-nested-finally-number.ts": {
+   "order": [
+    "<repo>/tests/corpus/16902-await-reject-nested-finally-number.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16903-await-reject-async-arrow.ts": {
+   "order": [
+    "<repo>/tests/corpus/16903-await-reject-async-arrow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16904-await-reject-class-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/16904-await-reject-class-method.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16905-await-reject-loop-body.ts": {
+   "order": [
+    "<repo>/tests/corpus/16905-await-reject-loop-body.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16906-await-reject-for-await.ts": {
+   "order": [
+    "<repo>/tests/corpus/16906-await-reject-for-await.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16907-await-reject-rethrow-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/16907-await-reject-rethrow-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16908-await-reject-operand.ts": {
+   "order": [
+    "<repo>/tests/corpus/16908-await-reject-operand.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16909-await-reject-keep-outer-number.ts": {
+   "order": [
+    "<repo>/tests/corpus/16909-await-reject-keep-outer-number.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1691-stream-transform.ts": {
    "order": [
     "<repo>/tests/corpus/1691-stream-transform.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16910-await-reject-binding-const.ts": {
+   "order": [
+    "<repo>/tests/corpus/16910-await-reject-binding-const.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16911-await-reject-skips-continuation.ts": {
+   "order": [
+    "<repo>/tests/corpus/16911-await-reject-skips-continuation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16912-await-resolve-control.ts": {
+   "order": [
+    "<repo>/tests/corpus/16912-await-resolve-control.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16913-await-reject-later-async-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/16913-await-reject-later-async-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16914-await-reject-try-finally-only.ts": {
+   "order": [
+    "<repo>/tests/corpus/16914-await-reject-try-finally-only.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16915-await-reject-timer-gap.ts": {
+   "order": [
+    "<repo>/tests/corpus/16915-await-reject-timer-gap.ts"
    ],
    "diags": []
   },
@@ -20818,6 +20914,90 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/node-types/argv-env.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/argv-env.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/import-fences.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/import-fences.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1010",
+     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
+      "start": 422,
+      "end": 461
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/fixtures/node-types/path-os.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/path-os.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stream-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/streams.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/streams.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts"
@@ -21371,90 +21551,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/fixtures/node-types/argv-env.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/argv-env.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/child-stdio.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/import-fences.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/import-fences.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC1010",
-     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
-     "loc": {
-      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
-      "start": 422,
-      "end": 461
-     },
-     "milestone": "M4",
-     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
-    }
-   ]
-  },
-  "<repo>/tests/fixtures/node-types/path-os.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/path-os.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/server-address-states.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stream-capture.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/streams.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
   }
  }
 }
