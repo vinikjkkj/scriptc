@@ -1280,7 +1280,7 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
    * concat chains (`a + b + c`, template literals), where each intermediate
    * result reaches the next concat as a sole-reference temp. Any string
    * with rc > 1 might be aliased and is copied, never mutated. */
-  if (a->rc == 1 && a != b && a->cap >= newlen) {
+  if (a->rc == 1 && a != b && a->cap >= newlen && a->cap < 0xFFFD0000u) {
     /* THE WEAK TABLE AND THIS ARM ARE THE ONE DANGEROUS PAIR IN THIS FILE.
      * With OWNING entries an interned string has rc >= 2, so this arm can
      * never fire on a table member and the two features cannot interact.
@@ -1322,7 +1322,7 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   }
   size_t newcap = newlen;
   size_t gmin = scr_str_growth_min();
-  if (a->rc == 1 && newlen >= gmin) {
+  if (a->rc == 1 && a->cap < 0xFFFD0000u && newlen >= gmin) {
     size_t grown = (size_t)a->cap + ((size_t)a->cap >> 1) + 16;
     if (grown > newcap) newcap = grown;
   } else if (newlen >= 512 && newlen <= SCR_STR_MAX_LEN / 2 && newlen >= gmin) {
