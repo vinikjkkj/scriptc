@@ -7079,6 +7079,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/17000-evolving-array-const-string-push.ts": {
+   "order": [
+    "<repo>/tests/corpus/17000-evolving-array-const-string-push.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17001-evolving-array-let-number-pushes.ts": {
+   "order": [
+    "<repo>/tests/corpus/17001-evolving-array-let-number-pushes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17002-evolving-array-mixed-union-push.ts": {
+   "order": [
+    "<repo>/tests/corpus/17002-evolving-array-mixed-union-push.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17003-evolving-array-function-local-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/17003-evolving-array-function-local-return.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17004-evolving-array-index-zero-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/17004-evolving-array-index-zero-write.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17005-evolving-array-nested-array-push.ts": {
+   "order": [
+    "<repo>/tests/corpus/17005-evolving-array-nested-array-push.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17006-evolving-array-for-of-and-map.ts": {
+   "order": [
+    "<repo>/tests/corpus/17006-evolving-array-for-of-and-map.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17007-evolving-array-length-between-pushes.ts": {
+   "order": [
+    "<repo>/tests/corpus/17007-evolving-array-length-between-pushes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17008-evolving-array-let-function-local-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/17008-evolving-array-let-function-local-string.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17009-evolving-array-object-push.ts": {
+   "order": [
+    "<repo>/tests/corpus/17009-evolving-array-object-push.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1701-mustcall-exit-report/main.cjs": {
    "order": [
     "<repo>/tests/corpus/1701-mustcall-exit-report/common.cjs",
