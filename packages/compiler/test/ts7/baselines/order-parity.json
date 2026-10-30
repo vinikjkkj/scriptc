@@ -19025,6 +19025,60 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/17900-fn-name-class-field-tostring-is-named-by-its-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/17900-fn-name-class-field-tostring-is-named-by-its-key.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17901-fn-name-object-keys-name-the-function.ts": {
+   "order": [
+    "<repo>/tests/corpus/17901-fn-name-object-keys-name-the-function.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17902-fn-name-default-and-binding-defaults.ts": {
+   "order": [
+    "<repo>/tests/corpus/17902-fn-name-default-and-binding-defaults.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17903-fn-name-logical-assignment-names-the-binding.ts": {
+   "order": [
+    "<repo>/tests/corpus/17903-fn-name-logical-assignment-names-the-binding.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17904-fn-name-typed-param-keeps-the-value-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/17904-fn-name-typed-param-keeps-the-value-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17905-fn-name-static-method-value-is-its-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/17905-fn-name-static-method-value-is-its-key.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17906-fn-name-private-field-arrow-keeps-the-hash.ts": {
+   "order": [
+    "<repo>/tests/corpus/17906-fn-name-private-field-arrow-keeps-the-hash.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17907-fn-name-js-class-fields-and-positions.js": {
+   "order": [
+    "<repo>/tests/corpus/17907-fn-name-js-class-fields-and-positions.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17908-fn-name-js-defaults-and-bindings.js": {
+   "order": [
+    "<repo>/tests/corpus/17908-fn-name-js-defaults-and-bindings.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/a-bare-type-parameter-with-no-readable-instantiation.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-bare-type-parameter-with-no-readable-instantiation.ts"
