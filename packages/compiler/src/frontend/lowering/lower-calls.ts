@@ -2,7 +2,7 @@
  * argument completion (optional/default/rest, explicit-undefined ≡ omission),
  * function/lambda lowering and signature collection, and monomorphizing
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
-import { stringFromCharCodeCallAliasOf } from "./lower-builtins.js";
+import { stringFromCharCodeCallAliasOf, timerDelayArg } from "./lower-builtins.js";
 import { lowerAbsentRequireCall } from "./lower-require-absent.js";
 import * as ts from "../ts7/adapter.js";
 import { defineAccessorCallOf, liveBagRef, liveDefinePropOf, liveDepOfBinding, liveExportsOf } from "./cjs-live-exports.js";
@@ -3948,7 +3948,7 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
         ? makeTimerArgsThunk(L, expr.arguments[0]!, expr.arguments.slice(2), "setTimeout", loc)
         : adaptZeroArgTimerCallback(L, L.lowerExpr(expr.arguments[0]!), expr.arguments[0]!, loc);
       const ms: IrExpr = expr.arguments.length >= 2
-        ? L.lowerExpr(expr.arguments[1]!)
+        ? timerDelayArg(L, expr.arguments[1]!, loc)
         : { kind: "numLit", value: 1, type: F64, loc };
       // The use position decides the shape: a Timeout handle (mapped to
       // f64) when the call is USED (assigned, `.unref()`d, cleared) — the
@@ -4000,7 +4000,7 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
         ? makeTimerArgsThunk(L, expr.arguments[0]!, expr.arguments.slice(2), "setInterval", loc)
         : adaptZeroArgTimerCallback(L, L.lowerExpr(expr.arguments[0]!), expr.arguments[0]!, loc);
       const ms: IrExpr = expr.arguments.length >= 2
-        ? L.lowerExpr(expr.arguments[1]!)
+        ? timerDelayArg(L, expr.arguments[1]!, loc)
         : { kind: "numLit", value: 1, type: F64, loc };
       return { kind: "libCall", fn: "timers.setInterval", args: [cb, ms], type: F64, loc };
     }
