@@ -3097,10 +3097,45 @@ ScrNetServer *scr_tls_create_server_dyn(const ScrDyn *opts /*borrowed*/,
   return s;
 }
 
+/* https.createServer's connection-timeout members (https.Server takes the
+ * http server options): present values are read from the record in flag
+ * bits 1 requestTimeout, 2 headersTimeout, 4 connectionsCheckingInterval.
+ * A non-number is Node's ERR_INVALID_ARG_TYPE; undefined reads as absent.
+ * The range checks run in scr_http_server_set_timeouts, after construction. */
+static bool scr_https_srv_timeouts_read(const ScrDyn *opts, double *req, double *hdr,
+                                        double *ivl, int *flags) {
+  *flags = 0;
+  if (opts == NULL || opts->kind != SCR_DYN_OBJ) return true; /* the walk reports it */
+  for (size_t i = 0; i < opts->v.obj.len; i++) {
+    const ScrDynEntry *e = &opts->v.obj.entries[i];
+    const ScrDyn *v = e->value;
+    double *dst;
+    int bit;
+    if (strcmp(e->key, "requestTimeout") == 0) { dst = req; bit = 1; }
+    else if (strcmp(e->key, "headersTimeout") == 0) { dst = hdr; bit = 2; }
+    else if (strcmp(e->key, "connectionsCheckingInterval") == 0) { dst = ivl; bit = 4; }
+    else continue;
+    if (v->kind == SCR_DYN_UNDEF) continue;
+    if (v->kind != SCR_DYN_NUM) {
+      scr_dyn_arg_type_fail(e->key, "of type number", v);
+      return false;
+    }
+    *dst = v->v.num;
+    *flags |= bit;
+  }
+  return true;
+}
+
 ScrNetServer *scr_https_create_server_dyn(const ScrDyn *opts /*borrowed*/,
                                            ScrClosure *handler /*moves, nullable*/,
                                            ScrHttpReqFn fn) {
   ScrBytes *cert, *key;
+  double req = 0, hdr = 0, ivl = 0;
+  int tflags = 0;
+  if (!scr_https_srv_timeouts_read(opts, &req, &hdr, &ivl, &tflags) || scr_exc_pending()) {
+    scr_closure_release(handler);
+    return NULL;
+  }
   if (!scr_tls_srv_opts_walk(opts, "https.createServer", &cert, &key)) {
     scr_closure_release(handler);
     return NULL;
@@ -3109,6 +3144,13 @@ ScrNetServer *scr_https_create_server_dyn(const ScrDyn *opts /*borrowed*/,
                                              (const char *)key->data, key->len, handler, fn);
   scr_bytes_release(cert);
   scr_bytes_release(key);
+  if (tflags != 0 && s != NULL) {
+    scr_http_server_set_timeouts(s, req, hdr, ivl, (double)tflags);
+    if (scr_exc_pending()) {
+      scr_net_server_release(s);
+      return NULL;
+    }
+  }
   return s;
 }
 

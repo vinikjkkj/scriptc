@@ -4393,6 +4393,9 @@ export type IrLibFn =
    * joinDuplicateHeaders joins repeated request-header reads ", "). */
   | "http.createServerEmpty"
   | "http.serverJoinDupHeaders"
+  /** createServer({ headersTimeout, requestTimeout, connectionsCheckingInterval })
+   * after construction: (server, requestTimeout, headersTimeout, interval, flags). */
+  | "http.serverSetTimeouts"
   /** server.on("listening", cb) — the deferred listen-callback list. */
   | "net.serverOnListening"
   /** The ServerResponse member surface: statusCode/statusMessage reads
@@ -13499,6 +13502,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // synchronously; the runtime answers with the pending exception.
   "net.sockSetTimeout",
   "net.sockSetTimeoutOn",
+  // createServer({ headersTimeout, requestTimeout, connectionsCheckingInterval }):
+  // Node validates at construction (validateInteger, the headers <= request check)
+  // and throws ERR_OUT_OF_RANGE synchronously; the runtime answers with the pending exception.
+  "http.serverSetTimeouts",
   // crypto.publicEncrypt, RSA-OAEP/SHA-1 only (scr_rsa_pubenc.c). The RSA
   // key is a REMOTE peer's, not local configuration -- bad/unparseable key
   // material, a non-RSA key, or an OAEP-too-long input throws a catchable

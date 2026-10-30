@@ -547,6 +547,8 @@ struct ScrNetServer {
    * cycle through edges the collector cannot trace (box → dyn → handle →
    * ctx → closure → box). Takes http_ctx; NULL = no hook. */
   void (*proto_settle)(void *http_ctx);
+  /* server.close() hook for the parser (Node clears the connections checker) */
+  void (*proto_close)(void *http_ctx);
   /* wrapper.close = fn — the portless close-proxy idiom: when set,
    * server.close() invokes THIS closure (a compiler-emitted zero-arg
    * wrapper around the user override) instead of closing; the override
@@ -1930,6 +1932,7 @@ void scr_net_server_close_direct(ScrNetServer *s, ScrClosure *cb /*moves, nullab
     scr_net_ls_drop(&s->listening_cbs);
   }
   s->closing = true; /* the sweep fires 'close' once nconns drains */
+  if (s->proto_close && s->http_ctx) s->proto_close(s->http_ctx);
   scr_net_server_close_idle(s);
   /* Already drained: this is Node's _emitCloseIfDrained scheduling the
    * tick, so it is queued HERE (the destroy hop, in call order). */
@@ -4065,6 +4068,10 @@ void scr_net_server_set_native_conn(ScrNetServer *s, ScrNetNativeConnFn fn, void
   s->native_conn = fn;
   s->native_ctx = ctx;
   s->native_ctx_free = ctx_free;
+}
+
+void scr_net_server_set_proto_close(ScrNetServer *s, void (*fn)(void *)) {
+  s->proto_close = fn;
 }
 
 void scr_net_server_set_proto_settle(ScrNetServer *s, void (*fn)(void *)) {
