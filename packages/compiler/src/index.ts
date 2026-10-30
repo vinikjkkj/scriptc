@@ -30,7 +30,7 @@ import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
 import { npmStaticIneligibleReason, npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
-import { provenanceSources } from "./frontend/provenance-registry.js";
+import { provenancePackageOfFile, provenanceSources } from "./frontend/provenance-registry.js";
 import { resolveBareModule } from "./frontend/resolve.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "./frontend/shared.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
@@ -295,6 +295,52 @@ interface Frontend {
   dispose: () => void;
 }
 
+/* Default-lane eligibility (dual-behaviour packages). The npm-static package.json
+ * transform answers an {import, require} condition with its require target (the
+ * CJS-first rule). When the two targets are DIFFERENT files the package has two
+ * behaviours, and Node runs the import side for an import statement, so the
+ * compiled answer would be wrong. Such a package is ineligible for the default
+ * lane and keeps its previous path (a refusal in static builds, never a silent
+ * misbuild). Explicit lists and "auto"/"lib" are unchanged. */
+function dualTargetsDiffer(exportsField: unknown): boolean {
+  if (exportsField === null || typeof exportsField !== "object") return false;
+  if (Array.isArray(exportsField)) return exportsField.some((v) => dualTargetsDiffer(v));
+  const o = exportsField as Record<string, unknown>;
+  if ("import" in o && "require" in o && JSON.stringify(o["import"]) !== JSON.stringify(o["require"])) return true;
+  return Object.values(o).some((v) => dualTargetsDiffer(v));
+}
+
+/** True when the package whose installed or attested directory is `dir` has a
+ * dual import/require export map whose targets differ. */
+function packageHasDivergentDual(dir: string): boolean {
+  const text = trackedReadFile(join(dir, "package.json"));
+  if (text === null) return false;
+  try {
+    const pkg = JSON.parse(text) as { exports?: unknown };
+    return dualTargetsDiffer(pkg.exports);
+  } catch {
+    return false;
+  }
+}
+
+/** The directory of the nearest package.json at or above `file` whose name is `name`. */
+function packageDirOfFile(file: string, name: string): string | null {
+  let dir = dirname(file);
+  for (;;) {
+    const text = trackedReadFile(join(dir, "package.json"));
+    if (text !== null) {
+      try {
+        if ((JSON.parse(text) as { name?: unknown }).name === name) return dir;
+      } catch {
+        /* unreadable manifest: keep walking */
+      }
+    }
+    const up = dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+}
+
 /** --npm-static=auto (and library mode's mandatory twin): one throwaway
  * load finds every bare npm import the program's own modules make, then
  * the eligibility heuristics (npm-static.ts) pick the packages whose
@@ -319,6 +365,7 @@ function detectAutoPackages(
   mode: "auto" | "lib" = "auto",
   judged?: Set<string>,
   sites?: Map<string, SrcLoc>,
+  defaultPosture = false,
 ): string[] {
   // package → the resolved types file AND the file whose import found it:
   // the runtime-JS probe below must resolve from the SAME importing file,
@@ -372,8 +419,18 @@ function detectAutoPackages(
       typesFile,
       jsEntry !== null && isJsSourceFileName(jsEntry.typesFile) ? jsEntry.typesFile : null,
     );
-    if (reason === null) chosen.push(pkg);
-    else statuses.push({ package: pkg, status: "fallback", detail: mode === "lib" ? reason : `auto: ${reason}` });
+    const dualDir = defaultPosture && reason === null && jsEntry !== null ? packageDirOfFile(jsEntry.typesFile, pkg) : null;
+    const dualReason =
+      dualDir !== null && packageHasDivergentDual(dualDir)
+        ? "its export map has an import/require pair with different targets (two behaviours: the CJS-first rewrite would run the require side for an import); it stays on its previous path"
+        : null;
+    if (reason === null && dualReason === null) chosen.push(pkg);
+    else
+      statuses.push({
+        package: pkg,
+        status: "fallback",
+        detail: reason !== null ? (mode === "lib" ? reason : `auto: ${reason}`) : dualReason!,
+      });
   }
   return chosen;
 }
@@ -411,7 +468,7 @@ function packagesNamedByDiag(message: string, optedIn: ReadonlySet<string>): Set
  * status the shared loops record becomes compileLibrary's SC4020
  * static-or-refuse teaching, and the detection closes over the opted-in
  * packages' own bare edges (no island exists to serve a dep from). */
-function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" | "lib"): Frontend {
+function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" | "lib", dynamic = false): Frontend {
   const statuses: NpmStaticStatus[] = [];
   const npmSites = new Map<string, SrcLoc>();
   const judged = new Set<string>();
@@ -424,7 +481,10 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   // the bar falls back to today's path with its reason recorded. Unlike
   // "lib", nothing here is build-stopping: the default never refuses a build
   // that the explicit lanes would have compiled.
-  const defaultLane = npmStatic === undefined;
+  // Static builds only: a --dynamic build keeps the island path it was built
+  // on (its packages run in the embedded engine), so it is byte-identical to
+  // the previous default. See admitDefaultBy for the refusal guard.
+  const defaultLane = npmStatic === undefined && !dynamic;
   if (npmStatic === "auto" || npmStatic === "lib" || defaultLane) {
     const scout = loadProgram(entryPath);
     try {
@@ -432,7 +492,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       requested =
         npmStatic === "auto"
           ? detectAutoPackages(scout, statuses)
-          : detectAutoPackages(scout, statuses, "lib", judged, npmSites);
+          : detectAutoPackages(scout, statuses, "lib", judged, npmSites, defaultLane);
     } finally {
       scout.dispose();
     }
@@ -467,7 +527,16 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   // identity for cache paths (lower-calls.ts). Explicit lists are unchanged.
   if (defaultLane) {
     for (const p of provenanceSources()?.packages ?? []) {
-      if (!requested.includes(p.name)) requested.push(p.name);
+      if (requested.includes(p.name)) continue;
+      if (packageHasDivergentDual(p.dir)) {
+        statuses.push({
+          package: p.name,
+          status: "fallback",
+          detail: "its export map has an import/require pair with different targets (two behaviours); it stays on its previous path",
+        });
+        continue;
+      }
+      requested.push(p.name);
     }
   }
   let load = loadProgram(entryPath, { npmStatic: requested });
@@ -481,7 +550,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   // at least one new package for good).
   if (npmStatic === "lib" || defaultLane) {
     for (;;) {
-      const grown = detectAutoPackages(load, statuses, "lib", judged, npmSites);
+      const grown = detectAutoPackages(load, statuses, "lib", judged, npmSites, defaultLane);
       if (grown.length === 0) break;
       requested = [...requested, ...grown];
       load.dispose();
@@ -587,8 +656,76 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
     if (effective.has(p)) statuses.push({ package: p, status: "static" });
   }
 
-  const finalLoad = load;
+  let finalLoad = load;
   let pinnedLoad: (LoadResult & { dispose: () => void }) | null = null;
+  type Refusal = { code: string; message: string; loc: { file: string } };
+  /* Admission by refusal (default lane only; see defaultLane). A package whose
+   * static path refuses a program that compiles on the previous path (no default
+   * packages) stays on that path. Decided before emit, deterministically:
+   *   - refusals of the current set are empty: nothing to decide;
+   *   - the previous path also refuses: the program was not protected, so the
+   *     default set stands (REST's 34 is that case);
+   *   - otherwise the admitted packages are dropped greedily: each step removes
+   *     the package whose removal leaves the fewest refusals (ties by name),
+   *     until none remain. The empty set IS the previous path, so this ends. */
+  const admitDefaultBy = (refusalsOf: (ld: LoadResult) => readonly Refusal[]): boolean => {
+    const current = refusalsOf(finalLoad);
+    if (current.length === 0) return false;
+    // loadProgram writes the module-level active set (npm-static.ts), and every
+    // probe below moves it. Lowering reads that state, not the load object, so
+    // finalLoad is reloaded once the probes end, whatever the outcome.
+    let probed = false;
+    try {
+      probed = true;
+      const previous = loadProgram(entryPath, { npmStatic: [] });
+      const previousRefuses = refusalsOf(previous).length > 0;
+      if (process.env["SCRIPTC_ADMIT_WHY"] !== undefined) {
+        console.error(
+          `[admit] current=${current.length} previous=${refusalsOf(previous).length} set=[${[...effective].join(",")}]`,
+        );
+      }
+      previous.dispose();
+      if (previousRefuses) return false;
+      const set = [...effective].sort();
+      let errors = current.length;
+      const dropped: string[] = [];
+      while (errors > 0 && set.length > 0) {
+        let bestPkg = "";
+        let bestErrors = Infinity;
+        for (const p of set) {
+          const trial = loadProgram(entryPath, { npmStatic: set.filter((q) => q !== p) });
+          const n = refusalsOf(trial).length;
+          trial.dispose();
+          if (n < bestErrors) {
+            bestErrors = n;
+            bestPkg = p;
+          }
+        }
+        set.splice(set.indexOf(bestPkg), 1);
+        dropped.push(bestPkg);
+        errors = bestErrors;
+      }
+      for (const p of dropped) {
+        effective.delete(p);
+        const hit =
+          current.find((d) => npmStaticPackageOfPath(d.loc.file) === p || provenancePackageOfFile(d.loc.file)?.name === p) ??
+          current[0]!;
+        for (let i = statuses.length - 1; i >= 0; i--) if (statuses[i]!.package === p) statuses.splice(i, 1);
+        statuses.push({
+          package: p,
+          status: "fallback",
+          detail: `its static path refuses this program (${hit.code}: ${hit.message}); the program compiles on the previous path, so the package stays on the island path`,
+        });
+      }
+      return dropped.length > 0;
+    } finally {
+      if (probed) {
+        finalLoad.dispose();
+        finalLoad = loadProgram(entryPath, { npmStatic: [...effective] });
+      }
+    }
+  };
+  type LowerOpts = Parameters<Frontend["lower"]>[0];
   return {
     preflight,
     entryText: () => finalLoad.entry.text,
@@ -622,6 +759,18 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         ),
       ),
     lower: (opts) => {
+      // Admission by lowering (default lane only): a package whose static
+      // lowering refuses a program that compiles on the previous path stays
+      // on that path. Decided here, before any emit, from the same inputs.
+      if (defaultLane) {
+        // Both stages: import-level refusals (preflight) and value-level ones
+        // (lowering). The previous path's protection is judged on the whole.
+        const lowerOf = (ld: LoadResult): readonly Refusal[] => [
+          ...checkPreflight(ld),
+          ...lowerToIr(ld.program, ld.entry, ld.moduleOrder, { ...opts, startupCrash: ld.startupCrash ?? null }).diagnostics,
+        ];
+        admitDefaultBy(lowerOf);
+      }
       const first = lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null });
       if (first.pinReload === undefined) return first;
       // Class fields untyped code writes another type (DynPins): load the
@@ -692,7 +841,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
     }
     ffi = loaded.profile;
   }
-  const fe = runFrontend(entryPath, opts.npmStatic);
+  const fe = runFrontend(entryPath, opts.npmStatic, opts.dynamic ?? false);
   try {
     const emptyStats = { statementsTotal: 0, statementsFailed: 0, statementsIsland: 0, functionsSkipped: 0 };
 
@@ -1263,7 +1412,7 @@ async function compileTracked(
     }
   }
 
-  const fe = tapped("fe.load", () => runFrontend(entryPath, opts.npmStatic));
+  const fe = tapped("fe.load", () => runFrontend(entryPath, opts.npmStatic, opts.dynamic ?? false));
   let lowered: LowerResult;
   let entryText: string;
   let sourceTexts: Map<string, string>;
