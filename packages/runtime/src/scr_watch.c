@@ -462,6 +462,9 @@ static void scr_watch_dispatch(void) {
         scr_watch_fire(w, "change");
       }
       if (scr_exc_pending()) return; /* the loop surfaces it */
+      /* one macrotask boundary per delivered event: ticks, then jobs */
+      scr_loop_drain_callback();
+      if (scr_loop_stopping()) return;
     }
     if (scr_loop_has_ready()) return; /* microtasks interleave first */
   }
@@ -489,6 +492,9 @@ static void scr_watch_dispatch(void) {
                                              * silent (no reopen), like Node */
       scr_watch_fire(w, change ? "change" : "rename");
       if (scr_exc_pending()) return; /* the loop surfaces it */
+      /* one macrotask boundary per delivered event: ticks, then jobs */
+      scr_loop_drain_callback();
+      if (scr_loop_stopping()) return;
     }
     if (scr_loop_has_ready()) return; /* microtasks interleave first */
   }
