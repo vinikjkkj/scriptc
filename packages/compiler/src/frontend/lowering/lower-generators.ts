@@ -8,10 +8,12 @@
  * g.next()` binds and reads flow. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DYN, IrExpr, IrStmt, IrType, SrcLoc, UNDEFINED_T, VOID, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, SrcLoc, UNDEFINED_T, VOID, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { genResultRecord } from "../types.js";
 import { forOfVarTarget } from "./lower-stmts.js";
+import { lowerTpOptions, timerDelayArg } from "./lower-builtins.js";
+import { unitOnlyUnion } from "../types.js";
 
 type GenType = IrType & { kind: "generator" };
 /** Either generator flavour, for the helpers that only read the three
@@ -785,6 +787,178 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
       ],
       loc,
     };
+  } finally {
+    L.scopes.pop();
+  }
+}
+
+/** `tp.setInterval(delay, value, options)` (node:timers/promises) as the
+ * iterable of a `for await`: the call expression when the callee is the
+ * module's setInterval (a namespace member or a named import), else null. */
+export function timersPromisesIntervalCallOf(L: Lowerer, expr: ts.Expression): ts.CallExpression | null {
+  let e: ts.Expression = expr;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isCallExpression(e)) return null;
+  const callee = e.expression;
+  if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && callee.name.text === "setInterval") {
+    return L.builtinNamespaceModuleOf(callee.expression) === "timers/promises" ? e : null;
+  }
+  if (ts.isIdentifier(callee)) {
+    const bi = L.builtinImportOf(callee);
+    return bi?.module === "timers/promises" && bi.member === "setInterval" ? e : null;
+  }
+  return null;
+}
+
+/** `for await (const x of tp.setInterval(ms, value, options)) body` — the
+ * timers/promises interval iterator, lowered as a loop over the runtime's
+ * interval record (scr_tp_interval.c), with Node's generator semantics:
+ *
+ *   { const %d = <delay>; const %v = <value>; const %s = <signal>;
+ *     const %h = tp.intervalOpen(%d, %s, <ref>);      // Node's first next()
+ *     try {
+ *       while (true) {
+ *         await tp.intervalNext(%h);                  // one tick, or AbortError
+ *         const x = %v;  <body>
+ *       }
+ *     } finally { tp.intervalClose(%h); }             // break, return, throw, abort
+ *   }
+ *
+ * The loop closes on EVERY exit, as Node's generator finally does. An
+ * unlabeled break binds to the loop marker; a labeled jump past the loop
+ * refuses through the same hasEscapingLabeledJump guard the generator uses.
+ * A call whose value is omitted yields undefined, as Node does. */
+export function lowerForAwaitTimersInterval(
+  L: Lowerer,
+  stmt: ts.ForOfStatement,
+  call: ts.CallExpression,
+  labels?: string[],
+): IrStmt {
+  if (!L.ctx.isAsync) {
+    L.unsupported("SC1090", stmt, "top-level 'for await' (await outside async functions)");
+  }
+  if (!ts.isVariableDeclarationList(stmt.initializer)) {
+    L.unsupported(
+      "SC1090",
+      stmt.initializer,
+      "for-await over a pre-declared variable (declare the loop variable in the loop: for await (const x of ...))",
+    );
+  }
+  const list = stmt.initializer;
+  if ((list.flags & ts.NodeFlags.Using) !== 0) {
+    L.unsupported("SC1090", list, "'using' declarations (dispose-at-scope-exit semantics)");
+  }
+  const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
+  const isLet = (list.flags & ts.NodeFlags.Let) !== 0;
+  if (!isConst && !isLet) L.unsupported("SC1030", list, "'var' loop bindings in 'for await' (use const)");
+  const decl = list.declarations[0]!;
+  if (!ts.isIdentifier(decl.name)) L.unsupported("SC1031", decl.name);
+  if (call.arguments.length > 3 || call.arguments.some((a) => ts.isSpreadElement(a))) {
+    L.unsupported(
+      "SC1090",
+      call,
+      "timers/promises setInterval with more than three arguments or a spread (setInterval(delay?, value?, options?) is the shape)",
+    );
+  }
+  const loc = locOf(stmt);
+  const [delayArg, valueArg, optionsArg] = call.arguments;
+  // Node's order: delay, value, then the options members (signal before ref).
+  const delay: IrExpr = delayArg
+    ? timerDelayArg(L, delayArg, loc)
+    : { kind: "numLit", value: 1, type: F64, loc };
+  const value: IrExpr = valueArg
+    ? L.lowerExpr(valueArg)
+    : { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
+  const { signal, refed } = lowerTpOptions(L, optionsArg, loc);
+  const unitValue = isUnitType(value.type);
+  if (unitValue && value.kind !== "unitLit") {
+    L.unsupported(
+      "SC1090",
+      valueArg ?? call,
+      "timers/promises setInterval with a non-literal undefined-typed value",
+    );
+  }
+  const elemT: IrType = unitValue ? unitOnlyUnion(L.unions) : value.type;
+  L.scopes.push(new Map());
+  try {
+    const dLocal = L.declareHiddenLocal("%ivd", F64);
+    const vLocal = unitValue ? null : L.declareHiddenLocal("%ivv", value.type);
+    const sLocal = signal ? L.declareHiddenLocal("%ivs", signal.type) : null;
+    const rLocal = L.declareHiddenLocal("%ivr", BOOL);
+    const hLocal = L.declareHiddenLocal("%ivh", F64);
+    const x = L.declareLocal(decl.name, decl.name.text, elemT, isLet);
+    const ref = (l: { id: string }, t: IrType): IrExpr => ({ kind: "varRef", localId: l.id, type: t, loc });
+    const open: IrExpr = signal
+      ? { kind: "libCall", fn: "tp.intervalOpenS", args: [ref(dLocal, F64), ref(sLocal!, signal.type), ref(rLocal, BOOL)], type: F64, loc }
+      : { kind: "libCall", fn: "tp.intervalOpen", args: [ref(dLocal, F64), ref(rLocal, BOOL)], type: F64, loc };
+    const xInit: IrExpr = vLocal
+      ? ref(vLocal, value.type)
+      : (L.unassignedSlotInit(elemT, loc) ?? { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc });
+    const next: IrStmt = {
+      kind: "exprStmt",
+      expr: {
+        kind: "awaitExpr",
+        value: { kind: "libCall", fn: "tp.intervalNext", args: [ref(hLocal, F64)], type: { kind: "promise", inner: VOID }, loc },
+        type: VOID,
+        loc,
+      },
+      loc,
+    };
+    // The loop is ALWAYS inside the finally: a labeled jump past it reaches the
+    // tryFinally and refuses (SC1090), where the generator form's non-wrapped
+    // placement would skip the close and leave the interval armed.
+    const head: IrStmt[] = [next, { kind: "varDecl", localId: x.id, init: xInit, loc }];
+    const body = L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels));
+    // Node's for-await awaits IteratorClose (return()) on break, return and
+    // body throw: one microtask hop. A throw out of next() (the abort) never
+    // calls return(), so the runtime answers which exit this is
+    // (tp.intervalAwaitClose: false once a next() has rejected). The question
+    // is a call, not a flag the loop writes: an assignment placed after an
+    // awaited rejection is not skipped on the backends (measured).
+    const closeAwaited: IrStmt = {
+      kind: "exprStmt",
+      expr: {
+        kind: "awaitExpr",
+        value: { kind: "libCall", fn: "tp.intervalCloseP", args: [ref(hLocal, F64)], type: { kind: "promise", inner: VOID }, loc },
+        type: VOID,
+        loc,
+      },
+      loc,
+    };
+    const closeNow: IrStmt = {
+      kind: "exprStmt",
+      expr: { kind: "libCall", fn: "tp.intervalClose", args: [ref(hLocal, F64)], type: VOID, loc },
+      loc,
+    };
+    const close: IrStmt = {
+      kind: "if",
+      cond: {
+        kind: "libCall",
+        fn: "tp.intervalAwaitClose",
+        args: [ref(hLocal, F64)],
+        type: BOOL,
+        loc,
+      },
+      then: [closeAwaited],
+      else_: [closeNow],
+      loc,
+    };
+    const loop: IrStmt = {
+      kind: "while",
+      cond: { kind: "boolLit", value: true, type: BOOL, loc },
+      body: [...head, ...body],
+      ...(labels && { labels }),
+      loc,
+    };
+    const stmts: IrStmt[] = [
+      { kind: "varDecl", localId: dLocal.id, init: delay, loc },
+      ...(vLocal ? [{ kind: "varDecl" as const, localId: vLocal.id, init: value, loc }] : []),
+      ...(sLocal ? [{ kind: "varDecl" as const, localId: sLocal.id, init: signal!, loc }] : []),
+      { kind: "varDecl", localId: rLocal.id, init: refed, loc },
+      { kind: "varDecl", localId: hLocal.id, init: open, loc },
+      { kind: "tryCatch", tryBody: [loop], catchBody: null, catchLocalId: null, finallyBody: [close], loc },
+    ];
+    return { kind: "block", body: stmts, loc };
   } finally {
     L.scopes.pop();
   }

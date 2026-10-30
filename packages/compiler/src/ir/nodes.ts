@@ -6441,6 +6441,19 @@ export type IrLibFn =
   | "tp.setTimeoutVS"
   | "tp.setTimeoutVoid"
   | "tp.setTimeoutVoidS"
+  /** timers/promises setInterval as a for-await iterable (scr_tp_interval.c):
+   * tp.intervalOpen = [ms, refed] / tp.intervalOpenS = [ms, signal, refed]
+   * arm the interval once and return its record (an f64 handle);
+   * tp.intervalNext = [h] is the promise of one tick (AbortError on abort);
+   * tp.intervalClose = [h] clears it and releases the record; tp.intervalCloseP
+   * is the same close answering the promise the loop awaits; tp.intervalAwaitClose
+   * = [h] says whether the exit must await it (false after a rejected next()). */
+  | "tp.intervalOpen"
+  | "tp.intervalOpenS"
+  | "tp.intervalNext"
+  | "tp.intervalClose"
+  | "tp.intervalCloseP"
+  | "tp.intervalAwaitClose"
   /** node:diagnostics_channel (scr_dc.c, linked when any dc.* appears —
    * the zlib gating precedent): a process-global name→channel registry;
    * channel values are f64 handles (types.ts maps Channel to F64, the
@@ -10211,7 +10224,7 @@ export function moduleUsesTimersPromisesValue(mod: IrModule): boolean {
     }
     if ((v as { kind?: unknown }).kind === "libCall") {
       const fn = (v as { fn?: unknown }).fn;
-      if (typeof fn === "string" && fn.startsWith("tp.setTimeoutV")) {
+      if (typeof fn === "string" && (fn.startsWith("tp.setTimeoutV") || fn.startsWith("tp.interval"))) {
         found = true;
         return;
       }

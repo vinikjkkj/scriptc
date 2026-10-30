@@ -777,11 +777,11 @@ declare module "timers" {
  * on (`await setTimeout(ms)` as a sleep). setTimeout's delay-only form and
  * setImmediate's bare form lower (a void promise the shared timer heap
  * settles); the resolve-value and options (AbortSignal, ref) forms lower
- * through scr_tp_set_timeout_v; setInterval async-iterator forms fence per site. */
+ * through scr_tp_set_timeout_v; setInterval is the for-await iterable (scr_tp_interval.c); a stored iterator fences. */
 declare module "node:timers/promises" {
   export function setTimeout<T = void>(delay?: number, value?: T, options?: { signal?: AbortSignal; ref?: boolean }): Promise<T>;
   export function setImmediate(): Promise<void>;
-  export function setInterval(delay?: number, value?: unknown, options?: unknown): unknown;
+  export function setInterval<T = void>(delay?: number, value?: T, options?: { signal?: AbortSignal; ref?: boolean }): AsyncIterableIterator<T>;
   export const scheduler: {
     wait(delay?: number, options?: { signal?: AbortSignal }): Promise<void>;
     yield(): Promise<void>;

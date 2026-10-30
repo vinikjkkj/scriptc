@@ -48,6 +48,10 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // scr_abort_signal_* (scr_abort.c) and reports Node's delay warnings through
   // scr_emit_warning (scr_async_dyn.c). Its gate (tpValue) implies both.
   "scr_tp_value.c": ["scr_abort.c", "scr_async_dyn.c"],
+  // The timers/promises setInterval iterator (scr_tp_interval.c): the abort
+  // listener and signal reference name scr_abort_signal_* (scr_abort.c); its
+  // gate (tpValue) implies scr_abort.c already.
+  "scr_tp_interval.c": ["scr_abort.c"],
   // Measured edges: scr_http_request_ex / scr_http_req_* / the client
   // listeners (scr_http.c), scr_tls_fetch_client_ctx and _wrap
   // (scr_tls.c), scr_url_new / scr_url_release (scr_url.c). The socket
@@ -2570,6 +2574,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),
     ...(abortSignal ? [rt(join(rtDir, "scr_abort.c"))] : []),
     ...(tpValue ? [rt(join(rtDir, "scr_tp_value.c"))] : []),
+    ...(tpValue ? [rt(join(rtDir, "scr_tp_interval.c"))] : []),
     ...(abortHttp ? [rt(join(rtDir, "scr_abort_http.c"))] : []),
     // The static fetch and the conjunction seam that gives it `signal`.
     // The seam is the scr_cipher_key.c / scr_abort_http.c shape: it links
