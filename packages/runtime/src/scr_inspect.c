@@ -80,6 +80,10 @@ static double insp_js_min(double a, double b) {
   if (isnan(a) || isnan(b)) return NAN;
   return a < b ? a : b;
 }
+static double insp_js_max(double a, double b) {
+  if (isnan(a) || isnan(b)) return NAN;
+  return a > b ? a : b;
+}
 
 /* ToNumber over the primitive kinds an options object can carry. An object
  * valued numeric option would run user valueOf code: it stays unsupported. */
@@ -95,13 +99,11 @@ static double insp_opt_num(const ScrDyn *v, const char *key) {
   return NAN;
 }
 
-/* A maxArrayLength / maxStringLength value this runtime slices exactly:
- * null means Infinity, otherwise a non-negative integer or Infinity. */
+/* maxArrayLength / maxStringLength: null means Infinity (Node normalizes it);
+ * every other value keeps its JS number, fractions and negatives included. */
 static double insp_opt_count(const ScrDyn *v, const char *key) {
   if (v->kind == SCR_DYN_NULL) return INFINITY;
-  double x = insp_opt_num(v, key);
-  if (!(x >= 0.0) || (!isinf(x) && x != floor(x))) insp_unsupported(key);
-  return x;
+  return insp_opt_num(v, key);
 }
 
 /* Node's inspect(value, opts): the keys listed below replace the defaults,
@@ -164,15 +166,27 @@ void scr_insp_opts_pop(void) {
 
 /* The active depth budget (the frontend's depth argument for the traversal). */
 double scr_insp_opt_depth(void) { return g_opts.depth; }
-/* The active maxArrayLength: the traversal's per-composite entry cap. */
-double scr_insp_opt_max_array(void) { return g_opts.max_array; }
 
-/* Leading entries a composite of n entries shows under maxArrayLength. */
+
+/* Node's maxLength for a composite of n entries: min(max(0, maxArrayLength), n). */
+static double insp_cap(double n) { return insp_js_min(insp_js_max(0.0, g_opts.max_array), n); }
+/* Entries a `i < maxLength` loop emits (ceil of the cap; NaN emits none). */
 static size_t insp_shown(size_t n) {
-  return (double)n > g_opts.max_array ? (size_t)g_opts.max_array : n;
+  double c = insp_cap((double)n);
+  return isnan(c) ? 0 : (size_t)ceil(c);
 }
+/* remaining = n - maxLength; the "... more items" tail exists when it is > 0. */
+static double insp_rem(size_t n) { return (double)n - insp_cap((double)n); }
+static bool insp_more(size_t n) { return insp_rem(n) > 0; }
 /* Node's `ctx.maxArrayLength < output.length` (the grid drops its last entry). */
 static bool insp_over_cap(size_t n) { return (double)n > g_opts.max_array; }
+/* For a composite of n entries: how many the traversal emits, and the tail
+ * count (n - maxLength, which is "more items" when > 0). */
+double scr_insp_shown(double n) {
+  double c = insp_cap(n);
+  return isnan(c) ? 0.0 : ceil(c);
+}
+double scr_insp_rem(double n) { return n - insp_cap(n); }
 static bool insp_groups(void) { return g_opts.compact_kind == INSP_COMPACT_NUM && g_opts.compact >= 1; }
 
 static void ib_grow(InspBuf *b, size_t need) {
@@ -546,9 +560,13 @@ ScrStr *scr_insp_ref_wrap(const void *v, ScrStr *s) {
 
 /* remainingText: the "... N more items" tail entry. */
 ScrStr *scr_insp_more_items(double remaining) {
-  char buf[64];
-  int n = snprintf(buf, sizeof buf, "... %.0f more item%s", remaining, remaining > 1 ? "s" : "");
-  return scr_str_new(buf, (size_t)n);
+  char num[40];
+  size_t nn = scr_f64_to_str(remaining, num);
+  InspBuf b = {0};
+  ib_cstr(&b, "... ");
+  ib_bytes(&b, num, nn);
+  ib_cstr(&b, remaining > 1 ? " more items" : " more item");
+  return ib_take(&b);
 }
 
 /* groupArrayElements: the grid layout for arrays with more than six
@@ -834,8 +852,12 @@ ScrStr *scr_insp_str(ScrStr *s) {
   char surrogate_tail[4];
   size_t surrogate_tail_len = 0;
   if ((double)units > g_opts.max_string) {
-    size_t cap = (size_t)g_opts.max_string;
-    size_t remaining = units - cap;
+    /* slice(0, maxStringLength): ToIntegerOrInfinity, a negative end counts
+     * back from the length (clamped at 0). */
+    double m = trunc(g_opts.max_string);
+    size_t cap = m >= 0 ? ((double)units < m ? units : (size_t)m)
+                        : ((double)units + m > 0 ? (size_t)((double)units + m) : 0);
+    double remaining = (double)units - g_opts.max_string;
     bool lone_high;
     uint32_t high_cp = 0;
     byte_len = insp_utf16_offset(data, byte_len, cap, &lone_high, &high_cp);
@@ -846,7 +868,9 @@ ScrStr *scr_insp_str(ScrStr *s) {
       surrogate_tail[2] = (char)(0x80 | (high_cp & 0x3f));
       surrogate_tail_len = 3;
     }
-    snprintf(trailer, sizeof trailer, "... %zu more character%s", remaining,
+    char rnum[40];
+    size_t rn = scr_f64_to_str(remaining, rnum);
+    snprintf(trailer, sizeof trailer, "... %.*s more character%s", (int)rn, rnum,
              remaining > 1 ? "s" : "");
     units = cap;
   }
@@ -948,9 +972,9 @@ ScrStr *scr_insp_typed(ScrBytes *b, ScrStr *name) {
     scr_insp_entry(s, true);
     scr_str_release(s);
   }
-  const bool more = n > shown;
+  const bool more = insp_more(n);
   if (more) {
-    ScrStr *m = scr_insp_more_items((double)(n - shown));
+    ScrStr *m = scr_insp_more_items(insp_rem(n));
     scr_insp_entry(m, true);
     scr_str_release(m);
   }
@@ -1226,9 +1250,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_insp_entry(s, item->kind == SCR_DYN_NUM);
         scr_str_release(s);
       }
-      bool more = d->v.arr.len > shown;
+      bool more = insp_more(d->v.arr.len);
       if (more) {
-        ScrStr *m = scr_insp_more_items((double)(d->v.arr.len - shown));
+        ScrStr *m = scr_insp_more_items(insp_rem(d->v.arr.len));
         scr_insp_entry(m, d->v.arr.items[shown]->kind == SCR_DYN_NUM);
         scr_str_release(m);
       }
@@ -1595,7 +1619,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         }
         scr_insp_begin(recurse + 1);
         size_t shown = 0;
-        for (double i = 0; i < scr_map_iter_count(dm) && (double)shown < g_opts.max_array; i++) {
+        for (double i = 0; i < scr_map_iter_count(dm) && (double)shown < insp_cap((double)n); i++) {
           if (!scr_map_iter_live(dm, i)) continue;
           ScrDyn *k = scr_dyn_map_key_at(d, i);
           ScrStr *ks = scr_insp_dyn(k, recurse + 1, depth);
@@ -1616,9 +1640,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           scr_str_release(entry);
           shown++;
         }
-        bool more = n > insp_shown(n);
+        bool more = insp_more(n);
         if (more) {
-          ScrStr *m = scr_insp_more_items((double)(n - insp_shown(n)));
+          ScrStr *m = scr_insp_more_items(insp_rem(n));
           scr_insp_entry(m, false);
           scr_str_release(m);
         }
@@ -1776,12 +1800,12 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           if (i) ib_char(&hex, ' ');
           ib_bytes(&hex, h, 2);
         }
-        if (b->len > shown) {
-          char more[48];
-          size_t rem = b->len - shown;
-          int n = snprintf(more, sizeof more, " ... %zu more byte%s", rem,
-                           rem > 1 ? "s" : "");
-          ib_bytes(&hex, more, (size_t)n);
+        if (insp_more(b->len)) {
+          char num[40];
+          size_t nn = scr_f64_to_str(insp_rem(b->len), num);
+          ib_cstr(&hex, " ... ");
+          ib_bytes(&hex, num, nn);
+          ib_cstr(&hex, insp_rem(b->len) > 1 ? " more bytes" : " more byte");
         }
         ib_char(&hex, '>');
         ScrStr *e = ib_take(&hex);
@@ -1837,9 +1861,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_insp_entry(s, true);
         scr_str_release(s);
       }
-      bool more = b->len > shown;
+      bool more = insp_more(b->len);
       if (more) {
-        ScrStr *m = scr_insp_more_items((double)(b->len - shown));
+        ScrStr *m = scr_insp_more_items(insp_rem(b->len));
         scr_insp_entry(m, true);
         scr_str_release(m);
       }

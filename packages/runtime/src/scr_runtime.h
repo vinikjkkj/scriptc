@@ -9905,7 +9905,9 @@ void scr_insp_begin(double recurse);
 void scr_insp_opts_push(const ScrDyn *o);
 void scr_insp_opts_pop(void);
 double scr_insp_opt_depth(void);
-double scr_insp_opt_max_array(void);
+/* shown(n): entries a composite of n emits; rem(n): n - maxLength (tail when > 0). */
+double scr_insp_shown(double n);
+double scr_insp_rem(double n);
 void scr_insp_entry(ScrStr *s, bool is_num);
 /* Circular references, Node-exact (<ref *N> / [Circular *N]): the
  * compiler-emitted helpers over CYCLE-CAPABLE composites call circ_check
