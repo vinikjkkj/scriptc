@@ -17948,16 +17948,19 @@ class LlEmitter {
       // runtime, which registers or releases it on every path. The throw
       // check follows the call.
       const on = e.fn.endsWith("On");
-      const base = e.fn.startsWith("http.client") ? "scr_http_client" : e.fn.startsWith("http.req") ? "scr_http_req" : "scr_http_res";
+      // Full symbol names, never a built prefix: the ABI scan reads literal names.
+      const sym = e.fn.startsWith("http.client")
+        ? "scr_http_client_set_timeout_ret"
+        : e.fn.startsWith("http.req") ? "scr_http_req_set_timeout_ret" : "scr_http_res_set_timeout_ret";
       const args = e.args.map((a) => this.emitExpr(a));
       let cb = "null";
       if (on) {
         this.moveTemp(args[2]!);
         cb = args[2]!.name;
       }
-      this.declare(`declare ptr @${base}_set_timeout_ret(ptr, double, ptr)`);
+      this.declare(`declare ptr @${sym}(ptr, double, ptr)`);
       const t = B.tmp();
-      B.line(`${t} = call ptr @${base}_set_timeout_ret(ptr ${args[0]!.name}, double ${args[1]!.name}, ptr ${cb})`);
+      B.line(`${t} = call ptr @${sym}(ptr ${args[0]!.name}, double ${args[1]!.name}, ptr ${cb})`);
       const out = this.own({ name: t, type: e.type });
       this.emitPendingCheck();
       return out;
