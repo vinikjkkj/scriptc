@@ -7349,6 +7349,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts": {
+   "order": [
+    "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1741-stream-extends-writable.ts": {
    "order": [
     "<repo>/tests/corpus/1741-stream-extends-writable.ts"
@@ -7445,6 +7457,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/17700-listen-tick-before-connect.ts": {
+   "order": [
+    "<repo>/tests/corpus/17700-listen-tick-before-connect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17701-immediate-tick-between-callbacks.ts": {
+   "order": [
+    "<repo>/tests/corpus/17701-immediate-tick-between-callbacks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17702-server-connection-tick-before-client-connect.ts": {
+   "order": [
+    "<repo>/tests/corpus/17702-server-connection-tick-before-client-connect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17703-timer-rejection-stops-the-next-timer.ts": {
+   "order": [
+    "<repo>/tests/corpus/17703-timer-rejection-stops-the-next-timer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17704-rejection-handled-in-checkpoint.ts": {
+   "order": [
+    "<repo>/tests/corpus/17704-rejection-handled-in-checkpoint.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17705-tick-destroys-batch-mate-socket.ts": {
+   "order": [
+    "<repo>/tests/corpus/17705-tick-destroys-batch-mate-socket.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17706-connect-callback-rejection-is-fatal.ts": {
+   "order": [
+    "<repo>/tests/corpus/17706-connect-callback-rejection-is-fatal.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1771-assert-dyn-deep.ts": {
    "order": [
     "<repo>/tests/corpus/1771-assert-dyn-deep.ts"
@@ -7470,16 +7524,16 @@
    "diags": []
   },
   "<repo>/tests/corpus/17800-fn-text-values.ts": {
-    "order": [
-      "<repo>/tests/corpus/17800-fn-text-values.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/17800-fn-text-values.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/17801-fn-text-erased-types.ts": {
-    "order": [
-      "<repo>/tests/corpus/17801-fn-text-erased-types.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/17801-fn-text-erased-types.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/1781-http-server-shapes.cjs": {
    "order": [
@@ -21412,18 +21466,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts": {
-   "order": [
-    "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts": {
-   "order": [
-    "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts"
-   ],
-   "diags": []
   }
  }
 }
