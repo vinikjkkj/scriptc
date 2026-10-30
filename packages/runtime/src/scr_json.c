@@ -2890,12 +2890,13 @@ static const SCR_STR_LIT(6) scr_tc_dec_both_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_C
  *   0xFFFF0000 | index << 2 | flags   an IMMORTAL codec: a composed decoder, stateless, nothing to release;
  *   0xFFFD0000 | index << 2 | flags   a HEAP codec: a stored decoder, refcounted, carrying its streaming state.
  * Index 0 is utf-8. The encoder (0xFFFFFFF1) and the utf-8 immortals (0xFFFFFFF2..5) sit outside both. */
+#include "scr_text_mb.h" /* the multi-byte state; the decoders are the gated scr_text_mb.c */
 #include "scr_text_tables.h"
 #define SCR_TC_CAP_IMM_BASE 0xFFFF0000u
 #define SCR_TC_CAP_HEAP_BASE 0xFFFD0000u
-static bool scr_tc_is_heap(uint32_t cap) { return (cap & 0xFFFFFF80u) == SCR_TC_CAP_HEAP_BASE; }
+static bool scr_tc_is_heap(uint32_t cap) { return (cap & 0xFFFFFF00u) == SCR_TC_CAP_HEAP_BASE; }
 static bool scr_tc_is_enc_cap(uint32_t cap) {
-  return (cap >= 0xFFFF0004u && cap <= 0xFFFF007Fu) || scr_tc_is_heap(cap);
+  return (cap >= 0xFFFF0004u && cap <= 0xFFFF00FFu) || scr_tc_is_heap(cap);
 }
 static int scr_tc_enc(const ScrStr *c) { return scr_tc_is_enc_cap(c->cap) ? (int)((c->cap >> 2) & 0x3Fu) : 0; }
 
@@ -2917,10 +2918,12 @@ typedef struct ScrTcSt {
   uint8_t lead_set, lead;     /* utf-16: a pending first byte */
   uint32_t surr;              /* utf-16: a pending lead surrogate (0: none) */
   uint8_t bom;                /* the BOM-seen flag */
+  ScrTcMbSt mb;               /* the multi-byte families' state (scr_text_mb.c) */
 } ScrTcSt;
 static void scr_tc_st_reset(ScrTcSt *st) {
   st->need = 0; st->seen = 0; st->lo = 0x80; st->hi = 0xBF; st->cp = 0;
   st->lead_set = 0; st->lead = 0; st->surr = 0; st->bom = 0;
+  st->mb = (ScrTcMbSt){0};
 }
 /* A heap codec is an ORDINARY string block (scr_str_new), so the RC audit counts it and the release path frees it
  * with no codec-specific code (scr_string.c is always linked: it must not change). Its name is data[0..len); the
@@ -3070,6 +3073,28 @@ static int scr_tc_flush(ScrTcW *w, ScrTcSt *st, int kind) {
   return 0;
 }
 
+/* The multi-byte decoders, installed by scr_text_mb.c's scr_text_mb_install (a link-gated unit). A program that
+ * constructs a multi-byte codec links it; no other program can reach these pointers. */
+static ScrTcMbFeedFn scr_txt_mb_feed_fn = NULL;
+static ScrTcMbFinishFn scr_txt_mb_finish_fn = NULL;
+void scr_txt_mb_set(ScrTcMbFeedFn feed, ScrTcMbFinishFn finish) {
+  scr_txt_mb_feed_fn = feed;
+  scr_txt_mb_finish_fn = finish;
+}
+/* The sink of one decode run, as the multi-byte decoders see it. */
+typedef struct ScrTcCtx {
+  ScrTcW *w;
+  ScrTcSt *st;
+} ScrTcCtx;
+static int scr_tc_cb_tok(void *c, uint32_t cp) {
+  ScrTcCtx *x = (ScrTcCtx *)c;
+  return scr_tc_emit(x->w, x->st, cp);
+}
+static int scr_tc_cb_fail(void *c) {
+  ScrTcCtx *x = (ScrTcCtx *)c;
+  return scr_tc_fail(x->w, x->st);
+}
+
 /* One decode of an input under a codec's encoding and flags. A heap codec's state is used and kept when
  * `stream` is set, and flushed (then reset) when not. An immortal codec has no state: every call is fresh.
  * +1 string, or NULL with the TypeError pending. */
@@ -3089,9 +3114,17 @@ static ScrStr *scr_tc_run(const ScrStr *codec, const uint8_t *in, size_t n, bool
     if (e->kind == SCR_TXT_KIND_UTF8) rc = scr_tc_u8(&w, st, b);
     else if (e->kind == SCR_TXT_KIND_UTF16LE) rc = scr_tc_u16(&w, st, false, b);
     else if (e->kind == SCR_TXT_KIND_UTF16BE) rc = scr_tc_u16(&w, st, true, b);
-    else rc = scr_tc_sb(&w, st, e, b);
+    else if (e->kind == SCR_TXT_KIND_MB) {
+      if (scr_txt_mb_feed_fn == NULL) scr_trap("scriptc: a multi-byte codec without its decoder unit (scr_text_mb.c)\n");
+      ScrTcCtx cx = {&w, st};
+      rc = scr_txt_mb_feed_fn(e->fam, &st->mb, b, &cx, &scr_tc_cb_tok, &scr_tc_cb_fail);
+    } else rc = scr_tc_sb(&w, st, e, b);
   }
-  if (rc == 0 && !stream) rc = scr_tc_flush(&w, st, e->kind);
+  if (rc == 0 && !stream && e->kind == SCR_TXT_KIND_MB) {
+    if (scr_txt_mb_finish_fn == NULL) scr_trap("scriptc: a multi-byte codec without its decoder unit (scr_text_mb.c)\n");
+    ScrTcCtx cx = {&w, st};
+    rc = scr_txt_mb_finish_fn(e->fam, &st->mb, &cx, &scr_tc_cb_tok, &scr_tc_cb_fail);
+  } else if (rc == 0 && !stream) rc = scr_tc_flush(&w, st, e->kind);
   if (rc < 0 || !stream) scr_tc_st_reset(st);
   if (rc < 0) {
     free(o);

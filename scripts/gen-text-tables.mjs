@@ -1,66 +1,75 @@
 #!/usr/bin/env node
-// Generates the TextDecoder encoding tables from the WHATWG Encoding Standard's own data:
-//   packages/runtime/src/scr_text_tables.h        the single-byte index tables (index-*.json),
-//                                                 the encoding list the runtime decodes, and one
-//                                                 immortal codec string per (encoding, flags);
+// Generates the TextDecoder encoding tables from the WHATWG Encoding Standard's own JSON data:
+//   packages/runtime/src/scr_text_tables.h     the encoding list the runtime decodes (the single-byte index
+//                                              tables, one immortal codec string per (encoding, flags));
+//   packages/runtime/src/scr_text_mb_tables.h  the multi-byte index tables (gb18030 with its ranges, big5,
+//                                              jis0208, jis0212, euc-kr, the ISO-2022-JP katakana).
+//                                              Included ONLY by scr_text_mb.c, a link-gated unit: a program
+//                                              pays for these tables only when it constructs a multi-byte codec;
 //   packages/compiler/src/frontend/text-codec-labels.ts
-//                                                 every WHATWG label Node's full-ICU build
-//                                                 accepts (replacement excluded) -> canonical name.
-// Sources (fetched from https://encoding.spec.whatwg.org/, the standard's own JSON):
-//   indexes.json    the index-* decode tables (each entry: code point, or null when unmapped)
-//   encodings.json  the label table (heading -> encodings -> { name, labels })
-// Usage: node scripts/gen-text-tables.mjs <indexes.json> <encodings.json> <header.h> <labels.ts>
+//                                              every WHATWG label Node's full-ICU build accepts (replacement
+//                                              excluded) -> canonical name, and the multi-byte name set.
+// Sources (https://encoding.spec.whatwg.org/): indexes.json (the index-* tables: each entry a code point, or
+// null when unmapped; gb18030-ranges is [pointer, code point] pairs) and encodings.json (the label table).
+// Usage: node scripts/gen-text-tables.mjs <indexes.json> <encodings.json> <header.h> <labels.ts> <mb-header.h>
 import fs from "node:fs";
 
-const [, , idxPath, encPath, headerOut, labelsOut] = process.argv;
-if (!idxPath || !encPath || !headerOut || !labelsOut) {
-  console.error("usage: gen-text-tables.mjs <indexes.json> <encodings.json> <header.h> <labels.ts>");
+const [, , idxPath, encPath, headerOut, labelsOut, mbHeaderOut] = process.argv;
+if (!idxPath || !encPath || !headerOut || !labelsOut || !mbHeaderOut) {
+  console.error("usage: gen-text-tables.mjs <indexes.json> <encodings.json> <header.h> <labels.ts> <mb-header.h>");
   process.exit(2);
 }
 const idx = JSON.parse(fs.readFileSync(idxPath, "utf8"));
 const encList = JSON.parse(fs.readFileSync(encPath, "utf8"));
 
 // Encodings the runtime decodes, in table order (the index is part of each codec string's cap).
-// kind: utf8 | u16le | u16be | sb (index table) | userdef (x-user-defined: 0x80+n -> U+F780+n).
-// Multi-byte families (big5, euc-jp, euc-kr, gbk, gb18030, iso-2022-jp, shift_jis) are NOT here:
-// their index tables are not generated yet (OPEN in the report).
+// kind: utf8 | u16le | u16be | sb (index table) | userdef (x-user-defined: 0x80+n -> U+F780+n) | mb (a
+// multi-byte family, decoded by scr_text_mb.c through the family code in the 4th column).
 const RUNTIME = [
-  ["utf-8", "utf8", null],
-  ["utf-16le", "u16le", null],
-  ["utf-16be", "u16be", null],
-  ["ibm866", "sb", "ibm866"],
-  ["iso-8859-2", "sb", "iso-8859-2"],
-  ["iso-8859-3", "sb", "iso-8859-3"],
-  ["iso-8859-4", "sb", "iso-8859-4"],
-  ["iso-8859-5", "sb", "iso-8859-5"],
-  ["iso-8859-6", "sb", "iso-8859-6"],
-  ["iso-8859-7", "sb", "iso-8859-7"],
-  ["iso-8859-8", "sb", "iso-8859-8"],
-  ["iso-8859-8-i", "sb", "iso-8859-8"],
-  ["iso-8859-10", "sb", "iso-8859-10"],
-  ["iso-8859-13", "sb", "iso-8859-13"],
-  ["iso-8859-14", "sb", "iso-8859-14"],
-  ["iso-8859-15", "sb", "iso-8859-15"],
-  ["iso-8859-16", "sb", "iso-8859-16"],
-  ["koi8-r", "sb", "koi8-r"],
-  ["koi8-u", "sb", "koi8-u"],
-  ["macintosh", "sb", "macintosh"],
-  ["windows-874", "sb", "windows-874"],
-  ["windows-1250", "sb", "windows-1250"],
-  ["windows-1251", "sb", "windows-1251"],
-  ["windows-1252", "sb", "windows-1252"],
-  ["windows-1253", "sb", "windows-1253"],
-  ["windows-1254", "sb", "windows-1254"],
-  ["windows-1255", "sb", "windows-1255"],
-  ["windows-1256", "sb", "windows-1256"],
-  ["windows-1257", "sb", "windows-1257"],
-  ["windows-1258", "sb", "windows-1258"],
-  ["x-mac-cyrillic", "sb", "x-mac-cyrillic"],
-  ["x-user-defined", "userdef", null],
+  ["utf-8", "utf8", null, null],
+  ["utf-16le", "u16le", null, null],
+  ["utf-16be", "u16be", null, null],
+  ["ibm866", "sb", "ibm866", null],
+  ["iso-8859-2", "sb", "iso-8859-2", null],
+  ["iso-8859-3", "sb", "iso-8859-3", null],
+  ["iso-8859-4", "sb", "iso-8859-4", null],
+  ["iso-8859-5", "sb", "iso-8859-5", null],
+  ["iso-8859-6", "sb", "iso-8859-6", null],
+  ["iso-8859-7", "sb", "iso-8859-7", null],
+  ["iso-8859-8", "sb", "iso-8859-8", null],
+  ["iso-8859-8-i", "sb", "iso-8859-8", null],
+  ["iso-8859-10", "sb", "iso-8859-10", null],
+  ["iso-8859-13", "sb", "iso-8859-13", null],
+  ["iso-8859-14", "sb", "iso-8859-14", null],
+  ["iso-8859-15", "sb", "iso-8859-15", null],
+  ["iso-8859-16", "sb", "iso-8859-16", null],
+  ["koi8-r", "sb", "koi8-r", null],
+  ["koi8-u", "sb", "koi8-u", null],
+  ["macintosh", "sb", "macintosh", null],
+  ["windows-874", "sb", "windows-874", null],
+  ["windows-1250", "sb", "windows-1250", null],
+  ["windows-1251", "sb", "windows-1251", null],
+  ["windows-1252", "sb", "windows-1252", null],
+  ["windows-1253", "sb", "windows-1253", null],
+  ["windows-1254", "sb", "windows-1254", null],
+  ["windows-1255", "sb", "windows-1255", null],
+  ["windows-1256", "sb", "windows-1256", null],
+  ["windows-1257", "sb", "windows-1257", null],
+  ["windows-1258", "sb", "windows-1258", null],
+  ["x-mac-cyrillic", "sb", "x-mac-cyrillic", null],
+  ["x-user-defined", "userdef", null, null],
+  ["gbk", "mb", null, "SCR_TXT_FAM_GB18030"],
+  ["gb18030", "mb", null, "SCR_TXT_FAM_GB18030"],
+  ["big5", "mb", null, "SCR_TXT_FAM_BIG5"],
+  ["euc-jp", "mb", null, "SCR_TXT_FAM_EUCJP"],
+  ["iso-2022-jp", "mb", null, "SCR_TXT_FAM_ISO2022JP"],
+  ["shift_jis", "mb", null, "SCR_TXT_FAM_SJIS"],
+  ["euc-kr", "mb", null, "SCR_TXT_FAM_EUCKR"],
 ];
-const KIND = { utf8: "SCR_TXT_KIND_UTF8", u16le: "SCR_TXT_KIND_UTF16LE", u16be: "SCR_TXT_KIND_UTF16BE", sb: "SCR_TXT_KIND_SB", userdef: "SCR_TXT_KIND_USERDEF" };
-const MULTIBYTE = new Set(["big5", "euc-jp", "euc-kr", "gbk", "gb18030", "iso-2022-jp", "shift_jis"]);
+const KIND = { utf8: "SCR_TXT_KIND_UTF8", u16le: "SCR_TXT_KIND_UTF16LE", u16be: "SCR_TXT_KIND_UTF16BE", sb: "SCR_TXT_KIND_SB", userdef: "SCR_TXT_KIND_USERDEF", mb: "SCR_TXT_KIND_MB" };
+const MULTIBYTE = new Set(["gbk", "gb18030", "big5", "euc-jp", "iso-2022-jp", "shift_jis", "euc-kr"]);
 const cident = (s) => s.replace(/-/g, "_");
+const hex = (v, w) => "0x" + v.toString(16).toUpperCase().padStart(w, "0");
 
 // Every WHATWG label -> canonical name, for each encoding (replacement is Node's unsupported one).
 const labelMap = [];
@@ -74,15 +83,6 @@ for (const heading of encList) {
   }
 }
 
-// The single-byte tables, each checked against the standard's shape (128 entries).
-const tables = new Map();
-for (const [name, kind, key] of RUNTIME) {
-  if (kind !== "sb") continue;
-  const t = idx[key];
-  if (!Array.isArray(t) || t.length !== 128) throw new Error(`index ${key} is not a 128-entry table`);
-  tables.set(key, t);
-}
-
 const out = [];
 out.push("/* GENERATED by scripts/gen-text-tables.mjs from the WHATWG Encoding Standard's JSON data");
 out.push(" * (https://encoding.spec.whatwg.org/indexes.json and encodings.json). Do not edit by hand. */");
@@ -92,22 +92,30 @@ out.push("#include <stdint.h>");
 out.push("");
 out.push("/* An unmapped index entry (the standard's null): a decode of it is U+FFFD, or the fatal TypeError. */");
 out.push("#define SCR_TXT_UNMAPPED 0xFFFFu");
-out.push("enum { SCR_TXT_KIND_UTF8, SCR_TXT_KIND_UTF16LE, SCR_TXT_KIND_UTF16BE, SCR_TXT_KIND_SB, SCR_TXT_KIND_USERDEF };");
+out.push("enum { SCR_TXT_KIND_UTF8, SCR_TXT_KIND_UTF16LE, SCR_TXT_KIND_UTF16BE, SCR_TXT_KIND_SB, SCR_TXT_KIND_USERDEF, SCR_TXT_KIND_MB };");
+// The multi-byte family enum (SCR_TXT_FAM_*) is defined in scr_text_mb.h, shared with scr_text_mb.c.
 out.push("");
-for (const [key, t] of tables) {
+const sbTables = new Map();
+for (const [name, kind, key] of RUNTIME) {
+  if (kind !== "sb") continue;
+  const t = idx[key];
+  if (!Array.isArray(t) || t.length !== 128) throw new Error(`index ${key} is not a 128-entry table`);
+  sbTables.set(key, t);
+}
+for (const [key, t] of sbTables) {
   out.push(`static const uint16_t scr_txt_tab_${cident(key)}[128] = {`);
   for (let i = 0; i < 128; i += 16) {
-    const row = t.slice(i, i + 16).map((v) => (v === null ? "SCR_TXT_UNMAPPED" : "0x" + v.toString(16).toUpperCase().padStart(4, "0")));
+    const row = t.slice(i, i + 16).map((v) => (v === null ? "SCR_TXT_UNMAPPED" : hex(v, 4)));
     out.push("  " + row.join(", ") + ",");
   }
   out.push("};");
 }
 out.push("");
-out.push("typedef struct ScrTxtEnc { const char *name; int kind; const uint16_t *tab; } ScrTxtEnc;");
+out.push("typedef struct ScrTxtEnc { const char *name; int kind; const uint16_t *tab; int fam; } ScrTxtEnc;");
 out.push("static const ScrTxtEnc scr_txt_encs[] = {");
-for (const [name, kind, key] of RUNTIME) {
+for (const [name, kind, key, fam] of RUNTIME) {
   const tab = key ? `scr_txt_tab_${cident(key)}` : "NULL";
-  out.push(`  {"${name}", ${KIND[kind]}, ${tab}},`);
+  out.push(`  {"${name}", ${KIND[kind]}, ${tab}, ${fam ?? "SCR_TXT_FAM_NONE"}},`);
 }
 out.push("};");
 out.push(`#define SCR_TXT_ENC_COUNT ${RUNTIME.length}`);
@@ -119,7 +127,7 @@ for (let e = 1; e < RUNTIME.length; e++) {
   const [name] = RUNTIME[e];
   for (let f = 0; f < 4; f++) {
     const cap = (0xffff0000 | (e << 2) | f) >>> 0;
-    out.push(`static const SCR_STR_LIT(${name.length + 1}) scr_txt_lit_${e}_${f} = {SCR_STR_IMMORTAL, ${name.length}, 0x${cap.toString(16).toUpperCase()}u, "${name}"};`);
+    out.push(`static const SCR_STR_LIT(${name.length + 1}) scr_txt_lit_${e}_${f} = {SCR_STR_IMMORTAL, ${name.length}, ${hex(cap, 8)}u, "${name}"};`);
   }
 }
 out.push("static const void *const scr_txt_lits[SCR_TXT_ENC_COUNT][4] = {");
@@ -130,6 +138,45 @@ for (let e = 1; e < RUNTIME.length; e++) {
 out.push("};");
 out.push("#endif");
 fs.writeFileSync(headerOut, out.join("\n") + "\n");
+
+// The multi-byte index tables (gated unit only): the gb18030 and jis0208 (ISO-2022-JP, a named refusal) families. Big5 and EUC-KR, and
+// Shift_JIS, decode from ICU-measured tables (scripts/gen-text-mb-icu.mjs), so the WHATWG ones are not emitted.
+const mb = [];
+mb.push("/* GENERATED by scripts/gen-text-tables.mjs from the WHATWG Encoding Standard's index data");
+mb.push(" * (https://encoding.spec.whatwg.org/indexes.json). Do not edit by hand. Included ONLY by scr_text_mb.c. */");
+mb.push("#ifndef SCR_TEXT_MB_TABLES_H");
+mb.push("#define SCR_TEXT_MB_TABLES_H");
+mb.push("#include <stdint.h>");
+mb.push("#define SCR_MB_NONE16 0xFFFFu");
+mb.push("#define SCR_MB_NONE32 0xFFFFFFFFu");
+const mbTables = [
+  ["scr_mb_gb18030", "gb18030", "uint16_t", "SCR_MB_NONE16"],
+  ["scr_mb_jis0208", "jis0208", "uint16_t", "SCR_MB_NONE16"],
+  ["scr_mb_katakana", "iso-2022-jp-katakana", "uint16_t", "SCR_MB_NONE16"],
+];
+const mbCounts = {};
+for (const [cname, key, ctype, none] of mbTables) {
+  const t = idx[key];
+  if (!Array.isArray(t)) throw new Error(`index ${key} missing`);
+  mbCounts[cname] = t.length;
+  mb.push(`#define ${cname.toUpperCase()}_LEN ${t.length}`);
+  mb.push(`static const ${ctype} ${cname}[${t.length}] = {`);
+  for (let i = 0; i < t.length; i += 16) {
+    mb.push("  " + t.slice(i, i + 16).map((v) => (v === null ? none : hex(v, ctype === "uint32_t" ? 8 : 4))).join(", ") + ",");
+  }
+  mb.push("};");
+}
+const ranges = idx["gb18030-ranges"];
+if (!Array.isArray(ranges)) throw new Error("gb18030-ranges missing");
+mb.push(`#define SCR_MB_GB_RANGES_LEN ${ranges.length}`);
+mb.push("static const uint32_t scr_mb_gb_range_ptr[SCR_MB_GB_RANGES_LEN] = {");
+mb.push("  " + ranges.map((r) => r[0]).join(", ") + ",");
+mb.push("};");
+mb.push("static const uint32_t scr_mb_gb_range_cp[SCR_MB_GB_RANGES_LEN] = {");
+mb.push("  " + ranges.map((r) => r[1]).join(", ") + ",");
+mb.push("};");
+mb.push("#endif");
+fs.writeFileSync(mbHeaderOut, mb.join("\n") + "\n");
 
 // The compiler side: the label map (only the labels Node's ICU build accepts), and the runtime's set.
 const lines = [];
@@ -146,9 +193,9 @@ lines.push("export const RUNTIME_TEXT_ENCODINGS: ReadonlySet<string> = new Set<s
 for (const [n] of RUNTIME) lines.push(`  ${JSON.stringify(n)},`);
 lines.push("]);");
 lines.push("");
-lines.push("/** Canonical names of the multi-byte families, whose tables are not generated yet (OPEN). */");
+lines.push("/** Canonical names of the multi-byte families: their codec links scr_text_mb.c (the gate). */");
 lines.push("export const MULTIBYTE_TEXT_ENCODINGS: ReadonlySet<string> = new Set<string>([");
 for (const n of MULTIBYTE) lines.push(`  ${JSON.stringify(n)},`);
 lines.push("]);");
 fs.writeFileSync(labelsOut, lines.join("\n") + "\n");
-console.log(`labels ${labelMap.length}, canonical ${canonical.size}, runtime ${RUNTIME.length}, tables ${tables.size}`);
+console.log(`labels ${labelMap.length}, canonical ${canonical.size}, runtime ${RUNTIME.length}, sb tables ${sbTables.size}, mb ${JSON.stringify(mbCounts)}, gb ranges ${ranges.length}`);

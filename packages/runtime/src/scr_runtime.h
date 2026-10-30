@@ -9687,7 +9687,8 @@ ScrStr *scr_text_decode_opt(const ScrStr *codec, const ScrBytes *b);
 ScrStr *scr_text_decoder_named(const ScrStr *name, double flags); /* new TextDecoder(canonical name, flags) (scr_json.c): +1-free immortal codec */
 ScrStr *scr_text_codec_encoding(const ScrStr *codec); /* the codec's canonical encoding name: +1 string */
 ScrStr *scr_text_decoder_new(const ScrStr *name, double flags); /* a STORED decoder: a fresh heap codec (+1) */
-ScrStr *scr_text_decode_state(const ScrStr *codec, const ScrBytes *b, double stream); /* decode with the state (stream keeps it) */
+ScrStr *scr_text_decode_state(const ScrStr *codec, const ScrBytes *b, double stream);
+void scr_text_mb_install(void); /* the multi-byte decoders (scr_text_mb.c, link-gated; emitted main calls it) */ /* decode with the state (stream keeps it) */
 ScrStr *scr_text_decode_state_dyn(const ScrStr *codec, const ScrDyn *v, double stream);
 ScrStr *scr_text_decode_end(const ScrStr *codec, double stream); /* decode() / decode(undefined) */
 ScrStr *scr_text_decode_fresh(const ScrStr *name, double flags, const ScrBytes *b); /* composed stream: a fresh decoder */
