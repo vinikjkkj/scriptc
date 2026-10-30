@@ -34,7 +34,7 @@ import {
   isChildSurfaceMember,
 } from "./surfaces.js";
 import { conditionalSpreadOf, lowerDynObjectLiteral, narrowBridgeDyn, probeLower, voidAllResultIsAValue } from "./lower-exprs.js";
-import { bufEncoding } from "./lower-containers.js";
+import { bufEncoding, decoderCtorSpec } from "./lower-containers.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { unitOnlyUnion } from "../types.js";
 
@@ -9946,6 +9946,30 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     );
   }
 
+  /** The stream flag of a decode's options argument: only a literal true or false (or an absent, null or
+   * undefined option: a flush) lowers. Node reads `options.stream` truthily, so anything else refuses by name. */
+  function decodeStreamOption(L: Lowerer, opt0: ts.Expression | undefined): boolean {
+    let opt = opt0;
+    while (opt !== undefined && (ts.isAsExpression(opt) || ts.isParenthesizedExpression(opt))) opt = opt.expression;
+    if (opt === undefined || opt.kind === ts.SyntaxKind.NullKeyword) return false;
+    if (ts.isIdentifier(opt) && opt.text === "undefined") return false;
+    if (!ts.isObjectLiteralExpression(opt)) {
+      L.noLowering("decode with a non-literal options object", opt, "pass the options inline: decode(bytes, { stream: true })");
+    }
+    let stream = false;
+    for (const p of opt.properties) {
+      if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name) || p.name.text !== "stream") {
+        if (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p) || ts.isMethodDeclaration(p)) continue;
+        L.noLowering("decode with a spread in its options", p, "pass the options inline: decode(bytes, { stream: true })");
+      }
+      const v = p.initializer;
+      if (v.kind === ts.SyntaxKind.TrueKeyword) stream = true;
+      else if (v.kind === ts.SyntaxKind.FalseKeyword) stream = false;
+      else L.noLowering("decode with a non-literal stream option", v, "the stream option must be the literal true or false");
+    }
+    return stream;
+  }
+
   export function lowerTextCodecCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
@@ -9980,51 +10004,75 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     const loc = locOf(call);
     const ctorArgs = ctorNode?.arguments ?? [];
     if (cls === "TextDecoder") {
-      if (call.arguments.length === 0) {
-        // decode() with no input is "" per spec — nothing to evaluate.
-        return { kind: "strLit", value: "", type: STRING, loc };
+      // The stream option (the second argument): only a literal true or false, or an absent,
+      // null or undefined option (a flush), lowers. Node reads `options.stream` truthily.
+      const stream = decodeStreamOption(L, call.arguments[1]);
+      const argNode = call.arguments[0];
+      const undefinedInput = argNode === undefined || (ts.isIdentifier(argNode) && argNode.text === "undefined");
+      const streamFlag: IrExpr = { kind: "numLit", value: stream ? 1 : 0, type: F64, loc };
+      if (ctorNode !== null) {
+        // A COMPOSED decoder: a fresh one per call, so the immortal form serves a flush and a fresh
+        // heap-free call serves a stream (its pending state is dropped, Node's answer for an unshared decoder).
+        const spec = decoderCtorSpec(L, ctorNode);
+        const nameLit: IrExpr = { kind: "strLit", value: spec.enc, type: STRING, loc };
+        const flagsLit: IrExpr = { kind: "numLit", value: spec.flags, type: F64, loc };
+        const immortal: IrExpr =
+          spec.enc !== "utf-8"
+            ? { kind: "libCall", fn: "text.decoderNamed", args: [nameLit, flagsLit], type: STRING, loc }
+            : spec.flags === 0
+              ? { kind: "libCall", fn: "text.decoder", args: [], type: STRING, loc }
+              : { kind: "libCall", fn: "text.decoderOpt", args: [flagsLit], type: STRING, loc };
+        if (undefinedInput) return { kind: "strLit", value: "", type: STRING, loc };
+        const arg = L.lowerExpr(argNode!);
+        if (stream) {
+          if (arg.type.kind === "dyn") {
+            return { kind: "libCall", fn: "text.decodeFreshDyn", args: [nameLit, flagsLit, arg], type: STRING, loc };
+          }
+          if (arg.type.kind === "bytes") {
+            return { kind: "libCall", fn: "text.decodeFresh", args: [nameLit, flagsLit, arg], type: STRING, loc };
+          }
+          L.noLowering(
+            `TextDecoder.decode of '${L.fmt(arg.type)}' values`,
+            argNode!,
+            "a Uint8Array, Buffer, typed array or ArrayBuffer input decodes",
+          );
+        }
+        if (arg.type.kind === "dyn") {
+          return spec.enc === "utf-8" && spec.flags === 0
+            ? { kind: "libCall", fn: "text.decodeDyn", args: [arg], type: STRING, loc }
+            : { kind: "libCall", fn: "text.decodeOptDyn", args: [immortal, arg], type: STRING, loc };
+        }
+        if (arg.type.kind === "bytes" && arg.type.elem !== "u8") {
+          return { kind: "libCall", fn: "text.decodeView", args: [immortal, arg], type: STRING, loc };
+        }
+        if (!(arg.type.kind === "bytes" && arg.type.elem === "u8")) {
+          L.noLowering(
+            `TextDecoder.decode of '${L.fmt(arg.type)}' values`,
+            argNode!,
+            "a Uint8Array, Buffer, typed array or ArrayBuffer input decodes",
+          );
+        }
+        return spec.enc === "utf-8" && spec.flags === 0
+          ? { kind: "libCall", fn: "text.decode", args: [arg], type: STRING, loc }
+          : { kind: "libCall", fn: "text.decodeOpt", args: [immortal, arg], type: STRING, loc };
       }
-      if (call.arguments.length !== 1) {
-        L.noLowering(
-          "decode with a stream option",
-          call,
-          "streaming decode has no lowering — decode whole buffers",
-        );
+      // A STORED decoder: its heap codec carries the pending state across calls, so every call goes through it.
+      const decoder = L.lowerExpr(recv);
+      if (undefinedInput) {
+        return { kind: "libCall", fn: "text.decodeEnd", args: [decoder, streamFlag], type: STRING, loc };
       }
-      // The decoder's flags (fatal, ignoreBOM) are the receiver's VALUE: a
-      // composed `new TextDecoder(...)` lowers to its own immortal constant,
-      // and a stored decoder is read. The plain default decoder keeps the
-      // established lowering; a flagged one carries its flags to the runtime.
-      const decoder = ctorNode !== null ? L.lowerExpr(ctorNode) : L.lowerExpr(recv);
-      const plain = decoder.kind === "libCall" && decoder.fn === "text.decoder";
-      const argNode = call.arguments[0]!;
-      if (ts.isIdentifier(argNode) && argNode.text === "undefined") {
-        // decode(undefined) is "" in Node, whatever the flags.
-        return { kind: "strLit", value: "", type: STRING, loc };
-      }
-      const arg = L.lowerExpr(argNode);
-      // A checked-dynamic input (an untyped value, or a Buffer whose call result the
-      // program made dynamic): Node's decode rules, undefined is "" and anything but a
-      // view or an ArrayBuffer throws (text.decodeDyn, scr_json.c).
+      const arg = L.lowerExpr(argNode!);
       if (arg.type.kind === "dyn") {
-        return plain
-          ? { kind: "libCall", fn: "text.decodeDyn", args: [arg], type: STRING, loc }
-          : { kind: "libCall", fn: "text.decodeOptDyn", args: [decoder, arg], type: STRING, loc };
+        return { kind: "libCall", fn: "text.decodeStateDyn", args: [decoder, arg, streamFlag], type: STRING, loc };
       }
-      // Any other typed array or ArrayBuffer decodes its own byte image (Node: the view's bytes).
-      if (arg.type.kind === "bytes" && arg.type.elem !== "u8") {
-        return { kind: "libCall", fn: "text.decodeView", args: [decoder, arg], type: STRING, loc };
+      if (arg.type.kind === "bytes") {
+        return { kind: "libCall", fn: "text.decodeState", args: [decoder, arg, streamFlag], type: STRING, loc };
       }
-      if (!(arg.type.kind === "bytes" && arg.type.elem === "u8")) {
-        L.noLowering(
-          `TextDecoder.decode of '${L.fmt(arg.type)}' values`,
-          argNode,
-          "a Uint8Array, Buffer, typed array or ArrayBuffer input decodes",
-        );
-      }
-      return plain
-        ? { kind: "libCall", fn: "text.decode", args: [arg], type: STRING, loc }
-        : { kind: "libCall", fn: "text.decodeOpt", args: [decoder, arg], type: STRING, loc };
+      L.noLowering(
+        `TextDecoder.decode of '${L.fmt(arg.type)}' values`,
+        argNode!,
+        "a Uint8Array, Buffer, typed array or ArrayBuffer input decodes",
+      );
     }
     if (ctorArgs.length > 0) {
       L.noLowering("new TextEncoder with arguments", recv);

@@ -893,6 +893,7 @@ bool scr_str_is_absent(const ScrStr *s);
  * an rc==1-only realloc that grows capacity in place. Both keep the RC
  * audit's live count exact. */
 ScrStr *scr_str_alloc_raw(size_t len, size_t cap);
+void *scr_str_codec_block(size_t bytes); /* a heap codec decoder's block (scr_string.c): counted, never pooled */
 ScrStr *scr_str_regrow(ScrStr *s, size_t newcap);
 
 static inline ScrStr *scr_str_retain(ScrStr *s) {
@@ -9686,6 +9687,12 @@ ScrStr *scr_text_decoder_opt(double flags);
 ScrStr *scr_text_decode_opt(const ScrStr *codec, const ScrBytes *b);
 ScrStr *scr_text_decoder_named(const ScrStr *name, double flags); /* new TextDecoder(canonical name, flags) (scr_json.c): +1-free immortal codec */
 ScrStr *scr_text_codec_encoding(const ScrStr *codec); /* the codec's canonical encoding name: +1 string */
+ScrStr *scr_text_decoder_new(const ScrStr *name, double flags); /* a STORED decoder: a fresh heap codec (+1) */
+ScrStr *scr_text_decode_state(const ScrStr *codec, const ScrBytes *b, double stream); /* decode with the state (stream keeps it) */
+ScrStr *scr_text_decode_state_dyn(const ScrStr *codec, const ScrDyn *v, double stream);
+ScrStr *scr_text_decode_end(const ScrStr *codec, double stream); /* decode() / decode(undefined) */
+ScrStr *scr_text_decode_fresh(const ScrStr *name, double flags, const ScrBytes *b); /* composed stream: a fresh decoder */
+ScrStr *scr_text_decode_fresh_dyn(const ScrStr *name, double flags, const ScrDyn *v);
 ScrStr *scr_text_decode_opt_dyn(const ScrStr *codec, const ScrDyn *v);
 bool scr_text_decoder_fatal(const ScrStr *codec);
 bool scr_text_decoder_ignore_bom(const ScrStr *codec);

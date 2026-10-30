@@ -6803,6 +6803,16 @@ export type IrLibFn =
   /** decode of a typed array or ArrayBuffer of ANY element kind on a decoder value (scr_text_decode_view): the
    * view's own bytes (len elements of elem_size bytes). Fatal validation throws the TypeError. */
   | "text.decodeView"
+  /** A STORED decoder: a fresh heap codec for a canonical name and flags (+1). Carries the streaming state. Never throws. */
+  | "text.decoderNew"
+  /** decode(bytes, flag) on a stored decoder (scr_text_decode_state): flag 1 streams (keeps the pending state), 0 flushes. Fatal errors throw. */
+  | "text.decodeState"
+  | "text.decodeStateDyn"
+  /** decode() / decode(undefined) on a stored decoder: the flag decides flush (0) or keep (1). */
+  | "text.decodeEnd"
+  /** decode(bytes, { stream: true }) on a COMPOSED decoder: a fresh decoder whose state is dropped after the call. */
+  | "text.decodeFresh"
+  | "text.decodeFreshDyn"
   /** The fatal and ignoreBOM flags of a decoder value (a boolean read of the immortal). Never throws. */
   | "text.decoderFatal"
   | "text.decoderIgnoreBOM"
@@ -13887,6 +13897,11 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "text.decodeOpt",
   "text.decodeOptDyn",
   "text.decodeView",
+  "text.decodeState",
+  "text.decodeStateDyn",
+  "text.decodeEnd",
+  "text.decodeFresh",
+  "text.decodeFreshDyn",
   "text.destDyn",
   "bytes.equalsChk",
   "bytes.compareChk",

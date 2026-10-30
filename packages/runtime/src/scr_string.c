@@ -1147,6 +1147,16 @@ static ScrStr *scr_str_take_spare(size_t len) {
 /* Builder entry points (scr_json.c): raw block with undefined bytes, and
  * an rc==1-only grow. The spare block is worth trying first — a stringify
  * loop's previous output is usually the right size for the next one. */
+/* A block for a heap codec decoder (scr_json.c): malloc'd, counted like a string (RC audit), never pooled. */
+void *scr_str_codec_block(size_t bytes) {
+  void *p = malloc(bytes);
+  if (p == NULL) scr_trap("scriptc: out of memory\n");
+#ifdef SCR_RC_AUDIT
+  scr_live_strings++;
+#endif
+  return p;
+}
+
 ScrStr *scr_str_alloc_raw(size_t len, size_t cap) {
   scr_str_size_check(cap); /* the spare path skips scr_str_alloc's fence */
   ScrStr *s = scr_str_take_spare(cap);
@@ -1188,6 +1198,7 @@ ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
     scr_trap("scriptc: scr_str_regrow on a shared string\n");
   }
 #endif
+  if (s->cap >= 0xFFFD0000u) scr_trap("scriptc: scr_str_regrow on a codec decoder\n"); /* its cap is a marker */
   /* A CARVED BLOCK CANNOT BE realloc'd — it did not come from the CRT. The
    * test is the same predicate the allocation used, over the same field, so
    * it cannot disagree with where the block came from. This is not a rare
@@ -1240,6 +1251,11 @@ void scr_str_release(ScrStr *s) {
 #ifdef SCR_RC_AUDIT
     scr_live_strings--;
 #endif
+    /* A heap codec decoder (scr_json.c): its own malloc'd block, never pooled, arena'd or spared. */
+    if (s->cap >= 0xFFFD0000u) {
+      free(s);
+      return;
+    }
 #ifndef SCR_RC_AUDIT
     /* The pool first: it covers the small end (mean 76 bytes), the spare
      * block below covers the large end (>= 512), and the two ranges do
@@ -1280,7 +1296,7 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
    * concat chains (`a + b + c`, template literals), where each intermediate
    * result reaches the next concat as a sole-reference temp. Any string
    * with rc > 1 might be aliased and is copied, never mutated. */
-  if (a->rc == 1 && a != b && a->cap >= newlen) {
+  if (a->rc == 1 && a != b && a->cap >= newlen && a->cap < 0xFFFD0000u) { /* a codec's cap is its marker */
     /* THE WEAK TABLE AND THIS ARM ARE THE ONE DANGEROUS PAIR IN THIS FILE.
      * With OWNING entries an interned string has rc >= 2, so this arm can
      * never fire on a table member and the two features cannot interact.
@@ -1322,7 +1338,7 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   }
   size_t newcap = newlen;
   size_t gmin = scr_str_growth_min();
-  if (a->rc == 1 && newlen >= gmin) {
+  if (a->rc == 1 && a->cap < 0xFFFD0000u && newlen >= gmin) {
     size_t grown = (size_t)a->cap + ((size_t)a->cap >> 1) + 16;
     if (grown > newcap) newcap = grown;
   } else if (newlen >= 512 && newlen <= SCR_STR_MAX_LEN / 2 && newlen >= gmin) {
