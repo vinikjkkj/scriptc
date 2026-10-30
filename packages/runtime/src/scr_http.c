@@ -152,6 +152,7 @@ struct ScrHttpReq {
   size_t nheaders;
   ScrStr *status_msg; /* client responses' reason phrase; NULL on server requests */
   ScrNetLs data_ls, end_ls, err_ls, close_ls;
+  ScrNetLs timeout_ls; /* req.setTimeout's cb / req.on('timeout'): Node's socketOnTimeout fires it while the request is incomplete */
   /* pipe destinations (req.pipe(...) — one of each kind, +1; released at
    * finish, so a piped destination never outlives the body) */
   ScrHttpRes *pipe_res;
@@ -256,6 +257,7 @@ void scr_http_req_release(ScrHttpReq *r) {
     scr_net_ls_drop(&r->err_ls);
     scr_net_ls_drop(&r->close_ls);
     scr_net_ls_drop(&r->aborted_ls);
+    scr_net_ls_drop(&r->timeout_ls);
     scr_http_res_release(r->pipe_res);
     scr_http_client_release(r->pipe_client);
     scr_net_sock_release(r->pipe_sock);
@@ -511,14 +513,23 @@ void scr_http_req_pause(ScrHttpReq *r) {
 /* req.setTimeout(ms[, cb]): the underlying socket's idle timer — the cb
  * registers once('timeout') there, Node's delegation. Finished/destroyed
  * messages skip (Node no-ops once the stream is done). */
+/* Node's IncomingMessage.setTimeout: `if (callback) this.on('timeout',
+ * callback)`, then this.socket.setTimeout(msecs) — validated even after the
+ * message ended (the socket is still the connection's, measured). */
 void scr_http_req_set_timeout(ScrHttpReq *r, double ms, ScrClosure *cb /*moves, nullable*/) {
-  if (r->ended || r->destroyed || r->close_emitted || !r->sock) {
-    /* the message is done — Node no-ops there (never arms, never fires) */
+  if (!r->sock) {
     if (cb) scr_closure_release(cb);
     return;
   }
+  if (cb) scr_net_ls_add(&r->timeout_ls, cb, NULL, false);
   scr_net_sock_set_timeout(r->sock, ms);
-  if (cb) scr_net_sock_on_timeout(r->sock, cb, true);
+}
+
+/* The typed answer: the message (+1), or NULL with the throw pending. */
+ScrHttpReq *scr_http_req_set_timeout_ret(ScrHttpReq *r, double ms, ScrClosure *cb /*moves, nullable*/) {
+  scr_http_req_set_timeout(r, ms, cb);
+  if (scr_exc_pending()) return NULL;
+  return scr_http_req_retain(r);
 }
 
 bool scr_http_req_destroyed_flag(ScrHttpReq *r) { return r->destroyed; }
@@ -613,6 +624,8 @@ struct ScrHttpRes {
   bool head_sent;
   bool chunked;
   bool finished;
+  bool detached;     /* Node's resOnFinish ran: no socket for setTimeout */
+  bool detach_queued;
   bool no_date; /* res.sendDate = false: suppress the implicit Date header */
   bool keep_alive; /* the REQUEST's verdict; Connection: close overrides */
   bool destroyed; /* res.destroy()/teardown — res.destroyed (true in 'close') */
@@ -630,6 +643,7 @@ struct ScrHttpRes {
   bool req_cleared;
   ScrNetLs close_ls;
   ScrNetLs finish_ls; /* res.end(cb) — fires deferred once the body went out */
+  ScrNetLs timeout_ls; /* res.setTimeout's cb / res.on('timeout'): Node's socketOnTimeout fires it while the response is the socket's */
   ScrNetLs wcb_ls;    /* res.write(chunk, cb) — fires from the queue */
   bool finish_queued;
   bool wcb_queued;
@@ -655,6 +669,7 @@ void scr_http_res_release(ScrHttpRes *r) {
     scr_net_ls_drop(&r->close_ls);
     scr_net_ls_drop(&r->finish_ls);
     scr_net_ls_drop(&r->wcb_ls);
+    scr_net_ls_drop(&r->timeout_ls);
     free(r->cork_buf);
     if (r->req_ref) scr_http_req_release(r->req_ref);
     if (r->sock) scr_net_sock_release(r->sock);
@@ -823,6 +838,7 @@ static void scr_http_buf_str(ScrHttpBuf *b, const char *s) { scr_http_buf_append
  * Content-Length or Transfer-Encoding (Node's useChunkedEncodingByDefault
  * for 1.1). Header order matches Node's storeHeader: user headers as set,
  * then the injected Date / Connection (+Keep-Alive) / framing header. */
+static double scr_http_res_keepalive_ms(const ScrHttpRes *r);
 static void scr_http_res_send_head(ScrHttpRes *r, long long body_len) {
   if (r->head_sent) return;
   r->head_sent = true;
@@ -869,7 +885,15 @@ static void scr_http_res_send_head(ScrHttpRes *r, long long body_len) {
     /* the user's own Connection header decides (already serialized) */
     user_close = true; /* trust their framing intent; keep-alive logic off */
   } else if (r->keep_alive) {
-    scr_http_buf_str(&b, "Connection: keep-alive\r\nKeep-Alive: timeout=5\r\n");
+    /* Node: Keep-Alive: timeout=<keepAliveTimeout in whole seconds>, and no
+     * line at all when the server's keepAliveTimeout is 0. */
+    double ka = scr_http_res_keepalive_ms(r);
+    scr_http_buf_str(&b, "Connection: keep-alive\r\n");
+    if (ka > 0) {
+      char ka_line[48];
+      snprintf(ka_line, sizeof ka_line, "Keep-Alive: timeout=%lld\r\n", (long long)floor(ka / 1000.0));
+      scr_http_buf_str(&b, ka_line);
+    }
   } else {
     scr_http_buf_str(&b, "Connection: close\r\n");
   }
@@ -966,17 +990,28 @@ void scr_http_res_set_req(ScrHttpRes *r, ScrHttpReq *req /*borrowed*/) {
 }
 
 /* res.setTimeout(ms[, cb]): the socket's idle timer, Node's delegation. */
+/* Node's OutgoingMessage.setTimeout: `if (callback) this.on('timeout',
+ * callback)` (persistent, before the delay is validated), then the socket's
+ * setTimeout. A detached response (its 'finish' ran) has no socket and
+ * answers without validation or effect. */
 void scr_http_res_set_timeout(ScrHttpRes *r, double ms, ScrClosure *cb /*moves, nullable*/) {
-  if (r->finished || r->close_emitted || !r->sock) {
+  if (r->detached || !r->sock) {
     if (cb) scr_closure_release(cb);
     return;
   }
+  if (cb) scr_net_ls_add(&r->timeout_ls, cb, NULL, false);
   scr_net_sock_set_timeout(r->sock, ms);
-  if (cb) scr_net_sock_on_timeout(r->sock, cb, true);
+}
+
+ScrHttpRes *scr_http_res_set_timeout_ret(ScrHttpRes *r, double ms, ScrClosure *cb /*moves, nullable*/) {
+  scr_http_res_set_timeout(r, ms, cb);
+  if (scr_exc_pending()) return NULL;
+  return scr_http_res_retain(r);
 }
 
 static void scr_http_conn_response_finished(struct ScrHttpConn *conn, bool keep_alive);
 static void scr_http_queue_res_finish(ScrHttpRes *res);
+static void scr_http_queue_res_detach(ScrHttpRes *res);
 
 /* Flush corked bytes as one write (corked already zero, or forced by
  * end()). */
@@ -1004,6 +1039,7 @@ static void scr_http_res_end_raw(ScrHttpRes *r, const char *data, size_t len) {
     scr_http_h2_ops->end(r->h2_stream, data, len);
     r->finished = true;
     if (r->finish_ls.n > 0) scr_http_queue_res_finish(r);
+    scr_http_queue_res_detach(r);
     return;
   }
   if (!r->head_sent) {
@@ -1016,6 +1052,7 @@ static void scr_http_res_end_raw(ScrHttpRes *r, const char *data, size_t len) {
   }
   r->finished = true;
   if (r->finish_ls.n > 0) scr_http_queue_res_finish(r);
+  scr_http_queue_res_detach(r);
   if (r->conn) scr_http_conn_response_finished(r->conn, r->keep_alive);
 }
 
@@ -1168,7 +1205,8 @@ enum {
   SCR_HTTP_EMIT_CLIENT_CLOSE = 4, /* ScrHttpClientReq */
   SCR_HTTP_EMIT_RES_FINISH = 5,  /* ScrHttpRes: the end(cb) callbacks */
   SCR_HTTP_EMIT_REQ_DRAIN = SCR_HTTP_EMIT_REQ_DRAIN_K, /* ScrHttpReq: resume()'s drain */
-  SCR_HTTP_EMIT_RES_WCB = 7      /* ScrHttpRes: write(chunk, cb) callbacks */
+  SCR_HTTP_EMIT_RES_WCB = 7,     /* ScrHttpRes: write(chunk, cb) callbacks */
+  SCR_HTTP_EMIT_RES_DETACH = 8   /* ScrHttpRes: the socket leaves the response (Node's resOnFinish) */
 };
 
 typedef struct {
@@ -1220,7 +1258,8 @@ static void scr_http_emit_release(ScrHttpEmit *e) {
   switch (e->kind) {
   case SCR_HTTP_EMIT_RES_CLOSE:
   case SCR_HTTP_EMIT_RES_WCB:
-  case SCR_HTTP_EMIT_RES_FINISH: scr_http_res_release((ScrHttpRes *)e->h); break;
+  case SCR_HTTP_EMIT_RES_FINISH:
+  case SCR_HTTP_EMIT_RES_DETACH: scr_http_res_release((ScrHttpRes *)e->h); break;
   case SCR_HTTP_EMIT_REQ_CLOSE:
   case SCR_HTTP_EMIT_REQ_DRAIN:
   case SCR_HTTP_EMIT_REQ_ABORTED: scr_http_req_release((ScrHttpReq *)e->h); break;
@@ -1254,6 +1293,14 @@ static void scr_http_queue_res_finish(ScrHttpRes *res) {
   if (res->finish_queued) return;
   res->finish_queued = true;
   scr_http_emit_push(SCR_HTTP_EMIT_RES_FINISH, scr_http_res_retain(res));
+}
+
+/* The detach is a macrotask after the response finished (Node's 'finish'
+ * arrives after the flush): queued once, released by the emit drain. */
+static void scr_http_queue_res_detach(ScrHttpRes *res) {
+  if (res->detach_queued) return;
+  res->detach_queued = true;
+  scr_http_emit_push(SCR_HTTP_EMIT_RES_DETACH, scr_http_res_retain(res));
 }
 
 /* res.end(cb)'s callback slot: registered just before the end call; a
@@ -1364,6 +1411,13 @@ static void scr_http_proto_sweep(void) {
       scr_net_fire0_this(&res->finish_ls, res, SCR_DYNH_HTTP_RES);
       break;
     }
+    case SCR_HTTP_EMIT_RES_DETACH: {
+      /* Node's resOnFinish: the response no longer owns its socket, so a
+       * later res.setTimeout neither validates nor arms (measured). */
+      ScrHttpRes *res = (ScrHttpRes *)e.h;
+      res->detached = true;
+      break;
+    }
     }
     scr_http_emit_release(&e);
     if (scr_exc_pending()) return;
@@ -1432,6 +1486,7 @@ typedef struct ScrHttpConn {
                              * runs below the client struct's definition) */
   struct ScrHttpClientReq *client; /* +1 in client mode; released at close */
   size_t idle_epoch; /* the epoch this connection last became idle in */
+  bool ka_armed; /* Node's state.keepAliveTimeoutSet: the idle timer is the keep-alive one */
 } ScrHttpConn;
 
 /* Client-mode forward declarations (implementations live with the client
@@ -1454,6 +1509,9 @@ typedef struct ScrHttpSrvCtx {
   ScrNetLs request_ls;
   ScrNetLs upgrade_ls;
   ScrNetLs connect_ls; /* HTTP CONNECT — the upgrade machinery's twin */
+  ScrNetLs timeout_ls; /* server.setTimeout's cb / server.on('timeout'): socketOnTimeout's last resort */
+  double timeout_ms;   /* server.timeout: applied to each accepted socket (0 = none) */
+  double keep_alive_ms; /* server.keepAliveTimeout (Node default 5000; 0 = none) */
   bool join_dup; /* createServer({ joinDuplicateHeaders: true }) */
 } ScrHttpSrvCtx;
 
@@ -1467,6 +1525,7 @@ static void scr_http_srv_ctx_release(ScrHttpSrvCtx *ctx) {
   scr_net_ls_drop(&ctx->request_ls);
   scr_net_ls_drop(&ctx->upgrade_ls);
   scr_net_ls_drop(&ctx->connect_ls);
+  scr_net_ls_drop(&ctx->timeout_ls);
   free(ctx);
 }
 
@@ -1482,6 +1541,7 @@ static void scr_http_srv_ctx_settle(void *p) {
   scr_net_ls_drop(&ctx->request_ls);
   scr_net_ls_drop(&ctx->upgrade_ls);
   scr_net_ls_drop(&ctx->connect_ls);
+  scr_net_ls_drop(&ctx->timeout_ls);
 }
 
 static void scr_http_conn_drop_request(ScrHttpConn *conn, bool fire_end) {
@@ -1511,7 +1571,27 @@ static void scr_http_conn_response_finished(ScrHttpConn *conn, bool keep_alive) 
   conn->idle_epoch = scr_net_epoch_now();
   if (!keep_alive || conn->close_after) {
     scr_net_sock_end(conn->sock);
+  } else if (conn->srv != NULL && conn->sock != NULL && conn->srv->keep_alive_ms > 0) {
+    /* Node's responseKeepAlive: the idle clock is keepAliveTimeout plus the
+     * 1000 ms buffer; the timeout destroys an idle socket nobody handles. */
+    scr_net_sock_set_timeout(conn->sock, conn->srv->keep_alive_ms + 1000.0);
+    conn->ka_armed = true;
   }
+}
+
+/* The response's server keepAliveTimeout (5000 when the response has no
+ * server context, e.g. a bare compat response). */
+static double scr_http_res_keepalive_ms(const ScrHttpRes *r) {
+  return (r->conn != NULL && r->conn->srv != NULL) ? r->conn->srv->keep_alive_ms : 5000.0;
+}
+
+/* The next request's head starts: Node's resetSocketTimeout puts the
+ * socket back on server.timeout (|| 0) when the keep-alive clock ran. */
+static void scr_http_conn_next_request(ScrHttpConn *conn) {
+  if (!conn->ka_armed || conn->sock == NULL) return;
+  conn->ka_armed = false;
+  double t = conn->srv != NULL ? conn->srv->timeout_ms : 0;
+  scr_net_sock_set_timeout(conn->sock, (t != 0 && !isnan(t)) ? t : 0);
 }
 
 /* One parsed header line (name lowercased into the req). */
@@ -1783,6 +1863,7 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len) {
   res->conn = conn;
   res->keep_alive = req_keep_alive;
   res->req_ref = scr_http_req_retain(req); /* res.req — req never points back */
+  scr_http_conn_next_request(conn);
   conn->req = req; /* conn's +1 */
   conn->res = res;
   conn->close_after = !req_keep_alive;
@@ -2069,7 +2150,34 @@ static bool scr_http_conn_idle(void *ctx) {
          conn->idle_epoch < scr_net_epoch_now();
 }
 
-/* The server's native connection hook: one parser per accepted socket. */
+/* Node's socketOnTimeout (lib/_http_server.js), the server socket's native
+ * 'timeout': the in-flight request (while incomplete), the current response
+ * and the server each emit; a socket nobody handled is destroyed. */
+static void scr_http_conn_timeout(void *ctx) {
+  ScrHttpConn *conn = (ScrHttpConn *)ctx;
+  if (conn->client_mode || conn->sock == NULL) return;
+  bool handled = false;
+  if (conn->req != NULL && !conn->req->ended && conn->req->timeout_ls.n > 0) {
+    handled = true;
+    scr_net_fire0_this(&conn->req->timeout_ls, conn->req, SCR_DYNH_HTTP_REQ);
+    if (scr_exc_pending()) return;
+  }
+  if (conn->res != NULL && conn->res->timeout_ls.n > 0) {
+    handled = true;
+    scr_net_fire0_this(&conn->res->timeout_ls, conn->res, SCR_DYNH_HTTP_RES);
+    if (scr_exc_pending()) return;
+  }
+  if (conn->srv != NULL && conn->srv->timeout_ls.n > 0) {
+    handled = true;
+    scr_net_fire0(&conn->srv->timeout_ls);
+    if (scr_exc_pending()) return;
+  }
+  if (!handled) scr_net_sock_destroy(conn->sock);
+}
+
+/* The server's native connection hook: one parser per accepted socket.
+ * Node's connectionListenerInternal: `if (server.timeout) socket.setTimeout(
+ * server.timeout)` (truthy: NaN and 0 skip, a negative value throws here). */
 static void scr_http_on_connection(void *ctx, ScrNetSocket *sock) {
   ScrHttpSrvCtx *srv = (ScrHttpSrvCtx *)ctx;
   ScrHttpConn *conn = calloc(1, sizeof *conn);
@@ -2080,7 +2188,75 @@ static void scr_http_on_connection(void *ctx, ScrNetSocket *sock) {
   scr_net_sock_set_native_reader(sock, &scr_http_conn_data, &scr_http_conn_eof,
                                   &scr_http_conn_closed, conn, &scr_http_conn_free);
   scr_net_sock_set_native_idle(sock, &scr_http_conn_idle);
-  scr_net_sock_set_native_events(sock, NULL, &scr_http_conn_err);
+  scr_net_sock_set_native_events(sock, &scr_http_conn_timeout, &scr_http_conn_err);
+  double t = srv->timeout_ms;
+  if (t != 0 && !isnan(t)) scr_net_sock_set_timeout(sock, t);
+}
+
+/* server.setTimeout(ms[, cb]) / server.timeout = ms (Node: `this.timeout =
+ * msecs` with NO validation at call time: the value validates per accepted
+ * socket). The callback is a persistent 'timeout' listener. */
+void scr_http_server_set_timeout(ScrNetServer *s, double ms, ScrClosure *cb /*moves, nullable*/) {
+  ScrHttpSrvCtx *ctx = (ScrHttpSrvCtx *)scr_net_server_get_http_ctx(s);
+  if (cb) {
+    if (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) scr_net_ls_add(&ctx->timeout_ls, cb, NULL, false);
+    else scr_closure_release(cb);
+  }
+  if (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) ctx->timeout_ms = ms;
+}
+
+/* Node's validateInteger(value, 'keepAliveTimeout', 0, 2^53-1) — the
+ * createServer option. False with the throw pending. */
+static bool scr_http_validate_keepalive(double v) {
+  char recv[48], msg[192];
+  int len;
+  if (!isfinite(v) || trunc(v) != v) {
+    scr_num_received(v, recv);
+    len = snprintf(msg, sizeof msg, "The value of \"keepAliveTimeout\" is out of range. It must be an integer. Received %s", recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  if (v < 0 || v > 9007199254740991.0) {
+    scr_num_received(v, recv);
+    len = snprintf(msg, sizeof msg, "The value of \"keepAliveTimeout\" is out of range. It must be >= 0 && <= 9007199254740991. Received %s", recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  return true;
+}
+
+/* createServer({ keepAliveTimeout }): validated at construction (Node's
+ * constructor), then stored. */
+ScrNetServer *scr_http_server_keepalive_new_ret(ScrNetServer *s, double ms) {
+  if (!scr_http_validate_keepalive(ms)) return NULL;
+  ScrHttpSrvCtx *ctx = (ScrHttpSrvCtx *)scr_net_server_get_http_ctx(s);
+  if (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) ctx->keep_alive_ms = ms;
+  return scr_net_server_retain(s);
+}
+
+/* server.keepAliveTimeout = ms: a plain property (no validation). */
+ScrNetServer *scr_net_server_keepalive_set_ret(ScrNetServer *s, double ms) {
+  ScrHttpSrvCtx *ctx = (ScrHttpSrvCtx *)scr_net_server_get_http_ctx(s);
+  if (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) ctx->keep_alive_ms = ms;
+  return scr_net_server_retain(s);
+}
+
+double scr_net_server_keepalive_get(ScrNetServer *s) {
+  ScrHttpSrvCtx *ctx = (ScrHttpSrvCtx *)scr_net_server_get_http_ctx(s);
+  return (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) ? ctx->keep_alive_ms : 5000;
+}
+
+/* The typed answers: the server (+1) and server.timeout's stored value. */
+ScrNetServer *scr_net_server_set_timeout_ret(ScrNetServer *s, double ms, ScrClosure *cb /*moves, nullable*/) {
+  scr_http_server_set_timeout(s, ms, cb);
+  return scr_net_server_retain(s);
+}
+
+double scr_net_server_timeout_get(ScrNetServer *s) { return scr_http_server_get_timeout(s); }
+
+double scr_http_server_get_timeout(ScrNetServer *s) {
+  ScrHttpSrvCtx *ctx = (ScrHttpSrvCtx *)scr_net_server_get_http_ctx(s);
+  return (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) ? ctx->timeout_ms : 0;
 }
 
 /* The unguarded h2-only stream call (`req.stream.on(...)`): stream IS
@@ -2106,6 +2282,7 @@ ScrNetServer *scr_http_create_server(ScrClosure *handler /*moves, nullable*/, Sc
   if (!ctx) scr_http_oom();
   ctx->proto = SCR_NET_PROTO_HTTP1;
   ctx->rc = 1;
+  ctx->keep_alive_ms = 5000; /* Node's keepAliveTimeout default */
   if (handler != NULL) scr_net_ls_add(&ctx->request_ls, handler, (void *)fn, false);
   scr_net_server_set_native_conn(s, &scr_http_on_connection, ctx, &scr_http_srv_ctx_free);
   scr_net_server_set_http_ctx(s, ctx);
@@ -2627,8 +2804,31 @@ void scr_http_client_end_bytes(ScrHttpClientReq *c, ScrBytes *data /*borrowed*/)
 
 /* req.setTimeout(ms) after construction (the island bridge's late arm —
  * the constructor's timeout_ms is the static lane's route). */
+/* Node's ClientRequest.setTimeout: `if (this._ended) return this` (the
+ * RESPONSE ended — responseOnEnd sets _ended, measured), then the delay
+ * validates, then `once('timeout', cb)` registers, then the socket arms. */
+void scr_http_client_set_timeout_cb(ScrHttpClientReq *c, double ms, ScrClosure *cb /*moves, nullable*/) {
+  if (c->response_done) {
+    if (cb) scr_closure_release(cb);
+    return;
+  }
+  double v = ms;
+  if (!scr_net_timer_duration(&v, "msecs")) {
+    if (cb) scr_closure_release(cb);
+    return;
+  }
+  if (cb) scr_http_client_on_timeout(c, cb, true);
+  if (c->sock) scr_net_sock_set_timeout(c->sock, v); /* v is clamped: no second warning */
+}
+
 void scr_http_client_set_timeout(ScrHttpClientReq *c, double ms) {
-  if (c->sock) scr_net_sock_set_timeout(c->sock, ms);
+  scr_http_client_set_timeout_cb(c, ms, NULL);
+}
+
+ScrHttpClientReq *scr_http_client_set_timeout_ret(ScrHttpClientReq *c, double ms, ScrClosure *cb /*moves, nullable*/) {
+  scr_http_client_set_timeout_cb(c, ms, cb);
+  if (scr_exc_pending()) return NULL;
+  return scr_http_client_retain(c);
 }
 
 /* destroy(): tears the connection down NOW. A destroy after the response
@@ -3240,7 +3440,7 @@ typedef struct ScrHttpAgent {
   double ka_msecs;
   double max_sockets; /* INFINITY = Node's default */
   double max_free;
-  double timeout_ms; /* < 0 = unset */
+  double timeout_ms; /* NaN = unset (Node: a falsy agent timeout arms nothing) */
   double default_port; /* settable (agent.defaultPort = p) */
   bool destroyed;
   ScrHttpAgentEnt *ents; /* append order — Node's FIFO queue */
@@ -3450,6 +3650,21 @@ ScrHttpClientReq *scr_http_request_agent_ex(ScrStr *host /*borrowed*/, double po
   int portn = snprintf(portbuf, sizeof portbuf, "%d", (int)p);
   ScrStr *name = scr_http_agent_name(host->data, host->len, portbuf, (size_t)portn,
                                       NULL, 0, 0, NULL, 0);
+  /* Node validates options.timeout in the ClientRequest constructor, then
+   * createSocket dials through net.connect, whose `if (options.timeout)` checks
+   * the agent's own timeout: both throw before anything is dialed. NaN (the
+   * unset sentinel) and 0 arm nothing, so they are skipped like Node's falsy test. */
+  double agent_ms = ag->timeout_ms;
+  if (!scr_net_timer_duration(&timeout_ms, "timeout")) {
+    scr_str_release(name);
+    if (cb) scr_closure_release(cb); /* not consumed yet: the throw path owns it */
+    return NULL;
+  }
+  if (agent_ms != 0 && !isnan(agent_ms) && !scr_net_timer_duration(&agent_ms, "msecs")) {
+    scr_str_release(name);
+    if (cb) scr_closure_release(cb);
+    return NULL;
+  }
   bool queue = scr_http_agent_active(ag, name) >= ag->max_sockets;
   ScrNetSocket *presock = queue ? scr_net_connect_deferred(p, host) : NULL;
   ScrHttpClientReq *c = scr_http_request_impl(host, p, path, method, timeout_ms, header_pairs,
@@ -3459,7 +3674,7 @@ ScrHttpClientReq *scr_http_request_agent_ex(ScrStr *host /*borrowed*/, double po
     scr_str_release(name);
     return NULL;
   }
-  if (ag->timeout_ms >= 0 && timeout_ms <= 0) scr_net_sock_set_timeout(c->sock, ag->timeout_ms);
+  if (agent_ms > 0 && timeout_ms <= 0) scr_net_sock_set_timeout(c->sock, agent_ms);
   c->agent = scr_http_agent_retain(ag);
   ScrHttpAgentEnt *e = calloc(1, sizeof *e);
   if (!e) scr_http_oom();
@@ -3677,7 +3892,7 @@ static ScrDyn *scr_http_dynh_req_invoke(void *h, ScrDyn *self, const char *metho
       scr_http_req_on_aborted(r, scr_dyn_listener_closure0(cb), once);
     } else if (scr_http_dynh_name_is(name, "timeout") && r->sock != NULL) {
       /* the socket's idle timer — req.setTimeout's event, Node's delegation */
-      scr_net_sock_on_timeout(r->sock, scr_dyn_listener_closure0(cb), once);
+      scr_net_ls_add(&r->timeout_ls, scr_dyn_listener_closure0(cb), NULL, once);
     } else {
       scr_http_dynh_event_unsupported("IncomingMessage", name);
       return NULL;
@@ -3976,7 +4191,7 @@ static ScrDyn *scr_http_dynh_res_invoke(void *h, ScrDyn *self, const char *metho
        * registration is the consistent answer (SEMANTICS.md). */
     } else if (scr_http_dynh_name_is(name, "timeout") && r->sock != NULL) {
       /* the socket's idle timer — res.setTimeout's event, Node's delegation */
-      scr_net_sock_on_timeout(r->sock, scr_dyn_listener_closure0(cb), once);
+      scr_net_ls_add(&r->timeout_ls, scr_dyn_listener_closure0(cb), NULL, once);
     } else {
       scr_http_dynh_event_unsupported("ServerResponse", name);
       return NULL;
@@ -4441,10 +4656,9 @@ static ScrDyn *scr_http_dynh_client_invoke(void *h, ScrDyn *self, const char *me
       scr_dyn_arg_type_fail("msecs", "of type number", ms);
       return NULL;
     }
-    scr_http_client_set_timeout(c, ms->v.num);
-    if (argc > 1 && args[1]->kind == SCR_DYN_FUNC) {
-      scr_http_client_on_timeout(c, scr_dyn_listener_closure0(args[1]), true);
-    }
+    ScrClosure *tcb = (argc > 1 && args[1]->kind == SCR_DYN_FUNC) ? scr_dyn_listener_closure0(args[1]) : NULL;
+    scr_http_client_set_timeout_cb(c, ms->v.num, tcb);
+    if (scr_exc_pending()) return NULL;
     return scr_dyn_retain(self);
   }
   if (strcmp(method, "flushHeaders") == 0) {

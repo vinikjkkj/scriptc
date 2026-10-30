@@ -2375,6 +2375,26 @@ ScrNetSocket *scr_net_connect(double port, ScrStr *host /*borrowed, nullable*/,
   return scr_net_connect_host(port, host, cb);
 }
 
+/* net.createConnection({ port, host, timeout }) (Node's net.connect: `if
+ * (options.timeout) socket.setTimeout(options.timeout)` before the dial).
+ * The truthiness test is Node's: 0 and NaN are skipped silently, anything
+ * else validates through getTimerDuration BEFORE the dial, so a throw
+ * dials nothing; the delay is then armed on the new socket. */
+ScrNetSocket *scr_net_connect_timed(double port, ScrStr *host /*borrowed, nullable*/,
+                                    double ms, ScrClosure *cb /*moves, nullable*/) {
+  double v = 0;
+  if (ms != 0 && !isnan(ms)) {
+    v = ms;
+    if (!scr_net_timer_duration(&v, "msecs")) {
+      if (cb) scr_closure_release(cb);
+      return NULL;
+    }
+  }
+  ScrNetSocket *s = scr_net_connect(port, host, cb);
+  if (s != NULL && v > 0) scr_net_sock_set_timeout(s, v); /* v is clamped: no second warning */
+  return s;
+}
+
 /* One dial of ONE address (a literal, or a name the resolver answered with one
  * address): the body the candidate chain collapses to. */
 static ScrNetSocket *scr_net_connect_one(double port, ScrStr *host /*borrowed, nullable*/,
