@@ -21208,6 +21208,36 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  }
+  },
+ "<repo>/tests/corpus/8856-text-mb-two-byte-sweep.ts": {
+   "order": [
+     "<repo>/tests/corpus/8856-text-mb-two-byte-sweep.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8857-text-mb-families-smoke.ts": {
+   "order": [
+     "<repo>/tests/corpus/8857-text-mb-families-smoke.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8858-text-mb-chunked-stream-fuzz.ts": {
+   "order": [
+     "<repo>/tests/corpus/8858-text-mb-chunked-stream-fuzz.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8859-text-mb-stored-through-any.ts": {
+   "order": [
+     "<repo>/tests/corpus/8859-text-mb-stored-through-any.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8860-text-mb-composed-forms.ts": {
+   "order": [
+     "<repo>/tests/corpus/8860-text-mb-composed-forms.ts"
+   ],
+   "diags": []
+ }
  }
 }
