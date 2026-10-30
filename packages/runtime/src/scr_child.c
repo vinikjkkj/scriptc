@@ -1923,6 +1923,9 @@ void scr_children_poll(void) {
       c->next = NULL;
       scr_child_settle(c);
       if (scr_exc_pending()) return;
+      /* one macrotask boundary per settled child: ticks, then jobs */
+      scr_loop_drain_callback();
+      if (scr_loop_stopping()) return;
     } else {
       link = &c->next;
     }
@@ -3816,6 +3819,9 @@ void scr_children_poll(void) {
       c->next = NULL;
       scr_child_settle(c);
       if (scr_exc_pending()) return;
+      /* one macrotask boundary per settled child: ticks, then jobs */
+      scr_loop_drain_callback();
+      if (scr_loop_stopping()) return;
     } else {
       link = &c->next;
     }
