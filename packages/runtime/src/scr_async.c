@@ -4296,12 +4296,21 @@ bool scr_loop_has_ready(void) { return scr_ready_len > 0; }
  * one callback runs before the next callback of its batch, where Node runs
  * it. An uncaught throw leaves its exception pending for the caller. */
 static bool scr_loop_reject_stop = false;
+/* The module root of the current loop (scr_loop_run_inner's top_level). Once
+ * it has rejected, the loop ends at that rejection: Node reports the root
+ * through the module's uncaught path and never decides the other pending
+ * rejections of that checkpoint (process 'unhandledRejection' listeners do not
+ * see them), so no boundary may report one. */
+static ScrPromise *scr_loop_root = NULL;
+static bool scr_loop_root_rejected(void) {
+  return scr_loop_root != NULL && scr_loop_root->state == SCR_PROM_REJECTED;
+}
 
-bool scr_loop_stopping(void) { return scr_loop_reject_stop || scr_exc_pending(); }
+bool scr_loop_stopping(void) { return scr_loop_reject_stop || scr_loop_root_rejected() || scr_exc_pending(); }
 
 void scr_loop_drain_callback(void) {
   for (;;) {
-    if (scr_loop_reject_stop) return;
+    if (scr_loop_reject_stop || scr_loop_root_rejected()) return;
     while (scr_nt_head != NULL) {
       ScrNtick *t = scr_nt_head;
       scr_nt_head = t->next;
@@ -4323,6 +4332,7 @@ void scr_loop_drain_callback(void) {
       scr_resume_fiber(f);
       if (scr_exc_pending()) return;
     }
+    if (scr_loop_root_rejected()) return; /* the root's rejection is the report */
     if (scr_nt_head != NULL || scr_ready_len > 0) continue;
     if (scr_nunhandled == 0) return;
     bool failed = scr_report_unhandled_rejections();
@@ -4398,6 +4408,7 @@ bool scr_loop_run(ScrPromise *top_level) {
 }
 
 static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
+  scr_loop_root = top_level;
   /* The FIRST checkpoint after the synchronous main body runs promise
    * jobs BEFORE the first tick drain: Node's main-module evaluation is
    * itself awaited (the runMain continuation is a microtask queued after
@@ -4474,8 +4485,8 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
     if (scr_stream_dispatch_fn != NULL) {
       scr_stream_dispatch_fn();
       if (scr_exc_pending()) return false; /* uncaught throw in a listener */
-      if (scr_loop_reject_stop) {
-        rejection_failed = true;
+      if (scr_loop_stopping()) {
+        rejection_failed = scr_loop_reject_stop;
         break;
       }
       if (scr_ready_len > 0) continue;
@@ -4489,8 +4500,8 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
     if (scr_events_dispatch_fn != NULL) {
       scr_events_dispatch_fn();
       if (scr_exc_pending()) return false; /* uncaught throw in a listener */
-      if (scr_loop_reject_stop) {
-        rejection_failed = true;
+      if (scr_loop_stopping()) {
+        rejection_failed = scr_loop_reject_stop;
         break;
       }
       if (scr_ready_len > 0) continue;
@@ -4502,8 +4513,8 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
     if (scr_net_dispatch_fn != NULL) {
       scr_net_dispatch_fn();
       if (scr_exc_pending()) return false; /* uncaught throw in a listener */
-      if (scr_loop_reject_stop) {
-        rejection_failed = true;
+      if (scr_loop_stopping()) {
+        rejection_failed = scr_loop_reject_stop;
         break;
       }
       if (scr_ready_len > 0) continue;
@@ -4514,8 +4525,8 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
     if (scr_dgram_dispatch_fn != NULL) {
       scr_dgram_dispatch_fn();
       if (scr_exc_pending()) return false; /* uncaught throw in a listener */
-      if (scr_loop_reject_stop) {
-        rejection_failed = true;
+      if (scr_loop_stopping()) {
+        rejection_failed = scr_loop_reject_stop;
         break;
       }
       if (scr_ready_len > 0) continue;
@@ -4527,8 +4538,8 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
     if (scr_wrtc_dispatch_fn != NULL) {
       scr_wrtc_dispatch_fn();
       if (scr_exc_pending()) return false; /* uncaught throw in a listener */
-      if (scr_loop_reject_stop) {
-        rejection_failed = true;
+      if (scr_loop_stopping()) {
+        rejection_failed = scr_loop_reject_stop;
         break;
       }
       if (scr_ready_len > 0) continue;
@@ -4539,8 +4550,8 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
     if (scr_watch_dispatch_fn != NULL) {
       scr_watch_dispatch_fn();
       if (scr_exc_pending()) return false; /* uncaught throw in a listener */
-      if (scr_loop_reject_stop) {
-        rejection_failed = true;
+      if (scr_loop_stopping()) {
+        rejection_failed = scr_loop_reject_stop;
         break;
       }
       if (scr_ready_len > 0) continue;
@@ -4571,8 +4582,8 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
       if (held) {
         scr_children_poll();
         if (scr_exc_pending()) return false; /* uncaught throw in a listener */
-      if (scr_loop_reject_stop) {
-        rejection_failed = true;
+      if (scr_loop_stopping()) {
+        rejection_failed = scr_loop_reject_stop;
         break;
       }
         if (scr_ready_len > 0) continue;
@@ -4900,7 +4911,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
        * pending one leaves the phase here and the checkpoint head reports. */
       scr_loop_drain_callback();
       if (scr_exc_pending()) return false;
-      if (scr_loop_reject_stop) break;
+      if (scr_loop_stopping()) break;
       if (top_level != NULL && top_level->state == SCR_PROM_REJECTED) break;
     }
     /* The check phase: immediates queued BEFORE this phase started run
@@ -4910,7 +4921,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
      * between callbacks, like Node's inter-macrotask checkpoints; a woken
      * fiber restarts the turn first (the timer loop's break above), so the
      * phase only runs on a drained queue. */
-    if (scr_ready_len == 0 && scr_pending_immediates > 0 && !scr_loop_reject_stop) {
+    if (scr_ready_len == 0 && scr_pending_immediates > 0 && !scr_loop_stopping()) {
       size_t end = scr_nimmediates;
       while (scr_immediates_head < end) {
         size_t i = scr_immediates_head++;
@@ -4929,7 +4940,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
          * CheckImmediate runs each MakeCallback's scope close). */
         scr_loop_drain_callback();
         if (scr_exc_pending()) return false;
-        if (scr_loop_reject_stop) break;
+        if (scr_loop_stopping()) break;
         if (top_level != NULL && top_level->state == SCR_PROM_REJECTED) break;
       }
       /* Fully drained: reset the cursor so the array reuses its slots. */
