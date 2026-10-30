@@ -20981,6 +20981,30 @@
      "<repo>/tests/corpus/8814-text-decoder-codec-inspect-through-any.ts"
    ],
    "diags": []
+ },
+ "<repo>/tests/corpus/8820-text-decoder-stream-scenarios.ts": {
+   "order": [
+     "<repo>/tests/corpus/8820-text-decoder-stream-scenarios.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8821-text-decoder-stream-chunked-fuzz.ts": {
+   "order": [
+     "<repo>/tests/corpus/8821-text-decoder-stream-chunked-fuzz.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8822-text-decoder-stream-through-any.ts": {
+   "order": [
+     "<repo>/tests/corpus/8822-text-decoder-stream-through-any.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8823-text-decoder-composed-stream.ts": {
+   "order": [
+     "<repo>/tests/corpus/8823-text-decoder-composed-stream.ts"
+   ],
+   "diags": []
  }
  }
 }
