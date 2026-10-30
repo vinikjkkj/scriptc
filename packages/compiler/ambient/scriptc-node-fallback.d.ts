@@ -783,7 +783,7 @@ declare module "node:timers/promises" {
   export function setImmediate(): Promise<void>;
   export function setInterval(delay?: number, value?: unknown, options?: unknown): unknown;
   export const scheduler: {
-    wait(delay?: number): Promise<void>;
+    wait(delay?: number, options?: { signal?: AbortSignal }): Promise<void>;
     yield(): Promise<void>;
   };
 }

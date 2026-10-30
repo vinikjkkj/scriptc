@@ -13129,40 +13129,14 @@ export function timerDelayArg(L: Lowerer, arg: ts.Expression, loc: SrcLoc): IrEx
   return L.lowerExprExpecting(arg, F64);
 }
 
-/** node:timers/promises setTimeout(delay, value, options) — the value and
- * options form. The promise carries the value's own IR type, so an `await`
- * types as TypeScript's Promise<T> does. Arguments evaluate in Node's order:
- * delay, value, then the options object's members. The options object must
- * be a literal whose members are `signal` (an AbortSignal) and `ref` (a
- * boolean), with `signal` written before `ref` when both appear, so the
- * lowered argument order is the source order. Node defaults ref to true.
- * The runtime entry (scr_tp_set_timeout_v, scr_abort.c) settles the promise
- * with the value, rejects with an AbortError whose cause is the signal's
- * reason, and removes the timer on abort. */
-function lowerTimersPromisesSetTimeoutValue(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr {
-  if (expr.arguments.length > 3 || expr.arguments.some((a) => ts.isSpreadElement(a))) {
-    L.noLowering(
-      "timers/promises setTimeout with more than three arguments or a spread",
-      expr,
-      "setTimeout(delay?, value?, options?) is the shape",
-    );
-  }
-  const [delayArg, valueArg, optionsArg] = expr.arguments;
-  const ms: IrExpr = delayArg
-    ? timerDelayArg(L, delayArg, loc)
-    : { kind: "numLit", value: 1, type: F64, loc };
-  const value = L.lowerExpr(valueArg!);
-  // A literal `undefined` value resolves to void: the void forms carry no
-  // value argument (a unit literal cannot ride as an IR argument). Any other
-  // unit-typed value is refused rather than dropped.
-  const voidValue = isUnitType(value.type);
-  if (voidValue && value.kind !== "unitLit") {
-    L.noLowering(
-      "timers/promises setTimeout with a non-literal undefined-typed value",
-      valueArg!,
-      "pass the value as a literal or omit it",
-    );
-  }
+/** The options object of timers/promises setTimeout / setInterval / scheduler.wait:
+ * a literal whose members are `signal` (an AbortSignal) and `ref` (a boolean),
+ * `signal` before `ref`. Node defaults ref to true. */
+export function lowerTpOptions(
+  L: Lowerer,
+  optionsArg: ts.Expression | undefined,
+  loc: SrcLoc,
+): { signal: IrExpr | null; refed: IrExpr } {
   let signal: IrExpr | null = null;
   let refed: IrExpr = { kind: "boolLit", value: true, type: BOOL, loc };
   if (optionsArg) {
@@ -13213,6 +13187,99 @@ function lowerTimersPromisesSetTimeoutValue(L: Lowerer, expr: ts.CallExpression,
       }
     }
   }
+  return { signal, refed };
+}
+
+/** scheduler.wait(delay, options?) and scheduler.yield() from node:timers/promises
+ * (Node 24: `scheduler` is not a global, only a member of the module). wait is
+ * the setTimeout promise with the same options; yield is the setImmediate
+ * promise. Null for every other call, so the caller's chain keeps trying. The
+ * receiver is `scheduler` (a named import) or `<timers/promises ns>.scheduler`. */
+export function lowerTimersSchedulerCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
+  if (!ts.isIdentifier(access.name)) return null;
+  const member = access.name.text;
+  if (member !== "wait" && member !== "yield") return null;
+  const recv = access.expression;
+  let isScheduler = false;
+  if (ts.isIdentifier(recv)) {
+    const bi = L.builtinImportOf(recv);
+    isScheduler = bi?.module === "timers/promises" && bi.member === "scheduler";
+  } else if (ts.isPropertyAccessExpression(recv) && ts.isIdentifier(recv.name) && recv.name.text === "scheduler") {
+    isScheduler = L.builtinNamespaceModuleOf(recv.expression) === "timers/promises";
+  }
+  if (!isScheduler) return null;
+  const loc = locOf(call);
+  if (call.arguments.some((a) => ts.isSpreadElement(a))) {
+    L.noLowering("scheduler call with a spread argument", call, "scheduler.wait(delay?, options?) and scheduler.yield() are the shapes");
+  }
+  if (member === "yield") {
+    if (call.arguments.length > 0) {
+      L.noLowering("scheduler.yield with arguments", call.arguments[0]!, "scheduler.yield() takes no arguments");
+    }
+    return { kind: "libCall", fn: "tp.setImmediate", args: [], type: { kind: "promise", inner: VOID }, loc };
+  }
+  if (call.arguments.length > 2) {
+    L.noLowering("scheduler.wait with more than two arguments", call.arguments[2]!, "scheduler.wait(delay?, options?) is the shape");
+  }
+  const [delayArg, optionsArg] = call.arguments;
+  if (!optionsArg) {
+    const ms: IrExpr = delayArg ? timerDelayArg(L, delayArg, loc) : { kind: "numLit", value: 1, type: F64, loc };
+    return { kind: "libCall", fn: "tp.setTimeout", args: [ms], type: { kind: "promise", inner: VOID }, loc };
+  }
+  return lowerTpSetTimeoutParts(L, call, delayArg, undefined, optionsArg, loc);
+}
+
+/** node:timers/promises setTimeout(delay, value, options) — the value and
+ * options form. The promise carries the value's own IR type, so an `await`
+ * types as TypeScript's Promise<T> does. Arguments evaluate in Node's order:
+ * delay, value, then the options object's members. The options object must
+ * be a literal whose members are `signal` (an AbortSignal) and `ref` (a
+ * boolean), with `signal` written before `ref` when both appear, so the
+ * lowered argument order is the source order. Node defaults ref to true.
+ * The runtime entry (scr_tp_set_timeout_v, scr_abort.c) settles the promise
+ * with the value, rejects with an AbortError whose cause is the signal's
+ * reason, and removes the timer on abort. */
+function lowerTimersPromisesSetTimeoutValue(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr {
+  if (expr.arguments.length > 3 || expr.arguments.some((a) => ts.isSpreadElement(a))) {
+    L.noLowering(
+      "timers/promises setTimeout with more than three arguments or a spread",
+      expr,
+      "setTimeout(delay?, value?, options?) is the shape",
+    );
+  }
+  const [delayArg, valueArg, optionsArg] = expr.arguments;
+  return lowerTpSetTimeoutParts(L, expr, delayArg, valueArg, optionsArg, loc);
+}
+
+/** The delay/value/options body shared by timers/promises setTimeout and
+ * scheduler.wait(delay, options) (Node: scheduler.wait is
+ * setTimeout(delay, undefined, options)). An absent value is undefined. */
+function lowerTpSetTimeoutParts(
+  L: Lowerer,
+  errNode: ts.Node,
+  delayArg: ts.Expression | undefined,
+  valueArg: ts.Expression | undefined,
+  optionsArg: ts.Expression | undefined,
+  loc: SrcLoc,
+): IrExpr {
+  const ms: IrExpr = delayArg
+    ? timerDelayArg(L, delayArg, loc)
+    : { kind: "numLit", value: 1, type: F64, loc };
+  const value: IrExpr = valueArg
+    ? L.lowerExpr(valueArg)
+    : { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
+  // A literal `undefined` value resolves to void: the void forms carry no
+  // value argument (a unit literal cannot ride as an IR argument). Any other
+  // unit-typed value is refused rather than dropped.
+  const voidValue = isUnitType(value.type);
+  if (voidValue && value.kind !== "unitLit") {
+    L.noLowering(
+      "timers/promises setTimeout with a non-literal undefined-typed value",
+      valueArg ?? errNode,
+      "pass the value as a literal or omit it",
+    );
+  }
+  const { signal, refed } = lowerTpOptions(L, optionsArg, loc);
   if (voidValue) {
     const args: IrExpr[] = signal ? [ms, signal, refed] : [ms, refed];
     return {
