@@ -20928,6 +20928,24 @@
    ],
    "diags": []
  },
+ "<repo>/tests/corpus/16400-timer-delay-warnings-global.ts": {
+   "order": [
+     "<repo>/tests/corpus/16400-timer-delay-warnings-global.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16401-timer-delay-warnings-modules.ts": {
+   "order": [
+     "<repo>/tests/corpus/16401-timer-delay-warnings-modules.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16402-timer-delay-warnings-order.ts": {
+   "order": [
+     "<repo>/tests/corpus/16402-timer-delay-warnings-order.ts"
+   ],
+   "diags": []
+ },
  "<repo>/tests/corpus/8730-text-decoder-fatal-and-bom.ts": {
    "order": [
      "<repo>/tests/corpus/8730-text-decoder-fatal-and-bom.ts"
