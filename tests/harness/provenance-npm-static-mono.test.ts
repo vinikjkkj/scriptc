@@ -205,15 +205,17 @@ describe("provenance + npm-static: the mono gate answers by package identity", (
     expect(r.coverage.stats.statementsFailed).toBe(0);
   });
 
-  /* ARM B -- SCOPE. Provenance alone must not switch the gate on. */
-  test("B: a provenance package nobody opted into keeps the gate OFF", async () => {
+  /* ARM B -- DEFAULT LANE. The flagless build names every attested package
+   * (index.ts: the default posture adds the provenance registry's packages), so
+   * the gate is ON for monoarg exactly as in arm A. Scope is still by NAME:
+   * arm C below proves an unrelated name does not switch it on for this one. */
+  test("B: under the default lane a provenance package is named, and the gate is ON", async () => {
     const { value: r, monoarg } = await gateDecisions(() => arm());
-    expect(decisionsAre(monoarg, "off")).toBe(true);
-    expect(r.coverage.npmStatic).toBeUndefined();
+    expect(decisionsAre(monoarg, "on")).toBe(true);
+    expect(r.coverage.preflightFailed).toBe(false);
+    expect(r.coverage.npmStatic).toEqual([{ package: "monoarg", status: "static" }]);
+    expect(r.coverage.diagnostics).toEqual([]);
     expect(fenceSites(r)).toEqual([]);
-    /* Gate off: the same 8 statements as the gate on, none failing. Dyn lowering
-     * closed the one statement this used to fail (the table read), so the
-     * counts no longer tell the arms apart; the decision above does. */
     expect(byFile(r)["attested-src/monoarg/index.js"]).toBe("8/0/0");
   });
 
@@ -249,6 +251,23 @@ describe("provenance + npm-static: the mono gate answers by package identity", (
       functionsSkipped: 0,
     });
   });
+
+  /* The DEFAULT lane binary: no npmStatic option at all, both backends. Node's
+   * output is the oracle (the proof of arm B's on-state reaching the binary). */
+  for (const backend of ["c", "llvm"] as const) {
+    test(`the default-lane static binary runs, and matches Node (${backend})`, async () => {
+      process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
+      setProvenanceSources(await resolveProvenanceSources(entry));
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, exeName(`monoarg-default-${backend}`));
+      const result = await compile(entry, { outPath, outDir, dynamic: false, backend });
+      if (!result.ok) {
+        throw new Error(result.diagnostics.map((d) => d.code + ": " + d.message).join("\n"));
+      }
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(EXPECTED);
+    });
+  }
 
   /* The binary. With the gate off the same program is REFUSED at build time
    * (arms B and C above: the diagnostics are the refusals), so a coverage hole

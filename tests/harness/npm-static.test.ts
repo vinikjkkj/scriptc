@@ -632,11 +632,14 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // The FLAGLESS classification of the same workspace link: an npm import
   // like any other — island-capable sites (per-package attribution naming
   // 'wslinked'), never "nothing installed resolves it".
-  test("a workspace-linked package classifies as an npm import without flags", () => {
+  test("a workspace-linked package compiles statically without flags (default lane)", () => {
+    // DEFAULT LANE (2026-10-30): the workspace package is an npm import and
+    // compiles statically with no flag. Proof: the CLI build of this case on
+    // C and LLVM matches Node byte for byte (23 bytes).
     const { coverage } = analyze(join(fixturesRoot, "npm/cases/workspace-linked/main.ts"));
     expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.npmStatic).toContainEqual({ package: "wslinked", status: "static" });
     const all = JSON.stringify(coverage.diagnostics);
-    expect(all).toContain("wslinked");
     expect(all).not.toContain("nothing installed resolves");
   }, 120_000);
 
