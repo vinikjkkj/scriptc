@@ -7301,6 +7301,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/17500-dyn-class-pct-s-calls-user-tostring.ts": {
+   "order": [
+    "<repo>/tests/corpus/17500-dyn-class-pct-s-calls-user-tostring.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17501-dyn-class-plus-asks-valueof-first.ts": {
+   "order": [
+    "<repo>/tests/corpus/17501-dyn-class-plus-asks-valueof-first.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17502-dyn-class-tostring-throw-propagates.ts": {
+   "order": [
+    "<repo>/tests/corpus/17502-dyn-class-tostring-throw-propagates.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17503-dyn-class-tostring-object-answer-falls-to-valueof.ts": {
+   "order": [
+    "<repo>/tests/corpus/17503-dyn-class-tostring-object-answer-falls-to-valueof.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1751-options-record-stance.ts": {
    "order": [
     "<repo>/tests/corpus/1751-options-record-stance.ts"
