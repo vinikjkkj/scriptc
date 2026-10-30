@@ -2646,15 +2646,17 @@ class LlEmitter {
     const fnNameRows = [...this.fnNames].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     // The function-text table (ScrFnText, scr_fntext.c): only when the program
     // converts a function value to its source text.
-    const fnTextRows = moduleUsesFnText(this.mod)
-      ? [...this.fnTexts].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      : [];
-    if (fnTextRows.length > 0) {
+    const usesFnText = moduleUsesFnText(this.mod);
+    const fnTextRows = [...this.fnTexts].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    if (usesFnText) {
+      // A program that uses fn.text always has a table; with no named closure
+      // it holds one null row, which the install skips.
+      const rows = fnTextRows.length > 0
+        ? fnTextRows.map(([sym, lit]) => `%ScrFnText { ptr @${sym}, ptr ${lit} }`)
+        : [`%ScrFnText { ptr null, ptr null }`];
       out.push(
         `declare void @scr_fn_texts_install(ptr, i64)`,
-        `@sc_fn_text_tbl = internal constant [${fnTextRows.length} x %ScrFnText] [` +
-          fnTextRows.map(([sym, lit]) => `%ScrFnText { ptr @${sym}, ptr ${lit} }`).join(", ") +
-          `]`,
+        `@sc_fn_text_tbl = internal constant [${rows.length} x %ScrFnText] [` + rows.join(", ") + `]`,
         ``,
       );
     }
@@ -2773,8 +2775,8 @@ class LlEmitter {
       ...(fnNameRows.length > 0
         ? [`  call void @scr_fn_names_install(ptr @sc_fn_name_tbl, i64 ${fnNameRows.length})`]
         : []),
-      ...(fnTextRows.length > 0
-        ? [`  call void @scr_fn_texts_install(ptr @sc_fn_text_tbl, i64 ${fnTextRows.length})`]
+      ...(usesFnText
+        ? [`  call void @scr_fn_texts_install(ptr @sc_fn_text_tbl, i64 ${fnTextRows.length > 0 ? fnTextRows.length : 1})`]
         : []),
       ...stamps,
       // Event-surface programs (signal/exit listeners) fill the loop's

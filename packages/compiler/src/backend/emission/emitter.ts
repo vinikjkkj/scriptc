@@ -1784,14 +1784,17 @@ export class CEmitter {
     // The function-text table (scr_fntext.c, ScrFnText): emitted only when the
     // program converts a function value to its source text. Sorted like the
     // name table, so the TU is a function of the program.
-    const fnTextRows = moduleUsesFnText(this.mod)
-      ? [...this.fnTexts].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      : [];
-    if (fnTextRows.length > 0) {
+    const usesFnText = moduleUsesFnText(this.mod);
+    const fnTextRows = [...this.fnTexts].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    if (usesFnText) {
       out.push(
         `${this.link}const ScrFnText sc_fn_text_tbl[] = {`,
-        ...fnTextRows.map(([sym, text]) =>
-          `  { (const void *)&${sym}, ${cStringLiteral(Buffer.from(text, "utf8"))} },`),
+        // A program that uses fn.text always has a table; with no named
+        // closure it holds one NULL row, which the install skips.
+        ...(fnTextRows.length > 0
+          ? fnTextRows.map(([sym, text]) =>
+            `  { (const void *)&${sym}, ${cStringLiteral(Buffer.from(text, "utf8"))} },`)
+          : [`  { NULL, "" },`]),
         `};`,
         ``,
       );
@@ -1810,7 +1813,7 @@ export class CEmitter {
       ...(fnNameRows.length > 0
         ? [`  scr_fn_names_install(sc_fn_name_tbl, sizeof sc_fn_name_tbl / sizeof sc_fn_name_tbl[0]);`]
         : []),
-      ...(fnTextRows.length > 0
+      ...(usesFnText
         ? [`  scr_fn_texts_install(sc_fn_text_tbl, sizeof sc_fn_text_tbl / sizeof sc_fn_text_tbl[0]);`]
         : []),
       ...(rcSiteRows.length > 0
