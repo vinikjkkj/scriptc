@@ -42,7 +42,7 @@ import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { dynRestPack } from "./lower-calls.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
-import { codecOfType } from "../codec-shadow.js";
+import { refuseCodecValue, typeHoldsCodec, type CodecReach } from "../codec-shadow.js";
 
 /* ── IR construction shorthand ───────────────────────────────────────── */
 
@@ -1290,18 +1290,9 @@ function formatUnionHelper(L: Lowerer, t: IrType & { kind: "union" }, depth: num
 /** A console argument whose TYPE is a codec (TextEncoder/TextDecoder) refuses at the build: Node
  * prints `TextDecoder { encoding, fatal, ignoreBOM }`, and the lowered value is the utf-8 string,
  * which would print "utf-8". The console form has no lowering yet (OPEN, mgtextcodec). */
+/** console arguments: the inspect form of a codec, direct or inside a record or array. */
 export function refuseCodecInspect(L: Lowerer, node: ts.Expression): void {
-  const codecName = codecOfType(
-    { checker: L.checker, isStdlibFile: L.isStdlibFile, isStdlibSymbol: (s) => L.isStdlibSymbol(s) },
-    L.typeOf(node),
-  );
-  if (codecName !== null) {
-    L.noLowering(
-      `console of a ${codecName} value`,
-      node,
-      "a codec prints as TextDecoder { ... } in Node; its console form has no lowering yet",
-    );
-  }
+  refuseCodecValue(L, node, "deep", "console");
 }
 
 export function lowerConsoleInspectArg(
@@ -2083,4 +2074,40 @@ function lowerGetCallSitesCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc)
     };
   };
   return { kind: "dynArrLit", elems: [frame(), frame(), frame()], type: DYN, loc };
+}
+
+/** The coercion sinks of a call: String(x), JSON.stringify(x), Object.prototype.toString.call(x),
+ * and the string-forming methods (toString, toLocaleString, valueOf, join) on a codec or an
+ * array of codecs. Each refuses at the build when the value holds a codec. */
+export function refuseCodecCoercionCall(L: Lowerer, call: ts.CallExpression): void {
+  const callee = call.expression;
+  const arg0 = call.arguments[0];
+  if (ts.isIdentifier(callee)) {
+    if (callee.text === "String" && arg0 !== undefined && L.isStdlibGlobal(callee, "String")) {
+      refuseCodecValue(L, arg0, "array", "String()");
+    }
+    return;
+  }
+  if (!ts.isPropertyAccessExpression(callee)) return;
+  const name = callee.name.text;
+  if (name === "stringify" && arg0 !== undefined && L.isStdlibGlobal(callee.expression, "JSON")) {
+    refuseCodecValue(L, arg0, "deep", "JSON.stringify");
+    return;
+  }
+  if ((name === "call" || name === "apply") && arg0 !== undefined) {
+    const fn = callee.expression;
+    if (
+      ts.isPropertyAccessExpression(fn) &&
+      fn.name.text === "toString" &&
+      ts.isPropertyAccessExpression(fn.expression) &&
+      fn.expression.name.text === "prototype" &&
+      L.isStdlibGlobal(fn.expression.expression, "Object")
+    ) {
+      refuseCodecValue(L, arg0, "direct", "Object.prototype.toString");
+      return;
+    }
+  }
+  if (name === "toString" || name === "toLocaleString" || name === "valueOf" || name === "join") {
+    refuseCodecValue(L, callee.expression, "array", `${name}()`);
+  }
 }

@@ -19,6 +19,7 @@
  * non-stdlib symbol.
  */
 import * as ts from "./ts7/adapter.js";
+import type { Lowerer } from "./lowering/lowerer.js";
 
 /** Each codec interface's own members (WHATWG Encoding, Node 24): kind by name. */
 const CODEC_MEMBERS: Readonly<Record<string, Readonly<Record<string, "prop" | "method">>>> = {
@@ -111,4 +112,52 @@ export function codecGlobalName(
  * declaring symbol, as the lowering checks it), or null. */
 export function codecOfType(ctx: CodecShadowCtx & { readonly isStdlibSymbol: (sym: ts.Symbol | undefined) => boolean }, t: ts.Type): CodecGlobalName | null {
   return codecGlobalName(ctx, t.getAliasSymbol() ?? t.getSymbol());
+}
+
+/** How deep a codec check looks into a value's type.
+ * "direct": the codec itself (or a union that contains it).
+ * "array": also an array or tuple OF codecs, whose string form joins the codecs.
+ * "deep": also any record or array whose properties hold a codec (JSON and inspect reach them). */
+export type CodecReach = "direct" | "array" | "deep";
+
+/** True when a value of type `t` holds a codec at the given reach. Depth-limited, so
+ * a pathological recursive type answers false rather than looping. */
+export function typeHoldsCodec(
+  ctx: CodecShadowCtx & { readonly isStdlibSymbol: (sym: ts.Symbol | undefined) => boolean },
+  t: ts.Type,
+  reach: CodecReach,
+  depth = 0,
+): boolean {
+  if (depth > 4) return false;
+  if (codecOfType(ctx, t) !== null) return true;
+  if (t.isUnionType()) return ts.constituentTypes(t).some((m) => typeHoldsCodec(ctx, m, reach, depth + 1));
+  if (reach === "direct") return false;
+  // The element type of a standard-library Array or ReadonlyArray (a tuple is not followed).
+  const sym = t.getSymbol();
+  if ((sym?.name === "Array" || sym?.name === "ReadonlyArray") && ctx.isStdlibSymbol(sym)) {
+    const elem = ctx.checker.getTypeArguments(t as ts.TypeReference)[0];
+    if (elem !== undefined && typeHoldsCodec(ctx, elem, reach, depth + 1)) return true;
+  }
+  if (reach === "array") return false;
+  return ctx.checker
+    .getPropertiesOfType(t)
+    .some((p) => typeHoldsCodec(ctx, ctx.checker.getTypeOfSymbol(p), reach, depth + 1));
+}
+
+/** Refuse a coercion or inspection sink whose argument holds a codec at `reach`. The lowered
+ * value is the utf-8 string, so the sink would print that string where Node prints the codec's
+ * own form (OPEN, mgtextcodec: the codec has no object representation yet). */
+export function refuseCodecValue(L: Lowerer, node: ts.Node, reach: CodecReach, sink: string): void {
+  const holds = typeHoldsCodec(
+    { checker: L.checker, isStdlibFile: L.isStdlibFile, isStdlibSymbol: (s) => L.isStdlibSymbol(s) },
+    L.typeOf(node as ts.Expression),
+    reach,
+  );
+  if (holds) {
+    L.noLowering(
+      `${sink} of a value holding a TextEncoder/TextDecoder`,
+      node,
+      "a codec's string form (utf-8) differs from Node's ([object TextDecoder] / TextDecoder { ... }); no lowering yet (OPEN, mgtextcodec)",
+    );
+  }
 }

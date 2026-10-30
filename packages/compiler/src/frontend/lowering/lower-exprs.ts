@@ -46,7 +46,7 @@ import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { emitterRooted } from "./lower-emitter.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, type ClassInfo } from "./lower-classes.js";
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
-import { codecOfType } from "../codec-shadow.js";
+import { codecOfType, refuseCodecValue } from "../codec-shadow.js";
 
 /** SCRIPTC_DTSTWIN_WHY probe: how many reads have taken the declaration-
  * module fence instead of the silent erasure stance. Read in the SAME run
@@ -16917,6 +16917,8 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
   }
 
 export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
+    // A template span is a string coercion: a codec there prints its utf-8 string.
+    for (const span of expr.templateSpans) refuseCodecValue(L, span.expression, "array", "template literal");
     const loc = locOf(expr);
     const pieces: IrExpr[] = [];
     if (expr.head.text !== "") {
@@ -17939,6 +17941,16 @@ function boolAsNumber(e: IrExpr): IrExpr {
 export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const loc = locOf(expr);
     const op = expr.operatorToken.kind;
+    // Concatenation and comparison coerce or compare identity: a codec operand answers differently from Node's object.
+    if (
+      op === ts.SyntaxKind.PlusToken || op === ts.SyntaxKind.EqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken ||
+      op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
+      op === ts.SyntaxKind.LessThanToken || op === ts.SyntaxKind.GreaterThanToken ||
+      op === ts.SyntaxKind.LessThanEqualsToken || op === ts.SyntaxKind.GreaterThanEqualsToken
+    ) {
+      refuseCodecValue(L, expr.left, "array", "binary operator");
+      refuseCodecValue(L, expr.right, "array", "binary operator");
+    }
     // `s[i] === 'x'` (and ==, !=, !==) over a string receiver: the element
     // read is lowered whole, before any operand lowers (the loose path
     // below would read the unit through charAt, which answers "" out of range).
