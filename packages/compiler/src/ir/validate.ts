@@ -1642,6 +1642,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "text.codecEncoding": { argTypes: [STRING], result: STRING },
   "text.decodeOpt": { argTypes: [STRING, BYTES_U8], result: STRING },
   "text.decodeOptDyn": { argTypes: [STRING, DYN], result: STRING },
+  "text.decodeView": { argTypes: [STRING, null], result: STRING },
   "text.decoderFatal": { argTypes: [STRING], result: BOOL },
   "text.decoderIgnoreBOM": { argTypes: [STRING], result: BOOL },
   "fs.mkdirRecursiveSync": { argTypes: [STRING], result: VOID },
@@ -4492,6 +4493,11 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `libCall ${e.fn} arg ${i}`);
         });
+        if (e.fn === "text.decodeView") {
+          // Any typed array or ArrayBuffer (the element kind is free; the byte image is its own).
+          const ta = e.args[1]?.type;
+          if (ta?.kind !== "bytes") err(`libCall text.decodeView: expected a bytes value, got ${ta?.kind}`, e.loc);
+        }
         if (e.fn === "crypto.timingSafeEqual") {
           // Two bytes values of any element width (the table says null so
           // the widths are free; the KIND is pinned here).

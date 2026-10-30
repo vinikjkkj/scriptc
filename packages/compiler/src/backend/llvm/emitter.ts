@@ -607,6 +607,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "text.codecEncoding": "scr_text_codec_encoding",
   "text.decodeOpt": "scr_text_decode_opt",
   "text.decodeOptDyn": "scr_text_decode_opt_dyn",
+  "text.decodeView": "scr_text_decode_view",
   "text.decoderFatal": "scr_text_decoder_fatal",
   "text.decoderIgnoreBOM": "scr_text_decoder_ignore_bom",
   "zlib.deflateSync": "scr_zlib_deflate",

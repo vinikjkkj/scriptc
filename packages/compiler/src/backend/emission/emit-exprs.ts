@@ -8502,6 +8502,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_text_decode_opt(${arg(0)}, ${arg(1)})`);
           case "text.decodeOptDyn":
             return finish(`scr_text_decode_opt_dyn(${arg(0)}, ${arg(1)})`);
+          case "text.decodeView":
+            return finish(`scr_text_decode_view(${arg(0)}, ${arg(1)})`);
           case "text.decoderFatal":
             return finish(`scr_text_decoder_fatal(${arg(0)})`);
           case "text.decoderIgnoreBOM":

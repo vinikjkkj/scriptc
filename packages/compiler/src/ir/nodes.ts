@@ -6786,6 +6786,9 @@ export type IrLibFn =
    * the TypeError ERR_ENCODING_INVALID_ENCODED_DATA; a BOM is stripped unless ignoreBOM. May throw. */
   | "text.decodeOpt"
   | "text.decodeOptDyn"
+  /** decode of a typed array or ArrayBuffer of ANY element kind on a decoder value (scr_text_decode_view): the
+   * view's own bytes (len elements of elem_size bytes). Fatal validation throws the TypeError. */
+  | "text.decodeView"
   /** The fatal and ignoreBOM flags of a decoder value (a boolean read of the immortal). Never throws. */
   | "text.decoderFatal"
   | "text.decoderIgnoreBOM"
@@ -13864,6 +13867,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "text.decodeDyn",
   "text.decodeOpt",
   "text.decodeOptDyn",
+  "text.decodeView",
   "text.destDyn",
   "bytes.equalsChk",
   "bytes.compareChk",

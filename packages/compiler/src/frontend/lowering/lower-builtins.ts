@@ -10011,11 +10011,15 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           ? { kind: "libCall", fn: "text.decodeDyn", args: [arg], type: STRING, loc }
           : { kind: "libCall", fn: "text.decodeOptDyn", args: [decoder, arg], type: STRING, loc };
       }
+      // Any other typed array or ArrayBuffer decodes its own byte image (Node: the view's bytes).
+      if (arg.type.kind === "bytes" && arg.type.elem !== "u8") {
+        return { kind: "libCall", fn: "text.decodeView", args: [decoder, arg], type: STRING, loc };
+      }
       if (!(arg.type.kind === "bytes" && arg.type.elem === "u8")) {
         L.noLowering(
           `TextDecoder.decode of '${L.fmt(arg.type)}' values`,
           argNode,
-          "Uint8Array/Buffer input decodes (ArrayBuffer values have no representation)",
+          "a Uint8Array, Buffer, typed array or ArrayBuffer input decodes",
         );
       }
       return plain

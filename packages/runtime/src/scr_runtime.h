@@ -9668,6 +9668,8 @@ ScrStr *scr_bytes_to_str_range(const ScrBytes *b, const ScrStr *enc, double star
 ScrStr *scr_text_decode(const ScrBytes *b);
 /* The decode under a decoder's flags (scr_bytes.c): fatal validates first and throws the TypeError ERR_ENCODING_INVALID_ENCODED_DATA; ignore_bom keeps a leading BOM. +1 string, or NULL with the exception pending. */
 ScrStr *scr_text_decode_with(const ScrBytes *b, bool fatal, bool ignore_bom);
+ScrStr *scr_text_decode_image(const uint8_t *in, size_t n, bool fatal, bool ignore_bom); /* the same over a raw byte image (scr_bytes.c) */
+ScrStr *scr_text_decode_view(const ScrStr *codec, const ScrBytes *b); /* decode of ANY typed array / ArrayBuffer: its byte image (scr_json.c) */
 /* The flagged decoder values and their decode (scr_json.c): flags bit 0 fatal, bit 1 ignoreBOM. */
 ScrStr *scr_text_decoder_opt(double flags);
 ScrStr *scr_text_decode_opt(const ScrStr *codec, const ScrBytes *b);

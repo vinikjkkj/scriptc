@@ -3000,11 +3000,21 @@ bad_input: {
 }
 }
 
-/* decode(bytes) under a decoder value's own encoding and flags (+1 string, or NULL with the TypeError pending). */
-static ScrStr *scr_tc_decode_bytes(const ScrStr *codec, const ScrBytes *b) {
+/* decode of a raw byte image under a decoder value's own encoding and flags (+1 string, or NULL with the
+ * TypeError pending). */
+static ScrStr *scr_tc_decode_raw(const ScrStr *codec, const uint8_t *in, size_t n) {
   const int enc = scr_tc_enc(codec);
-  if (enc == 0) return scr_text_decode_with(b, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
-  return scr_txt_decode(enc, b->data, b->len, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
+  if (enc == 0) return scr_text_decode_image(in, n, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
+  return scr_txt_decode(enc, in, n, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
+}
+static ScrStr *scr_tc_decode_bytes(const ScrStr *codec, const ScrBytes *b) {
+  return scr_tc_decode_raw(codec, b->data, b->len);
+}
+
+/* TextDecoder.decode of a typed array or ArrayBuffer of ANY element kind: Node decodes the view's own bytes
+ * (len elements of elem_size bytes each, the storage's little-endian image). */
+ScrStr *scr_text_decode_view(const ScrStr *codec, const ScrBytes *b) {
+  return scr_tc_decode_raw(codec, b->data, b->len * scr_bytes_elem_size(b->elem));
 }
 
 /* new TextDecoder(label, { fatal, ignoreBOM }) for a CONSTANT canonical encoding name (the lowering resolved

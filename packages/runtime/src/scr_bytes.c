@@ -1097,9 +1097,7 @@ static bool scr_utf8_is_valid(const uint8_t *in, size_t n) {
 /* TextDecoder.decode under the decoder's flags. A fatal decoder validates the whole input first
  * (a BOM is valid UTF-8 and counts), and an invalid input throws Node's TypeError with its code and
  * message; then the BOM is dropped unless ignoreBOM. +1 string, or NULL with the exception pending. */
-ScrStr *scr_text_decode_with(const ScrBytes *b, bool fatal, bool ignore_bom) {
-  const uint8_t *in = b->data;
-  size_t n = b->len;
+ScrStr *scr_text_decode_image(const uint8_t *in, size_t n, bool fatal, bool ignore_bom) {
   if (fatal && !scr_utf8_is_valid(in, n)) {
     static const char msg[] = "The encoded data was not valid for encoding utf-8";
     scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_ENCODING_INVALID_ENCODED_DATA");
@@ -1110,6 +1108,11 @@ ScrStr *scr_text_decode_with(const ScrBytes *b, bool fatal, bool ignore_bom) {
     n -= 3;
   }
   return scr_bytes_decode_utf8(in, n);
+}
+
+/* The whole-buffer decode of a ScrBytes (any element kind: the view's own bytes). */
+ScrStr *scr_text_decode_with(const ScrBytes *b, bool fatal, bool ignore_bom) {
+  return scr_text_decode_image(b->data, b->len, fatal, ignore_bom);
 }
 
 /* ── node:string_decoder, the utf8 StringDecoder ─────────────────────────
