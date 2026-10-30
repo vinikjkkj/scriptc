@@ -1305,7 +1305,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       if (bi.member === "setTimeout") {
         if (expr.arguments.length > 1) return lowerTimersPromisesSetTimeoutValue(L, expr, loc);
         const ms: IrExpr = expr.arguments[0]
-          ? L.lowerExprExpecting(expr.arguments[0], F64)
+          ? timerDelayArg(L, expr.arguments[0], loc)
           : { kind: "numLit", value: 1, type: F64, loc };
         return { kind: "libCall", fn: "tp.setTimeout", args: [ms], type: promiseVoid, loc };
       }
@@ -13110,6 +13110,25 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
     }
   }
 
+/** A timer's delay argument. A literal `undefined` (the identifier, or
+ * `void <numeric literal>`) is Node's 1 ms: Node's Timeout constructor runs
+ * `after *= 1`, the NaN fails the range check and the delay becomes 1 with no
+ * warning, the same as an omitted delay. Every other expression lowers as
+ * before (the delay's own type check decides it). */
+export function timerDelayArg(L: Lowerer, arg: ts.Expression, loc: SrcLoc): IrExpr {
+  let a: ts.Expression = arg;
+  while (ts.isParenthesizedExpression(a)) a = a.expression;
+  // The global `undefined` has no declaration (a user binding of that name
+  // would have one).
+  const undefinedSym = ts.isIdentifier(a) ? L.checker.getSymbolAtLocation(a) : undefined;
+  const literalUndefined =
+    (ts.isIdentifier(a) && a.text === "undefined" &&
+      (undefinedSym === undefined || L.checker.declarationsOf(undefinedSym).length === 0)) ||
+    (ts.isVoidExpression(a) && ts.isNumericLiteral(a.expression));
+  if (literalUndefined) return { kind: "numLit", value: 1, type: F64, loc };
+  return L.lowerExprExpecting(arg, F64);
+}
+
 /** node:timers/promises setTimeout(delay, value, options) — the value and
  * options form. The promise carries the value's own IR type, so an `await`
  * types as TypeScript's Promise<T> does. Arguments evaluate in Node's order:
@@ -13130,7 +13149,7 @@ function lowerTimersPromisesSetTimeoutValue(L: Lowerer, expr: ts.CallExpression,
   }
   const [delayArg, valueArg, optionsArg] = expr.arguments;
   const ms: IrExpr = delayArg
-    ? L.lowerExprExpecting(delayArg, F64)
+    ? timerDelayArg(L, delayArg, loc)
     : { kind: "numLit", value: 1, type: F64, loc };
   const value = L.lowerExpr(valueArg!);
   // A literal `undefined` value resolves to void: the void forms carry no
