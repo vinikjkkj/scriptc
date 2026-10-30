@@ -2826,6 +2826,8 @@ declare module "http2" {
   }
   export interface Http2ServerRequest {
     readonly url: string;
+    /* Node: this.stream.setTimeout(msecs, callback); the lowering refuses it. */
+    setTimeout(msecs: number, callback?: () => void): this;
     readonly method: string;
     readonly statusCode: number | undefined;
     readonly socket: Socket;
@@ -2856,6 +2858,9 @@ declare module "http2" {
   }
   export interface Http2ServerResponse {
     readonly headersSent: boolean;
+    /* Node: this.stream.setTimeout(msecs, callback); answers the response. The
+     * lowering refuses it (the h2 stream timer is not modeled). */
+    setTimeout(msecs: number, callback?: () => void): this;
     /* The same lowered surface as http.ServerResponse — the allowHTTP1
      * lowering serves every connection as HTTP/1.1, where the compat
      * response IS this parser's response handle. */

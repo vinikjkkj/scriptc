@@ -4904,6 +4904,18 @@ function lowerHttpSetTimeoutCall(L: Lowerer, call: ts.CallExpression,
 ): IrExpr {
   const loc = locOf(call);
   const args = call.arguments;
+  // Http2ServerRequest / Http2ServerResponse share the http/1 handle kinds, but
+  // their setTimeout is the h2 STREAM's idle timer (Node: this.stream.setTimeout),
+  // which this runtime does not model. Refuse by the static type, never run the
+  // socket path (which would be a silent no-op for an h2 stream).
+  const recvSym = L.checker.getTypeAtLocation(access.expression).getSymbol()?.name;
+  if (recvSym === "Http2ServerRequest" || recvSym === "Http2ServerResponse") {
+    L.noLowering(
+      `${member}.setTimeout on an ${recvSym}`,
+      call,
+      "the h2 stream's idle timer is not modeled; setTimeout is supported on http/1 requests and responses",
+    );
+  }
   if (args.length !== 1 && args.length !== 2) {
     L.noLowering(
       `${member}.setTimeout with ${args.length} arguments`,
