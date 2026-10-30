@@ -20415,6 +20415,37 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/net-server-expando-refused.js": {
+   "order": [
+    "<repo>/tests/diagnostics/net-server-expando-refused.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/net-server-timeout-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/net-server-timeout-refused.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'timeout' does not exist on type 'Server'.",
+     "loc": {
+      "file": "<repo>/tests/diagnostics/net-server-timeout-refused.ts",
+      "start": 317,
+      "end": 324
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'timeout' does not exist on type 'Server'.",
+     "loc": {
+      "file": "<repo>/tests/diagnostics/net-server-timeout-refused.ts",
+      "start": 357,
+      "end": 364
+     }
+    }
+   ]
+  },
   "<repo>/tests/diagnostics/new-target-field-initializer.ts": {
    "order": [
     "<repo>/tests/diagnostics/new-target-field-initializer.ts"
