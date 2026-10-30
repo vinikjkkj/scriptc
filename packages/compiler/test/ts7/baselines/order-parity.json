@@ -6537,6 +6537,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16400-inspect-runtime-options-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/16400-inspect-runtime-options-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16401-inspect-literal-options-caps-sorted.ts": {
+   "order": [
+    "<repo>/tests/corpus/16401-inspect-literal-options-caps-sorted.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1641-string-search.ts": {
    "order": [
     "<repo>/tests/corpus/1641-string-search.ts"
