@@ -20999,6 +20999,18 @@
      "<repo>/tests/corpus/8814-text-decoder-codec-inspect-through-any.ts"
    ],
    "diags": []
- }
+ },
+  "<repo>/tests/corpus/16400-inspect-runtime-options-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/16400-inspect-runtime-options-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16401-inspect-literal-options-caps-sorted.ts": {
+   "order": [
+    "<repo>/tests/corpus/16401-inspect-literal-options-caps-sorted.ts"
+   ],
+   "diags": []
+  }
  }
 }
