@@ -1638,6 +1638,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "text.encoder": { argTypes: [], result: STRING },
   "text.decoder": { argTypes: [], result: STRING },
   "text.decoderOpt": { argTypes: [F64], result: STRING },
+  "text.decoderNamed": { argTypes: [STRING, F64], result: STRING },
+  "text.codecEncoding": { argTypes: [STRING], result: STRING },
   "text.decodeOpt": { argTypes: [STRING, BYTES_U8], result: STRING },
   "text.decodeOptDyn": { argTypes: [STRING, DYN], result: STRING },
   "text.decoderFatal": { argTypes: [STRING], result: BOOL },

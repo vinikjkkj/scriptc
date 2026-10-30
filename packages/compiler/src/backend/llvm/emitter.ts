@@ -603,6 +603,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "text.encoder": "scr_text_encoder_value",
   "text.decoder": "scr_text_decoder_value",
   "text.decoderOpt": "scr_text_decoder_opt",
+  "text.decoderNamed": "scr_text_decoder_named",
+  "text.codecEncoding": "scr_text_codec_encoding",
   "text.decodeOpt": "scr_text_decode_opt",
   "text.decodeOptDyn": "scr_text_decode_opt_dyn",
   "text.decoderFatal": "scr_text_decoder_fatal",

@@ -9671,6 +9671,8 @@ ScrStr *scr_text_decode_with(const ScrBytes *b, bool fatal, bool ignore_bom);
 /* The flagged decoder values and their decode (scr_json.c): flags bit 0 fatal, bit 1 ignoreBOM. */
 ScrStr *scr_text_decoder_opt(double flags);
 ScrStr *scr_text_decode_opt(const ScrStr *codec, const ScrBytes *b);
+ScrStr *scr_text_decoder_named(const ScrStr *name, double flags); /* new TextDecoder(canonical name, flags) (scr_json.c): +1-free immortal codec */
+ScrStr *scr_text_codec_encoding(const ScrStr *codec); /* the codec's canonical encoding name: +1 string */
 ScrStr *scr_text_decode_opt_dyn(const ScrStr *codec, const ScrDyn *v);
 bool scr_text_decoder_fatal(const ScrStr *codec);
 bool scr_text_decoder_ignore_bom(const ScrStr *codec);

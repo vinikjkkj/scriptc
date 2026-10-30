@@ -8492,6 +8492,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // The flagged decoder (fatal bit 0, ignoreBOM bit 1): an immortal string per flags.
           case "text.decoderOpt":
             return finish(`scr_text_decoder_opt(${arg(0)})`);
+          case "text.decoderNamed":
+            return finish(`scr_text_decoder_named(${arg(0)}, ${arg(1)})`);
+          case "text.codecEncoding":
+            return finish(`scr_text_codec_encoding(${arg(0)})`);
           // decode on a decoder with flags (scr_json.c): fatal validation throws
           // the TypeError ERR_ENCODING_INVALID_ENCODED_DATA, so the pending check runs.
           case "text.decodeOpt":

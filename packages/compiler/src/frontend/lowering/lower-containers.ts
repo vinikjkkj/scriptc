@@ -7,6 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { canConvertToDyn, isRuntimeRootedClassName, strandTrap } from "../../ir/nodes.js";
 import { isProvenBufferRefinement } from "../buffer-refinement.js";
 import { codecGlobalName } from "../codec-shadow.js";
+import { MULTIBYTE_TEXT_ENCODINGS, WHATWG_LABEL_TO_ENCODING } from "../text-codec-labels.js";
 import { BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { checkedArmBridge, lowerUnionContainerDispatch, captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
@@ -7995,11 +7996,9 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   BigUint64Array: "u64",
 };
 
-/** The labels that name the one decoder this lowering has a table for: the
- * WHATWG utf-8 spellings (Node trims ASCII whitespace and folds ASCII case,
- * then looks the label up). Every other label is OPEN (mgtextcodec): the
- * other encodings need index tables the runtime does not carry yet. */
-const UTF8_DECODER_LABELS: ReadonlySet<string> = new Set(["utf-8", "utf8", "unicode-1-1-utf-8"]);
+/** The WHATWG label table (text-codec-labels.ts, generated from the standard's encodings.json): a
+ * label folds the way Node looks it up (ASCII whitespace trimmed, ASCII case folded). A label whose
+ * encoding is a multi-byte family is OPEN: its index tables are not generated yet. */
 
 /** The flags of `new TextDecoder(label?, options?)`: bit 0 fatal, bit 1
  * ignoreBOM. Only a literal utf-8 label and literal boolean options lower;
@@ -8013,7 +8012,11 @@ function codecOf(L: Lowerer, symbol: ts.Symbol | null | undefined): ReturnType<t
   );
 }
 
-function decoderCtorFlags(L: Lowerer, expr: ts.NewExpression): number {
+/** The encoding and flags of `new TextDecoder(label?, options?)`: `enc` is the canonical WHATWG
+ * name (utf-8 when the label is absent), bit 0 of `flags` fatal, bit 1 ignoreBOM. A non-literal label or
+ * options refuse at the build, by name. */
+function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: string; flags: number } {
+  let enc = "utf-8";
   const args = expr.arguments ?? [];
   const isUndefinedArg = (a: ts.Expression): boolean => ts.isIdentifier(a) && a.text === "undefined";
   if (args.length > 2) {
@@ -8030,13 +8033,22 @@ function decoderCtorFlags(L: Lowerer, expr: ts.NewExpression): number {
       );
     }
     const folded = lt.value.replace(/^[ \t\n\f\r]+|[ \t\n\f\r]+$/g, "").replace(/[A-Z]/g, (c) => c.toLowerCase());
-    if (!UTF8_DECODER_LABELS.has(folded)) {
+    const canonical = WHATWG_LABEL_TO_ENCODING.get(folded);
+    if (canonical === undefined) {
       L.noLowering(
         `new TextDecoder('${lt.value}')`,
         label,
-        "only the utf-8 labels lower (utf-8, utf8, unicode-1-1-utf-8); the other WHATWG encodings are not implemented yet",
+        "not a WHATWG encoding label that Node accepts (replacement, iso-2022-cn/kr, hz-gb-2312 are refused by Node)",
       );
     }
+    if (MULTIBYTE_TEXT_ENCODINGS.has(canonical)) {
+      L.noLowering(
+        `new TextDecoder('${lt.value}')`,
+        label,
+        `the ${canonical} family is OPEN: its index tables are not generated yet (the single-byte and UTF-16 encodings lower)`,
+      );
+    }
+    enc = canonical;
   }
   let fatal = false;
   let ignoreBOM = false;
@@ -8071,7 +8083,7 @@ function decoderCtorFlags(L: Lowerer, expr: ts.NewExpression): number {
       else ignoreBOM = bool;
     }
   }
-  return (fatal ? 1 : 0) | (ignoreBOM ? 2 : 0);
+  return { enc, flags: (fatal ? 1 : 0) | (ignoreBOM ? 2 : 0) };
 }
 
 /** `new Uint8Array(...)` / `new Uint32Array(...)` / `new Float32Array(...)`
@@ -8110,7 +8122,20 @@ function decoderCtorFlags(L: Lowerer, expr: ts.NewExpression): number {
     if (codec === "TextDecoder") {
       // The decoder's state (fatal, ignoreBOM) is carried by WHICH immortal
       // string it is: 0 is the default decoder, and each flag adds one.
-      const flags = decoderCtorFlags(L, expr);
+      const spec = decoderCtorSpec(L, expr);
+      const flags = spec.flags;
+      if (spec.enc !== "utf-8") {
+        return {
+          kind: "libCall",
+          fn: "text.decoderNamed",
+          args: [
+            { kind: "strLit", value: spec.enc, type: STRING, loc: locOf(expr) },
+            { kind: "numLit", value: flags, type: F64, loc: locOf(expr) },
+          ],
+          type: STRING,
+          loc: locOf(expr),
+        };
+      }
       if (flags === 0) return { kind: "libCall", fn: "text.decoder", args: [], type: STRING, loc: locOf(expr) };
       return {
         kind: "libCall",

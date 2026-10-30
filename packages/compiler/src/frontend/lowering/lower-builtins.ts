@@ -6748,12 +6748,11 @@ let digestInputValueDispatches = 0;
       if (receiver.type.kind !== "record") L.badType(expr.expression, L.typeOf(expr.expression));
       return { kind: "recordGet", obj: receiver, shapeId: receiver.type.shapeId, field: "encoding", type: STRING, loc: locOf(expr) };
     }
-    // codec.encoding on a TextEncoder/TextDecoder: the constant "utf-8".
-    // NOT the receiver itself, which is one of the runtime's two immortal
-    // codec strings (scr_dyn_new_str boxes those as a handle): a read that
-    // handed the receiver back would make `use(codec.encoding)` cross the
-    // boundary as a TextEncoder. The receiver still evaluates, once, for
-    // its effects.
+    // codec.encoding on a TextEncoder/TextDecoder: the canonical name read off the
+    // receiver's value (its cap says which encoding; the encoder is utf-8). NOT the
+    // receiver itself, which is one of the runtime's immortal codec strings
+    // (scr_dyn_new_str boxes those as a handle): a read that handed the receiver back
+    // would make `use(codec.encoding)` cross the boundary as a TextEncoder.
     if (
       expr.name.text === "encoding" &&
       (isStdlibInstanceOf(L, expr.expression, "TextEncoder") ||
@@ -6761,9 +6760,9 @@ let digestInputValueDispatches = 0;
     ) {
       const loc = locOf(expr);
       return {
-        kind: "seqExpr",
-        stmts: [{ kind: "exprStmt", expr: L.lowerExprExpecting(expr.expression, STRING), loc }],
-        result: { kind: "strLit", value: "utf-8", type: STRING, loc },
+        kind: "libCall",
+        fn: "text.codecEncoding",
+        args: [L.lowerExprExpecting(expr.expression, STRING)],
         type: STRING,
         loc,
       };

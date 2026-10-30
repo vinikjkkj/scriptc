@@ -6776,6 +6776,12 @@ export type IrLibFn =
    * decoder string for the flags (bit 0 fatal, bit 1 ignoreBOM); the flags ride the value so a
    * stored decoder keeps them. No runtime input; +1 (immortal); never throws. */
   | "text.decoderOpt"
+  /** `new TextDecoder(canonical, { fatal, ignoreBOM })` for a CONSTANT WHATWG encoding name the
+   * lowering resolved (args: the name string, the flags as a number): the immortal codec of that
+   * encoding and flags (scr_text_decoder_named). No runtime input; +1 (immortal); never throws. */
+  | "text.decoderNamed"
+  /** The canonical encoding name of a codec value (scr_text_codec_encoding): a fresh +1 string. Never throws. */
+  | "text.codecEncoding"
   /** decode(bytes) on a decoder value with flags (scr_text_decode_opt): fatal validation throws
    * the TypeError ERR_ENCODING_INVALID_ENCODED_DATA; a BOM is stripped unless ignoreBOM. May throw. */
   | "text.decodeOpt"

@@ -1858,7 +1858,7 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
    * the TextCodec section below). Two header loads on a path that already
    * allocates; an immortal literal's cap is its length, so only a codec string
    * has a cap this large. */
-  if (s->rc == SCR_STR_IMMORTAL && s->cap >= 0xFFFFFFF1u) return scr_textcodec_box_fn(s);
+  if (s->rc == SCR_STR_IMMORTAL && s->cap >= 0xFFFF0000u) return scr_textcodec_box_fn(s);
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_STR);
   d->v.str = scr_str_retain(s);
   return d;
@@ -2884,8 +2884,148 @@ static const SCR_STR_LIT(6) scr_tc_dec_fatal_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_
 static const SCR_STR_LIT(6) scr_tc_dec_nobom_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_CAP_DEC_NOBOM, "utf-8"};
 static const SCR_STR_LIT(6) scr_tc_dec_both_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_CAP_DEC_BOTH, "utf-8"};
 
-static bool scr_tc_fatal(const ScrStr *c) { return c->cap == SCR_TC_CAP_DEC_FATAL || c->cap == SCR_TC_CAP_DEC_BOTH; }
-static bool scr_tc_ignore_bom(const ScrStr *c) { return c->cap == SCR_TC_CAP_DEC_NOBOM || c->cap == SCR_TC_CAP_DEC_BOTH; }
+/* The decoders of the OTHER encodings (scr_text_tables.h, generated from the WHATWG index data): cap =
+ * 0xFFFF0000 | (encoding index << 2) | flags. Index 0 is utf-8, which keeps the caps above; an encoder
+ * (0xFFFFFFF1) and every utf-8 cap sit outside this range. */
+#include "scr_text_tables.h"
+#define SCR_TC_CAP_ENC_BASE 0xFFFF0000u
+static bool scr_tc_is_enc_cap(uint32_t cap) { return cap >= 0xFFFF0004u && cap <= 0xFFFF007Fu; }
+static int scr_tc_enc(const ScrStr *c) { return scr_tc_is_enc_cap(c->cap) ? (int)((c->cap >> 2) & 0x3Fu) : 0; }
+
+static bool scr_tc_fatal(const ScrStr *c) {
+  if (scr_tc_is_enc_cap(c->cap)) return (c->cap & 1u) != 0;
+  return c->cap == SCR_TC_CAP_DEC_FATAL || c->cap == SCR_TC_CAP_DEC_BOTH;
+}
+static bool scr_tc_ignore_bom(const ScrStr *c) {
+  if (scr_tc_is_enc_cap(c->cap)) return (c->cap & 2u) != 0;
+  return c->cap == SCR_TC_CAP_DEC_NOBOM || c->cap == SCR_TC_CAP_DEC_BOTH;
+}
+
+/* The WHATWG decode of one non-utf-8 encoding (the standard's own algorithms, measured against Node's
+ * full-ICU TextDecoder): UTF-16 pairs with a BOM stripped unless ignoreBOM, a lone surrogate or a
+ * trailing odd byte is one U+FFFD (the fatal TypeError), and the single-byte tables map 0x80..0xFF
+ * with their unmapped entries as U+FFFD (fatal: the TypeError); x-user-defined maps 0x80+n to U+F780+n.
+ * +1 string, or NULL with the TypeError pending. */
+static void scr_txt_put(uint8_t *o, size_t *k, uint32_t cp) {
+  if (cp < 0x80) {
+    o[(*k)++] = (uint8_t)cp;
+  } else if (cp < 0x800) {
+    o[(*k)++] = (uint8_t)(0xC0 | (cp >> 6));
+    o[(*k)++] = (uint8_t)(0x80 | (cp & 0x3F));
+  } else if (cp < 0x10000) {
+    o[(*k)++] = (uint8_t)(0xE0 | (cp >> 12));
+    o[(*k)++] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F));
+    o[(*k)++] = (uint8_t)(0x80 | (cp & 0x3F));
+  } else {
+    o[(*k)++] = (uint8_t)(0xF0 | (cp >> 18));
+    o[(*k)++] = (uint8_t)(0x80 | ((cp >> 12) & 0x3F));
+    o[(*k)++] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F));
+    o[(*k)++] = (uint8_t)(0x80 | (cp & 0x3F));
+  }
+}
+
+static ScrStr *scr_txt_decode(int enc, const uint8_t *in, size_t n, bool fatal, bool ignore_bom) {
+  const ScrTxtEnc *e = &scr_txt_encs[enc];
+  /* Output bound: 3 bytes per single-byte input, 4 per UTF-16 pair, and one 3-byte U+FFFD for a tail. */
+  uint8_t *o = (uint8_t *)malloc(3 * n + 4);
+  if (o == NULL) scr_trap("scriptc: out of memory\n");
+  size_t k = 0, i = 0;
+  if (e->kind == SCR_TXT_KIND_UTF16LE || e->kind == SCR_TXT_KIND_UTF16BE) {
+    const bool be = e->kind == SCR_TXT_KIND_UTF16BE;
+#define SCR_TXT_U16(p) (be ? (uint32_t)((in[p] << 8) | in[(p) + 1]) : (uint32_t)((in[(p) + 1] << 8) | in[p]))
+    if (!ignore_bom && n >= 2 && (be ? (in[0] == 0xFE && in[1] == 0xFF) : (in[0] == 0xFF && in[1] == 0xFE))) i = 2;
+    while (i + 2 <= n) {
+      uint32_t u = SCR_TXT_U16(i);
+      if (u >= 0xD800 && u <= 0xDBFF) {
+        if (i + 4 <= n) {
+          uint32_t v = SCR_TXT_U16(i + 2);
+          if (v >= 0xDC00 && v <= 0xDFFF) {
+            scr_txt_put(o, &k, 0x10000 + ((u - 0xD800) << 10) + (v - 0xDC00));
+            i += 4;
+            continue;
+          }
+          if (fatal) goto bad_input;
+          scr_txt_put(o, &k, 0xFFFD);
+          i += 2; /* the next unit is decoded on its own */
+          continue;
+        }
+        /* A lead surrogate pending at the end, with at most one odd byte after it: one U+FFFD for both. */
+        if (fatal) goto bad_input;
+        scr_txt_put(o, &k, 0xFFFD);
+        i = n;
+        break;
+      }
+      if (u >= 0xDC00 && u <= 0xDFFF) {
+        if (fatal) goto bad_input;
+        scr_txt_put(o, &k, 0xFFFD);
+        i += 2;
+        continue;
+      }
+      scr_txt_put(o, &k, u);
+      i += 2;
+    }
+#undef SCR_TXT_U16
+    if (i < n) {
+      if (fatal) goto bad_input;
+      scr_txt_put(o, &k, 0xFFFD);
+    }
+  } else {
+    for (i = 0; i < n; i++) {
+      const uint8_t b = in[i];
+      if (b < 0x80) {
+        scr_txt_put(o, &k, b);
+        continue;
+      }
+      if (e->kind == SCR_TXT_KIND_USERDEF) {
+        scr_txt_put(o, &k, 0xF780u + (uint32_t)(b - 0x80));
+        continue;
+      }
+      uint32_t cp = e->tab[b - 0x80];
+      if (cp == SCR_TXT_UNMAPPED) {
+        if (fatal) goto bad_input;
+        cp = 0xFFFD;
+      }
+      scr_txt_put(o, &k, cp);
+    }
+  }
+  ScrStr *s = scr_str_new((const char *)o, k);
+  free(o);
+  return s;
+bad_input: {
+  free(o);
+  char msg[160];
+  const int m = snprintf(msg, sizeof msg, "The encoded data was not valid for encoding %s", e->name);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)m, "ERR_ENCODING_INVALID_ENCODED_DATA");
+  return NULL;
+}
+}
+
+/* decode(bytes) under a decoder value's own encoding and flags (+1 string, or NULL with the TypeError pending). */
+static ScrStr *scr_tc_decode_bytes(const ScrStr *codec, const ScrBytes *b) {
+  const int enc = scr_tc_enc(codec);
+  if (enc == 0) return scr_text_decode_with(b, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
+  return scr_txt_decode(enc, b->data, b->len, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
+}
+
+/* new TextDecoder(label, { fatal, ignoreBOM }) for a CONSTANT canonical encoding name (the lowering resolved
+ * the WHATWG label at build time): the immortal codec of that encoding and flags. */
+ScrStr *scr_text_decoder_named(const ScrStr *name, double flags) {
+  scr_textcodec_box_fn = &scr_textcodec_box_impl;
+  const int f = (int)flags & 3;
+  for (int e = 1; e < SCR_TXT_ENC_COUNT; e++) {
+    const size_t n = strlen(scr_txt_encs[e].name);
+    if (name->len == n && memcmp(name->data, scr_txt_encs[e].name, n) == 0) {
+      return (ScrStr *)(uintptr_t)scr_txt_lits[e][f];
+    }
+  }
+  return scr_text_decoder_opt((double)f); /* utf-8 */
+}
+
+/* encoding of a codec value: a fresh string (+1) of its canonical name; the encoder is utf-8. */
+ScrStr *scr_text_codec_encoding(const ScrStr *codec) {
+  const char *n = scr_txt_encs[scr_tc_enc(codec)].name;
+  return scr_str_new(n, strlen(n));
+}
 
 /* new TextDecoder(label, { fatal, ignoreBOM }) with literal utf-8 options, by its flags (the lowering's). */
 ScrStr *scr_text_decoder_opt(double flags) {
@@ -2900,7 +3040,7 @@ ScrStr *scr_text_decoder_opt(double flags) {
 
 /* decode(bytes) on a decoder value: the flags are the value's own. +1 string, or NULL with the TypeError pending. */
 ScrStr *scr_text_decode_opt(const ScrStr *codec, const ScrBytes *b) {
-  return scr_text_decode_with(b, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
+  return scr_tc_decode_bytes(codec, b);
 }
 
 bool scr_text_decoder_fatal(const ScrStr *codec) { return scr_tc_fatal(codec); }
@@ -3022,7 +3162,7 @@ static ScrDyn *scr_tc_decode(const ScrStr *codec, ScrDyn *const *args, size_t ar
     return NULL;
   }
   if (ib == NULL) return scr_tc_new_plain_str("");
-  ScrStr *s = scr_text_decode_with(ib, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
+  ScrStr *s = scr_tc_decode_bytes(codec, ib);
   if (s == NULL) return NULL; /* a fatal decode of invalid bytes: the TypeError is pending */
   ScrDyn *d = scr_dyn_new_str(s);
   scr_str_release(s);
@@ -3053,7 +3193,7 @@ static ScrDyn *scr_tc_invoke(void *h, ScrDyn *self, const char *method, ScrDyn *
 static ScrDyn *scr_tc_get(void *h, const char *key, size_t key_len) {
   (void)key_len;
   const bool enc = scr_tc_is_encoder(h);
-  if (strcmp(key, "encoding") == 0) return scr_tc_new_plain_str("utf-8");
+  if (strcmp(key, "encoding") == 0) return scr_tc_new_plain_str(scr_txt_encs[scr_tc_enc((const ScrStr *)h)].name);
   if (!enc && strcmp(key, "fatal") == 0) return scr_dyn_new_bool(scr_tc_fatal((const ScrStr *)h));
   if (!enc && strcmp(key, "ignoreBOM") == 0) return scr_dyn_new_bool(scr_tc_ignore_bom((const ScrStr *)h));
   return NULL; /* not a modeled property — the caller answers undefined */
@@ -13372,7 +13512,7 @@ ScrStr *scr_text_decode_dyn(const ScrDyn *v) {
 ScrStr *scr_text_decode_opt_dyn(const ScrStr *codec, const ScrDyn *v) {
   if (v->kind == SCR_DYN_UNDEF) return scr_str_new("", 0);
   if ((v->kind == SCR_DYN_BYTES || v->kind == SCR_DYN_ARRBUF) && v->v.bytes != NULL) {
-    return scr_text_decode_with(v->v.bytes, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
+    return scr_tc_decode_bytes(codec, v->v.bytes);
   }
   const char *m = "The \"list\" argument must be an instance of SharedArrayBuffer, ArrayBuffer or ArrayBufferView.";
   scr_throw_error_msg_code(SCR_ERR_TYPE, m, strlen(m), "ERR_INVALID_ARG_TYPE");
