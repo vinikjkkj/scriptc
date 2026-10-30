@@ -261,15 +261,22 @@ export const RUNTIME_TEXT_ENCODINGS: ReadonlySet<string> = new Set<string>([
   "windows-1258",
   "x-mac-cyrillic",
   "x-user-defined",
-]);
-
-/** Canonical names of the multi-byte families, whose tables are not generated yet (OPEN). */
-export const MULTIBYTE_TEXT_ENCODINGS: ReadonlySet<string> = new Set<string>([
-  "big5",
-  "euc-jp",
-  "euc-kr",
   "gbk",
   "gb18030",
+  "big5",
+  "euc-jp",
   "iso-2022-jp",
   "shift_jis",
+  "euc-kr",
+]);
+
+/** Canonical names of the multi-byte families: their codec links scr_text_mb.c (the gate). */
+export const MULTIBYTE_TEXT_ENCODINGS: ReadonlySet<string> = new Set<string>([
+  "gbk",
+  "gb18030",
+  "big5",
+  "euc-jp",
+  "iso-2022-jp",
+  "shift_jis",
+  "euc-kr",
 ]);

@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
+import { DYN, funcOf, moduleUsesTextMb, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import { setDynOrderPlan } from "../dyn-members.js";
 import { orderRecordPlanCached, isRuntimeRootedClassName, moduleUsesObjectWeakKeys } from "../../ir/nodes.js";
@@ -1818,6 +1818,8 @@ export class CEmitter {
       // fetch (the island-backed ambient's globalGet) — both boot the
       // engine before the global is read.
       ...(moduleUsesFetch(this.mod) ? [`  scr_fetch_install();`] : []),
+      // A constant multi-byte codec label links scr_text_mb.c (its decoders and index tables): the same predicate.
+      ...(moduleUsesTextMb(this.mod) ? [`  scr_text_mb_install();`] : []),
       // Embedded graphs that import node:zlib register the island's zlib
       // bridge before any island entry — the ONLY reference to
       // scr_zlib_island.c (cc.ts compiles it on the same predicate), so

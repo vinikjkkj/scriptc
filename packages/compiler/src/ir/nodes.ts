@@ -10633,6 +10633,34 @@ function isZlibStreamFn(fn: string): boolean {
  * starts with "zlib."; scr_stream.c through moduleUsesStream, which reads
  * the same predicate). The scr_http_body.c shape: a bridge TU gated on
  * its own use so neither half it joins pays for it. */
+/** The multi-byte codec names whose decoders are the gated scr_text_mb.c unit (the generated label table's set). */
+const TEXT_MB_NAMES: ReadonlySet<string> = new Set(["gbk", "gb18030", "big5", "euc-jp", "shift_jis", "euc-kr"]);
+/** Calls that construct or stream a codec by a constant name: a multi-byte name among them links scr_text_mb.c. */
+const TEXT_CODEC_NAMED_FNS: ReadonlySet<string> = new Set(["text.decoderNamed", "text.decoderNew", "text.decodeFresh", "text.decodeFreshDyn"]);
+/** The link gate for the multi-byte WHATWG decoders (scr_text_mb.c, with its index tables): a program that
+ * constructs a decoder of a multi-byte encoding by a constant label. Other programs keep their exact link line. */
+export function moduleUsesTextMb(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown; args?: unknown; value?: unknown };
+    if (node.kind === "libCall" && typeof node.fn === "string" && TEXT_CODEC_NAMED_FNS.has(node.fn)) {
+      const first = Array.isArray(node.args) ? (node.args[0] as { kind?: unknown; value?: unknown } | undefined) : undefined;
+      if (first?.kind === "strLit" && typeof first.value === "string" && TEXT_MB_NAMES.has(first.value)) {
+        found = true;
+        return;
+      }
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 export function moduleUsesZlibStream(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {

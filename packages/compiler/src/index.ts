@@ -25,7 +25,7 @@ import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
 import { moduleUsesDestroyDyn, moduleUsesTimersPromisesValue, moduleUsesHttpDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesWebCrypto, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
-  moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc , moduleBoxesProcStream, procStreamLibWriteFence} from "./ir/nodes.js";
+  moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, moduleUsesTextMb, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc , moduleBoxesProcStream, procStreamLibWriteFence} from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
@@ -806,6 +806,8 @@ function programNativeFeatures(
     // also pulls scr_stream.c, so a gunzipSync program keeps its exact
     // link line.
     zlibStream: moduleUsesZlibStream(mod),
+    // The link switch for scr_text_mb.c: a constant multi-byte codec label (gbk, big5, ...) on the IR.
+    textMb: moduleUsesTextMb(mod),
     streamDyn: moduleUsesDestroyDyn(mod),
     httpDyn: moduleUsesHttpDestroyDyn(mod),
     // The link switch for scr_assert.c: assert.* libCalls on the IR (the
