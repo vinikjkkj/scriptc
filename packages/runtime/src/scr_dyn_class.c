@@ -616,6 +616,21 @@ static ScrDyn *dyn_cls_objinst_to_primitive(const ScrDyn *d, int hint) {
   return NULL;
 }
 
+/* util.format %s over a class instance: Node's hasBuiltInToString asks whether
+ * `value.toString` is a function. A method row is one; so is a data row holding a
+ * callable (the instance's own property). Returns 1 when it is, 0 when not, and 2
+ * when reading the field threw (the exception stays pending). */
+static int dyn_cls_objinst_user_tostring(const ScrDyn *d) {
+  const ScrDynClassMember *cm = scr_dyn_objinst_member(d, "toString", 8);
+  if (cm == NULL) return 0;
+  if (cm->call != NULL) return 1;
+  ScrDyn *fv = cm->get != NULL ? cm->get(d->v.inst.o) : NULL;
+  if (fv == NULL) return scr_exc_pending() ? 2 : 0;
+  int user = dyn_cls_is_callable(fv) ? 1 : 0;
+  scr_dyn_release(fv);
+  return user;
+}
+
 /* ToString(object) for a class instance: ToPrimitive with the STRING hint, then
  * ToString of the primitive. A class with no member table and no Error root has
  * no protocol at all: the built-in fence answers (String()'s wording). */
@@ -633,7 +648,7 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_impl_err_get, dyn_cls_impl_err_set, dyn_cls_impl_err_has, dyn_cls_impl_err_delete,
   dyn_cls_ops_fn_get, dyn_cls_ops_construct, dyn_cls_ops_set, dyn_cls_ops_delete, dyn_cls_ops_walk_error,
   dyn_cls_ops_error_rooted, dyn_cls_ops_error_instanceof,
-  dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string
+  dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string, dyn_cls_objinst_user_tostring,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }

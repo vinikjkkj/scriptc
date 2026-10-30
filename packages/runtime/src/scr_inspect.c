@@ -1926,14 +1926,14 @@ ScrStr *scr_insp_fmt_s(ScrDyn *d, double depth) {
     if (m == NULL) m = scr_dyn_proto_get(d, "toString", 8);
     if (m != NULL && m->kind == SCR_DYN_FUNC) return scr_dyn_to_string(d, NULL);
   }
-  if (d->kind == SCR_DYN_OBJINST) {
-    /* A class instance whose class (or a user base) DECLARES toString: the
-     * same hasBuiltInToString test, answered by the member table. Its
-     * toString is user code, so the conversion is String(arg), not inspect.
-     * A class with only valueOf or no methods inherits Object.prototype's
-     * toString and inspects, exactly as before. */
-    const ScrDynClassMember *cm = scr_dyn_objinst_member(d, "toString", 8);
-    if (cm != NULL && cm->call != NULL) return scr_dyn_to_string(d, NULL);
+  if (d->kind == SCR_DYN_OBJINST && scr_dyn_class_ops != NULL) {
+    /* A class instance whose toString is user code (a method, or a function-valued
+     * field): the same hasBuiltInToString test, answered by the class unit. The
+     * conversion is String(arg), not inspect. A class with no user toString
+     * inspects, exactly as before. */
+    int user = scr_dyn_class_ops->objinst_user_tostring(d);
+    if (user == 2) return scr_str_new("", 0); /* the field read threw: pending */
+    if (user == 1) return scr_dyn_to_string(d, NULL);
   }
   return scr_insp_dyn(d, 0, depth);
 }
