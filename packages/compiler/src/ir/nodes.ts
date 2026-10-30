@@ -47,7 +47,7 @@ export type IrType =
    * f64 or string (SameValueZero); values are f64, string, bool, record,
    * object, union, or array — anything isRefCounted or scalar EXCEPT
    * func/promise/dyn/jsval/map (frontend-fenced, validator-checked). */
-  | { kind: "map"; key: IrType; value: IrType }
+  | { kind: "map"; key: IrType; value: IrType; weak?: true }
   /** ES `WeakMap<K, V>` — heap, refcounted, reference-identity keys held
    * WEAKLY (ScrWeakMap). NOT a Map with a flag: the table does not retain
    * its keys, and an entry is removed inside the key's own free path the
@@ -809,6 +809,14 @@ export function mapOf(key: IrType, value: IrType): IrType {
   return { kind: "map", key, value };
 }
 
+/** A WeakMap whose table rides the strong Map representation (a class or record key,
+ * which the runtime cannot watch die). The entries and every operation are the Map's;
+ * only the identity Node reports differs: inspect prints `WeakMap { <items unknown> }`
+ * and String() prints `[object WeakMap]`. The flag is part of the type key. */
+export function weakRideMapOf(key: IrType, value: IrType): IrType {
+  return { kind: "map", key, value, weak: true };
+}
+
 export function weakMapOf(key: IrType, value: IrType): IrType {
   return { kind: "weakmap", key, value };
 }
@@ -1212,7 +1220,7 @@ export function typeKey(t: IrType): string {
     case "bytes":
       return `bytes<${t.elem}>`;
     case "map":
-      return `map<${typeKey(t.key)},${typeKey(t.value)}>`;
+      return `${t.weak ? "weakride" : ""}map<${typeKey(t.key)},${typeKey(t.value)}>`;
     case "weakmap":
       return `weakmap<${typeKey(t.key)},${typeKey(t.value)}>`;
     case "set":
@@ -1306,7 +1314,11 @@ export function typeEquals(a: IrType, b: IrType): boolean {
   if (a.kind === "array") return b.kind === "array" && typeEquals(a.elem, b.elem);
   if (a.kind === "bytes") return b.kind === "bytes" && a.elem === b.elem;
   if (a.kind === "map") {
-    return b.kind === "map" && typeEquals(a.key, b.key) && typeEquals(a.value, b.value);
+    // A weak-riding WeakMap is not the Map it rides (see weakRideMapOf).
+    return (
+      b.kind === "map" && (a.weak === true) === (b.weak === true) &&
+      typeEquals(a.key, b.key) && typeEquals(a.value, b.value)
+    );
   }
   if (a.kind === "set") return b.kind === "set" && typeEquals(a.elem, b.elem);
   if (a.kind === "func") {

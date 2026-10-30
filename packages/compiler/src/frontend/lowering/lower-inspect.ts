@@ -882,6 +882,11 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
     case "map":
     case "set": {
       const isMap = t.kind === "map";
+      // A WeakMap riding the strong table: Node cannot enumerate it either.
+      if (isMap && t.weak) {
+        body = [ret(str("WeakMap { <items unknown> }", loc))];
+        break;
+      }
       const mi = (method: string, args: IrExpr[], type: IrType): IrExpr =>
         isMap
           ? ({ kind: "mapIntrinsic", method: method as "size", receiver: v(), args, type, loc } as IrExpr)
