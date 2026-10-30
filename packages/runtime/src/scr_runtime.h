@@ -7672,8 +7672,9 @@ void scr_promise_mark_handled(ScrPromise *p);
 /* A rejected promise's reason as a dyn value (identity-preserving for
  * dyn payloads and %Error instances). +1. */
 ScrDyn *scr_promise_reason_dyn(const ScrPromise *p);
-/* process warnings (scr_lib.c — always linked so any unit can emit a
- * deprecation): dyn listeners plus Node's default stderr report
+/* process warnings (scr_async.c — always linked, with the timer core that
+ * raises the delay warnings, so any unit can emit one): dyn listeners plus
+ * Node's default stderr report, printed before every user listener
  * ("(node:pid) [CODE] Name: message" and a detail second line). Emission
  * is SYNCHRONOUS at the call (Node defers a tick — SEMANTICS.md 138's
  * precedent). scr_process_emit_warning takes the ARGUMENT VECTOR as one
@@ -7684,6 +7685,7 @@ void scr_process_off_warning(ScrDyn *fn);
 void scr_process_emit_warning(ScrDyn *args);
 void scr_util_deprecation_warn(ScrDyn *args);
 void scr_emit_warning(const char *name, const char *code, ScrStr *message);
+void scr_warning_dispatch(ScrDyn *w); /* borrowed; report, then listeners */
 /* The promise-or-absent await's unit arm: one microtask hop, like JS's
  * await of any non-thenable (and like awaiting a settled promise). */
 void scr_await_hop(void);

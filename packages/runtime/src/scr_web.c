@@ -101,7 +101,7 @@ static const char web_prelude[] =
     "      throw new TypeError('The \"callback\" argument must be of type function. Received type ' + typeof fn);\n"
     "    }\n"
     "    const cb = args.length === 0 ? fn : () => fn(...args);\n"
-    "    return new Timeout(cb, Number(ms), repeat);\n"
+    "    return new Timeout(cb, ms === undefined ? 1 : Number(ms), repeat);\n"
     "  };\n"
     "  g.setTimeout = (fn, ms, ...args) => mkTimer(fn, ms, args, false);\n"
     "  g.setInterval = (fn, ms, ...args) => mkTimer(fn, ms, args, true);\n"
