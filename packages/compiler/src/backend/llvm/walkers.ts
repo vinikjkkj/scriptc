@@ -875,7 +875,7 @@ export class LlWalkers {
         }
         case "map":
         case "set": {
-          const lit = host.internLiteral(arm.kind === "map" ? "[object Map]" : "[object Set]");
+          const lit = host.internLiteral(arm.kind === "map" ? (arm.weak ? "[object WeakMap]" : "[object Map]") : "[object Set]");
           host.declare(`declare ptr @scr_str_retain_v(ptr)`);
           const r = B.tmp();
           B.line(`${r} = call ptr @scr_str_retain_v(ptr ${lit})`);

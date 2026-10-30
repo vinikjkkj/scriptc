@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs";
 import * as ts from "./ts7/adapter.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isSupportedWeakValue, isUnitType, JSVAL, mapOf, weakMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isSupportedWeakValue, isUnitType, JSVAL, mapOf, weakMapOf, weakRideMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
 import { dynBuiltinFnType, dynBuiltinSigOfType } from "./dyn-builtin-sigs.js";
@@ -1090,7 +1090,7 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       // "Float32Array" in every diagnostic that formatted one.
       return BYTES_ELEM_NAMES[t.elem];
     case "map":
-      return `Map<${formatIrType(t.key, shapes, unions, seen)}, ${formatIrType(t.value, shapes, unions, seen)}>`;
+      return `${t.weak ? "WeakMap" : "Map"}<${formatIrType(t.key, shapes, unions, seen)}, ${formatIrType(t.value, shapes, unions, seen)}>`;
     case "set":
       return `Set<${formatIrType(t.elem, shapes, unions, seen)}>`;
     case "func":
@@ -3709,7 +3709,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (key.kind === "dyn" && isStdlibInterface("WeakMap")) return null;
     const value = mapType(args[1]!, ctx);
     if (!value || !isSupportedMapValue(value)) return null;
-    return mapOf(key, value);
+    return isStdlibInterface("WeakMap") ? weakRideMapOf(key, value) : mapOf(key, value);
   }
   // Set<T>: Map's sibling — same provenance rule, elements fenced to Map's
   // KEY kinds (f64/string, SameValueZero). Anything else stays unmapped;

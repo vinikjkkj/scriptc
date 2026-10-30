@@ -638,7 +638,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         case "set": {
           // Object.prototype.toString's constant, exactly Node's
           // String(new Map()) / String(new Set()).
-          const sym = E.internLiteral(arm.kind === "map" ? "[object Map]" : "[object Set]");
+          const sym = E.internLiteral(arm.kind === "map" ? (arm.weak ? "[object WeakMap]" : "[object Map]") : "[object Set]");
           d.push(`  case ${i}: return scr_str_retain((ScrStr *)&${sym});`);
           break;
         }

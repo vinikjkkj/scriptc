@@ -151,7 +151,7 @@ export function structuralForm(
     case "array":
       return `array<${structuralForm(type.elem, shapes, unions, path, cache)}>`;
     case "map":
-      return `map<${structuralForm(type.key, shapes, unions, path, cache)},${structuralForm(type.value, shapes, unions, path, cache)}>`;
+      return `${type.weak ? "weakride" : ""}map<${structuralForm(type.key, shapes, unions, path, cache)},${structuralForm(type.value, shapes, unions, path, cache)}>`;
     case "set":
       return `set<${structuralForm(type.elem, shapes, unions, path, cache)}>`;
     case "promise":

@@ -16678,7 +16678,7 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
     if (e.type.kind === "map" || e.type.kind === "set") {
       // Object.prototype.toString's constant: nothing can override it on a
       // Map or Set here. The operand still evaluates (effects).
-      const text = e.type.kind === "map" ? "[object Map]" : "[object Set]";
+      const text = e.type.kind === "map" ? (e.type.weak ? "[object WeakMap]" : "[object Map]") : "[object Set]";
       const lit: IrExpr = { kind: "strLit", value: text, type: STRING, loc: e.loc };
       if (pureReemittable(e)) return lit;
       return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: e, loc: e.loc }], result: lit, type: STRING, loc: e.loc };

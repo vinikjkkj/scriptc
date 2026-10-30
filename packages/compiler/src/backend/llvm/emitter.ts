@@ -8327,7 +8327,7 @@ class LlEmitter {
               }
               case "map":
               case "set": {
-                const sym = this.internLiteral(arm.kind === "map" ? "[object Map]" : "[object Set]");
+                const sym = this.internLiteral(arm.kind === "map" ? (arm.weak ? "[object WeakMap]" : "[object Map]") : "[object Set]");
                 B.line(`store ptr ${this.retainValue(sym, e.type)}, ptr ${slot}`);
                 break;
               }
