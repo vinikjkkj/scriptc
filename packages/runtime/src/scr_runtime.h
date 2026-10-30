@@ -6877,6 +6877,9 @@ typedef struct ScrDynClassOps {
    * no class never links it. Same contracts as scr_dyn_to_primitive / scr_dyn_to_string. */
   ScrDyn *(*objinst_to_primitive)(const ScrDyn *d, int hint);
   ScrStr *(*objinst_to_string)(const ScrDyn *d);
+  /* util.format %s: 1 when the instance's toString is a function (method, or a field holding one),
+   * 0 when not, 2 when reading a field threw (pending). */
+  int (*objinst_user_tostring)(const ScrDyn *d);
 } ScrDynClassOps;
 extern const ScrDynClassOps *scr_dyn_class_ops;
 void scr_dyn_class_install(void);
