@@ -40,7 +40,7 @@ import { isJsSourceFile, locOf } from "../program.js";
 import { BOOL, BYTES_ELEM_NAMES, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
-import { dynRestPack } from "./lower-calls.js";
+import { classInstanceToString, dynRestPack } from "./lower-calls.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
 import { refuseCodecValue } from "../codec-shadow.js";
 
@@ -1787,17 +1787,56 @@ function lowerInspectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrE
 
 /* ── util.format / util.formatWithOptions ────────────────────────────── */
 
-/** Statically visible %s shapes whose String(arg) Node runs and this
- * lowering does not (OPEN, fmttostr): a record or object whose toString
- * member is a function, a class instance whose class chain defines
- * toString, a function value (Node prints its source text), an Error
- * (Node prints err.stack). A union answers with its first hazardous arm. */
+/** Node's builtInObjects: the constructor names hasBuiltInToString treats as
+ * built-in. A user toString whose declaring constructor carries one of
+ * these names is NOT user code, so Node inspects the value instead.
+ * Object.getOwnPropertyNames(globalThis) filtered by /^[A-Z][a-zA-Z0-9]+$/
+ * on Node v24.15 (the CI pin). */
+const NODE_BUILTIN_CTOR_NAMES: ReadonlySet<string> = new Set(
+  (
+    "AbortController AbortSignal AggregateError Array ArrayBuffer AsyncDisposableStack Atomics BigInt " +
+    "BigInt64Array BigUint64Array Blob Boolean BroadcastChannel Buffer ByteLengthQueuingStrategy CloseEvent " +
+    "CompressionStream CountQueuingStrategy Crypto CryptoKey CustomEvent DOMException DataView Date " +
+    "DecompressionStream DisposableStack Error EvalError Event EventTarget File FinalizationRegistry " +
+    "Float16Array Float32Array Float64Array FormData Function Headers Infinity Int16Array Int32Array " +
+    "Int8Array Intl Iterator JSON Map Math MessageChannel MessageEvent MessagePort NaN Navigator Number " +
+    "Object Performance PerformanceEntry PerformanceMark PerformanceMeasure PerformanceObserver " +
+    "PerformanceObserverEntryList PerformanceResourceTiming Promise Proxy RangeError " +
+    "ReadableByteStreamController ReadableStream ReadableStreamBYOBReader ReadableStreamBYOBRequest " +
+    "ReadableStreamDefaultController ReadableStreamDefaultReader ReferenceError Reflect RegExp Request " +
+    "Response Set SharedArrayBuffer String SubtleCrypto SuppressedError Symbol SyntaxError TextDecoder " +
+    "TextDecoderStream TextEncoder TextEncoderStream TransformStream TransformStreamDefaultController " +
+    "TypeError URIError URL URLPattern URLSearchParams Uint16Array Uint32Array Uint8Array Uint8ClampedArray " +
+    "WeakMap WeakRef WeakSet WebAssembly WebSocket WritableStream WritableStreamDefaultController " +
+    "WritableStreamDefaultWriter"
+  ).split(" "),
+);
+
+/** The class whose prototype supplies an instance's toString: the nearest
+ * class in the chain that declares one (Node's "pointer" walk). */
+function toStringDeclarer(L: Lowerer, className: string): ClassInfo | null {
+  for (let info: ClassInfo | null = L.classes.get(className) ?? null; info; info = info.base) {
+    if (info.methods.has("toString")) return info;
+  }
+  return null;
+}
+
+/** Statically visible %s shapes whose String(arg) Node runs (hasBuiltInToString
+ * is false): a record whose toString or [Symbol.toPrimitive] member is a
+ * function, a class instance whose toString comes from user code, a function
+ * value (Node prints its source text), an Error (Node prints err.stack). A
+ * union answers with its first hazardous arm. A hazard whose exact String(arg)
+ * lowering is not yet available is fenced by the caller (OPEN, fmttostr). */
 function sConversionHazard(L: Lowerer, t: IrType, seen: Set<string>): string | null {
   switch (t.kind) {
     case "func":
       return "a function value (Node prints its source text)";
     case "record": {
-      const member = L.shapes.get(t.shapeId)?.fields.find((f) => f.name === "toString");
+      const fields = L.shapes.get(t.shapeId)?.fields ?? [];
+      if (fields.some((f) => f.name.startsWith("__@toPrimitive") && f.type.kind === "func")) {
+        return "an object with a [Symbol.toPrimitive] member (Node calls it)";
+      }
+      const member = fields.find((f) => f.name === "toString");
       if (member && member.type.kind === "func") {
         return "an object whose toString member is a function (Node calls it)";
       }
@@ -1805,10 +1844,9 @@ function sConversionHazard(L: Lowerer, t: IrType, seen: Set<string>): string | n
     }
     case "object": {
       if (isErrorClass(L, t.className)) return "an Error value (Node prints err.stack)";
-      for (let info: ClassInfo | null = L.classes.get(t.className) ?? null; info; info = info.base) {
-        if (info.methods.has("toString")) {
-          return "a class instance whose class defines toString (Node calls it)";
-        }
+      const info = toStringDeclarer(L, t.className);
+      if (info !== null && !NODE_BUILTIN_CTOR_NAMES.has(info.def.jsName ?? "")) {
+        return "a class instance whose class defines toString (Node calls it)";
       }
       return null;
     }
@@ -1826,8 +1864,120 @@ function sConversionHazard(L: Lowerer, t: IrType, seen: Set<string>): string | n
   }
 }
 
-/** A `[Symbol.toPrimitive]` member on the checker's view of the argument
- * (String(arg) calls it). Union constituents are checked one by one. */
+/** The exact %s text of a hazardous value, as String(arg) gives it: the
+ * user's own method called with ToPrimitive's arguments, its string, number
+ * or boolean result converted by ToString. A record's [Symbol.toPrimitive]
+ * (hint "string") is consulted before its toString. Null = no exact lowering
+ * (the caller fences). A union converts arm by arm: a hazardous arm through
+ * this function, every other arm through the top-level %s rule it always had
+ * (formatValueExpr), so an f64 arm keeps formatNumber's -0. */
+function sUserStringExpr(L: Lowerer, t: IrType, value: IrExpr, node: ts.Expression, depth: number, loc: SrcLoc): IrExpr | null {
+  if (t.kind === "union") {
+    const arms = L.unions.get(t.unionId)?.arms;
+    if (!arms || arms.length === 0) return null;
+    const tmp = arms.length > 1 && !pureReemittable(value) ? L.declareHiddenLocal("%fmtS", t) : null;
+    const src: IrExpr = tmp ? { kind: "varRef", localId: tmp.id, type: t, loc } : value;
+    const armText = (tag: number): IrExpr | null => {
+      const arm = arms[tag]!;
+      const narrowed: IrExpr = { kind: "unionNarrow", unionId: t.unionId, tag, value: src, type: arm, loc };
+      if (sConversionHazard(L, arm, new Set()) !== null) return sUserStringExpr(L, arm, narrowed, node, depth, loc);
+      const walk = { recursive: false };
+      const reason = inspectSupport(L, arm, new Set(), walk);
+      if (reason !== null) L.noLowering(`util.format %s of '${L.fmt(t)}' values`, node, reason);
+      return formatValueExpr(L, arm, narrowed, depth, loc);
+    };
+    const texts: (IrExpr | null)[] = arms.map((_, tag) => armText(tag));
+    if (texts.some((x) => x === null)) return null;
+    let result = texts[arms.length - 1]!;
+    for (let tag = arms.length - 2; tag >= 0; tag--) {
+      result = {
+        kind: "ternary",
+        cond: { kind: "unionIsTag", unionId: t.unionId, tag, negated: false, value: src, type: BOOL, loc },
+        then: texts[tag]!,
+        else_: result,
+        type: STRING,
+        loc,
+      };
+    }
+    if (!tmp) return result;
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: tmp.id, init: value, loc }],
+      result,
+      type: STRING,
+      loc,
+    };
+  }
+  if (t.kind === "record") {
+    const shape = L.shapes.get(t.shapeId);
+    if (!shape || shape.tuple) return null;
+    const hint = shape.fields.find((f) => f.name.startsWith("__@toPrimitive") && f.type.kind === "func");
+    if (hint !== undefined) return recordMethodString(L, t, value, hint, true, loc);
+    const slot = shape.fields.find((f) => f.name === "toString");
+    if (slot !== undefined && slot.type.kind === "func") return recordMethodString(L, t, value, slot, false, loc);
+    return null;
+  }
+  if (t.kind === "object") {
+    // An Error's %s is its stack (fenced by the caller), never String(err).
+    if (isErrorClass(L, t.className)) return null;
+    // classInstanceToString answers only a toString it can call with a string
+    // result; anything else (a non-string return, a required parameter, an
+    // abstract method) answers null here and stays fenced.
+    return classInstanceToString(L, value, loc);
+  }
+  return null;
+}
+
+/** Calls a record's function-typed toString (or [Symbol.toPrimitive] with
+ * hint "string") and converts its result as ToPrimitive then ToString do.
+ * Only the shapes whose answer is a primitive the lowering can convert are
+ * exact: a string, number or boolean result. A declared object result would
+ * fall through to valueOf (or throw), so it stays fenced. */
+function recordMethodString(
+  L: Lowerer,
+  t: IrType & { kind: "record" },
+  value: IrExpr,
+  member: { name: string; type: IrType },
+  hinted: boolean,
+  loc: SrcLoc,
+): IrExpr | null {
+  const ft = member.type;
+  if (ft.kind !== "func" || ft.rest === true || ft.restAbi !== undefined) return null;
+  let args: IrExpr[];
+  if (hinted) {
+    if (ft.params.length === 0) args = [];
+    else if (ft.params.length === 1 && ft.params[0]!.kind === "string") args = [{ kind: "strLit", value: "string", type: STRING, loc }];
+    else return null;
+  } else {
+    if (ft.params.length !== 0) return null;
+    args = [];
+  }
+  const ret = ft.ret;
+  const unit = ret.kind === "void" || ret.kind === "undefinedT" || ret.kind === "nullT";
+  if (ret.kind !== "string" && ret.kind !== "f64" && ret.kind !== "bool" && !unit) return null;
+  const callee: IrExpr = { kind: "recordGet", obj: value, shapeId: t.shapeId, field: member.name, type: ft, loc };
+  const call: IrExpr = { kind: "callValue", callee, args, type: ret, loc };
+  // A method that answers nothing (a throw-only body is void) converts its
+  // undefined (or null) result to that text; the call still runs for effect,
+  // and a throw in it propagates from here.
+  if (unit) {
+    const text = ret.kind === "nullT" ? "null" : "undefined";
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: call, loc }],
+      result: { kind: "strLit", value: text, type: STRING, loc },
+      type: STRING,
+      loc,
+    };
+  }
+  if (ret.kind === "string") return call;
+  return { kind: "toString", operand: call, type: STRING, loc };
+}
+
+/** A `[Symbol.toPrimitive]` member on the checker's view of an argument that
+ * is NOT a bare record (a record's member is read from its shape fields):
+ * String(arg) calls it, and the lowering has no exact call for a class. Union
+ * constituents are checked one by one. */
 function toPrimitiveHazard(L: Lowerer, type: ts.Type): string | null {
   if (type.isUnionType()) {
     for (const c of ts.constituentTypes(type)) {
@@ -1846,6 +1996,7 @@ function toPrimitiveHazard(L: Lowerer, type: ts.Type): string | null {
   }
   return null;
 }
+
 
 /** One argument as format's %s conversion (Node: numbers via
  * formatNumber, strings verbatim, objects through inspect at the given
@@ -1877,20 +2028,26 @@ function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
     const fn = sSpec ? "insp.fmtS" : "insp.dynS";
     return { kind: "libCall", fn, args: [value, num(depth, loc)], type: STRING, loc };
   }
-  // OPEN, fmttostr: the %s position runs String(arg) for any object whose
-  // toString is user code, for functions (their source text), and for
-  // Errors (their stack). This lowering prints the inspect form for those
-  // shapes, which diverges from Node, so they refuse at build time until an
-  // exact lowering exists. dyn arguments are NOT fenced: their conversion
-  // is the runtime's insp.fmtS, and the class-instance loss at dyn boxing
-  // is a separate open item.
-  const hazard = !sSpec ? null : (sConversionHazard(L, t, new Set()) ?? toPrimitiveHazard(L, L.typeOf(node)));
-  if (hazard !== null) {
-    L.noLowering(
-      `util.format %s of '${L.fmt(t)}' values`,
-      node,
-      `OPEN, fmttostr: ${hazard}. Node converts it through String(arg); this lowering would print the inspect form.`,
-    );
+  // The %s position runs String(arg) for any object whose toString or
+  // [Symbol.toPrimitive] is user code (Node's hasBuiltInToString), and
+  // prints the function's source text or the Error's stack. The user-method
+  // shapes lower to the call and its converted result (sUserStringExpr); the
+  // rest, and a checker-visible toPrimitive on a class or union, refuse at
+  // build time (OPEN, fmttostr) rather than print the inspect form. dyn
+  // arguments are NOT fenced: their conversion is the runtime's insp.fmtS,
+  // and the class-instance loss at dyn boxing is a separate open item.
+  if (sSpec) {
+    const primChecker = t.kind === "record" ? null : toPrimitiveHazard(L, L.typeOf(node));
+    const hazard = sConversionHazard(L, t, new Set()) ?? primChecker;
+    if (hazard !== null) {
+      const exact = primChecker === null ? sUserStringExpr(L, t, value, node, depth, loc) : null;
+      if (exact !== null) return exact;
+      L.noLowering(
+        `util.format %s of '${L.fmt(t)}' values`,
+        node,
+        `OPEN, fmttostr: ${hazard}. Node converts it through String(arg); this lowering has no exact conversion for it.`,
+      );
+    }
   }
   // A UNION argument dispatches per arm at runtime: a string arm prints
   // VERBATIM (typeof arg === 'string' in Node's formatter — inspect's
