@@ -533,11 +533,89 @@ static bool dyn_cls_ops_error_instanceof(const ScrDyn *d, int k) {
   return scr_error_vts[k].pre <= pre && pre <= scr_error_vts[k].post;
 }
 
+/* ── ToPrimitive over a class instance that DECLARES valueOf or toString ──
+ * Moved here from scr_json.c so a program that declares no class never links
+ * it. The member table carries the methods (scr_dyn_objinst_member, which reads
+ * the instance's own class), so the answer is the same whichever spelling
+ * reached it. OrdinaryToPrimitive: the STRING hint runs toString then valueOf,
+ * the DEFAULT and NUMBER hints run valueOf then toString. A missing user method
+ * falls through to the next one; the built-in table answers once both are gone
+ * (scr_dyn_objinst_builtin_prim). A method that throws leaves the exception
+ * pending and answers NULL. */
+/* A primitive answer (the same kinds scr_json.c's scr_dyn_is_prim names). */
+static bool dyn_cls_is_prim(const ScrDyn *d) {
+  switch (d->kind) {
+  case SCR_DYN_NUM:
+  case SCR_DYN_STR:
+  case SCR_DYN_BOOL:
+  case SCR_DYN_NULL:
+  case SCR_DYN_UNDEF: return true;
+  default: return false;
+  }
+}
+
+static ScrDyn *dyn_cls_toprim_try(const ScrDyn *d, const char *name, size_t len, bool *found) {
+  *found = false;
+  /* A METHOD row runs with the instance as the receiver, the same entry the dyn
+   * method call uses. A DATA row (a field) is not a method and is absent here. */
+  const ScrDynClassMember *cm = scr_dyn_objinst_member(d, name, len);
+  if (cm == NULL || cm->call == NULL) return NULL; /* absent, or a data row */
+  *found = true;
+  ScrDyn *r = cm->call(d->v.inst.o, NULL, 0, name);
+  if (!r) return NULL; /* threw - pending */
+  if (dyn_cls_is_prim(r) || r->kind == SCR_DYN_BIG) return r; /* +1 */
+  scr_dyn_release(r);
+  return NULL;
+}
+
+static ScrDyn *dyn_cls_objinst_to_primitive(const ScrDyn *d, int hint) {
+  const char *first = hint == SCR_TOPRIM_STRING ? "toString" : "valueOf";
+  const char *second = hint == SCR_TOPRIM_STRING ? "valueOf" : "toString";
+  size_t fl = hint == SCR_TOPRIM_STRING ? 8 : 7;
+  size_t sl = hint == SCR_TOPRIM_STRING ? 7 : 8;
+  bool f1 = false, f2 = false;
+  ScrDyn *r = dyn_cls_toprim_try(d, first, fl, &f1);
+  if (r) return r;
+  if (scr_exc_pending()) return NULL;
+  /* STRING hint with no user toString: Object.prototype.toString is the first
+   * method and it answers a PRIMITIVE ("[object Object]"), so ToPrimitive stops
+   * there and a user valueOf is never consulted. The DEFAULT hint's first method
+   * is valueOf, whose missing form answers the object itself, so toString still
+   * gets its turn after it. */
+  if (hint != SCR_TOPRIM_STRING || f1) {
+    r = dyn_cls_toprim_try(d, second, sl, &f2);
+    if (r) return r;
+    if (scr_exc_pending()) return NULL;
+  }
+  /* Both methods answered objects (the second one present): the chain is
+   * exhausted. A missing second method is Object.prototype's, which falls to the
+   * built-in table below. */
+  if (hint == SCR_TOPRIM_STRING ? f1 : f2) {
+    static const char msg[] = "Cannot convert object to primitive value";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  return scr_dyn_objinst_builtin_prim(d);
+}
+
+/* ToString(object) for a class instance: ToPrimitive with the STRING hint, then
+ * ToString of the primitive. A class with no member table and no Error root has
+ * no protocol at all: the built-in fence answers (String()'s wording). */
+static ScrStr *dyn_cls_objinst_to_string(const ScrDyn *d) {
+  if (!scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_error_rooted(d)) return scr_dyn_objinst_builtin_string(d);
+  ScrDyn *p = dyn_cls_objinst_to_primitive(d, SCR_TOPRIM_STRING);
+  if (p == NULL) return scr_str_new("", 0); /* pending */
+  ScrStr *ps = scr_dyn_string_coerce(p);
+  scr_dyn_release(p);
+  return ps;
+}
+
 static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_impl_box, dyn_cls_impl_of_value, dyn_cls_impl_error_box,
   dyn_cls_impl_err_get, dyn_cls_impl_err_set, dyn_cls_impl_err_has, dyn_cls_impl_err_delete,
   dyn_cls_ops_fn_get, dyn_cls_ops_construct, dyn_cls_ops_set, dyn_cls_ops_delete, dyn_cls_ops_walk_error,
   dyn_cls_ops_error_rooted, dyn_cls_ops_error_instanceof,
+  dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }

@@ -6872,11 +6872,20 @@ typedef struct ScrDynClassOps {
   ScrDyn *(*walk_error)(const ScrDyn *v, ScrObjWalk mode);
   bool (*error_rooted)(const ScrDyn *d);
   bool (*error_instanceof)(const ScrDyn *d, int kind);
+  /* The user valueOf/toString protocol of a class instance (ToPrimitive over
+   * the member table). Lives in the gated class unit so a program that declares
+   * no class never links it. Same contracts as scr_dyn_to_primitive / scr_dyn_to_string. */
+  ScrDyn *(*objinst_to_primitive)(const ScrDyn *d, int hint);
+  ScrStr *(*objinst_to_string)(const ScrDyn *d);
 } ScrDynClassOps;
 extern const ScrDynClassOps *scr_dyn_class_ops;
 void scr_dyn_class_install(void);
 /* The registered class descriptors (scr_dyn_objinst_registry's table). */
 const ScrDynClass *const *scr_dyn_class_registry(size_t *n);
+/* The built-in table for a class instance with no user method (Error.prototype's form, or
+ * "[object Object]"), and the fence for a class with no member table. Always linked (scr_json.c). */
+ScrDyn *scr_dyn_objinst_builtin_prim(const ScrDyn *d);
+ScrStr *scr_dyn_objinst_builtin_string(const ScrDyn *d);
 static inline bool scr_dyn_objinst_error_rooted(const ScrDyn *d) { return scr_dyn_class_ops != NULL && scr_dyn_class_ops->error_rooted(d); }
 static inline ScrDyn *scr_dyn_class_box(const ScrDynClass *cls) { return scr_dyn_class_ops ? scr_dyn_class_ops->class_box(cls) : NULL; }
 static inline const ScrDynClass *scr_dyn_class_of_value(const ScrDyn *d) { return scr_dyn_class_ops ? scr_dyn_class_ops->class_of_value(d) : NULL; }

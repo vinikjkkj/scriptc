@@ -6465,34 +6465,11 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
     }
     return scr_str_new("[object Object]", 15);
   case SCR_DYN_OBJINST: {
-    /* A class instance may override toString, and its static twin calls
-     * the override -- answering "[object Object]" blindly would make one
-     * value render two ways depending on whether it crossed the boundary,
-     * which is the wrong-answer shape this tree refuses. That is why this
-     * WAS a fence: the box had no member table to dispatch through.
-     *
-     * It has one now, so this answers. An override runs; a class that
-     * declares none inherits Object.prototype.toString, whose answer is
-     * "[object Object]" -- and here that is a MEASURED constant rather
-     * than a guess, because the table is the class's whole member set and
-     * its absence from the table is the absence of the method. Only a
-     * class with NO table keeps the fence: there the box still cannot
-     * tell an override from an absence. */
-    if (!scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_error_rooted(d)) {
-      scr_dyn_objinst_fence(d, "String()");
-      return scr_str_new("", 0); /* the pending throw wins */
-    }
-    /* ToString(object) is ToPrimitive with the STRING hint, then ToString:
-     * the user toString first, then valueOf when toString answers an
-     * object (`toString(){return {}}` with `valueOf(){return 7}` is "7"),
-     * then the built-in table. The protocol lives in scr_dyn_to_primitive,
-     * which reads the same member table, so this arm and `+` and `%s` share
-     * one answer per hint. A throw leaves the exception pending. */
-    ScrDyn *p = scr_dyn_to_primitive(d, SCR_TOPRIM_STRING);
-    if (p == NULL) return scr_str_new("", 0); /* pending */
-    ScrStr *ps = scr_dyn_string_coerce(p);
-    scr_dyn_release(p);
-    return ps;
+    /* ToString(object): the user toString/valueOf protocol is the class unit's
+     * (scr_dyn_class.c). Without that unit no class has a user method, and the
+     * built-in table answers (Error.prototype's form, or "[object Object]"). */
+    if (scr_dyn_class_ops != NULL) return scr_dyn_class_ops->objinst_to_string(d);
+    return scr_dyn_objinst_builtin_string(d);
   }
   case SCR_DYN_BIG:
     /* The DIGITS, with no suffix: String(5n) is "5" and only
@@ -6790,20 +6767,32 @@ static ScrDyn *scr_toprim_try(const ScrDyn *d, const char *name, size_t len) {
  * of that name (the caller then keeps the rest of the protocol). Borrows the
  * instance; +1 primitive, or NULL with *found true and no exception (the
  * method answered an object), or NULL with the exception pending (it threw). */
-static ScrDyn *scr_toprim_objinst_try(const ScrDyn *d, const char *name, size_t len, bool *found) {
-  *found = false;
-  /* The member row is read here, not through scr_dyn_objinst_member_get:
-   * that lives in the gated dyn-invoke unit, which a program that never
-   * reaches a dyn method call does not link. A METHOD row runs with the
-   * instance as the receiver, the same entry the dyn call uses. */
-  const ScrDynClassMember *cm = scr_dyn_objinst_member(d, name, len);
-  if (cm == NULL || cm->call == NULL) return NULL; /* absent, or a data row */
-  *found = true;
-  ScrDyn *r = cm->call(d->v.inst.o, NULL, 0, name);
-  if (!r) return NULL; /* threw - pending */
-  if (scr_dyn_is_prim(r) || r->kind == SCR_DYN_BIG) return r; /* +1 */
-  scr_dyn_release(r);
-  return NULL;
+/* The built-in ToPrimitive answer for a class instance with no user method:
+ * Error.prototype's form for an Error-rooted instance, "[object Object]" for a
+ * class with a member table, and the fence (a TypeError) for a class with none.
+ * Borrows d; +1, or NULL with the exception pending. */
+ScrDyn *scr_dyn_objinst_builtin_prim(const ScrDyn *d) {
+  if (!scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_error_rooted(d)) {
+    scr_dyn_check_fail(NULL, "a primitive value", d);
+    return NULL;
+  }
+  ScrStr *s = scr_dyn_objinst_error_rooted(d) ? scr_error_to_string((ScrError *)d->v.inst.o)
+                                              : scr_str_new("[object Object]", 15);
+  ScrDyn *out = scr_dyn_new_str(s); /* retains s into the node */
+  scr_str_release(s);
+  return out;
+}
+
+/* The built-in ToString answer for a class instance with no user method: the
+ * same table as scr_dyn_objinst_builtin_prim with String()'s fence wording.
+ * +1; a class with no member table and no Error root fences and answers "". */
+ScrStr *scr_dyn_objinst_builtin_string(const ScrDyn *d) {
+  if (!scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_error_rooted(d)) {
+    scr_dyn_objinst_fence(d, "String()");
+    return scr_str_new("", 0); /* the pending throw wins */
+  }
+  if (scr_dyn_objinst_error_rooted(d)) return scr_error_to_string((ScrError *)d->v.inst.o);
+  return scr_str_new("[object Object]", 15);
 }
 
 ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
@@ -6812,38 +6801,13 @@ ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
     return NULL;
   }
   if (scr_dyn_is_prim(d) || d->kind == SCR_DYN_BIG) return scr_dyn_retain((ScrDyn *)d);
-  /* A compiled class instance whose class DECLARES valueOf or toString: the
-   * member table carries the method, so the same protocol the OBJ arm runs
-   * below applies, method order by hint. */
+  /* A class instance: the user valueOf/toString protocol is in the class unit
+   * (scr_dyn_class.c, linked exactly when the program declares a class a dyn box
+   * can hold). A program with no such class has no class instance with a user
+   * method, so the built-in table answers. */
   if (d->kind == SCR_DYN_OBJINST) {
-    const char *first = hint == SCR_TOPRIM_STRING ? "toString" : "valueOf";
-    const char *second = hint == SCR_TOPRIM_STRING ? "valueOf" : "toString";
-    size_t fl = hint == SCR_TOPRIM_STRING ? 8 : 7;
-    size_t sl = hint == SCR_TOPRIM_STRING ? 7 : 8;
-    bool f1 = false, f2 = false;
-    ScrDyn *r = scr_toprim_objinst_try(d, first, fl, &f1);
-    if (r) return r;
-    if (scr_exc_pending()) return NULL;
-    /* STRING hint with no user toString: Object.prototype.toString is the
-     * first method and it answers a PRIMITIVE ("[object Object]"), so
-     * ToPrimitive stops there and a user valueOf is never consulted. The
-     * DEFAULT hint's first method is valueOf, whose missing form answers the
-     * object itself, so toString still gets its turn after it. */
-    if (hint != SCR_TOPRIM_STRING || f1) {
-      r = scr_toprim_objinst_try(d, second, sl, &f2);
-      if (r) return r;
-      if (scr_exc_pending()) return NULL;
-    }
-    /* Both protocol methods answered objects only when the toString row
-     * exists and answered one: a missing valueOf is Object.prototype's, which
-     * answers the object itself, so the chain is exhausted. A missing
-     * toString falls through to the built-in table below, which is the
-     * "[object Object]" answer. */
-    if (hint == SCR_TOPRIM_STRING ? f1 : f2) {
-      static const char msg[] = "Cannot convert object to primitive value";
-      scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
-      return NULL;
-    }
+    if (scr_dyn_class_ops != NULL) return scr_dyn_class_ops->objinst_to_primitive(d, hint);
+    return scr_dyn_objinst_builtin_prim(d);
   }
   /* Only SCR_DYN_OBJ carries a member table a user valueOf/toString can
    * live in; every other reference kind takes the built-in table below. */
@@ -6872,20 +6836,6 @@ ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
       return NULL;
     }
   }
-  /* A compiled class instance WITH a member table answers through the
-   * toString arm of scr_dyn_to_string below (its own row, or the
-   * "[object Object]" constant). One WITHOUT a table keeps the fence here: a
-   * fence whose wording names String() in that arm, which is wrong for this
-   * caller, because every caller of this function is an operator
-   * that wanted a PRIMITIVE (`+`, `<`, ToNumber, `==`), and none of them
-   * asked for a string. Refuse in this function's own terms instead, which
-   * also gets the error CLASS right: JS's own failure to convert an object
-   * to a primitive is a TypeError, and scr_dyn_check_fail throws one.
-   * Refusal before, refusal after -- only the message changes. */
-  if (d->kind == SCR_DYN_OBJINST && !scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_error_rooted(d)) {
-    scr_dyn_check_fail(NULL, "a primitive value", d);
-    return NULL;
-  }
   /* A Date handle under the NUMBER hint answers its time value: the built-in
    * @@toPrimitive picks valueOf for "number" and toString otherwise (ES
    * 21.4.4.45). Falling through to the string below made `d < e` over two
@@ -6901,10 +6851,7 @@ ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
      * (it calls back into this function), so the built-in table is spelled
      * out here instead: Error.prototype's form, or the "[object Object]"
      * constant that Object.prototype.toString gives a class with members. */
-    ScrStr *s = d->kind == SCR_DYN_OBJINST
-                  ? (scr_dyn_objinst_error_rooted(d) ? scr_error_to_string((ScrError *)d->v.inst.o)
-                                                     : scr_str_new("[object Object]", 15))
-                  : scr_dyn_to_string(d, NULL);
+    ScrStr *s = scr_dyn_to_string(d, NULL);
     if (!s) return NULL; /* pending (an OBJINST fence, a throwing member) */
     ScrDyn *out = scr_dyn_new_str(s); /* retains s into the node */
     scr_str_release(s);
