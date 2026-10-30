@@ -7667,9 +7667,87 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/17600-http-headers-timeout-408.ts": {
+   "order": [
+    "<repo>/tests/corpus/17600-http-headers-timeout-408.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17601-http-fresh-connection-408.ts": {
+   "order": [
+    "<repo>/tests/corpus/17601-http-fresh-connection-408.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17602-http-body-stall-408.ts": {
+   "order": [
+    "<repo>/tests/corpus/17602-http-body-stall-408.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17603-http-slow-handler-no-timeout.ts": {
+   "order": [
+    "<repo>/tests/corpus/17603-http-slow-handler-no-timeout.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17604-http-headers-sent-no-408.ts": {
+   "order": [
+    "<repo>/tests/corpus/17604-http-headers-sent-no-408.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17605-http-keepalive-idle-no-408.ts": {
+   "order": [
+    "<repo>/tests/corpus/17605-http-keepalive-idle-no-408.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17606-http-second-request-stall-408.ts": {
+   "order": [
+    "<repo>/tests/corpus/17606-http-second-request-stall-408.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17607-http-timeouts-validation.ts": {
+   "order": [
+    "<repo>/tests/corpus/17607-http-timeouts-validation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17608-http-timeout-then-close-exit.ts": {
+   "order": [
+    "<repo>/tests/corpus/17608-http-timeout-then-close-exit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17609-http-defaults-exit-on-close.ts": {
+   "order": [
+    "<repo>/tests/corpus/17609-http-defaults-exit-on-close.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1761-emitter-special-event-names.cjs": {
    "order": [
     "<repo>/tests/corpus/1761-emitter-special-event-names.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17610-http-two-stalled-clients.ts": {
+   "order": [
+    "<repo>/tests/corpus/17610-http-two-stalled-clients.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17611-https-literal-timeouts-408.ts": {
+   "order": [
+    "<repo>/tests/corpus/17611-https-literal-timeouts-408.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17612-https-typed-record-timeouts-408.ts": {
+   "order": [
+    "<repo>/tests/corpus/17612-https-typed-record-timeouts-408.ts"
    ],
    "diags": []
   },
