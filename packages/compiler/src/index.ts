@@ -310,6 +310,20 @@ function dualTargetsDiffer(exportsField: unknown): boolean {
   return Object.values(o).some((v) => dualTargetsDiffer(v));
 }
 
+/* Provenance packages are judged by the mapping the registry already made, not by
+ * the source tree's package.json. A dist pair (import: dist/esm, require: dist/cjs)
+ * that maps BOTH conditions to one TypeScript source is one behaviour: the
+ * registry's requireEntries is absent or agrees with entries. A require mapping to
+ * a different source file is two behaviours, and the package stays out. */
+function provenanceDualDiverges(p: { entries: Record<string, string>; requireEntries?: Record<string, string> }): boolean {
+  if (p.requireEntries === undefined) return false;
+  const keys = new Set([...Object.keys(p.entries), ...Object.keys(p.requireEntries)]);
+  for (const k of keys) {
+    if (p.entries[k] !== p.requireEntries[k]) return true;
+  }
+  return false;
+}
+
 /** True when the package whose installed or attested directory is `dir` has a
  * dual import/require export map whose targets differ. */
 function packageHasDivergentDual(dir: string): boolean {
@@ -420,10 +434,22 @@ function detectAutoPackages(
       jsEntry !== null && isJsSourceFileName(jsEntry.typesFile) ? jsEntry.typesFile : null,
     );
     const dualDir = defaultPosture && reason === null && jsEntry !== null ? packageDirOfFile(jsEntry.typesFile, pkg) : null;
+    // An installed package the registry attested is judged by its provenance
+    // mapping (one TypeScript source for both conditions is one behaviour). Only
+    // a package with no attestation falls back to its own export map.
+    const attested = provenanceSources()?.packages.find((q) => q.name === pkg);
     const dualReason =
-      dualDir !== null && packageHasDivergentDual(dualDir)
+      attested !== undefined
+        ? provenanceDualDiverges(attested)
+          ? "its import and require entries map to different source files (two behaviours); it stays on its previous path"
+          : null
+        : dualDir !== null && packageHasDivergentDual(dualDir)
         ? "its export map has an import/require pair with different targets (two behaviours: the CJS-first rewrite would run the require side for an import); it stays on its previous path"
         : null;
+    if (process.env["SCRIPTC_DUAL_WHY"] !== undefined && defaultPosture) {
+      const oldRule = dualDir !== null && packageHasDivergentDual(dualDir);
+      console.error(`[dual] node_modules ${pkg} attested=${attested !== undefined} excluded=${dualReason !== null} packageJsonRule=${oldRule}`);
+    }
     if (reason === null && dualReason === null) chosen.push(pkg);
     else
       statuses.push({
@@ -525,14 +551,21 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   // The default posture names every attested package: its identity is known
   // to the provenance registry, and implicitMonoFile keys the lane on that
   // identity for cache paths (lower-calls.ts). Explicit lists are unchanged.
+  if (process.env["SCRIPTC_DUAL_WHY"] !== undefined) {
+    console.error(`[dual] registry: ${provenanceSources() === null ? "null" : provenanceSources()!.packages.map((q) => q.name).join(",")}`);
+  }
   if (defaultLane) {
     for (const p of provenanceSources()?.packages ?? []) {
       if (requested.includes(p.name)) continue;
-      if (packageHasDivergentDual(p.dir)) {
+      const divergent = provenanceDualDiverges(p);
+      if (process.env["SCRIPTC_DUAL_WHY"] !== undefined) {
+        console.error(`[dual] provenance ${p.name} divergent=${divergent} requireEntries=${p.requireEntries === undefined ? "none" : "present"}`);
+      }
+      if (divergent) {
         statuses.push({
           package: p.name,
           status: "fallback",
-          detail: "its export map has an import/require pair with different targets (two behaviours); it stays on its previous path",
+          detail: "its import and require entries map to different source files (two behaviours); it stays on its previous path",
         });
         continue;
       }
@@ -654,6 +687,9 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   }
   for (const p of requested) {
     if (effective.has(p)) statuses.push({ package: p, status: "static" });
+  }
+  if (process.env["SCRIPTC_DUAL_WHY"] !== undefined) {
+    console.error(`[dual] final set=[${[...effective].join(",")}] statuses=${statuses.map((st) => st.package + ":" + st.status).join(" ")}`);
   }
 
   let finalLoad = load;
