@@ -86,7 +86,7 @@ import {
   typeKey,
   isUnitType,
 } from "../../ir/nodes.js";
-import { type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf } from "./surfaces.js";
+import { type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf, stdlibGlobalNameOf } from "./surfaces.js";
 import { optionalTimerHandleClear } from "./lower-calls.js";
 import { DYN_BUILTIN_SIGS, dynBuiltinFnType } from "../dyn-builtin-sigs.js";
 import { isJsSourceFile } from "../program.js";
@@ -725,6 +725,27 @@ const JS_GLOBAL_ROWS: Readonly<Record<string, JsGlobalRow | undefined>> = {
 function clearRow(L: Lowerer, m: Extract<IrType, { kind: "func" }>, a: readonly IrExpr[], fn: IrLibFn, loc: SrcLoc): IrExpr | null {
   if (m.params.length !== 1 || m.ret.kind !== "void") return null;
   return optionalTimerHandleClear(L, a[0]!, fn, loc);
+}
+
+/** The timer globals a TypeScript source may take as VALUES. Their overloaded
+ * declared types map nowhere, so the value is the runtime's dyn function
+ * (jsGlobalFnValueOf answers them in both sources). */
+export const TIMER_GLOBAL_VALUE_NAMES: ReadonlySet<string> = new Set([
+  "setTimeout", "setInterval", "setImmediate", "clearTimeout", "clearInterval", "clearImmediate",
+]);
+
+/** The slot of a binding initialized by a timer global (`const st =
+ * setTimeout`) in ANY source: the declared type is the overload set, which
+ * maps nowhere, so the slot is the runtime's dyn function (the same value
+ * jsGlobalFnValueOf hands out). Null for every other initializer. */
+export function timerGlobalDeclType(L: Lowerer, init: ts.Expression | undefined): IrType | null {
+  if (init === undefined) return null;
+  let e: ts.Expression = init;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isIdentifier(e)) return null;
+  const name = stdlibGlobalNameOf(L, e);
+  if (name === null || !TIMER_GLOBAL_VALUE_NAMES.has(name)) return null;
+  return DYN;
 }
 
 /** The value of a global function in a JavaScript source: the interned

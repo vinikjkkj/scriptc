@@ -17,7 +17,7 @@ import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExport
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
-import { builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf, staticMemberDynFnValueOf, dynBuiltinFnPropertyOf, dynReceiverCallbackValue } from "./lower-fnvalue.js";
+import { TIMER_GLOBAL_VALUE_NAMES, builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf, staticMemberDynFnValueOf, dynBuiltinFnPropertyOf, dynReceiverCallbackValue } from "./lower-fnvalue.js";
 import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence, valuesCountdown, voidCountdown } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
@@ -2246,6 +2246,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             if (mapped?.kind === "opaque" && mapped.name === "PromiseConstructor") {
               return { kind: "libCall", fn: "opaque.promiseCtor", args: [], type: mapped, loc };
             }
+          }
+          // The timer globals as VALUES (setTimeout, setInterval, setImmediate,
+          // clearTimeout, ...) in a TypeScript source: the same native closures
+          // a JavaScript source takes (jsGlobalFnValueOf). Their overloaded
+          // declared types map nowhere, so the value is the dyn function the
+          // runtime owns; extra arguments reach the callback as in Node.
+          const timerGlobal = stdlibGlobalNameOf(L, expr) ?? expr.text;
+          if (ts.isIdentifier(expr) && TIMER_GLOBAL_VALUE_NAMES.has(timerGlobal)) {
+            const gv = jsGlobalFnValueOf(L, expr, timerGlobal, loc, sym ?? undefined);
+            if (gv !== null) return gv;
           }
           L.noLowering(expr.text, expr, globalHints[expr.text], sym ?? undefined);
         }
