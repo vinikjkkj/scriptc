@@ -6,6 +6,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { canConvertToDyn, isRuntimeRootedClassName, strandTrap } from "../../ir/nodes.js";
 import { isProvenBufferRefinement } from "../buffer-refinement.js";
+import { codecGlobalName } from "../codec-shadow.js";
 import { BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { checkedArmBridge, lowerUnionContainerDispatch, captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
@@ -7994,6 +7995,85 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   BigUint64Array: "u64",
 };
 
+/** The labels that name the one decoder this lowering has a table for: the
+ * WHATWG utf-8 spellings (Node trims ASCII whitespace and folds ASCII case,
+ * then looks the label up). Every other label is OPEN (mgtextcodec): the
+ * other encodings need index tables the runtime does not carry yet. */
+const UTF8_DECODER_LABELS: ReadonlySet<string> = new Set(["utf-8", "utf8", "unicode-1-1-utf-8"]);
+
+/** The flags of `new TextDecoder(label?, options?)`: bit 0 fatal, bit 1
+ * ignoreBOM. Only a literal utf-8 label and literal boolean options lower;
+ * anything else refuses at the build, by name. An undefined argument is the
+ * default, as in Node. */
+/** The codec global a value symbol denotes for this lowerer (codec-shadow.ts). */
+function codecOf(L: Lowerer, symbol: ts.Symbol | null | undefined): ReturnType<typeof codecGlobalName> {
+  return codecGlobalName(
+    { checker: L.checker, isStdlibFile: L.isStdlibFile, isStdlibSymbol: (s) => L.isStdlibSymbol(s) },
+    symbol ?? undefined,
+  );
+}
+
+function decoderCtorFlags(L: Lowerer, expr: ts.NewExpression): number {
+  const args = expr.arguments ?? [];
+  const isUndefinedArg = (a: ts.Expression): boolean => ts.isIdentifier(a) && a.text === "undefined";
+  if (args.length > 2) {
+    L.noLowering(`new TextDecoder with ${args.length} arguments`, expr, "the constructor takes a label and an options object");
+  }
+  if (args.length >= 1 && !isUndefinedArg(args[0]!)) {
+    const label = args[0]!;
+    const lt = L.typeOf(label);
+    if (!lt.isStringLiteralType()) {
+      L.noLowering(
+        "new TextDecoder with a label that is not a string literal",
+        label,
+        "spell the label as a literal: new TextDecoder('utf-8', { fatal: true })",
+      );
+    }
+    const folded = lt.value.replace(/^[ \t\n\f\r]+|[ \t\n\f\r]+$/g, "").replace(/[A-Z]/g, (c) => c.toLowerCase());
+    if (!UTF8_DECODER_LABELS.has(folded)) {
+      L.noLowering(
+        `new TextDecoder('${lt.value}')`,
+        label,
+        "only the utf-8 labels lower (utf-8, utf8, unicode-1-1-utf-8); the other WHATWG encodings are not implemented yet",
+      );
+    }
+  }
+  let fatal = false;
+  let ignoreBOM = false;
+  if (args.length === 2 && !isUndefinedArg(args[1]!)) {
+    const opts = args[1]!;
+    if (!ts.isObjectLiteralExpression(opts)) {
+      L.noLowering(
+        "new TextDecoder with a non-literal options object",
+        opts,
+        "pass the options inline: new TextDecoder('utf-8', { fatal: true, ignoreBOM: false })",
+      );
+    }
+    for (const p of opts.properties) {
+      const key = ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) ? p.name.text : null;
+      if (key !== "fatal" && key !== "ignoreBOM") {
+        L.noLowering(
+          "new TextDecoder with an option other than fatal or ignoreBOM",
+          p,
+          "the decoder reads only fatal and ignoreBOM",
+        );
+      }
+      const v = (p as ts.PropertyAssignment).initializer;
+      const bool = v.kind === ts.SyntaxKind.TrueKeyword ? true : v.kind === ts.SyntaxKind.FalseKeyword ? false : null;
+      if (bool === null) {
+        L.noLowering(
+          `new TextDecoder with a non-literal ${key} option`,
+          v,
+          "the option must be the literal true or false",
+        );
+      }
+      if (key === "fatal") fatal = bool;
+      else ignoreBOM = bool;
+    }
+  }
+  return (fatal ? 1 : 0) | (ignoreBOM ? 2 : 0);
+}
+
 /** `new Uint8Array(...)` / `new Uint32Array(...)` / `new Float32Array(...)`
    * (stdlib provenance — a user's own class with the name resolves through
    * classBySymbol). Lowered argument shapes: none (empty), a length
@@ -8018,24 +8098,24 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     // and { fatal, ignoreBOM } options would give an instance state this
     // representation cannot carry, so only the default utf-8 decoder
     // constructs.
-    if (symbol && (symbol.name === "TextEncoder" || symbol.name === "TextDecoder") && L.isStdlibSymbol(symbol)) {
-      if ((expr.arguments ?? []).length > 0) {
-        L.noLowering(
-          `new ${symbol.name} with arguments`,
-          expr,
-          symbol.name === "TextDecoder"
-            ? "utf-8 with default options is the supported decoder: new TextDecoder()"
-            : undefined,
-        );
-      }
-      // The instance is one of the runtime's two IMMORTAL "utf-8" strings,
-      // not a fresh literal: they are what scr_dyn_new_str recognizes at the
+    const codec = codecOf(L, symbol);
+    if (codec === "TextEncoder") {
+      if ((expr.arguments ?? []).length > 0) L.noLowering("new TextEncoder with arguments", expr);
+      // The instance is one of the runtime's IMMORTAL "utf-8" strings, not a
+      // fresh literal: they are what scr_dyn_new_str recognizes at the
       // boundary, so a codec that escapes into an `any` slot becomes an
       // object with its members instead of the plain string it spells.
+      return { kind: "libCall", fn: "text.encoder", args: [], type: STRING, loc: locOf(expr) };
+    }
+    if (codec === "TextDecoder") {
+      // The decoder's state (fatal, ignoreBOM) is carried by WHICH immortal
+      // string it is: 0 is the default decoder, and each flag adds one.
+      const flags = decoderCtorFlags(L, expr);
+      if (flags === 0) return { kind: "libCall", fn: "text.decoder", args: [], type: STRING, loc: locOf(expr) };
       return {
         kind: "libCall",
-        fn: symbol.name === "TextDecoder" ? "text.decoder" : "text.encoder",
-        args: [],
+        fn: "text.decoderOpt",
+        args: [{ kind: "numLit", value: flags, type: F64, loc: locOf(expr) }],
         type: STRING,
         loc: locOf(expr),
       };

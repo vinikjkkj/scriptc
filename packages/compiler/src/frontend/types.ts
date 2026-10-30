@@ -8,6 +8,7 @@ import { dynBuiltinFnType, dynBuiltinSigOfType } from "./dyn-builtin-sigs.js";
 import { isSqliteTypesPath } from "./shared.js";
 import { isProvenanceSourceFile } from "./provenance-registry.js";
 import { bytesRefinementProven, type StdlibBufferTypes } from "./buffer-refinement.js";
+import { ambientCodecName } from "./codec-shadow.js";
 import { accessorSlotProp, armDiscrimLits, armLitsConflict, builtinRenderingKey, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
@@ -3782,6 +3783,12 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         ctx.isStdlibFile(d.getSourceFile()),
     )
   ) {
+    return STRING;
+  }
+  // A program's ambient `declare const TextDecoder` with a module type alias of the
+  // same name (bson's shape): the alias symbol names the type, and the proven shape
+  // (codec-shadow.ts) makes it the codec's string, not a record.
+  if (ambientCodecName({ checker, isStdlibFile: ctx.isStdlibFile }, widened.getAliasSymbol()) !== null) {
     return STRING;
   }
   // ArrayBuffer: the OPAQUE bytes flavor. It rides the same ScrBytes

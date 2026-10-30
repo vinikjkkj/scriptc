@@ -42,6 +42,7 @@ import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { dynRestPack } from "./lower-calls.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
+import { codecOfType } from "../codec-shadow.js";
 
 /* ── IR construction shorthand ───────────────────────────────────────── */
 
@@ -1286,6 +1287,23 @@ function formatUnionHelper(L: Lowerer, t: IrType & { kind: "union" }, depth: num
  * site): the rendered STRING under Node's console semantics — inspect at
  * the rest-args depth 2 — or the honest fence naming the first
  * unsupported constituent. */
+/** A console argument whose TYPE is a codec (TextEncoder/TextDecoder) refuses at the build: Node
+ * prints `TextDecoder { encoding, fatal, ignoreBOM }`, and the lowered value is the utf-8 string,
+ * which would print "utf-8". The console form has no lowering yet (OPEN, mgtextcodec). */
+export function refuseCodecInspect(L: Lowerer, node: ts.Expression): void {
+  const codecName = codecOfType(
+    { checker: L.checker, isStdlibFile: L.isStdlibFile, isStdlibSymbol: (s) => L.isStdlibSymbol(s) },
+    L.typeOf(node),
+  );
+  if (codecName !== null) {
+    L.noLowering(
+      `console of a ${codecName} value`,
+      node,
+      "a codec prints as TextDecoder { ... } in Node; its console form has no lowering yet",
+    );
+  }
+}
+
 export function lowerConsoleInspectArg(
   L: Lowerer,
   node: ts.Expression,
@@ -1306,6 +1324,10 @@ export function lowerConsoleInspectArg(
   // refcounted result). Corpus 2592's `console.log("never", dead)` is the
   // case: dead code past an uncaught ambient-root trap, whose type became
   // renderable-or-not only because a generic member kept its slot.
+  // A codec value prints as `TextDecoder { encoding, fatal, ignoreBOM }` in Node. Its lowered
+  // value is the utf-8 string, which would print "utf-8": the console form of a codec has no
+  // lowering yet (OPEN, mgtextcodec), so the argument refuses at the build.
+  refuseCodecInspect(L, node);
   if (value.kind === "libCall" && value.fn === "global.undefRead") {
     return { ...value, type: STRING };
   }

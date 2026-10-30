@@ -2874,6 +2874,38 @@ ScrStr *scr_text_decoder_value(void) {
   return (ScrStr *)(uintptr_t)&scr_tc_decoder_lit;
 }
 
+/* The flagged decoders: the same immortal "utf-8", one cap per flag set (bit 0 fatal, bit 1 ignoreBOM).
+ * The cap is the decoder's whole state, so a stored decoder carries its flags through any slot and the
+ * dyn boundary, and scr_dyn_new_str still boxes all of them (cap >= 0xFFFFFFF1). */
+#define SCR_TC_CAP_DEC_FATAL 0xFFFFFFF3u
+#define SCR_TC_CAP_DEC_NOBOM 0xFFFFFFF4u
+#define SCR_TC_CAP_DEC_BOTH 0xFFFFFFF5u
+static const SCR_STR_LIT(6) scr_tc_dec_fatal_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_CAP_DEC_FATAL, "utf-8"};
+static const SCR_STR_LIT(6) scr_tc_dec_nobom_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_CAP_DEC_NOBOM, "utf-8"};
+static const SCR_STR_LIT(6) scr_tc_dec_both_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_CAP_DEC_BOTH, "utf-8"};
+
+static bool scr_tc_fatal(const ScrStr *c) { return c->cap == SCR_TC_CAP_DEC_FATAL || c->cap == SCR_TC_CAP_DEC_BOTH; }
+static bool scr_tc_ignore_bom(const ScrStr *c) { return c->cap == SCR_TC_CAP_DEC_NOBOM || c->cap == SCR_TC_CAP_DEC_BOTH; }
+
+/* new TextDecoder(label, { fatal, ignoreBOM }) with literal utf-8 options, by its flags (the lowering's). */
+ScrStr *scr_text_decoder_opt(double flags) {
+  scr_textcodec_box_fn = &scr_textcodec_box_impl;
+  switch ((int)flags) {
+    case 1: return (ScrStr *)(uintptr_t)&scr_tc_dec_fatal_lit;
+    case 2: return (ScrStr *)(uintptr_t)&scr_tc_dec_nobom_lit;
+    case 3: return (ScrStr *)(uintptr_t)&scr_tc_dec_both_lit;
+    default: return (ScrStr *)(uintptr_t)&scr_tc_decoder_lit;
+  }
+}
+
+/* decode(bytes) on a decoder value: the flags are the value's own. +1 string, or NULL with the TypeError pending. */
+ScrStr *scr_text_decode_opt(const ScrStr *codec, const ScrBytes *b) {
+  return scr_text_decode_with(b, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
+}
+
+bool scr_text_decoder_fatal(const ScrStr *codec) { return scr_tc_fatal(codec); }
+bool scr_text_decoder_ignore_bom(const ScrStr *codec) { return scr_tc_ignore_bom(codec); }
+
 static bool scr_tc_is_encoder(const void *h) { return ((const ScrStr *)h)->cap == SCR_TC_CAP_ENCODER; }
 
 static void *scr_tc_retain(void *h) { return h; }  /* immortal: nothing to count */
@@ -2947,7 +2979,7 @@ static ScrDyn *scr_tc_encode_into(ScrDyn *const *args, size_t argc) {
   return o;
 }
 
-static ScrDyn *scr_tc_decode(ScrDyn *const *args, size_t argc) {
+static ScrDyn *scr_tc_decode(const ScrStr *codec, ScrDyn *const *args, size_t argc) {
   /* `decode(input = empty, options = kEmptyObject)`: the options are
    * validated FIRST (an object, an array, a function or null; anything
    * else is ERR_INVALID_ARG_TYPE), then the input. */
@@ -2990,7 +3022,8 @@ static ScrDyn *scr_tc_decode(ScrDyn *const *args, size_t argc) {
     return NULL;
   }
   if (ib == NULL) return scr_tc_new_plain_str("");
-  ScrStr *s = scr_text_decode(ib);
+  ScrStr *s = scr_text_decode_with(ib, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
+  if (s == NULL) return NULL; /* a fatal decode of invalid bytes: the TypeError is pending */
   ScrDyn *d = scr_dyn_new_str(s);
   scr_str_release(s);
   return d;
@@ -3001,7 +3034,7 @@ static ScrDyn *scr_tc_invoke(void *h, ScrDyn *self, const char *method, ScrDyn *
   const bool enc = scr_tc_is_encoder(h);
   if (enc && strcmp(method, "encode") == 0) return scr_tc_encode(args, argc);
   if (enc && strcmp(method, "encodeInto") == 0) return scr_tc_encode_into(args, argc);
-  if (!enc && strcmp(method, "decode") == 0) return scr_tc_decode(args, argc);
+  if (!enc && strcmp(method, "decode") == 0) return scr_tc_decode((const ScrStr *)h, args, argc);
   /* Object.prototype's, which a codec inherits (it declares none of its
    * own beyond the three above): toString answers the @@toStringTag form,
    * valueOf the receiver, hasOwnProperty false (a codec has no own data
@@ -3021,8 +3054,8 @@ static ScrDyn *scr_tc_get(void *h, const char *key, size_t key_len) {
   (void)key_len;
   const bool enc = scr_tc_is_encoder(h);
   if (strcmp(key, "encoding") == 0) return scr_tc_new_plain_str("utf-8");
-  if (!enc && strcmp(key, "fatal") == 0) return scr_dyn_new_bool(false);
-  if (!enc && strcmp(key, "ignoreBOM") == 0) return scr_dyn_new_bool(false);
+  if (!enc && strcmp(key, "fatal") == 0) return scr_dyn_new_bool(scr_tc_fatal((const ScrStr *)h));
+  if (!enc && strcmp(key, "ignoreBOM") == 0) return scr_dyn_new_bool(scr_tc_ignore_bom((const ScrStr *)h));
   return NULL; /* not a modeled property — the caller answers undefined */
 }
 
@@ -13329,6 +13362,17 @@ ScrStr *scr_text_decode_dyn(const ScrDyn *v) {
   if (v->kind == SCR_DYN_UNDEF) return scr_str_new("", 0);
   if ((v->kind == SCR_DYN_BYTES || v->kind == SCR_DYN_ARRBUF) && v->v.bytes != NULL) {
     return scr_text_decode(v->v.bytes);
+  }
+  const char *m = "The \"list\" argument must be an instance of SharedArrayBuffer, ArrayBuffer or ArrayBufferView.";
+  scr_throw_error_msg_code(SCR_ERR_TYPE, m, strlen(m), "ERR_INVALID_ARG_TYPE");
+  return NULL;
+}
+
+/* The same decode over a checked-dynamic input, on a flagged decoder (the receiver's flags). */
+ScrStr *scr_text_decode_opt_dyn(const ScrStr *codec, const ScrDyn *v) {
+  if (v->kind == SCR_DYN_UNDEF) return scr_str_new("", 0);
+  if ((v->kind == SCR_DYN_BYTES || v->kind == SCR_DYN_ARRBUF) && v->v.bytes != NULL) {
+    return scr_text_decode_with(v->v.bytes, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
   }
   const char *m = "The \"list\" argument must be an instance of SharedArrayBuffer, ArrayBuffer or ArrayBufferView.";
   scr_throw_error_msg_code(SCR_ERR_TYPE, m, strlen(m), "ERR_INVALID_ARG_TYPE");

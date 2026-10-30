@@ -1055,6 +1055,63 @@ ScrStr *scr_text_decode(const ScrBytes *b) {
   return scr_bytes_decode_utf8(in, n);
 }
 
+/* The Encoding Standard's UTF-8 decoder run over the whole input without an error: the test a
+ * `fatal` decoder makes before it decodes. Every lead byte's allowed second-byte range is the
+ * spec's (E0 needs A0..BF, ED needs 80..9F, F0 needs 90..BF, F4 needs 80..8F), and a sequence cut
+ * off by the end of the input is an error. */
+static bool scr_utf8_is_valid(const uint8_t *in, size_t n) {
+  size_t i = 0;
+  while (i < n) {
+    uint8_t c = in[i];
+    if (c < 0x80) {
+      i++;
+      continue;
+    }
+    size_t need;
+    uint8_t lo = 0x80, hi = 0xBF;
+    if (c >= 0xC2 && c <= 0xDF) {
+      need = 1;
+    } else if (c >= 0xE0 && c <= 0xEF) {
+      need = 2;
+      if (c == 0xE0) lo = 0xA0;
+      if (c == 0xED) hi = 0x9F;
+    } else if (c >= 0xF0 && c <= 0xF4) {
+      need = 3;
+      if (c == 0xF0) lo = 0x90;
+      if (c == 0xF4) hi = 0x8F;
+    } else {
+      return false;
+    }
+    if (n - i - 1 < need) return false;
+    for (size_t k = 1; k <= need; k++) {
+      uint8_t b = in[i + k];
+      uint8_t l = k == 1 ? lo : 0x80;
+      uint8_t h = k == 1 ? hi : 0xBF;
+      if (b < l || b > h) return false;
+    }
+    i += need + 1;
+  }
+  return true;
+}
+
+/* TextDecoder.decode under the decoder's flags. A fatal decoder validates the whole input first
+ * (a BOM is valid UTF-8 and counts), and an invalid input throws Node's TypeError with its code and
+ * message; then the BOM is dropped unless ignoreBOM. +1 string, or NULL with the exception pending. */
+ScrStr *scr_text_decode_with(const ScrBytes *b, bool fatal, bool ignore_bom) {
+  const uint8_t *in = b->data;
+  size_t n = b->len;
+  if (fatal && !scr_utf8_is_valid(in, n)) {
+    static const char msg[] = "The encoded data was not valid for encoding utf-8";
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_ENCODING_INVALID_ENCODED_DATA");
+    return NULL;
+  }
+  if (!ignore_bom && n >= 3 && in[0] == 0xef && in[1] == 0xbb && in[2] == 0xbf) {
+    in += 3;
+    n -= 3;
+  }
+  return scr_bytes_decode_utf8(in, n);
+}
+
 /* ── node:string_decoder, the utf8 StringDecoder ─────────────────────────
  * The decoder VALUE is a one-field record holding the pending partial
  * sequence PACKED into an f64 (count in the low byte, then up to three

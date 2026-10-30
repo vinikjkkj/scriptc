@@ -8489,6 +8489,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_text_encoder_value()`);
           case "text.decoder":
             return finish(`scr_text_decoder_value()`);
+          // The flagged decoder (fatal bit 0, ignoreBOM bit 1): an immortal string per flags.
+          case "text.decoderOpt":
+            return finish(`scr_text_decoder_opt(${arg(0)})`);
+          // decode on a decoder with flags (scr_json.c): fatal validation throws
+          // the TypeError ERR_ENCODING_INVALID_ENCODED_DATA, so the pending check runs.
+          case "text.decodeOpt":
+            return finish(`scr_text_decode_opt(${arg(0)}, ${arg(1)})`);
+          case "text.decodeOptDyn":
+            return finish(`scr_text_decode_opt_dyn(${arg(0)}, ${arg(1)})`);
+          case "text.decoderFatal":
+            return finish(`scr_text_decoder_fatal(${arg(0)})`);
+          case "text.decoderIgnoreBOM":
+            return finish(`scr_text_decoder_ignore_bom(${arg(0)})`);
           // The fs option forms (scr_lib.c) — all in the may-throw seed,
           // like the rest of sync fs.
           case "fs.mkdirRecursiveSync":

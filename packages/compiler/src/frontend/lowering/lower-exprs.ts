@@ -46,6 +46,7 @@ import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { emitterRooted } from "./lower-emitter.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, type ClassInfo } from "./lower-classes.js";
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
+import { codecOfType } from "../codec-shadow.js";
 
 /** SCRIPTC_DTSTWIN_WHY probe: how many reads have taken the declaration-
  * module fence instead of the silent erasure stance. Read in the SAME run
@@ -1430,6 +1431,20 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       return { kind: "jsOp", op: "arrLit", args, type: JSVAL, loc };
     }
     if (ts.isTypeOfExpression(expr)) {
+      // typeof on a codec instance: Node answers "object", and the lowered value is its
+      // utf-8 string, which would answer "string". OPEN (mgtextcodec): refuse at the build.
+      if (
+        codecOfType(
+          { checker: L.checker, isStdlibFile: L.isStdlibFile, isStdlibSymbol: (s) => L.isStdlibSymbol(s) },
+          L.typeOf(expr.expression),
+        ) !== null
+      ) {
+        L.noLowering(
+          "typeof on a TextEncoder/TextDecoder value",
+          expr,
+          "a codec is an object in Node; its lowered value is a string (OPEN, mgtextcodec)",
+        );
+      }
       // `typeof queueMicrotask` / `typeof Math` on a STDLIB global: folds
       // to Node's answer BEFORE the operand lowers — read off the declared
       // type, because `typeof` is the one consumer that never needs the

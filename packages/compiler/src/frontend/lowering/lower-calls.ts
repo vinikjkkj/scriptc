@@ -38,7 +38,7 @@ import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } f
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitApplyCall, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
 import { emitterCtorCallOnGraft, lowerEmitterMixinCall } from "./lower-emitter-mixin.js";
-import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply } from "./lower-inspect.js";
+import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply, refuseCodecInspect } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
 import { isRequireBindingIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
 import { declSymbolOf } from "./lower-modules.js";
@@ -4834,6 +4834,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
             loc,
           } satisfies IrExpr;
         }
+        // A codec instance is lowered as its utf-8 string, which would print verbatim: the
+        // console form of a TextEncoder/TextDecoder refuses here (lower-inspect.ts).
+        refuseCodecInspect(L, a);
         // number/string/boolean ride the ScrLogArg protocol directly (the
         // runtime formats them Node-exactly — including -0).
         if (lowered.type.kind === "f64" || lowered.type.kind === "string" || lowered.type.kind === "bool") {

@@ -14,6 +14,7 @@ import { canonicalBuiltinModule, cjsEnumerableAccessorNames, isCjsJsFile, isJsSo
 import { isRequireBindingIdent, moduleNsSourceFileOf } from "./lower-namespaces.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
+import { codecGlobalName, type CodecGlobalName } from "../codec-shadow.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { invalidJsonModuleDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import {
@@ -6756,8 +6757,7 @@ let digestInputValueDispatches = 0;
     if (
       expr.name.text === "encoding" &&
       (isStdlibInstanceOf(L, expr.expression, "TextEncoder") ||
-        isStdlibInstanceOf(L, expr.expression, "TextDecoder")) &&
-      L.isStdlibMember(expr)
+        isStdlibInstanceOf(L, expr.expression, "TextDecoder"))
     ) {
       const loc = locOf(expr);
       return {
@@ -6765,6 +6765,21 @@ let digestInputValueDispatches = 0;
         stmts: [{ kind: "exprStmt", expr: L.lowerExprExpecting(expr.expression, STRING), loc }],
         result: { kind: "strLit", value: "utf-8", type: STRING, loc },
         type: STRING,
+        loc,
+      };
+    }
+    // codec.fatal / codec.ignoreBOM on a TextDecoder: the flags are the
+    // receiver's value (the immortal string says which decoder it is).
+    if (
+      (expr.name.text === "fatal" || expr.name.text === "ignoreBOM") &&
+      isStdlibInstanceOf(L, expr.expression, "TextDecoder")
+    ) {
+      const loc = locOf(expr);
+      return {
+        kind: "libCall",
+        fn: expr.name.text === "fatal" ? "text.decoderFatal" : "text.decoderIgnoreBOM",
+        args: [L.lowerExprExpecting(expr.expression, STRING)],
+        type: BOOL,
         loc,
       };
     }
@@ -9911,10 +9926,22 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * provenance, not the name, so a user's own same-named interface never
    * matches (isTimerHandleTyped's technique, for a stored instance whose
    * IR type alone cannot discriminate it). */
+  /** The codec global (TextEncoder/TextDecoder) a value symbol denotes for this
+   * lowerer: the stdlib global, or a program's proven ambient shadow (codec-shadow.ts). */
+  function codecOfLowerer(L: Lowerer, symbol: ts.Symbol | null | undefined): CodecGlobalName | null {
+    return codecGlobalName(
+      { checker: L.checker, isStdlibFile: L.isStdlibFile, isStdlibSymbol: (s) => L.isStdlibSymbol(s) },
+      symbol ?? undefined,
+    );
+  }
+
   function isStdlibInstanceOf(L: Lowerer, node: ts.Expression, name: string): boolean {
     const t = L.typeOf(node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== name) return false;
+    // A program's ambient `declare const TextDecoder` shadow whose type alias is proven
+    // to be the codec's own shape (codec-shadow.ts) is the same instance type.
+    if (codecOfLowerer(L, sym) === name) return true;
     return L.checker.declarationsOf(sym).some(
       (d) => (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) && L.isStdlibFile(d.getSourceFile()),
     );
@@ -9936,9 +9963,9 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
      * the receiver but its existence. */
     let ctorNode: ts.NewExpression | null = null;
     if (ts.isNewExpression(recv) && ts.isIdentifier(recv.expression)) {
-      const sym = L.resolveValueSymbol(recv.expression);
-      if (!sym || !L.isStdlibSymbol(sym)) return null;
-      cls = sym.name;
+      const codec = codecOfLowerer(L, L.resolveValueSymbol(recv.expression));
+      if (codec === null) return null;
+      cls = codec;
       ctorNode = recv;
     } else if ((member === "encode" || member === "encodeInto") && isStdlibInstanceOf(L, recv, "TextEncoder")) {
       cls = "TextEncoder";
@@ -9954,19 +9981,6 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     const loc = locOf(call);
     const ctorArgs = ctorNode?.arguments ?? [];
     if (cls === "TextDecoder") {
-      // The constructor may spell the default label; anything else (other
-      // labels, { fatal }/{ ignoreBOM } options) changes behavior the
-      // runtime doesn't implement.
-      const labelT = ctorArgs.length >= 1 ? L.typeOf(ctorArgs[0]!) : null;
-      const utf8Label =
-        labelT !== null && labelT.isStringLiteralType() && (labelT.value === "utf-8" || labelT.value === "utf8");
-      if (ctorArgs.length > 1 || (ctorArgs.length === 1 && !utf8Label)) {
-        L.noLowering(
-          "new TextDecoder beyond the default utf-8",
-          recv,
-          "utf-8 with default options is the supported decoder: new TextDecoder().decode(bytes)",
-        );
-      }
       if (call.arguments.length === 0) {
         // decode() with no input is "" per spec — nothing to evaluate.
         return { kind: "strLit", value: "", type: STRING, loc };
@@ -9978,13 +9992,25 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           "streaming decode has no lowering — decode whole buffers",
         );
       }
+      // The decoder's flags (fatal, ignoreBOM) are the receiver's VALUE: a
+      // composed `new TextDecoder(...)` lowers to its own immortal constant,
+      // and a stored decoder is read. The plain default decoder keeps the
+      // established lowering; a flagged one carries its flags to the runtime.
+      const decoder = ctorNode !== null ? L.lowerExpr(ctorNode) : L.lowerExpr(recv);
+      const plain = decoder.kind === "libCall" && decoder.fn === "text.decoder";
       const argNode = call.arguments[0]!;
+      if (ts.isIdentifier(argNode) && argNode.text === "undefined") {
+        // decode(undefined) is "" in Node, whatever the flags.
+        return { kind: "strLit", value: "", type: STRING, loc };
+      }
       const arg = L.lowerExpr(argNode);
       // A checked-dynamic input (an untyped value, or a Buffer whose call result the
       // program made dynamic): Node's decode rules, undefined is "" and anything but a
       // view or an ArrayBuffer throws (text.decodeDyn, scr_json.c).
       if (arg.type.kind === "dyn") {
-        return { kind: "libCall", fn: "text.decodeDyn", args: [arg], type: STRING, loc };
+        return plain
+          ? { kind: "libCall", fn: "text.decodeDyn", args: [arg], type: STRING, loc }
+          : { kind: "libCall", fn: "text.decodeOptDyn", args: [decoder, arg], type: STRING, loc };
       }
       if (!(arg.type.kind === "bytes" && arg.type.elem === "u8")) {
         L.noLowering(
@@ -9993,7 +10019,9 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           "Uint8Array/Buffer input decodes (ArrayBuffer values have no representation)",
         );
       }
-      return { kind: "libCall", fn: "text.decode", args: [arg], type: STRING, loc };
+      return plain
+        ? { kind: "libCall", fn: "text.decode", args: [arg], type: STRING, loc }
+        : { kind: "libCall", fn: "text.decodeOpt", args: [decoder, arg], type: STRING, loc };
     }
     if (ctorArgs.length > 0) {
       L.noLowering("new TextEncoder with arguments", recv);

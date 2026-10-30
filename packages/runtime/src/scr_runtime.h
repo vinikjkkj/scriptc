@@ -9666,6 +9666,14 @@ ScrStr *scr_bytes_to_str_range(const ScrBytes *b, const ScrStr *enc, double star
  * same replacement decode as toString("utf8") with the leading BOM
  * stripped. Borrows; +1; never throws. */
 ScrStr *scr_text_decode(const ScrBytes *b);
+/* The decode under a decoder's flags (scr_bytes.c): fatal validates first and throws the TypeError ERR_ENCODING_INVALID_ENCODED_DATA; ignore_bom keeps a leading BOM. +1 string, or NULL with the exception pending. */
+ScrStr *scr_text_decode_with(const ScrBytes *b, bool fatal, bool ignore_bom);
+/* The flagged decoder values and their decode (scr_json.c): flags bit 0 fatal, bit 1 ignoreBOM. */
+ScrStr *scr_text_decoder_opt(double flags);
+ScrStr *scr_text_decode_opt(const ScrStr *codec, const ScrBytes *b);
+ScrStr *scr_text_decode_opt_dyn(const ScrStr *codec, const ScrDyn *v);
+bool scr_text_decoder_fatal(const ScrStr *codec);
+bool scr_text_decoder_ignore_bom(const ScrStr *codec);
 
 /* Buffer.from(string, enc): "utf8" copies the bytes; "hex" parses pairs
  * and stops at the first invalid/odd tail (Node-lenient); "base64" and

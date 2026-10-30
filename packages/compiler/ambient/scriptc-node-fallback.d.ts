@@ -544,13 +544,14 @@ interface BufferConstructor {
 }
 declare var Buffer: BufferConstructor;
 
-/* The WHATWG encoders (Node globals). Only the COMPOSED forms lower —
- * `new TextEncoder().encode(s)` and `new TextDecoder().decode(bytes)`;
- * the label is typed as the utf-8 spellings (the one supported decoder;
- * other labels and the fatal/ignoreBOM options fence at the use site).
- * encodeInto lowers from a STORED encoder as well — its receiver is the
- * stateless instance, like encode's. */
+/* The WHATWG encoders (Node globals). The utf-8 forms lower, composed or
+ * stored: `new TextEncoder().encode(s)`, `new TextDecoder('utf-8', { fatal,
+ * ignoreBOM }).decode(bytes)` with literal options. Other labels, non-literal
+ * options and the streaming decode fence at the use site. encodeInto lowers
+ * from a STORED encoder as well — its receiver is the stateless instance,
+ * like encode's. */
 interface TextEncoder {
+  readonly encoding: string;
   encode(input?: string): Uint8Array;
   encodeInto(src: string, dest: Uint8Array): TextEncoderEncodeIntoResult;
 }
@@ -562,9 +563,12 @@ interface TextEncoderEncodeIntoResult {
 }
 declare var TextEncoder: { new (): TextEncoder };
 interface TextDecoder {
-  decode(input?: ArrayBufferView | ArrayBuffer): string;
+  readonly encoding: string;
+  readonly fatal: boolean;
+  readonly ignoreBOM: boolean;
+  decode(input?: ArrayBufferView | ArrayBuffer, options?: { stream?: boolean }): string;
 }
-declare var TextDecoder: { new (label?: "utf-8" | "utf8"): TextDecoder };
+declare var TextDecoder: { new (label?: string, options?: { fatal?: boolean; ignoreBOM?: boolean }): TextDecoder };
 
 /* The WHATWG event surface (Node globals since v15): declared so the
  * suite's event-plumbing tests typecheck and fence per SITE with the

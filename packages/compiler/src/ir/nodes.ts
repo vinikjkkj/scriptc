@@ -6772,6 +6772,17 @@ export type IrLibFn =
    * no-op count); never throws. */
   | "text.encoder"
   | "text.decoder"
+  /** `new TextDecoder(label, { fatal, ignoreBOM })` with literal utf-8 options: the immortal
+   * decoder string for the flags (bit 0 fatal, bit 1 ignoreBOM); the flags ride the value so a
+   * stored decoder keeps them. No runtime input; +1 (immortal); never throws. */
+  | "text.decoderOpt"
+  /** decode(bytes) on a decoder value with flags (scr_text_decode_opt): fatal validation throws
+   * the TypeError ERR_ENCODING_INVALID_ENCODED_DATA; a BOM is stripped unless ignoreBOM. May throw. */
+  | "text.decodeOpt"
+  | "text.decodeOptDyn"
+  /** The fatal and ignoreBOM flags of a decoder value (a boolean read of the immortal). Never throws. */
+  | "text.decoderFatal"
+  | "text.decoderIgnoreBOM"
   /** The wider sync fs slice (scr_lib.c), all throwing catchably with
    * Node's errno message shapes and `.code` stamped like the rest of
    * sync fs. unlink/chmod/chown wrap the syscalls 1:1 (Node reports the
@@ -13845,6 +13856,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "crypto.inputBytesEnc",
   "bytes.argChk",
   "text.decodeDyn",
+  "text.decodeOpt",
+  "text.decodeOptDyn",
   "text.destDyn",
   "bytes.equalsChk",
   "bytes.compareChk",
