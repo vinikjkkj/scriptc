@@ -21280,6 +21280,18 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts": {
+   "order": [
+    "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts"
+   ],
+   "diags": []
   }
  }
 }
