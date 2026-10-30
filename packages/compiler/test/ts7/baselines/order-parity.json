@@ -20927,6 +20927,30 @@
      "<repo>/tests/corpus/16323-random-bytes-mongodb-shape.cjs"
    ],
    "diags": []
+ },
+ "<repo>/tests/corpus/8730-text-decoder-fatal-and-bom.ts": {
+   "order": [
+     "<repo>/tests/corpus/8730-text-decoder-fatal-and-bom.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8731-text-encoder-members.ts": {
+   "order": [
+     "<repo>/tests/corpus/8731-text-encoder-members.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8732-bson-shadow-codec-globals.ts": {
+   "order": [
+     "<repo>/tests/corpus/8732-bson-shadow-codec-globals.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8733-text-decoder-flags-through-any.ts": {
+   "order": [
+     "<repo>/tests/corpus/8733-text-decoder-flags-through-any.ts"
+   ],
+   "diags": []
  }
  }
 }
