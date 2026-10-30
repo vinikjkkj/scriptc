@@ -142,6 +142,7 @@ import { isIslandExpr, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalF
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerNamespaceConditionalCall, namespaceOverrideOf } from "./lower-nsvalue.js";
 import { builtinMemberFnValueOf } from "./lower-fnvalue.js";
+import { evolvedEmptyArrayIrOf } from "./evolved-array.js";
 import { lowerStaticFetchCall } from "./lower-fetch.js";
 import { lowerDgramDnsModuleCall, lowerDgramMethodCall } from "./lower-dgram.js";
 import { lowerNodeTestModuleCall, lowerTestDirectCall, lowerTestMethodCall, lowerTestCtxProperty } from "./lower-test.js";
@@ -6718,6 +6719,10 @@ export class Lowerer {
   irTypeOf(node: ts.Node): IrType {
     // A binding whose value is a live export object is the DYN bag reference (cjs-live-exports.ts).
     if (ts.isIdentifier(node) && isLiveAliasName(this, node)) return DYN;
+    // An unannotated empty-initialized TypeScript array (`const a = []`) whose
+    // evolved element type the program's own pushes close (evolved-array.ts).
+    const evolvedArr = evolvedEmptyArrayIrOf(this, node);
+    if (evolvedArr !== null) return evolvedArr;
     const t = this.typeOf(node);
     // A never-tainted JS type (neverTaintedJsType) maps — never rides as
     // f64 — but must not: pre-empt the mapping so the JS fallback below

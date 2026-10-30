@@ -3,6 +3,7 @@
  * flow (if/while/for/for-of/do, switch, try/catch, jumps with the
  * finally-crossing fence), and blocked-binding poisoning. */
 import { protoDataAssignStmt } from "./lower-protodata.js";
+import { evolvedEmptyArrayIrOf } from "./evolved-array.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
@@ -4980,7 +4981,10 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // later references to this name don't produce cascading errors.
     let init: IrExpr;
     try {
-      const tableExpect = isLet ? null : uniformTupleArrayExpectation(L, decl);
+      // An evolving empty array (`const a = []` with pushes that close its
+      // element type, evolved-array.ts) lowers its literal at that type.
+      const evolvedExpect = ts.isIdentifier(decl.name) ? evolvedEmptyArrayIrOf(L, decl.name) : null;
+      const tableExpect = evolvedExpect ?? (isLet ? null : uniformTupleArrayExpectation(L, decl));
       init = tableExpect
         ? L.lowerExprExpecting(decl.initializer, tableExpect)
         : L.lowerExpr(decl.initializer);
@@ -5112,6 +5116,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // asked), while the initializer lowered to the runtime's dyn function
       // (lower-exprs, and timerGlobalDeclType in lower-fnvalue.ts). The slot is that dyn value.
       (init.type.kind === "dyn" ? timerGlobalDeclType(L, decl.initializer) : null) ??
+      (ts.isIdentifier(decl.name) ? evolvedEmptyArrayIrOf(L, decl.name) : null) ??
       (bindingTainted ? null : L.mapTypeOf(L.typeOf(decl.name))) ??
       (init.type.kind === "dyn" ? DYN : null) ??
       // A CONST holding a class reference whose DECLARED type is a
