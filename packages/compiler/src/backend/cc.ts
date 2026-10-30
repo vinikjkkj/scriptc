@@ -314,6 +314,9 @@ export interface CcOptions {
    * edge so a gate that drifts fails at SELECTION with the gate named,
    * not at the linker with a bare symbol. */
   zlibStream?: boolean;
+  /** The multi-byte WHATWG decoders (gbk, gb18030, big5, euc-jp, iso-2022-jp, shift_jis, euc-kr): compiles
+   * scr_text_mb.c and its index tables, only for a program that constructs one of these codecs by a constant label. */
+  textMb?: boolean;
   /** The stream.destroyDyn gate: scr_stream_dyn.c (links stream + inspect). */
   streamDyn?: boolean;
   /** The http.clientDestroyDyn gate: scr_http_dyn.c (implies scr_stream_dyn.c). */
@@ -2544,6 +2547,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // The zlib ↔ stream bridge (createUnzip and friends). The -I/-lz it
     // needs already rode the zlib arm above, which this gate implies.
     ...(opts.zlibStream ? [rt(join(rtDir, "scr_zlib_stream.c"))] : []),
+    ...(opts.textMb ? [rt(join(rtDir, "scr_text_mb.c"))] : []),
     ...(opts.streamDyn || opts.httpDyn ? [rt(join(rtDir, "scr_stream_dyn.c"))] : []),
     ...(opts.httpDyn ? [rt(join(rtDir, "scr_http_dyn.c"))] : []),
     // The zlib ↔ island bridge: only when BOTH halves are in the build

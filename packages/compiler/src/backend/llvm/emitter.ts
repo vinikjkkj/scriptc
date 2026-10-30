@@ -73,7 +73,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream } from "../../ir/nodes.js";
+import { moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream } from "../../ir/nodes.js";
 import { setDynOrderPlan } from "../dyn-members.js";
 import { orderRecordPlanCached } from "../../ir/nodes.js";
 import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
@@ -2162,6 +2162,7 @@ class LlEmitter {
     // any island entry (the engine's lazy boot consults it) — cc.ts
     // compiles scr_fetch.c on the same predicate.
     const usesFetch = moduleUsesFetch(this.mod);
+    const usesTextMb = moduleUsesTextMb(this.mod); // the gated multi-byte decoders (scr_text_mb.c)
     // Regex-surface programs stamp the RegExp handle-dispatch ops, gated
     // on the same moduleUsesRegex switch cc.ts links scr_regex.c by.
     const usesRegex = moduleUsesRegex(this.mod);
@@ -2274,6 +2275,7 @@ class LlEmitter {
     if (usesDcDyn) this.declare(`declare void @scr_dc_dyn_install()`);
     if (usesChildStream) this.declare(`declare void @scr_child_stream_dyn_install()`);
     if (usesFetch) this.declare(`declare void @scr_fetch_install()`);
+    if (usesTextMb) this.declare(`declare void @scr_text_mb_install()`);
     if (usesEvents && hasRefGlobals) {
       this.declare(`declare void @scr_run_exit_listeners(double)`);
       this.declare(`declare i32 @scr_exit_code_hint_get()`);
@@ -2743,6 +2745,7 @@ class LlEmitter {
       // scr_watch.c links only when this line is emitted.
       ...(usesFsWatch ? [`  call void @scr_watch_install()`] : []),
       ...(usesFetch ? [`  call void @scr_fetch_install()`] : []),
+      ...(usesTextMb ? [`  call void @scr_text_mb_install()`] : []),
       // The C twin's row: the static fetch dials through the poller, so
       // without the net hooks the loop exits before the response head.
       ...(usesNet ? [`  call void @scr_net_install()`, `  call void @scr_net_dyn_install()`] : []),

@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { canConvertToDyn, isRuntimeRootedClassName, strandTrap } from "../../ir/nodes.js";
 import { isProvenBufferRefinement } from "../buffer-refinement.js";
 import { codecGlobalName } from "../codec-shadow.js";
-import { MULTIBYTE_TEXT_ENCODINGS, WHATWG_LABEL_TO_ENCODING } from "../text-codec-labels.js";
+import { WHATWG_LABEL_TO_ENCODING } from "../text-codec-labels.js";
 import { BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { checkedArmBridge, lowerUnionContainerDispatch, captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
@@ -8041,11 +8041,13 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
         "not a WHATWG encoding label that Node accepts (replacement, iso-2022-cn/kr, hz-gb-2312 are refused by Node)",
       );
     }
-    if (MULTIBYTE_TEXT_ENCODINGS.has(canonical)) {
+    if (canonical === "iso-2022-jp") {
+      // OPEN (measured): ICU's escape matcher differs from the standard after ESC followed by $ ( . & O % (30 of
+      // 327680 two-byte cases, and the same prefixes in the single-byte sweep): a silent divergence stays a refusal.
       L.noLowering(
         `new TextDecoder('${lt.value}')`,
         label,
-        `the ${canonical} family is OPEN: its index tables are not generated yet (the single-byte and UTF-16 encodings lower)`,
+        "the iso-2022-jp family is OPEN: ICU's escape handling after ESC and one of $ ( . & O % differs from the standard",
       );
     }
     enc = canonical;
