@@ -9898,6 +9898,14 @@ ScrStr *scr_insp_format(ScrDyn *arr);
 ScrStr *scr_insp_jsval(ScrJsval *v, double recurse, double depth);
 #endif
 void scr_insp_begin(double recurse);
+/* util.inspect options (scr_inspect.c): opts_push installs an options object
+ * (NULL or any value keeps Node's defaults) as the active set and saves the
+ * previous one; opts_pop restores it. opt_depth / opt_max_array read the
+ * active depth and maxArrayLength (Infinity when unbounded). Borrowed input. */
+void scr_insp_opts_push(const ScrDyn *o);
+void scr_insp_opts_pop(void);
+double scr_insp_opt_depth(void);
+double scr_insp_opt_max_array(void);
 void scr_insp_entry(ScrStr *s, bool is_num);
 /* Circular references, Node-exact (<ref *N> / [Circular *N]): the
  * compiler-emitted helpers over CYCLE-CAPABLE composites call circ_check

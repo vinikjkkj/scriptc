@@ -6369,6 +6369,14 @@ export type IrLibFn =
   | "insp.format"
   | "insp.jsval"
   | "insp.begin"
+  /** util.inspect options (scr_inspect.c's InspOpts): optsPush installs an
+   * options object (a DYN, read by the runtime with Node's defaults) as the
+   * active set and saves the previous one; optsPop restores it. optDepth and
+   * optMaxArray read the active depth and maxArrayLength. */
+  | "insp.optsPush"
+  | "insp.optsPop"
+  | "insp.optDepth"
+  | "insp.optMaxArray"
   | "insp.entry"
   /** The frame entries for a compiled class instance's run-time property
    * table (args: the `%props` dyn table, recurse, depth) — one per

@@ -56,6 +56,10 @@ const strNode = (value: string, loc: SrcLoc): StrLit => ({ kind: "strLit", value
 const str = (value: string, loc: SrcLoc): IrExpr => ({ kind: "strLit", value, type: STRING, loc });
 const num = (value: number, loc: SrcLoc): IrExpr => ({ kind: "numLit", value, type: F64, loc });
 const boolLit = (value: boolean, loc: SrcLoc): IrExpr => ({ kind: "boolLit", value, type: BOOL, loc });
+/** The active util.inspect maxArrayLength (runtime options; Infinity when unbounded). */
+const optMaxArray = (loc: SrcLoc): IrExpr => ({ kind: "libCall", fn: "insp.optMaxArray", args: [], type: F64, loc });
+/** The active util.inspect depth (runtime options). */
+const optDepth = (loc: SrcLoc): IrExpr => ({ kind: "libCall", fn: "insp.optDepth", args: [], type: F64, loc });
 
 function concatAll(parts: IrExpr[], loc: SrcLoc): IrExpr {
   if (parts.length === 0) return str("", loc);
@@ -594,7 +598,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       const n = (): IrExpr => ref("n.0", F64);
       const shown = (): IrExpr => ref("s.0", F64);
       const i = (): IrExpr => ref("i.0", F64);
-      const hasMore = (): IrExpr => ({ kind: "bin", op: ">", left: n(), right: num(100, loc), type: BOOL, loc });
+      const hasMore = (): IrExpr => ({ kind: "bin", op: ">", left: n(), right: optMaxArray(loc), type: BOOL, loc });
       body = [
         { kind: "varDecl", localId: "n.0", init: len(), loc },
         {
@@ -605,7 +609,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
           loc,
         },
         depthGate("[Array]"),
-        { kind: "varDecl", localId: "s.0", init: { kind: "ternary", cond: hasMore(), then: num(100, loc), else_: n(), type: F64, loc }, loc },
+        { kind: "varDecl", localId: "s.0", init: { kind: "ternary", cond: hasMore(), then: optMaxArray(loc), else_: n(), type: F64, loc }, loc },
         ...begin(),
         {
           kind: "for",
@@ -623,11 +627,11 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
               {
                 kind: "libCall",
                 fn: "insp.moreItems",
-                args: [{ kind: "bin", op: "-", left: n(), right: num(100, loc), type: F64, loc }],
+                args: [{ kind: "bin", op: "-", left: n(), right: optMaxArray(loc), type: F64, loc }],
                 type: STRING,
                 loc,
               },
-              isNumberFlag(L, t.elem, () => at(num(100, loc)), loc),
+              isNumberFlag(L, t.elem, () => at(optMaxArray(loc)), loc),
             ),
           ],
           else_: null,
@@ -890,7 +894,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       const c = (): IrExpr => ref("c.0", F64);
       const label = isMap ? "Map" : "Set";
       const keyT = isMap ? (t as IrType & { kind: "map" }).key : (t as IrType & { kind: "set" }).elem;
-      const hasMore = (): IrExpr => ({ kind: "bin", op: ">", left: n(), right: num(100, loc), type: BOOL, loc });
+      const hasMore = (): IrExpr => ({ kind: "bin", op: ">", left: n(), right: optMaxArray(loc), type: BOOL, loc });
       const entryValue = (): IrExpr => {
         const k = child(keyT, mi("iterKey", [i()], keyT));
         if (!isMap) return k;
@@ -924,7 +928,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
             },
             {
               kind: "if",
-              cond: { kind: "bin", op: "===", left: c(), right: num(100, loc), type: BOOL, loc },
+              cond: { kind: "bin", op: "===", left: c(), right: optMaxArray(loc), type: BOOL, loc },
               then: [{ kind: "break", loc }],
               else_: null,
               loc,
@@ -942,7 +946,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
               {
                 kind: "libCall",
                 fn: "insp.moreItems",
-                args: [{ kind: "bin", op: "-", left: n(), right: num(100, loc), type: F64, loc }],
+                args: [{ kind: "bin", op: "-", left: n(), right: optMaxArray(loc), type: F64, loc }],
                 type: STRING,
                 loc,
               },
@@ -1385,6 +1389,131 @@ export function lowerConsoleInspectArg(
 
 /** The parsed options literal: the resolved depth (numeric; Infinity for
  * `null`), with every non-default knob fenced by name. */
+/** Literal truthiness of a compile-time constant option value, or null when
+ * the value is only known at run time. */
+function literalTruthy(node: ts.Expression): boolean | null {
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (node.kind === ts.SyntaxKind.FalseKeyword || node.kind === ts.SyntaxKind.NullKeyword) return false;
+  if (ts.isIdentifier(node) && node.text === "undefined") return false;
+  if (ts.isIdentifier(node) && node.text === "Infinity") return true;
+  if (ts.isNumericLiteral(node)) return Number(node.text) !== 0;
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text.length > 0;
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isObjectLiteralExpression(node) || ts.isArrayLiteralExpression(node)) return true;
+  return null;
+}
+
+/** A compile-time numeric option value (`5`, `-1`, `Infinity`, `null`), or null. */
+function literalNumber(node: ts.Expression): number | null | "unknown" {
+  if (node.kind === ts.SyntaxKind.NullKeyword) return null;
+  if (ts.isNumericLiteral(node)) return Number(node.text);
+  if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(node.operand)) return -Number(node.operand.text);
+  if (ts.isIdentifier(node) && node.text === "Infinity") return Infinity;
+  return "unknown";
+}
+
+/** util.inspect options this runtime does not render yet (OPEN, ci-classes
+ * iofmtopts). A literal value that shows the option non-default is a named
+ * build refusal; a value known only at run time is checked by the runtime
+ * options reader, which stops the program with the same name. */
+function refuseOpenInspectOption(L: Lowerer, prop: ts.PropertyAssignment, key: string, value: ts.Expression): void {
+  const open = (what: string): never =>
+    L.noLowering(`util.inspect with the '${what}' option`, prop, "this option is OPEN (ci-classes iofmtopts): the rendering for it is not lowered yet");
+  if (key === "stylize") open("stylize");
+  if (key === "customInspect" && literalTruthy(value) === false) open("customInspect: false");
+  if (["colors", "showHidden", "showProxy", "getters"].includes(key) && literalTruthy(value) === true) open(`${key}: true`);
+  if (key === "compact" && value.kind === ts.SyntaxKind.TrueKeyword) open("compact: true");
+  if (key === "sorted" && literalTruthy(value) === true && value.kind !== ts.SyntaxKind.TrueKeyword) open("sorted with a comparator");
+  if (key === "sorted" && (ts.isArrowFunction(value) || ts.isFunctionExpression(value))) open("sorted with a comparator");
+  if (key === "maxArrayLength" || key === "maxStringLength") {
+    const n = literalNumber(value);
+    if (n !== "unknown" && n !== null && !(n >= 0 && (n === Infinity || Number.isInteger(n)))) {
+      L.noLowering(`util.inspect with a ${key} that is not a non-negative integer`, prop, "the runtime slices whole counts only (OPEN: ci-classes iofmtopts)");
+    }
+  }
+}
+
+/** The options argument of util.inspect as a run-time DYN object. A literal
+ * object lowers entry by entry (the runtime reads it exactly as it reads any
+ * options object, so a literal and a run-time object share one code path);
+ * any other expression is taken as a value. Keys Node ignores are carried and
+ * ignored by the reader. */
+function inspectOptionsDyn(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr {
+  if (
+    ts.isObjectLiteralExpression(node) &&
+    node.properties.every((p) => ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)))
+  ) {
+    const fields: { key: IrExpr; value: IrExpr }[] = [];
+    for (const p of node.properties as ts.NodeArray<ts.PropertyAssignment>) {
+      const key = (p.name as ts.Identifier | ts.StringLiteral).text;
+      refuseOpenInspectOption(L, p, key, p.initializer);
+      const v = L.lowerExpr(p.initializer);
+      const dv: IrExpr = v.type.kind === "dyn" ? v : { kind: "dynFrom", value: v, type: DYN, loc };
+      fields.push({ key: str(key, loc), value: dv });
+    }
+    return { kind: "dynObjLit", fields, type: DYN, loc };
+  }
+  const v = L.lowerExpr(node);
+  return v.type.kind === "dyn" ? v : { kind: "dynFrom", value: v, type: DYN, loc };
+}
+
+/** util.inspect(value, options) with options: the interned helper
+ * `%util.inspopts.<n>(v, o)` pushes `o` as the runtime's active options,
+ * renders `v` at the options' depth, and pops in a finally, so a render that
+ * throws (an unsupported dynamic class throws catchably) cannot leave its
+ * options active. Interned per value type, the formatUnionHelper pattern. */
+function inspectWithOptionsHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
+  const key = `inspopts:${typeKey(t)}`;
+  const existing = L.inspectHelpers.get(key);
+  if (existing) return existing;
+  const name = `%util.inspopts.${L.inspectHelpers.size}`;
+  L.inspectHelpers.set(key, name);
+  const v: IrExpr = { kind: "varRef", localId: "v.0", type: t, loc };
+  const libStmt = (fn: "insp.optsPush" | "insp.optsPop", args: IrExpr[]): IrStmt => ({
+    kind: "exprStmt",
+    expr: { kind: "libCall", fn, args, type: { kind: "void" }, loc },
+    loc,
+  });
+  const o: IrExpr = { kind: "varRef", localId: "o.0", type: DYN, loc };
+  const body: IrStmt[] = [
+    libStmt("insp.optsPush", [o]),
+    {
+      kind: "tryCatch",
+      tryBody: [{ kind: "return", value: inspectExpr(L, t, v, num(0, loc), optDepth(loc), loc), loc }],
+      catchBody: null,
+      catchLocalId: null,
+      finallyBody: [libStmt("insp.optsPop", [])],
+      loc,
+    },
+  ];
+  L.liftedFns.push({
+    name,
+    params: [
+      { localId: "v.0", name: "v", type: t },
+      { localId: "o.0", name: "o", type: DYN },
+    ],
+    returnType: STRING,
+    locals: [
+      { id: "v.0", name: "v", type: t, mutable: false },
+      { id: "o.0", name: "o", type: DYN, mutable: false },
+    ],
+    body,
+    loc,
+  });
+  return name;
+}
+
+/** util.inspect(value, options) with options: the value and the options are
+ * evaluated in JS argument order (value first) as the helper's arguments. */
+function lowerInspectWithOptions(L: Lowerer, value: IrExpr, optsNode: ts.Expression, loc: SrcLoc): IrExpr {
+  return {
+    kind: "call",
+    callee: inspectWithOptionsHelper(L, value.type, loc),
+    args: [value, inspectOptionsDyn(L, optsNode, loc)],
+    type: STRING,
+    loc,
+  };
+}
+
 function parseInspectOptions(L: Lowerer, node: ts.Expression | undefined, recursive: boolean): number {
   if (!node || (ts.isIdentifier(node) && node.text === "undefined")) return 2;
   if (!ts.isObjectLiteralExpression(node)) {
@@ -1544,8 +1673,11 @@ function lowerInspectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrE
   if (reason !== null) {
     L.noLowering(`util.inspect of '${L.fmt(value.type)}' values`, valueNode, reason);
   }
-  const depth = parseInspectOptions(L, expr.arguments[1], walk.recursive);
-  return inspectExpr(L, value.type, value, num(0, loc), num(depth, loc), loc);
+  const optsNode = expr.arguments[1];
+  if (optsNode === undefined || (ts.isIdentifier(optsNode) && optsNode.text === "undefined")) {
+    return inspectExpr(L, value.type, value, num(0, loc), num(2, loc), loc);
+  }
+  return lowerInspectWithOptions(L, value, optsNode, loc);
 }
 
 /* ── util.format / util.formatWithOptions ────────────────────────────── */
