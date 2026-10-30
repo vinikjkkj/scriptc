@@ -9763,7 +9763,7 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
     // jsFuncNameOf is exactly that set. ACCESSORS decline: node spells
     // their name `get x`/`set x`, and half of it would be a wrong answer.
     // The empty string is the honest answer for `arr.map((x) => x)`.
-    const jsName = ts.isAccessor(node) ? "" : (nameIdent ? nameIdent.text : (jsFuncNameOf(node) ?? ""));
+    const jsName = ts.isAccessor(node) ? "" : (nameIdent ? nameIdent.text : (jsFuncNameOf(node, L) ?? ""));
     // Named function expressions/declarations can self-reference by name; an
     // object-literal method's name is a PROPERTY, not a binding — no self.
     const selfSymbol =
