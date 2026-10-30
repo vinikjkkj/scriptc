@@ -27,6 +27,7 @@ import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
 import type { EnumRefill, NullProtoPatch, OwnKeyPatch, SlotFilledPatch } from "./ir-patch.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
+import { attachFnSrcText } from "./fn-srctext-attach.js";
 import {
   anyOpRequiresDynamicDiag,
   blockedBindingUseDiag,
@@ -3823,6 +3824,20 @@ export class Lowerer {
     // after the whole walk, so the answer does not depend on whether the
     // cast was lowered before or after the surface that enumerates it.
     if (this.diags.length === 0) this.armOwnMasks(functions, artifacts.records);
+    // Function-value text (fn.text): every closure the program creates needs
+    // its exact source text, or the program is refused (fn-srctext-attach.ts).
+    {
+      const fnText = attachFnSrcText(functions, this.globalsList, this.program);
+      if (fnText.missing !== null && fnText.used !== null) {
+        this.pushDiag({
+          code: "SC2020",
+          message:
+            `util.format %s / String() / toString of a function value: the function '${fnText.missing.fnName}' ` +
+            `has no exact source text (OPEN, fmttostr: its text needs a form fn-srctext.ts does not reproduce)`,
+          loc: fnText.used,
+        } as ScrDiagnostic);
+      }
+    }
     const module: IrModule | null =
       this.diags.length > 0
         ? null

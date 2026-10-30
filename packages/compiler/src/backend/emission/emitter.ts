@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, moduleUsesTextMb, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
+import { DYN, funcOf, moduleUsesTextMb, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesFnText, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import { setDynOrderPlan } from "../dyn-members.js";
 import { orderRecordPlanCached, isRuntimeRootedClassName, moduleUsesObjectWeakKeys } from "../../ir/nodes.js";
@@ -689,6 +689,11 @@ export class CEmitter {
    * box resolves through it; a function this program cannot name has no
    * row, and `[Function (anonymous)]` stays the answer. */
   readonly fnNames = new Map<string, string>();
+  /** Emitted closure ENTRY POINT symbol -> the exact Function.prototype
+   * .toString text of its function (IrFunction.srcText). Filled at the same
+   * creation sites as fnNames; emitted (ScrFnText table, scr_fntext.c) only
+   * when the program uses fn.text (moduleUsesFnText). */
+  readonly fnTexts = new Map<string, string>();
   /** dyn-promise settle adapters (sc_pda_*), per INNER typeKey: convert a
    * typed fulfillment payload into the boxed destination's dyn payload
    * (scr_dyn_new_promise_adapting's callback — toDynHelper's promise arm). */
@@ -1776,6 +1781,21 @@ export class CEmitter {
         ``,
       );
     }
+    // The function-text table (scr_fntext.c, ScrFnText): emitted only when the
+    // program converts a function value to its source text. Sorted like the
+    // name table, so the TU is a function of the program.
+    const fnTextRows = moduleUsesFnText(this.mod)
+      ? [...this.fnTexts].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      : [];
+    if (fnTextRows.length > 0) {
+      out.push(
+        `${this.link}const ScrFnText sc_fn_text_tbl[] = {`,
+        ...fnTextRows.map(([sym, text]) =>
+          `  { (const void *)&${sym}, ${cStringLiteral(Buffer.from(text, "utf8"))} },`),
+        `};`,
+        ``,
+      );
+    }
     out.push(
       // Real argc/argv feed the library's interned process.argv (see
       // scr_lib_init — lazy, so argv-free programs allocate nothing).
@@ -1789,6 +1809,9 @@ export class CEmitter {
       ...(moduleUsesDynClass(this.mod) ? [`  scr_dyn_class_install();`] : []),
       ...(fnNameRows.length > 0
         ? [`  scr_fn_names_install(sc_fn_name_tbl, sizeof sc_fn_name_tbl / sizeof sc_fn_name_tbl[0]);`]
+        : []),
+      ...(fnTextRows.length > 0
+        ? [`  scr_fn_texts_install(sc_fn_text_tbl, sizeof sc_fn_text_tbl / sizeof sc_fn_text_tbl[0]);`]
         : []),
       ...(rcSiteRows.length > 0
         ? [
