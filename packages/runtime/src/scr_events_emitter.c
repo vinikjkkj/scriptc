@@ -110,7 +110,6 @@ ScrVt scr_emitter_vt = {1, 0, &scr_emitter_release_direct};
 
 double scr_emitter_default_max = 10; /* EventEmitter.defaultMaxListeners */
 
-static bool scr_ee_trace_hint_shown = false;
 
 /* Post-registration hook (scr_runtime.h): the stream unit's flow kick.
  * NULL in stream-free builds — behavior byte-identical. */
@@ -336,16 +335,12 @@ static void scr_ee_warn_maybe(ScrEmitter *em, ScrEeBucket *b) {
   /* Node's message byte for byte — except the pid, which is OURS (it can
    * never match another process's), and the synchronous timing (Node
    * defers the print by a tick). SEMANTICS.md documents both. */
-  fprintf(stderr,
-          "(node:%ld) MaxListenersExceededWarning: Possible EventEmitter memory leak "
-          "detected. %zu %s listeners added to [%s]. MaxListeners is %g. Use "
-          "emitter.setMaxListeners() to increase limit\n",
-          SCR_EE_PID(), b->n, b->name->data, em->cls, max);
-  if (!scr_ee_trace_hint_shown) {
-    scr_ee_trace_hint_shown = true;
-    fputs("(Use `node --trace-warnings ...` to show where the warning was created)\n",
-          stderr);
-  }
+  char msg[512];
+  snprintf(msg, sizeof msg,
+           "Possible EventEmitter memory leak detected. %zu %s listeners added to [%s]. "
+           "MaxListeners is %g. Use emitter.setMaxListeners() to increase limit",
+           b->n, b->name->data, em->cls, max);
+  scr_warn_report("MaxListenersExceededWarning", NULL, msg, NULL);
 }
 
 /* Registers a listener. cb and orig MOVE in; name is borrowed. Returns em

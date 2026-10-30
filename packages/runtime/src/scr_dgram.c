@@ -397,13 +397,7 @@ static void scr_dns_emit_empty_warning(void) {
     /* The channel is not linked: no listener can exist, so the default
      * report alone is Node's output — "(node:pid) [CODE] Name: message"
      * and the one-time trace hint. */
-    static bool hinted = false;
-    fflush(stdout);
-    fprintf(stderr, "(node:%ld) [DEP0118] DeprecationWarning: %s\n", SCR_DNS_PID(), text);
-    if (!hinted) {
-      hinted = true;
-      fputs("(Use `node --trace-deprecation ...` to show where the warning was created)\n", stderr);
-    }
+    scr_warn_report("DeprecationWarning", "DEP0118", text, NULL);
   }
   scr_str_release(m);
 }

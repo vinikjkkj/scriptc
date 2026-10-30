@@ -1285,17 +1285,9 @@ void scr_next_tick_raw(void (*fn)(void)) {
 /* ── process warnings raised by the always-linked core ───────────────
  * Node's process.emitWarning defers its dispatch with nextTick AT THE CALL,
  * so the warning rides the user tick queue in call order. The dispatch is
- * the dyn channel's scr_emit_warning (listeners, then the default report)
- * when main installs it: that install happens only in dyn-async programs,
- * where a 'warning' listener can exist. Otherwise the default report is
- * printed here, which is all Node prints when no listener is registered. */
-#ifdef _WIN32
-#include <process.h>
-#define SCR_PW_PID() ((long)_getpid())
-#else
-#include <unistd.h>
-#define SCR_PW_PID() ((long)getpid())
-#endif
+ * the dyn channel's scr_emit_warning (listeners, then the report) when main
+ * installs it, which happens only in dyn-async programs; otherwise the one
+ * printer, scr_warn_report, emits the report alone. */
 
 static void (*scr_proc_warn_hook)(const char *name, const char *code, ScrStr *message) = NULL;
 
@@ -1326,19 +1318,8 @@ static void scr_proc_warn_release_v(void *p) { scr_proc_warn_release((ScrProcWar
 /* The queued tick. The box's get is a +1 released here. */
 static void scr_proc_warn_fire(ScrClosure *self) {
   ScrProcWarn *w = (ScrProcWarn *)scr_box_get_ref(self->caps[0]);
-  if (scr_proc_warn_hook != NULL) {
-    scr_proc_warn_hook(w->name, NULL, w->msg);
-  } else {
-    /* Node's onWarning report: "(node:pid) Name: message", the message
-     * carrying its own detail line, then the one-time trace hint. */
-    fflush(stdout);
-    fprintf(stderr, "(node:%ld) %s: %s\n", SCR_PW_PID(), w->name, w->msg->data);
-    static bool hinted = false;
-    if (!hinted) {
-      hinted = true;
-      fputs("(Use `node --trace-warnings ...` to show where the warning was created)\n", stderr);
-    }
-  }
+  if (scr_proc_warn_hook != NULL) scr_proc_warn_hook(w->name, NULL, w->msg);
+  else scr_warn_report(w->name, NULL, w->msg->data, NULL); /* the one printer */
   scr_proc_warn_release(w);
 }
 
