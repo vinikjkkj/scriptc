@@ -1782,6 +1782,66 @@ function lowerInspectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrE
 
 /* ── util.format / util.formatWithOptions ────────────────────────────── */
 
+/** Statically visible %s shapes whose String(arg) Node runs and this
+ * lowering does not (OPEN, fmttostr): a record or object whose toString
+ * member is a function, a class instance whose class chain defines
+ * toString, a function value (Node prints its source text), an Error
+ * (Node prints err.stack). A union answers with its first hazardous arm. */
+function sConversionHazard(L: Lowerer, t: IrType, seen: Set<string>): string | null {
+  switch (t.kind) {
+    case "func":
+      return "a function value (Node prints its source text)";
+    case "record": {
+      const member = L.shapes.get(t.shapeId)?.fields.find((f) => f.name === "toString");
+      if (member && member.type.kind === "func") {
+        return "an object whose toString member is a function (Node calls it)";
+      }
+      return null;
+    }
+    case "object": {
+      if (isErrorClass(L, t.className)) return "an Error value (Node prints err.stack)";
+      for (let info: ClassInfo | null = L.classes.get(t.className) ?? null; info; info = info.base) {
+        if (info.methods.has("toString")) {
+          return "a class instance whose class defines toString (Node calls it)";
+        }
+      }
+      return null;
+    }
+    case "union": {
+      if (seen.has(t.unionId)) return null;
+      seen.add(t.unionId);
+      for (const arm of L.unions.get(t.unionId)?.arms ?? []) {
+        const hit = sConversionHazard(L, arm, seen);
+        if (hit !== null) return hit;
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** A `[Symbol.toPrimitive]` member on the checker's view of the argument
+ * (String(arg) calls it). Union constituents are checked one by one. */
+function toPrimitiveHazard(L: Lowerer, type: ts.Type): string | null {
+  if (type.isUnionType()) {
+    for (const c of ts.constituentTypes(type)) {
+      const hit = toPrimitiveHazard(L, c);
+      if (hit !== null) return hit;
+    }
+    return null;
+  }
+  for (const p of L.checker.getPropertiesOfType(type)) {
+    // Built-in members (Date's [Symbol.toPrimitive]) are not user code:
+    // Node's hasBuiltInToString inspects them, so they never fence.
+    if (L.isStdlibSymbol(p)) continue;
+    if (String(p.escapedName).startsWith("__@toPrimitive")) {
+      return "an object with a [Symbol.toPrimitive] member (Node calls it)";
+    }
+  }
+  return null;
+}
+
 /** One argument as format's %s conversion (Node: numbers via
  * formatNumber, strings verbatim, objects through inspect at the given
  * depth). Null = fence with the given reason.
@@ -1812,6 +1872,21 @@ function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
     const fn = sSpec ? "insp.fmtS" : "insp.dynS";
     return { kind: "libCall", fn, args: [value, num(depth, loc)], type: STRING, loc };
   }
+  // OPEN, fmttostr: the %s position runs String(arg) for any object whose
+  // toString is user code, for functions (their source text), and for
+  // Errors (their stack). This lowering prints the inspect form for those
+  // shapes, which diverges from Node, so they refuse at build time until an
+  // exact lowering exists. dyn arguments are NOT fenced: their conversion
+  // is the runtime's insp.fmtS, and the class-instance loss at dyn boxing
+  // is a separate open item.
+  const hazard = !sSpec ? null : (sConversionHazard(L, t, new Set()) ?? toPrimitiveHazard(L, L.typeOf(node)));
+  if (hazard !== null) {
+    L.noLowering(
+      `util.format %s of '${L.fmt(t)}' values`,
+      node,
+      `OPEN, fmttostr: ${hazard}. Node converts it through String(arg); this lowering would print the inspect form.`,
+    );
+  }
   // A UNION argument dispatches per arm at runtime: a string arm prints
   // VERBATIM (typeof arg === 'string' in Node's formatter — inspect's
   // quoting never applies at the top level), every other arm inspects.
@@ -1820,19 +1895,6 @@ function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
     const reason = inspectSupport(L, t, new Set(), walk);
     if (reason !== null) L.noLowering(`util.format %s of '${L.fmt(t)}' values`, node, reason);
     return formatValueExpr(L, t, value, depth, loc);
-  }
-  if (t.kind === "object" && !isErrorClass(L, t.className)) {
-    // hasBuiltInToString: a class with its OWN toString goes through
-    // String(arg) in Node, not inspect — call it explicitly instead.
-    for (let info: ClassInfo | null = L.classes.get(t.className) ?? null; info; info = info.base) {
-      if (info.methods.has("toString")) {
-        L.noLowering(
-          "util.format %s over a class with its own toString",
-          node,
-          "Node calls the override (String(arg)) — call it explicitly",
-        );
-      }
-    }
   }
   if (t.kind === "bytes") {
     L.noLowering(`util.format %s of typed-array values`, node, "pass util.inspect(buf) explicitly");
