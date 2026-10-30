@@ -7469,6 +7469,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts": {
+    "order": [
+      "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts": {
+    "order": [
+      "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/1741-stream-extends-writable.ts": {
    "order": [
     "<repo>/tests/corpus/1741-stream-extends-writable.ts"
