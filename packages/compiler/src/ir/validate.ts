@@ -1639,6 +1639,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "text.decoder": { argTypes: [], result: STRING },
   "text.decoderOpt": { argTypes: [F64], result: STRING },
   "text.decoderNamed": { argTypes: [STRING, F64], result: STRING },
+  "text.decoderNew": { argTypes: [STRING, F64], result: STRING },
+  "text.decodeState": { argTypes: [STRING, null, F64], result: STRING },
+  "text.decodeStateDyn": { argTypes: [STRING, DYN, F64], result: STRING },
+  "text.decodeEnd": { argTypes: [STRING, F64], result: STRING },
+  "text.decodeFresh": { argTypes: [STRING, F64, null], result: STRING },
+  "text.decodeFreshDyn": { argTypes: [STRING, F64, DYN], result: STRING },
   "text.codecEncoding": { argTypes: [STRING], result: STRING },
   "text.decodeOpt": { argTypes: [STRING, BYTES_U8], result: STRING },
   "text.decodeOptDyn": { argTypes: [STRING, DYN], result: STRING },
@@ -4493,6 +4499,10 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `libCall ${e.fn} arg ${i}`);
         });
+        if (e.fn === "text.decodeState" || e.fn === "text.decodeFresh") {
+          const ta = e.args[e.fn === "text.decodeState" ? 1 : 2]?.type;
+          if (ta?.kind !== "bytes") err(`libCall ${e.fn}: expected a bytes value, got ${ta?.kind}`, e.loc);
+        }
         if (e.fn === "text.decodeView") {
           // Any typed array or ArrayBuffer (the element kind is free; the byte image is its own).
           const ta = e.args[1]?.type;

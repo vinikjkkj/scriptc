@@ -1858,7 +1858,7 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
    * the TextCodec section below). Two header loads on a path that already
    * allocates; an immortal literal's cap is its length, so only a codec string
    * has a cap this large. */
-  if (s->rc == SCR_STR_IMMORTAL && s->cap >= 0xFFFF0000u) return scr_textcodec_box_fn(s);
+  if (s->cap >= 0xFFFD0000u) return scr_textcodec_box_fn(s); /* immortal or heap codec (cap marker) */
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_STR);
   d->v.str = scr_str_retain(s);
   return d;
@@ -2884,12 +2884,19 @@ static const SCR_STR_LIT(6) scr_tc_dec_fatal_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_
 static const SCR_STR_LIT(6) scr_tc_dec_nobom_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_CAP_DEC_NOBOM, "utf-8"};
 static const SCR_STR_LIT(6) scr_tc_dec_both_lit = {SCR_STR_IMMORTAL, 5, SCR_TC_CAP_DEC_BOTH, "utf-8"};
 
-/* The decoders of the OTHER encodings (scr_text_tables.h, generated from the WHATWG index data): cap =
- * 0xFFFF0000 | (encoding index << 2) | flags. Index 0 is utf-8, which keeps the caps above; an encoder
- * (0xFFFFFFF1) and every utf-8 cap sit outside this range. */
+/* The decoders of the OTHER encodings and the streaming state (scr_text_tables.h, generated from the WHATWG
+ * data). The cap carries the encoding index (bits 2-7) and the flags (bit 0 fatal, bit 1 ignoreBOM) in two
+ * families:
+ *   0xFFFF0000 | index << 2 | flags   an IMMORTAL codec: a composed decoder, stateless, nothing to release;
+ *   0xFFFD0000 | index << 2 | flags   a HEAP codec: a stored decoder, refcounted, carrying its streaming state.
+ * Index 0 is utf-8. The encoder (0xFFFFFFF1) and the utf-8 immortals (0xFFFFFFF2..5) sit outside both. */
 #include "scr_text_tables.h"
-#define SCR_TC_CAP_ENC_BASE 0xFFFF0000u
-static bool scr_tc_is_enc_cap(uint32_t cap) { return cap >= 0xFFFF0004u && cap <= 0xFFFF007Fu; }
+#define SCR_TC_CAP_IMM_BASE 0xFFFF0000u
+#define SCR_TC_CAP_HEAP_BASE 0xFFFD0000u
+static bool scr_tc_is_heap(uint32_t cap) { return (cap & 0xFFFFFF80u) == SCR_TC_CAP_HEAP_BASE; }
+static bool scr_tc_is_enc_cap(uint32_t cap) {
+  return (cap >= 0xFFFF0004u && cap <= 0xFFFF007Fu) || scr_tc_is_heap(cap);
+}
 static int scr_tc_enc(const ScrStr *c) { return scr_tc_is_enc_cap(c->cap) ? (int)((c->cap >> 2) & 0x3Fu) : 0; }
 
 static bool scr_tc_fatal(const ScrStr *c) {
@@ -2901,11 +2908,30 @@ static bool scr_tc_ignore_bom(const ScrStr *c) {
   return c->cap == SCR_TC_CAP_DEC_NOBOM || c->cap == SCR_TC_CAP_DEC_BOTH;
 }
 
-/* The WHATWG decode of one non-utf-8 encoding (the standard's own algorithms, measured against Node's
- * full-ICU TextDecoder): UTF-16 pairs with a BOM stripped unless ignoreBOM, a lone surrogate or a
- * trailing odd byte is one U+FFFD (the fatal TypeError), and the single-byte tables map 0x80..0xFF
- * with their unmapped entries as U+FFFD (fatal: the TypeError); x-user-defined maps 0x80+n to U+F780+n.
- * +1 string, or NULL with the TypeError pending. */
+/* The WHATWG Encoding Standard's decoder state, per decoder: the utf-8 sequence in progress, the utf-16 pending
+ * byte and lead surrogate, and the BOM-seen flag. A stream call keeps it; a non-stream call (and the end of
+ * a stream) flushes it and resets it. A fatal error resets it too (measured on Node 24.15). */
+typedef struct ScrTcSt {
+  uint8_t need, seen, lo, hi; /* utf-8: bytes still needed, bytes seen, the allowed next-byte bounds */
+  uint32_t cp;                /* utf-8: the code point so far */
+  uint8_t lead_set, lead;     /* utf-16: a pending first byte */
+  uint32_t surr;              /* utf-16: a pending lead surrogate (0: none) */
+  uint8_t bom;                /* the BOM-seen flag */
+} ScrTcSt;
+static void scr_tc_st_reset(ScrTcSt *st) {
+  st->need = 0; st->seen = 0; st->lo = 0x80; st->hi = 0xBF; st->cp = 0;
+  st->lead_set = 0; st->lead = 0; st->surr = 0; st->bom = 0;
+}
+/* A heap codec's block: the string header, the name (a canonical encoding name, at most 14 bytes), the state. */
+typedef struct ScrTcHeap {
+  uint32_t rc;
+  uint32_t len;
+  uint32_t cap;
+  char data[16];
+  ScrTcSt st;
+} ScrTcHeap;
+
+/* UTF-8 of one code point, appended. */
 static void scr_txt_put(uint8_t *o, size_t *k, uint32_t cp) {
   if (cp < 0x80) {
     o[(*k)++] = (uint8_t)cp;
@@ -2924,101 +2950,162 @@ static void scr_txt_put(uint8_t *o, size_t *k, uint32_t cp) {
   }
 }
 
-static ScrStr *scr_txt_decode(int enc, const uint8_t *in, size_t n, bool fatal, bool ignore_bom) {
-  const ScrTxtEnc *e = &scr_txt_encs[enc];
-  /* Output bound: 3 bytes per single-byte input, 4 per UTF-16 pair, and one 3-byte U+FFFD for a tail. */
-  uint8_t *o = (uint8_t *)malloc(3 * n + 4);
-  if (o == NULL) scr_trap("scriptc: out of memory\n");
-  size_t k = 0, i = 0;
-  if (e->kind == SCR_TXT_KIND_UTF16LE || e->kind == SCR_TXT_KIND_UTF16BE) {
-    const bool be = e->kind == SCR_TXT_KIND_UTF16BE;
-#define SCR_TXT_U16(p) (be ? (uint32_t)((in[p] << 8) | in[(p) + 1]) : (uint32_t)((in[(p) + 1] << 8) | in[p]))
-    if (!ignore_bom && n >= 2 && (be ? (in[0] == 0xFE && in[1] == 0xFF) : (in[0] == 0xFF && in[1] == 0xFE))) i = 2;
-    while (i + 2 <= n) {
-      uint32_t u = SCR_TXT_U16(i);
-      if (u >= 0xD800 && u <= 0xDBFF) {
-        if (i + 4 <= n) {
-          uint32_t v = SCR_TXT_U16(i + 2);
-          if (v >= 0xDC00 && v <= 0xDFFF) {
-            scr_txt_put(o, &k, 0x10000 + ((u - 0xD800) << 10) + (v - 0xDC00));
-            i += 4;
-            continue;
-          }
-          if (fatal) goto bad_input;
-          scr_txt_put(o, &k, 0xFFFD);
-          i += 2; /* the next unit is decoded on its own */
-          continue;
-        }
-        /* A lead surrogate pending at the end, with at most one odd byte after it: one U+FFFD for both. */
-        if (fatal) goto bad_input;
-        scr_txt_put(o, &k, 0xFFFD);
-        i = n;
-        break;
-      }
-      if (u >= 0xDC00 && u <= 0xDFFF) {
-        if (fatal) goto bad_input;
-        scr_txt_put(o, &k, 0xFFFD);
-        i += 2;
-        continue;
-      }
-      scr_txt_put(o, &k, u);
-      i += 2;
-    }
-#undef SCR_TXT_U16
-    if (i < n) {
-      if (fatal) goto bad_input;
-      scr_txt_put(o, &k, 0xFFFD);
-    }
-  } else {
-    for (i = 0; i < n; i++) {
-      const uint8_t b = in[i];
-      if (b < 0x80) {
-        scr_txt_put(o, &k, b);
-        continue;
-      }
-      if (e->kind == SCR_TXT_KIND_USERDEF) {
-        scr_txt_put(o, &k, 0xF780u + (uint32_t)(b - 0x80));
-        continue;
-      }
-      uint32_t cp = e->tab[b - 0x80];
-      if (cp == SCR_TXT_UNMAPPED) {
-        if (fatal) goto bad_input;
-        cp = 0xFFFD;
-      }
-      scr_txt_put(o, &k, cp);
-    }
+
+/* The output sink: UTF-8 bytes, the BOM rule (utf-8 and utf-16 only), and the fatal rule. */
+typedef struct ScrTcW {
+  uint8_t *o;
+  size_t k;
+  bool ign;
+  bool fatal;
+  bool bomable;
+} ScrTcW;
+static int scr_tc_emit(ScrTcW *w, ScrTcSt *st, uint32_t t) {
+  if (w->bomable && !st->bom) {
+    st->bom = 1;
+    if (!w->ign && t == 0xFEFFu) return 0; /* the BOM is the first token: dropped */
   }
-  ScrStr *s = scr_str_new((const char *)o, k);
+  scr_txt_put(w->o, &w->k, t);
+  return 0;
+}
+/* One error token (U+FFFD), or the fatal TypeError (-1). */
+static int scr_tc_fail(ScrTcW *w, ScrTcSt *st) {
+  if (w->fatal) return -1;
+  return scr_tc_emit(w, st, 0xFFFDu);
+}
+
+static int scr_tc_u8(ScrTcW *w, ScrTcSt *st, uint8_t b) {
+  for (;;) {
+    if (st->need == 0) {
+      if (b <= 0x7Fu) return scr_tc_emit(w, st, b);
+      if (b >= 0xC2u && b <= 0xDFu) {
+        st->need = 1;
+        st->cp = b & 0x1Fu;
+      } else if (b >= 0xE0u && b <= 0xEFu) {
+        if (b == 0xE0u) st->lo = 0xA0;
+        if (b == 0xEDu) st->hi = 0x9F;
+        st->need = 2;
+        st->cp = b & 0x0Fu;
+      } else if (b >= 0xF0u && b <= 0xF4u) {
+        if (b == 0xF0u) st->lo = 0x90;
+        if (b == 0xF4u) st->hi = 0x8F;
+        st->need = 3;
+        st->cp = b & 0x07u;
+      } else {
+        return scr_tc_fail(w, st);
+      }
+      st->seen = 0;
+      return 0;
+    }
+    if (b < st->lo || b > st->hi) {
+      st->need = 0; st->seen = 0; st->cp = 0; st->lo = 0x80; st->hi = 0xBF;
+      if (scr_tc_fail(w, st) < 0) return -1;
+      continue; /* the byte is read again, as a lead */
+    }
+    st->lo = 0x80; st->hi = 0xBF;
+    st->cp = (st->cp << 6) | (b & 0x3Fu);
+    if (++st->seen == st->need) {
+      const uint32_t cp = st->cp;
+      st->need = 0; st->seen = 0; st->cp = 0;
+      return scr_tc_emit(w, st, cp);
+    }
+    return 0;
+  }
+}
+
+static int scr_tc_u16_unit(ScrTcW *w, ScrTcSt *st, uint32_t u) {
+  if (st->surr != 0) {
+    const uint32_t lead = st->surr;
+    st->surr = 0;
+    if (u >= 0xDC00u && u <= 0xDFFFu) return scr_tc_emit(w, st, 0x10000u + ((lead - 0xD800u) << 10) + (u - 0xDC00u));
+    if (scr_tc_fail(w, st) < 0) return -1; /* a lone lead; the unit is read again */
+    return scr_tc_u16_unit(w, st, u);
+  }
+  if (u >= 0xD800u && u <= 0xDBFFu) {
+    st->surr = u;
+    return 0;
+  }
+  if (u >= 0xDC00u && u <= 0xDFFFu) return scr_tc_fail(w, st);
+  return scr_tc_emit(w, st, u);
+}
+static int scr_tc_u16(ScrTcW *w, ScrTcSt *st, bool be, uint8_t b) {
+  if (!st->lead_set) {
+    st->lead = b;
+    st->lead_set = 1;
+    return 0;
+  }
+  st->lead_set = 0;
+  const uint32_t u = be ? (((uint32_t)st->lead << 8) | b) : (((uint32_t)b << 8) | st->lead);
+  return scr_tc_u16_unit(w, st, u);
+}
+
+static int scr_tc_sb(ScrTcW *w, ScrTcSt *st, const ScrTxtEnc *e, uint8_t b) {
+  if (b < 0x80u) {
+    scr_txt_put(w->o, &w->k, b);
+    return 0;
+  }
+  if (e->kind == SCR_TXT_KIND_USERDEF) {
+    scr_txt_put(w->o, &w->k, 0xF780u + (uint32_t)(b - 0x80));
+    return 0;
+  }
+  const uint32_t cp = e->tab[b - 0x80];
+  if (cp == SCR_TXT_UNMAPPED) return scr_tc_fail(w, st);
+  scr_txt_put(w->o, &w->k, cp);
+  return 0;
+}
+
+/* The end of a stream: a sequence or lead still pending is one error. */
+static int scr_tc_flush(ScrTcW *w, ScrTcSt *st, int kind) {
+  if (kind == SCR_TXT_KIND_UTF8 && st->need != 0) {
+    st->need = 0; st->seen = 0; st->cp = 0; st->lo = 0x80; st->hi = 0xBF;
+    return scr_tc_fail(w, st);
+  }
+  if ((kind == SCR_TXT_KIND_UTF16LE || kind == SCR_TXT_KIND_UTF16BE) && (st->lead_set != 0 || st->surr != 0)) {
+    st->lead_set = 0; st->lead = 0; st->surr = 0;
+    return scr_tc_fail(w, st);
+  }
+  return 0;
+}
+
+/* One decode of an input under a codec's encoding and flags. A heap codec's state is used and kept when
+ * `stream` is set, and flushed (then reset) when not. An immortal codec has no state: every call is fresh.
+ * +1 string, or NULL with the TypeError pending. */
+static ScrStr *scr_tc_run(const ScrStr *codec, const uint8_t *in, size_t n, bool stream) {
+  const ScrTxtEnc *e = &scr_txt_encs[scr_tc_enc(codec)];
+  ScrTcSt local;
+  scr_tc_st_reset(&local);
+  ScrTcSt *st = &local;
+  if (scr_tc_is_heap(codec->cap)) st = &((ScrTcHeap *)(void *)codec)->st;
+  const bool bomable = e->kind == SCR_TXT_KIND_UTF8 || e->kind == SCR_TXT_KIND_UTF16LE || e->kind == SCR_TXT_KIND_UTF16BE;
+  uint8_t *o = (uint8_t *)malloc(3 * n + 8);
+  if (o == NULL) scr_trap("scriptc: out of memory\n");
+  ScrTcW w = {o, 0, scr_tc_ignore_bom(codec), scr_tc_fatal(codec), bomable};
+  int rc = 0;
+  for (size_t i = 0; i < n && rc == 0; i++) {
+    const uint8_t b = in[i];
+    if (e->kind == SCR_TXT_KIND_UTF8) rc = scr_tc_u8(&w, st, b);
+    else if (e->kind == SCR_TXT_KIND_UTF16LE) rc = scr_tc_u16(&w, st, false, b);
+    else if (e->kind == SCR_TXT_KIND_UTF16BE) rc = scr_tc_u16(&w, st, true, b);
+    else rc = scr_tc_sb(&w, st, e, b);
+  }
+  if (rc == 0 && !stream) rc = scr_tc_flush(&w, st, e->kind);
+  if (rc < 0 || !stream) scr_tc_st_reset(st);
+  if (rc < 0) {
+    free(o);
+    char msg[160];
+    const int m = snprintf(msg, sizeof msg, "The encoded data was not valid for encoding %s", e->name);
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)m, "ERR_ENCODING_INVALID_ENCODED_DATA");
+    return NULL;
+  }
+  ScrStr *s = scr_str_new((const char *)o, w.k);
   free(o);
   return s;
-bad_input: {
-  free(o);
-  char msg[160];
-  const int m = snprintf(msg, sizeof msg, "The encoded data was not valid for encoding %s", e->name);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)m, "ERR_ENCODING_INVALID_ENCODED_DATA");
-  return NULL;
-}
 }
 
-/* decode of a raw byte image under a decoder value's own encoding and flags (+1 string, or NULL with the
- * TypeError pending). */
-static ScrStr *scr_tc_decode_raw(const ScrStr *codec, const uint8_t *in, size_t n) {
-  const int enc = scr_tc_enc(codec);
-  if (enc == 0) return scr_text_decode_image(in, n, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
-  return scr_txt_decode(enc, in, n, scr_tc_fatal(codec), scr_tc_ignore_bom(codec));
-}
-static ScrStr *scr_tc_decode_bytes(const ScrStr *codec, const ScrBytes *b) {
-  return scr_tc_decode_raw(codec, b->data, b->len);
-}
-
-/* TextDecoder.decode of a typed array or ArrayBuffer of ANY element kind: Node decodes the view's own bytes
- * (len elements of elem_size bytes each, the storage's little-endian image). */
-ScrStr *scr_text_decode_view(const ScrStr *codec, const ScrBytes *b) {
-  return scr_tc_decode_raw(codec, b->data, b->len * scr_bytes_elem_size(b->elem));
-}
+/* The bytes of a typed array or ArrayBuffer of any element kind: its image (len elements of elem_size bytes). */
+static size_t scr_tc_image_len(const ScrBytes *b) { return b->len * scr_bytes_elem_size(b->elem); }
 
 /* new TextDecoder(label, { fatal, ignoreBOM }) for a CONSTANT canonical encoding name (the lowering resolved
- * the WHATWG label at build time): the immortal codec of that encoding and flags. */
+ * the WHATWG label at build time): the immortal codec of that encoding and flags (a composed decoder). */
 ScrStr *scr_text_decoder_named(const ScrStr *name, double flags) {
   scr_textcodec_box_fn = &scr_textcodec_box_impl;
   const int f = (int)flags & 3;
@@ -3031,7 +3118,76 @@ ScrStr *scr_text_decoder_named(const ScrStr *name, double flags) {
   return scr_text_decoder_opt((double)f); /* utf-8 */
 }
 
-/* encoding of a codec value: a fresh string (+1) of its canonical name; the encoder is utf-8. */
+/* A STORED decoder: a fresh heap codec for a canonical name and flags (+1). It is the only codec with state. */
+ScrStr *scr_text_decoder_new(const ScrStr *name, double flags) {
+  scr_textcodec_box_fn = &scr_textcodec_box_impl;
+  int enc = 0;
+  for (int e = 1; e < SCR_TXT_ENC_COUNT; e++) {
+    const size_t n = strlen(scr_txt_encs[e].name);
+    if (name->len == n && memcmp(name->data, scr_txt_encs[e].name, n) == 0) {
+      enc = e;
+      break;
+    }
+  }
+  ScrTcHeap *h = (ScrTcHeap *)scr_str_codec_block(sizeof *h);
+  const char *cn = scr_txt_encs[enc].name;
+  const size_t cl = strlen(cn);
+  h->rc = 1;
+  h->len = (uint32_t)cl;
+  h->cap = SCR_TC_CAP_HEAP_BASE | ((uint32_t)enc << 2) | ((uint32_t)flags & 3u);
+  memcpy(h->data, cn, cl + 1);
+  scr_tc_st_reset(&h->st);
+  return (ScrStr *)h;
+}
+
+/* decode(bytes) on a codec: a stream call keeps the state, a non-stream call flushes it. +1, or NULL with the
+ * TypeError pending. */
+ScrStr *scr_text_decode_state(const ScrStr *codec, const ScrBytes *b, double stream) {
+  return scr_tc_run(codec, b->data, scr_tc_image_len(b), stream != 0.0);
+}
+/* decode(x) on a codec, x checked-dynamic: undefined is "" (and the flush); a view or an ArrayBuffer decodes
+ * its bytes; anything else throws Node's ERR_INVALID_ARG_TYPE. */
+ScrStr *scr_text_decode_state_dyn(const ScrStr *codec, const ScrDyn *v, double stream) {
+  if (v->kind == SCR_DYN_UNDEF) return scr_tc_run(codec, NULL, 0, stream != 0.0);
+  if ((v->kind == SCR_DYN_BYTES || v->kind == SCR_DYN_ARRBUF) && v->v.bytes != NULL) {
+    return scr_text_decode_state(codec, v->v.bytes, stream);
+  }
+  const char *m = "The \"list\" argument must be an instance of SharedArrayBuffer, ArrayBuffer or ArrayBufferView.";
+  scr_throw_error_msg_code(SCR_ERR_TYPE, m, strlen(m), "ERR_INVALID_ARG_TYPE");
+  return NULL;
+}
+/* decode() or decode(undefined) on a codec: no input, the stream flag decides flush or keep. */
+ScrStr *scr_text_decode_end(const ScrStr *codec, double stream) {
+  return scr_tc_run(codec, NULL, 0, stream != 0.0);
+}
+/* decode(bytes, { stream: true }) on a COMPOSED decoder: a fresh decoder whose pending state is dropped after
+ * the call (Node's answer for a decoder nothing else holds). */
+ScrStr *scr_text_decode_fresh(const ScrStr *name, double flags, const ScrBytes *b) {
+  return scr_tc_run(scr_text_decoder_named(name, flags), b->data, scr_tc_image_len(b), true);
+}
+ScrStr *scr_text_decode_fresh_dyn(const ScrStr *name, double flags, const ScrDyn *v) {
+  if (v->kind == SCR_DYN_UNDEF) return scr_str_new("", 0);
+  if ((v->kind == SCR_DYN_BYTES || v->kind == SCR_DYN_ARRBUF) && v->v.bytes != NULL) {
+    return scr_text_decode_fresh(name, flags, v->v.bytes);
+  }
+  const char *m = "The \"list\" argument must be an instance of SharedArrayBuffer, ArrayBuffer or ArrayBufferView.";
+  scr_throw_error_msg_code(SCR_ERR_TYPE, m, strlen(m), "ERR_INVALID_ARG_TYPE");
+  return NULL;
+}
+
+/* A flushing decode of a byte image, as the non-stream paths use it. */
+static ScrStr *scr_tc_decode_raw(const ScrStr *codec, const uint8_t *in, size_t n) {
+  return scr_tc_run(codec, in, n, false);
+}
+static ScrStr *scr_tc_decode_bytes(const ScrStr *codec, const ScrBytes *b) {
+  return scr_text_decode_state(codec, b, 0.0);
+}
+/* decode of ANY typed array / ArrayBuffer under a codec: its byte image, flushed. */
+ScrStr *scr_text_decode_view(const ScrStr *codec, const ScrBytes *b) {
+  return scr_tc_decode_raw(codec, b->data, scr_tc_image_len(b));
+}
+
+/* The canonical encoding name of a codec value: a fresh string (+1); the encoder is utf-8. */
 ScrStr *scr_text_codec_encoding(const ScrStr *codec) {
   const char *n = scr_txt_encs[scr_tc_enc(codec)].name;
   return scr_str_new(n, strlen(n));
@@ -3048,7 +3204,7 @@ ScrStr *scr_text_decoder_opt(double flags) {
   }
 }
 
-/* decode(bytes) on a decoder value: the flags are the value's own. +1 string, or NULL with the TypeError pending. */
+/* decode(bytes) on a decoder value, flushed: the flags and the state are the value's own. +1, or NULL. */
 ScrStr *scr_text_decode_opt(const ScrStr *codec, const ScrBytes *b) {
   return scr_tc_decode_bytes(codec, b);
 }
@@ -3058,8 +3214,9 @@ bool scr_text_decoder_ignore_bom(const ScrStr *codec) { return scr_tc_ignore_bom
 
 static bool scr_tc_is_encoder(const void *h) { return ((const ScrStr *)h)->cap == SCR_TC_CAP_ENCODER; }
 
-static void *scr_tc_retain(void *h) { return h; }  /* immortal: nothing to count */
-static void scr_tc_release(void *h) { (void)h; }
+/* A codec handle owns one count of its string (an immortal codec ignores it; a heap codec is freed at zero). */
+static void *scr_tc_retain(void *h) { scr_str_retain((ScrStr *)h); return h; }
+static void scr_tc_release(void *h) { scr_str_release((ScrStr *)h); }
 
 static ScrDyn *scr_tc_new_plain_str(const char *lit) {
   ScrStr *s = scr_str_new(lit, strlen(lit));
@@ -3130,49 +3287,33 @@ static ScrDyn *scr_tc_encode_into(ScrDyn *const *args, size_t argc) {
 }
 
 static ScrDyn *scr_tc_decode(const ScrStr *codec, ScrDyn *const *args, size_t argc) {
-  /* `decode(input = empty, options = kEmptyObject)`: the options are
-   * validated FIRST (an object, an array, a function or null; anything
-   * else is ERR_INVALID_ARG_TYPE), then the input. */
+  /* `decode(input = empty, options = kEmptyObject)`: the options are validated FIRST (an object, an array,
+   * a function, null or undefined; anything else is ERR_INVALID_ARG_TYPE), then the input. Only an object
+   * with a truthy `stream` streams: null and undefined flush (measured on Node 24.15). */
   ScrDyn *input = argc > 0 ? args[0] : scr_dyn_undefined();
   ScrDyn *opts = argc > 1 ? args[1] : scr_dyn_undefined();
   bool stream = false;
-  if (opts->kind != SCR_DYN_UNDEF) {
-    if (opts->kind == SCR_DYN_NULL) {
-      /* `null` skips the flush flag (Node: `if (options !== null) flags |=
-       * options.stream ? 0 : FLUSH`), i.e. it streams. */
-      stream = true;
-    } else if (opts->kind == SCR_DYN_OBJ) {
-      ScrDyn *sv = scr_dyn_obj_key_get(opts, "stream", 6); /* +1, or NULL when a getter threw */
-      if (sv == NULL) return NULL;
-      stream = scr_dyn_truthy(sv);
-      scr_dyn_release(sv);
-    } else if (opts->kind == SCR_DYN_ARR || opts->kind == SCR_DYN_FUNC) {
-      stream = false; /* an array or function has no `stream` of its own to read */
-    } else {
-      scr_dyn_arg_type_fail("options", "of type object", opts);
-      return NULL;
-    }
-  }
-  const ScrBytes *ib = NULL;
-  if (input->kind != SCR_DYN_UNDEF) {
-    ib = scr_tc_input_bytes(input);
-    if (ib == NULL) {
-      static const char msg[] =
-          "The \"list\" argument must be an instance of SharedArrayBuffer, ArrayBuffer or ArrayBufferView.";
-      scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_INVALID_ARG_TYPE");
-      return NULL;
-    }
-  }
-  if (stream) {
-    static const char msg[] =
-        "TextDecoder.prototype.decode with { stream: true } on a dynamic value is not supported yet"
-        " (a decoder is represented by its constant utf-8 value, which has nowhere to hold the pending"
-        " partial sequence and the BOM-seen bit a streaming decode carries between calls)";
-    scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+  if (opts->kind == SCR_DYN_OBJ) {
+    ScrDyn *sv = scr_dyn_obj_key_get(opts, "stream", 6); /* +1, or NULL when a getter threw */
+    if (sv == NULL) return NULL;
+    stream = scr_dyn_truthy(sv);
+    scr_dyn_release(sv);
+  } else if (opts->kind != SCR_DYN_UNDEF && opts->kind != SCR_DYN_NULL && opts->kind != SCR_DYN_ARR &&
+             opts->kind != SCR_DYN_FUNC) {
+    scr_dyn_arg_type_fail("options", "of type object", opts);
     return NULL;
   }
-  if (ib == NULL) return scr_tc_new_plain_str("");
-  ScrStr *s = scr_tc_decode_bytes(codec, ib);
+  ScrStr *s;
+  if (input->kind == SCR_DYN_UNDEF) {
+    s = scr_text_decode_end(codec, stream ? 1.0 : 0.0);
+  } else if ((input->kind == SCR_DYN_BYTES || input->kind == SCR_DYN_ARRBUF) && input->v.bytes != NULL) {
+    s = scr_text_decode_state(codec, input->v.bytes, stream ? 1.0 : 0.0);
+  } else {
+    static const char msg[] =
+        "The \"list\" argument must be an instance of SharedArrayBuffer, ArrayBuffer or ArrayBufferView.";
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_INVALID_ARG_TYPE");
+    return NULL;
+  }
   if (s == NULL) return NULL; /* a fatal decode of invalid bytes: the TypeError is pending */
   ScrDyn *d = scr_dyn_new_str(s);
   scr_str_release(s);

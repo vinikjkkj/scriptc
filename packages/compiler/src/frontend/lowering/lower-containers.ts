@@ -8015,7 +8015,7 @@ function codecOf(L: Lowerer, symbol: ts.Symbol | null | undefined): ReturnType<t
 /** The encoding and flags of `new TextDecoder(label?, options?)`: `enc` is the canonical WHATWG
  * name (utf-8 when the label is absent), bit 0 of `flags` fatal, bit 1 ignoreBOM. A non-literal label or
  * options refuse at the build, by name. */
-function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: string; flags: number } {
+export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: string; flags: number } {
   let enc = "utf-8";
   const args = expr.arguments ?? [];
   const isUndefinedArg = (a: ts.Expression): boolean => ts.isIdentifier(a) && a.text === "undefined";
@@ -8122,25 +8122,15 @@ function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: string; fla
     if (codec === "TextDecoder") {
       // The decoder's state (fatal, ignoreBOM) is carried by WHICH immortal
       // string it is: 0 is the default decoder, and each flag adds one.
+      // A STORED decoder is a heap codec (text.decoderNew): it carries its streaming state.
       const spec = decoderCtorSpec(L, expr);
-      const flags = spec.flags;
-      if (spec.enc !== "utf-8") {
-        return {
-          kind: "libCall",
-          fn: "text.decoderNamed",
-          args: [
-            { kind: "strLit", value: spec.enc, type: STRING, loc: locOf(expr) },
-            { kind: "numLit", value: flags, type: F64, loc: locOf(expr) },
-          ],
-          type: STRING,
-          loc: locOf(expr),
-        };
-      }
-      if (flags === 0) return { kind: "libCall", fn: "text.decoder", args: [], type: STRING, loc: locOf(expr) };
       return {
         kind: "libCall",
-        fn: "text.decoderOpt",
-        args: [{ kind: "numLit", value: flags, type: F64, loc: locOf(expr) }],
+        fn: "text.decoderNew",
+        args: [
+          { kind: "strLit", value: spec.enc, type: STRING, loc: locOf(expr) },
+          { kind: "numLit", value: spec.flags, type: F64, loc: locOf(expr) },
+        ],
         type: STRING,
         loc: locOf(expr),
       };
