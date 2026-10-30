@@ -1422,6 +1422,30 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_str_release(iso);
         return with;
       }
+      if (d->v.handle.tag == SCR_DYNH_TEXTCODEC) {
+        /* Node's TextDecoder / TextEncoder [util.inspect.custom]: the decoder
+         * prints `TextDecoder { encoding, fatal, ignoreBOM }` and the encoder
+         * prints its own `{ encoding }` with no class prefix (measured on
+         * Node 24.15). The flags are the handle's own: the get hook answers
+         * fatal/ignoreBOM for a decoder and NULL for an encoder. */
+        const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
+        ScrDyn *obj = scr_dyn_new_obj();
+        ScrDyn *enc = ops->get(d->v.handle.ptr, "encoding", 8);
+        if (enc != NULL) scr_dyn_obj_set_lit(obj, "encoding", 8, enc);
+        ScrDyn *fat = ops->get(d->v.handle.ptr, "fatal", 5);
+        ScrStr *base = scr_str_new("", 0);
+        if (fat != NULL) {
+          scr_dyn_obj_set_lit(obj, "fatal", 5, fat);
+          ScrDyn *ign = ops->get(d->v.handle.ptr, "ignoreBOM", 9);
+          if (ign != NULL) scr_dyn_obj_set_lit(obj, "ignoreBOM", 9, ign);
+          scr_str_release(base);
+          base = scr_str_new("TextDecoder", 11);
+        }
+        ScrStr *with = insp_with_base(base, obj, recurse, depth);
+        scr_str_release(base);
+        scr_dyn_release(obj);
+        return with;
+      }
       if (d->v.handle.tag == SCR_DYNH_STATS) {
         /* A Stats prints `Stats { ...its enumerable own members... }` (Node's
          * class-name prefix): the members object is exactly those members. */
