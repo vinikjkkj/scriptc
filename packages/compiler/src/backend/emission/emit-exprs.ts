@@ -6872,6 +6872,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               `scr_tp_set_timeout_v(${arg(0)}, 4, 0.0, (void *)${arg(1)}, (void *(*)(void *))&${va.retain}, (void (*)(void *))&${va.release}, ${E.traceArgC(vT)}, ${sig}, ${refed})`,
             );
           }
+          case "tp.intervalOpen":
+            return finish(`scr_tp_interval_open(${arg(0)}, ${arg(1)})`);
+          case "tp.intervalOpenS":
+            return finish(`scr_tp_interval_open_s(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "tp.intervalNext":
+            return finish(`scr_tp_interval_next(${arg(0)})`);
+          case "tp.intervalClose":
+            return finish(`scr_tp_interval_close(${arg(0)})`);
+          case "tp.intervalCloseP":
+            return finish(`scr_tp_interval_close_p(${arg(0)})`);
+          case "tp.intervalAwaitClose":
+            return finish(`scr_tp_interval_await_close(${arg(0)})`);
           case "dc.channel":
             return finish(`scr_dc_channel(${arg(0)})`);
           case "dc.channelDyn":

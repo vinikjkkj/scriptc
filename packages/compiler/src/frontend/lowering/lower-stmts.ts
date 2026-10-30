@@ -6,7 +6,7 @@ import { protoDataAssignStmt } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
-import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
+import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
 import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { wholeExportRootRebindable } from "./lower-modules.js";
@@ -9900,6 +9900,12 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
         L.stdlibGlobalMember(stmt.expression, "process") === "stdin"
       ) {
         return lowerForAwaitStdin(L, stmt);
+      }
+      // node:timers/promises setInterval(delay, value, options) as the
+      // iterable: the runtime interval record (lowerForAwaitTimersInterval).
+      {
+        const tpInterval = timersPromisesIntervalCallOf(L, stmt.expression);
+        if (tpInterval) return lowerForAwaitTimersInterval(L, stmt, tpInterval, labels);
       }
       // Readable streams (the readableAsyncIterator surface): the mapped
       // receiver class roots at a readable-sided stream class.

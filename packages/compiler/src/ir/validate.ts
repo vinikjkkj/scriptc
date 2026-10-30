@@ -1550,6 +1550,13 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "tp.setTimeoutVS": { argTypes: [F64, null, ABORTSIGNAL_T, BOOL], result: { kind: "promise", inner: VOID } },
   "tp.setTimeoutVoid": { argTypes: [F64, BOOL], result: { kind: "promise", inner: VOID } },
   "tp.setTimeoutVoidS": { argTypes: [F64, ABORTSIGNAL_T, BOOL], result: { kind: "promise", inner: VOID } },
+  // timers/promises setInterval as an iterator: a record handle (f64) per loop.
+  "tp.intervalOpen": { argTypes: [F64, BOOL], result: F64 },
+  "tp.intervalOpenS": { argTypes: [F64, ABORTSIGNAL_T, BOOL], result: F64 },
+  "tp.intervalNext": { argTypes: [F64], result: { kind: "promise", inner: VOID } },
+  "tp.intervalClose": { argTypes: [F64], result: VOID },
+  "tp.intervalCloseP": { argTypes: [F64], result: { kind: "promise", inner: VOID } },
+  "tp.intervalAwaitClose": { argTypes: [F64], result: BOOL },
   "dc.channel": { argTypes: [STRING], result: F64 },
   "dc.channelDyn": { argTypes: [STRING], result: DYN },
   "dc.tracingChannelDyn": { argTypes: [STRING], result: DYN },

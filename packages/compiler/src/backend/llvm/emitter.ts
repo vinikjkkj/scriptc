@@ -1207,6 +1207,14 @@ const LIB_FN_SYMS: Record<string, string> = {
   // generic shapes; the throwing members ride the pending check.
   "tp.setTimeout": "scr_tp_set_timeout",
   "tp.setImmediate": "scr_tp_set_immediate",
+  // timers/promises setInterval iterator (scr_tp_interval.c): the record
+  // handle is an f64; next is +1 promise; close is void.
+  "tp.intervalOpen": "scr_tp_interval_open",
+  "tp.intervalOpenS": "scr_tp_interval_open_s",
+  "tp.intervalNext": "scr_tp_interval_next",
+  "tp.intervalClose": "scr_tp_interval_close",
+  "tp.intervalCloseP": "scr_tp_interval_close_p",
+  "tp.intervalAwaitClose": "scr_tp_interval_await_close",
   // stream/promises' finished form (+1 promise; may-throw pending check;
   // the pipeline form needs the stream-array compound and emits below).
   "sp.finished": "scr_sp_finished",

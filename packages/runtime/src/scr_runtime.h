@@ -10553,6 +10553,19 @@ typedef struct ScrAbortSignal ScrAbortSignal;
 ScrPromise *scr_tp_set_timeout_v(double ms, int kind, double num, void *val,
                                  void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace,
                                  ScrAbortSignal *sig, bool refed);
+/* timers/promises setInterval as an async iterator (scr_tp_interval.c): open
+ * arms the interval once at loop entry (sig borrowed, nullable); next returns
+ * the promise for one tick (+1), rejecting with an AbortError on abort; close
+ * clears the interval and releases the record (every loop exit). Handles are
+ * the record address as f64. */
+double scr_tp_interval_open(double ms, bool refed);
+double scr_tp_interval_open_s(double ms, ScrAbortSignal *sig, bool refed);
+ScrPromise *scr_tp_interval_next(double h);
+void scr_tp_interval_close(double h);
+/* The same close, answering a fulfilled promise for the for-await's awaited
+ * IteratorClose (break, return, throw out of the body). */
+ScrPromise *scr_tp_interval_close_p(double h);
+bool scr_tp_interval_await_close(double h);
 typedef struct ScrAbortController ScrAbortController;
 ScrAbortSignal *scr_abort_signal_new(void);
 ScrAbortSignal *scr_abort_signal_retain(ScrAbortSignal *s);
