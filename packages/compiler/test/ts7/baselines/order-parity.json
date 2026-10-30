@@ -7036,9 +7036,105 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/16900-await-reject-try-flag-direct.ts": {
+   "order": [
+    "<repo>/tests/corpus/16900-await-reject-try-flag-direct.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16901-await-reject-try-flag-ctor.ts": {
+   "order": [
+    "<repo>/tests/corpus/16901-await-reject-try-flag-ctor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16902-await-reject-nested-finally-number.ts": {
+   "order": [
+    "<repo>/tests/corpus/16902-await-reject-nested-finally-number.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16903-await-reject-async-arrow.ts": {
+   "order": [
+    "<repo>/tests/corpus/16903-await-reject-async-arrow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16904-await-reject-class-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/16904-await-reject-class-method.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16905-await-reject-loop-body.ts": {
+   "order": [
+    "<repo>/tests/corpus/16905-await-reject-loop-body.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16906-await-reject-for-await.ts": {
+   "order": [
+    "<repo>/tests/corpus/16906-await-reject-for-await.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16907-await-reject-rethrow-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/16907-await-reject-rethrow-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16908-await-reject-operand.ts": {
+   "order": [
+    "<repo>/tests/corpus/16908-await-reject-operand.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16909-await-reject-keep-outer-number.ts": {
+   "order": [
+    "<repo>/tests/corpus/16909-await-reject-keep-outer-number.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1691-stream-transform.ts": {
    "order": [
     "<repo>/tests/corpus/1691-stream-transform.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16910-await-reject-binding-const.ts": {
+   "order": [
+    "<repo>/tests/corpus/16910-await-reject-binding-const.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16911-await-reject-skips-continuation.ts": {
+   "order": [
+    "<repo>/tests/corpus/16911-await-reject-skips-continuation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16912-await-resolve-control.ts": {
+   "order": [
+    "<repo>/tests/corpus/16912-await-resolve-control.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16913-await-reject-later-async-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/16913-await-reject-later-async-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16914-await-reject-try-finally-only.ts": {
+   "order": [
+    "<repo>/tests/corpus/16914-await-reject-try-finally-only.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/16915-await-reject-timer-gap.ts": {
+   "order": [
+    "<repo>/tests/corpus/16915-await-reject-timer-gap.ts"
    ],
    "diags": []
   },
