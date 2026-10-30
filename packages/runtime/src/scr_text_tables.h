@@ -6,7 +6,7 @@
 
 /* An unmapped index entry (the standard's null): a decode of it is U+FFFD, or the fatal TypeError. */
 #define SCR_TXT_UNMAPPED 0xFFFFu
-enum { SCR_TXT_KIND_UTF8, SCR_TXT_KIND_UTF16LE, SCR_TXT_KIND_UTF16BE, SCR_TXT_KIND_SB, SCR_TXT_KIND_USERDEF };
+enum { SCR_TXT_KIND_UTF8, SCR_TXT_KIND_UTF16LE, SCR_TXT_KIND_UTF16BE, SCR_TXT_KIND_SB, SCR_TXT_KIND_USERDEF, SCR_TXT_KIND_MB };
 
 static const uint16_t scr_txt_tab_ibm866[128] = {
   0x0410, 0x0411, 0x0412, 0x0413, 0x0414, 0x0415, 0x0416, 0x0417, 0x0418, 0x0419, 0x041A, 0x041B, 0x041C, 0x041D, 0x041E, 0x041F,
@@ -279,42 +279,49 @@ static const uint16_t scr_txt_tab_x_mac_cyrillic[128] = {
   0x0440, 0x0441, 0x0442, 0x0443, 0x0444, 0x0445, 0x0446, 0x0447, 0x0448, 0x0449, 0x044A, 0x044B, 0x044C, 0x044D, 0x044E, 0x20AC,
 };
 
-typedef struct ScrTxtEnc { const char *name; int kind; const uint16_t *tab; } ScrTxtEnc;
+typedef struct ScrTxtEnc { const char *name; int kind; const uint16_t *tab; int fam; } ScrTxtEnc;
 static const ScrTxtEnc scr_txt_encs[] = {
-  {"utf-8", SCR_TXT_KIND_UTF8, NULL},
-  {"utf-16le", SCR_TXT_KIND_UTF16LE, NULL},
-  {"utf-16be", SCR_TXT_KIND_UTF16BE, NULL},
-  {"ibm866", SCR_TXT_KIND_SB, scr_txt_tab_ibm866},
-  {"iso-8859-2", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_2},
-  {"iso-8859-3", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_3},
-  {"iso-8859-4", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_4},
-  {"iso-8859-5", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_5},
-  {"iso-8859-6", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_6},
-  {"iso-8859-7", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_7},
-  {"iso-8859-8", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_8},
-  {"iso-8859-8-i", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_8},
-  {"iso-8859-10", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_10},
-  {"iso-8859-13", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_13},
-  {"iso-8859-14", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_14},
-  {"iso-8859-15", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_15},
-  {"iso-8859-16", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_16},
-  {"koi8-r", SCR_TXT_KIND_SB, scr_txt_tab_koi8_r},
-  {"koi8-u", SCR_TXT_KIND_SB, scr_txt_tab_koi8_u},
-  {"macintosh", SCR_TXT_KIND_SB, scr_txt_tab_macintosh},
-  {"windows-874", SCR_TXT_KIND_SB, scr_txt_tab_windows_874},
-  {"windows-1250", SCR_TXT_KIND_SB, scr_txt_tab_windows_1250},
-  {"windows-1251", SCR_TXT_KIND_SB, scr_txt_tab_windows_1251},
-  {"windows-1252", SCR_TXT_KIND_SB, scr_txt_tab_windows_1252},
-  {"windows-1253", SCR_TXT_KIND_SB, scr_txt_tab_windows_1253},
-  {"windows-1254", SCR_TXT_KIND_SB, scr_txt_tab_windows_1254},
-  {"windows-1255", SCR_TXT_KIND_SB, scr_txt_tab_windows_1255},
-  {"windows-1256", SCR_TXT_KIND_SB, scr_txt_tab_windows_1256},
-  {"windows-1257", SCR_TXT_KIND_SB, scr_txt_tab_windows_1257},
-  {"windows-1258", SCR_TXT_KIND_SB, scr_txt_tab_windows_1258},
-  {"x-mac-cyrillic", SCR_TXT_KIND_SB, scr_txt_tab_x_mac_cyrillic},
-  {"x-user-defined", SCR_TXT_KIND_USERDEF, NULL},
+  {"utf-8", SCR_TXT_KIND_UTF8, NULL, SCR_TXT_FAM_NONE},
+  {"utf-16le", SCR_TXT_KIND_UTF16LE, NULL, SCR_TXT_FAM_NONE},
+  {"utf-16be", SCR_TXT_KIND_UTF16BE, NULL, SCR_TXT_FAM_NONE},
+  {"ibm866", SCR_TXT_KIND_SB, scr_txt_tab_ibm866, SCR_TXT_FAM_NONE},
+  {"iso-8859-2", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_2, SCR_TXT_FAM_NONE},
+  {"iso-8859-3", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_3, SCR_TXT_FAM_NONE},
+  {"iso-8859-4", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_4, SCR_TXT_FAM_NONE},
+  {"iso-8859-5", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_5, SCR_TXT_FAM_NONE},
+  {"iso-8859-6", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_6, SCR_TXT_FAM_NONE},
+  {"iso-8859-7", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_7, SCR_TXT_FAM_NONE},
+  {"iso-8859-8", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_8, SCR_TXT_FAM_NONE},
+  {"iso-8859-8-i", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_8, SCR_TXT_FAM_NONE},
+  {"iso-8859-10", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_10, SCR_TXT_FAM_NONE},
+  {"iso-8859-13", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_13, SCR_TXT_FAM_NONE},
+  {"iso-8859-14", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_14, SCR_TXT_FAM_NONE},
+  {"iso-8859-15", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_15, SCR_TXT_FAM_NONE},
+  {"iso-8859-16", SCR_TXT_KIND_SB, scr_txt_tab_iso_8859_16, SCR_TXT_FAM_NONE},
+  {"koi8-r", SCR_TXT_KIND_SB, scr_txt_tab_koi8_r, SCR_TXT_FAM_NONE},
+  {"koi8-u", SCR_TXT_KIND_SB, scr_txt_tab_koi8_u, SCR_TXT_FAM_NONE},
+  {"macintosh", SCR_TXT_KIND_SB, scr_txt_tab_macintosh, SCR_TXT_FAM_NONE},
+  {"windows-874", SCR_TXT_KIND_SB, scr_txt_tab_windows_874, SCR_TXT_FAM_NONE},
+  {"windows-1250", SCR_TXT_KIND_SB, scr_txt_tab_windows_1250, SCR_TXT_FAM_NONE},
+  {"windows-1251", SCR_TXT_KIND_SB, scr_txt_tab_windows_1251, SCR_TXT_FAM_NONE},
+  {"windows-1252", SCR_TXT_KIND_SB, scr_txt_tab_windows_1252, SCR_TXT_FAM_NONE},
+  {"windows-1253", SCR_TXT_KIND_SB, scr_txt_tab_windows_1253, SCR_TXT_FAM_NONE},
+  {"windows-1254", SCR_TXT_KIND_SB, scr_txt_tab_windows_1254, SCR_TXT_FAM_NONE},
+  {"windows-1255", SCR_TXT_KIND_SB, scr_txt_tab_windows_1255, SCR_TXT_FAM_NONE},
+  {"windows-1256", SCR_TXT_KIND_SB, scr_txt_tab_windows_1256, SCR_TXT_FAM_NONE},
+  {"windows-1257", SCR_TXT_KIND_SB, scr_txt_tab_windows_1257, SCR_TXT_FAM_NONE},
+  {"windows-1258", SCR_TXT_KIND_SB, scr_txt_tab_windows_1258, SCR_TXT_FAM_NONE},
+  {"x-mac-cyrillic", SCR_TXT_KIND_SB, scr_txt_tab_x_mac_cyrillic, SCR_TXT_FAM_NONE},
+  {"x-user-defined", SCR_TXT_KIND_USERDEF, NULL, SCR_TXT_FAM_NONE},
+  {"gbk", SCR_TXT_KIND_MB, NULL, SCR_TXT_FAM_GB18030},
+  {"gb18030", SCR_TXT_KIND_MB, NULL, SCR_TXT_FAM_GB18030},
+  {"big5", SCR_TXT_KIND_MB, NULL, SCR_TXT_FAM_BIG5},
+  {"euc-jp", SCR_TXT_KIND_MB, NULL, SCR_TXT_FAM_EUCJP},
+  {"iso-2022-jp", SCR_TXT_KIND_MB, NULL, SCR_TXT_FAM_ISO2022JP},
+  {"shift_jis", SCR_TXT_KIND_MB, NULL, SCR_TXT_FAM_SJIS},
+  {"euc-kr", SCR_TXT_KIND_MB, NULL, SCR_TXT_FAM_EUCKR},
 };
-#define SCR_TXT_ENC_COUNT 32
+#define SCR_TXT_ENC_COUNT 39
 
 /* The immortal codec string for (encoding index e >= 1, flags f): the name is the
  * canonical encoding, cap = 0xFFFF0000 | (e << 2) | f (bit 0 fatal, bit 1 ignoreBOM). The
@@ -443,6 +450,34 @@ static const SCR_STR_LIT(15) scr_txt_lit_31_0 = {SCR_STR_IMMORTAL, 14, 0xFFFF007
 static const SCR_STR_LIT(15) scr_txt_lit_31_1 = {SCR_STR_IMMORTAL, 14, 0xFFFF007Du, "x-user-defined"};
 static const SCR_STR_LIT(15) scr_txt_lit_31_2 = {SCR_STR_IMMORTAL, 14, 0xFFFF007Eu, "x-user-defined"};
 static const SCR_STR_LIT(15) scr_txt_lit_31_3 = {SCR_STR_IMMORTAL, 14, 0xFFFF007Fu, "x-user-defined"};
+static const SCR_STR_LIT(4) scr_txt_lit_32_0 = {SCR_STR_IMMORTAL, 3, 0xFFFF0080u, "gbk"};
+static const SCR_STR_LIT(4) scr_txt_lit_32_1 = {SCR_STR_IMMORTAL, 3, 0xFFFF0081u, "gbk"};
+static const SCR_STR_LIT(4) scr_txt_lit_32_2 = {SCR_STR_IMMORTAL, 3, 0xFFFF0082u, "gbk"};
+static const SCR_STR_LIT(4) scr_txt_lit_32_3 = {SCR_STR_IMMORTAL, 3, 0xFFFF0083u, "gbk"};
+static const SCR_STR_LIT(8) scr_txt_lit_33_0 = {SCR_STR_IMMORTAL, 7, 0xFFFF0084u, "gb18030"};
+static const SCR_STR_LIT(8) scr_txt_lit_33_1 = {SCR_STR_IMMORTAL, 7, 0xFFFF0085u, "gb18030"};
+static const SCR_STR_LIT(8) scr_txt_lit_33_2 = {SCR_STR_IMMORTAL, 7, 0xFFFF0086u, "gb18030"};
+static const SCR_STR_LIT(8) scr_txt_lit_33_3 = {SCR_STR_IMMORTAL, 7, 0xFFFF0087u, "gb18030"};
+static const SCR_STR_LIT(5) scr_txt_lit_34_0 = {SCR_STR_IMMORTAL, 4, 0xFFFF0088u, "big5"};
+static const SCR_STR_LIT(5) scr_txt_lit_34_1 = {SCR_STR_IMMORTAL, 4, 0xFFFF0089u, "big5"};
+static const SCR_STR_LIT(5) scr_txt_lit_34_2 = {SCR_STR_IMMORTAL, 4, 0xFFFF008Au, "big5"};
+static const SCR_STR_LIT(5) scr_txt_lit_34_3 = {SCR_STR_IMMORTAL, 4, 0xFFFF008Bu, "big5"};
+static const SCR_STR_LIT(7) scr_txt_lit_35_0 = {SCR_STR_IMMORTAL, 6, 0xFFFF008Cu, "euc-jp"};
+static const SCR_STR_LIT(7) scr_txt_lit_35_1 = {SCR_STR_IMMORTAL, 6, 0xFFFF008Du, "euc-jp"};
+static const SCR_STR_LIT(7) scr_txt_lit_35_2 = {SCR_STR_IMMORTAL, 6, 0xFFFF008Eu, "euc-jp"};
+static const SCR_STR_LIT(7) scr_txt_lit_35_3 = {SCR_STR_IMMORTAL, 6, 0xFFFF008Fu, "euc-jp"};
+static const SCR_STR_LIT(12) scr_txt_lit_36_0 = {SCR_STR_IMMORTAL, 11, 0xFFFF0090u, "iso-2022-jp"};
+static const SCR_STR_LIT(12) scr_txt_lit_36_1 = {SCR_STR_IMMORTAL, 11, 0xFFFF0091u, "iso-2022-jp"};
+static const SCR_STR_LIT(12) scr_txt_lit_36_2 = {SCR_STR_IMMORTAL, 11, 0xFFFF0092u, "iso-2022-jp"};
+static const SCR_STR_LIT(12) scr_txt_lit_36_3 = {SCR_STR_IMMORTAL, 11, 0xFFFF0093u, "iso-2022-jp"};
+static const SCR_STR_LIT(10) scr_txt_lit_37_0 = {SCR_STR_IMMORTAL, 9, 0xFFFF0094u, "shift_jis"};
+static const SCR_STR_LIT(10) scr_txt_lit_37_1 = {SCR_STR_IMMORTAL, 9, 0xFFFF0095u, "shift_jis"};
+static const SCR_STR_LIT(10) scr_txt_lit_37_2 = {SCR_STR_IMMORTAL, 9, 0xFFFF0096u, "shift_jis"};
+static const SCR_STR_LIT(10) scr_txt_lit_37_3 = {SCR_STR_IMMORTAL, 9, 0xFFFF0097u, "shift_jis"};
+static const SCR_STR_LIT(7) scr_txt_lit_38_0 = {SCR_STR_IMMORTAL, 6, 0xFFFF0098u, "euc-kr"};
+static const SCR_STR_LIT(7) scr_txt_lit_38_1 = {SCR_STR_IMMORTAL, 6, 0xFFFF0099u, "euc-kr"};
+static const SCR_STR_LIT(7) scr_txt_lit_38_2 = {SCR_STR_IMMORTAL, 6, 0xFFFF009Au, "euc-kr"};
+static const SCR_STR_LIT(7) scr_txt_lit_38_3 = {SCR_STR_IMMORTAL, 6, 0xFFFF009Bu, "euc-kr"};
 static const void *const scr_txt_lits[SCR_TXT_ENC_COUNT][4] = {
   {NULL, NULL, NULL, NULL},
   {&scr_txt_lit_1_0, &scr_txt_lit_1_1, &scr_txt_lit_1_2, &scr_txt_lit_1_3},
@@ -476,5 +511,12 @@ static const void *const scr_txt_lits[SCR_TXT_ENC_COUNT][4] = {
   {&scr_txt_lit_29_0, &scr_txt_lit_29_1, &scr_txt_lit_29_2, &scr_txt_lit_29_3},
   {&scr_txt_lit_30_0, &scr_txt_lit_30_1, &scr_txt_lit_30_2, &scr_txt_lit_30_3},
   {&scr_txt_lit_31_0, &scr_txt_lit_31_1, &scr_txt_lit_31_2, &scr_txt_lit_31_3},
+  {&scr_txt_lit_32_0, &scr_txt_lit_32_1, &scr_txt_lit_32_2, &scr_txt_lit_32_3},
+  {&scr_txt_lit_33_0, &scr_txt_lit_33_1, &scr_txt_lit_33_2, &scr_txt_lit_33_3},
+  {&scr_txt_lit_34_0, &scr_txt_lit_34_1, &scr_txt_lit_34_2, &scr_txt_lit_34_3},
+  {&scr_txt_lit_35_0, &scr_txt_lit_35_1, &scr_txt_lit_35_2, &scr_txt_lit_35_3},
+  {&scr_txt_lit_36_0, &scr_txt_lit_36_1, &scr_txt_lit_36_2, &scr_txt_lit_36_3},
+  {&scr_txt_lit_37_0, &scr_txt_lit_37_1, &scr_txt_lit_37_2, &scr_txt_lit_37_3},
+  {&scr_txt_lit_38_0, &scr_txt_lit_38_1, &scr_txt_lit_38_2, &scr_txt_lit_38_3},
 };
 #endif
