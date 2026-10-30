@@ -42,7 +42,7 @@ import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { dynRestPack } from "./lower-calls.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
-import { refuseCodecValue, typeHoldsCodec, type CodecReach } from "../codec-shadow.js";
+import { refuseCodecValue } from "../codec-shadow.js";
 
 /* ── IR construction shorthand ───────────────────────────────────────── */
 

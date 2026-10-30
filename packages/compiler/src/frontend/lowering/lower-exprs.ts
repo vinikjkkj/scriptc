@@ -17948,8 +17948,17 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       op === ts.SyntaxKind.LessThanToken || op === ts.SyntaxKind.GreaterThanToken ||
       op === ts.SyntaxKind.LessThanEqualsToken || op === ts.SyntaxKind.GreaterThanEqualsToken
     ) {
-      refuseCodecValue(L, expr.left, "array", "binary operator");
-      refuseCodecValue(L, expr.right, "array", "binary operator");
+      // A comparison with the null or undefined literal is exact (a codec is never nullish, and its
+      // utf-8 string is not either), so it stays a static comparison. Every other operand is fenced.
+      const nullishSide = (e: ts.Expression): boolean =>
+        e.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(e) && e.text === "undefined");
+      const equality =
+        op === ts.SyntaxKind.EqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken ||
+        op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+      if (!(equality && (nullishSide(expr.left) || nullishSide(expr.right)))) {
+        refuseCodecValue(L, expr.left, "array", "binary operator");
+        refuseCodecValue(L, expr.right, "array", "binary operator");
+      }
     }
     // `s[i] === 'x'` (and ==, !=, !==) over a string receiver: the element
     // read is lowered whole, before any operand lowers (the loose path
