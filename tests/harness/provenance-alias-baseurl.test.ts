@@ -126,7 +126,9 @@ describe("provenance: a package's alias baseUrl belongs to the config that spell
     // island boundary, so a probe that shows the fix can also show the
     // failure.
     setProvenanceSources(null);
-    const before = analyze(entry).coverage;
+    // Pinned to the explicit flagless path (npmStatic: []): the refusal this
+    // test fixes is the old default, which the default lane no longer takes.
+    const before = analyze(entry, { npmStatic: [] }).coverage;
     expect(before.diagnostics.length).toBeGreaterThan(0);
     expect(before.diagnostics.some((d) => d.code === "SC2013")).toBe(true);
   });

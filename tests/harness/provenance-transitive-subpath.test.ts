@@ -118,7 +118,9 @@ describe("provenance: a subpath discovered inside another package's source", () 
     // refuses at the island boundary. A probe that cannot show the
     // failure cannot be believed when it shows the fix.
     setProvenanceSources(null);
-    const before = analyze(transEntry).coverage;
+    // Pinned to the explicit flagless path (npmStatic: []): the refusal this
+    // test fixes is the old default, which the default lane no longer takes.
+    const before = analyze(transEntry, { npmStatic: [] }).coverage;
     expect(before.diagnostics.length).toBeGreaterThan(0);
     expect(before.diagnostics.some((d) => d.code === "SC2013")).toBe(true);
   });
