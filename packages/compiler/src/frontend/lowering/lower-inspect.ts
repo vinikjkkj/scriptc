@@ -1467,12 +1467,19 @@ function literalOptionEntries(node: ts.ObjectLiteralExpression): { key: string; 
 }
 
 /** Whether a util.inspect callee is node:util's inspect, through the lowering's own builtin
- * resolver (`util.inspect` on a util namespace or default import). A bare `inspect` is not
- * recognised, so a reference through it refuses (conservative). */
+ * resolver: `util.inspect` on a util namespace or default import, or a bare `inspect` named
+ * import or require destructure. */
 function isUtilInspectCallee(L: Lowerer, callee: ts.Expression): boolean {
-  if (!ts.isPropertyAccessExpression(callee)) return false;
-  const bi = L.builtinMemberOf(callee);
-  return bi !== null && bi.module === "util" && bi.member === "inspect";
+  if (ts.isPropertyAccessExpression(callee)) {
+    const bi = L.builtinMemberOf(callee);
+    return bi !== null && bi.module === "util" && bi.member === "inspect";
+  }
+  if (ts.isIdentifier(callee)) {
+    // A named import (`import { inspect } from "util"`) or a require destructure.
+    const bi = L.builtinImportOf(callee);
+    return bi !== null && bi.module === "util" && bi.member === "inspect";
+  }
+  return false;
 }
 
 /** The object literal an options identifier names, when the binding's whole life is safe:
