@@ -8346,8 +8346,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_opts_pop()`);
           case "insp.optDepth":
             return finish(`scr_insp_opt_depth()`);
-          case "insp.optMaxArray":
-            return finish(`scr_insp_opt_max_array()`);
+          case "insp.shown":
+            return finish(`scr_insp_shown(${arg(0)})`);
+          case "insp.rem":
+            return finish(`scr_insp_rem(${arg(0)})`);
           // Circular references over cycle-capable composites: check/push/
           // wrap drive Node's seen/circular machinery (scr_inspect.c).
           case "insp.circCheck":

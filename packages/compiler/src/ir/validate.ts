@@ -1523,7 +1523,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.optsPush": { argTypes: [DYN], result: VOID },
   "insp.optsPop": { argTypes: [], result: VOID },
   "insp.optDepth": { argTypes: [], result: F64 },
-  "insp.optMaxArray": { argTypes: [], result: F64 },
+  "insp.shown": { argTypes: [F64], result: F64 },
+  "insp.rem": { argTypes: [F64], result: F64 },
   "insp.entry": { argTypes: [STRING, BOOL], result: VOID },
   "insp.clsProps": { argTypes: [DYN, F64, F64, BOOL], result: VOID },
   // Circular references: the receiver slot is program-dependent (any

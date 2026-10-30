@@ -9,6 +9,7 @@ const text = "x".repeat(20) + "\n" + "y".repeat(30);
 const dyn: any = { b: 2, a: 1, c: [3, 1], nested: { z: [1, 2, 3, 4, 5, 6, 7, 8], y: "q" } };
 const dynNums: any = [1234567, 2, 3, 1e-7];
 
+type Opts = { breakLength?: number; compact?: number | false; maxArrayLength?: number | null; maxStringLength?: number | null; numericSeparator?: boolean; sorted?: boolean; depth?: number | null };
 const opts = [
   '{"breakLength": 20}',
   '{"compact": false}',
@@ -23,7 +24,7 @@ const opts = [
   '{"depth": null}',
 ];
 for (const text_ of opts) {
-  const o = JSON.parse(text_);
+  const o: Opts = JSON.parse(text_);
   console.log(`== ${text_}`);
   console.log(util.inspect(obj, o));
   console.log(util.inspect(arr, o));
@@ -32,5 +33,4 @@ for (const text_ of opts) {
   console.log(util.inspect(dynNums, o));
 }
 console.log(util.inspect(obj, undefined));
-console.log(util.inspect(obj, null as any));
 console.log(util.inspect(obj));
