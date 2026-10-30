@@ -7123,6 +7123,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/17100-net-connect-timeout-validation.ts": {
+   "order": [
+    "<repo>/tests/corpus/17100-net-connect-timeout-validation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17101-net-connect-timeout-fires.ts": {
+   "order": [
+    "<repo>/tests/corpus/17101-net-connect-timeout-fires.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17102-net-connect-timeout-overflow.ts": {
+   "order": [
+    "<repo>/tests/corpus/17102-net-connect-timeout-overflow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17103-net-connect-timeout-throw-dials-nothing.ts": {
+   "order": [
+    "<repo>/tests/corpus/17103-net-connect-timeout-throw-dials-nothing.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17104-req-settimeout-validation.ts": {
+   "order": [
+    "<repo>/tests/corpus/17104-req-settimeout-validation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17105-res-settimeout-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/17105-res-settimeout-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17106-res-settimeout-after-finish.ts": {
+   "order": [
+    "<repo>/tests/corpus/17106-res-settimeout-after-finish.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17107-incoming-settimeout-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/17107-incoming-settimeout-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17108-incoming-settimeout-after-end.ts": {
+   "order": [
+    "<repo>/tests/corpus/17108-incoming-settimeout-after-end.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17109-server-settimeout-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/17109-server-settimeout-callback.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1711-cjs-export-single-values/main.js": {
    "order": [
     "<repo>/tests/corpus/1711-cjs-export-single-values/double.js",
@@ -7131,6 +7191,66 @@
     "<repo>/tests/corpus/1711-cjs-export-single-values/offset.js",
     "<repo>/tests/corpus/1711-cjs-export-single-values/enabled.js",
     "<repo>/tests/corpus/1711-cjs-export-single-values/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17110-server-timeout-property-destroys.ts": {
+   "order": [
+    "<repo>/tests/corpus/17110-server-timeout-property-destroys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17111-server-timeout-negative-uncaught.ts": {
+   "order": [
+    "<repo>/tests/corpus/17111-server-timeout-negative-uncaught.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17112-agent-timeout-negative-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/17112-agent-timeout-negative-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17113-agent-timeout-fires.ts": {
+   "order": [
+    "<repo>/tests/corpus/17113-agent-timeout-fires.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17114-agent-timeout-nan-unset.ts": {
+   "order": [
+    "<repo>/tests/corpus/17114-agent-timeout-nan-unset.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17115-keepalive-option-validation.ts": {
+   "order": [
+    "<repo>/tests/corpus/17115-keepalive-option-validation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17116-keepalive-idle-close.ts": {
+   "order": [
+    "<repo>/tests/corpus/17116-keepalive-idle-close.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17117-keepalive-property-default.ts": {
+   "order": [
+    "<repo>/tests/corpus/17117-keepalive-property-default.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17118-keepalive-header-default.ts": {
+   "order": [
+    "<repo>/tests/corpus/17118-keepalive-header-default.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17119-keepalive-zero-no-header.ts": {
+   "order": [
+    "<repo>/tests/corpus/17119-keepalive-zero-no-header.ts"
    ],
    "diags": []
   },
@@ -20667,90 +20787,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/fixtures/node-types/argv-env.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/argv-env.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/child-stdio.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/import-fences.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/import-fences.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC1010",
-     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
-     "loc": {
-      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
-      "start": 422,
-      "end": 461
-     },
-     "milestone": "M4",
-     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
-    }
-   ]
-  },
-  "<repo>/tests/fixtures/node-types/path-os.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/path-os.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/server-address-states.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stream-capture.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/streams.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts"
@@ -21304,6 +21340,90 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/fixtures/node-types/argv-env.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/argv-env.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/import-fences.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/import-fences.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1010",
+     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
+      "start": 422,
+      "end": 461
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/fixtures/node-types/path-os.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/path-os.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stream-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/streams.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/streams.ts"
+   ],
+   "diags": []
   }
  }
 }
