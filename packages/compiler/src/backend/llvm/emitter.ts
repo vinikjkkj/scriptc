@@ -2241,6 +2241,10 @@ class LlEmitter {
       this.declare(`declare void @scr_dns_set_warn_hook(ptr)`);
       this.declare(`declare void @scr_emit_warning(ptr, ptr, ptr)`);
     }
+    if (moduleUsesDynAsync(this.mod)) {
+      this.declare(`declare void @scr_proc_warn_set_hook(ptr)`);
+      this.declare(`declare void @scr_emit_warning(ptr, ptr, ptr)`);
+    }
     if (embedsZlib) this.declare(`declare void @scr_zlib_island_install()`);
     if (embedsHttpClient) this.declare(`declare void @scr_net_island_install()`);
     if (usesRegex) this.declare(`declare void @scr_regex_dyn_install()`);
@@ -2752,6 +2756,8 @@ class LlEmitter {
       ...(usesDgram ? [`  call void @scr_dgram_install()`] : []),
       ...(usesDgram && moduleUsesDynAsync(this.mod)
         ? [`  call void @scr_dns_set_warn_hook(ptr @scr_emit_warning)`] : []),
+      ...(moduleUsesDynAsync(this.mod)
+        ? [`  call void @scr_proc_warn_set_hook(ptr @scr_emit_warning)`] : []),
       ...(embedsZlib ? [`  call void @scr_zlib_island_install()`] : []),
       ...(embedsHttpClient ? [`  call void @scr_net_island_install()`] : []),
       `  call void @scr_lib_init(i32 %argc, ptr %argv)`,

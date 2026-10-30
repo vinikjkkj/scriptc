@@ -1922,6 +1922,10 @@ export class CEmitter {
       // dyn-async unit: listeners and the default report live there).
       ...(moduleUsesDgram(this.mod) && moduleUsesDynAsync(this.mod)
         ? [`  scr_dns_set_warn_hook(&scr_emit_warning);`] : []),
+      // The core's process warnings (socket timer validation, scr_net.c) reach
+      // the dyn channel's emitWarning through this hook, installed only when
+      // that unit is linked; otherwise scr_async.c prints the default report.
+      ...(moduleUsesDynAsync(this.mod) ? [`  scr_proc_warn_set_hook(&scr_emit_warning);`] : []),
       // fs.watch programs fill the loop's watch hooks the same way —
       // scr_watch.c links only when this line is emitted.
       ...(moduleUsesFsWatch(this.mod) ? [`  scr_watch_install();`] : []),
