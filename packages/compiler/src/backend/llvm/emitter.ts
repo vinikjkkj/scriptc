@@ -662,6 +662,12 @@ const LIB_FN_SYMS: Record<string, string> = {
   // with the reason. llvm-runtime-abi.test.ts fences the class.
   "tls.pemDyn": "scr_tls_pem_from_dyn",
   "tls.createServerDyn": "scr_tls_create_server_dyn",
+  // The https twin of the row above: the runtime-options walk into
+  // scr_https_create_server_dyn (scr_tls.c). The handler-less shape is
+  // this row; the handler form is special-cased below because its request
+  // adapter is picked by the handler's arity (LIB_FN_TAIL carries the
+  // NULLs of this one).
+  "https.createServerDyn": "scr_https_create_server_dyn",
   "tls.createSecureContextDyn": "scr_tls_create_secure_context_dyn",
   "tls.connect": "scr_tls_connect_dyn",
   "tls.connectCb": "scr_tls_connect_dyn",
@@ -1406,6 +1412,7 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
   // that goes with it): the no-handler flavor of a runtime entry whose Cb
   // sibling carries one. The C tier spells the identical NULLs inline.
   "tls.createServerDyn": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
+  "https.createServerDyn": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
   "tls.connect": [{ decl: "ptr", arg: "ptr null" }],
   "dgram.close": [{ decl: "ptr", arg: "ptr null" }],
   // The no-callback bind/connect: the C tier spells the same trailing
@@ -1500,7 +1507,7 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   // dgram calls that implicit-bind — emit-exprs.ts marks E.usesTimers on
   // exactly these, and a server whose loop never runs accepts nothing.
   "tls.createServer", "tls.createServerCb", "tls.createServerDyn", "tls.connect", "tls.connectCb",
-  "https.createServer",
+  "https.createServer", "https.createServerDyn", "https.createServerDynCb",
   "dgram.bind", "dgram.bindCb", "dgram.connect", "dgram.connectCb",
   "dgram.sendStr", "dgram.sendBytes", "dgram.sendConnStr", "dgram.sendConnBytes", "dgram.sendDyn",
   "fs.existsChk", "fs.readFileCb", "fs.mkdtempCb", "fs.readCb", "fs.lchmodCb",
@@ -18187,6 +18194,29 @@ class LlEmitter {
       const t = B.tmp();
       B.line(`${t} = call ptr @scr_http_create_server(ptr ${cb}, ptr ${adapter})`);
       return this.own({ name: t, type: e.type });
+    }
+    if (e.fn === "https.createServerDynCb") {
+      // The https runtime-options handler form (the C tier's
+      // emit-exprs.ts case, same three arguments): the options record is
+      // BORROWED by the walk, the handler MOVES into the server's registry,
+      // and the request adapter is picked by the handler's arity. The
+      // generic LIB_FN_SYMS row cannot pick an adapter, hence this branch.
+      // The runtime's walk throws the catchable fence on bad members, so
+      // this is a MAY_THROW member and takes the pending check.
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: https.createServerDynCb handler not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const sym = cbT.params.length === 2 ? "scr_http_handler_thunk2"
+        : cbT.params.length === 1 ? "scr_http_handler_thunk1"
+        : "scr_http_handler_thunk0";
+      this.declare(`declare void @${sym}(ptr, ptr, ptr)`);
+      this.declare(`declare ptr @scr_https_create_server_dyn(ptr, ptr, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_https_create_server_dyn(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${sym})`);
+      const out = this.own({ name: t, type: e.type });
+      this.emitPendingCheck();
+      return out;
     }
     if (e.fn === "tls.createServer" || e.fn === "tls.createServerCb" || e.fn === "https.createServer") {
       // The node:tls and node:https servers — the two rows in this tier's
