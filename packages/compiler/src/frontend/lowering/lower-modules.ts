@@ -29,7 +29,7 @@ import { streamClassAliasDecl } from "./lower-stream.js";
 import { dynImportBindingDepOf } from "./lower-island.js";
 import { bufferSpeciesAliasDecl } from "./lower-containers.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibBufferVarAliasDecl, stdlibGlobalAliasDecl } from "./surfaces.js";
-import { builtinFnValueDeclType } from "./lower-fnvalue.js";
+import { builtinFnValueDeclType, timerGlobalDeclType } from "./lower-fnvalue.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { collectProtoDataNames } from "./lower-protodata.js";
@@ -2711,6 +2711,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                   // See lower-fnvalue.ts; lowerVarDecl carries the
                   // function-scope twin of this arm.
                   builtinFnValueDeclType(L, decl) ??
+                  // `const st = setTimeout` at file scope: the timer global's
+                  // overloaded declared type maps nowhere; the slot is the dyn
+                  // function value (timerGlobalDeclType).
+                  timerGlobalDeclType(L, decl.initializer) ??
                   // `const r = require` at file scope: NodeRequire maps
                   // nowhere, so without a slot the binding would fence on
                   // its own declared type and lose the identity the value

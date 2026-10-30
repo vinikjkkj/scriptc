@@ -16,7 +16,7 @@ import { recordKeyReadRow } from "./keyread-census.js";
 import { type CjsKeyedForEach, cjsKeyedForEachOf, cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, resolveImport, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordWrite, isBareExportsAccess } from "./cjs-export-record.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibBufferVarAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
-import { builtinFnValueDeclType } from "./lower-fnvalue.js";
+import { builtinFnValueDeclType, timerGlobalDeclType } from "./lower-fnvalue.js";
 import { requestInitWriteFence } from "./lower-fetch.js";
 import { lowerWrtcWrite } from "./lower-wrtc.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
@@ -5107,6 +5107,11 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       (!bindingTainted && init.type.kind === "array"
         ? uniformTupleAsArray(L, L.typeOf(decl.name), init.type)
         : null) ??
+      // `const st = setTimeout` in a TypeScript source: the timer global's
+      // overloaded declared type maps nowhere (SC2007 at the binding if it is
+      // asked), while the initializer lowered to the runtime's dyn function
+      // (lower-exprs, and timerGlobalDeclType in lower-fnvalue.ts). The slot is that dyn value.
+      (init.type.kind === "dyn" ? timerGlobalDeclType(L, decl.initializer) : null) ??
       (bindingTainted ? null : L.mapTypeOf(L.typeOf(decl.name))) ??
       (init.type.kind === "dyn" ? DYN : null) ??
       // A CONST holding a class reference whose DECLARED type is a
