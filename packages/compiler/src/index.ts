@@ -670,7 +670,16 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
    *     until none remain. The empty set IS the previous path, so this ends. */
   const admitDefaultBy = (refusalsOf: (ld: LoadResult) => readonly Refusal[]): boolean => {
     const current = refusalsOf(finalLoad);
-    if (current.length === 0) return false;
+    // Rule (a): the guard acts only when a refusal falls inside an admitted
+    // package (its own file, or its provenance checkout). A program with no such
+    // refusal is never probed, so it is untouched by admission.
+    const insideAdmitted = (file: string): boolean => {
+      const byPath = npmStaticPackageOfPath(file);
+      if (byPath !== null && effective.has(byPath)) return true;
+      const prov = provenancePackageOfFile(file)?.name;
+      return prov !== undefined && effective.has(prov);
+    };
+    if (!current.some((d) => insideAdmitted(d.loc.file))) return false;
     // loadProgram writes the module-level active set (npm-static.ts), and every
     // probe below moves it. Lowering reads that state, not the load object, so
     // finalLoad is reloaded once the probes end, whatever the outcome.
