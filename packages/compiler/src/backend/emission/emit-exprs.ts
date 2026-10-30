@@ -2263,6 +2263,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // that pointer is what a walker-built box sees.
           const jsName = irFunctionJsName(target);
           if (jsName !== null) E.fnNames.set(mangleWrapper(e.fnName), jsName);
+          if (target.srcText !== undefined) E.fnTexts.set(mangleWrapper(e.fnName), target.srcText);
           return E.newTemp(
             e.type,
             retainCallC(e.type, `(ScrClosure *)&${mangleFnClosure(e.fnName)}`),
@@ -2275,6 +2276,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         }
         const jsName = irFunctionJsName(target);
         if (jsName !== null) E.fnNames.set(E.callTargetC(e.fnName), jsName);
+        if (target.srcText !== undefined) E.fnTexts.set(E.callTargetC(e.fnName), target.srcText);
         const t = E.newTemp(
           e.type,
           `scr_closure_new((void *)&${E.callTargetC(e.fnName)}, ${e.captures.length})`,
@@ -4191,6 +4193,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_sym_for(${arg(0)})`);
           case "sym.toString":
             return finish(`scr_sym_to_string(${arg(0)})`);
+          case "fn.text":
+            return finish(`scr_fn_text(${arg(0)})`);
           case "sym.desc":
           case "sym.keyFor": {
             // `string | undefined` — the child.stdout pattern with a

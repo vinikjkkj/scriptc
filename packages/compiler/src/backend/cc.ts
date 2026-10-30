@@ -385,6 +385,10 @@ export interface CcOptions {
    * registry initializes lazily), so it cross-compiles everywhere.
    * Symbol-free binaries keep their exact link line. */
   symbol?: boolean;
+  /** The program converts a function value to its source text (moduleUsesFnText
+   * on the IR): compiles scr_fntext.c into the binary. Other programs keep
+   * their exact link line. */
+  fntext?: boolean;
   /** Pull scr_weak.c in. Set from moduleUsesWeakMap; a program with no
    * WeakMap keeps its exact link line and its exact scr_bytes_release. */
   weak?: boolean;
@@ -1774,6 +1778,10 @@ export interface LibArchiveOptions {
   assert?: boolean;
   inspect?: boolean;
   symbol?: boolean;
+  /** The program converts a function value to its source text (moduleUsesFnText
+   * on the IR): compiles scr_fntext.c into the binary. Other programs keep
+   * their exact link line. */
+  fntext?: boolean;
   /** Pull scr_weak.c in. Set from moduleUsesWeakMap; a program with no
    * WeakMap keeps its exact link line and its exact scr_bytes_release. */
   weak?: boolean;
@@ -1816,6 +1824,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...(opts.assert || regex || opts.symbol ? ["scr_assert.c"] : []),
     ...(opts.inspect ? ["scr_inspect.c"] : []),
     ...(opts.symbol ? ["scr_symbol.c"] : []),
+    ...(opts.fntext ? ["scr_fntext.c"] : []),
     ...(opts.weak ? ["scr_weak.c"] : []),
     ...(opts.searchParams ? ["scr_url_params.c"] : []),
     ...(opts.emitter ? ["scr_events_emitter.c", "scr_dyn_handle.c"] : []),
@@ -2570,6 +2579,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       ? [rt(join(rtDir, "scr_dyn_handle.c"))]
       : []),
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
+    ...(opts.fntext ? [rt(join(rtDir, "scr_fntext.c"))] : []),
     ...(opts.weak ? [rt(join(rtDir, "scr_weak.c"))] : []),
     ...(opts.searchParams ? [rt(join(rtDir, "scr_url_params.c"))] : []),
     // node:querystring's own escape/unescape live in scr_qs.c: the unit

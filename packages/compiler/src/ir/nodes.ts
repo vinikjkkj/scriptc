@@ -2575,6 +2575,11 @@ export interface IrUnionDef {
 }
 
 export interface IrFunction {
+  /** The exact Function.prototype.toString text of the function VALUE this
+   * body backs (fn-srctext.ts; set by frontend/lowering/fn-srctext-attach.ts
+   * only for closure targets of a program that uses `fn.text`). Absent for
+   * every other function, so no backend reads it unless the table exists. */
+  srcText?: string;
   /** Original TS name (mangling is a backend concern). Lifted lambdas get
    * synthetic '%'-prefixed names ('%' can't appear in a TS identifier). */
   name: string;
@@ -4043,6 +4048,10 @@ export type IrLibFn =
   | "sym.keyFor"
   | "sym.desc"
   | "sym.toString"
+  /** Function.prototype.toString of a function VALUE (arg 0, func-typed):
+   * the closure entry's exact source text (IrFunction.srcText, emitted as
+   * the ScrFnText table only when a program uses this, scr_fntext.c). +1 string. */
+  | "fn.text"
   /** fs.statSync → a Stats value (may throw, like the other sync fs
    * calls); the stats.* getters are pure reads on it. */
   | "fs.statSync"
@@ -11562,6 +11571,27 @@ export function moduleUsesNet(mod: IrModule): boolean {
  * net's: a symbol-typed local whose initializer compiled to a runtime
  * fence still emits release calls that need the unit linked. Symbol-free
  * programs pay zero bytes and keep their exact link line. */
+/** True when the program converts a function VALUE to its source text
+ * (`fn.text`): the link switch for scr_fntext.c and its ScrFnText table. */
+export function moduleUsesFnText(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "fn.text") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod.functions);
+  return found;
+}
+
 export function moduleUsesSymbol(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {

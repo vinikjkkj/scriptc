@@ -4930,6 +4930,18 @@ void scr_fn_names_install(const ScrFnName *tbl, size_t n);
 /* NULL when this program never named that entry point. */
 const char *scr_fn_name_of(const void *fn);
 
+/* Function.prototype.toString of a function VALUE (scr_fntext.c, linked only
+ * when a program converts a function to a string: moduleUsesFnText). The
+ * table is the program's own text per closure entry point, installed by
+ * main(); a closure it does not name is one the runtime itself made, which
+ * Node prints as native code. +1 string. */
+typedef struct ScrFnText {
+  const void *fn;    /* the closure entry point (ScrClosure.fn) */
+  const char *text;  /* its exact toString text -- a static literal */
+} ScrFnText;
+void scr_fn_texts_install(const ScrFnText *tbl, size_t n);
+ScrStr *scr_fn_text(const ScrClosure *c);
+
 /* Object member. `key` is UTF-8 bytes, NUL-terminated for convenience,
  * and `key_len` excludes the NUL — duplicate keys were already collapsed
  * at parse time (later wins, like JS JSON.parse).

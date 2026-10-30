@@ -843,9 +843,12 @@ export function refuseUnloweredSubtleCall(L: Lowerer, call: ts.CallExpression): 
   };
   /** the hash of a dictionary argument: provably served, or absent (the runtime answers the missing-member error) */
   const hashOk = (e: ts.Expression | undefined): boolean => {
-    if (e === undefined) return true;
-    const obj = provableObject(L, e);
-    if (obj === null) return provableString(L, e) !== null; /* a bare name has no hash to check */
+    if (e === undefined) return true;
+
+    const obj = provableObject(L, e);
+
+    if (obj === null) return provableString(L, e) !== null; /* a bare name has no hash to check */
+
     const h = memberOf(obj, "hash");
     if (h === undefined) return true;
     // The hash is a name or a { name } dictionary (HmacImportParams.hash: HashAlgorithmIdentifier).
@@ -998,7 +1001,8 @@ export function refuseUnloweredWebCryptoPattern(L: Lowerer, pattern: ts.ObjectBi
 }
 
 
-function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
+function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
+
   refuseWebCryptoFlowsAt(L, expr);
   if (ts.isBinaryExpression(expr)) refuseUnloweredWebCryptoAssign(L, expr);
     const loc = locOf(expr);
@@ -16629,6 +16633,9 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
       if (armed) return { kind: "toString", operand: armed, type: STRING, loc: e.loc };
     }
     if (e.type.kind === "string") return e;
+    // String(f) / `${f}` / "" + f over a function VALUE: its source text
+    // (Node's ToString calls Function.prototype.toString; fn-srctext.ts).
+    if (e.type.kind === "func") return { kind: "libCall", fn: "fn.text", args: [e], type: STRING, loc: e.loc };
     // A void call's value is JS's undefined: it runs for effect, then the
     // text is "undefined" (String(f()) and `${f()}` over a void function).
     if (e.type.kind === "void") {

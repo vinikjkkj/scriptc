@@ -6285,6 +6285,20 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // (m.keys(), p.then(f), Object.keys(o)) or an unlowered call FORM of
       // a lowered one (Math.min with three arguments, s.padStart(8),
       // x.toFixed()).
+      // A function VALUE's toString() is its source text (fn-srctext.ts), the
+      // one stdlib member on a function receiver that lowers: refused below
+      // otherwise.
+      if (
+        ts.isPropertyAccessExpression(expr.expression) &&
+        expr.expression.name.text === "toString" &&
+        expr.arguments.length === 0 &&
+        L.checker.getCallSignatures(L.checker.getNonNullableType(L.typeOf(expr.expression.expression))).length > 0
+      ) {
+        const fnRecv = L.lowerExpr(expr.expression.expression);
+        if (fnRecv.type.kind === "func") {
+          return { kind: "libCall", fn: "fn.text", args: [fnRecv], type: STRING, loc: locOf(expr) };
+        }
+      }
       L.stdlibMemberFence(expr.expression);
       // The npm METHOD-CALL chokepoint: a call on a package-typed receiver
       // in a static build — attributed to the package.
