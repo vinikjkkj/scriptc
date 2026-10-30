@@ -11588,6 +11588,13 @@ void scr_loop_set_netwait(bool (*fn)(double));
  * hooks use it to yield between event batches so promise jobs interleave
  * (net's sweep/drain alternation). */
 bool scr_loop_has_ready(void);
+/* One macrotask boundary: the user tick queue, then the promise jobs, to
+ * joint exhaustion (Node's callback-scope close). The loop's stations call
+ * it between the callbacks they deliver. */
+void scr_loop_drain_callback(void);
+/* True once an exception is pending or a callback boundary decided a fatal
+ * unhandled rejection: a station stops delivering and the loop exits. */
+bool scr_loop_stopping(void);
 
 /* ── node:dgram + node:dns (scr_dgram.c — compiled only when the program
  * uses either; design note atop the file). One lean refcounted handle

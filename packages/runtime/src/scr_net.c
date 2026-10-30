@@ -4595,7 +4595,8 @@ static void scr_net_sock_close_phase(void) {
     bool ok = scr_net_sock_emit_close(pick, due_floor);
     scr_net_cur_sock = outer;
     scr_net_sock_release(pick);
-    if (!ok) return;
+    scr_loop_drain_callback();
+    if (!ok || scr_loop_stopping()) return;
   }
 }
 
@@ -4649,8 +4650,9 @@ static void scr_net_idle_step(int q) {
 }
 
 static void scr_net_idle_drain(void) {
-  while (scr_net_idle_pending() && !scr_exc_pending()) {
+  while (scr_net_idle_pending() && !scr_loop_stopping()) {
     scr_net_idle_step(scr_idle_q[0] != NULL ? 0 : 1);
+    scr_loop_drain_callback();
   }
 }
 
@@ -4737,7 +4739,13 @@ static void scr_net_sweep(void) {
       }
     }
     scr_net_cur_sock = NULL;
+    /* The unit's callbacks are done: its ticks and jobs run before the next
+     * socket. `next` is held across the drain, since a tick may close it. */
+    if (next) scr_net_sock_retain(next);
     scr_net_sock_release(sock);
+    scr_loop_drain_callback();
+    if (next) scr_net_sock_release(next);
+    if (scr_loop_stopping()) return;
     sock = next;
   }
   scr_net_sock_close_phase(); /* libuv's close phase: last, and LIFO */
@@ -4776,7 +4784,11 @@ static void scr_net_sweep(void) {
         return;
       }
     }
+    if (next) scr_net_server_retain(next); /* a tick may close it */
     scr_net_server_release(srv);
+    scr_loop_drain_callback();
+    if (next) scr_net_server_release(next);
+    if (scr_loop_stopping()) return;
     srv = next;
   }
   scr_net_settle_due_servers();
@@ -4835,6 +4847,12 @@ static void scr_net_dispatch(void) {
     ScrPollerEvent evs[64];
     int n = scrp_drain(scr_net_poller, evs, 64);
     for (int i = 0; i < n; i++) {
+      if (i > 0) {
+        /* Node's MakeCallback scope closes after each delivered event: the
+         * user tick queue, then the promise jobs, before the next event. */
+        scr_loop_drain_callback();
+        if (scr_loop_stopping()) return;
+      }
       if (i > 0 && scr_net_ticks_between_events()) {
         scr_net_settle_due_servers(); /* the tick queue between libuv callbacks */
         if (scr_exc_pending()) return;
@@ -4887,6 +4905,10 @@ static void scr_net_dispatch(void) {
       }
       scr_net_cur_sock = NULL;
       if (scr_exc_pending()) return;
+    }
+    if (n > 0) {
+      scr_loop_drain_callback();
+      if (scr_loop_stopping()) return;
     }
     if (n > 0 && scr_net_ticks_between_events()) {
       scr_net_settle_due_servers();

@@ -1137,10 +1137,20 @@ static void scr_dgram_dispatch(void) {
     ScrPollerEvent evs[64];
     int n = scrp_drain(scr_dgram_poller, evs, 64);
     for (int i = 0; i < n; i++) {
+      /* one macrotask boundary per delivered datagram batch entry (Node's
+       * MakeCallback scope close): the ticks and jobs before the next one */
+      if (i > 0) {
+        scr_loop_drain_callback();
+        if (scr_loop_stopping()) return;
+      }
       ScrDgramSocket *s = (ScrDgramSocket *)evs[i].udata;
       if (!s || s->fd < 0) continue; /* closed earlier in this batch */
       scr_dgram_read(s);
       if (scr_exc_pending()) return;
+    }
+    if (n > 0) {
+      scr_loop_drain_callback();
+      if (scr_loop_stopping()) return;
     }
     if (!scr_dgram_flags_pending()) return;
     if (scr_loop_has_ready()) return; /* microtasks interleave first */
