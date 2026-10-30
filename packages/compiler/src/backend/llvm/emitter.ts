@@ -2162,7 +2162,8 @@ class LlEmitter {
     // any island entry (the engine's lazy boot consults it) — cc.ts
     // compiles scr_fetch.c on the same predicate.
     const usesFetch = moduleUsesFetch(this.mod);
-    const usesTextMb = moduleUsesTextMb(this.mod); // the gated multi-byte decoders (scr_text_mb.c)
+    // The gated multi-byte decoders (scr_text_mb.c): the same predicate as the C main.
+    const usesTextMb = moduleUsesTextMb(this.mod);
     // Regex-surface programs stamp the RegExp handle-dispatch ops, gated
     // on the same moduleUsesRegex switch cc.ts links scr_regex.c by.
     const usesRegex = moduleUsesRegex(this.mod);
