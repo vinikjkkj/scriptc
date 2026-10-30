@@ -20951,6 +20951,36 @@
      "<repo>/tests/corpus/8733-text-decoder-flags-through-any.ts"
    ],
    "diags": []
+ },
+ "<repo>/tests/corpus/8810-text-decoder-single-byte-encodings.ts": {
+   "order": [
+     "<repo>/tests/corpus/8810-text-decoder-single-byte-encodings.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8811-text-decoder-utf16-bom-and-surrogates.ts": {
+   "order": [
+     "<repo>/tests/corpus/8811-text-decoder-utf16-bom-and-surrogates.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8812-text-decoder-whatwg-labels.ts": {
+   "order": [
+     "<repo>/tests/corpus/8812-text-decoder-whatwg-labels.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8813-text-decoder-typed-array-inputs.ts": {
+   "order": [
+     "<repo>/tests/corpus/8813-text-decoder-typed-array-inputs.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/8814-text-decoder-codec-inspect-through-any.ts": {
+   "order": [
+     "<repo>/tests/corpus/8814-text-decoder-codec-inspect-through-any.ts"
+   ],
+   "diags": []
  }
  }
 }
