@@ -554,48 +554,66 @@ static bool dyn_cls_is_prim(const ScrDyn *d) {
   }
 }
 
-static ScrDyn *dyn_cls_toprim_try(const ScrDyn *d, const char *name, size_t len, bool *found) {
-  *found = false;
-  /* A METHOD row runs with the instance as the receiver, the same entry the dyn
-   * method call uses. A DATA row (a field) is not a method and is absent here. */
-  const ScrDynClassMember *cm = scr_dyn_objinst_member(d, name, len);
-  if (cm == NULL || cm->call == NULL) return NULL; /* absent, or a data row */
-  *found = true;
-  ScrDyn *r = cm->call(d->v.inst.o, NULL, 0, name);
-  if (!r) return NULL; /* threw - pending */
+/* A callable answer: a function box, or a function held by the island engine. */
+static bool dyn_cls_is_callable(const ScrDyn *v) {
+  return v->kind == SCR_DYN_FUNC || (v->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(v, "function"));
+}
+
+/* One ToPrimitive step over the member row `m` (Node's OrdinaryToPrimitive
+ * Get-then-Call). A METHOD row runs with the instance as the receiver, the entry
+ * the dyn method call uses. A DATA row (a declared field, or an accessor read
+ * through its getter) is read, and when its value is callable it runs with the
+ * instance as `this`; a non-callable value is skipped. Borrows the instance; +1
+ * primitive (or BigInt), or NULL: with the exception pending when a member threw,
+ * otherwise when the step did not answer a primitive. */
+static ScrDyn *dyn_cls_toprim_step(const ScrDyn *d, const ScrDynClassMember *m, const char *name) {
+  if (m == NULL) return NULL; /* no row: nothing to call */
+  ScrDyn *r = NULL;
+  if (m->call != NULL) {
+    r = m->call(d->v.inst.o, NULL, 0, name);
+  } else {
+    ScrDyn *fv = m->get != NULL ? m->get(d->v.inst.o) : NULL; /* +1; NULL: the read threw */
+    if (fv == NULL) return NULL;
+    if (dyn_cls_is_callable(fv)) {
+      scr_dyn_this_push_dyn(d);
+      r = scr_dyn_call(fv, NULL, 0, name);
+      scr_dyn_this_pop();
+    }
+    scr_dyn_release(fv);
+  }
+  if (r == NULL) return NULL; /* threw (pending), or not callable */
   if (dyn_cls_is_prim(r) || r->kind == SCR_DYN_BIG) return r; /* +1 */
-  scr_dyn_release(r);
+  scr_dyn_release(r); /* an object answer: OrdinaryToPrimitive goes on */
   return NULL;
 }
 
+/* ToPrimitive over a class instance, in OrdinaryToPrimitive order. The STRING hint
+ * asks toString then valueOf; DEFAULT and NUMBER ask valueOf then toString. A member
+ * row is read by name through the table, so an own FIELD holding a function answers
+ * exactly as a method does, and a field holding a non-callable value is skipped.
+ * With no toString row, Object.prototype.toString answers a primitive and the chain
+ * stops at the built-in table. With a toString row and no primitive answer, the
+ * chain is exhausted: TypeError. */
 static ScrDyn *dyn_cls_objinst_to_primitive(const ScrDyn *d, int hint) {
-  const char *first = hint == SCR_TOPRIM_STRING ? "toString" : "valueOf";
-  const char *second = hint == SCR_TOPRIM_STRING ? "valueOf" : "toString";
-  size_t fl = hint == SCR_TOPRIM_STRING ? 8 : 7;
-  size_t sl = hint == SCR_TOPRIM_STRING ? 7 : 8;
-  bool f1 = false, f2 = false;
-  ScrDyn *r = dyn_cls_toprim_try(d, first, fl, &f1);
-  if (r) return r;
-  if (scr_exc_pending()) return NULL;
-  /* STRING hint with no user toString: Object.prototype.toString is the first
-   * method and it answers a PRIMITIVE ("[object Object]"), so ToPrimitive stops
-   * there and a user valueOf is never consulted. The DEFAULT hint's first method
-   * is valueOf, whose missing form answers the object itself, so toString still
-   * gets its turn after it. */
-  if (hint != SCR_TOPRIM_STRING || f1) {
-    r = dyn_cls_toprim_try(d, second, sl, &f2);
-    if (r) return r;
-    if (scr_exc_pending()) return NULL;
+  const ScrDynClassMember *tm = scr_dyn_objinst_member(d, "toString", 8);
+  const ScrDynClassMember *vm = scr_dyn_objinst_member(d, "valueOf", 7);
+  ScrDyn *r;
+  if (hint == SCR_TOPRIM_STRING) {
+    if (tm == NULL) return scr_dyn_objinst_builtin_prim(d);
+    r = dyn_cls_toprim_step(d, tm, "toString");
+    if (r != NULL || scr_exc_pending()) return r;
+    r = dyn_cls_toprim_step(d, vm, "valueOf");
+    if (r != NULL || scr_exc_pending()) return r;
+  } else {
+    r = dyn_cls_toprim_step(d, vm, "valueOf");
+    if (r != NULL || scr_exc_pending()) return r;
+    if (tm == NULL) return scr_dyn_objinst_builtin_prim(d);
+    r = dyn_cls_toprim_step(d, tm, "toString");
+    if (r != NULL || scr_exc_pending()) return r;
   }
-  /* Both methods answered objects (the second one present): the chain is
-   * exhausted. A missing second method is Object.prototype's, which falls to the
-   * built-in table below. */
-  if (hint == SCR_TOPRIM_STRING ? f1 : f2) {
-    static const char msg[] = "Cannot convert object to primitive value";
-    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
-    return NULL;
-  }
-  return scr_dyn_objinst_builtin_prim(d);
+  static const char msg[] = "Cannot convert object to primitive value";
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+  return NULL;
 }
 
 /* ToString(object) for a class instance: ToPrimitive with the STRING hint, then
@@ -615,7 +633,7 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_impl_err_get, dyn_cls_impl_err_set, dyn_cls_impl_err_has, dyn_cls_impl_err_delete,
   dyn_cls_ops_fn_get, dyn_cls_ops_construct, dyn_cls_ops_set, dyn_cls_ops_delete, dyn_cls_ops_walk_error,
   dyn_cls_ops_error_rooted, dyn_cls_ops_error_instanceof,
-  dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string,
+  dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }
