@@ -20928,21 +20928,21 @@
    ],
    "diags": []
  },
- "<repo>/tests/corpus/16400-timer-delay-warnings-global.ts": {
+ "<repo>/tests/corpus/16500-timer-delay-warnings-global.ts": {
    "order": [
-     "<repo>/tests/corpus/16400-timer-delay-warnings-global.ts"
+     "<repo>/tests/corpus/16500-timer-delay-warnings-global.ts"
    ],
    "diags": []
  },
- "<repo>/tests/corpus/16401-timer-delay-warnings-modules.ts": {
+ "<repo>/tests/corpus/16501-timer-delay-warnings-modules.ts": {
    "order": [
-     "<repo>/tests/corpus/16401-timer-delay-warnings-modules.ts"
+     "<repo>/tests/corpus/16501-timer-delay-warnings-modules.ts"
    ],
    "diags": []
  },
- "<repo>/tests/corpus/16402-timer-delay-warnings-order.ts": {
+ "<repo>/tests/corpus/16502-timer-delay-warnings-order.ts": {
    "order": [
-     "<repo>/tests/corpus/16402-timer-delay-warnings-order.ts"
+     "<repo>/tests/corpus/16502-timer-delay-warnings-order.ts"
    ],
    "diags": []
  },
