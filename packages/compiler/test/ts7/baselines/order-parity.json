@@ -21400,6 +21400,66 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  }
+  },
+ "<repo>/tests/corpus/17520-dyn-class-field-tostring-arrow-converts.ts": {
+   "order": [
+     "<repo>/tests/corpus/17520-dyn-class-field-tostring-arrow-converts.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/17521-dyn-class-field-valueof-arrow-converts.ts": {
+   "order": [
+     "<repo>/tests/corpus/17521-dyn-class-field-valueof-arrow-converts.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/17522-dyn-class-field-nonfunction-skipped.ts": {
+   "order": [
+     "<repo>/tests/corpus/17522-dyn-class-field-nonfunction-skipped.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/17523-dyn-class-nonfunction-tostring-falls-to-valueof.ts": {
+   "order": [
+     "<repo>/tests/corpus/17523-dyn-class-nonfunction-tostring-falls-to-valueof.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/17524-dyn-class-field-tostring-throw-propagates.ts": {
+   "order": [
+     "<repo>/tests/corpus/17524-dyn-class-field-tostring-throw-propagates.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/17525-dyn-class-field-tostring-object-answer-no-valueof.ts": {
+   "order": [
+     "<repo>/tests/corpus/17525-dyn-class-field-tostring-object-answer-no-valueof.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/17526-dyn-class-field-tostring-with-method-valueof.ts": {
+   "order": [
+     "<repo>/tests/corpus/17526-dyn-class-field-tostring-with-method-valueof.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/17527-dyn-class-method-tostring-with-field-valueof.ts": {
+   "order": [
+     "<repo>/tests/corpus/17527-dyn-class-method-tostring-with-field-valueof.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/17528-dyn-class-inherited-field-tostring.ts": {
+   "order": [
+     "<repo>/tests/corpus/17528-dyn-class-inherited-field-tostring.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/17529-dyn-class-getter-returning-function-tostring.ts": {
+   "order": [
+     "<repo>/tests/corpus/17529-dyn-class-getter-returning-function-tostring.ts"
+   ],
+   "diags": []
+ }
  }
 }
