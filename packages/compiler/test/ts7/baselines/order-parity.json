@@ -20999,6 +20999,48 @@
      "<repo>/tests/corpus/8814-text-decoder-codec-inspect-through-any.ts"
    ],
    "diags": []
+ },
+ "<repo>/tests/corpus/16700-socket-timeout-validation.ts": {
+   "order": [
+     "<repo>/tests/corpus/16700-socket-timeout-validation.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16701-socket-timeout-destroyed.ts": {
+   "order": [
+     "<repo>/tests/corpus/16701-socket-timeout-destroyed.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16702-socket-timeout-overflow-listener.ts": {
+   "order": [
+     "<repo>/tests/corpus/16702-socket-timeout-overflow-listener.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16703-socket-timeout-pre-dial.ts": {
+   "order": [
+     "<repo>/tests/corpus/16703-socket-timeout-pre-dial.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16704-http-request-timeout-validation.ts": {
+   "order": [
+     "<repo>/tests/corpus/16704-http-request-timeout-validation.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16705-http-request-timeout-overflow.ts": {
+   "order": [
+     "<repo>/tests/corpus/16705-http-request-timeout-overflow.ts"
+   ],
+   "diags": []
+ },
+ "<repo>/tests/corpus/16706-socket-timeout-warning-order.ts": {
+   "order": [
+     "<repo>/tests/corpus/16706-socket-timeout-warning-order.ts"
+   ],
+   "diags": []
  }
  }
 }
