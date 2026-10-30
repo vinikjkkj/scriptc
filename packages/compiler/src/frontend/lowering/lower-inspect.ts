@@ -1391,8 +1391,6 @@ export function lowerConsoleInspectArg(
 
 /** The parsed options literal: the resolved depth (numeric; Infinity for
  * `null`), with every non-default knob fenced by name. */
-/** util.inspect option keys this runtime renders exactly. */
-const INSPECT_SUPPORTED_KEYS = new Set(["depth", "breakLength", "compact", "maxArrayLength", "maxStringLength", "numericSeparator", "sorted"]);
 /** Node's option keys this runtime does not render yet (OPEN, ci-classes iofmtopts). */
 const INSPECT_OPEN_KEYS = new Set(["colors", "showHidden", "showProxy", "getters", "customInspect", "stylize"]);
 
@@ -1409,20 +1407,12 @@ function literalTruthy(node: ts.Expression): boolean | null {
   return null;
 }
 
-/** A compile-time numeric option value (`5`, `-1`, `Infinity`, `null`), or null. */
-function literalNumber(node: ts.Expression): number | null | "unknown" {
-  if (node.kind === ts.SyntaxKind.NullKeyword) return null;
-  if (ts.isNumericLiteral(node)) return Number(node.text);
-  if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(node.operand)) return -Number(node.operand.text);
-  if (ts.isIdentifier(node) && node.text === "Infinity") return Infinity;
-  return "unknown";
-}
 
 /** util.inspect options this runtime does not render yet (OPEN, ci-classes
  * iofmtopts). A literal value that shows the option non-default is a named
  * build refusal; a value known only at run time is checked by the runtime
  * options reader, which stops the program with the same name. */
-function refuseOpenInspectOption(L: Lowerer, prop: ts.PropertyAssignment, key: string, value: ts.Expression): void {
+function refuseOpenInspectOption(L: Lowerer, prop: ts.Node, key: string, value: ts.Expression): void {
   const open = (what: string): never =>
     L.noLowering(`util.inspect with the '${what}' option`, prop, "this option is OPEN (ci-classes iofmtopts): the rendering for it is not lowered yet");
   if (key === "stylize") open("stylize");
@@ -1434,12 +1424,6 @@ function refuseOpenInspectOption(L: Lowerer, prop: ts.PropertyAssignment, key: s
   if (key === "compact" && value.kind === ts.SyntaxKind.TrueKeyword) open("compact: true");
   if (key === "sorted" && literalTruthy(value) === true && value.kind !== ts.SyntaxKind.TrueKeyword) open("sorted with a comparator");
   if (key === "sorted" && (ts.isArrowFunction(value) || ts.isFunctionExpression(value))) open("sorted with a comparator");
-  if (key === "maxArrayLength" || key === "maxStringLength") {
-    const n = literalNumber(value);
-    if (n !== "unknown" && n !== null && !(n >= 0 && (n === Infinity || Number.isInteger(n)))) {
-      L.noLowering(`util.inspect with a ${key} that is not a non-negative integer`, prop, "the runtime slices whole counts only (OPEN: ci-classes iofmtopts)");
-    }
-  }
 }
 
 /** The constituents of a union type (the type itself otherwise). */
@@ -1454,74 +1438,115 @@ function valueMayBeTrue(L: Lowerer, node: ts.Expression): boolean {
   return parts.some((x) => (x.flags & ts.TypeFlags.Any) !== 0 || ((x.flags & ts.TypeFlags.BooleanLiteral) !== 0 && (x as { intrinsicName?: string }).intrinsicName === "true"));
 }
 
-/** A run-time options expression is admitted only when its STATIC type proves
- * the keys: an object type whose every property is a supported option (no
- * index signature, no any/unknown, no OPEN key, no comparator, compact that
- * cannot be true). Anything else is a named build refusal, the same surface
- * main used for a non-literal options argument. Scope note: TypeScript types
- * are structural, so a value typed narrower than its runtime object can still
- * carry an extra key; that residual is OPEN and named at run time. */
-function checkRuntimeOptionsType(L: Lowerer, node: ts.Expression): void {
-  const refuse = (why: string): never =>
-    L.noLowering("util.inspect with a non-literal options argument", node, why);
-  let t = L.typeOf(node);
-  if (t.isUnionType()) {
-    const rest = (t as unknown as { getTypes(): ts.Type[] }).getTypes().filter((x) => (x.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void)) === 0);
-    if (rest.length !== 1) refuse("the options type is a union: its keys are not known at build");
-    t = rest[0]!;
-  }
-  if ((t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
-    refuse("the options type is any/unknown: its keys are not known at build");
-  }
-  if ((t.flags & ts.TypeFlags.Object) === 0) refuse("the options type is not an object type");
-  if (L.checker.getIndexInfosOfType(t).length > 0) refuse("the options type has an index signature");
-  if (L.checker.getCallSignatures(t).length > 0) refuse("the options value is callable");
-  for (const prop of L.checker.getPropertiesOfType(t)) {
-    const name = prop.name;
-    if (INSPECT_OPEN_KEYS.has(name)) {
-      const pt = L.checker.getTypeOfSymbol(prop);
-      const quiet = (x: ts.Type): boolean => (x.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void)) !== 0 ||
-        ((x.flags & ts.TypeFlags.BooleanLiteral) !== 0 && (x as { intrinsicName?: string }).intrinsicName === (name === "customInspect" ? "true" : "false"));
-      const parts = typeParts(pt);
-      if (!parts.every(quiet)) refuse(`the '${name}' option is OPEN (ci-classes iofmtopts): not lowered yet`);
-      continue;
-    }
-    if (!INSPECT_SUPPORTED_KEYS.has(name)) refuse(`the '${name}' option is not lowered yet`);
-    const pt = L.checker.getTypeOfSymbol(prop);
-    if ((pt.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) refuse(`the '${name}' option has type any/unknown`);
-    if (name === "sorted" && L.checker.getCallSignatures(pt).length > 0) refuse("sorted with a comparator is OPEN (ci-classes iofmtopts)");
-    if (name === "compact") {
-      const parts = typeParts(pt);
-      if (parts.some((x) => (x.flags & ts.TypeFlags.BooleanLiteral) !== 0 && (x as { intrinsicName?: string }).intrinsicName === "true")) {
-        refuse("compact: true is OPEN (ci-classes iofmtopts): the compact option may be true");
-      }
-    }
-  }
+/** util.inspect's options argument is admitted only in two forms, both of which the
+ * runtime sees exactly as written: (1) an object literal (no spread, method or accessor),
+ * or (2) an identifier naming a non-exported `const` initialised by such a literal, and
+ * referenced nowhere except as the options argument (index 1) of a util.inspect call.
+ * Form (2) cannot be mutated or aliased, so the object is the literal. Everything else
+ * (a parameter, a width-coerced or cast value, a class instance, a JSON value, any) would
+ * reach the runtime as the static shape its type names, which can drop or hide keys that
+ * Node reads, so it is refused at build with main's surface wording. */
+function nonLiteralOptions(L: Lowerer, node: ts.Expression, why: string): never {
+  return L.noLowering("util.inspect with a non-literal options argument", node, why);
 }
 
-/** The options argument of util.inspect as a run-time DYN object. A literal
- * object lowers entry by entry (the runtime reads it exactly as it reads any
- * options object, so a literal and a run-time object share one code path);
- * any other expression is taken as a value. Keys Node ignores are carried and
- * ignored by the reader. */
+/** util.inspect's options expression is a constant-keyed literal: plain `key: value` and
+ * shorthand entries only. Null when it has a spread, a method or an accessor. */
+function literalOptionEntries(node: ts.ObjectLiteralExpression): { key: string; value: ts.Expression; prop: ts.Node }[] | null {
+  const out: { key: string; value: ts.Expression; prop: ts.Node }[] = [];
+  for (const p of node.properties) {
+    if (ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) {
+      out.push({ key: (p.name as ts.Identifier | ts.StringLiteral).text, value: p.initializer, prop: p });
+    } else if (ts.isShorthandPropertyAssignment(p)) {
+      out.push({ key: (p.name as ts.Identifier).text, value: p.name as ts.Identifier, prop: p });
+    } else {
+      return null;
+    }
+  }
+  return out;
+}
+
+/** Whether a util.inspect callee is node:util's inspect, through the lowering's own builtin
+ * resolver (`util.inspect` on a util namespace or default import). A bare `inspect` is not
+ * recognised, so a reference through it refuses (conservative). */
+function isUtilInspectCallee(L: Lowerer, callee: ts.Expression): boolean {
+  if (!ts.isPropertyAccessExpression(callee)) return false;
+  const bi = L.builtinMemberOf(callee);
+  return bi !== null && bi.module === "util" && bi.member === "inspect";
+}
+
+/** The object literal an options identifier names, when the binding's whole life is safe:
+ * a non-exported `const` initialised by an object literal, referenced only as the options
+ * argument of a util.inspect call. Null otherwise. */
+function admittedConstOptions(L: Lowerer, id: ts.Identifier): ts.ObjectLiteralExpression | null {
+  const sym = L.resolveValueSymbol(id);
+  if (!sym) return null;
+  const decl = L.checker.declarationsOf(sym)[0];
+  if (!decl || !ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name)) return null;
+  if (!decl.initializer || !ts.isObjectLiteralExpression(decl.initializer)) return null;
+  const list = decl.parent;
+  if (!list || !ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) return null;
+  const stmt = list.parent;
+  if (!stmt || !ts.isVariableStatement(stmt)) return null;
+  if (stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return null;
+  let safe = true;
+  const visit = (n: ts.Node): void => {
+    if (!safe) return;
+    if (ts.isIdentifier(n) && n.text === id.text && n !== decl.name) {
+      const parent = n.parent;
+      const propName = parent !== undefined &&
+        ((ts.isPropertyAccessExpression(parent) && parent.name === n) || (ts.isPropertyAssignment(parent) && parent.name === n));
+      if (!propName) {
+        const s2 = L.resolveValueSymbol(n);
+        if (s2 === undefined || s2 === sym) {
+          const okRef = parent !== undefined && ts.isCallExpression(parent) && parent.arguments[1] === n &&
+            isUtilInspectCallee(L, parent.expression);
+          if (!okRef) safe = false;
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(id.getSourceFile());
+  return safe ? decl.initializer : null;
+}
+
+/** The OPEN-key and any-typed checks over an admitted literal's entries (its values are
+ * lowered where it is used; the checks run for the literal wherever it was written). */
+function checkLiteralOptions(L: Lowerer, node: ts.ObjectLiteralExpression): { key: string; value: ts.Expression; prop: ts.Node }[] {
+  const entries = literalOptionEntries(node);
+  if (entries === null) nonLiteralOptions(L, node, "spread, method and accessor entries are not lowered in options objects");
+  for (const e of entries) {
+    refuseOpenInspectOption(L, e.prop, e.key, e.value);
+    if ((L.typeOf(e.value).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
+      nonLiteralOptions(L, e.value, `the '${e.key}' option value has type any/unknown`);
+    }
+  }
+  return entries;
+}
+
+/** The options argument of util.inspect as a run-time DYN object: an admitted literal
+ * (inline, or a const bound to one, see admittedConstOptions). Anything else refuses. */
 function inspectOptionsDyn(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr {
-  if (
-    ts.isObjectLiteralExpression(node) &&
-    node.properties.every((p) => ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)))
-  ) {
+  if (ts.isObjectLiteralExpression(node)) {
+    const entries = checkLiteralOptions(L, node);
     const fields: { key: IrExpr; value: IrExpr }[] = [];
-    for (const p of node.properties as ts.NodeArray<ts.PropertyAssignment>) {
-      const key = (p.name as ts.Identifier | ts.StringLiteral).text;
-      refuseOpenInspectOption(L, p, key, p.initializer);
-      const v = L.lowerExpr(p.initializer);
+    for (const e of entries) {
+      const v = L.lowerExpr(e.value);
       const dv: IrExpr = v.type.kind === "dyn" ? v : { kind: "dynFrom", value: v, type: DYN, loc };
-      fields.push({ key: str(key, loc), value: dv });
+      fields.push({ key: str(e.key, loc), value: dv });
     }
     return { kind: "dynObjLit", fields, type: DYN, loc };
   }
-  checkRuntimeOptionsType(L, node);
-  const v = L.lowerExpr(node);
-  return v.type.kind === "dyn" ? v : { kind: "dynFrom", value: v, type: DYN, loc };
+  if (ts.isIdentifier(node)) {
+    const init = admittedConstOptions(L, node);
+    if (init !== null) {
+      checkLiteralOptions(L, init);
+      const v = L.lowerExpr(node);
+      return v.type.kind === "dyn" ? v : { kind: "dynFrom", value: v, type: DYN, loc };
+    }
+  }
+  return nonLiteralOptions(L, node, "the options must be an object literal, or a non-exported const bound to one that is used only as a util.inspect options argument");
 }
 
 /** util.inspect(value, options) with options: the interned helper

@@ -1,6 +1,7 @@
-// util.inspect options that arrive as RUNTIME objects (JSON.parse), on static
-// and checked-dynamic values: breakLength, compact (false / a number), the
-// maxArrayLength and maxStringLength caps, numericSeparator, sorted, depth.
+// util.inspect options written as LITERAL objects (the runtime options form the
+// ruling admits): breakLength, compact (false / a number), the maxArrayLength and
+// maxStringLength caps, numericSeparator, sorted and depth, on static and
+// checked-dynamic values.
 import util from "node:util";
 
 const obj = { a: 1, b: "two", c: [1, 2, 3], d: { e: { f: { g: 1 } } } };
@@ -8,29 +9,71 @@ const arr: number[] = Array.from({ length: 120 }, (_, i) => i);
 const text = "x".repeat(20) + "\n" + "y".repeat(30);
 const dyn: any = { b: 2, a: 1, c: [3, 1], nested: { z: [1, 2, 3, 4, 5, 6, 7, 8], y: "q" } };
 const dynNums: any = [1234567, 2, 3, 1e-7];
-
-type Opts = { breakLength?: number; compact?: number | false; maxArrayLength?: number | null; maxStringLength?: number | null; numericSeparator?: boolean; sorted?: boolean; depth?: number | null };
-const opts = [
-  '{"breakLength": 20}',
-  '{"compact": false}',
-  '{"compact": 1}',
-  '{"compact": 5, "breakLength": 40}',
-  '{"maxArrayLength": 3}',
-  '{"maxArrayLength": null}',
-  '{"maxStringLength": 10}',
-  '{"numericSeparator": true}',
-  '{"sorted": true}',
-  '{"depth": 0, "unknownKey": 5}',
-  '{"depth": null}',
-];
-for (const text_ of opts) {
-  const o: Opts = JSON.parse(text_);
-  console.log(`== ${text_}`);
-  console.log(util.inspect(obj, o));
-  console.log(util.inspect(arr, o));
-  console.log(util.inspect(text, o));
-  console.log(util.inspect(dyn, o));
-  console.log(util.inspect(dynNums, o));
-}
+console.log("== {\"breakLength\": 20}");
+console.log(util.inspect(obj, {"breakLength": 20}));
+console.log(util.inspect(arr, {"breakLength": 20}));
+console.log(util.inspect(text, {"breakLength": 20}));
+console.log(util.inspect(dyn, {"breakLength": 20}));
+console.log(util.inspect(dynNums, {"breakLength": 20}));
+console.log("== {\"compact\": false}");
+console.log(util.inspect(obj, {"compact": false}));
+console.log(util.inspect(arr, {"compact": false}));
+console.log(util.inspect(text, {"compact": false}));
+console.log(util.inspect(dyn, {"compact": false}));
+console.log(util.inspect(dynNums, {"compact": false}));
+console.log("== {\"compact\": 1}");
+console.log(util.inspect(obj, {"compact": 1}));
+console.log(util.inspect(arr, {"compact": 1}));
+console.log(util.inspect(text, {"compact": 1}));
+console.log(util.inspect(dyn, {"compact": 1}));
+console.log(util.inspect(dynNums, {"compact": 1}));
+console.log("== {\"compact\": 5, \"breakLength\": 40}");
+console.log(util.inspect(obj, {"compact": 5, "breakLength": 40}));
+console.log(util.inspect(arr, {"compact": 5, "breakLength": 40}));
+console.log(util.inspect(text, {"compact": 5, "breakLength": 40}));
+console.log(util.inspect(dyn, {"compact": 5, "breakLength": 40}));
+console.log(util.inspect(dynNums, {"compact": 5, "breakLength": 40}));
+console.log("== {\"maxArrayLength\": 3}");
+console.log(util.inspect(obj, {"maxArrayLength": 3}));
+console.log(util.inspect(arr, {"maxArrayLength": 3}));
+console.log(util.inspect(text, {"maxArrayLength": 3}));
+console.log(util.inspect(dyn, {"maxArrayLength": 3}));
+console.log(util.inspect(dynNums, {"maxArrayLength": 3}));
+console.log("== {\"maxArrayLength\": null}");
+console.log(util.inspect(obj, {"maxArrayLength": null}));
+console.log(util.inspect(arr, {"maxArrayLength": null}));
+console.log(util.inspect(text, {"maxArrayLength": null}));
+console.log(util.inspect(dyn, {"maxArrayLength": null}));
+console.log(util.inspect(dynNums, {"maxArrayLength": null}));
+console.log("== {\"maxStringLength\": 10}");
+console.log(util.inspect(obj, {"maxStringLength": 10}));
+console.log(util.inspect(arr, {"maxStringLength": 10}));
+console.log(util.inspect(text, {"maxStringLength": 10}));
+console.log(util.inspect(dyn, {"maxStringLength": 10}));
+console.log(util.inspect(dynNums, {"maxStringLength": 10}));
+console.log("== {\"numericSeparator\": true}");
+console.log(util.inspect(obj, {"numericSeparator": true}));
+console.log(util.inspect(arr, {"numericSeparator": true}));
+console.log(util.inspect(text, {"numericSeparator": true}));
+console.log(util.inspect(dyn, {"numericSeparator": true}));
+console.log(util.inspect(dynNums, {"numericSeparator": true}));
+console.log("== {\"sorted\": true}");
+console.log(util.inspect(obj, {"sorted": true}));
+console.log(util.inspect(arr, {"sorted": true}));
+console.log(util.inspect(text, {"sorted": true}));
+console.log(util.inspect(dyn, {"sorted": true}));
+console.log(util.inspect(dynNums, {"sorted": true}));
+console.log("== {\"depth\": 0}");
+console.log(util.inspect(obj, {"depth": 0}));
+console.log(util.inspect(arr, {"depth": 0}));
+console.log(util.inspect(text, {"depth": 0}));
+console.log(util.inspect(dyn, {"depth": 0}));
+console.log(util.inspect(dynNums, {"depth": 0}));
+console.log("== {\"depth\": null}");
+console.log(util.inspect(obj, {"depth": null}));
+console.log(util.inspect(arr, {"depth": null}));
+console.log(util.inspect(text, {"depth": null}));
+console.log(util.inspect(dyn, {"depth": null}));
+console.log(util.inspect(dynNums, {"depth": null}));
 console.log(util.inspect(obj, undefined));
 console.log(util.inspect(obj));
