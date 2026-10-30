@@ -2922,14 +2922,18 @@ static void scr_tc_st_reset(ScrTcSt *st) {
   st->need = 0; st->seen = 0; st->lo = 0x80; st->hi = 0xBF; st->cp = 0;
   st->lead_set = 0; st->lead = 0; st->surr = 0; st->bom = 0;
 }
-/* A heap codec's block: the string header, the name (a canonical encoding name, at most 14 bytes), the state. */
-typedef struct ScrTcHeap {
-  uint32_t rc;
-  uint32_t len;
-  uint32_t cap;
-  char data[16];
-  ScrTcSt st;
-} ScrTcHeap;
+/* A heap codec is an ORDINARY string block (scr_str_new), so the RC audit counts it and the release path frees it
+ * with no codec-specific code (scr_string.c is always linked: it must not change). Its name is data[0..len); the
+ * state sits at data[SCR_TC_STATE_OFF] inside the same block (the block is sized for it). Its cap is the marker:
+ * above any real length, so the release path never pools it (scr_pool_give refuses the size) and it goes to the
+ * spare/free path. */
+#define SCR_TC_STATE_OFF 16
+/* The physical payload of a heap codec: above the pool's largest class (SCR_POOL_MAX), so the block is a plain
+ * malloc block and the release path's spare/free route is a valid free (a pooled or arena-carved block is not). */
+#define SCR_TC_BLOCK_BYTES 320
+static ScrTcSt *scr_tc_state_of(const ScrStr *s) {
+  return (ScrTcSt *)(void *)((char *)s->data + SCR_TC_STATE_OFF);
+}
 
 /* UTF-8 of one code point, appended. */
 static void scr_txt_put(uint8_t *o, size_t *k, uint32_t cp) {
@@ -3074,7 +3078,7 @@ static ScrStr *scr_tc_run(const ScrStr *codec, const uint8_t *in, size_t n, bool
   ScrTcSt local;
   scr_tc_st_reset(&local);
   ScrTcSt *st = &local;
-  if (scr_tc_is_heap(codec->cap)) st = &((ScrTcHeap *)(void *)codec)->st;
+  if (scr_tc_is_heap(codec->cap)) st = scr_tc_state_of(codec);
   const bool bomable = e->kind == SCR_TXT_KIND_UTF8 || e->kind == SCR_TXT_KIND_UTF16LE || e->kind == SCR_TXT_KIND_UTF16BE;
   uint8_t *o = (uint8_t *)malloc(3 * n + 8);
   if (o == NULL) scr_trap("scriptc: out of memory\n");
@@ -3129,15 +3133,16 @@ ScrStr *scr_text_decoder_new(const ScrStr *name, double flags) {
       break;
     }
   }
-  ScrTcHeap *h = (ScrTcHeap *)scr_str_codec_block(sizeof *h);
+  char buf[SCR_TC_BLOCK_BYTES];
+  memset(buf, 0, sizeof buf);
   const char *cn = scr_txt_encs[enc].name;
   const size_t cl = strlen(cn);
-  h->rc = 1;
+  memcpy(buf, cn, cl);
+  ScrStr *h = scr_str_new(buf, sizeof buf); /* +1, rc 1, a fresh block (never interned) */
   h->len = (uint32_t)cl;
   h->cap = SCR_TC_CAP_HEAP_BASE | ((uint32_t)enc << 2) | ((uint32_t)flags & 3u);
-  memcpy(h->data, cn, cl + 1);
-  scr_tc_st_reset(&h->st);
-  return (ScrStr *)h;
+  scr_tc_st_reset(scr_tc_state_of(h));
+  return h;
 }
 
 /* decode(bytes) on a codec: a stream call keeps the state, a non-stream call flushes it. +1, or NULL with the

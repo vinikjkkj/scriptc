@@ -893,7 +893,6 @@ bool scr_str_is_absent(const ScrStr *s);
  * an rc==1-only realloc that grows capacity in place. Both keep the RC
  * audit's live count exact. */
 ScrStr *scr_str_alloc_raw(size_t len, size_t cap);
-void *scr_str_codec_block(size_t bytes); /* a heap codec decoder's block (scr_string.c): counted, never pooled */
 ScrStr *scr_str_regrow(ScrStr *s, size_t newcap);
 
 static inline ScrStr *scr_str_retain(ScrStr *s) {
