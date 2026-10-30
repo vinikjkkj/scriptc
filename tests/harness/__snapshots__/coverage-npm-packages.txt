@@ -7,10 +7,9 @@ scriptc coverage tests/diagnostics/npm-imports/main.ts
     mathkit      island fallback (its inferred export surface breaks 1 import site in program files — the package serves from the island instead (bundler-emitted surfaces type only as far as inference reaches))
     @acme/units  static
 
-  runs with --dynamic   5 sites (embeds a JS engine, ~620KB — static stays the default)
+  runs with --dynamic   4 sites (embeds a JS engine, ~620KB — static stays the default)
       ×3  values from the 'mathkit' package run in the embedded dynamic engine, which this build does not include  SC2013
       ×1  importing 'mathkit' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there  SC2013
-      ×1  importing '@acme/units' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there  SC2013
 
   blockers:
       ×1  calling 'calc.value' (it has no compiled implementation: its module 'mathkit' ships only a declaration file; this call cannot run in a static build)  SC1090
