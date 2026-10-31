@@ -7138,48 +7138,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/18000-cjs-main-tick-before-main-micro.cjs": {
-   "order": [
-    "<repo>/tests/corpus/18000-cjs-main-tick-before-main-micro.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18001-cjs-main-nested-ticks-and-jobs.cjs": {
-   "order": [
-    "<repo>/tests/corpus/18001-cjs-main-nested-ticks-and-jobs.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18002-cjs-main-await-fn-tick-order.cjs": {
-   "order": [
-    "<repo>/tests/corpus/18002-cjs-main-await-fn-tick-order.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18003-cjs-main-throw-listener-tick-order.cjs": {
-   "order": [
-    "<repo>/tests/corpus/18003-cjs-main-throw-listener-tick-order.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18004-esm-ts-main-micro-before-main-tick.ts": {
-   "order": [
-    "<repo>/tests/corpus/18004-esm-ts-main-micro-before-main-tick.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18005-esm-mjs-main-micro-before-main-tick.mjs": {
-   "order": [
-    "<repo>/tests/corpus/18005-esm-mjs-main-micro-before-main-tick.mjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18006-type-module-ts-main-micro-before-main-tick.ts": {
-   "order": [
-    "<repo>/tests/corpus/18006-type-module-ts-main-micro-before-main-tick.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/1692-stream-pipe.ts": {
    "order": [
     "<repo>/tests/corpus/1692-stream-pipe.ts"
@@ -7512,16 +7470,16 @@
    "diags": []
   },
   "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts": {
-    "order": [
-      "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/17400-pct-s-user-tostring-shapes.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts": {
-    "order": [
-      "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/17401-pct-s-user-tostring-results.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/1741-stream-extends-writable.ts": {
    "order": [
@@ -7824,16 +7782,16 @@
    "diags": []
   },
   "<repo>/tests/corpus/17800-fn-text-values.ts": {
-    "order": [
-      "<repo>/tests/corpus/17800-fn-text-values.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/17800-fn-text-values.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/17801-fn-text-erased-types.ts": {
-    "order": [
-      "<repo>/tests/corpus/17801-fn-text-erased-types.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/17801-fn-text-erased-types.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/1781-http-server-shapes.cjs": {
    "order": [
@@ -7844,6 +7802,60 @@
   "<repo>/tests/corpus/1790-computed-key-folds.ts": {
    "order": [
     "<repo>/tests/corpus/1790-computed-key-folds.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17900-fn-name-class-field-tostring-is-named-by-its-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/17900-fn-name-class-field-tostring-is-named-by-its-key.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17901-fn-name-object-keys-name-the-function.ts": {
+   "order": [
+    "<repo>/tests/corpus/17901-fn-name-object-keys-name-the-function.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17902-fn-name-default-and-binding-defaults.ts": {
+   "order": [
+    "<repo>/tests/corpus/17902-fn-name-default-and-binding-defaults.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17903-fn-name-logical-assignment-names-the-binding.ts": {
+   "order": [
+    "<repo>/tests/corpus/17903-fn-name-logical-assignment-names-the-binding.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17904-fn-name-typed-param-keeps-the-value-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/17904-fn-name-typed-param-keeps-the-value-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17905-fn-name-static-method-value-is-its-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/17905-fn-name-static-method-value-is-its-key.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17906-fn-name-private-field-arrow-keeps-the-hash.ts": {
+   "order": [
+    "<repo>/tests/corpus/17906-fn-name-private-field-arrow-keeps-the-hash.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17907-fn-name-js-class-fields-and-positions.js": {
+   "order": [
+    "<repo>/tests/corpus/17907-fn-name-js-class-fields-and-positions.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/17908-fn-name-js-defaults-and-bindings.js": {
+   "order": [
+    "<repo>/tests/corpus/17908-fn-name-js-defaults-and-bindings.js"
    ],
    "diags": []
   },
@@ -7898,6 +7910,48 @@
   "<repo>/tests/corpus/1800-immediate-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1800-immediate-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18000-cjs-main-tick-before-main-micro.cjs": {
+   "order": [
+    "<repo>/tests/corpus/18000-cjs-main-tick-before-main-micro.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18001-cjs-main-nested-ticks-and-jobs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/18001-cjs-main-nested-ticks-and-jobs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18002-cjs-main-await-fn-tick-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/18002-cjs-main-await-fn-tick-order.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18003-cjs-main-throw-listener-tick-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/18003-cjs-main-throw-listener-tick-order.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18004-esm-ts-main-micro-before-main-tick.ts": {
+   "order": [
+    "<repo>/tests/corpus/18004-esm-ts-main-micro-before-main-tick.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18005-esm-mjs-main-micro-before-main-tick.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18005-esm-mjs-main-micro-before-main-tick.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18006-type-module-ts-main-micro-before-main-tick.ts": {
+   "order": [
+    "<repo>/tests/corpus/18006-type-module-ts-main-micro-before-main-tick.ts"
    ],
    "diags": []
   },
@@ -8287,35 +8341,77 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/18904-fs-read-ts-callback-forms.ts": {
-    "order": [
-      "<repo>/tests/corpus/18904-fs-read-ts-callback-forms.ts"
-    ],
-    "diags": []
+  "<repo>/tests/corpus/18900-fs-readfile-ts-callback-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/18900-fs-readfile-ts-callback-forms.ts"
+   ],
+   "diags": []
   },
-  "<repo>/tests/corpus/18903-fs-mkdtemp-ts-callback.ts": {
-    "order": [
-      "<repo>/tests/corpus/18903-fs-mkdtemp-ts-callback.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/18902-fs-exists-ts-callback.ts": {
-    "order": [
-      "<repo>/tests/corpus/18902-fs-exists-ts-callback.ts"
-    ],
-    "diags": []
+  "<repo>/tests/corpus/18900-rejhandled-late-catch-after-unhandled.ts": {
+   "order": [
+    "<repo>/tests/corpus/18900-rejhandled-late-catch-after-unhandled.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/18901-fs-readfile-ts-enoent.ts": {
-    "order": [
-      "<repo>/tests/corpus/18901-fs-readfile-ts-enoent.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/18901-fs-readfile-ts-enoent.ts"
+   ],
+   "diags": []
   },
-  "<repo>/tests/corpus/18900-fs-readfile-ts-callback-forms.ts": {
-    "order": [
-      "<repo>/tests/corpus/18900-fs-readfile-ts-callback-forms.ts"
-    ],
-    "diags": []
+  "<repo>/tests/corpus/18901-rejhandled-late-catch-in-timer-body.ts": {
+   "order": [
+    "<repo>/tests/corpus/18901-rejhandled-late-catch-in-timer-body.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18902-fs-exists-ts-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/18902-fs-exists-ts-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18902-rejhandled-two-promises-same-tick.ts": {
+   "order": [
+    "<repo>/tests/corpus/18902-rejhandled-two-promises-same-tick.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18903-fs-mkdtemp-ts-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/18903-fs-mkdtemp-ts-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18903-rejhandled-two-promises-different-ticks.ts": {
+   "order": [
+    "<repo>/tests/corpus/18903-rejhandled-two-promises-different-ticks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18904-fs-read-ts-callback-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/18904-fs-read-ts-callback-forms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18904-rejhandled-listener-registered-late.ts": {
+   "order": [
+    "<repo>/tests/corpus/18904-rejhandled-listener-registered-late.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18905-rejhandled-with-new-rejection-in-batch.ts": {
+   "order": [
+    "<repo>/tests/corpus/18905-rejhandled-with-new-rejection-in-batch.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18906-rejhandled-await-attach.ts": {
+   "order": [
+    "<repo>/tests/corpus/18906-rejhandled-await-attach.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/1891-ns-reexport/main.ts": {
    "order": [
@@ -8324,6 +8420,212 @@
     "<repo>/tests/corpus/1891-ns-reexport/constants.ts",
     "<repo>/tests/corpus/1891-ns-reexport/drink.ts",
     "<repo>/tests/corpus/1891-ns-reexport/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19100-fs-stat-enoent-stats-undefined-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19100-fs-stat-enoent-stats-undefined-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19101-fs-stat-enoent-size-throws-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19101-fs-stat-enoent-size-throws-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19102-fs-stat-enoent-size-throws-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19102-fs-stat-enoent-size-throws-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19103-fs-stat-success-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19103-fs-stat-success-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19104-fs-stat-success-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19104-fs-stat-success-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19105-fs-stat-enoent-errno-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/19105-fs-stat-enoent-errno-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19106-fs-stat-enoent-guard-ternary.ts": {
+   "order": [
+    "<repo>/tests/corpus/19106-fs-stat-enoent-guard-ternary.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19107-fs-stat-enoent-cjs-ternary.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19107-fs-stat-enoent-cjs-ternary.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19108-fs-stat-enoent-cjs-if-code.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19108-fs-stat-enoent-cjs-if-code.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19109-fs-stat-enoent-cjs-stats-only.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19109-fs-stat-enoent-cjs-stats-only.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19110-fs-stat-enoent-mtime-throws-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19110-fs-stat-enoent-mtime-throws-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19111-fs-stat-enoent-mode-throws-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19111-fs-stat-enoent-mode-throws-ts.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'mode' does not exist on type 'Stats'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/19111-fs-stat-enoent-mode-throws-ts.ts",
+      "start": 153,
+      "end": 157
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/19112-fs-stat-success-then-miss-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19112-fs-stat-success-then-miss-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19113-fs-stat-enoent-then-success-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19113-fs-stat-enoent-then-success-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19114-fs-stat-enoent-message-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19114-fs-stat-enoent-message-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19115-fs-stat-enoent-promises-rejects.ts": {
+   "order": [
+    "<repo>/tests/corpus/19115-fs-stat-enoent-promises-rejects.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19116-fs-stat-success-mode-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19116-fs-stat-success-mode-ts.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'mode' does not exist on type 'Stats'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/19116-fs-stat-success-mode-ts.ts",
+      "start": 96,
+      "end": 100
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/19117-fs-stat-enoent-guard-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19117-fs-stat-enoent-guard-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19118-fs-stat-enoent-typeof-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19118-fs-stat-enoent-typeof-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19119-fs-stat-success-cjs-size.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19119-fs-stat-success-cjs-size.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19200-fs-writefile-ts-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/19200-fs-writefile-ts-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19201-fs-writefile-cjs-callback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19201-fs-writefile-cjs-callback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19202-fs-writefile-forms-cjs-callback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19202-fs-writefile-forms-cjs-callback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19203-fs-appendfile-ts-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/19203-fs-appendfile-ts-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19204-fs-appendfile-cjs-callback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19204-fs-appendfile-cjs-callback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19205-fs-mkdir-ts-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/19205-fs-mkdir-ts-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19206-fs-mkdir-cjs-callback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19206-fs-mkdir-cjs-callback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19207-fs-unlink-rename-ts-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/19207-fs-unlink-rename-ts-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19208-fs-unlink-rename-cjs-callback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19208-fs-unlink-rename-cjs-callback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19209-fs-callback-error-ladder-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19209-fs-callback-error-ladder-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19210-fs-callback-option-kinds-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19210-fs-callback-option-kinds-cjs.cjs"
    ],
    "diags": []
   },
@@ -19661,60 +19963,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/17900-fn-name-class-field-tostring-is-named-by-its-key.ts": {
-   "order": [
-    "<repo>/tests/corpus/17900-fn-name-class-field-tostring-is-named-by-its-key.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/17901-fn-name-object-keys-name-the-function.ts": {
-   "order": [
-    "<repo>/tests/corpus/17901-fn-name-object-keys-name-the-function.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/17902-fn-name-default-and-binding-defaults.ts": {
-   "order": [
-    "<repo>/tests/corpus/17902-fn-name-default-and-binding-defaults.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/17903-fn-name-logical-assignment-names-the-binding.ts": {
-   "order": [
-    "<repo>/tests/corpus/17903-fn-name-logical-assignment-names-the-binding.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/17904-fn-name-typed-param-keeps-the-value-name.ts": {
-   "order": [
-    "<repo>/tests/corpus/17904-fn-name-typed-param-keeps-the-value-name.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/17905-fn-name-static-method-value-is-its-key.ts": {
-   "order": [
-    "<repo>/tests/corpus/17905-fn-name-static-method-value-is-its-key.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/17906-fn-name-private-field-arrow-keeps-the-hash.ts": {
-   "order": [
-    "<repo>/tests/corpus/17906-fn-name-private-field-arrow-keeps-the-hash.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/17907-fn-name-js-class-fields-and-positions.js": {
-   "order": [
-    "<repo>/tests/corpus/17907-fn-name-js-class-fields-and-positions.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/17908-fn-name-js-defaults-and-bindings.js": {
-   "order": [
-    "<repo>/tests/corpus/17908-fn-name-js-defaults-and-bindings.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/a-bare-type-parameter-with-no-readable-instantiation.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-bare-type-parameter-with-no-readable-instantiation.ts"
@@ -20664,20 +20912,20 @@
    "diags": []
   },
   "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs": {
-    "order": [
-      "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs"
-    ],
-    "diags": [
-      {
-        "code": "SC0001",
-        "message": "No overload expects 5 arguments, but overloads do exist that expect either 4 or 6 arguments.",
-        "loc": {
-          "file": "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs",
-          "start": 2632,
-          "end": 2636
-        }
-      }
-    ]
+   "order": [
+    "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "No overload expects 5 arguments, but overloads do exist that expect either 4 or 6 arguments.",
+     "loc": {
+      "file": "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs",
+      "start": 2632,
+      "end": 2636
+     }
+    }
+   ]
   },
   "<repo>/tests/diagnostics/js-new-proxy.js": {
    "order": [
@@ -21380,6 +21628,90 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/node-types/argv-env.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/argv-env.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/import-fences.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/import-fences.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1010",
+     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
+      "start": 422,
+      "end": 461
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/fixtures/node-types/path-os.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/path-os.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stream-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/streams.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/streams.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts"
@@ -21933,272 +22265,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/fixtures/node-types/argv-env.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/argv-env.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/child-stdio.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/import-fences.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/import-fences.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC1010",
-     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
-     "loc": {
-      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
-      "start": 422,
-      "end": 461
-     },
-     "milestone": "M4",
-     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
-    }
-   ]
-  },
-  "<repo>/tests/fixtures/node-types/path-os.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/path-os.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/server-address-states.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stream-capture.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/streams.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19100-fs-stat-enoent-stats-undefined-ts.ts": {
-   "order": [
-    "<repo>/tests/corpus/19100-fs-stat-enoent-stats-undefined-ts.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19101-fs-stat-enoent-size-throws-ts.ts": {
-   "order": [
-    "<repo>/tests/corpus/19101-fs-stat-enoent-size-throws-ts.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19102-fs-stat-enoent-size-throws-cjs.cjs": {
-   "order": [
-    "<repo>/tests/corpus/19102-fs-stat-enoent-size-throws-cjs.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19103-fs-stat-success-ts.ts": {
-   "order": [
-    "<repo>/tests/corpus/19103-fs-stat-success-ts.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19104-fs-stat-success-cjs.cjs": {
-   "order": [
-    "<repo>/tests/corpus/19104-fs-stat-success-cjs.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19105-fs-stat-enoent-errno-fields.ts": {
-   "order": [
-    "<repo>/tests/corpus/19105-fs-stat-enoent-errno-fields.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19106-fs-stat-enoent-guard-ternary.ts": {
-   "order": [
-    "<repo>/tests/corpus/19106-fs-stat-enoent-guard-ternary.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19107-fs-stat-enoent-cjs-ternary.cjs": {
-   "order": [
-    "<repo>/tests/corpus/19107-fs-stat-enoent-cjs-ternary.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19108-fs-stat-enoent-cjs-if-code.cjs": {
-   "order": [
-    "<repo>/tests/corpus/19108-fs-stat-enoent-cjs-if-code.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19109-fs-stat-enoent-cjs-stats-only.cjs": {
-   "order": [
-    "<repo>/tests/corpus/19109-fs-stat-enoent-cjs-stats-only.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19110-fs-stat-enoent-mtime-throws-ts.ts": {
-   "order": [
-    "<repo>/tests/corpus/19110-fs-stat-enoent-mtime-throws-ts.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19111-fs-stat-enoent-mode-throws-ts.ts": {
-   "order": [
-    "<repo>/tests/corpus/19111-fs-stat-enoent-mode-throws-ts.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'mode' does not exist on type 'Stats'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/19111-fs-stat-enoent-mode-throws-ts.ts",
-      "start": 153,
-      "end": 157
-     }
-    }
-   ]
-  },
-  "<repo>/tests/corpus/19112-fs-stat-success-then-miss-ts.ts": {
-   "order": [
-    "<repo>/tests/corpus/19112-fs-stat-success-then-miss-ts.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19113-fs-stat-enoent-then-success-cjs.cjs": {
-   "order": [
-    "<repo>/tests/corpus/19113-fs-stat-enoent-then-success-cjs.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19114-fs-stat-enoent-message-ts.ts": {
-   "order": [
-    "<repo>/tests/corpus/19114-fs-stat-enoent-message-ts.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19115-fs-stat-enoent-promises-rejects.ts": {
-   "order": [
-    "<repo>/tests/corpus/19115-fs-stat-enoent-promises-rejects.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19116-fs-stat-success-mode-ts.ts": {
-   "order": [
-    "<repo>/tests/corpus/19116-fs-stat-success-mode-ts.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'mode' does not exist on type 'Stats'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/19116-fs-stat-success-mode-ts.ts",
-      "start": 96,
-      "end": 100
-     }
-    }
-   ]
-  },
-  "<repo>/tests/corpus/19117-fs-stat-enoent-guard-cjs.cjs": {
-   "order": [
-    "<repo>/tests/corpus/19117-fs-stat-enoent-guard-cjs.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19118-fs-stat-enoent-typeof-ts.ts": {
-   "order": [
-    "<repo>/tests/corpus/19118-fs-stat-enoent-typeof-ts.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19119-fs-stat-success-cjs-size.cjs": {
-   "order": [
-    "<repo>/tests/corpus/19119-fs-stat-success-cjs-size.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18900-rejhandled-late-catch-after-unhandled.ts": {
-   "order": [
-    "<repo>/tests/corpus/18900-rejhandled-late-catch-after-unhandled.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18901-rejhandled-late-catch-in-timer-body.ts": {
-   "order": [
-    "<repo>/tests/corpus/18901-rejhandled-late-catch-in-timer-body.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18902-rejhandled-two-promises-same-tick.ts": {
-   "order": [
-    "<repo>/tests/corpus/18902-rejhandled-two-promises-same-tick.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18903-rejhandled-two-promises-different-ticks.ts": {
-   "order": [
-    "<repo>/tests/corpus/18903-rejhandled-two-promises-different-ticks.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18904-rejhandled-listener-registered-late.ts": {
-   "order": [
-    "<repo>/tests/corpus/18904-rejhandled-listener-registered-late.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18905-rejhandled-with-new-rejection-in-batch.ts": {
-   "order": [
-    "<repo>/tests/corpus/18905-rejhandled-with-new-rejection-in-batch.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18906-rejhandled-await-attach.ts": {
-   "order": [
-    "<repo>/tests/corpus/18906-rejhandled-await-attach.ts"
-   ],
-   "diags": []
   }
  }
 }
