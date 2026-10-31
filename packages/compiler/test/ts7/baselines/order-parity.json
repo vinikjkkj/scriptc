@@ -22117,6 +22117,48 @@
     "<repo>/tests/corpus/19119-fs-stat-success-cjs-size.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/18900-rejhandled-late-catch-after-unhandled.ts": {
+   "order": [
+    "<repo>/tests/corpus/18900-rejhandled-late-catch-after-unhandled.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18901-rejhandled-late-catch-in-timer-body.ts": {
+   "order": [
+    "<repo>/tests/corpus/18901-rejhandled-late-catch-in-timer-body.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18902-rejhandled-two-promises-same-tick.ts": {
+   "order": [
+    "<repo>/tests/corpus/18902-rejhandled-two-promises-same-tick.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18903-rejhandled-two-promises-different-ticks.ts": {
+   "order": [
+    "<repo>/tests/corpus/18903-rejhandled-two-promises-different-ticks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18904-rejhandled-listener-registered-late.ts": {
+   "order": [
+    "<repo>/tests/corpus/18904-rejhandled-listener-registered-late.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18905-rejhandled-with-new-rejection-in-batch.ts": {
+   "order": [
+    "<repo>/tests/corpus/18905-rejhandled-with-new-rejection-in-batch.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18906-rejhandled-await-attach.ts": {
+   "order": [
+    "<repo>/tests/corpus/18906-rejhandled-await-attach.ts"
+   ],
+   "diags": []
   }
  }
 }
