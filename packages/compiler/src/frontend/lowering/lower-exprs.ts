@@ -24586,6 +24586,21 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
    * composes with existing strEq/bin/switch nodes, so `r.kind === "ok"`
    * and `switch (r.kind)` work without dedicated test nodes. Anything else
    * on a union receiver is rejected specifically (narrow first). */
+  /** True when a `?.` sits on the receiver spine of `expr` (`r?.a.b`: the
+   * `.b` read short-circuits with its chain). Parentheses end the chain
+   * (`(r?.a).b` throws in Node), so the walk stops there. */
+  function inOptionalChainOf(expr: ts.Expression): boolean {
+    let n: ts.Expression = expr;
+    for (;;) {
+      if (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n) || ts.isCallExpression(n)) {
+        if (n.questionDotToken !== undefined) return true;
+        n = n.expression;
+        continue;
+      }
+      return false;
+    }
+  }
+
   export function lowerUnionProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (L.chainBlocked(expr)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(expr.expression));
@@ -24644,6 +24659,24 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
       throw new Error("lowerer bug: union-typed receiver lowered to a non-union");
     }
     const field = expr.name.text;
+    // A plain (non-optional) read of a record field through a JavaScript union
+    // whose unit arm is Node's null/undefined and whose one real arm is that
+    // record (`cond ? {a, b} : null`, then `r.a`): the unit arm throws Node's
+    // TypeError at the read ("Cannot read properties of null (reading 'a')"),
+    // and the read is the record's own declared field. The keyed reader below
+    // answers the unit arm with undefined (its optional-chain short-circuit),
+    // which a plain read never does in Node.
+    if (!inOptionalChainOf(expr) && isJsSourceFile(expr.getSourceFile())) {
+      const target = L.lyingTargetOf(value.type);
+      const shape = target?.kind === "record" ? L.shapes.get(target.shapeId) : undefined;
+      if (target?.kind === "record" && shape?.fields.some((f) => f.name === field)) {
+        const lr = L.lyingRead(value, expr.expression);
+        if (lr?.type.kind === "record") {
+          const f = shape!.fields.find((x) => x.name === field)!;
+          return { kind: "recordGet", obj: lr, shapeId: target.shapeId, field, type: f.type, loc: locOf(expr) };
+        }
+      }
+    }
     const wide = lowerUnionFieldRead(L, expr, value, field);
     if (wide) return wide;
     // The WIDE union cannot answer, but the CHECKER's picture at this site
