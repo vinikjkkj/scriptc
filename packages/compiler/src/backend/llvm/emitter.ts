@@ -2384,7 +2384,7 @@ class LlEmitter {
     // declared the flag already; the Set dedupes).
     if (entryMayThrow || runsLoop) this.declare(`declare zeroext i1 @scr_exc_pending()`);
     if (runsLoop) {
-      this.declare(`declare zeroext i1 @scr_loop_run(ptr)`);
+      this.declare(`declare zeroext i1 @${this.mod.entryCjs ? "scr_loop_run_cjs" : "scr_loop_run"}(ptr)`);
       this.declare(`declare zeroext i1 @scr_report_unhandled_rejections()`);
       this.declare(`declare void @scr_discard_unhandled_rejections()`);
     }
@@ -2843,7 +2843,7 @@ class LlEmitter {
       // both exit 1, like Node — the C main's loop block exactly.
       ...(runsLoop
         ? [
-            `  %loop_rejection = call zeroext i1 @scr_loop_run(ptr ${asyncEntry ? "%top" : "null"})`,
+            `  %loop_rejection = call zeroext i1 @${this.mod.entryCjs ? "scr_loop_run_cjs" : "scr_loop_run"}(ptr ${asyncEntry ? "%top" : "null"})`,
             `  %lexc = call zeroext i1 @scr_exc_pending()`,
             `  br i1 %lexc, label %luncaught, label %lok`,
             `luncaught:`,

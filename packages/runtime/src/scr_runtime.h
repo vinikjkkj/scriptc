@@ -7942,6 +7942,9 @@ double scr_now_ms(void); /* the loop's monotonic clock, in ms */
  * Returns true when a default/listener-crashing unhandled rejection
  * already selected and reported exit status 1. */
 bool scr_loop_run(ScrPromise *top_level);
+/* The same loop for a CommonJS entry: its main body's nextTicks drain before
+ * its promise jobs (Node's order for a synchronously evaluated main module). */
+bool scr_loop_run_cjs(ScrPromise *top_level);
 /* SCR_LOOP_WHY (a build define, reached through SCRIPTC_PROF_CFLAGS):
  * names what is keeping the loop alive. A program whose main() RETURNS but
  * whose process never comes back has a live handle nobody can see, and

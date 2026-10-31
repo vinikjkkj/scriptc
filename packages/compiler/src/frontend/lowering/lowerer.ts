@@ -79,6 +79,7 @@ import {
   cjsKeyedForEachOf,
   cjsWholeExportAssignmentOf,
   cjsExportTargetLiteral,
+  isCjsEntryFile,
   isCjsJsFile,
   cjsExportDiscardReason,
   fallbackDtsPath,
@@ -3837,6 +3838,7 @@ export class Lowerer {
             ...(this.npmEmbedded ? { embedded: this.npmEmbedded } : {}),
             entry: ENTRY_NAME,
             ...(this.ffiImports.length > 0 ? { ffiImports: [...this.ffiImports] } : {}),
+            ...(isCjsEntryFile(this.entry) ? { entryCjs: true } : {}),
           };
     return {
       module,
