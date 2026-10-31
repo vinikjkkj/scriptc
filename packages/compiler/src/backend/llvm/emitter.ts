@@ -721,6 +721,40 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dgram.onListening": "scr_dgram_on_listening",
   "dgram.onClose": "scr_dgram_on_close",
   "dgram.onConnect": "scr_dgram_on_connect",
+  // The WebRTC peer-connection and data-channel surface (lower-wrtc.ts's
+  // libCalls). Each row is the C tier's emit-exprs.ts case, one runtime
+  // call, the arguments 1:1 with the IR's. The four state-change and the
+  // three channel registrations take a MOVED closure (LIB_FN_MOVE_ARGS);
+  // wrtc.dcOnMessage picks its adapter by arity and is special-cased in
+  // emitLibCall. The two sends are MAY_THROW (InvalidStateError), so their
+  // rows take the pending check through the generic path.
+  "wrtc.newPeer": "scr_rtc_peer_new",
+  "wrtc.pcSignalingState": "scr_rtc_peer_signaling_state",
+  "wrtc.pcIceConnectionState": "scr_rtc_peer_ice_connection_state",
+  "wrtc.pcIceGatheringState": "scr_rtc_peer_ice_gathering_state",
+  "wrtc.pcConnectionState": "scr_rtc_peer_connection_state",
+  "wrtc.pcClose": "scr_rtc_peer_close",
+  "wrtc.pcCreateDataChannel": "scr_rtc_peer_create_data_channel",
+  "wrtc.dcLabel": "scr_rtc_dc_label",
+  "wrtc.dcProtocol": "scr_rtc_dc_protocol",
+  "wrtc.dcOrdered": "scr_rtc_dc_ordered",
+  "wrtc.dcReadyState": "scr_rtc_dc_ready_state",
+  "wrtc.dcBinaryType": "scr_rtc_dc_binary_type",
+  "wrtc.dcBufferedAmount": "scr_rtc_dc_buffered_amount",
+  "wrtc.dcSetBinaryType": "scr_rtc_dc_set_binary_type",
+  "wrtc.dcClose": "scr_rtc_dc_close",
+  "wrtc.pcCreateOffer": "scr_rtc_peer_create_offer",
+  "wrtc.pcSetLocalDesc": "scr_rtc_peer_set_local_description",
+  "wrtc.pcSetRemoteDesc": "scr_rtc_peer_set_remote_description",
+  "wrtc.pcOnIceConnectionStateChange": "scr_rtc_peer_on_ice_connection_state_change",
+  "wrtc.pcOnIceGatheringStateChange": "scr_rtc_peer_on_ice_gathering_state_change",
+  "wrtc.pcOnSignalingStateChange": "scr_rtc_peer_on_signaling_state_change",
+  "wrtc.pcOnConnectionStateChange": "scr_rtc_peer_on_connection_state_change",
+  "wrtc.dcOnOpen": "scr_rtc_dc_on_open",
+  "wrtc.dcOnClose": "scr_rtc_dc_on_close",
+  "wrtc.dcOnError": "scr_rtc_dc_on_error",
+  "wrtc.dcSendStr": "scr_rtc_dc_send_str",
+  "wrtc.dcSendBytes": "scr_rtc_dc_send_bytes",
   "crypto.randomBytes": "scr_crypto_random_bytes",
   "crypto.getRandomValues": "scr_crypto_get_random_values",
   "crypto.randomInt": "scr_crypto_random_int",
@@ -1481,6 +1515,16 @@ const LIB_FN_MOVE_ARGS: Record<string, readonly number[]> = {
   "dgram.onListening": [1],
   "dgram.onClose": [1],
   "dgram.onConnect": [1],
+  // The WebRTC registrations: each runtime entry keeps its closure (`/*+1*/`
+  // in scr_runtime.h), so the frame stops owning it, as the C tier's
+  // E.moveTemp(cb) does. wrtc.dcOnMessage is not here: it is special-cased.
+  "wrtc.pcOnIceConnectionStateChange": [1],
+  "wrtc.pcOnIceGatheringStateChange": [1],
+  "wrtc.pcOnSignalingStateChange": [1],
+  "wrtc.pcOnConnectionStateChange": [1],
+  "wrtc.dcOnOpen": [1],
+  "wrtc.dcOnClose": [1],
+  "wrtc.dcOnError": [1],
 };
 
 /** The rows where a STRING argument is handed to the runtime as its raw
@@ -1549,6 +1593,12 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "https.requestAgent", "https.requestAgentCb", "https.requestFn", "https.requestFnCb",
   "dgram.bind", "dgram.bindCb", "dgram.connect", "dgram.connectCb",
   "dgram.sendStr", "dgram.sendBytes", "dgram.sendConnStr", "dgram.sendConnBytes", "dgram.sendDyn",
+  // The WebRTC rows the C tier marks E.usesTimers (emit-exprs.ts): a
+  // handshake in flight and every registered handler are loop work.
+  "wrtc.pcSetLocalDesc", "wrtc.pcSetRemoteDesc",
+  "wrtc.pcOnIceConnectionStateChange", "wrtc.pcOnIceGatheringStateChange",
+  "wrtc.pcOnSignalingStateChange", "wrtc.pcOnConnectionStateChange",
+  "wrtc.dcOnOpen", "wrtc.dcOnClose", "wrtc.dcOnError", "wrtc.dcOnMessage",
   "fs.existsChk", "fs.readFileCb", "fs.writeFileCb", "fs.appendFileCb", "fs.mkdirCb", "fs.unlinkCb", "fs.renameCb",
   "fs.mkdtempCb", "fs.readCb", "fs.lchmodCb",
   "http.createServer", "http.createServerEmpty",
@@ -18718,6 +18768,23 @@ class LlEmitter {
       B.line(`${port} = call double @scr_dgram_addr_port(ptr ${sock.name})`);
       this.storeField(this.recordFieldPtr(rec, e.type.shapeId, "port").ptr, F64, port);
       return recv;
+    }
+    if (e.fn === "wrtc.dcOnMessage") {
+      // The data-channel message listener (the C tier's emit-exprs.ts case):
+      // the closure MOVES into the channel, and the adapter is the runtime's
+      // thunk picked by the handler's arity (zero parameters takes the
+      // ignoring thunk, the Uint8Array payload takes the bytes thunk). The
+      // generic row cannot pick an adapter, hence this branch. Not a
+      // MAY_THROW member, so no pending check, exactly like the C tier's.
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: wrtc.dcOnMessage callback not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const adapter = cbT.params.length === 0 ? "scr_rtc_msg_thunk0" : "scr_rtc_msg_thunk_bytes";
+      this.declare(`declare void @${adapter}(ptr, ptr)`);
+      this.declare(`declare void @scr_rtc_dc_on_message(ptr, ptr, ptr)`);
+      B.line(`call void @scr_rtc_dc_on_message(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${adapter})`);
+      return { name: "", type: e.type };
     }
     if (e.fn === "dgram.onMessage") {
       // The registration the whole tier used to fall over on. The runtime
