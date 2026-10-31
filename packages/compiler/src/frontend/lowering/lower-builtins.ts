@@ -1110,6 +1110,13 @@ function fsOptionsKindFence(L: Lowerer, fn: string, node: ts.Expression | undefi
     const t = L.typeOf(m.value);
     const parts: readonly ts.Type[] = (t.flags & ts.TypeFlags.Union) ? (t as unknown as { types: ts.Type[] }).types : [t];
     const ok = parts.every((x) => (x.flags & (allowed | ts.TypeFlags.Undefined | ts.TypeFlags.Null)) !== 0);
+    if (!ok && allowed === 0) {
+      L.noLowering(
+        `${fn} with the option '${m.name}'`,
+        m.value,
+        "an AbortSignal is not honoured by the runtime yet; the write would run unaborted",
+      );
+    }
     if (!ok) {
       L.noLowering(
         `${fn} with the option '${m.name}' given a value of the wrong kind`,
@@ -1259,6 +1266,10 @@ function fsOptionsKindFence(L: Lowerer, fn: string, node: ts.Expression | undefi
           mode: ts.TypeFlags.NumberLike | ts.TypeFlags.StringLike,
           flag: ts.TypeFlags.StringLike,
           flush: ts.TypeFlags.BooleanLike,
+          // Node aborts a write whose AbortSignal is already aborted; no
+          // signal reaches the runtime, so a literal signal fences (0 admits
+          // only null/undefined).
+          signal: 0,
         });
         const a = dynArgs([args[0], args[1], args[2], args[3]]);
         return a && chk(bi.member === "writeFile" ? "fs.writeFileCb" : "fs.appendFileCb", a, DYN);
