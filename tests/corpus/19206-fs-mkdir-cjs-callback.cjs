@@ -1,33 +1,31 @@
-// Corpus 19206: fs callback form of m1 (rows 19206); operates in a temp directory under cwd and removes it.
+// Corpus 19206: fs callback forms, run in a private mkdtemp directory (no path is printed; filesystem errors print code and syscall only).
 const fs = require('fs');
-const D = 'fsw-19206';
-fs.rmSync(D, { recursive: true, force: true });
-fs.mkdirSync(D);
-const show = (tag, ...a) => console.log(tag, a.length, a.map((x) => (x === undefined ? 'undef' : x === null ? 'null' : typeof x)).join(','), a[1] === undefined ? '' : JSON.stringify(a[1]));
-fs.mkdir(D + '/md-plain', (...a) => {
-  show('plain', ...a);
-  fs.mkdir(D + '/md-plain', (eb) => {
-    console.log('eexist', eb.code, eb.errno, eb.syscall, eb.path, eb.message, Object.keys(eb).sort().join(','));
-    fs.mkdir(D + '/md-mode', 0o700, (...c) => {
-      show('mode', ...c);
-      fs.mkdir(D + '/md-rec/a/b', { recursive: true }, (...d) => {
-        show('rec-created', ...d);
-        fs.mkdir(D + '/md-rec/a/b', { recursive: true }, (...e) => {
-          show('rec-existing', ...e);
-          fs.mkdir(D + '/md-rec/a/b/c', { recursive: true, mode: 0o750 }, (...f) => {
-            show('rec-mode', ...f);
+const os = require('os');
+const D = fs.mkdtempSync(os.tmpdir() + '/fscb-19206-');
+const cb = (tag) => (e) => console.log(tag, e === null ? 'null' : e.code);
+
+fs.mkdir(D + '/md-plain', (e) => {
+  cb('plain')(e);
+  fs.mkdir(D + '/md-plain', (e2) => {
+    console.log('eexist', e2.code, e2.syscall);
+    fs.mkdir(D + '/md-mode', 0o700, (e3) => {
+      cb('mode')(e3);
+      fs.mkdir(D + '/md-rec/a/b', { recursive: true }, (e4, first) => {
+        cb('rec-created')(e4);
+        console.log('first', typeof first === 'string' && first.endsWith('md-rec'));
+        fs.mkdir(D + '/md-rec/a/b', { recursive: true }, (e5, again) => {
+          console.log('rec-existing', e5 === null ? 'null' : e5.code, again === undefined ? 'no-path' : 'path');
+          fs.mkdir(D + '/md-rec/a/b/c', { recursive: true, mode: 0o750 }, (e6, deep) => {
+            console.log('rec-mode', e6, typeof deep === 'string' && deep.endsWith('c'));
             fs.writeFileSync(D + '/md-file', 'x');
-            fs.mkdir(D + '/md-file/sub', { recursive: true }, (eg) => {
-              console.log('rec-enotdir', eg.code, eg.errno, eg.syscall, eg.path, eg.message);
-              fs.mkdir(D + '/md-nope/x/y', (eh) => {
-                console.log('plain-enoent', eh.code, eh.errno, eh.syscall, eh.path, eh.message);
-                fs.mkdir(D + '/md-null', null, (...i) => {
-                  show('null-opts', ...i);
-                  fs.mkdir(D + '/md-nullrec', { recursive: false }, (...j) => {
-                    show('recfalse', ...j);
-                    console.log('main end');
-                    fs.rmSync(D, { recursive: true, force: true });
-                  });
+            fs.mkdir(D + '/md-file/sub', { recursive: true }, (e7) => {
+              console.log('rec-enotdir', e7.code, e7.syscall);
+              fs.mkdir(D + '/md-nope/x/y', (e8) => {
+                console.log('plain-enoent', e8.code, e8.syscall);
+                fs.mkdir(D + '/md-null', null, (e9) => {
+                  cb('null-opts')(e9);
+                  fs.rmSync(D, { recursive: true, force: true });
+                  console.log('main end');
                 });
               });
             });
@@ -37,4 +35,4 @@ fs.mkdir(D + '/md-plain', (...a) => {
     });
   });
 });
-console.log('main end');
+
