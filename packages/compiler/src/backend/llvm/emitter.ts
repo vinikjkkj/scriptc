@@ -2272,6 +2272,7 @@ class LlEmitter {
     // Declared NOW — the extern block flushes before main assembles.
     if (usesEvents) this.declare(`declare void @scr_events_install()`);
     if (moduleUsesUncaughtListener(this.mod)) this.declare(`declare void @scr_uncaught_dispatch()`);
+    if (!this.mod.entryCjs && this.mayThrow.has(this.mod.entry)) this.declare(`declare void @scr_entry_throw_jobs()`);
     if (usesFsWatch) this.declare(`declare void @scr_watch_install()`);
     if (usesStream) this.declare(`declare void @scr_stream_install()`);
     // No --dynamic guard needed on either backend: `response`/`headers`
@@ -2850,6 +2851,7 @@ class LlEmitter {
       ...(asyncEntry
         ? [`  %top = call ptr @${mangleAsyncSpawn(this.mod.entry)}()`]
         : [`  call void @${mangleFunction(this.mod.entry)}()`]),
+      ...(!asyncEntry && !this.mod.entryCjs && entryMayThrow ? [`  call void @scr_entry_throw_jobs()`] : []),
       ...(!asyncEntry && moduleUsesUncaughtListener(this.mod) ? [`  call void @scr_uncaught_dispatch()`] : []),
       // Uncaught exception from top-level code: Node exits 1.
       ...(entryMayThrow && !asyncEntry
