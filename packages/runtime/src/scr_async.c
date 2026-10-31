@@ -5033,6 +5033,15 @@ bool scr_report_unhandled_rejections(void) {
         p->rejection_observed = true;
         p->reported_unhandled = true;
         if (!scr_urj_deliver_fn(p)) crashed = true;
+      } else if (scr_uncaught_listener_fn != NULL) {
+        /* No 'unhandledRejection' listener, but an 'uncaughtException' one:
+         * Node's triggerUncaughtException(reason, fromPromise): the reason
+         * goes to the uncaught listeners with origin "unhandledRejection",
+         * and the process continues (exit 0 unless something else fails). */
+        p->rejection_observed = true;
+        p->reported_unhandled = true;
+        scr_promise_rethrow(p);
+        scr_uncaught_dispatch_rejection();
       } else if (!any) {
         any = true;
         fflush(stdout);

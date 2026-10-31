@@ -3250,6 +3250,8 @@ void scr_exc_print_uncaught(void);
 /* The 'uncaughtException' seam (scr_exception.c / scr_async_dyn.c). */
 extern void (*scr_uncaught_listener_fn)(void);
 void scr_uncaught_dispatch(void);
+extern const char *scr_uncaught_origin;
+void scr_uncaught_dispatch_rejection(void);
 void scr_process_on_uncaught_exception(ScrDyn *fn, bool once);
 void scr_process_off_uncaught_exception(ScrDyn *fn);
 
