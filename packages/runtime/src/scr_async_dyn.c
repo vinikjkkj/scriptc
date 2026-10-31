@@ -327,7 +327,7 @@ static void scr_uncx_dispatch(void) {
   ScrCaught *c = scr_exc_take();
   ScrDyn *err = scr_caught_to_dyn(c);
   scr_caught_release(c);
-  ScrStr *os = scr_str_new("uncaughtException", 17);
+  ScrStr *os = scr_str_new(scr_uncaught_origin, strlen(scr_uncaught_origin));
   ScrDyn *origin = scr_dyn_new_str(os);
   scr_str_release(os);
   ScrDyn *args[2] = {err, origin};
