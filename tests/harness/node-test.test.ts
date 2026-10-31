@@ -79,23 +79,28 @@ function expectedExitCode(file: string): number {
   return m ? Number(m[1]) : 0;
 }
 
-async function build(entry: string): Promise<string> {
+/* The two emitters. The SAME normalization and the SAME expected output
+ * apply to both lanes: a diff on either one is a real defect, never a
+ * per-lane allowance. */
+type Backend = "c" | "llvm";
+const backends: readonly Backend[] = ["c", "llvm"];
+
+async function build(entry: string, backend: Backend): Promise<string> {
   const hash = createHash("sha256");
   hash.update(entry).update(readFileSync(entry));
-  const key = hash.update(sanitize ? "san" : "plain").digest("hex").slice(0, 16);
+  const key = hash.update(sanitize ? "san" : "plain").update(backend).digest("hex").slice(0, 16);
   // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
   // reclaim this run's own finished scratch mid-run. Released by the
   // per-test hook -- safe here because this directory is created, built
   // into and read inside one helper call, within one test.
-  const outDir = holdScratch(cacheDir, `node-test-${key}`);
+  const outDir = holdScratch(cacheDir, `node-test-${backend}-${key}`);
   const result = await compile(entry, {
     outPath: join(outDir, exeName("program")),
     outDir,
     sanitize,
-    // Pinned: the spec-reporter normalizations here were written against
-    // the C lane; lane identity stays fixed so a diff means the reporter
-    // (or Node) changed, never that the default backend moved.
-    backend: "c",
+    // Explicit per lane, so a diff means the reporter (or Node) changed or
+    // one emitter moved, never that the default backend changed.
+    backend,
   });
   if (!result.ok) {
     throw new Error(
@@ -114,7 +119,7 @@ const cases = globSync(join(fixturesRoot, "cases/*.ts"))
   .sort()
   .map((entry) => ({ name: entry.split("/").at(-1)!.replace(/\.ts$/, ""), entry }));
 
-describe(`node:test differential (${cases.length} programs${sanitize ? ", sanitized" : ""})`, () => {
+describe(`node:test differential (${cases.length} programs x ${backends.length} backends${sanitize ? ", sanitized" : ""})`, () => {
   /* The population is the denominator. `test.for([])` registers nothing and
    * reports green, so a glob that silently answers nothing (a moved fixture
    * dir, a separator bug in the pattern) would retire this whole lane
@@ -125,8 +130,13 @@ describe(`node:test differential (${cases.length} programs${sanitize ? ", saniti
     expect(cases.length).toBeGreaterThan(0);
   });
 
-  test.for(cases.map((c) => [c.name, c] as const))("%s", async ([, c]) => {
-    const binary = await build(c.entry);
+  // The C lane keeps its original case names; the LLVM lane is the same
+  // program under the same normalization, named with its backend suffix.
+  const lanes = backends.flatMap((backend) =>
+    cases.map((c) => [backend === "c" ? c.name : `${c.name} [llvm]`, c, backend] as const),
+  );
+  test.for(lanes)("%s", async ([, c, backend]) => {
+    const binary = await build(c.entry, backend);
     const [nodeRes, nativeRes] = await Promise.all([
       runLane("node", [c.entry]),
       runLane(binary, []),
