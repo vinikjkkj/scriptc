@@ -22017,6 +22017,72 @@
     "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/19200-fs-writefile-ts-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/19200-fs-writefile-ts-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19201-fs-writefile-cjs-callback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19201-fs-writefile-cjs-callback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19202-fs-writefile-forms-cjs-callback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19202-fs-writefile-forms-cjs-callback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19203-fs-appendfile-ts-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/19203-fs-appendfile-ts-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19204-fs-appendfile-cjs-callback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19204-fs-appendfile-cjs-callback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19205-fs-mkdir-ts-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/19205-fs-mkdir-ts-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19206-fs-mkdir-cjs-callback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19206-fs-mkdir-cjs-callback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19207-fs-unlink-rename-ts-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/19207-fs-unlink-rename-ts-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19208-fs-unlink-rename-cjs-callback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19208-fs-unlink-rename-cjs-callback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19209-fs-callback-error-ladder-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19209-fs-callback-error-ladder-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19210-fs-callback-option-kinds-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19210-fs-callback-option-kinds-cjs.cjs"
+   ],
+   "diags": []
   }
  }
 }
