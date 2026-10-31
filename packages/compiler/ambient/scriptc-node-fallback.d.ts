@@ -970,6 +970,8 @@ declare module "node:fs" {
   export function readFile(path: string | number, encoding: BufferEncoding, callback: (err: NodeJS.ErrnoException | null, data: string) => void): void;
   export function readFile(path: string | number, options: { encoding: BufferEncoding }, callback: (err: NodeJS.ErrnoException | null, data: string) => void): void;
   export function readFile(path: string | number, options: { encoding?: null } | null | undefined, callback: (err: NodeJS.ErrnoException | null, data: Buffer) => void): void;
+  /* Last resort for a misused arity or shape: dynamic, so the ladder answers. */
+  export function readFile(...args: any[]): void;
   export function exists(path: string, callback: (exists: boolean) => void): void;
   /* writeFile / appendFile / mkdir / unlink / rename: the callback forms
    * the lowering answers (fs.writeFileCb, fs.appendFileCb, fs.mkdirCb,
@@ -1014,9 +1016,15 @@ declare module "node:fs" {
   export function mkdtemp(prefix: string, callback: (err: NodeJS.ErrnoException | null, folder: string) => void): void;
   export function mkdtemp(prefix: string, options: { encoding: BufferEncoding }, callback: (err: NodeJS.ErrnoException | null, folder: string) => void): void;
   export function mkdtemp(prefix: string, options: { encoding: "buffer" }, callback: (err: NodeJS.ErrnoException | null, folder: Buffer) => void): void;
+  /* Last resort for a misused arity or shape: dynamic, so the ladder answers. */
+  export function mkdtemp(...args: any[]): void;
   export function read(fd: number, callback: (err: NodeJS.ErrnoException | null, bytesRead: number, buffer: Buffer) => void): void;
   export function read<TBuffer extends Uint8Array>(fd: number, buffer: TBuffer, offset: number, length: number, position: number | null, callback: (err: NodeJS.ErrnoException | null, bytesRead: number, buffer: TBuffer) => void): void;
   export function read<TBuffer extends Uint8Array>(fd: number, buffer: TBuffer, options: { offset?: number; length?: number; position?: number | null }, callback: (err: NodeJS.ErrnoException | null, bytesRead: number, buffer: TBuffer) => void): void;
+  /* Last resort for a misused arity or shape (fs.read(3, 4, 0, 'utf-8', cb)):
+   * the declared forms above stay the typed answers for valid calls; anything
+   * else stays dynamic so the validation ladder answers Node's exact error. */
+  export function read(...args: any[]): void;
   /* The options form carries the mode (applied at CREATION only, like
    * Node — an existing file keeps its permissions) and/or the utf8
    * encoding spelling. */
