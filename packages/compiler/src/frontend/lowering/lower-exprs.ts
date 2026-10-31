@@ -17,7 +17,7 @@ import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExport
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
-import { TIMER_GLOBAL_VALUE_NAMES, builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf, staticMemberDynFnValueOf, dynBuiltinFnPropertyOf, dynReceiverCallbackValue } from "./lower-fnvalue.js";
+import { TIMER_GLOBAL_VALUE_NAMES, bigStaticHolderSlotFence, builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf, staticMemberDynFnValueOf, dynBuiltinFnPropertyOf, dynReceiverCallbackValue } from "./lower-fnvalue.js";
 import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence, valuesCountdown, voidCountdown } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
@@ -1016,6 +1016,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     const loc = locOf(expr);
     // STEP 2a: a flagged number[] may only be indexed, measured, filled or grown.
     if (ts.isIdentifier(expr)) checkHoleFlaggedUse(L, expr);
+    // A holder of a BigInt static (`const f = BigInt.asIntN`) read into a
+    // slot of another function type: refused, not adapted (lower-fnvalue.ts).
+    // Ahead of the local-variable read, which returns before the stdlib arms.
+    if (ts.isIdentifier(expr)) bigStaticHolderSlotFence(L, expr);
     helperFieldEnumerationFence(L, expr);
     // A loop variable of an unrolled accessor family reads as the literal it
     // is bound to in this body (registerAccessorFamilies).
