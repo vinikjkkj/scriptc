@@ -1053,9 +1053,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // order (the CJS export-table literal, accessor-narrowed JS
         // shapes) keep the canonical order — their construction paths
         // document the divergence.
-        const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
+        // A SYMBOL-keyed member is not a string key: JSON.stringify skips it.
+        const order = (shape.declaredOrder ?? shape.fields.map((f) => f.name)).filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@")));
         const inOrder = new Set(order);
-        if (shape.fields.some((f) => !inOrder.has(f.name) && !f.name.startsWith("%"))) {
+        if (shape.fields.some((f) => !inOrder.has(f.name) && !f.name.startsWith("%") && !(f.name.startsWith("__@") && !f.name.startsWith("__@ord@")))) {
           throw new Error(`emitter bug: declaredOrder of shape ${t.shapeId} omits a non-internal field`);
         }
         const byName = new Map(shape.fields.map((f) => [f.name, f]));
