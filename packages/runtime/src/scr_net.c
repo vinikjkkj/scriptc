@@ -2000,8 +2000,14 @@ void scr_net_server_on_connection(ScrNetServer *s, ScrClosure *cb /*moves*/, Scr
   scr_net_ls_add(&s->conn_ls, cb, (void *)fn, once);
 }
 
-/* Accept until EAGAIN; each connection fires the 'connection' listeners
- * directly (the accepted socket passes +1 per listener via the adapter). */
+/* Accept ONE connection per readiness event; its 'connection' listeners fire
+ * directly (the accepted socket passes +1 per listener via the adapter).
+ * Node's libuv listener returns after each connection_cb (measured on
+ * v24.15.0: one accept4 per listen wake, the rest of that poll batch runs
+ * before the next accept). The listener stays readable (level-triggered), so
+ * the next connection comes in the next batch, and the drain between events
+ * runs this connection's nextTicks and promise jobs before it, as Node's
+ * MakeCallback scope does. */
 static void scr_net_server_accept(ScrNetServer *srv) {
   for (;;) {
     if (!srv->listening || srv->fd < 0) return;
@@ -2054,7 +2060,7 @@ static void scr_net_server_accept(ScrNetServer *srv) {
      * a peek while there is no consumer (see scr_net_sock_update_read). */
     scr_net_sock_update_read(sock);
     scr_net_sock_release(sock); /* registry + server-count refs remain */
-    if (scr_exc_pending()) return;
+    return;
   }
 }
 
