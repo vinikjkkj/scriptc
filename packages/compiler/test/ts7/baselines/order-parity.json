@@ -22387,6 +22387,36 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/19600-fs-open-close-chmod-cjs.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19600-fs-open-close-chmod-cjs.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19601-fs-write-forms-cjs.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19601-fs-write-forms-cjs.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19602-fs-write-close-chmod-ladder-cjs.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19602-fs-write-close-chmod-ladder-cjs.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19603-fs-open-ladder-cjs.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19603-fs-open-ladder-cjs.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19604-fs-callback-forms-ts.ts": {
+    "order": [
+      "<repo>/tests/corpus/19604-fs-callback-forms-ts.ts"
+    ],
+    "diags": []
   }
  }
 }
