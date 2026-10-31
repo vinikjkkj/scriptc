@@ -1092,6 +1092,34 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * opendirSync, watchFile, lchmod, read, the stream option forms) stay
    * with the table, which refuses them at build time. Null when this
    * is not a claimed member/shape (the table or fence path stands). */
+/** An object-literal options argument whose member holds a value of the
+ * wrong kind (flag: true, flush: "yes") has no lowering: the literal would
+ * be fitted to the declared member type and the runtime would throw an
+ * internal shape error where Node throws ERR_INVALID_ARG_VALUE /
+ * ERR_INVALID_ARG_TYPE. The mismatch fences at build instead. `kinds` maps a
+ * member name to the ts.TypeFlags its value may carry (null/undefined always
+ * pass: Node reads them as absent). */
+function fsOptionsKindFence(L: Lowerer, fn: string, node: ts.Expression | undefined,
+  kinds: Readonly<Record<string, number>>): void {
+  if (!node || !ts.isObjectLiteralExpression(node)) return;
+  for (const p of node.properties) {
+    const m = optionMember(p);
+    if (!m) continue;
+    const allowed = kinds[m.name];
+    if (allowed === undefined) continue;
+    const t = L.typeOf(m.value);
+    const parts: readonly ts.Type[] = (t.flags & ts.TypeFlags.Union) ? (t as unknown as { types: ts.Type[] }).types : [t];
+    const ok = parts.every((x) => (x.flags & (allowed | ts.TypeFlags.Undefined | ts.TypeFlags.Null)) !== 0);
+    if (!ok) {
+      L.noLowering(
+        `${fn} with the option '${m.name}' given a value of the wrong kind`,
+        m.value,
+        `the documented kind of '${m.name}' is checked at build time; a mistyped literal has no lowering`,
+      );
+    }
+  }
+}
+
   export function lowerFsLadderCall(L: Lowerer, expr: ts.CallExpression,
     bi: { module: string; member: string },
     loc: SrcLoc,): IrExpr | null {
@@ -1102,7 +1130,9 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // one of them) must not fence at build. Every other member keeps its JS-only
     // ladder and its TypeScript compile fence.
     const tsCallbackForm = bi.module === "fs" &&
-      (bi.member === "readFile" || bi.member === "exists" || bi.member === "mkdtemp" || bi.member === "read");
+      (bi.member === "readFile" || bi.member === "exists" || bi.member === "mkdtemp" || bi.member === "read" ||
+        bi.member === "writeFile" || bi.member === "appendFile" || bi.member === "mkdir" ||
+        bi.member === "unlink" || bi.member === "rename");
     if (!isJsSourceFile(expr.getSourceFile()) && !tsCallbackForm) return null;
     const args = expr.arguments;
     if (args.some(ts.isSpreadElement)) return null;
@@ -1218,6 +1248,41 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         if (args.length < 1 || args.length > 3) return null;
         const a = dynArgs([args[0], args[1], args[2]]);
         return a && chk("fs.readFileCb", a, DYN);
+      }
+      case "writeFile":
+      case "appendFile": {
+        // writeFile(file, data[, options], callback): the four slots cross as
+        // dyn values and the runtime resolves the callback (callback || options).
+        if (args.length > 4) return null;
+        fsOptionsKindFence(L, `fs.${bi.member}`, args[2], {
+          encoding: ts.TypeFlags.StringLike,
+          mode: ts.TypeFlags.NumberLike | ts.TypeFlags.StringLike,
+          flag: ts.TypeFlags.StringLike,
+          flush: ts.TypeFlags.BooleanLike,
+        });
+        const a = dynArgs([args[0], args[1], args[2], args[3]]);
+        return a && chk(bi.member === "writeFile" ? "fs.writeFileCb" : "fs.appendFileCb", a, DYN);
+      }
+      case "mkdir": {
+        // mkdir(path[, options], callback): a function in the options slot is the callback.
+        if (args.length < 1 || args.length > 3) return null;
+        fsOptionsKindFence(L, "fs.mkdir", args[1], {
+          recursive: ts.TypeFlags.BooleanLike,
+          mode: ts.TypeFlags.NumberLike | ts.TypeFlags.StringLike,
+        });
+        const a = dynArgs([args[0], args[1], args[2]]);
+        return a && chk("fs.mkdirCb", a, DYN);
+      }
+      case "unlink": {
+        if (args.length > 2) return null;
+        const a = dynArgs([args[0], args[1]]);
+        return a && chk("fs.unlinkCb", a, DYN);
+      }
+      case "rename": {
+        // rename(oldPath, newPath, callback)
+        if (args.length > 3) return null;
+        const a = dynArgs([args[0], args[1], args[2]]);
+        return a && chk("fs.renameCb", a, DYN);
       }
       case "lchmod": {
         if (args.length > 3) return null;

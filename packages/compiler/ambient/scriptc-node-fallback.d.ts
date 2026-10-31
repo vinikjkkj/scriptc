@@ -964,13 +964,47 @@ declare module "node:fs" {
    * The runtime dispatches every
    * @types/node spelling over dyn values, the callback runs on a later turn,
    * and the error is Node's ErrnoException. Only the forms that lower are
-   * declared; the others (writeFile, mkdir, open, ...) have no callback
+   * declared; the others (open, close, write, chmod, ...) have no callback
    * lowering and stay undeclared (a build-time refusal, not a runtime throw). */
   export function readFile(path: string | number, callback: (err: NodeJS.ErrnoException | null, data: Buffer) => void): void;
   export function readFile(path: string | number, encoding: BufferEncoding, callback: (err: NodeJS.ErrnoException | null, data: string) => void): void;
   export function readFile(path: string | number, options: { encoding: BufferEncoding }, callback: (err: NodeJS.ErrnoException | null, data: string) => void): void;
   export function readFile(path: string | number, options: { encoding?: null } | null | undefined, callback: (err: NodeJS.ErrnoException | null, data: Buffer) => void): void;
   export function exists(path: string, callback: (exists: boolean) => void): void;
+  /* writeFile / appendFile / mkdir / unlink / rename: the callback forms
+   * the lowering answers (fs.writeFileCb, fs.appendFileCb, fs.mkdirCb,
+   * fs.unlinkCb, fs.renameCb), declared as @types/node 24 spells them minus
+   * the options it cannot honour (the AbortSignal `signal` member is not
+   * declared, so it refuses at build). A mkdir recursive callback answers
+   * the first created path, and only when one was created. */
+  export function writeFile(
+    file: string | number,
+    data: string | ArrayBufferView,
+    options: { encoding?: BufferEncoding | null; mode?: number | string; flag?: string; flush?: boolean } | BufferEncoding | null,
+    callback: (err: NodeJS.ErrnoException | null) => void,
+  ): void;
+  export function writeFile(file: string | number, data: string | ArrayBufferView, callback: (err: NodeJS.ErrnoException | null) => void): void;
+  export function appendFile(
+    file: string | number,
+    data: string | Uint8Array,
+    options: { encoding?: BufferEncoding | null; mode?: number | string; flag?: string; flush?: boolean } | BufferEncoding | null,
+    callback: (err: NodeJS.ErrnoException | null) => void,
+  ): void;
+  export function appendFile(file: string | number, data: string | Uint8Array, callback: (err: NodeJS.ErrnoException | null) => void): void;
+  export function mkdir(path: string | Buffer, options: { recursive: true }, callback: (err: NodeJS.ErrnoException | null, path?: string) => void): void;
+  export function mkdir(
+    path: string | Buffer,
+    options: number | string | ({ recursive?: false; mode?: number | string } | null | undefined),
+    callback: (err: NodeJS.ErrnoException | null) => void,
+  ): void;
+  export function mkdir(
+    path: string | Buffer,
+    options: number | string | { recursive?: boolean; mode?: number | string } | null | undefined,
+    callback: (err: NodeJS.ErrnoException | null, path?: string) => void,
+  ): void;
+  export function mkdir(path: string | Buffer, callback: (err: NodeJS.ErrnoException | null) => void): void;
+  export function unlink(path: string | Buffer, callback: (err: NodeJS.ErrnoException | null) => void): void;
+  export function rename(oldPath: string | Buffer, newPath: string | Buffer, callback: (err: NodeJS.ErrnoException | null) => void): void;
   /* Last resort for a call Node answers at run time: an argument the
    * declared forms do not admit (an object literal in the path or callback
    * slot: fs.exists({}, cb) calls back false, fs.exists(p, {}) throws

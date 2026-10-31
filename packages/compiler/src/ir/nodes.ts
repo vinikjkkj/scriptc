@@ -5184,6 +5184,11 @@ export type IrLibFn =
    * the dyn undefined — and mkdtempSync(prefix, opts) answering the path in
    * the requested encoding. May-throw seeds. */
   | "fs.readFileCb"
+  | "fs.writeFileCb"
+  | "fs.appendFileCb"
+  | "fs.mkdirCb"
+  | "fs.unlinkCb"
+  | "fs.renameCb"
   | "fs.mkdtempCb"
   | "fs.mkdtempSyncOpts"
   | "fs.readCb"
@@ -11230,7 +11235,8 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
  * an error. Hello-world-class binaries do not carry them. Same walk shape as
  * moduleUsesZlib. */
 const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
-  "fs.readFileCb", "fs.mkdtempCb", "fs.mkdtempSyncOpts", "fs.readCb", "fs.lchmodCb", "fs.lchmodSyncChk", "fsp.lchmodChk",
+  "fs.readFileCb", "fs.writeFileCb", "fs.appendFileCb", "fs.mkdirCb", "fs.unlinkCb", "fs.renameCb",
+  "fs.mkdtempCb", "fs.mkdtempSyncOpts", "fs.readCb", "fs.lchmodCb", "fs.lchmodSyncChk", "fsp.lchmodChk",
   "buffer.concatDyn", "buffer.concatDynLen", "buffer.byteLenDyn", "buffer.isEncodingDyn", "error.msgDyn", "dyn.isBuffer", "dyn.looseEq", "error.ext",
   "dyn.bufferValue",
 ]);
@@ -13243,6 +13249,11 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   // exclude — refuse the surface like the rest of the event-loop family.
   ["fs.existsChk", "the async fs callback surface (fs.exists)"],
   ["fs.readFileCb", "the async fs callback surface (fs.readFile)"],
+  ["fs.writeFileCb", "the async fs callback surface (fs.writeFile)"],
+  ["fs.appendFileCb", "the async fs callback surface (fs.appendFile)"],
+  ["fs.mkdirCb", "the async fs callback surface (fs.mkdir)"],
+  ["fs.unlinkCb", "the async fs callback surface (fs.unlink)"],
+  ["fs.renameCb", "the async fs callback surface (fs.rename)"],
   ["fs.statCb", "the async fs callback surface (fs.stat)"],
   ["fs.mkdtempCb", "the async fs callback surface (fs.mkdtemp)"],
   ["fs.readCb", "the async fs callback surface (fs.read)"],
@@ -14026,6 +14037,11 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.toUnixTimestamp",
   "fs.existsChk",
   "fs.readFileCb",
+  "fs.writeFileCb",
+  "fs.appendFileCb",
+  "fs.mkdirCb",
+  "fs.unlinkCb",
+  "fs.renameCb",
   "fs.mkdtempCb",
   "fs.mkdtempSyncOpts",
   "fs.readCb",

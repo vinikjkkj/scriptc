@@ -965,6 +965,12 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
     // The Buffer form (no encoding), the fd forms (readFileSync(fd[,
     // "utf8"])), and the checked-dynamic encoding form.
     readFileSync: ["fs.readFileSyncBuf", "fs.readFileSyncBytes", "fs.readFileSyncDyn", "fs.readFdSync", "fs.readFdSyncBytes", "fs.readFileCb"],
+    // The callback forms of the fs writers and the path operations.
+    writeFile: ["fs.writeFileCb"],
+    appendFile: ["fs.appendFileCb"],
+    mkdir: ["fs.mkdirCb"],
+    unlink: ["fs.unlinkCb"],
+    rename: ["fs.renameCb"],
     // The callback form and the options form of mkdtemp, and fs.read.
     mkdtempSync: ["fs.mkdtempSyncOpts", "fs.mkdtempCb"],
     readSync: ["fs.readCb"],
