@@ -535,3 +535,10 @@ const char *scr_fn_name_of(const void *fn) {
   const ScrFnName *row = scr_fnname_idx[i];
   return (row != NULL && row->fn == fn) ? row->name : NULL;
 }
+
+unsigned scr_fn_code_of(const void *fn) {
+  if (scr_fnname_idx == NULL || fn == NULL) return 0;
+  size_t i = scr_fnname_probe(scr_fnname_idx, scr_fnname_idx_cap, fn);
+  const ScrFnName *row = scr_fnname_idx[i];
+  return (row != NULL && row->fn == fn) ? row->code : 0;
+}

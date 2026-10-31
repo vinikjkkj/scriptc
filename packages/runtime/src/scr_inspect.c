@@ -221,6 +221,9 @@ static ScrStr *ib_take(InspBuf *b) {
   return out;
 }
 
+/* util.format %o (scr_insp_dyn_h): function values also list their hidden keys. */
+static bool scr_insp_show_hidden = false;
+
 /* ── WTF-8 iteration + JS length/width measures ──────────────────────── */
 
 /* Decode the code point at data[i] (WTF-8: lone surrogates ride 3-byte
@@ -1492,14 +1495,94 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         }
         return vout;
       }
+      /* The kind word (SCR_FNK_*): Node's getFunctionBase prefix. A
+       * bound function, an arrow and a method are plain Functions. */
+      static const char *const fn_kind_names[4] = {"Function", "AsyncFunction", "GeneratorFunction", "AsyncGeneratorFunction"};
+      const unsigned fcode = scr_dyn_fn_code(d);
+      const char *kname = fn_kind_names[fcode & 3u];
+      /* A bound function's prototype-chain constructor is its target's kind,
+       * printed after the base unless it is the plain Function (see
+       * SCR_FNK_INH_SHIFT). The same kind names its toStringTag. */
+      const unsigned finh = (fcode >> SCR_FNK_INH_SHIFT) & 3u;
+      const unsigned ftag = (fcode & 3u) != 0 ? (fcode & 3u) : finh;
+      ib_char(&out, '[');
+      ib_cstr(&out, kname);
       if (name && name[0]) {
-        ib_cstr(&out, "[Function: ");
+        ib_cstr(&out, ": ");
         ib_cstr(&out, name);
-        ib_char(&out, ']');
       } else {
-        ib_cstr(&out, "[Function (anonymous)]");
+        ib_cstr(&out, " (anonymous)");
       }
-      return ib_take(&out);
+      ib_char(&out, ']');
+      if (finh != 0) {
+        ib_char(&out, ' ');
+        ib_cstr(&out, fn_kind_names[finh]);
+      }
+      if (!scr_insp_show_hidden) return ib_take(&out);
+      /* showHidden (%o): Node lists the function's own non-enumerable keys
+       * after its base, one per line when they do not fit:
+       * [length], [name], [prototype] (for a function that has one, whose
+       * constructor points back at it: the <ref *1> circle), then the
+       * [Symbol(Symbol.toStringTag)] of an async or generator kind. */
+      ScrStr *hbase = ib_take(&out);
+      /* Past the depth limit Node answers with the bare constructor name
+       * (`[Function]`, `[AsyncFunction]`), not the keys. */
+      if (recurse > depth) {
+        scr_str_release(hbase);
+        InspBuf db = {0};
+        ib_char(&db, '[');
+        ib_cstr(&db, finh != 0 ? fn_kind_names[finh] : kname);
+        ib_char(&db, ']');
+        return ib_take(&db);
+      }
+      const bool hproto = (fcode & SCR_FNK_NOPROTO) == 0;
+      scr_insp_begin(recurse + 1);
+      {
+        char lenbuf[48];
+        snprintf(lenbuf, sizeof lenbuf, "[length]: %u", (unsigned)scr_dyn_fn_len(d));
+        ScrStr *e = scr_str_new(lenbuf, strlen(lenbuf));
+        scr_insp_entry(e, true);
+        scr_str_release(e);
+      }
+      {
+        InspBuf eb = {0};
+        const char *nm = name ? name : "";
+        const char q = strchr(nm, '\'') != NULL && strchr(nm, '"') == NULL ? '"' : '\'';
+        ib_cstr(&eb, "[name]: ");
+        ib_char(&eb, q);
+        ib_cstr(&eb, nm);
+        ib_char(&eb, q);
+        ScrStr *e = ib_take(&eb);
+        scr_insp_entry(e, false);
+        scr_str_release(e);
+      }
+      if (hproto) {
+        static const char proto_entry[] = "[prototype]: { [constructor]: [Circular *1] }";
+        ScrStr *e = scr_str_new(proto_entry, sizeof proto_entry - 1);
+        scr_insp_entry(e, false);
+        scr_str_release(e);
+      }
+      if (ftag != 0) {
+        InspBuf eb = {0};
+        ib_cstr(&eb, "[Symbol(Symbol.toStringTag)]: '");
+        ib_cstr(&eb, fn_kind_names[ftag]);
+        ib_char(&eb, '\'');
+        ScrStr *e = ib_take(&eb);
+        scr_insp_entry(e, false);
+        scr_str_release(e);
+      }
+      ScrStr *hb0 = scr_str_new("{", 1);
+      ScrStr *hb1 = scr_str_new("}", 1);
+      ScrStr *hout = scr_insp_end(hbase, hb0, hb1, recurse + 1, false, false);
+      scr_str_release(hbase);
+      scr_str_release(hb0);
+      scr_str_release(hb1);
+      if (!hproto) return hout;
+      InspBuf rb = {0};
+      ib_cstr(&rb, "<ref *1> ");
+      ib_str(&rb, hout);
+      scr_str_release(hout);
+      return ib_take(&rb);
     }
     case SCR_DYN_OBJINST: {
       /* Node prints `Thing { a: 1 }` -- the instance's own ENUMERABLE
@@ -1889,6 +1972,18 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
 ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth) {
   if (d->kind == SCR_DYN_STR) return scr_str_retain(d->v.str);
   return scr_insp_dyn(d, 0, depth);
+}
+
+/* util.format's %o: util.inspect with showHidden. Only function values
+ * render their hidden keys here (the DYN_FUNC arm reads the flag); the
+ * compiler lowers %o over an array or a typed value through the other
+ * paths. The flag is saved and restored, so a nested %o cannot leak it. */
+ScrStr *scr_insp_dyn_h(ScrDyn *d, double depth) {
+  const bool saved = scr_insp_show_hidden;
+  scr_insp_show_hidden = true;
+  ScrStr *r = d->kind == SCR_DYN_STR ? scr_str_retain(d->v.str) : scr_insp_dyn(d, 0, depth);
+  scr_insp_show_hidden = saved;
+  return r;
 }
 
 /* util.format's %s conversion, which is NOT the rest-arg conversion
