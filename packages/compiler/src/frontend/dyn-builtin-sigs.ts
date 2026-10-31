@@ -10,7 +10,7 @@
  * are keyed by their interface name in types.ts; this table is the
  * functions. */
 import * as ts from "./ts7/adapter.js";
-import { BOOL, DYN, F64, funcOf, type IrType, STRING } from "../ir/nodes.js";
+import { BIGINT, BOOL, DYN, F64, funcOf, type IrType, STRING } from "../ir/nodes.js";
 
 export interface DynBuiltinSig {
   readonly arity: number;
@@ -33,11 +33,20 @@ export const DYN_BUILTIN_SIGS: Readonly<Record<string, DynBuiltinSig | undefined
   unescape: { arity: 1, ret: STRING },
   "Array.isArray": { arity: 1, ret: BOOL },
   "JSON.stringify": { arity: 1, ret: STRING },
+  // The value is the bigint the operation returns; both operands are
+  // checked-dynamic (the value form's params), converted in the spec's order.
+  "BigInt.asIntN": { arity: 2, ret: BIGINT },
+  "BigInt.asUintN": { arity: 2, ret: BIGINT },
 };
 
 /** The keys whose static TYPE maps to the DYN signature. Every other key
  * keeps its own mapping: a typed value row on main is gated on it. */
-export const DYN_MAPPED_KEYS: ReadonlySet<string> = new Set(["Array.isArray", "JSON.stringify"]);
+export const DYN_MAPPED_KEYS: ReadonlySet<string> = new Set([
+  "Array.isArray",
+  "JSON.stringify",
+  "BigInt.asIntN",
+  "BigInt.asUintN",
+]);
 
 /** The table key of a stdlib function declaration, or null. */
 function keyOfDecl(d: ts.Node): string | null {
@@ -48,6 +57,7 @@ function keyOfDecl(d: ts.Node): string | null {
     if (owner.kind === ts.SyntaxKind.InterfaceDeclaration && owner.name !== undefined) {
       if (owner.name.text === "JSON") return `JSON.${m.name.text}`;
       if (owner.name.text === "ArrayConstructor") return `Array.${m.name.text}`;
+      if (owner.name.text === "BigIntConstructor") return `BigInt.${m.name.text}`;
     }
   }
   return null;

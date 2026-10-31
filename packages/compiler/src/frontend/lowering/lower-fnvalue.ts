@@ -71,6 +71,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import {
+  BIGINT,
   BOOL,
   F64,
   funcOf,
@@ -845,6 +846,12 @@ const DYN_BUILTIN_FNS: Readonly<Record<string, DynBuiltinFn | undefined>> = {
   unescape: { body: (a, loc) => libCall("str.unescape", [toStr(a[0]!, loc)], STRING, loc) },
   "Array.isArray": { body: (a, loc) => ({ kind: "dynTest", test: "array", value: a[0]!, type: BOOL, loc }) },
   "JSON.stringify": { body: (a, loc) => ({ kind: "jsonStringify", value: a[0]!, type: STRING, loc }) },
+  // BigInt.asIntN / asUintN: the direct call's own operation over the two
+  // checked-dynamic operands. The width (ToIndex) is converted and range-
+  // checked before the value (ToBigInt), as the spec orders them, inside
+  // the one runtime entry (scr_big_as_n_dyn).
+  "BigInt.asIntN": { body: (a, loc) => libCall("big.asIntNDyn", [a[0]!, a[1]!], BIGINT, loc) },
+  "BigInt.asUintN": { body: (a, loc) => libCall("big.asUintNDyn", [a[0]!, a[1]!], BIGINT, loc) },
 };
 
 /** The DYN-table key of a global function EXPRESSION (`String`, `parseInt`,
@@ -861,6 +868,8 @@ export function dynBuiltinKeyOf(L: Lowerer, node: ts.Expression): string | null 
   } else if (ts.isPropertyAccessExpression(node) && !node.questionDotToken) {
     if (L.stdlibGlobalMember(node, "Array") === "isArray") key = "Array.isArray";
     else if (L.stdlibGlobalMember(node, "JSON") === "stringify") key = "JSON.stringify";
+    else if (L.stdlibGlobalMember(node, "BigInt") === "asIntN") key = "BigInt.asIntN";
+    else if (L.stdlibGlobalMember(node, "BigInt") === "asUintN") key = "BigInt.asUintN";
     else return null;
   } else {
     return null;
@@ -919,7 +928,67 @@ export function staticMemberDynFnValueOf(L: Lowerer, expr: ts.PropertyAccessExpr
   if (expr.questionDotToken) return null;
   if (L.stdlibGlobalMember(expr, "Array") === "isArray") return dynBuiltinFnValueOf(L, "Array.isArray", loc);
   if (!L.dynamic && L.stdlibGlobalMember(expr, "JSON") === "stringify") return dynBuiltinFnValueOf(L, "JSON.stringify", loc);
+  const bigStatic = L.stdlibGlobalMember(expr, "BigInt");
+  if (bigStatic === "asIntN" || bigStatic === "asUintN") {
+    const key = `BigInt.${bigStatic}`;
+    bigStaticSlotFence(L, expr, key);
+    return dynBuiltinFnValueOf(L, key, loc);
+  }
   return null;
+}
+
+/** The BigInt statics' value form is the DYN-signature closure (both
+ * operands checked-dynamic, so a non-bigint or an invalid width throws
+ * Node's TypeError or RangeError from the one runtime entry). A slot of
+ * ANOTHER function type would take an adapter, and an adapter is a fresh
+ * closure: `rec.op === BigInt.asIntN` would answer false where Node answers
+ * true. So a value that reaches such a slot refuses here, the same stance
+ * narrowedSlotFence takes for the globals. A union slot is judged by its
+ * func arms: an arm of the value's own shape takes it unadapted, and a
+ * union with no func arm boxes the closure rather than adapting it. */
+export function bigStaticSlotFence(L: Lowerer, node: ts.Expression, key: string): void {
+  const sig = ownRow(DYN_BUILTIN_SIGS, key);
+  if (sig === undefined) return;
+  const ctx = (() => {
+    try {
+      return L.checker.getContextualType(node);
+    } catch {
+      return undefined;
+    }
+  })();
+  if (ctx === undefined) return;
+  const mapped = L.mapTypeOf(ctx);
+  if (mapped === null) return;
+  const want = dynBuiltinFnType(sig);
+  const funcArms: IrType[] = mapped.kind === "func"
+    ? [mapped]
+    : mapped.kind === "union"
+      ? (L.unions.get(mapped.unionId)?.arms ?? []).filter((a) => a.kind === "func")
+      : [];
+  if (funcArms.length === 0 || funcArms.some((a) => typeEquals(a, want))) return;
+  L.noLowering(
+    `${key} stored in a slot typed '${L.fmt(mapped)}'`,
+    node,
+    `the value's own signature is '${L.fmt(want)}' (both operands checked); a slot of another shape ` +
+      `would take an adapter, and an adapter is a FRESH closure -- '${key}' held there would compare ` +
+      `unequal to '${key}' where Node compares equal. Call it directly, or hold it in a slot typed as its own signature`,
+  );
+}
+
+/** A local whose declaration is `const h = BigInt.asIntN` (or asUintN), read
+ * as a value in a typed slot: the same fence, reached through the holder,
+ * because the read is a plain variable and never passes the member form. */
+export function bigStaticHolderSlotFence(L: Lowerer, expr: ts.Identifier): void {
+  const sym = L.resolveValueSymbol(expr);
+  if (!sym) return;
+  const decl = L.checker.valueDeclarationOf(sym);
+  if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return;
+  let init: ts.Expression = decl.initializer;
+  while (ts.isParenthesizedExpression(init)) init = init.expression;
+  if (!ts.isPropertyAccessExpression(init) || init.questionDotToken) return;
+  const member = L.stdlibGlobalMember(init, "BigInt");
+  if (member !== "asIntN" && member !== "asUintN") return;
+  bigStaticSlotFence(L, expr, `BigInt.${member}`);
 }
 
 /** The typed-row globals: their value form predates this one (lower-fnvalue.ts's
@@ -991,8 +1060,12 @@ export function dynBuiltinHofCallback(
   // is the runtime's object protocol, which has no Object.prototype member
   // table, so it refuses at run time where Node prints "[object Object]".
   // Those callbacks keep their refusal at compile time instead.
+  // A bigint element is boxable for the BigInt statics alone: their
+  // conversions take a bigint (asUintN(1n, ...) is the width's TypeError),
+  // and every other builtin keeps the refusal it had.
+  const bigintKey = key.startsWith("BigInt.");
   for (const t of params) {
-    if (!boxableCallbackParam(L, t)) return null;
+    if (!boxableCallbackParam(L, t) && !(bigintKey && t.kind === "bigint")) return null;
   }
   // JSON.stringify of an undefined-capable element: the direct call refuses
   // it (SC1090), because the walker would print the TEXT "undefined" where
