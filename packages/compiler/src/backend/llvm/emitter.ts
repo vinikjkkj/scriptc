@@ -668,6 +668,16 @@ const LIB_FN_SYMS: Record<string, string> = {
   // adapter is picked by the handler's arity (LIB_FN_TAIL carries the
   // NULLs of this one).
   "https.createServerDyn": "scr_https_create_server_dyn",
+  // The tls socket's authorized flag: a bare bool read (C: finish of the same call).
+  "tls.sockAuthorized": "scr_tls_sock_authorized",
+  // The request-version reads (req.httpVersion and its two halves): the C
+  // rows are finish() of these same entries. The source form is refused
+  // before lowering on the current typings, so the rows are the mirror.
+  "http.reqHttpVersion": "scr_http_req_http_version",
+  "http.reqHttpVersionMajor": "scr_http_req_http_version_major",
+  "http.reqHttpVersionMinor": "scr_http_req_http_version_minor",
+  // assert.throws(fn, errorInstance): the dyn walk (void, may throw).
+  "assert.expectsErrDyn": "scr_assert_expects_err_dyn",
   "tls.createSecureContextDyn": "scr_tls_create_secure_context_dyn",
   "tls.connect": "scr_tls_connect_dyn",
   "tls.connectCb": "scr_tls_connect_dyn",
@@ -1504,6 +1514,9 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   // exactly these, and a server whose loop never runs accepts nothing.
   "tls.createServer", "tls.createServerCb", "tls.createServerDyn", "tls.connect", "tls.connectCb",
   "https.createServer", "https.createServerDyn", "https.createServerDynCb",
+  "tls.createServerDynCb",
+  // The requestAgent / requestFn rows: an in-flight request holds the loop open (C: E.usesTimers).
+  "https.requestAgent", "https.requestAgentCb", "https.requestFn", "https.requestFnCb",
   "dgram.bind", "dgram.bindCb", "dgram.connect", "dgram.connectCb",
   "dgram.sendStr", "dgram.sendBytes", "dgram.sendConnStr", "dgram.sendConnBytes", "dgram.sendDyn",
   "fs.existsChk", "fs.readFileCb", "fs.mkdtempCb", "fs.readCb", "fs.lchmodCb",
@@ -12271,6 +12284,49 @@ class LlEmitter {
     return sym;
   }
 
+  /** The CONNECT-listener adapter for a UNION socket slot — emit-async.ts's
+   * connectSockThunkFor in IR. The runtime fires (cb, req, sock, head) like
+   * an upgrade; the adapter wraps the socket at the union's netSocket arm
+   * (the tag is program data, pinned by the frontend) and drops `head` when
+   * the listener declares two parameters. All arguments arrive +1; the
+   * union takes the socket's reference. Interned per (union id, arity). */
+  private connectSockThunkFor(cbT: IrType & { kind: "func" }): string {
+    const sockT = cbT.params[1];
+    if (sockT === undefined || sockT.kind !== "union") {
+      throw new Error("llvm emitter bug: connect listener union shape (frontend must fence)");
+    }
+    const key = `connect:${sockT.unionId}/${cbT.params.length}`;
+    const seen = this.resolveThunks.get(key);
+    if (seen) return seen;
+    const sym = `sc_hconn_${this.resolveThunks.size}`;
+    this.resolveThunks.set(key, sym);
+    const def = this.unionsById.get(sockT.unionId);
+    const tag = def ? def.arms.findIndex((a) => a.kind === "netSocket") : -1;
+    if (tag < 0) throw new Error("llvm emitter bug: connect listener union lacks its socket arm");
+    const three = cbT.params.length === 3;
+    this.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
+    this.declare(`declare ptr @scr_net_sock_retain_v(ptr)`);
+    this.declare(`declare void @scr_net_sock_release_v(ptr)`);
+    this.declare(`declare void @scr_bytes_release(ptr)`);
+    const body: string[] = [
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      ...(three ? [] : [`  call void @scr_bytes_release(ptr %head)`]),
+      `  %u = call ptr @scr_union_new_ref(i32 ${tag}, ptr %sock, ptr @scr_net_sock_retain_v, ptr @scr_net_sock_release_v, ptr null)`,
+      `  %fn = load ptr, ptr %fnp`,
+      three
+        ? `  call void %fn(ptr %cb, ptr %req, ptr %u, ptr %head)`
+        : `  call void %fn(ptr %cb, ptr %req, ptr %u)`,
+      `  ret void`,
+    ];
+    this.resolveThunkDefs.push(
+      `define internal void @${sym}(ptr %cb, ptr %req, ptr %sock, ptr %head) ${FN_ATTRS} { ; http connect adapter (${cbT.params.length} params)`,
+      ...body,
+      `}`,
+      ``,
+    );
+    return sym;
+  }
+
   /** The per-shape `dgram` message adapter for the TWO-parameter
    * `(msg, rinfo)` listener — emit-async.ts's dgramMsgThunkFor, in IR.
    *
@@ -17930,15 +17986,18 @@ class LlEmitter {
       B.line(`call void @${entry}(ptr ${args[0]!.name}, ptr ${args[1]!.name}, i1 ${args[2]!.name})`);
       return { name: "", type: e.type };
     }
-    if (e.fn === "net.serverOnConnection") {
+    if (e.fn === "net.serverOnConnection" || e.fn === "net.serverOnSecureConnection") {
+      // The plain and the TLS 'connection'-shaped listeners share one C
+      // case (emit-exprs.ts): same adapter choice, two entry points.
       const cbT = e.args[1]!.type;
-      if (cbT.kind !== "func") throw new Error("llvm emitter bug: net.serverOnConnection callback not a func");
+      if (cbT.kind !== "func") throw new Error(`llvm emitter bug: ${e.fn} callback not a func`);
       const args = e.args.map((a) => this.emitExpr(a));
       this.moveTemp(args[1]!);
       const adapter = cbT.params.length === 0 ? "scr_net_conn_thunk0" : "scr_net_conn_thunk_sock";
+      const entry = e.fn === "net.serverOnConnection" ? "scr_net_server_on_connection" : "scr_net_server_on_secure_connection";
       this.declare(`declare void @${adapter}(ptr, ptr)`);
-      this.declare(`declare void @scr_net_server_on_connection(ptr, ptr, ptr, i1 zeroext)`);
-      B.line(`call void @scr_net_server_on_connection(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${adapter}, i1 ${args[2]!.name})`);
+      this.declare(`declare void @${entry}(ptr, ptr, ptr, i1 zeroext)`);
+      B.line(`call void @${entry}(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${adapter}, i1 ${args[2]!.name})`);
       return { name: "", type: e.type };
     }
     if (e.fn === "net.connect" || e.fn === "net.connectCb") {
@@ -17952,6 +18011,58 @@ class LlEmitter {
       const t = B.tmp();
       B.line(`${t} = call ptr @scr_net_connect(double ${args[0]!.name}, ptr ${args[1]!.name}, ptr ${cb})`);
       return this.own({ name: t, type: e.type });
+    }
+    if (e.fn === "http.serverOnConnect") {
+      // The CONNECT handover (C: emit-exprs.ts's case): the upgrade adapters
+      // fit the plain socket-param shapes; a UNION socket slot (the h2 compat
+      // listener) takes the per-shape wrapper, whose netSocket arm tag is
+      // program data. The listener moves in.
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: http.serverOnConnect listener not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const p1 = cbT.params[1];
+      let adapter: string;
+      if (p1 !== undefined && p1.kind === "union") {
+        adapter = this.connectSockThunkFor(cbT);
+      } else {
+        adapter = cbT.params.length === 3 ? "scr_http_upgrade_thunk3"
+          : cbT.params.length === 2 ? "scr_http_upgrade_thunk2"
+          : cbT.params.length === 1 ? "scr_http_upgrade_thunk1"
+          : "scr_http_upgrade_thunk0";
+        this.declare(`declare void @${adapter}(ptr, ptr, ptr, ptr)`);
+      }
+      this.declare(`declare void @scr_http_server_on_connect(ptr, ptr, ptr, i1 zeroext)`);
+      B.line(`call void @scr_http_server_on_connect(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${adapter}, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "tls.sockAuthError") {
+      // string | null: the verify-failure code string, or the null arm when
+      // authorized / never verified (C: emit-exprs.ts). The raw pointer is
+      // +1 or NULL; the present arm takes it, the null arm is the unit instance.
+      if (e.type.kind !== "union") throw new Error("llvm emitter bug: tls.sockAuthError result is not a union");
+      const def = this.unionsById.get(e.type.unionId);
+      const strTag = def ? def.arms.findIndex((a) => a.kind === "string") : -1;
+      const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
+      if (strTag < 0 || nullTag < 0) throw new Error("llvm emitter bug: tls.sockAuthError union lacks its arms");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.declare(`declare ptr @scr_tls_sock_auth_error(ptr)`);
+      const raw = B.tmp();
+      B.line(`${raw} = call ptr @scr_tls_sock_auth_error(ptr ${args[0]!.name}) ; +1 or NULL`);
+      return this.wrapNullable(raw, raw, def!.arms[strTag]!, strTag, e.type, nullTag);
+    }
+    if (e.fn === "tls.createSecureContext") {
+      // The static form: the PEM pair (cert, key) expanded to pointer and
+      // length each (C: emit-exprs.ts's finish of the same entry).
+      const args = e.args.map((a) => this.emitExpr(a));
+      const cert = this.pemDataLen(e.fn, args[0]!);
+      const key = this.pemDataLen(e.fn, args[1]!);
+      this.declare(`declare ptr @scr_tls_create_secure_context(ptr, i64, ptr, i64)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_tls_create_secure_context(ptr ${cert.data}, i64 ${cert.len}, ptr ${key.data}, i64 ${key.len})`);
+      const out = this.own({ name: t, type: e.type });
+      if (MAY_THROW_LIB_FNS.has(e.fn)) this.emitPendingCheck();
+      return out;
     }
     if (e.fn === "tls.sockOnSecureConnect") {
       // secureConnect listeners: the closure moves in; scr_tls_sock_on_secure_connect
@@ -18148,6 +18259,26 @@ class LlEmitter {
       this.emitPendingCheck();
       return out;
     }
+    if (e.fn === "tls.createServerDynCb") {
+      // The tls twin of https.createServerDynCb (the C tier's emit-exprs.ts
+      // case, same arguments): the options record is BORROWED by the walk,
+      // the handler MOVES into the server, and the adapter is the net
+      // connection thunk picked by the handler's arity (no parameters takes
+      // thunk0, anything else the socket thunk). The walk's catchable fence
+      // is the pending check, placed exactly where finish() places it.
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: tls.createServerDynCb handler not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const sym = cbT.params.length === 0 ? "scr_net_conn_thunk0" : "scr_net_conn_thunk_sock";
+      this.declare(`declare void @${sym}(ptr, ptr)`);
+      this.declare(`declare ptr @scr_tls_create_server_dyn(ptr, ptr, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_tls_create_server_dyn(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${sym})`);
+      const out = this.own({ name: t, type: e.type });
+      if (MAY_THROW_LIB_FNS.has(e.fn)) this.emitPendingCheck();
+      return out;
+    }
     if (e.fn === "tls.createServer" || e.fn === "tls.createServerCb" || e.fn === "https.createServer") {
       // The node:tls and node:https servers — the two rows in this tier's
       // refusal list that the generic path genuinely cannot take, because
@@ -18223,7 +18354,8 @@ class LlEmitter {
         e.fn === "http.requestUrlOpts" || e.fn === "http.requestUrlOptsCb" ||
         e.fn === "https.requestUrlOpts" || e.fn === "https.requestUrlOptsCb" ||
         e.fn === "http.requestUrlAgent" || e.fn === "http.requestUrlAgentCb" ||
-        e.fn === "https.requestUrlAgent" || e.fn === "https.requestUrlAgentCb") {
+        e.fn === "https.requestUrlAgent" || e.fn === "https.requestUrlAgentCb" ||
+        e.fn === "https.requestAgent" || e.fn === "https.requestAgentCb") {
       // The https URL row is the http one with the TLS entry point — same
       // three arguments, same response-callback adapter. The https options
       // row is wider: rejectUnauthorized stays an i1, while its ScrStr or
@@ -18238,7 +18370,11 @@ class LlEmitter {
       const isUrl = e.fn.includes("requestUrl") && !isUrlOpts;
       const isTlsOptions = isTls && !isUrl && !isUrlOpts;
       const isAgent = e.fn.startsWith("http.requestAgent");
-      const cbIdx = isUrl ? 3 : isUrlOpts ? (isTls ? 7 : 5) + (isUrlAgent ? 1 : 0) : isTlsOptions ? 9 : isAgent ? 8 : 7;
+      // The https options agent row (C: scr_https_request_agent): the same
+      // eight head slots and the CA at 8, then the agent dyn at 9 and the
+      // callback one slot later than the plain https row.
+      const isTlsAgent = e.fn.startsWith("https.requestAgent");
+      const cbIdx = isUrl ? 3 : isUrlOpts ? (isTls ? 7 : 5) + (isUrlAgent ? 1 : 0) : isTlsAgent ? 10 : isTlsOptions ? 9 : isAgent ? 8 : 7;
       /** The ScrStr/ScrBytes CA slot, expanded to pointer + length. */
       const caIdx = isTlsOptions ? 8 : isTls && isUrlOpts ? 6 : -1;
       const hasCb = e.fn.endsWith("Cb");
@@ -18255,7 +18391,8 @@ class LlEmitter {
         adapter = `@${sym}`;
       }
       const head = args.slice(0, cbIdx);
-      const entry = isTlsOptions ? "scr_https_request"
+      const entry = isTlsAgent ? "scr_https_request_agent"
+        : isTlsOptions ? "scr_https_request"
         : isUrlAgent ? (isTls ? "scr_https_request_url_agent" : "scr_http_request_url_agent")
         : isUrlOpts ? (isTls ? "scr_https_request_url_opts" : "scr_http_request_url_opts")
         : isTls ? "scr_https_request_url"
@@ -18291,6 +18428,58 @@ class LlEmitter {
       B.line(
         `${t} = call ptr @${entry}(${[...callArgs, `ptr ${cb}`, `ptr ${adapter}`].join(", ")})`,
       );
+      const out = this.own({ name: t, type: e.type });
+      if (MAY_THROW_LIB_FNS.has(e.fn)) this.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "https.requestFn" || e.fn === "https.requestFnCb") {
+      // The requestFn binding (C: emit-exprs.ts's ternary): arg 0 picks the
+      // client, and exactly ONE entry runs over the same evaluated argument
+      // temps. The https side takes the CA string at 9 (expanded to pointer
+      // and length) and reject at 8; the http side reads only 1..7 and
+      // passes port 80 with NULL wrap. The callback moves into whichever
+      // side runs, so it is moved once, before the branch.
+      const hasCb = e.fn === "https.requestFnCb";
+      const args = e.args.map((a) => this.emitExpr(a));
+      let cb = "null";
+      let adapter = "null";
+      if (hasCb) {
+        const cbT = e.args[10]!.type;
+        if (cbT.kind !== "func") throw new Error(`llvm emitter bug: ${e.fn} callback not a func`);
+        this.moveTemp(args[10]!);
+        cb = args[10]!.name;
+        const sym = cbT.params.length === 0 ? "scr_http_resp_thunk0" : "scr_http_resp_thunk_res";
+        this.declare(`declare void @${sym}(ptr, ptr)`);
+        adapter = `@${sym}`;
+      }
+      this.declare(`declare ptr @scr_https_request(ptr, double, ptr, ptr, double, ptr, i1 zeroext, i1 zeroext, ptr, i64, ptr, ptr)`);
+      this.declare(`declare ptr @scr_http_request_ex(ptr, double, ptr, ptr, double, ptr, i1 zeroext, ptr, ptr, i32, ptr, ptr)`);
+      const slot = B.slot();
+      B.entryAllocas.push(`${slot} = alloca ptr`);
+      const lt = B.newLabel("rfn.s");
+      const lf = B.newLabel("rfn.h");
+      const lj = B.newLabel("rfn.j");
+      const a = (i: number): string => `${this.llType(args[i]!.type)} ${args[i]!.name}`;
+      const i1Arg = (i: number): string => `i1 zeroext ${args[i]!.name}`;
+      B.condBr(args[0]!.name, lt, lf);
+      B.startBlock(lt);
+      const { data: caData, len: caLen } = this.pemDataLen(e.fn, args[9]!);
+      const ts = B.tmp();
+      B.line(
+        `${ts} = call ptr @scr_https_request(${[a(1), a(2), a(3), a(4), a(5), a(6), i1Arg(7), i1Arg(8), `ptr ${caData}`, `i64 ${caLen}`, `ptr ${cb}`, `ptr ${adapter}`].join(", ")})`,
+      );
+      B.line(`store ptr ${ts}, ptr ${slot}`);
+      B.br(lj);
+      B.startBlock(lf);
+      const th = B.tmp();
+      B.line(
+        `${th} = call ptr @scr_http_request_ex(${[a(1), a(2), a(3), a(4), a(5), a(6), i1Arg(7), `ptr ${cb}`, `ptr ${adapter}`, "i32 80", "ptr null", "ptr null"].join(", ")})`,
+      );
+      B.line(`store ptr ${th}, ptr ${slot}`);
+      B.br(lj);
+      B.startBlock(lj);
+      const t = B.tmp();
+      B.line(`${t} = load ptr, ptr ${slot}`);
       const out = this.own({ name: t, type: e.type });
       if (MAY_THROW_LIB_FNS.has(e.fn)) this.emitPendingCheck();
       return out;
