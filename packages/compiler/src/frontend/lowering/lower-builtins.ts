@@ -1096,7 +1096,14 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     bi: { module: string; member: string },
     loc: SrcLoc,): IrExpr | null {
     if (bi.module !== "fs" && bi.module !== "fs/promises") return null;
-    if (!isJsSourceFile(expr.getSourceFile())) return null;
+    // The callback forms of readFile, exists, mkdtemp and read are claimed for
+    // TypeScript too: their validation ladder and the runtime callbacks are the
+    // same as JS, and a TS program that Node accepts (@types/node declares every
+    // one of them) must not fence at build. Every other member keeps its JS-only
+    // ladder and its TypeScript compile fence.
+    const tsCallbackForm = bi.module === "fs" &&
+      (bi.member === "readFile" || bi.member === "exists" || bi.member === "mkdtemp" || bi.member === "read");
+    if (!isJsSourceFile(expr.getSourceFile()) && !tsCallbackForm) return null;
     const args = expr.arguments;
     if (args.some(ts.isSpreadElement)) return null;
     // Every ladder argument crosses as a dyn value; an argument that
