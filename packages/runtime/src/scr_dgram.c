@@ -347,10 +347,6 @@ struct ScrDgramSocket {
   struct ScrDgramSocket *next;
 };
 
-#ifdef SCR_RC_AUDIT
-static long scr_dgram_live = 0;
-long scr_dgram_live_count(void) { return scr_dgram_live; }
-#endif
 
 static ScrDgramSocket *scr_dgram_socks = NULL; /* registry: +1 each, tail-appended */
 static ScrPoller *scr_dgram_poller = NULL;
@@ -421,9 +417,7 @@ void scr_dgram_release(ScrDgramSocket *s) {
     scr_dgram_ls_drop(&s->conn_ls);
     scr_str_release(s->pending_err);
     if (s->fd >= 0) scr_dgram_close_fd_raw(s->fd);
-#ifdef SCR_RC_AUDIT
-    scr_dgram_live--;
-#endif
+    scr_dgram_free_note();
     free(s);
   }
 }
@@ -496,9 +490,7 @@ ScrDgramSocket *scr_dgram_create(bool reuse_addr) {
   s->rc = 1;
   s->fd = -1;
   s->reuse_addr = reuse_addr;
-#ifdef SCR_RC_AUDIT
-  scr_dgram_live++;
-#endif
+  scr_dgram_alloc_note();
   return s;
 }
 

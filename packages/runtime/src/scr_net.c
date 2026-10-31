@@ -773,11 +773,6 @@ enum { SCR_NET_NS_IDLE = 0, SCR_NET_NS_LIVE = 1, SCR_NET_NS_CLOSED = 2 };
 static bool scr_net_keeps_listeners(const ScrNetSocket *s) { (void)s; return true; }
 #define LISTEN_DEAD(sk) ((sk)->close_emitted && !scr_net_keeps_listeners(sk))
 
-#ifdef SCR_RC_AUDIT
-static long scr_net_live = 0;
-long scr_net_live_count(void) { return scr_net_live; }
-#endif
-
 static ScrNetServer *scr_net_servers = NULL; /* registry: +1 each, tail-appended */
 static ScrNetSocket *scr_net_socks = NULL;
 static ScrPoller *scr_net_poller = NULL;
@@ -803,9 +798,7 @@ void scr_net_server_release(ScrNetServer *s) {
     scr_str_release(s->bound_host);
     scr_str_release(s->pending_err);
     if (s->fd >= 0) scr_net_close_fd_raw(s->fd);
-#ifdef SCR_RC_AUDIT
-    scr_net_live--;
-#endif
+    scr_netsrv_free_note();
     free(s);
   }
 }
@@ -854,9 +847,7 @@ void scr_net_sock_release(ScrNetSocket *s) {
     if (s->conn_pending) scr_net_server_release(s->conn_pending);
     if (s->server) scr_net_server_release(s->server);
     if (s->fd >= 0) scr_net_close_fd_raw(s->fd);
-#ifdef SCR_RC_AUDIT
-    scr_net_live--;
-#endif
+    scr_netsock_free_note();
     free(s);
   }
 }
@@ -1068,9 +1059,7 @@ static ScrNetSocket *scr_net_sock_new(void) {
    * setDefaultAutoSelectFamilyAttemptTimeout before the dial takes
    * effect and one after it does not */
   s->dial_attempt_ms = scr_net_get_autosel_timeout();
-#ifdef SCR_RC_AUDIT
-  scr_net_live++;
-#endif
+  scr_netsock_alloc_note();
   return s;
 }
 
@@ -1664,9 +1653,7 @@ static ScrNetServer *scr_net_server_new(void) {
   s->kind = SCR_NET_K_SERVER;
   s->rc = 1;
   s->fd = -1;
-#ifdef SCR_RC_AUDIT
-  scr_net_live++;
-#endif
+  scr_netsrv_alloc_note();
   return s;
 }
 

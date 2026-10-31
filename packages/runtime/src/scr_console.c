@@ -53,6 +53,19 @@ extern long scr_obj_live_count(void);     /* scr_object.c */
 extern long scr_union_live_count(void);   /* scr_union.c */
 extern long scr_dyn_live_count(void);     /* scr_json.c */
 extern long scr_bytes_live_count(void);   /* scr_bytes.c */
+extern long scr_timers_live_count(void); /* scr_async.c */
+extern long scr_netsock_live_count(void); /* scr_object.c */
+extern long scr_netsrv_live_count(void); /* scr_object.c */
+extern long scr_tlsctx_live_count(void); /* scr_object.c */
+extern long scr_tlssock_live_count(void); /* scr_object.c */
+extern long scr_httpconn_live_count(void); /* scr_object.c */
+extern long scr_httpmsg_live_count(void); /* scr_object.c */
+extern long scr_h2sess_live_count(void); /* scr_object.c */
+extern long scr_h2stream_live_count(void); /* scr_object.c */
+extern long scr_dgram_live_count(void); /* scr_object.c */
+extern long scr_watcher_live_count(void); /* scr_object.c */
+extern long scr_child_live_count(void); /* scr_object.c */
+extern long scr_childstream_live_count(void); /* scr_object.c */
 #ifdef SCR_DYNAMIC
 extern long scr_jsval_live_count(void); /* scr_island.c */
 #endif
@@ -118,10 +131,31 @@ static void scr_rc_audit_at_exit(void) {
    * one indirection from its cause. */
   long abortsigs = scr_abortsig_live_count();
   long abortctls = scr_abortctl_live_count();
+  /* The handle kinds of the socket, TLS, HTTP, HTTP/2, dgram, fs-watch and
+   * child-process units, plus pending timers. Their units are link-gated, so
+   * the counters live in scr_object.c (always linked) and the notes are
+   * nothing off the audit lane. Each one is a handle a program can leak
+   * without a string, a closure or an object being left behind. */
+  long netsocks = scr_netsock_live_count();
+  long netsrvs = scr_netsrv_live_count();
+  long tlsctxs = scr_tlsctx_live_count();
+  long tlssocks = scr_tlssock_live_count();
+  long httpconns = scr_httpconn_live_count();
+  long httpmsgs = scr_httpmsg_live_count();
+  long h2sessions = scr_h2sess_live_count();
+  long h2streams = scr_h2stream_live_count();
+  long dgrams = scr_dgram_live_count();
+  long watchers = scr_watcher_live_count();
+  long childprocs = scr_child_live_count();
+  long childstreams = scr_childstream_live_count();
+  long timers = scr_timers_live_count();
   if (strings != 0 || arrays != 0 || maps != 0 || boxes != 0 || closures != 0 ||
       objects != 0 || unions != 0 || dyns != 0 || bytes != 0 || jsvals != 0 ||
       bigints != 0 || keyobjs != 0 || hashes != 0 || hmacs != 0 ||
-      ciphers != 0 || abortsigs != 0 || abortctls != 0) {
+      ciphers != 0 || abortsigs != 0 || abortctls != 0 || netsocks != 0 ||
+      netsrvs != 0 || tlsctxs != 0 || tlssocks != 0 || httpconns != 0 ||
+      httpmsgs != 0 || h2sessions != 0 || h2streams != 0 || dgrams != 0 ||
+      watchers != 0 || childprocs != 0 || childstreams != 0 || timers != 0) {
     fflush(stdout);
     fprintf(stderr,
             "scriptc RC AUDIT FAILED: %ld heap string(s), %ld array(s), "
@@ -129,10 +163,17 @@ static void scr_rc_audit_at_exit(void) {
             "%ld union(s), %ld dyn value(s), %ld bytes value(s), "
             "%ld island value(s), %ld bigint(s), %ld key object(s), "
             "%ld hash(es), %ld hmac(s), %ld cipher(s), %ld abort signal(s), "
-            "%ld abort controller(s) live at exit\n",
+            "%ld abort controller(s), "
+            "%ld net socket(s), %ld net server(s), %ld tls context(s), "
+            "%ld tls socket(s), %ld http connection(s), %ld http message(s), "
+            "%ld http2 session(s), %ld http2 stream(s), %ld dgram socket(s), "
+            "%ld fs watcher(s), %ld child process(es), %ld child stream(s), "
+            "%ld timer(s) live at exit\n",
             strings, arrays, maps, boxes, closures, objects, unions, dyns,
             bytes, jsvals, bigints, keyobjs, hashes, hmacs, ciphers,
-            abortsigs, abortctls);
+            abortsigs, abortctls, netsocks, netsrvs, tlsctxs, tlssocks,
+            httpconns, httpmsgs, h2sessions, h2streams, dgrams, watchers,
+            childprocs, childstreams, timers);
     /* The line above counts by TYPE, which is where a leak hunt stops:
      * it names no call site. The tables below name one -- live closures
      * by the source position of the lambda that made them, and live dyn

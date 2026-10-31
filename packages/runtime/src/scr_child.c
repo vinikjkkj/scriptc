@@ -1279,6 +1279,7 @@ void scr_child_release(ScrChild *c) {
     scr_child_stream_release(c->out_stream);
     scr_child_stream_release(c->err_stream);
     if (c->proc != NULL) CloseHandle(c->proc);
+    scr_child_free_note();
     free(c);
   }
 }
@@ -1308,6 +1309,7 @@ void scr_child_stream_release(ScrChildStream *s) {
   if (--s->rc == 0) {
     scr_child_stream_drop_listeners(s); /* only reachable pre-'end' via leaks */
     if (s->h != NULL) CloseHandle(s->h);
+    scr_childstream_free_note();
     free(s);
   }
 }
@@ -1326,6 +1328,7 @@ static bool scr_child_stream_watching(const ScrChildStream *s) {
 static ScrChildStream *scr_child_stream_new(HANDLE h) {
   ScrChildStream *s = calloc(1, sizeof *s);
   if (!s) scr_child_oom();
+  scr_childstream_alloc_note();
   s->rc = 1;
   s->h = h;
   if (h == NULL) {
@@ -1533,6 +1536,7 @@ ScrChild *scr_spawn_opts(ScrStr *cmd, ScrArr *args, double in_mode,
   }
   ScrChild *c = calloc(1, sizeof(ScrChild));
   if (!c) scr_child_oom();
+  scr_child_alloc_note();
   c->rc = 1;
 
   /* Piped slots: the pipe NOW; a pipe failure degrades the slot to NUL
@@ -3011,6 +3015,7 @@ void scr_child_release(ScrChild *c) {
     scr_str_release(c->err_msg);
     scr_child_stream_release(c->out_stream);
     scr_child_stream_release(c->err_stream);
+    scr_child_free_note();
     free(c);
   }
 }
@@ -3060,6 +3065,7 @@ void scr_child_stream_release(ScrChildStream *s) {
   if (--s->rc == 0) {
     scr_child_stream_drop_listeners(s); /* only reachable pre-'end' via leaks */
     if (s->fd >= 0) close(s->fd);
+    scr_childstream_free_note();
     free(s);
   }
 }
@@ -3079,6 +3085,7 @@ static bool scr_child_stream_watching(const ScrChildStream *s) {
 static ScrChildStream *scr_child_stream_new(int fd) {
   ScrChildStream *s = calloc(1, sizeof *s);
   if (!s) scr_child_oom();
+  scr_childstream_alloc_note();
   s->rc = 1;
   s->fd = fd;
   if (fd < 0) {
@@ -3360,6 +3367,7 @@ ScrChild *scr_spawn_opts(ScrStr *cmd, ScrArr *args, double in_mode,
   }
   ScrChild *c = calloc(1, sizeof(ScrChild));
   if (!c) scr_child_oom();
+  scr_child_alloc_note();
   c->rc = 1;
 
   /* Piped slots: pipe(2) NOW, both ends cloexec (the file action's dup2

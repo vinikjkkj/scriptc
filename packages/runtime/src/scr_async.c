@@ -883,6 +883,11 @@ typedef struct {
 
 static ScrTimer *scr_timers = NULL;
 static size_t scr_ntimers = 0, scr_timers_cap = 0;
+#ifdef SCR_RC_AUDIT
+/* Pending timer entries (armed setTimeout/setInterval, refed or not). Read
+ * by the RC audit at exit: an entry still armed then is a live timer. */
+long scr_timers_live_count(void) { return (long)scr_ntimers; }
+#endif
 static unsigned long scr_timer_seq = 0;
 /* REF'd armed timers — the loop's timer-liveness count (an unref'd timer
  * sits in the heap and still FIRES if the loop runs for other reasons, but
