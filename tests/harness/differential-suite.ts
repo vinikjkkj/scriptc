@@ -161,7 +161,11 @@ function nodeOracleArgs(file: string): string[] {
     ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning"]
     : [];
   const nodep = wantsNoDeprecation(file) ? ["--no-deprecation"] : [];
-  return [...transform, ...nodep, "--import", comptimeShim, "--import", islandShim, nodeOracleFile(file)];
+  // --require, not --import: an --import makes Node load the ENTRY through the
+  // ESM loader, which runs a CommonJS main body inside a promise job (promise
+  // jobs before nextTicks). `node file.cjs` runs it synchronously; the oracle
+  // must match that. The shims are CommonJS for the same reason.
+  return [...transform, ...nodep, "--require", fileURLToPath(comptimeShim), "--require", fileURLToPath(islandShim), nodeOracleFile(file)];
 }
 
 /** Runs a binary, tolerating an expected nonzero exit (execFile rejects on
@@ -240,11 +244,11 @@ function comparableStderr(stderr: Buffer): Buffer {
 // `comptime(fn)` in plain JS semantics is just `fn()` — the shim defines it
 // globally so Node stays the oracle for comptime programs (the compile-time
 // result must equal what Node computes at runtime); inert for the rest.
-const comptimeShim = pathToFileURL(join(import.meta.dirname, "comptime-shim.mjs")).href;
+const comptimeShim = pathToFileURL(join(import.meta.dirname, "comptime-shim.cjs")).href;
 // `__island_eval(code)` in plain JS semantics is a global indirect eval +
 // String() — the island shim defines it so Node stays the oracle for island
 // programs too; inert for the rest.
-const islandShim = pathToFileURL(join(import.meta.dirname, "island-shim.mjs")).href;
+const islandShim = pathToFileURL(join(import.meta.dirname, "island-shim.cjs")).href;
 
 /** Entry file plus siblings for directory tests — every byte a program run
  * depends on, shared by the oracle cache key and the compile cache key.
