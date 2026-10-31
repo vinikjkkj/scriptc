@@ -8641,6 +8641,126 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/19300-errctor-typeerror-name.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19300-errctor-typeerror-name.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19301-errctor-rangeerror-name.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19301-errctor-rangeerror-name.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19302-errctor-syntax-json-name.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19302-errctor-syntax-json-name.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19303-errctor-user-error-name.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19303-errctor-user-error-name.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19304-errctor-user-typeerror-name.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19304-errctor-user-typeerror-name.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19305-errctor-fs-enoent-name.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19305-errctor-fs-enoent-name.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19306-errctor-buffer-range-name.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19306-errctor-buffer-range-name.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19307-errctor-fn-catch-instanceof.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19307-errctor-fn-catch-instanceof.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19308-errctor-json-syntax-message-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19308-errctor-json-syntax-message-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19309-errctor-subclass-caught-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19309-errctor-subclass-caught-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19310-errctor-subclass-with-class-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19310-errctor-subclass-with-class-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19311-errctor-identity-typeerror-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19311-errctor-identity-typeerror-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19312-errctor-identity-value-binding.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19312-errctor-identity-value-binding.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19313-errctor-proto-name-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19313-errctor-proto-name-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19314-errctor-kindproto-ctor-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19314-errctor-kindproto-ctor-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19315-errctor-ctor-call-new-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19315-errctor-ctor-call-new-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19316-errctor-alien-object-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19316-errctor-alien-object-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19317-errctor-thrown-rangeerror-identity.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19317-errctor-thrown-rangeerror-identity.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19318-errctor-plain-fn-proto-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19318-errctor-plain-fn-proto-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19319-errctor-ts-as-error-syntax.ts": {
+   "order": [
+    "<repo>/tests/corpus/19319-errctor-ts-as-error-syntax.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1940-class-values-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1940-class-values-basics.ts"
