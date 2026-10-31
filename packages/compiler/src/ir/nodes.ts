@@ -709,6 +709,33 @@ export function irFunctionJsName(fn: IrFunction): string | null {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(fn.name) ? fn.name : null;
 }
 
+/** The inspect KIND code of a function VALUE, as the runtime's ScrFnName
+ * row and FUNC box carry it (scr_runtime.h, SCR_FNK_*): bits 0..1 are the
+ * kind (0 Function, 1 AsyncFunction, 2 GeneratorFunction, 3
+ * AsyncGeneratorFunction) and bit 2 says the value has no own `prototype`.
+ * Set by the lowering from the creation node (`valueCode`); a function the
+ * lowering did not stamp takes its kind from the async/generator flags and
+ * is treated as having a prototype. */
+export function irFunctionValueCode(fn: IrFunction): number {
+  if (fn.valueCode !== undefined) return fn.valueCode;
+  return (fn.async === true ? 1 : 0) | (fn.generator !== undefined ? 2 : 0);
+}
+
+/** The function-name table's rows, shared by both emitters: one row per
+ * closure entry point that has a name OR a non-zero kind code, sorted by
+ * symbol so the output is a function of the program. The name is null for a
+ * function with no JS name (its code still matters). */
+export function fnNameTableRows(
+  names: ReadonlyMap<string, string>,
+  codes: ReadonlyMap<string, number>,
+): [string, string | null, number][] {
+  const syms = new Set<string>([...names.keys(), ...codes.keys()]);
+  return [...syms]
+    .filter((sym) => sym.length > 0)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .map((sym) => [sym, names.get(sym) ?? null, codes.get(sym) ?? 0] as [string, string | null, number]);
+}
+
 export function isUnitType(t: IrType): boolean {
   return t.kind === "undefinedT" || t.kind === "nullT";
 }
@@ -2601,6 +2628,9 @@ export interface IrFunction {
    * never by codegen, so a wrong answer here is a wrong PRINTED name and
    * nothing else. */
   jsName?: string;
+  /** The inspect kind code of the function value this body backs (see
+   * irFunctionValueCode). Stamped by the lowering from the creation node. */
+  valueCode?: number;
   params: IrParam[];
   returnType: IrType;
   /** All locals including params, pre-collected and scope-flat: ids are
@@ -6366,6 +6396,7 @@ export type IrLibFn =
   | "insp.error"
   | "insp.dyn"
   | "insp.dynS"
+  | "insp.dynH"
   | "insp.fmtS"
   | "big.str"
   | "key.fromPkcs8"
@@ -7881,7 +7912,7 @@ export type IrExpr =
    * that byte-exactly is a separate piece of work, and until it exists a
    * TypeScript function's text would be wrong in a way no one could see.
    * The TypeScript arms stay loud. */
-  | { kind: "dynFrom"; value: IrExpr; fnName?: string; fnSrc?: { text: string } | "bound"; type: IrType; loc: SrcLoc }
+  | { kind: "dynFrom"; value: IrExpr; fnName?: string; fnSrc?: { text: string } | "bound"; fnCode?: number; type: IrType; loc: SrcLoc }
   /** Island value → dyn conversion (`type` is always dyn; the operand
    * is always jsval): the jsval→dyn crossing — an 'any'-typed engine
    * value flowing into an 'unknown'/'object'/JS-residue slot wraps BY
@@ -13915,6 +13946,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // program simply did not run, at exit 0. Measured on both backends.
   "insp.dyn",
   "insp.dynS",
+  // util.format %o over a function value: showHidden on the function box.
+  "insp.dynH",
   "insp.dynSpread",
   // util.format over a RUNTIME argument list: a %o over a dyn array/function and a
   // user toString under %s/%d/%i/%f leave a pending exception.
