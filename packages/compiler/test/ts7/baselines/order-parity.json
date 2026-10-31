@@ -22795,6 +22795,48 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/20800-proto-factory-call-arrow.js": {
+    "order": [
+      "<repo>/tests/corpus/20800-proto-factory-call-arrow.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/20801-proto-factory-call-function-expression.js": {
+    "order": [
+      "<repo>/tests/corpus/20801-proto-factory-call-function-expression.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/20802-proto-factory-call-closure-state.js": {
+    "order": [
+      "<repo>/tests/corpus/20802-proto-factory-call-closure-state.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/20803-proto-factory-call-inherited.js": {
+    "order": [
+      "<repo>/tests/corpus/20803-proto-factory-call-inherited.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/20804-proto-factory-call-read-as-value.js": {
+    "order": [
+      "<repo>/tests/corpus/20804-proto-factory-call-read-as-value.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/20805-proto-factory-call-commonjs.cjs": {
+    "order": [
+      "<repo>/tests/corpus/20805-proto-factory-call-commonjs.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/20806-proto-factory-call-two-methods-one-factory.js": {
+    "order": [
+      "<repo>/tests/corpus/20806-proto-factory-call-two-methods-one-factory.js"
+    ],
+    "diags": []
   }
  }
 }
