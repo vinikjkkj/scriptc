@@ -853,6 +853,13 @@
       "status": "static"
     },
     {
+      "id": "node-builtin.fs.chmod",
+      "kind": "node-builtin",
+      "name": "fs.chmod",
+      "status": "static",
+      "note": "the callback form"
+    },
+    {
       "id": "node-builtin.fs.chmodSync",
       "kind": "node-builtin",
       "name": "fs.chmodSync",
@@ -863,6 +870,13 @@
       "kind": "node-builtin",
       "name": "fs.chownSync",
       "status": "static"
+    },
+    {
+      "id": "node-builtin.fs.close",
+      "kind": "node-builtin",
+      "name": "fs.close",
+      "status": "static",
+      "note": "the callback form; without a callback an error is thrown on the loop turn, as Node's default callback does"
     },
     {
       "id": "node-builtin.fs.closeSync",
@@ -918,6 +932,13 @@
       "kind": "node-builtin",
       "name": "fs.mkdtempSync",
       "status": "static"
+    },
+    {
+      "id": "node-builtin.fs.open",
+      "kind": "node-builtin",
+      "name": "fs.open",
+      "status": "static",
+      "note": "the callback form: path, flags and mode as Node reads them (the argument count picks the callback)"
     },
     {
       "id": "node-builtin.fs.openSync",
@@ -1060,6 +1081,13 @@
       "kind": "node-builtin",
       "name": "fs.watch",
       "status": "static"
+    },
+    {
+      "id": "node-builtin.fs.write",
+      "kind": "node-builtin",
+      "name": "fs.write",
+      "status": "static",
+      "note": "the buffer and string forms, positional and options (Node's six-slot ladder)"
     },
     {
       "id": "node-builtin.fs.writeFile",
