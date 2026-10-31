@@ -1537,6 +1537,7 @@ ScrChild *scr_spawn_opts(ScrStr *cmd, ScrArr *args, double in_mode,
   ScrChild *c = calloc(1, sizeof(ScrChild));
   if (!c) scr_child_oom();
   scr_child_alloc_note();
+  scr_abandon_arm();
   c->rc = 1;
 
   /* Piped slots: the pipe NOW; a pipe failure degrades the slot to NUL
@@ -3368,6 +3369,7 @@ ScrChild *scr_spawn_opts(ScrStr *cmd, ScrArr *args, double in_mode,
   ScrChild *c = calloc(1, sizeof(ScrChild));
   if (!c) scr_child_oom();
   scr_child_alloc_note();
+  scr_abandon_arm();
   c->rc = 1;
 
   /* Piped slots: pipe(2) NOW, both ends cloexec (the file action's dup2
