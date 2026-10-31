@@ -8105,6 +8105,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/18300-fn-kind-static-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/18300-fn-kind-static-inspect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18301-fn-kind-console-log-async.ts": {
+   "order": [
+    "<repo>/tests/corpus/18301-fn-kind-console-log-async.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18302-fn-kind-any-box.ts": {
+   "order": [
+    "<repo>/tests/corpus/18302-fn-kind-any-box.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18303-fn-kind-record-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/18303-fn-kind-record-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18304-fn-showhidden-arrow.ts": {
+   "order": [
+    "<repo>/tests/corpus/18304-fn-showhidden-arrow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18305-fn-showhidden-named.ts": {
+   "order": [
+    "<repo>/tests/corpus/18305-fn-showhidden-named.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18306-fn-showhidden-async.ts": {
+   "order": [
+    "<repo>/tests/corpus/18306-fn-showhidden-async.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18307-fn-bound-static.ts": {
+   "order": [
+    "<repo>/tests/corpus/18307-fn-bound-static.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18308-fn-bound-async.ts": {
+   "order": [
+    "<repo>/tests/corpus/18308-fn-bound-async.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18309-fn-bound-boxed-away.ts": {
+   "order": [
+    "<repo>/tests/corpus/18309-fn-bound-boxed-away.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1831-enum-string-const-reverse.ts": {
    "order": [
     "<repo>/tests/corpus/1831-enum-string-const-reverse.ts"
@@ -8249,6 +8309,48 @@
   "<repo>/tests/corpus/1850-overload-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1850-overload-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18500-esm-throw-job-before-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18500-esm-throw-job-before-listener.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18501-esm-throw-job-before-fatal-exit.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18501-esm-throw-job-before-fatal-exit.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18502-esm-tla-throw-job-before-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18502-esm-tla-throw-job-before-listener.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18503-esm-tla-throw-fatal-no-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18503-esm-tla-throw-fatal-no-listener.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18504-esm-tick-only-throw-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18504-esm-tick-only-throw-listener.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18505-esm-rejection-routed-to-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18505-esm-rejection-routed-to-listener.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18506-esm-late-tla-rejection-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18506-esm-late-tla-rejection-listener.mjs"
    ],
    "diags": []
   },
@@ -8764,6 +8866,42 @@
   "<repo>/tests/corpus/1940-class-values-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1940-class-values-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19400-uncaught-exit-with-armed-timer.ts": {
+   "order": [
+    "<repo>/tests/corpus/19400-uncaught-exit-with-armed-timer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19401-uncaught-exit-with-armed-interval.ts": {
+   "order": [
+    "<repo>/tests/corpus/19401-uncaught-exit-with-armed-interval.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19402-uncaught-exit-with-queued-immediate.ts": {
+   "order": [
+    "<repo>/tests/corpus/19402-uncaught-exit-with-queued-immediate.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19403-uncaught-exit-with-queued-tick.ts": {
+   "order": [
+    "<repo>/tests/corpus/19403-uncaught-exit-with-queued-tick.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19404-uncaught-exit-with-pending-stat-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/19404-uncaught-exit-with-pending-stat-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19405-uncaught-throw-in-timer-with-armed-timer.ts": {
+   "order": [
+    "<repo>/tests/corpus/19405-uncaught-throw-in-timer-with-armed-timer.ts"
    ],
    "diags": []
   },
@@ -22387,84 +22525,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/19400-uncaught-exit-with-armed-timer.ts": {
-   "order": [
-    "<repo>/tests/corpus/19400-uncaught-exit-with-armed-timer.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19401-uncaught-exit-with-armed-interval.ts": {
-   "order": [
-    "<repo>/tests/corpus/19401-uncaught-exit-with-armed-interval.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19402-uncaught-exit-with-queued-immediate.ts": {
-   "order": [
-    "<repo>/tests/corpus/19402-uncaught-exit-with-queued-immediate.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19403-uncaught-exit-with-queued-tick.ts": {
-   "order": [
-    "<repo>/tests/corpus/19403-uncaught-exit-with-queued-tick.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19404-uncaught-exit-with-pending-stat-callback.ts": {
-   "order": [
-    "<repo>/tests/corpus/19404-uncaught-exit-with-pending-stat-callback.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/19405-uncaught-throw-in-timer-with-armed-timer.ts": {
-   "order": [
-    "<repo>/tests/corpus/19405-uncaught-throw-in-timer-with-armed-timer.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18500-esm-throw-job-before-listener.mjs": {
-   "order": [
-    "<repo>/tests/corpus/18500-esm-throw-job-before-listener.mjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18501-esm-throw-job-before-fatal-exit.mjs": {
-   "order": [
-    "<repo>/tests/corpus/18501-esm-throw-job-before-fatal-exit.mjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18502-esm-tla-throw-job-before-listener.mjs": {
-   "order": [
-    "<repo>/tests/corpus/18502-esm-tla-throw-job-before-listener.mjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18503-esm-tla-throw-fatal-no-listener.mjs": {
-   "order": [
-    "<repo>/tests/corpus/18503-esm-tla-throw-fatal-no-listener.mjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18504-esm-tick-only-throw-listener.mjs": {
-   "order": [
-    "<repo>/tests/corpus/18504-esm-tick-only-throw-listener.mjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18505-esm-rejection-routed-to-listener.mjs": {
-   "order": [
-    "<repo>/tests/corpus/18505-esm-rejection-routed-to-listener.mjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/18506-esm-late-tla-rejection-listener.mjs": {
-   "order": [
-    "<repo>/tests/corpus/18506-esm-late-tla-rejection-listener.mjs"
-   ],
-   "diags": []
   }
  }
 }
