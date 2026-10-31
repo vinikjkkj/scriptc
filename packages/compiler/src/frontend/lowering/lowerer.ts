@@ -1367,6 +1367,77 @@ export function jsFuncValueNameOf(L: Lowerer, node: ts.Node, seen?: Set<ts.Symbo
   return null;
 }
 
+/** The inspect kind code of a function VALUE made at `n` (ir/nodes.ts
+ * irFunctionValueCode; SCR_FNK_* in scr_runtime.h). Bits 0..1: 0 Function, 1
+ * AsyncFunction, 2 GeneratorFunction, 3 AsyncGeneratorFunction. Bit 2 (4):
+ * the value has no own `prototype`, which is an arrow, a method (unless it
+ * is a generator), and any async function that is not a generator. Node's
+ * own rules: a generator function's prototype is its generator object's
+ * prototype, so it has one; an async function has none. */
+export function fnValueCodeOfNode(n: ts.Node): number {
+  const gen = (n as { asteriskToken?: ts.Node }).asteriskToken !== undefined;
+  const mods = (n as { modifiers?: ts.NodeArray<ts.ModifierLike> }).modifiers;
+  const isAsync = mods !== undefined && mods.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+  const noProto = ts.isArrowFunction(n) || (ts.isMethodDeclaration(n) && !gen) || (isAsync && !gen);
+  return (isAsync ? 1 : 0) | (gen ? 2 : 0) | (noProto ? 4 : 0);
+}
+
+/** The kind code of a `.bind(...)` value whose target a declaration proves
+ * (ir/nodes.ts irFunctionValueCode, SCR_FNK_*): no prototype, and the kind
+ * of the target's prototype-chain constructor in bits 3..4 when the target
+ * is an async or generator function (Node prints ` AsyncFunction` after the
+ * base). Null when the target is not provable from its declaration. */
+export function boundCodeOf(L: Lowerer, call: ts.Node): number | null {
+  const n = peelParens(call);
+  if (!ts.isCallExpression(n) || !ts.isPropertyAccessExpression(n.expression)) return null;
+  const recv: ts.Node = peelParens(n.expression.expression);
+  let target: number | null = null;
+  if (ts.isCallExpression(recv) && ts.isPropertyAccessExpression(recv.expression) && recv.expression.name.text === "bind") {
+    const inner = boundCodeOf(L, recv);
+    if (inner === null) return null;
+    target = inner;
+  } else if (ts.isIdentifier(recv)) {
+    const sym = L.resolveValueSymbol(recv);
+    if (!sym) return null;
+    const decl = L.checker.declarationsOf(sym)[0];
+    if (decl === undefined || L.checker.declarationsOf(sym).length !== 1) return null;
+    if (ts.isFunctionDeclaration(decl)) target = fnValueCodeOfNode(decl);
+    else if (ts.isVariableDeclaration(decl) && decl.initializer && (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))) {
+      target = fnValueCodeOfNode(decl.initializer);
+    }
+  }
+  if (target === null) return null;
+  const inh = (target & 3) !== 0 ? target & 3 : (target >> 3) & 3;
+  return 4 | (inh << 3);
+}
+
+export function peelParens(n: ts.Node): ts.Node {
+  let m = n;
+  while (ts.isParenthesizedExpression(m)) m = m.expression;
+  return m;
+}
+
+
+/** The kind code of a function VALUE expression that a declaration proves
+ * (a function node, a bind call, or an identifier whose one const binding
+ * holds one of those), or null. Used where a box must carry the code its
+ * closure cannot (ScrDyn fnCode, scr_dyn_fn_code_set). */
+export function staticFnCodeOf(L: Lowerer, node: ts.Node): number | null {
+  const n = peelParens(node);
+  if (ts.isArrowFunction(n) || ts.isFunctionExpression(n)) return fnValueCodeOfNode(n);
+  if (ts.isCallExpression(n)) return boundCodeOf(L, n);
+  if (!ts.isIdentifier(n)) return null;
+  const sym = L.resolveValueSymbol(n);
+  if (!sym) return null;
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length !== 1) return null;
+  const d = decls[0]!;
+  if (ts.isFunctionDeclaration(d)) return fnValueCodeOfNode(d);
+  if (!ts.isVariableDeclaration(d) || d.initializer === undefined) return null;
+  if ((ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const) === 0) return null;
+  return staticFnCodeOf(L, d.initializer);
+}
+
 /** The name a `.bind` TARGET contributes. A bind target that is a property
  * read has no table entry of its own (the bound box is built here), so it
  * takes the property's declared creation site: a method's key, or the
@@ -10699,7 +10770,7 @@ export class Lowerer {
    * Declines (and the caller keeps its fence) on a rest signature, on more
    * bound arguments than the target declares, and on a target or bound
    * argument whose type cannot ride a capture box. */
-  bindThisClosure(fn: IrExpr, thisArg: IrExpr, boundArgs: IrExpr[], loc: SrcLoc, pushThis = true): IrExpr | null {
+  bindThisClosure(fn: IrExpr, thisArg: IrExpr, boundArgs: IrExpr[], loc: SrcLoc, pushThis = true, valueCode?: number): IrExpr | null {
     const ft = fn.type;
     if (ft.kind !== "func" || ft.rest === true) return null;
     if (pushThis && thisArg.type.kind !== "dyn" && !this.dynConvertible(thisArg.type)) return null;
@@ -10709,7 +10780,9 @@ export class Lowerer {
     }
     const rest = ft.params.slice(boundArgs.length);
     const outT = funcOf(rest, ft.ret);
-    const key = `bindthis:${typeKey(ft)}:${boundArgs.length}:${pushThis ? "this" : "nothis"}`;
+    // The kind code is part of the key: the wrapper is shared per signature, and a
+    // bound async target and a plain one need different prototype-chain kinds.
+    const key = `bindthis:${typeKey(ft)}:${boundArgs.length}:${pushThis ? "this" : "nothis"}${valueCode !== undefined ? `:code${valueCode}` : ""}`;
     const existing = this.widthHelpers.get(key);
     const name = existing ?? `%bindthis.${this.widthHelpers.size}`;
     if (!existing) {
@@ -10767,6 +10840,7 @@ export class Lowerer {
           : [{ kind: "return", value: call, loc }];
       this.liftedFns.push({
         name,
+        ...(valueCode !== undefined ? { valueCode } : {}),
         params,
         returnType: ft.ret,
         captures: capParams,
