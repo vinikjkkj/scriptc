@@ -1470,6 +1470,13 @@ const LIB_FN_SYMS: Record<string, string> = {
   "http2.streamOnEnd": "scr_http2_stream_on_end",
   "http2.streamOnClose": "scr_http2_stream_on_close",
   "http2.streamOnAborted": "scr_http2_stream_on_aborted",
+  "http2.streamId": "scr_http2_stream_id",
+  "http2.streamRstCode": "scr_http2_stream_rst_code",
+  "http2.streamDestroyed": "scr_http2_stream_destroyed",
+  "http2.streamClosed": "scr_http2_stream_closed",
+  "http2.streamAborted": "scr_http2_stream_aborted",
+  "http2.streamPending": "scr_http2_stream_pending",
+  "http2.streamSession": "scr_http2_stream_session",
 };
 
 /** The rows whose runtime entry takes a trailing CONSTANT the IR does not
@@ -18738,6 +18745,12 @@ class LlEmitter {
       this.declare(`declare void @scr_http2_resp_thunk(ptr, ptr, double, double)`);
       this.declare(`declare void @scr_http2_stream_on_response(ptr, ptr, ptr, i1 zeroext)`);
       B.line(`call void @scr_http2_stream_on_response(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @scr_http2_resp_thunk, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "http2.streamNoop") {
+      // `req.stream?.on(...)` on an HTTP/1.1 request: the optional chain
+      // short-circuits. The arguments still evaluate, as in the C tier.
+      for (const a of e.args) this.emitExpr(a);
       return { name: "", type: e.type };
     }
     if (e.fn === "https.createServerDynCb") {
