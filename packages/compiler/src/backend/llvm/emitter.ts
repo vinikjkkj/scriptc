@@ -73,7 +73,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream } from "../../ir/nodes.js";
+import { moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest } from "../../ir/nodes.js";
 import { setDynOrderPlan } from "../dyn-members.js";
 import { orderRecordPlanCached } from "../../ir/nodes.js";
 import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
@@ -1320,6 +1320,18 @@ const LIB_FN_SYMS: Record<string, string> = {
   // current fiber — USES_TIMERS_LIB_FNS marks the loop live).
   "async.hop": "scr_await_hop",
   "async.awaitDyn": "scr_await_dyn_value",
+  // node:test (scr_test.c): the registration surface and the TestContext
+  // members. Same runtime entries and argument order as emit-exprs.ts; the
+  // two bodyless forms (registerEmpty, subEmpty) pass NULL in the middle of
+  // the argument list and are emitted by their own branch.
+  "test.register": "scr_test_register",
+  "test.suite": "scr_test_suite",
+  "test.hook": "scr_test_hook",
+  "test.sub": "scr_test_sub",
+  "test.ctxSkip": "scr_test_ctx_skip",
+  "test.ctxTodo": "scr_test_ctx_todo",
+  "test.ctxDiagnostic": "scr_test_ctx_diagnostic",
+  "test.ctxName": "scr_test_ctx_name",
   // The promise payload-conversion memo (scr_async.c): borrowed source,
   // results +1, never throws.
   "promise.adaptHas": "scr_promise_adapt_has",
@@ -1450,6 +1462,11 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
  * per-call habit. Index is into the IR's argument list. */
 const LIB_FN_MOVE_ARGS: Record<string, readonly number[]> = {
   "net.sockConnectCb": [3],
+  // node:test: the body closure moves into the runtime (scr_test.c: "closures MOVE").
+  "test.register": [3],
+  "test.suite": [3],
+  "test.hook": [1],
+  "test.sub": [4],
   // scr_dgram_connect's `ScrClosure *cb /*moves, nullable*/`.
   "dgram.connectCb": [3],
   // scr_tls_connect_dyn's `ScrClosure *cb /*moves, nullable*/` (the connect
@@ -1495,6 +1512,7 @@ const STREAM_CANONICAL_CBS: Record<string, ("r" | "w" | "f" | "d" | "t" | "l")[]
  * dispatch so generic and special shapes share one table. */
 const USES_TIMERS_LIB_FNS = new Set<string>([
   "dns.lookup",
+  "test.register", "test.registerEmpty", "test.suite", "test.hook",
   "fs.statCb",
   "net.sockConnect", "net.sockConnectCb",
   "net.sockConnect", "net.sockConnectCb", "net.sockNew",
@@ -2269,6 +2287,10 @@ class LlEmitter {
     // they exit with process.exitCode when the graph set it (Node's
     // implicit exit status). Both are the C main's usesIsland.
     const usesIsland = npm !== null;
+    // node:test programs exit through the runner's verdict (scr_test_exit_code),
+    // and that verdict outranks an island's process.exitCode (the C main's
+    // programExitCode precedence, emission/emitter.ts).
+    const usesNodeTest = moduleUsesNodeTest(this.mod);
     const embedsZlib = moduleEmbedsBuiltin(this.mod, "node:zlib");
     // The island's socket bridge, on the SAME predicate as cc.ts's link
     // switch (moduleEmbedsNetIsland). It read http/https only while the
@@ -2357,8 +2379,25 @@ class LlEmitter {
     // read again afterwards and replaces the verdict only when the
     // island's version counter moved (the C main's exit-code-version
     // dance, which is also why the note is emitted BEFORE the listeners).
+    if (usesNodeTest) {
+      this.declare(`declare i32 @scr_test_exit_code()`);
+      this.declare(`declare void @scr_exit_code_note(i32)`);
+    }
     const islandStuck: { pre: string[]; post: string[]; status: string } =
-      !usesIsland || !asyncEntry
+      usesNodeTest && asyncEntry
+        ? {
+            // The C main's pending-root block: sc_exit_status = programExitCode,
+            // 13 when that is 0, noted before the exit listeners run.
+            pre: [
+              `  %tstp = call i32 @scr_test_exit_code()`,
+              `  %tstpz = icmp eq i32 %tstp, 0`,
+              `  %tsts = select i1 %tstpz, i32 13, i32 %tstp`,
+              `  call void @scr_exit_code_note(i32 %tsts)`,
+            ],
+            post: [],
+            status: "%tsts",
+          }
+      : !usesIsland || !asyncEntry
         ? { pre: [], post: [], status: "13" }
         : !usesEvents || !hasRefGlobals
           ? {
@@ -2945,7 +2984,8 @@ class LlEmitter {
       // Read AFTER the exit listeners and the releases, like the C main's
       // `return scr_island_exit_code();`.
       ...(usesIsland ? [`  %islex = call i32 @scr_island_exit_code()`] : []),
-      `  ret i32 ${usesIsland ? "%islex" : "0"}`,
+      ...(usesNodeTest ? [`  %texit = call i32 @scr_test_exit_code()`] : []),
+      `  ret i32 ${usesNodeTest ? "%texit" : usesIsland ? "%islex" : "0"}`,
       `}`,
       ``,
       // sanitize_address is inert under the plain pipeline; the sanitized
@@ -18740,6 +18780,38 @@ class LlEmitter {
       this.declare(`declare void @scr_dns_lookup(ptr, double, ptr, ptr)`);
       if (cbT.params.length === 0) this.declare(`declare void @scr_dns_thunk0(ptr, ptr, ptr, double)`);
       B.line(`call void @scr_dns_lookup(ptr ${host.name}, double ${fam.name}, ptr ${cb.name}, ptr @${adapter})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "test.registerEmpty") {
+      // scr_test_register(name, mode, msg, NULL, flags, at): the bodyless
+      // registration. Borrowed strings; the NULL closure is the C twin's.
+      const name = this.emitExpr(e.args[0]!);
+      const mode = this.emitExpr(e.args[1]!);
+      const msg = this.emitExpr(e.args[2]!);
+      const flags = this.emitExpr(e.args[3]!);
+      const at = this.emitExpr(e.args[4]!);
+      this.declare(`declare void @scr_test_register(ptr, double, ptr, ptr, double, ptr)`);
+      B.line(
+        `call void @scr_test_register(ptr ${name.name}, double ${mode.name}, ptr ${msg.name}, ptr null, double ${flags.name}, ptr ${at.name})`,
+      );
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "test.subEmpty") {
+      // Fn-less subtest: scr_test_sub(t, name, mode, msg, NULL, 0, at) runs
+      // the subtest and returns the settled promise (+1), which the lowering
+      // types void and nothing consumes: released here, as the C twin does.
+      const t = this.emitExpr(e.args[0]!);
+      const name = this.emitExpr(e.args[1]!);
+      const mode = this.emitExpr(e.args[2]!);
+      const msg = this.emitExpr(e.args[3]!);
+      const at = this.emitExpr(e.args[4]!);
+      this.declare(`declare ptr @scr_test_sub(ptr, ptr, double, ptr, ptr, double, ptr)`);
+      this.declare(`declare void @scr_promise_release(ptr)`);
+      const p = B.tmp();
+      B.line(
+        `${p} = call ptr @scr_test_sub(ptr ${t.name}, ptr ${name.name}, double ${mode.name}, ptr ${msg.name}, ptr null, double 0.0, ptr ${at.name})`,
+      );
+      B.line(`call void @scr_promise_release(ptr ${p})`);
       return { name: "", type: e.type };
     }
     if (MAY_THROW_LIB_FNS.has(e.fn) && LIB_FN_SYMS[e.fn] === undefined) {
