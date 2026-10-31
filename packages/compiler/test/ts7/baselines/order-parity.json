@@ -7138,6 +7138,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/18000-cjs-main-tick-before-main-micro.cjs": {
+   "order": [
+    "<repo>/tests/corpus/18000-cjs-main-tick-before-main-micro.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18001-cjs-main-nested-ticks-and-jobs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/18001-cjs-main-nested-ticks-and-jobs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18002-cjs-main-await-fn-tick-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/18002-cjs-main-await-fn-tick-order.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18003-cjs-main-throw-listener-tick-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/18003-cjs-main-throw-listener-tick-order.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18004-esm-ts-main-micro-before-main-tick.ts": {
+   "order": [
+    "<repo>/tests/corpus/18004-esm-ts-main-micro-before-main-tick.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18005-esm-mjs-main-micro-before-main-tick.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18005-esm-mjs-main-micro-before-main-tick.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18006-type-module-ts-main-micro-before-main-tick.ts": {
+   "order": [
+    "<repo>/tests/corpus/18006-type-module-ts-main-micro-before-main-tick.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1692-stream-pipe.ts": {
    "order": [
     "<repo>/tests/corpus/1692-stream-pipe.ts"
