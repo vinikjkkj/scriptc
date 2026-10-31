@@ -23209,6 +23209,42 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/21100-reflect-apply-targets.ts": {
+   "order": [
+    "<repo>/tests/corpus/21100-reflect-apply-targets.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21101-reflect-apply-runtime-list.ts": {
+   "order": [
+    "<repo>/tests/corpus/21101-reflect-apply-runtime-list.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21102-reflect-apply-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/21102-reflect-apply-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21103-reflect-construct-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/21103-reflect-construct-class.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21104-reflect-construct-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/21104-reflect-construct-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21105-reflect-apply-wrapper.ts": {
+   "order": [
+    "<repo>/tests/corpus/21105-reflect-apply-wrapper.ts"
+   ],
+   "diags": []
   }
  }
 }
