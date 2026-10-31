@@ -22267,6 +22267,42 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/19400-uncaught-exit-with-armed-timer.ts": {
+   "order": [
+    "<repo>/tests/corpus/19400-uncaught-exit-with-armed-timer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19401-uncaught-exit-with-armed-interval.ts": {
+   "order": [
+    "<repo>/tests/corpus/19401-uncaught-exit-with-armed-interval.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19402-uncaught-exit-with-queued-immediate.ts": {
+   "order": [
+    "<repo>/tests/corpus/19402-uncaught-exit-with-queued-immediate.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19403-uncaught-exit-with-queued-tick.ts": {
+   "order": [
+    "<repo>/tests/corpus/19403-uncaught-exit-with-queued-tick.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19404-uncaught-exit-with-pending-stat-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/19404-uncaught-exit-with-pending-stat-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19405-uncaught-throw-in-timer-with-armed-timer.ts": {
+   "order": [
+    "<repo>/tests/corpus/19405-uncaught-throw-in-timer-with-armed-timer.ts"
+   ],
+   "diags": []
   }
  }
 }
