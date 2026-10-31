@@ -1441,6 +1441,13 @@ const LIB_FN_SYMS: Record<string, string> = {
   "http2.sessionCloseCb": "scr_http2_session_close",
   "http2.sessionDestroy": "scr_http2_session_destroy",
   "http2.sessionOnClose": "scr_http2_session_on_close",
+  "http2.sessionSettings0": "scr_http2_session_settings",
+  "http2.sessionSettings": "scr_http2_session_settings",
+  "http2.sessionSettingsDynCb": "scr_http2_session_settings_dyncb",
+  "http2.sessionOnSettingsDyn": "scr_http2_session_on_settings_dyn",
+  "http2.sessionSettingsGet": "scr_http2_session_settings_get",
+  "http2.sessionPendingSettingsAck": "scr_http2_session_pending_settings_ack",
+  "http2.getDefaultSettings": "scr_http2_get_default_settings",
 };
 
 /** The rows whose runtime entry takes a trailing CONSTANT the IR does not
@@ -1498,6 +1505,8 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
   "dgram.connect": [{ decl: "ptr", arg: "ptr null" }],
   "http2.createSecureServerDyn": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
   "http2.sessionClose": [{ decl: "ptr", arg: "ptr null" }],
+  "http2.sessionSettings0": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
+  "http2.sessionSettings": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
 };
 
 /** The rows whose runtime entry TAKES OWNERSHIP of an argument — the
@@ -18664,6 +18673,22 @@ class LlEmitter {
       this.declare(`declare void @${sym}(ptr, double, double)`);
       this.declare(`declare void @scr_http2_session_on_goaway(ptr, ptr, ptr, i1 zeroext)`);
       B.line(`call void @scr_http2_session_on_goaway(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${sym}, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "http2.sessionSettingsCb0") {
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[2]!);
+      this.declare(`declare void @scr_http2_settings_thunk0(ptr, ptr)`);
+      this.declare(`declare void @scr_http2_session_settings(ptr, ptr, ptr, ptr)`);
+      B.line(`call void @scr_http2_session_settings(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr ${args[2]!.name}, ptr @scr_http2_settings_thunk0)`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "http2.sessionOnSettings0") {
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      this.declare(`declare void @scr_http2_settings_thunk0(ptr, ptr)`);
+      this.declare(`declare void @scr_http2_session_on_settings(ptr, ptr, ptr, i1 zeroext, i1 zeroext)`);
+      B.line(`call void @scr_http2_session_on_settings(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @scr_http2_settings_thunk0, i1 ${args[2]!.name}, i1 ${args[3]!.name})`);
       return { name: "", type: e.type };
     }
     if (e.fn === "https.createServerDynCb") {
