@@ -4346,6 +4346,171 @@ static bool scr_px_delete_ex(ScrDyn *p, ScrStr *key, bool throw_on_false) {
   return ok;
 }
 
+/* ── Reflect.apply / Reflect.construct over a checked-dynamic target ──
+ *
+ * The V8 TypeError texts, measured against $NODE_CI (Node 24.15.0):
+ *   Reflect.apply(v, t, l) with v not callable:
+ *     "Function.prototype.apply was called on <R>, which is <K> and not a function"
+ *     <K> is "null" for null, "an object" for an object, else "a " + typeof
+ *     (so undefined reads "a undefined", a string "a string").
+ *   Reflect.construct(v, l) with v not a constructor: "<R> is not a constructor".
+ *   A non-object argumentsList (undefined and null included) after the callable
+ *     check: "CreateListFromArrayLike called on non-object".
+ * <R> is V8's NoSideEffectsToString: primitives print their value (strings raw),
+ * "#<Ctor>" for an object whose toString is Object.prototype.toString and whose
+ * constructor has a name (plain {} and class instances, Map, Set), "[object Tag]"
+ * for the rest (Array, Date, RegExp, typed arrays, ArrayBuffer, Promise), and
+ * "[object Object]" for a null-prototype object. Nothing here runs user code. */
+static bool dyn_reflect_callable(const ScrDyn *d) {
+  if (d->kind == SCR_DYN_FUNC) return true;
+  if (d->kind == SCR_DYN_PROXY) return scr_dyn_proxy_is_function(d);
+  if (d->kind == SCR_DYN_JSVAL) return scr_dyn_isl_typeof_is(d, "function");
+  return false;
+}
+
+static void dyn_reflect_render(ScrJsonBuf *b, const ScrDyn *d) {
+  switch (d->kind) {
+  case SCR_DYN_OBJ:
+    if (d->null_proto) { scr_jb_puts(b, "[object Object]"); return; }
+    if (scr_dyn_obj_own_data(d, "toString", 8) != NULL) { scr_jb_puts(b, "[object Object]"); return; }
+    scr_jb_puts(b, "#<");
+    {
+      const ScrDynObjExt *x = scr_dyn_ext(d);
+      scr_jb_puts(b, x->cname != NULL ? x->cname : "Object");
+    }
+    scr_jb_putc(b, '>');
+    return;
+  case SCR_DYN_OBJINST:
+    scr_jb_puts(b, "#<");
+    scr_jb_puts(b, scr_dyn_objinst_cls(d));
+    scr_jb_putc(b, '>');
+    return;
+  case SCR_DYN_MAP:
+    scr_jb_puts(b, "#<");
+    scr_jb_puts(b, scr_dyn_map_cls(d));
+    scr_jb_putc(b, '>');
+    return;
+  case SCR_DYN_ARR: scr_jb_puts(b, "[object Array]"); return;
+  case SCR_DYN_ARRBUF: scr_jb_puts(b, "[object ArrayBuffer]"); return;
+  case SCR_DYN_PROMISE: scr_jb_puts(b, "[object Promise]"); return;
+  case SCR_DYN_BYTES: {
+    static const char *const names[] = { "Uint8Array", "Uint32Array", "Float32Array", "Int32Array",
+                                         "Float64Array", "Int8Array", "ArrayBuffer", "Int16Array",
+                                         "Uint16Array", "Uint8ClampedArray", "Float16Array",
+                                         "BigInt64Array", "BigUint64Array" };
+    scr_jb_puts(b, "[object ");
+    scr_jb_puts(b, names[(unsigned)d->v.bytes->elem < 13 ? (unsigned)d->v.bytes->elem : 0]);
+    scr_jb_putc(b, ']');
+    return;
+  }
+  case SCR_DYN_FUNC: {
+    /* Node prints the function's source text. A TypeScript program's
+     * functions carry none in this build (scr_fn_to_string traps on that),
+     * so the message names the boundary instead of guessing the text. */
+    if (scr_dyn_fn_src(d) == NULL) {
+      scr_jb_puts(b, "[scriptc: no source text for ");
+      scr_jb_puts(b, scr_dyn_fn_name(d) != NULL ? scr_dyn_fn_name(d) : "(anonymous)");
+      scr_jb_putc(b, ']');
+      return;
+    }
+    ScrStr *s = scr_fn_to_string(d);
+    for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);
+    scr_str_release(s);
+    return;
+  }
+  default:
+    /* the primitives and the remaining kinds: the diagnostic table, which
+     * is constant for every kind it reaches here (no user code). */
+    dyn_str_buf(b, d, false);
+    return;
+  }
+}
+
+static void dyn_reflect_throw_not_ctor(const ScrDyn *d) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  dyn_reflect_render(&b, d);
+  scr_jb_puts(&b, " is not a constructor");
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+}
+
+static void dyn_reflect_throw_apply_nonfn(const ScrDyn *d) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, "Function.prototype.apply was called on ");
+  dyn_reflect_render(&b, d);
+  scr_jb_puts(&b, ", which is ");
+  if (d->kind == SCR_DYN_NULL) {
+    scr_jb_puts(&b, "null");
+  } else if (scr_dyn_typeof_is_object(d)) {
+    scr_jb_puts(&b, "an object");
+  } else {
+    ScrStr *t = scr_dyn_typeof(d);
+    scr_jb_puts(&b, "a ");
+    for (size_t i = 0; i < t->len; i++) scr_jb_putc(&b, t->data[i]);
+    scr_str_release(t);
+  }
+  scr_jb_puts(&b, " and not a function");
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+}
+
+/* Reflect.apply(target, thisArgument, argumentsList) for a dyn target. All
+ * borrowed; the result is owned (+1), or NULL with the exception pending. */
+ScrDyn *scr_dyn_reflect_apply(const ScrDyn *target, const ScrDyn *thisArg, const ScrDyn *list) {
+  if (!dyn_reflect_callable(target)) {
+    dyn_reflect_throw_apply_nonfn(target);
+    return NULL;
+  }
+  if (list->kind == SCR_DYN_NULL) {
+    scr_throw_error_msg(SCR_ERR_TYPE, "CreateListFromArrayLike called on non-object",
+                        strlen("CreateListFromArrayLike called on non-object"));
+    return NULL;
+  }
+  if (list->kind == SCR_DYN_ARR) {
+    scr_dyn_this_push_dyn(thisArg);
+    ScrDyn *r = scr_dyn_call(target, list->v.arr.items, list->v.arr.len, "Reflect.apply");
+    scr_dyn_this_pop();
+    return r;
+  }
+  size_t packc = 0;
+  ScrDyn **pack = dyn_list_from_array_like((ScrDyn *)list, &packc);
+  if (pack == NULL && scr_exc_pending()) return NULL;
+  scr_dyn_this_push_dyn(thisArg);
+  ScrDyn *r = scr_dyn_call(target, pack, packc, "Reflect.apply");
+  scr_dyn_this_pop();
+  for (size_t i = 0; i < packc; i++) scr_dyn_release(pack[i]);
+  free(pack);
+  return r;
+}
+
+/* Reflect.construct(target, argumentsList) for a dyn target (newTarget is
+ * the target: the caller refuses every other newTarget at build time). */
+ScrDyn *scr_dyn_reflect_construct(const ScrDyn *target, const ScrDyn *list) {
+  bool ctor = (target->kind == SCR_DYN_FUNC && scr_dyn_fn_is_ctor(target)) ||
+              (target->kind == SCR_DYN_PROXY && scr_dyn_proxy_is_function(target));
+  if (!ctor) {
+    dyn_reflect_throw_not_ctor(target);
+    return NULL;
+  }
+  if (list->kind == SCR_DYN_NULL) {
+    /* typeof null is "object", but CreateListFromArrayLike rejects it (the
+     * Function.prototype.apply null-means-no-arguments rule does not apply) */
+    scr_throw_error_msg(SCR_ERR_TYPE, "CreateListFromArrayLike called on non-object",
+                        strlen("CreateListFromArrayLike called on non-object"));
+    return NULL;
+  }
+  if (list->kind == SCR_DYN_ARR) return scr_dyn_construct(target, list, NULL);
+  size_t packc = 0;
+  ScrDyn **pack = dyn_list_from_array_like((ScrDyn *)list, &packc);
+  if (pack == NULL && scr_exc_pending()) return NULL;
+  ScrDyn *arr = scr_dyn_new_arr();
+  for (size_t i = 0; i < packc; i++) scr_dyn_arr_push(arr, pack[i]);
+  free(pack);
+  ScrDyn *r = scr_dyn_construct(target, arr, NULL);
+  scr_dyn_release(arr);
+  return r;
+}
+
 /* Reflect.set / Reflect.deleteProperty / Reflect.defineProperty over a dyn
  * target: the boolean the operation answers, never the strict-mode TypeError
  * a falsish trap would raise through the property syntax. A write that

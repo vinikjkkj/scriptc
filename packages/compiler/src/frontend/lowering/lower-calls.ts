@@ -30,7 +30,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerDateLocaleFormat, lowerNumberLocaleFormat } from "./lower-numfmt.js";
-import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerRandomBytesCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerErrorCaptureStackTraceCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
+import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerRandomBytesCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerErrorCaptureStackTraceCall, lowerReflectApplyCall, lowerReflectConstructCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
@@ -6085,6 +6085,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // Reflect.apply of a builtin rest-parameter fn (fixtures.js's
         // fixturesPath idiom) — before the stdlib member fence claims it.
         lowerReflectApplyCall(L, expr, expr.expression) ??
+        // Reflect.construct(F, args[, F]) over a checked-dynamic target: the
+        // runtime's [[Construct]] with Node's TypeErrors; any other newTarget
+        // refuses at build time.
+        lowerReflectConstructCall(L, expr, expr.expression) ??
         // `String.fromCharCode.apply(String, codes)` — the ES5 spelling of
         // the whole-array call lowerStringStaticCall already lowers under
         // its spread form. Here, beside Reflect.apply and for the same

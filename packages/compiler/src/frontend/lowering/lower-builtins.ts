@@ -2081,34 +2081,78 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
     const loc = locOf(call);
     const fenceHint =
       "the lowered form is Reflect.apply(path.join | path.resolve, <effect-free this>, args) — call other functions directly (f(...args))";
-    if (call.arguments.length !== 3 || call.arguments.some(ts.isSpreadElement)) {
+    if (call.arguments.some(ts.isSpreadElement)) {
       L.noLowering("Reflect.apply with this argument shape", call, fenceHint);
     }
-    const targetNode = call.arguments[0]!;
-    const bi = ts.isPropertyAccessExpression(targetNode) ? L.builtinMemberOf(targetNode) : null;
+    const targetNode = call.arguments[0];
+    const bi = targetNode !== undefined && ts.isPropertyAccessExpression(targetNode) ? L.builtinMemberOf(targetNode) : null;
     const fn = bi ? builtinModuleFnOf(L, bi.module, bi.member) : null;
-    if (!fn || fn.variadicPack !== true) {
-      L.noLowering(
-        `Reflect.apply of '${targetNode.getText()}'`,
-        targetNode,
-        fenceHint,
-      );
-    }
-    const thisNode = call.arguments[1]!;
+    // A builtin rest-parameter table fn with the exact three-argument shape
+    // and an effect-free receiver: the packed libCall. Every other target
+    // (a typed or any-typed function, a closure, a method, a builtin with a
+    // computed receiver) takes the checked-dynamic arm below.
+    const thisNode = call.arguments[1];
     const effectFree =
+      thisNode === undefined ||
       thisNode.kind === ts.SyntaxKind.ThisKeyword ||
       ts.isIdentifier(thisNode) ||
-      thisNode.kind === ts.SyntaxKind.NullKeyword ||
-      (ts.isIdentifier(thisNode) && thisNode.text === "undefined");
-    if (!effectFree) {
-      L.noLowering(
-        "Reflect.apply with a computed thisArg",
-        thisNode,
-        "the target ignores its receiver, so only effect-free spellings drop honestly (`this`, a binding, null, undefined)",
-      );
+      thisNode.kind === ts.SyntaxKind.NullKeyword;
+    if (fn && fn.variadicPack === true && call.arguments.length === 3 && effectFree) {
+      const packed = L.lowerExprExpecting(call.arguments[2]!, arrayOf(STRING));
+      return { kind: "libCall", fn: fn.fn, args: [packed], type: fn.result, loc };
     }
-    const packed = L.lowerExprExpecting(call.arguments[2]!, arrayOf(STRING));
-    return { kind: "libCall", fn: fn.fn, args: [packed], type: fn.result, loc };
+    return lowerReflectDynOperands(L, call, loc, "dyn.reflectApply", 3);
+  }
+
+  /** `Reflect.construct(target, argumentsList[, newTarget])`. The checked-
+   * dynamic arm: a target the runtime constructs (scr_dyn_reflect_construct
+   * owns the TypeErrors). newTarget is accepted ONLY when it is spelled
+   * exactly as the target (Reflect.construct(F, args, F) is new F(...args));
+   * a different newTarget changes the instance's prototype, which this
+   * representation cannot carry exactly, so that form refuses at build time
+   * with a precise diagnostic. */
+  export function lowerReflectConstructCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(call)) return null;
+    if (L.stdlibGlobalMember(access, "Reflect") !== "construct") return null;
+    const loc = locOf(call);
+    if (call.arguments.some(ts.isSpreadElement) || call.arguments.length > 3) {
+      L.noLowering("Reflect.construct with this argument shape", call,
+        "the lowered form is new F(...args): spell the construction directly, or pass newTarget as F itself");
+    }
+    const newTargetNode = call.arguments[2];
+    if (newTargetNode !== undefined && newTargetNode.getText() !== call.arguments[0]!.getText()) {
+      L.noLowering("Reflect.construct with a newTarget other than its target", newTargetNode,
+        "a different newTarget picks the instance's prototype (newTarget.prototype), which the checked-dynamic construction cannot carry exactly; pass the target itself as newTarget, or spell the construction directly");
+    }
+    return lowerReflectDynOperands(L, call, loc, "dyn.reflectConstruct", 2);
+  }
+
+  /** The checked-dynamic operands of a Reflect call: the target, thisArg
+   * (apply only) and the argument list, each lowered as a dyn value. A
+   * missing operand is the JS undefined, which the runtime then refuses with
+   * Node's own message. The result is dyn; a statically typed call result
+   * (Reflect.apply's TypeScript signature returns R) leaves the dyn through
+   * the validated exit. */
+  function lowerReflectDynOperands(L: Lowerer, call: ts.CallExpression, loc: SrcLoc, fn: "dyn.reflectApply" | "dyn.reflectConstruct", arity: number): IrExpr {
+    const nodes: (ts.Expression | undefined)[] = [];
+    for (let i = 0; i < arity; i++) nodes.push(call.arguments[i]);
+    const ops: IrExpr[] = nodes.map((n) => {
+      if (n === undefined) return dynUndefinedExpr(loc);
+      // An array literal is built element by element as a dyn array (the
+      // `new` arm's pack). Its checker type here is the parameter's
+      // (ArrayLike<any> for construct), which has no static lowering of its own.
+      let x: ts.Expression = n;
+      while (ts.isParenthesizedExpression(x)) x = x.expression;
+      if (ts.isArrayLiteralExpression(x) && !x.elements.some((e) => ts.isSpreadElement(e) || ts.isOmittedExpression(e))) {
+        return { kind: "dynArrLit", elems: x.elements.map((e) => L.lowerExprExpecting(e, DYN)), type: DYN, loc };
+      }
+      return L.lowerExprExpecting(n, DYN);
+    });
+    const dynCall: IrExpr = { kind: "libCall", fn, args: ops, type: DYN, loc };
+    const resultT = L.mapTypeOf(L.typeOf(call));
+    if (resultT === null || resultT.kind === "dyn") return dynCall;
+    return L.coerceToExpected(dynCall, resultT);
   }
 
 /** `String.fromCharCode.apply(<thisArg>, codes)` — the pre-spread spelling
