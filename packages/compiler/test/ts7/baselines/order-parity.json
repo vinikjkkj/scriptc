@@ -8287,6 +8287,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/18904-fs-read-ts-callback-forms.ts": {
+    "order": [
+      "<repo>/tests/corpus/18904-fs-read-ts-callback-forms.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/18903-fs-mkdtemp-ts-callback.ts": {
+    "order": [
+      "<repo>/tests/corpus/18903-fs-mkdtemp-ts-callback.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/18902-fs-exists-ts-callback.ts": {
+    "order": [
+      "<repo>/tests/corpus/18902-fs-exists-ts-callback.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/18901-fs-readfile-ts-enoent.ts": {
+    "order": [
+      "<repo>/tests/corpus/18901-fs-readfile-ts-enoent.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/18900-fs-readfile-ts-callback-forms.ts": {
+    "order": [
+      "<repo>/tests/corpus/18900-fs-readfile-ts-callback-forms.ts"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/1891-ns-reexport/main.ts": {
    "order": [
     "<repo>/tests/corpus/1891-ns-reexport/shared.ts",
