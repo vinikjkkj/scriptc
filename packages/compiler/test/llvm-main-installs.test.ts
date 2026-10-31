@@ -37,6 +37,7 @@ import { describe, expect, test } from "vitest";
 
 const cEmitter = join(import.meta.dirname, "../src/backend/emission/emitter.ts");
 const llvmEmitter = join(import.meta.dirname, "../src/backend/llvm/emitter.ts");
+const runtimeHeader = join(import.meta.dirname, "../../runtime/src/scr_runtime.h");
 
 /** `const usesFoo = moduleUsesFoo(this.mod) || moduleUsesBar(this.mod);`
  * → usesFoo ↦ its right-hand side, so a gate spelled as a local resolves
@@ -212,7 +213,15 @@ describe("the two mains install the same hooks on the same predicates", () => {
     const ll = await readFile(llvmEmitter, "utf8");
     expect(c).toContain("ScrFnName sc_fn_name_tbl[]");
     expect(c).toContain("scr_fn_names_install(sc_fn_name_tbl");
-    expect(ll).toContain("%ScrFnName = type { ptr, ptr }");
+    // The row is { fn, name, code } on both sides (ScrFnName in scr_runtime.h:
+    // the kind code column was added with the function-kind work). The C row
+    // writes its code as a `u`-suffixed literal; the LLVM row is an i32.
+    expect(c).toContain("${code}u }");
+    // The runtime struct is the layout both emitters must match.
+    const h = await readFile(runtimeHeader, "utf8");
+    expect(h).toMatch(/typedef struct ScrFnName \{[^}]*const char \*name;[^}]*unsigned code;/);
+    expect(ll).toContain("%ScrFnName = type { ptr, ptr, i32 }");
+    expect(ll).toContain("i32 ${code} }");
     expect(ll).toContain("@sc_fn_name_tbl = internal constant");
     expect(ll).toContain("scr_fn_names_install(ptr @sc_fn_name_tbl");
   });
