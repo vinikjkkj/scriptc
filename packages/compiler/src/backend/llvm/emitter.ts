@@ -1454,6 +1454,22 @@ const LIB_FN_SYMS: Record<string, string> = {
   "http2.sessionType": "scr_http2_session_type",
   "http2.sessionAlpn": "scr_http2_session_alpn",
   "http2.sessionSocket": "scr_http2_session_socket",
+  "http2.streamRespond": "scr_http2_stream_respond",
+  "http2.streamWrite": "scr_http2_stream_write_str",
+  "http2.streamWriteBytes": "scr_http2_stream_write_bytes",
+  "http2.streamEnd": "scr_http2_stream_end",
+  "http2.streamEndStr": "scr_http2_stream_end_str",
+  "http2.streamEndBytes": "scr_http2_stream_end_bytes",
+  "http2.streamClose": "scr_http2_stream_close",
+  "http2.streamCloseCb": "scr_http2_stream_close",
+  "http2.streamDestroy": "scr_http2_stream_destroy",
+  "http2.streamSetEncoding": "scr_http2_stream_set_encoding",
+  "http2.streamSetEncodingRet": "scr_http2_stream_set_encoding_ret",
+  "http2.streamResume": "scr_http2_stream_resume",
+  "http2.streamPause": "scr_http2_stream_pause",
+  "http2.streamOnEnd": "scr_http2_stream_on_end",
+  "http2.streamOnClose": "scr_http2_stream_on_close",
+  "http2.streamOnAborted": "scr_http2_stream_on_aborted",
 };
 
 /** The rows whose runtime entry takes a trailing CONSTANT the IR does not
@@ -1513,6 +1529,7 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
   "http2.sessionClose": [{ decl: "ptr", arg: "ptr null" }],
   "http2.sessionSettings0": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
   "http2.sessionSettings": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
+  "http2.streamClose": [{ decl: "ptr", arg: "ptr null" }],
 };
 
 /** The rows whose runtime entry TAKES OWNERSHIP of an argument — the
@@ -1556,6 +1573,10 @@ const LIB_FN_MOVE_ARGS: Record<string, readonly number[]> = {
   "wrtc.dcOnError": [1],
   "http2.sessionCloseCb": [1],
   "http2.sessionOnClose": [1],
+  "http2.streamCloseCb": [2],
+  "http2.streamOnEnd": [1],
+  "http2.streamOnClose": [1],
+  "http2.streamOnAborted": [1],
 };
 
 /** The rows where a STRING argument is handed to the runtime as its raw
@@ -18695,6 +18716,28 @@ class LlEmitter {
       this.declare(`declare void @scr_http2_settings_thunk0(ptr, ptr)`);
       this.declare(`declare void @scr_http2_session_on_settings(ptr, ptr, ptr, i1 zeroext, i1 zeroext)`);
       B.line(`call void @scr_http2_session_on_settings(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @scr_http2_settings_thunk0, i1 ${args[2]!.name}, i1 ${args[3]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "http2.streamOnData") {
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: http2.streamOnData callback not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const sym = cbT.params.length === 0 ? "scr_net_data_thunk0"
+        : cbT.params[0]!.kind === "dyn" ? "scr_net_data_thunk_dyn"
+        : cbT.params[0]!.kind === "string" ? "scr_net_data_thunk_str"
+        : "scr_net_data_thunk_bytes";
+      this.declare(`declare void @${sym}(ptr, ptr)`);
+      this.declare(`declare void @scr_http2_stream_on_data(ptr, ptr, ptr, i1 zeroext)`);
+      B.line(`call void @scr_http2_stream_on_data(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${sym}, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "http2.streamOnResponse") {
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      this.declare(`declare void @scr_http2_resp_thunk(ptr, ptr, double, double)`);
+      this.declare(`declare void @scr_http2_stream_on_response(ptr, ptr, ptr, i1 zeroext)`);
+      B.line(`call void @scr_http2_stream_on_response(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @scr_http2_resp_thunk, i1 ${args[2]!.name})`);
       return { name: "", type: e.type };
     }
     if (e.fn === "https.createServerDynCb") {
