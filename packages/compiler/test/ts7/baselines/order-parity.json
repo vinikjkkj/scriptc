@@ -22465,6 +22465,36 @@
     "<repo>/tests/corpus/18506-esm-late-tla-rejection-listener.mjs"
    ],
    "diags": []
-  }
+  },
+   "<repo>/tests/corpus/18700-symbol-key-literal-order.ts": {
+    "order": [
+     "<repo>/tests/corpus/18700-symbol-key-literal-order.ts"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/18701-symbol-key-description-forms.ts": {
+    "order": [
+     "<repo>/tests/corpus/18701-symbol-key-description-forms.ts"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/18702-symbol-key-well-known.ts": {
+    "order": [
+     "<repo>/tests/corpus/18702-symbol-key-well-known.ts"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/18703-symbol-key-nested-records.ts": {
+    "order": [
+     "<repo>/tests/corpus/18703-symbol-key-nested-records.ts"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/18704-symbol-key-copy-and-length.ts": {
+    "order": [
+     "<repo>/tests/corpus/18704-symbol-key-copy-and-length.ts"
+    ],
+    "diags": []
+   }
  }
 }
