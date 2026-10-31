@@ -8134,6 +8134,13 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
         const target = L.resolveWritable(expr.left);
         if (!target) L.rejectUnresolved(expr.left, `assignment to '${expr.left.text}' (not a writable local or module global)`);
         const loc = locOf(expr);
+        if (target.type.kind === "dyn") {
+          // An any/unknown variable CAN hold null or undefined at run time:
+          // the static fold below would drop the store. Test the value at
+          // run time and store only when it is nullish (rhs stays lazy).
+          const logical = lowerLogicalAssignStmt(L, expr, "??");
+          if (logical !== null) return logical;
+        }
         if (target.type.kind !== "union") {
           // The checker says never nullish: JS neither evaluates e nor
           // assigns — the statement is a no-op (lowerNullishCoalesce's
