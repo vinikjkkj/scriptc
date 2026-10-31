@@ -1448,6 +1448,12 @@ const LIB_FN_SYMS: Record<string, string> = {
   "http2.sessionSettingsGet": "scr_http2_session_settings_get",
   "http2.sessionPendingSettingsAck": "scr_http2_session_pending_settings_ack",
   "http2.getDefaultSettings": "scr_http2_get_default_settings",
+  "http2.sessionClosed": "scr_http2_session_closed",
+  "http2.sessionDestroyed": "scr_http2_session_destroyed",
+  "http2.sessionEncrypted": "scr_http2_session_encrypted",
+  "http2.sessionType": "scr_http2_session_type",
+  "http2.sessionAlpn": "scr_http2_session_alpn",
+  "http2.sessionSocket": "scr_http2_session_socket",
 };
 
 /** The rows whose runtime entry takes a trailing CONSTANT the IR does not
