@@ -312,7 +312,7 @@ async function runWindowsNode(file: string): Promise<RunResult> {
     ? "--no-deprecation "
     : "";
   return runOnBox(
-    `node ${transform}${nodep}--import ./comptime-shim.mjs --import ./island-shim.mjs ${entry}`,
+    `node ${transform}${nodep}--require ./comptime-shim.cjs --require ./island-shim.cjs ${entry}`,
   );
 }
 
@@ -542,8 +542,8 @@ describe.skipIf(!enabled)(`windows differential (${target})`, () => {
       await execFileAsync("ssh", [...sshOpts, host, `cmd /c if exist ${laneDirWin} rmdir /S /Q ${laneDirWin}`]);
       await execFileAsync("ssh", [...sshOpts, host, `cmd /c mkdir ${laneDirWin}`]);
       await scpToLane([
-        join(repoRoot, "tests/harness/comptime-shim.mjs"),
-        join(repoRoot, "tests/harness/island-shim.mjs"),
+        join(repoRoot, "tests/harness/comptime-shim.cjs"),
+        join(repoRoot, "tests/harness/island-shim.cjs"),
         // The corpus package.json ({"type":"module"}): without it the
         // oracle's module detection can run export-less programs as sloppy
         // CJS, where the macOS oracle (and the compiler) see strict ESM.
