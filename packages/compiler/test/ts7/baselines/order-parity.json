@@ -7733,6 +7733,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/18200-logical-assign-any-locals.ts": {
+   "order": [
+    "<repo>/tests/corpus/18200-logical-assign-any-locals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18201-logical-assign-short-circuit-dyn.ts": {
+   "order": [
+    "<repo>/tests/corpus/18201-logical-assign-short-circuit-dyn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18202-logical-assign-typed-and-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/18202-logical-assign-typed-and-fields.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1821-static-block-order.ts": {
    "order": [
     "<repo>/tests/corpus/1821-static-block-order.ts"
