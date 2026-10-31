@@ -9891,6 +9891,10 @@ ScrDyn *scr_fs_append_file_cb(const ScrDyn *path, const ScrDyn *data, const ScrD
 ScrDyn *scr_fs_mkdir_cb(const ScrDyn *path, const ScrDyn *opts, const ScrDyn *cb);
 ScrDyn *scr_fs_unlink_cb(const ScrDyn *path, const ScrDyn *cb);
 ScrDyn *scr_fs_rename_cb(const ScrDyn *oldp, const ScrDyn *newp, const ScrDyn *cb);
+ScrDyn *scr_fs_open_cb(const ScrDyn *path, const ScrDyn *flags, const ScrDyn *mode, const ScrDyn *cb, double argc);
+ScrDyn *scr_fs_close_cb(const ScrDyn *fd, const ScrDyn *cb);
+ScrDyn *scr_fs_write_cb(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2, const ScrDyn *a3, const ScrDyn *a4, const ScrDyn *cb);
+ScrDyn *scr_fs_chmod_cb(const ScrDyn *path, const ScrDyn *mode, const ScrDyn *cb);
 ScrDyn *scr_fs_mkdtemp_cb(const ScrDyn *prefix, const ScrDyn *opts, const ScrDyn *cb);
 ScrDyn *scr_fs_mkdtemp_sync_opts(const ScrDyn *prefix, const ScrDyn *opts);
 ScrDyn *scr_fs_read_cb(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2, const ScrDyn *a3,
