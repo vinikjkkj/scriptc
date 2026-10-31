@@ -22303,6 +22303,48 @@
     "<repo>/tests/corpus/19405-uncaught-throw-in-timer-with-armed-timer.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/18500-esm-throw-job-before-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18500-esm-throw-job-before-listener.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18501-esm-throw-job-before-fatal-exit.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18501-esm-throw-job-before-fatal-exit.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18502-esm-tla-throw-job-before-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18502-esm-tla-throw-job-before-listener.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18503-esm-tla-throw-fatal-no-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18503-esm-tla-throw-fatal-no-listener.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18504-esm-tick-only-throw-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18504-esm-tick-only-throw-listener.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18505-esm-rejection-routed-to-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18505-esm-rejection-routed-to-listener.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18506-esm-late-tla-rejection-listener.mjs": {
+   "order": [
+    "<repo>/tests/corpus/18506-esm-late-tla-rejection-listener.mjs"
+   ],
+   "diags": []
   }
  }
 }
