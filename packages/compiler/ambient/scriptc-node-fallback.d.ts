@@ -1007,6 +1007,45 @@ declare module "node:fs" {
   export function mkdir(path: string | Buffer, callback: (err: NodeJS.ErrnoException | null) => void): void;
   export function unlink(path: string | Buffer, callback: (err: NodeJS.ErrnoException | null) => void): void;
   export function rename(oldPath: string | Buffer, newPath: string | Buffer, callback: (err: NodeJS.ErrnoException | null) => void): void;
+  /* open / close / write / chmod: the callback forms the lowering answers
+   * (fs.openCb, fs.closeCb, fs.writeCb, fs.chmodCb), declared as @types/node
+   * spells them. Each family ends in a catch-all, so a misused arity or shape
+   * stays dynamic and the validation ladder answers Node's exact error. */
+  export function open(path: string | Buffer, callback: (err: NodeJS.ErrnoException | null, fd: number) => void): void;
+  export function open(path: string | Buffer, flags: string | number | null | undefined, callback: (err: NodeJS.ErrnoException | null, fd: number) => void): void;
+  export function open(
+    path: string | Buffer,
+    flags: string | number | null | undefined,
+    mode: string | number | null | undefined,
+    callback: (err: NodeJS.ErrnoException | null, fd: number) => void,
+  ): void;
+  export function open(...args: any[]): void;
+  export function close(fd: number, callback?: (err: NodeJS.ErrnoException | null) => void): void;
+  export function close(...args: any[]): void;
+  export function write<TBuffer extends Uint8Array>(
+    fd: number,
+    buffer: TBuffer,
+    offset: number | null | undefined,
+    length: number | null | undefined,
+    position: number | null | undefined,
+    callback: (err: NodeJS.ErrnoException | null, written: number, buffer: TBuffer) => void,
+  ): void;
+  export function write<TBuffer extends Uint8Array>(
+    fd: number,
+    buffer: TBuffer,
+    callback: (err: NodeJS.ErrnoException | null, written: number, buffer: TBuffer) => void,
+  ): void;
+  export function write(
+    fd: number,
+    string: string,
+    position: number | null | undefined,
+    encoding: BufferEncoding | null | undefined,
+    callback: (err: NodeJS.ErrnoException | null, written: number, str: string) => void,
+  ): void;
+  export function write(fd: number, string: string, callback: (err: NodeJS.ErrnoException | null, written: number, str: string) => void): void;
+  export function write(...args: any[]): void;
+  export function chmod(path: string | Buffer, mode: string | number, callback: (err: NodeJS.ErrnoException | null) => void): void;
+  export function chmod(...args: any[]): void;
   /* Last resort for a call Node answers at run time: an argument the
    * declared forms do not admit (an object literal in the path or callback
    * slot: fs.exists({}, cb) calls back false, fs.exists(p, {}) throws

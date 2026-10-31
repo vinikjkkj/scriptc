@@ -888,6 +888,26 @@ ScrDyn *scr_fs_rename_cb(const ScrDyn *oldp, const ScrDyn *newp, const ScrDyn *c
   scr_trap("scriptc: internal error: fs.rename callback reached in a library build — please report this");
   return NULL;
 }
+ScrDyn *scr_fs_open_cb(const ScrDyn *path, const ScrDyn *flags, const ScrDyn *mode, const ScrDyn *cb, double argc) {
+  (void)path; (void)flags; (void)mode; (void)cb; (void)argc;
+  scr_trap("scriptc: internal error: fs.open callback reached in a library build — please report this");
+  return NULL;
+}
+ScrDyn *scr_fs_close_cb(const ScrDyn *fd, const ScrDyn *cb) {
+  (void)fd; (void)cb;
+  scr_trap("scriptc: internal error: fs.close callback reached in a library build — please report this");
+  return NULL;
+}
+ScrDyn *scr_fs_write_cb(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2, const ScrDyn *a3, const ScrDyn *a4, const ScrDyn *cb) {
+  (void)fd; (void)buffer; (void)a2; (void)a3; (void)a4; (void)cb;
+  scr_trap("scriptc: internal error: fs.write callback reached in a library build — please report this");
+  return NULL;
+}
+ScrDyn *scr_fs_chmod_cb(const ScrDyn *path, const ScrDyn *mode, const ScrDyn *cb) {
+  (void)path; (void)mode; (void)cb;
+  scr_trap("scriptc: internal error: fs.chmod callback reached in a library build — please report this");
+  return NULL;
+}
 #else
 
 #ifndef O_BINARY
@@ -1195,6 +1215,399 @@ ScrDyn *scr_fs_rename_cb(const ScrDyn *oldp, const ScrDyn *newp, const ScrDyn *c
   if (!scr_fs_path_chk(newp, "newPath")) return NULL;
   const ScrDyn *vals[3] = {oldp, newp, cb};
   scr_set_timeout(scr_fs_cb_closure(scr_fs_rename_fire, 3, vals), 0);
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+/* ── the callback forms of open, close, write and chmod ───────────────
+ * Node's ladders (lib/fs.js of v24.15.0, read from the function sources):
+ * open's argument count picks the callback slot, the path, the mode and the
+ * flags are checked, then the callback; close checks the callback before the
+ * descriptor (the binding does the descriptor check); write's buffer and
+ * string forms are one ladder over the six positional slots, with Node's
+ * `callback ||= position || length || offset` and the typeof tests kept
+ * literal. The operation runs one loop turn later. A position the binding
+ * cannot use as an offset (a non-integer, or a negative one) is the current
+ * file position, as GetOffset and libuv's offset -1 give it. */
+
+static double scr_fs_write_offset_of(const ScrDyn *p) {
+  if (p->kind != SCR_DYN_NUM) return -1;
+  double v = p->v.num;
+  if (!(isfinite(v) && trunc(v) == v && fabs(v) <= 9007199254740991.0)) return -1;
+  return v < 0 ? -1 : v;
+}
+
+static ssize_t scr_fs_pwrite_at(int fd, const char *p, size_t n, double at) {
+#ifdef _WIN32
+  long long saved = _lseeki64(fd, 0, SEEK_CUR);
+  if (saved < 0 || _lseeki64(fd, (long long)at, SEEK_SET) < 0) return -1;
+  int w = _write(fd, p, (unsigned)n);
+  int e = errno;
+  _lseeki64(fd, saved, SEEK_SET);
+  errno = e;
+  return (ssize_t)w;
+#else
+  return pwrite(fd, p, n, (off_t)at);
+#endif
+}
+
+static void scr_fs_open_fire(ScrClosure *self) {
+  ScrDyn *path = scr_box_get_ref(self->caps[0]);
+  ScrDyn *flags = scr_box_get_ref(self->caps[1]);
+  ScrDyn *mode = scr_box_get_ref(self->caps[2]);
+  ScrDyn *cb = scr_box_get_ref(self->caps[3]);
+  ScrStr *p = scr_fs_path_str(path);
+  int fd = open(p->data, (int)flags->v.num | O_BINARY, (mode_t)mode->v.num);
+  if (fd < 0) {
+    scr_fs_throw(errno, "open", p);
+    scr_fs_cb_finish(cb, NULL, 0, "the fs.open callback");
+  } else {
+    ScrDyn *v = scr_dyn_new_num((double)fd);
+    scr_fs_cb_finish(cb, &v, 1, "the fs.open callback");
+    scr_dyn_release(v);
+  }
+  scr_str_release(p);
+  scr_dyn_release(path);
+  scr_dyn_release(flags);
+  scr_dyn_release(mode);
+  scr_dyn_release(cb);
+}
+
+/* The ERR_INVALID_ARG_VALUE for a bad flags value. inspect-lite cannot
+ * render an empty object or array (it sketches them as { ... } and [ ... ]),
+ * and Node prints {} and []; those two shapes are spelled here. */
+static void scr_fs_flags_fail(const ScrDyn *flags) {
+  if (flags->kind == SCR_DYN_OBJ || flags->kind == SCR_DYN_ARR) {
+    ScrDyn *keys = flags->kind == SCR_DYN_OBJ ? scr_dyn_obj_keys(flags) : NULL;
+    bool empty = flags->kind == SCR_DYN_ARR ? scr_dyn_arr_len(flags) == 0 : scr_dyn_arr_len(keys) == 0;
+    if (keys != NULL) scr_dyn_release(keys);
+    if (empty) {
+      const char *shown = flags->kind == SCR_DYN_OBJ ? "{}" : "[]";
+      char msg[160];
+      int len = snprintf(msg, sizeof msg, "The argument 'flags' is invalid. Received %s", shown);
+      scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)len, "ERR_INVALID_ARG_VALUE");
+      return;
+    }
+  }
+  scr_dyn_arg_value_fail("flags", "is invalid", flags);
+}
+
+/* fs.open(path, flags, mode, callback) with argc the count the caller wrote.
+ * argc < 3: the flags slot IS the callback ('r', 0o666). A function in the
+ * mode slot is the callback. Otherwise: path, then parseFileMode (mode),
+ * then stringToFlags (flags), then the callback. */
+ScrDyn *scr_fs_open_cb(const ScrDyn *path, const ScrDyn *flags0, const ScrDyn *mode0, const ScrDyn *cb0,
+                       double argc) {
+  if (!scr_fs_path_chk(path, "path")) return NULL;
+  const ScrDyn *cb = cb0;
+  double m = 0666;
+  double bits = 0; /* 'r' */
+  if (argc < 3) {
+    cb = flags0;
+  } else {
+    if (mode0->kind == SCR_DYN_FUNC) {
+      cb = mode0;
+    } else if (!scr_fs_dyn_absent(mode0)) {
+      if (!scr_fs_mode_chk(mode0, "mode")) return NULL;
+      m = mode0->kind == SCR_DYN_NUM ? mode0->v.num : (double)strtol(mode0->v.str->data, NULL, 8);
+    }
+    if (flags0->kind == SCR_DYN_NUM) {
+      bits = flags0->v.num;
+    } else if (!scr_fs_dyn_absent(flags0)) {
+      int b = flags0->kind == SCR_DYN_STR ? scr_fs_flag_bits(flags0->v.str) : -1;
+      if (b < 0) {
+        scr_fs_flags_fail(flags0);
+        return NULL;
+      }
+      bits = (double)b;
+    }
+  }
+  if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+  ScrDyn *vals[4];
+  vals[0] = (ScrDyn *)path;
+  vals[1] = scr_dyn_new_num(bits);
+  vals[2] = scr_dyn_new_num(m);
+  vals[3] = (ScrDyn *)cb;
+  ScrClosure *clo = scr_fs_cb_closure(scr_fs_open_fire, 4, (const ScrDyn *const *)vals);
+  scr_dyn_release(vals[1]);
+  scr_dyn_release(vals[2]);
+  scr_set_timeout(clo, 0);
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+/* A close with no callback is Node's defaultCloseCallback: an error is
+ * thrown (uncaught) on the loop turn. */
+static void scr_fs_close_fire(ScrClosure *self) {
+  ScrDyn *fd = scr_box_get_ref(self->caps[0]);
+  ScrDyn *cb = scr_box_get_ref(self->caps[1]);
+  bool hasCb = cb->kind == SCR_DYN_FUNC;
+  scr_fs_close(fd->v.num);
+  if (hasCb) scr_fs_cb_finish(cb, NULL, 0, "the fs.close callback");
+  scr_dyn_release(fd);
+  scr_dyn_release(cb);
+}
+
+ScrDyn *scr_fs_close_cb(const ScrDyn *fd, const ScrDyn *cb) {
+  bool dflt = cb->kind == SCR_DYN_UNDEF;
+  if (!dflt && !scr_fs_cb_chk(cb, "cb")) return NULL;
+  if (!scr_fs_int_range_chk(fd, "fd", 0, 2147483647.0, ">= 0 && <= 2147483647")) return NULL;
+  const ScrDyn *vals[2] = {fd, cb};
+  scr_set_timeout(scr_fs_cb_closure(scr_fs_close_fire, 2, vals), 0);
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+static void scr_fs_write_cb_fire(ScrClosure *self) {
+  ScrDyn *fd = scr_box_get_ref(self->caps[0]);
+  ScrDyn *data = scr_box_get_ref(self->caps[1]);
+  ScrDyn *shown = scr_box_get_ref(self->caps[2]);
+  ScrDyn *offv = scr_box_get_ref(self->caps[3]);
+  ScrDyn *lenv = scr_box_get_ref(self->caps[4]);
+  ScrDyn *posv = scr_box_get_ref(self->caps[5]);
+  ScrDyn *cb = scr_box_get_ref(self->caps[6]);
+  const char *base = (const char *)data->v.bytes->data;
+  size_t off = (size_t)offv->v.num, len = (size_t)lenv->v.num;
+  double pos = posv->v.num;
+  size_t at = 0;
+  int err = 0;
+  while (at < len) {
+    ssize_t w = pos < 0 ? write((int)fd->v.num, base + off + at, len - at)
+                        : scr_fs_pwrite_at((int)fd->v.num, base + off + at, len - at, pos + (double)at);
+    if (w < 0) {
+      if (errno == EINTR) continue;
+      err = errno;
+      break;
+    }
+    if (w == 0) break;
+    at += (size_t)w;
+  }
+  if (err != 0) scr_fs_throw(err, "write", NULL);
+  ScrDyn *a[3];
+  ScrDyn *r;
+  if (scr_exc_pending()) {
+    a[0] = scr_fs_take_error_dyn();
+    a[1] = scr_dyn_new_num(0);
+    a[2] = shown;
+    r = scr_dyn_call(cb, a, 3, "the fs.write callback");
+    scr_dyn_release(a[0]);
+    scr_dyn_release(a[1]);
+  } else {
+    a[0] = scr_dyn_new_null();
+    a[1] = scr_dyn_new_num((double)at);
+    a[2] = shown;
+    r = scr_dyn_call(cb, a, 3, "the fs.write callback");
+    scr_dyn_release(a[0]);
+    scr_dyn_release(a[1]);
+  }
+  if (r != NULL) scr_dyn_release(r);
+  scr_dyn_release(fd);
+  scr_dyn_release(data);
+  scr_dyn_release(shown);
+  scr_dyn_release(offv);
+  scr_dyn_release(lenv);
+  scr_dyn_release(posv);
+  scr_dyn_release(cb);
+}
+
+/* Node's write ladder over the six positional slots. The buffer form runs
+ * the options destructuring, validateInteger(offset), validateOffsetLengthWrite
+ * and the binding's position rule; the string form runs the typeof shuffle,
+ * validateEncoding and the callback check. The data is read at fire time for
+ * a buffer (Node writes the buffer it was given) and encoded now for a string. */
+static bool scr_fs_write_buffer_chk(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2, const ScrDyn *a3,
+                                       const ScrDyn *a4, const ScrDyn *cb, ScrDyn **offOut, ScrDyn **lenOut,
+                                       ScrDyn **posOut) {
+  (void)fd;
+  double blen = scr_bytes_byte_len(buffer->v.bytes);
+  ScrDyn *offv, *lenv, *posv;
+  bool objForm = a2->kind == SCR_DYN_OBJ || a2->kind == SCR_DYN_ARR || a2->kind == SCR_DYN_NULL ||
+                 a2->kind == SCR_DYN_BYTES;
+  if (objForm) {
+    /* ({ offset = 0, length = byteLength - offset, position = null } = a2 ?? {}) */
+    const ScrDyn *o = NULL, *l = NULL, *p = NULL;
+    if (a2->kind == SCR_DYN_OBJ) {
+      o = scr_dyn_obj_get(a2, "offset", 6);
+      l = scr_dyn_obj_get(a2, "length", 6);
+      p = scr_dyn_obj_get(a2, "position", 8);
+    }
+    offv = (o != NULL && o->kind != SCR_DYN_UNDEF) ? scr_dyn_retain((ScrDyn *)o) : scr_dyn_new_num(0);
+    if (l != NULL && l->kind != SCR_DYN_UNDEF) {
+      lenv = scr_dyn_retain((ScrDyn *)l);
+    } else if (a2->kind == SCR_DYN_ARR) {
+      lenv = scr_dyn_new_num(scr_dyn_arr_len(a2)); /* an array's own length */
+    } else if (a2->kind == SCR_DYN_BYTES) {
+      lenv = scr_dyn_new_num(blen);
+    } else {
+      double base = offv->kind == SCR_DYN_NUM ? offv->v.num : 0;
+      lenv = scr_dyn_new_num(blen - base);
+    }
+    posv = (p != NULL && p->kind != SCR_DYN_UNDEF) ? scr_dyn_retain((ScrDyn *)p) : scr_dyn_new_null();
+  } else {
+    offv = scr_dyn_retain((ScrDyn *)a2);
+    lenv = scr_dyn_retain((ScrDyn *)a3);
+    posv = scr_dyn_retain((ScrDyn *)a4);
+  }
+  (void)cb;
+  /* offset == null or a function is 0; anything else must be an integer. */
+  if (offv->kind == SCR_DYN_NULL || offv->kind == SCR_DYN_UNDEF || offv->kind == SCR_DYN_FUNC) {
+    scr_dyn_release(offv);
+    offv = scr_dyn_new_num(0);
+  } else if (!scr_fs_int_range_chk(offv, "offset", 0, 9007199254740991.0, ">= 0 && <= 9007199254740991")) {
+    goto fail;
+  }
+  double offset = offv->v.num;
+  /* typeof length !== 'number' → byteLength - offset */
+  double length = lenv->kind == SCR_DYN_NUM ? lenv->v.num : blen - offset;
+  char recv[48], msg[192];
+  if (offset > blen) {
+    scr_num_received(offset, recv);
+    int n = snprintf(msg, sizeof msg, "The value of \"offset\" is out of range. It must be <= %.0f. Received %s", blen, recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    goto fail;
+  }
+  if (length > blen - offset) {
+    scr_num_received(length, recv);
+    int n = snprintf(msg, sizeof msg, "The value of \"length\" is out of range. It must be <= %.0f. Received %s", blen - offset, recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    goto fail;
+  }
+  if (length < 0) {
+    scr_num_received(length, recv);
+    int n = snprintf(msg, sizeof msg, "The value of \"length\" is out of range. It must be >= 0. Received %s", recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    goto fail;
+  }
+  ScrDyn *ln = scr_dyn_new_num(length);
+  bool lenok = scr_fs_int_range_chk(ln, "length", 0, 2147483647.0, ">= 0 && <= 2147483647");
+  scr_dyn_release(ln);
+  if (!lenok) goto fail;
+  double pos = scr_fs_write_offset_of(posv);
+  scr_dyn_release(offv);
+  scr_dyn_release(lenv);
+  scr_dyn_release(posv);
+  *offOut = scr_dyn_new_num(offset);
+  *lenOut = scr_dyn_new_num(length);
+  *posOut = scr_dyn_new_num(pos);
+  return true;
+fail:
+  scr_dyn_release(offv);
+  scr_dyn_release(lenv);
+  scr_dyn_release(posv);
+  return false;
+}
+
+/* The six positional slots of fs.write, as Node's parameters. */
+ScrDyn *scr_fs_write_cb(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2, const ScrDyn *a3,
+                        const ScrDyn *a4, const ScrDyn *cb0) {
+  if (!scr_fs_int_range_chk(fd, "fd", 0, 2147483647.0, ">= 0 && <= 2147483647")) return NULL;
+  ScrDyn *data, *offv = NULL, *lenv = NULL, *posv = NULL, *shown;
+  const ScrDyn *cb;
+  if (buffer->kind == SCR_DYN_BYTES) {
+    /* callback ||= position || length || offset */
+    cb = cb0;
+    if (!scr_dyn_truthy(cb)) cb = scr_dyn_truthy(a4) ? a4 : scr_dyn_truthy(a3) ? a3 : a2;
+    if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+    if (!scr_fs_write_buffer_chk(fd, buffer, a2, a3, a4, cb, &offv, &lenv, &posv)) return NULL;
+    data = scr_dyn_retain((ScrDyn *)buffer);
+    shown = scr_dyn_retain((ScrDyn *)buffer);
+  } else {
+    /* validateStringAfterArrayBufferView */
+    if (buffer->kind != SCR_DYN_STR) {
+      scr_dyn_arg_type_fail("buffer", "of type string or an instance of Buffer, TypedArray, or DataView", buffer);
+      return NULL;
+    }
+    const ScrDyn *offset = a2, *length = a3, *position = a4;
+    if (position->kind != SCR_DYN_FUNC) {
+      if (offset->kind == SCR_DYN_FUNC) {
+        position = offset;
+        offset = NULL;
+      } else {
+        position = length;
+      }
+      length = NULL; /* 'utf8' */
+    }
+    /* validateEncoding(str, length): Node's only check is the hex length on UTF-16 units. */
+    const char *canon = "utf8";
+    if (length != NULL && length->kind == SCR_DYN_STR) {
+      const char *c = scr_fs_enc_canon(length->v.str);
+      if (c != NULL) canon = c;
+    }
+    if (strcmp(canon, "hex") == 0) {
+      size_t units = 0;
+      const ScrStr *s = buffer->v.str;
+      for (size_t i = 0; i < s->len; i++) {
+        unsigned char c = (unsigned char)s->data[i];
+        if ((c & 0xC0) != 0x80) units += c >= 0xF0 ? 2 : 1;
+      }
+      if (units % 2 != 0) {
+        char reason[80];
+        snprintf(reason, sizeof reason, "is invalid for data of length %zu", units);
+        scr_dyn_arg_value_fail("encoding", reason, length);
+        return NULL;
+      }
+    }
+    cb = position;
+    if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+    ScrStr *enc = scr_str_new(canon, strlen(canon));
+    ScrBytes *b = scr_bytes_from_str(buffer->v.str, enc);
+    scr_str_release(enc);
+    data = scr_dyn_new_buffer_copy(b);
+    offv = scr_dyn_new_num(0);
+    lenv = scr_dyn_new_num(scr_bytes_byte_len(data->v.bytes));
+    posv = scr_dyn_new_num(offset != NULL ? scr_fs_write_offset_of(offset) : -1);
+    scr_bytes_release(b);
+    shown = scr_dyn_retain((ScrDyn *)buffer);
+  }
+#ifdef SCR_LIB
+  scr_trap("scriptc: internal error: fs.write callback reached in a library build — please report this");
+  return NULL;
+#else
+  {
+    ScrDyn *vals[7];
+    vals[0] = (ScrDyn *)fd;
+    vals[1] = data;
+    vals[2] = shown;
+    vals[3] = offv;
+    vals[4] = lenv;
+    vals[5] = posv;
+    vals[6] = (ScrDyn *)cb;
+    ScrClosure *clo = scr_fs_cb_closure(scr_fs_write_cb_fire, 7, (const ScrDyn *const *)vals);
+    scr_dyn_release(data);
+    scr_dyn_release(shown);
+    scr_dyn_release(offv);
+    scr_dyn_release(lenv);
+    scr_dyn_release(posv);
+    scr_set_timeout(clo, 0);
+    return scr_dyn_retain(scr_dyn_undefined());
+  }
+#endif
+}
+
+static void scr_fs_chmod_cb_fire(ScrClosure *self) {
+  ScrDyn *path = scr_box_get_ref(self->caps[0]);
+  ScrDyn *mode = scr_box_get_ref(self->caps[1]);
+  ScrDyn *cb = scr_box_get_ref(self->caps[2]);
+  ScrStr *p = scr_fs_path_str(path);
+  scr_fs_chmod(p, mode->v.num);
+  scr_str_release(p);
+  scr_fs_cb_finish(cb, NULL, 0, "the fs.chmod callback");
+  scr_dyn_release(path);
+  scr_dyn_release(mode);
+  scr_dyn_release(cb);
+}
+
+/* chmod(path, mode, callback): path, then parseFileMode (no default), then
+ * the callback. */
+ScrDyn *scr_fs_chmod_cb(const ScrDyn *path, const ScrDyn *mode0, const ScrDyn *cb) {
+  if (!scr_fs_path_chk(path, "path")) return NULL;
+  if (!scr_fs_mode_chk(mode0, "mode")) return NULL;
+  if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+  ScrDyn *m = scr_dyn_new_num(mode0->kind == SCR_DYN_NUM ? mode0->v.num : (double)strtol(mode0->v.str->data, NULL, 8));
+  ScrDyn *vals[3];
+  vals[0] = (ScrDyn *)path;
+  vals[1] = m;
+  vals[2] = (ScrDyn *)cb;
+  ScrClosure *clo = scr_fs_cb_closure(scr_fs_chmod_cb_fire, 3, (const ScrDyn *const *)vals);
+  scr_dyn_release(m);
+  scr_set_timeout(clo, 0);
   return scr_dyn_retain(scr_dyn_undefined());
 }
 #endif
