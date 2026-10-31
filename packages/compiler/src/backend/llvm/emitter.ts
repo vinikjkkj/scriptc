@@ -1349,6 +1349,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.assignAll": "scr_dyn_assign_all",
   "dyn.objCreateNullProto": "scr_dyn_new_obj_null_proto",
   "dyn.errorProto": "scr_dyn_error_prototype",
+  "dyn.errorClass": "scr_dyn_error_class_value",
   "dyn.u8Ctor": "scr_dyn_uint8array_ctor",
   "dyn.bufferValue": "scr_dyn_buffer_value",
   "dyn.webCrypto": "scr_dyn_web_crypto",

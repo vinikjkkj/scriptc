@@ -458,6 +458,11 @@ if (LOWER_FP_ON) {
  * exists). Static builds only — under --dynamic the engine owns the real
  * constructor, and a second static one would be a different object from
  * the one every engine-side typed array is linked to. */
+/** The SC_ERR kind of each builtin error class (runtime scr_runtime.h SCR_ERR_*). */
+const JS_ERROR_CLASS_KIND: Readonly<Record<string, number>> = {
+  Error: 0, TypeError: 1, RangeError: 2, SyntaxError: 3, ReferenceError: 5, AggregateError: 6,
+};
+
 export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc): IrExpr | null {
   // The WebCrypto object is an object in Node (typeof "object"), not a
   // string token: one process singleton, shared with require('crypto').webcrypto.
@@ -467,6 +472,13 @@ export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc
   // The global Blob and File are the buffer module's own classes (Node: the same objects).
   if (canonical === "Blob" && !L.dynamic) return bufferValueOf(12, loc);
   if (canonical === "File" && !L.dynamic) return bufferValueOf(13, loc);
+  // The builtin error classes are function objects in Node. An error ENCODING's constructor is the
+  // same box (scr_dyn_error_class_box, always linked), so `e.constructor === TypeError` is identity.
+  // DOMException (kind 4) keeps its identity token: it has no box.
+  const errKind = Object.prototype.hasOwnProperty.call(JS_ERROR_CLASS_KIND, canonical) ? JS_ERROR_CLASS_KIND[canonical] : undefined;
+  if (errKind !== undefined && !L.dynamic) {
+    return { kind: "libCall", fn: "dyn.errorClass", args: [{ kind: "numLit", value: errKind, type: F64, loc }], type: DYN, loc };
+  }
   if (canonical !== "Uint8Array" || L.dynamic) return null;
   return { kind: "libCall", fn: "dyn.u8Ctor", args: [], type: DYN, loc };
 }

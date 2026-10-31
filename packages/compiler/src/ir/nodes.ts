@@ -5863,6 +5863,7 @@ export type IrLibFn =
    * only — under --dynamic the engine owns the real one, and the member
    * read keeps its fence. */
   | "dyn.errorProto"
+  | "dyn.errorClass"
   /** `Uint8Array` as a VALUE in a JavaScript source (scr_json.c): the
    * process singleton standing for the CONSTRUCTOR FUNCTION object.
    *
