@@ -22586,5 +22586,66 @@
     ],
     "diags": []
   }
+,
+  "<repo>/tests/corpus/19500-json-message-end-of-input.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19500-json-message-end-of-input.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19501-json-message-unexpected-token.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19501-json-message-unexpected-token.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19502-json-message-context-excerpt.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19502-json-message-context-excerpt.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19503-json-message-structure.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19503-json-message-structure.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19504-json-message-literal-mismatch.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19504-json-message-literal-mismatch.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19505-json-message-numbers.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19505-json-message-numbers.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19506-json-message-strings.cjs": {
+    "order": [
+      "<repo>/tests/corpus/19506-json-message-strings.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19507-json-message-lines.ts": {
+    "order": [
+      "<repo>/tests/corpus/19507-json-message-lines.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19508-json-message-unicode.ts": {
+    "order": [
+      "<repo>/tests/corpus/19508-json-message-unicode.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/19509-json-message-reviver-and-trailing.ts": {
+    "order": [
+      "<repo>/tests/corpus/19509-json-message-reviver-and-trailing.ts"
+    ],
+    "diags": []
+  }
  }
 }
