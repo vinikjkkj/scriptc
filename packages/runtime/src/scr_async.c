@@ -3398,6 +3398,11 @@ void scr_module_await(ScrPromise *p) {
   if (p->state == SCR_PROM_REJECTED) scr_promise_rethrow(p);
 }
 
+/* A rejected module root that an 'uncaughtException' listener consumed (Node
+ * reports the evaluation rejection to the listeners and the process goes on):
+ * the loop runs on, and the root is no longer fatal. */
+static bool scr_root_consumed = false;
+
 int scr_promise_finish_top_level(ScrPromise *p) {
   if (p->state == SCR_PROM_PENDING) {
     /* ECMAScript module evaluation is still pending, but Node's ref'd
@@ -3407,7 +3412,7 @@ int scr_promise_finish_top_level(ScrPromise *p) {
     return 13;
   }
   scr_prom_observe(p);
-  return p->state == SCR_PROM_REJECTED ? 1 : 0;
+  return p->state == SCR_PROM_REJECTED && !scr_root_consumed ? 1 : 0;
 }
 
 void scr_promise_rethrow_top_level(ScrPromise *p) {
@@ -4303,7 +4308,25 @@ static bool scr_loop_reject_stop = false;
  * see them), so no boundary may report one. */
 static ScrPromise *scr_loop_root = NULL;
 static bool scr_loop_root_rejected(void) {
-  return scr_loop_root != NULL && scr_loop_root->state == SCR_PROM_REJECTED;
+  return scr_loop_root != NULL && scr_loop_root->state == SCR_PROM_REJECTED && !scr_root_consumed;
+}
+
+/* The module root rejected and an 'uncaughtException' listener is armed. Node
+ * runs the promise jobs queued so far, then hands the evaluation's rejection
+ * to the listeners (origin "unhandledRejection"), then goes on with ticks and
+ * the rest of the loop. The root is then handled: no fatal verdict, and no
+ * unhandled-rejection report for it. */
+static void scr_root_consume(void) {
+  while (scr_ready_len > 0) {
+    ScrFiber *f = scr_ready[scr_ready_head++];
+    scr_ready_len--;
+    scr_resume_fiber(f);
+  }
+  if (!scr_loop_root_rejected()) return;
+  scr_root_consumed = true;
+  scr_loop_root->rejection_observed = true;
+  scr_promise_rethrow(scr_loop_root);
+  scr_uncaught_dispatch_rejection();
 }
 
 bool scr_loop_stopping(void) { return scr_loop_reject_stop || scr_loop_root_rejected() || scr_exc_pending(); }
@@ -4390,6 +4413,33 @@ static void scr_loop_why_report(bool kids, bool io, bool events, bool net, bool 
 #endif
 SCR_LOOP_NOINLINE static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_entry);
 
+/* An ES-module entry (not CommonJS) that throws synchronously at top level.
+ * Node evaluates such an entry inside a promise job, so the promise jobs
+ * queued before the throw run BEFORE its report: the 'uncaughtException'
+ * listener (or the fatal print) comes after them, and nextTicks after the
+ * listener. main calls this before its uncaught dispatch, with the entry's
+ * throw still pending. The throw is held aside while the jobs run (a job
+ * must not see a pending exception), then put back for the report.
+ * scr_entry_threw makes the loop's first checkpoint run ticks, since the
+ * listener has already run by then. */
+static bool scr_entry_threw = false;
+void scr_entry_throw_jobs(void) {
+  if (!scr_exc_pending()) return;
+  ScrCaught *c = scr_exc_take();
+  while (scr_ready_len > 0) {
+    ScrFiber *f = scr_ready[scr_ready_head++];
+    scr_ready_len--;
+    scr_resume_fiber(f);
+  }
+  scr_rethrow(c);
+  scr_caught_release(c);
+  scr_entry_threw = true;
+  /* Node's origin for an ES-module entry's throw is "unhandledRejection" (the
+   * evaluation promise's rejection), measured on v24.15.0. No listener: no-op,
+   * and the pending throw is the fatal report. */
+  scr_uncaught_dispatch_rejection();
+}
+
 /* The loop, resumed after every escaped throw an 'uncaughtException'
  * listener consumed (Node calls the listener and keeps going); with no
  * listener the exception stays pending and main reports it. A resumed pass
@@ -4397,7 +4447,7 @@ SCR_LOOP_NOINLINE static bool scr_loop_run_inner(ScrPromise *top_level, bool res
  * cjs_entry: the entry file is CommonJS (scr_loop_run_cjs), see the first
  * checkpoint below. */
 static bool scr_loop_run_mode(ScrPromise *top_level, bool cjs_entry) {
-  bool resumed = false;
+  bool resumed = scr_entry_threw; /* the entry's listener already ran (main) */
   for (;;) {
     bool r = scr_loop_run_inner(top_level, resumed, cjs_entry);
     if (scr_uncaught_listener_fn != NULL && scr_exc_pending()) {
@@ -4433,7 +4483,12 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
       rejection_failed = true; /* a callback boundary decided a fatal rejection */
       break;
     }
-    if (top_level != NULL && top_level->state == SCR_PROM_REJECTED) break;
+    if (scr_loop_root_rejected()) {
+      if (scr_uncaught_listener_fn == NULL) break;
+      scr_root_consume();
+      first_checkpoint = false;
+      continue;
+    }
     /* process.nextTick callbacks BEFORE promise jobs (Node's checkpoint
      * order): the tick queue to exhaustion, then the microtask queue to
      * exhaustion, and back while either has work — a microtask's
@@ -4470,7 +4525,12 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
      * rejection handler is itself promise-job ordered — then leave through
      * the normal teardown below. A fulfilled root deliberately does not
      * stop the loop. */
-    if (top_level != NULL && top_level->state == SCR_PROM_REJECTED) break;
+    if (scr_loop_root_rejected()) {
+      if (scr_uncaught_listener_fn == NULL) break;
+      scr_root_consume();
+      first_checkpoint = false;
+      continue;
+    }
     if (scr_nt_head != NULL) continue;
     /* Node decides unhandled rejections at the END of each complete
      * nextTick/microtask checkpoint, before advancing to timers or I/O.
@@ -4923,7 +4983,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
       scr_loop_drain_callback();
       if (scr_exc_pending()) return false;
       if (scr_loop_stopping()) break;
-      if (top_level != NULL && top_level->state == SCR_PROM_REJECTED) break;
+      if (scr_loop_root_rejected()) break;
     }
     /* The check phase: immediates queued BEFORE this phase started run
      * now, FIFO; ones a callback queues wait for the next turn (the end
@@ -4952,7 +5012,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
         scr_loop_drain_callback();
         if (scr_exc_pending()) return false;
         if (scr_loop_stopping()) break;
-        if (top_level != NULL && top_level->state == SCR_PROM_REJECTED) break;
+        if (scr_loop_root_rejected()) break;
       }
       /* Fully drained: reset the cursor so the array reuses its slots. */
       if (scr_immediates_head == scr_nimmediates) {

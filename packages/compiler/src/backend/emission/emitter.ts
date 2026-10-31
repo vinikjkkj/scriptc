@@ -1976,6 +1976,10 @@ export class CEmitter {
       ...(asyncEntry
         ? [`  ScrPromise *sc_top = ${mangleAsyncSpawn(this.mod.entry)}();`]
         : [`  ${mangleFunction(this.mod.entry)}();`]),
+      // An ES-module entry's promise jobs queued before a synchronous throw
+      // run before its report (Node evaluates the entry inside a job); a
+      // CommonJS entry has no job around it. Holds the throw aside itself.
+      ...(!asyncEntry && !this.mod.entryCjs && this.mayThrow.has(this.mod.entry) ? [`  scr_entry_throw_jobs();`] : []),
       // An 'uncaughtException' listener consumes the entry's escaped throw
       // (the loop then runs on, like Node).
       ...(!asyncEntry && moduleUsesUncaughtListener(this.mod) ? [`  scr_uncaught_dispatch();`] : []),
