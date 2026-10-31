@@ -8629,6 +8629,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/19211-fs-writefile-signal-free-options-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19211-fs-writefile-signal-free-options-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19212-fs-writefile-signal-free-options-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19212-fs-writefile-signal-free-options-ts.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1940-class-values-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1940-class-values-basics.ts"
