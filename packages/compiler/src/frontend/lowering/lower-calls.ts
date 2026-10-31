@@ -22,7 +22,7 @@ import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCa
 import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr, staticFnCodeOf, boundCodeOf } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
-import { lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
+import { checkedArmBridge, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -4652,6 +4652,13 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         expr.expression.questionDotToken &&
         !L.chainHandled.has(expr.expression))
     ) {
+      // `f?.call(t, ...)` / `f?.apply(t, [...])` on `F | undefined`: the optional-chain
+      // lowering's never-nullish branch would drop the undefined arm the checker types, so the
+      // helper claims the shape first (it returns null for every other chain).
+      if (!expr.questionDotToken && ts.isPropertyAccessExpression(expr.expression)) {
+        const nullableCall = lowerNullableFnCallApply(L, expr, expr.expression);
+        if (nullableCall !== null) return nullableCall;
+      }
       return L.lowerOptionalChain(expr);
     }
 
@@ -6242,6 +6249,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         L.lowerRecordFieldCall(expr, expr.expression) ??
         // Object-literal GENERIC methods (excluded from record shapes) —
         // monomorphized against the defining literal's declaration.
+        // Unguarded `.call`/`.apply` on `F | undefined` (see the helper): before the generic
+        // member lookup below, which finds no `call` member on a union that has an undefined arm.
+        lowerNullableFnCallApply(L, expr, expr.expression) ??
         lowerObjLitGenericMethodCall(L, expr, expr.expression);
       if (intrinsic) return intrinsic;
       // A method call rooted at an initializer-less ambient `declare
@@ -14618,6 +14628,127 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
     const args = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, DYN));
     const arr: IrExpr = { kind: "libCall", fn: "arrlike.from", args: [recv], type: DYN, loc };
     return { kind: "dynInvoke", recv: arr, method: borrowed.name.text, calleeName: borrowed.getText(), args, type: DYN, loc };
+  }
+
+  /** `f.call(t, ...)` / `f.apply(t, [...])` where `f` is a compiled function value that is ALSO
+   * undefined and/or null (unguarded: `(() => any) | undefined`, the shape of a descriptor's
+   * optional `get`). Node reads `.call` off the receiver FIRST, so a nullish receiver throws
+   * "Cannot read properties of <unit> (reading 'call')" before the thisArg and the arguments
+   * evaluate; any other receiver is the guarded call. Lowered as: bind the receiver once, a tag
+   * test per unit arm that throws Node's TypeError for that unit, and otherwise the existing
+   * `.call`/`.apply` arm over the receiver re-read through the tag-checked function arm (the
+   * checker's narrowing is the same bridge a guarded `if (f)` read takes). `?.call` keeps the
+   * optional-chain lowering. Declines (null) leave the fence to name the spelling. */
+  export function lowerNullableFnCallApply(L: Lowerer, call: ts.CallExpression, callee: ts.Expression): IrExpr | null {
+    if (!ts.isPropertyAccessExpression(callee)) return null;
+    const access = callee;
+    const name = access.name.text;
+    if ((name !== "call" && name !== "apply") || call.questionDotToken !== undefined) return null;
+    if (L.chainHandled.has(access) || L.chainRecvByNode.has(access.expression)) return null;
+    const optional = access.questionDotToken !== undefined;
+    const recvNode = access.expression;
+    // The receiver's VALUE is what Node reads `.call` from: parentheses, `as` and `!` wrap the same
+    // value, so the union is lowered from the innermost operand. Lowering the cast itself would
+    // trap a narrowing the runtime value does not satisfy (`(f as F).call` answered the wrong
+    // message on main), where the unit tests below answer Node's TypeError.
+    let valueNode: ts.Expression = recvNode;
+    while (ts.isParenthesizedExpression(valueNode) || ts.isAsExpression(valueNode) || ts.isNonNullExpression(valueNode)) {
+      valueNode = valueNode.expression;
+    }
+    const saved = L.diagSink;
+    const captured: ScrDiagnostic[] = [];
+    L.diagSink = captured;
+    let recvIr: IrExpr | null = null;
+    try {
+      recvIr = L.lowerExpr(valueNode);
+    } catch (e) {
+      if (!(e instanceof PoisonError)) {
+        L.diagSink = saved;
+        throw e;
+      }
+    }
+    L.diagSink = saved;
+    if (recvIr !== null && captured.length === 0 && recvIr.type.kind === "func") {
+      // The lowering already holds a plain function value (the representation cannot be nullish),
+      // while the checker still types the receiver with an undefined arm (a JSDoc-typed binding
+      // assigned a function). The value is never nullish, so the call is the plain call: the
+      // receiver is re-lowered inside the body under the non-nullable type.
+      const checkerT = L.typeOf(recvNode);
+      if (L.checker.getNonNullableType(checkerT) !== checkerT && !L.chainNarrowedType.has(recvNode) && !L.chainRecvByNode.has(recvNode)) {
+        L.chainNarrowedType.set(recvNode, L.checker.getNonNullableType(checkerT));
+        L.chainHandled.add(access);
+        try {
+          return L.lowerExpr(call);
+        } finally {
+          L.chainHandled.delete(access);
+          L.chainNarrowedType.delete(recvNode);
+        }
+      }
+      return null;
+    }
+    if (recvIr === null || captured.length !== 0 || recvIr.type.kind !== "union") return null;
+    const unionId = recvIr.type.unionId;
+    const def = L.unions.get(unionId);
+    if (!def) return null;
+    const units = def.arms.filter((a) => isUnitType(a));
+    const rest = def.arms.filter((a) => !isUnitType(a));
+    if (units.length === 0 || rest.length !== 1 || rest[0]!.kind !== "func") return null;
+    const loc = locOf(call);
+    const tmp = L.declareHiddenLocal("%nullableCallee", recvIr.type);
+    const ref: IrExpr = { kind: "varRef", localId: tmp.id, type: recvIr.type, loc };
+    // The checker still types the receiver with its undefined arm; the body reads it as the
+    // non-nullable type the guard just proved (typeOf answers chainNarrowedType, as the `?.` path does).
+    const narrowedWas = L.chainNarrowedType.has(recvNode);
+    if (!narrowedWas) L.chainNarrowedType.set(recvNode, L.checker.getNonNullableType(L.checker.getTypeAtLocation(recvNode)));
+    // `f?.call(...)`: the optional chain binds the receiver once and answers undefined when it is
+    // nullish (the arguments do not evaluate); the body reads the bound arm through chainRecv.
+    const chainId = `chain.${L.chainCounter++}`;
+    const armRef: IrExpr = optional
+      ? { kind: "chainRecv", id: chainId, type: rest[0]!, loc }
+      : checkedArmBridge(L, ref, rest[0]!, loc);
+    L.chainRecvByNode.set(recvNode, armRef);
+    L.chainHandled.add(access);
+    let body: IrExpr;
+    try {
+      body = L.lowerExpr(call);
+    } finally {
+      L.chainRecvByNode.delete(recvNode);
+      L.chainHandled.delete(access);
+      if (!narrowedWas) L.chainNarrowedType.delete(recvNode);
+    }
+    if (optional) {
+      const chained = L.finishOptionalChain(call, chainId, ref, body, loc, false);
+      return { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: tmp.id, init: recvIr, loc }], result: chained, type: chained.type, loc };
+    }
+    if (body.type.kind === "void") {
+      // A ternary cannot carry a void arm, and a seqExpr cannot carry an if-statement. The guard is
+      // a non-void ternary evaluated as a statement BEFORE the call (the throw comes first, the
+      // arguments evaluate only past it), and the void call is the sequence's result.
+      let guard: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
+      for (const u of [...units].reverse()) {
+        const tag = L.armTag(unionId, u);
+        const test: IrExpr = { kind: "unionIsTag", unionId, tag, negated: false, value: ref, type: BOOL, loc };
+        const unit = u.kind === "nullT" ? "null" : "undefined";
+        const thrown = nodeThrowExpr(1, "", `Cannot read properties of ${unit} (reading '${name}')`, F64, loc);
+        guard = { kind: "ternary", cond: test, then: thrown, else_: guard, type: F64, loc };
+      }
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "varDecl", localId: tmp.id, init: recvIr, loc }, { kind: "exprStmt", expr: guard, loc }],
+        result: body,
+        type: VOID,
+        loc,
+      };
+    }
+    let out: IrExpr = body;
+    for (const u of [...units].reverse()) {
+      const tag = L.armTag(unionId, u);
+      const test: IrExpr = { kind: "unionIsTag", unionId, tag, negated: false, value: ref, type: BOOL, loc };
+      const unit = u.kind === "nullT" ? "null" : "undefined";
+      const thrown = nodeThrowExpr(1, "", `Cannot read properties of ${unit} (reading '${name}')`, body.type, loc);
+      out = { kind: "ternary", cond: test, then: thrown, else_: out, type: body.type, loc };
+    }
+    return { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: tmp.id, init: recvIr, loc }], result: out, type: body.type, loc };
   }
 
   export function lowerObjLitGenericMethodCall(L: Lowerer, call: ts.CallExpression,
