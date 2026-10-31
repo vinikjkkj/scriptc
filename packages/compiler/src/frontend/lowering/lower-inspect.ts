@@ -35,12 +35,12 @@
  * 36's existing stance). */
 import * as ts from "../ts7/adapter.js";
 import type { NullProtoPatch } from "./ir-patch.js";
-import type { Lowerer } from "./lowerer.js";
+import { boundCodeOf, fnValueCodeOfNode, jsFuncValueNameOf, staticFnCodeOf, type Lowerer } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { BOOL, BYTES_ELEM_NAMES, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
-import { classInstanceToString, dynRestPack } from "./lower-calls.js";
+import { bindingNeverReassigned, classInstanceToString, dynRestPack } from "./lower-calls.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
 import { refuseCodecValue } from "../codec-shadow.js";
 
@@ -1696,26 +1696,72 @@ function directCallableInspect(L: Lowerer, node: ts.Expression, loc: SrcLoc): Ir
       // Node's Error constructors are native functions, not classes.
       return str(`[Function: ${cls.def.name.replace(/^%/, "")}]`, loc);
     }
+    // Node lists a class's OWN enumerable static fields after its base
+    // (`[class C] { k: 5 }`), which this baked form does not render. A class
+    // that declares one declines here, so the lowering refuses instead of
+    // printing the bare base. A class with no declaration node keeps its form.
+    if (cls.decl !== null && cls.decl.members.some((m) => ts.isPropertyDeclaration(m) && !ts.isPrivateIdentifier(m.name) && (m.modifiers ?? []).some((x) => x.kind === ts.SyntaxKind.StaticKeyword))) {
+      return null;
+    }
     const base = cls.base ? ` extends ${cls.base.def.name.replace(/^%/, "")}` : "";
     return str(`[class ${cls.def.name}${base}]`, loc);
   }
   const decl = L.checker.declarationsOf(sym)[0];
   if (!decl) return null;
   if (ts.isFunctionDeclaration(decl) && decl.name) {
-    return str(`[Function: ${decl.name.text}]`, loc);
+    return str(fnInspectBase(fnValueCodeOfNode(decl), decl.name.text), loc);
   }
-  if (
-    ts.isVariableDeclaration(decl) &&
-    ts.isIdentifier(decl.name) &&
-    decl.initializer &&
-    (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
-  ) {
-    // JS name inference: the binding names the function value — unless
-    // the function expression carries its OWN name, which wins.
-    const own = ts.isFunctionExpression(decl.initializer) ? decl.initializer.name?.text : undefined;
-    return str(`[Function: ${own ?? decl.name.text}]`, loc);
+  if (ts.isVariableDeclaration(decl) && ts.isIdentifier(decl.name) && decl.initializer) {
+    const init = decl.initializer;
+    if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+      // JS name inference: the binding names the function value — unless
+      // the function expression carries its OWN name, which wins.
+      const own = ts.isFunctionExpression(init) ? init.name?.text : undefined;
+      return str(fnInspectBase(fnValueCodeOfNode(init), own ?? decl.name.text), loc);
+    }
+    // `const b = f.bind(...)`: a bound function is a plain Function with no
+    // prototype, named "bound " plus its target's name (jsFuncValueNameOf).
+    if (
+      ts.isCallExpression(init) &&
+      ts.isPropertyAccessExpression(init.expression) &&
+      init.expression.name.text === "bind" &&
+      (((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0) || bindingNeverReassigned(L, sym, decl))
+    ) {
+      const bound = jsFuncValueNameOf(L, init);
+      const code = bound === null ? null : boundCodeOf(L, init);
+      if (bound === null || code === null) return null;
+      return str(fnInspectBase(code, bound), loc);
+    }
   }
   return null;
+}
+
+/** The kind names Node's getFunctionBase prints, by SCR_FNK_* kind bits. */
+const FN_KIND_NAMES = ["Function", "AsyncFunction", "GeneratorFunction", "AsyncGeneratorFunction"] as const;
+
+/** Node's bracketed base of a function value: `[AsyncFunction: f]`,
+ * `[Function (anonymous)]`. `code` is the kind code (fnValueCodeOfNode). */
+export function fnInspectBase(code: number, name: string): string {
+  const kind = FN_KIND_NAMES[code & 3]!;
+  const inh = (code >> 3) & 3;
+  const suffix = inh === 0 ? "" : ` ${FN_KIND_NAMES[inh]}`;
+  return (name === "" ? `[${kind} (anonymous)]` : `[${kind}: ${name}]`) + suffix;
+}
+
+/** The dyn box of a function VALUE for inspect, with its creation-site name
+ * where one is provable (a bind, a const binding): the box's own table
+ * answer is the per-body spelling, which a bound value does not have. */
+function funcInspectBox(L: Lowerer, node: ts.Expression, value: IrExpr, loc: SrcLoc): IrExpr {
+  const name = jsFuncValueNameOf(L, node);
+  const code = staticFnCodeOf(L, node);
+  return {
+    kind: "dynFrom",
+    value,
+    type: DYN,
+    ...(name !== null ? { fnName: name } : {}),
+    ...(code !== null ? { fnCode: code } : {}),
+    loc,
+  };
 }
 
 /** util.inspect(value[, options]) — the spoke's inspect entry. */
@@ -1737,7 +1783,8 @@ function lowerInspectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrE
   }
   if (ts.isArrowFunction(valueNode) || ts.isFunctionExpression(valueNode)) {
     parseInspectOptions(L, expr.arguments[1], false);
-    return str(valueNode.kind === ts.SyntaxKind.FunctionExpression && (valueNode as ts.FunctionExpression).name ? `[Function: ${(valueNode as ts.FunctionExpression).name!.text}]` : "[Function (anonymous)]", loc);
+    const litName = ts.isFunctionExpression(valueNode) && valueNode.name ? valueNode.name.text : "";
+    return str(fnInspectBase(fnValueCodeOfNode(valueNode), litName), loc);
   }
   const value = L.lowerExpr(valueNode);
   if (value.type.kind === "bytes") {
@@ -1779,6 +1826,11 @@ function lowerInspectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrE
     L.noLowering(`util.inspect of '${L.fmt(value.type)}' values`, valueNode, reason);
   }
   const optsNode = expr.arguments[1];
+  if (value.type.kind === "func" && (optsNode === undefined || (ts.isIdentifier(optsNode) && optsNode.text === "undefined"))) {
+    // A function VALUE that no baked form named: the box prints its kind
+    // and its creation-site name (funcInspectBox).
+    return { kind: "libCall", fn: "insp.dyn", args: [funcInspectBox(L, valueNode, value, loc), num(0, loc), num(2, loc)], type: STRING, loc };
+  }
   if (optsNode === undefined || (ts.isIdentifier(optsNode) && optsNode.text === "undefined")) {
     return inspectExpr(L, value.type, value, num(0, loc), num(2, loc), loc);
   }
@@ -2090,7 +2142,59 @@ function formatOArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
       "%o renders with showHidden (arrays gain a hidden [length] entry) — use %O for the default rendering",
     );
   }
+  if (value.type.kind === "func") {
+    // A function VALUE: %O is the default inspect; %o adds the showHidden keys
+    // (length, name, prototype) through the box, which knows the kind.
+    const box = funcInspectBox(L, node, value, loc);
+    return depth === 4
+      ? { kind: "libCall", fn: "insp.dynH", args: [box, num(4, loc)], type: STRING, loc }
+      : { kind: "libCall", fn: "insp.dyn", args: [box, num(0, loc), num(2, loc)], type: STRING, loc };
+  }
+  if (depth === 4 && value.type.kind !== "dyn" && typeTreeHasFunc(L, value.type, new Set())) {
+    // A function nested in a record or union would need the showHidden
+    // keys inside a static walk, which has no lowering: refuse, not print
+    // the default rendering under %o.
+    L.noLowering(
+      "util.format %o over function values nested in records or unions",
+      node,
+      "a nested function's showHidden keys (length, name, prototype) have no static lowering yet: pass the function alone, or use %O",
+    );
+  }
+  if (depth === 4 && value.type.kind === "dyn") {
+    return { kind: "libCall", fn: "insp.dynH", args: [value, num(4, loc)], type: STRING, loc };
+  }
   return inspectExpr(L, value.type, value, num(0, loc), num(depth, loc), loc);
+}
+
+/** A function value anywhere in the static tree (see typeTreeHasArray). */
+function typeTreeHasFunc(L: Lowerer, t: IrType, visiting: Set<string>): boolean {
+  switch (t.kind) {
+    case "func":
+      return true;
+    case "record": {
+      if (visiting.has(t.shapeId)) return false;
+      visiting.add(t.shapeId);
+      return (L.shapes.get(t.shapeId)?.fields ?? []).some((f) => typeTreeHasFunc(L, f.type, visiting));
+    }
+    case "map":
+      return typeTreeHasFunc(L, t.key, visiting) || typeTreeHasFunc(L, t.value, visiting);
+    case "set":
+      return typeTreeHasFunc(L, t.elem, visiting);
+    case "array":
+      return typeTreeHasFunc(L, t.elem, visiting);
+    case "union": {
+      if (visiting.has(t.unionId)) return false;
+      visiting.add(t.unionId);
+      return (L.unions.get(t.unionId)?.arms ?? []).some((a) => typeTreeHasFunc(L, a, visiting));
+    }
+    case "object": {
+      if (visiting.has(t.className)) return false;
+      visiting.add(t.className);
+      return (L.classes.get(t.className)?.def.fields ?? []).some((f) => typeTreeHasFunc(L, f.type, visiting));
+    }
+    default:
+      return false;
+  }
 }
 
 /** util.format(...) / util.formatWithOptions({}, ...): the compile-time
