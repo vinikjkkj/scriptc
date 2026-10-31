@@ -73,7 +73,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream } from "../../ir/nodes.js";
+import { moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, irFunctionValueCode, fnNameTableRows, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream } from "../../ir/nodes.js";
 import { setDynOrderPlan } from "../dyn-members.js";
 import { orderRecordPlanCached } from "../../ir/nodes.js";
 import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
@@ -1008,6 +1008,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.thisPop": "scr_dyn_this_pop",
   "insp.dyn": "scr_insp_dyn",
   "insp.dynS": "scr_insp_dyn_s",
+  "insp.dynH": "scr_insp_dyn_h",
   "insp.fmtS": "scr_insp_fmt_s",
   "big.str": "scr_big_to_str",
   "big.fromDyn": "scr_big_from_dyn",
@@ -1674,6 +1675,8 @@ class LlEmitter {
   /** Closure entry symbol -> its exact toString text (ScrFnText rows; the
    * table exists only when the program uses fn.text, see fnTextRows below). */
   private readonly fnTexts = new Map<string, string>();
+  /** Entry symbol -> inspect kind code (see the C twin, emitter.ts fnCodes). */
+  private readonly fnCodes = new Map<string, number>();
   private needsOom = false;
   private needsBadTag = false;
   private needsBadKey = false;
@@ -2532,9 +2535,9 @@ class LlEmitter {
       // entry point and the JS name of the value it backs (ScrFnName in
       // scr_runtime.h). main() installs the array; walker-built boxes
       // resolve `[Function: name]` through it.
-      `%ScrFnName = type { ptr, ptr }`,
       // One row of the function-text table { fn, text } (ScrFnText, scr_fntext.c).
       `%ScrFnText = type { ptr, ptr }`,
+      `%ScrFnName = type { ptr, ptr, i32 }`,
       // The runtime emitter prefix { rc, vt, reg, cls } — user subclasses
       // embed it (classes.ts), and bare-emitter GEPs address through it.
       `%ScrEmitter = type { i64, ptr, ptr, ptr }`,
@@ -2665,7 +2668,6 @@ class LlEmitter {
     if (this.recWideTables.size > 0) out.push(``);
     // The function-name table (ScrFnName). Sorted so the .ll is a
     // function of the program and not of emission order.
-    const fnNameRows = [...this.fnNames].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     // The function-text table (ScrFnText, scr_fntext.c): only when the program
     // converts a function value to its source text.
     const usesFnText = moduleUsesFnText(this.mod);
@@ -2682,11 +2684,12 @@ class LlEmitter {
         ``,
       );
     }
+    const fnNameRows = fnNameTableRows(this.fnNames, this.fnCodes);
     if (fnNameRows.length > 0) {
       out.push(
         `declare void @scr_fn_names_install(ptr, i64)`,
         `@sc_fn_name_tbl = internal constant [${fnNameRows.length} x %ScrFnName] [` +
-          fnNameRows.map(([sym, lit]) => `%ScrFnName { ptr @${sym}, ptr ${lit} }`).join(", ") +
+          fnNameRows.map(([sym, lit, code]) => `%ScrFnName { ptr @${sym}, ptr ${lit === null ? "null" : lit}, i32 ${code} }`).join(", ") +
           `]`,
         ``,
       );
@@ -9678,6 +9681,7 @@ class LlEmitter {
           const declName = irFunctionJsName(target);
           if (declName !== null) this.fnNames.set(mangleWrapper(e.fnName), this.cstr(declName));
           if (target.srcText !== undefined) this.fnTexts.set(mangleWrapper(e.fnName), this.cstr(target.srcText));
+          if (irFunctionValueCode(target) !== 0) this.fnCodes.set(mangleWrapper(e.fnName), irFunctionValueCode(target));
           return this.own({
             name: this.retainValue(`@${mangleFnClosure(e.fnName)}`, e.type),
             type: e.type,
@@ -9686,6 +9690,7 @@ class LlEmitter {
         const liftedName = irFunctionJsName(target);
         if (liftedName !== null) this.fnNames.set(this.callTarget(e.fnName), this.cstr(liftedName));
         if (target.srcText !== undefined) this.fnTexts.set(this.callTarget(e.fnName), this.cstr(target.srcText));
+        if (irFunctionValueCode(target) !== 0) this.fnCodes.set(this.callTarget(e.fnName), irFunctionValueCode(target));
         // Lifted async lambdas enter through their spawn wrapper (which
         // takes sc_env first, like every lifted function).
         this.declare(`declare ptr @scr_closure_new(ptr, i64)`);
@@ -10958,8 +10963,15 @@ class LlEmitter {
             : this.cstr(e.fnSrc.text);
           if (e.fnSrc === "bound") this.declare(`@SCR_FN_SRC_BOUND = external constant i8`);
           const box = this.dyn.dynFuncBoxHelper(v.type);
-          const t = B.tmp();
+          let t = B.tmp();
           B.line(`${t} = call ptr @${box}(ptr ${v.name}, ptr ${name}, ptr ${src})`);
+          if (e.fnCode !== undefined) {
+            // The compiler's proven kind code (a static bind): replace the box's code bits.
+            this.declare(`declare ptr @scr_dyn_fn_code_set(ptr, i32)`);
+            const c = B.tmp();
+            B.line(`${c} = call ptr @scr_dyn_fn_code_set(ptr ${t}, i32 ${e.fnCode})`);
+            t = c;
+          }
           return this.own({ name: t, type: e.type });
         }
         const conv = this.dyn.toDynHelper(v.type);
