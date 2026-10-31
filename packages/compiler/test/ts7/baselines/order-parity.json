@@ -9052,6 +9052,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/20100-net-accept-batch-ticks-jobs.ts": {
+   "order": [
+    "<repo>/tests/corpus/20100-net-accept-batch-ticks-jobs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/20101-net-accept-batch-three-clients.ts": {
+   "order": [
+    "<repo>/tests/corpus/20101-net-accept-batch-three-clients.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/20102-net-accept-batch-throw-uncaught.cjs": {
+   "order": [
+    "<repo>/tests/corpus/20102-net-accept-batch-throw-uncaught.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/20103-timers-same-due-ticks-jobs.ts": {
+   "order": [
+    "<repo>/tests/corpus/20103-timers-same-due-ticks-jobs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/20104-immediates-ticks-jobs.ts": {
+   "order": [
+    "<repo>/tests/corpus/20104-immediates-ticks-jobs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/20105-dgram-two-sockets-ticks-jobs.ts": {
+   "order": [
+    "<repo>/tests/corpus/20105-dgram-two-sockets-ticks-jobs.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2011-generators-forof.ts": {
    "order": [
     "<repo>/tests/corpus/2011-generators-forof.ts"
