@@ -6129,6 +6129,117 @@ static ScrDyn *scr_dyn_error_kind_prototype(int kind) {
   return scr_dyn_retain(scr_error_kind_proto[kind]);
 }
 
+/* ── builtin error CLASS values: `e.constructor` of an error ──────────────
+ *
+ * One immortal FUNC per kind, minted on first use and kept for the process:
+ * `e.constructor === e2.constructor` is box identity, and the box's `name`
+ * is the kind's. Callable with or without `new` (an Error constructs either
+ * way). Lives in this always-linked unit, not in the gated class unit
+ * (scr_dyn_class.c): an error encoding exists in every program that catches
+ * a runtime error, and a gated install left its constructor answer unreachable
+ * in a program with no class (the `reading 'constructor' through Error.prototype`
+ * fence). The statics are modeled for `prototype` only (the kind's prototype, the
+ * one the encoding links to); every other static stays a loud ladder, and
+ * DOMException (kind SCR_ERR_DOMEX) has no box. */
+static void *err_cls_noop_v(void *p) { return p; }
+static void err_cls_noop_rel_v(void *p) { (void)p; }
+
+static ScrDyn *err_cls_boxes[SCR_ERR_KINDS];
+static bool err_cls_teardown_set = false;
+
+static void err_cls_teardown(void) {
+  for (int i = 0; i < SCR_ERR_KINDS; i++) {
+    scr_dyn_release(err_cls_boxes[i]);
+    err_cls_boxes[i] = NULL;
+  }
+  err_cls_teardown_set = false;
+}
+
+static int err_cls_kind_of_clo(ScrClosure *clo) {
+  return (int)(intptr_t)scr_box_get_ref((ScrBox *)clo->caps[0]);
+}
+
+static ScrDyn *err_cls_make(int kind, const ScrDyn *msg) {
+  ScrStr *m = NULL;
+  if (msg != NULL && msg->kind != SCR_DYN_UNDEF) {
+    m = scr_dyn_string_coerce(msg);
+    if (scr_exc_pending()) {
+      scr_str_release(m);
+      return NULL;
+    }
+  }
+  ScrError *e = scr_error_new(kind, m);
+  scr_str_release(m);
+  ScrDyn *r = scr_dyn_from_error(e);
+  scr_error_release(e);
+  return r;
+}
+
+static ScrDyn *err_cls_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  return err_cls_make(err_cls_kind_of_clo(clo), argc > 0 ? args[0] : NULL);
+}
+
+static bool err_cls_is(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_FUNC && d->v.fn.thunk == err_cls_thunk;
+}
+
+ScrDyn *scr_dyn_error_class_box(int kind) {
+  if (kind < 0 || kind >= SCR_ERR_KINDS || kind == SCR_ERR_DOMEX) return NULL;
+  if (err_cls_boxes[kind] == NULL) {
+    ScrClosure *clo = scr_closure_new((void *)err_cls_thunk, 1);
+    clo->caps[0] = scr_box_new_obj(err_cls_noop_v, err_cls_noop_rel_v, NULL);
+    scr_box_set_ref((ScrBox *)clo->caps[0], (void *)(intptr_t)kind);
+    err_cls_boxes[kind] = scr_dyn_new_func(clo, err_cls_thunk, 1, "(string)", scr_error_kind_name(kind));
+    if (!err_cls_teardown_set) {
+      err_cls_teardown_set = true;
+      scr_atexit(err_cls_teardown);
+    }
+  }
+  return scr_dyn_retain(err_cls_boxes[kind]);
+}
+
+/* A builtin error class taken as a VALUE in a JavaScript source (`TypeError`,
+ * `Error`, ...): the kind's box, +1. The lowering passes the kind as a double
+ * (the libCall ABI). */
+ScrDyn *scr_dyn_error_class_value(double kind) { return scr_dyn_error_class_box((int)kind); }
+
+/* The constructor an OBJECT reaches through the error prototype chain when no
+ * `constructor` is stored on it (the encoding, or an alien object made with
+ * Object.create): walk from the receiver. A kind's own prototype answers that
+ * kind's box (TypeError.prototype.constructor is TypeError); %Error.prototype%
+ * answers Error. NULL when the chain reaches neither (the caller's fence). */
+static ScrDyn *scr_dyn_error_ctor_by_chain(const ScrDyn *recv) {
+  const ScrDyn *p = recv;
+  for (size_t steps = 0; p != NULL && p->kind == SCR_DYN_OBJ && steps <= SCR_PROTO_MAX_DEPTH; steps++) {
+    for (int k = 0; k < SCR_ERR_KINDS; k++) {
+      if (scr_error_kind_has_proto(k) && scr_error_kind_proto[k] == p) return scr_dyn_error_class_box(k);
+    }
+    if (p == scr_error_proto) return scr_dyn_error_class_box(SCR_ERR_ERROR);
+    p = scr_dyn_ext(p)->proto;
+  }
+  return NULL;
+}
+
+/* A read on a builtin error class value. `name` is answered by the function
+ * built-ins below; `prototype` is the kind's prototype; any other key is the
+ * loud ladder (Error.captureStackTrace and the rest are real members this box
+ * does not model, and undefined would be the silent wrong answer). */
+static ScrDyn *err_cls_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
+  if (key_len == 4 && memcmp(key, "name", 4) == 0) return NULL;
+  if (key_len == 9 && memcmp(key, "prototype", 9) == 0) {
+    return scr_dyn_error_kind_prototype(err_cls_kind_of_clo(d->v.fn.clo));
+  }
+  ScrJsonBuf fb;
+  scr_jb_init(&fb);
+  scr_jb_puts(&fb, "reading '");
+  scr_jb_write(&fb, key, key_len);
+  scr_jb_puts(&fb, "' on the class value ");
+  scr_jb_puts(&fb, scr_dyn_fn_name(d));
+  scr_jb_puts(&fb, " is not supported yet");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&fb));
+  return NULL;
+}
+
 /* `Error.prototype.toString()` — ES's Error.prototype.toString, whole:
  * ToString(this.name, defaulting to "Error"), ToString(this.message,
  * defaulting to ""), joined with ": " unless one side is empty. Reads
@@ -7230,6 +7341,13 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
         const int k = scr_error_kind_of(ce);
         scr_error_release(ce);
         ScrDyn *cb = scr_dyn_error_class_box(k);
+        if (cb != NULL) return cb;
+      } else {
+        /* Not an encoding the cache knows: an error PROTOTYPE (a kind's, or
+         * %Error.prototype%'s own chain) or an alien object linked to one.
+         * Node answers the constructor the chain links to (no own
+         * `constructor` was found above, so the chain answers it). */
+        ScrDyn *cb = scr_dyn_error_ctor_by_chain(recv);
         if (cb != NULL) return cb;
       }
       scr_dyn_error_ctor_fence();
@@ -9778,7 +9896,12 @@ bool scr_dyn_expando_set(ScrClosure *clo, const char *key, size_t key_len, ScrDy
  * the lifted-member accessors, then the function-instance built-ins
  * name/length. +1 or NULL. */
 ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
-  /* A CLASS VALUE or a builtin error class value answers from the class unit. */
+  /* A builtin error class value answers its own (always linked) ladder. */
+  if (err_cls_is(d)) {
+    ScrDyn *es = err_cls_fn_get(d, key, key_len);
+    if (es != NULL || scr_exc_pending()) return es;
+  }
+  /* A CLASS VALUE answers from the class unit. */
   if (scr_dyn_class_ops != NULL) {
     ScrDyn *cs = scr_dyn_class_ops->fn_get(d, key, key_len);
     if (cs != NULL || scr_exc_pending()) return cs;
@@ -12367,6 +12490,10 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
    * its thunk's only job is the requires-'new' throw the plain call form
    * needs. Every other function keeps the ordinary path. */
   if (fn == scr_u8_ctor) return scr_u8_construct(args);
+  if (err_cls_is(fn)) {
+    return err_cls_make(err_cls_kind_of_clo(fn->v.fn.clo),
+                        args->kind == SCR_DYN_ARR && args->v.arr.len > 0 ? args->v.arr.items[0] : NULL);
+  }
   if (scr_dyn_class_ops != NULL) {
     bool handled = false;
     ScrDyn *cr = scr_dyn_class_ops->construct(fn, args, &handled);
