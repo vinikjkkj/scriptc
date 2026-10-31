@@ -2022,7 +2022,13 @@ static void scr_net_server_accept(ScrNetServer *srv) {
     if (srv->native_conn) {
       /* the protocol layer (scr_http.c / scr_tls.c) claims the connection */
       srv->native_conn(srv->native_ctx, sock);
-      if (scr_exc_pending()) return;
+      /* the creation reference is ours until the release below: an early
+       * return must give it back too, or the socket outlives the program
+       * (a throw from the protocol layer, e.g. server.timeout = -1). */
+      if (scr_exc_pending()) {
+        scr_net_sock_release(sock);
+        return;
+      }
     }
     if (srv->defer_conn) {
       /* 'connection' waits for the handshake (secureConnection timing) */
