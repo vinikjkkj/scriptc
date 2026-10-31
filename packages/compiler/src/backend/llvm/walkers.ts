@@ -259,9 +259,10 @@ export class LlWalkers {
     // Fields serialize in DECLARED order (JS insertion order); internal
     // '%'-fields stay hidden — jsonWriteHelper's contract, ported comment
     // and all.
-    const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
+    // A SYMBOL-keyed member is not a string key: JSON.stringify skips it.
+    const order = (shape.declaredOrder ?? shape.fields.map((f) => f.name)).filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@")));
     const inOrder = new Set(order);
-    if (shape.fields.some((f) => !inOrder.has(f.name) && !f.name.startsWith("%"))) {
+    if (shape.fields.some((f) => !inOrder.has(f.name) && !f.name.startsWith("%") && !(f.name.startsWith("__@") && !f.name.startsWith("__@ord@")))) {
       throw new Error(`llvm emitter bug: declaredOrder of shape ${shapeId} omits a non-internal field`);
     }
     const byName = new Map(shape.fields.map((f) => [f.name, f]));

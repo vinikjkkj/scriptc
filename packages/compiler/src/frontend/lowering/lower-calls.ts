@@ -15878,7 +15878,8 @@ function refillObjKeysHelper(Lu: unknown, r: EnumRefill): void {
   L.dropOwnKeyGuards(r.helper);
   body.length = 0;
   body.push({ kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc });
-  const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
+  // A SYMBOL-keyed member is not a string key: Object.keys, for-in, values and entries skip it.
+  const order = (shape.declaredOrder ?? shape.fields.map((f) => f.name)).filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@")));
   for (const name of order) {
     const f = shape.fields.find((x) => x.name === name)!;
     const pushStmt: IrStmt = {
@@ -15952,7 +15953,8 @@ function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
   body.length = 0;
   body.push({ kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc });
   const member = r.diag?.member ?? objMember;
-  const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
+  // A SYMBOL-keyed member is not a string key: Object.keys, for-in, values and entries skip it.
+  const order = (shape.declaredOrder ?? shape.fields.map((f) => f.name)).filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@")));
   for (const name of order) {
     const f = shape.fields.find((x) => x.name === name)!;
     const raw: IrExpr = { kind: "recordGet", obj: ref, shapeId: r.shapeId, field: f.name, type: f.type, loc };
