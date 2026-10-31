@@ -1,0 +1,47 @@
+{
+  "oracle": {
+    "node": "v24.15.0",
+    "addon": "@roamhq/wrtc 0.10.0 (npm; lockfile-pinned in the lab, resolved from registry.npmjs.org)",
+    "host": "debian-vps, Debian 13, Linux 6.12.113 x86_64",
+    "recordedOn": "2026-10-31",
+    "method": "Each probe ran 21 times under the Node oracle with the addon installed. The stdout of all 21 runs was byte-identical (MEASURED, lab/out/node). stdout is the first run. stderr and exit code are recorded as well. The probes live in tests/fixtures/wrtc/probes/ and are compiled by scriptc WITHOUT the addon present, so the shipped ambient declarations apply.",
+    "excluded": "ch.id: uninitialised memory in the oracle (p-sync header). bufferedAmount VALUE: not scored, only its type (p-buffered header). The ctl-* lab probes are refusal controls, not oracle cases."
+  },
+  "probes": {
+    "p-sync": {
+      "exitCode": 0,
+      "stdout": "pc.signalingState=stable\npc.iceConnectionState=new\npc.iceGatheringState=new\npc.connectionState=new\nch.label=wa-web-call\nch.ordered=false\nch.readyState=connecting\nch.binaryType=arraybuffer\nch.protocol=[]\nafter set, ch.binaryType=arraybuffer\nafter close, ch.readyState=closing\nafter pc.close, pc.signalingState=closed\ndone\n",
+      "stderr": ""
+    },
+    "p-events": {
+      "exitCode": 0,
+      "stdout": "send on connecting throws name=InvalidStateError\nsend on connecting throws message=RTCDataChannel.readyState is not 'open'\nafter ch.close, readyState=closing\nsend after close throws name=InvalidStateError\nsend after close throws message=RTCDataChannel.readyState is not 'open'\ndone\nice fired\nconnection fired\nsignaling fired\n",
+      "stderr": ""
+    },
+    "p-signal": {
+      "exitCode": 0,
+      "stdout": "before offer, signalingState=stable\noffer.type=offer\noffer.sdp is string=true\noffer.sdp ends CRLF=true\noffer has v=0 first=true\nufrag matched=true\nufrag len=4\nufrag charset ok=true\npwd len=24\nfingerprint sha-256 pairs=32\nhas setup:actpass=true\nhas webrtc-datachannel m-line=true\nhas sctp-port:5000=true\nhas max-message-size=true\nhas a=mid=true\nhas ice-options=true\nafter setLocal, signalingState=have-local-offer\nanswer has setup:passive=true\nanswer has relay candidate=true\nanswer has end-of-candidates=true\nanswer has fixed fingerprint=true\nafter setRemote, signalingState=stable\nafter setRemote, ch.readyState=connecting\nafter close, signalingState=closed\ndone\n",
+      "stderr": ""
+    },
+    "p-bytes": {
+      "exitCode": 0,
+      "stdout": "bytes send throws name=InvalidStateError\nbytes send throws message=RTCDataChannel.readyState is not 'open'\ndone\n",
+      "stderr": ""
+    },
+    "p-msg0": {
+      "exitCode": 0,
+      "stdout": "done\nconn0 fired\n",
+      "stderr": ""
+    },
+    "p-live": {
+      "exitCode": 0,
+      "stdout": "before\nconstructed\nchannel\nsignalingState=stable\nreadyState=connecting\nafter\n",
+      "stderr": ""
+    },
+    "p-buffered": {
+      "exitCode": 0,
+      "stdout": "ch.bufferedAmount is number=true\ndone\n",
+      "stderr": ""
+    }
+  }
+}
