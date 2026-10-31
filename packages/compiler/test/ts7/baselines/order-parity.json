@@ -7940,6 +7940,96 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/18400-tls-createserverdyncb-arity1.ts": {
+   "order": [
+    "<repo>/tests/corpus/18400-tls-createserverdyncb-arity1.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18401-tls-createserverdyncb-arity0.ts": {
+   "order": [
+    "<repo>/tests/corpus/18401-tls-createserverdyncb-arity0.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18402-tls-sock-authorized.ts": {
+   "order": [
+    "<repo>/tests/corpus/18402-tls-sock-authorized.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18403-tls-sock-authorization-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/18403-tls-sock-authorization-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18404-tls-server-secure-connection.ts": {
+   "order": [
+    "<repo>/tests/corpus/18404-tls-server-secure-connection.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18405-https-request-agent-no-cb.ts": {
+   "order": [
+    "<repo>/tests/corpus/18405-https-request-agent-no-cb.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18406-https-request-agent-cb.ts": {
+   "order": [
+    "<repo>/tests/corpus/18406-https-request-agent-cb.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18407-https-request-fn-no-cb.ts": {
+   "order": [
+    "<repo>/tests/corpus/18407-https-request-fn-no-cb.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18408-https-request-fn-cb.ts": {
+   "order": [
+    "<repo>/tests/corpus/18408-https-request-fn-cb.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18409-http-server-connect.cjs": {
+   "order": [
+    "<repo>/tests/corpus/18409-http-server-connect.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18410-assert-throws-error-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/18410-assert-throws-error-instance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18411-tls-connect-secure-cb.ts": {
+   "order": [
+    "<repo>/tests/corpus/18411-tls-connect-secure-cb.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18412-tls-secure-connect-listener.ts": {
+   "order": [
+    "<repo>/tests/corpus/18412-tls-secure-connect-listener.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18413-tls-session-listener.ts": {
+   "order": [
+    "<repo>/tests/corpus/18413-tls-session-listener.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18414-dns-lookup-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/18414-dns-lookup-callback.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1850-overload-basics.ts": {
    "order": [
     "<repo>/tests/corpus/1850-overload-basics.ts"
