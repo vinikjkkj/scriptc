@@ -22585,6 +22585,126 @@
       "<repo>/tests/corpus/19604-fs-callback-forms-ts.ts"
     ],
     "diags": []
-  }
+  },
+   "<repo>/tests/corpus/20000-stat-err-code-arrow.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20000-stat-err-code-arrow.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20001-stat-err-message-fn.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20001-stat-err-message-fn.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20002-stat-err-errno-syscall-path.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20002-stat-err-errno-syscall-path.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20003-stat-ok-null-member-caught.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20003-stat-ok-null-member-caught.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20004-stat-guard-both-branches.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20004-stat-guard-both-branches.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20005-stat-sequence-error-then-ok.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20005-stat-sequence-error-then-ok.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20006-mkdir-ok-null-member-caught.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20006-mkdir-ok-null-member-caught.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20007-mkdir-err-errno-fn.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20007-mkdir-err-errno-fn.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20008-readfile-err-code-arrow.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20008-readfile-err-code-arrow.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20009-dns-err-typeof-code.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20009-dns-err-typeof-code.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20010-union-record-null-plain-read-caught.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20010-union-record-null-plain-read-caught.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20011-union-record-null-field-ok.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20011-union-record-null-field-ok.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20012-union-class-undefined-read-caught.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20012-union-class-undefined-read-caught.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20013-union-class-undefined-field-ok.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20013-union-class-undefined-field-ok.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20014-union-record-null-guarded.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20014-union-record-null-guarded.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20015-union-record-null-optional-chain.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20015-union-record-null-optional-chain.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20016-union-record-null-loop-catch.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20016-union-record-null-loop-catch.cjs"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20017-stat-err-ts-guarded.ts": {
+    "order": [
+     "<repo>/tests/corpus/20017-stat-err-ts-guarded.ts"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20018-readfile-err-ts-nonnull.ts": {
+    "order": [
+     "<repo>/tests/corpus/20018-readfile-err-ts-nonnull.ts"
+    ],
+    "diags": []
+   },
+   "<repo>/tests/corpus/20019-stat-err-ternary-chain.cjs": {
+    "order": [
+     "<repo>/tests/corpus/20019-stat-err-ternary-chain.cjs"
+    ],
+    "diags": []
+   }
  }
 }
