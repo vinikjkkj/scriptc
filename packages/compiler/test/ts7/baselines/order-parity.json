@@ -21977,6 +21977,146 @@
     "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/19100-fs-stat-enoent-stats-undefined-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19100-fs-stat-enoent-stats-undefined-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19101-fs-stat-enoent-size-throws-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19101-fs-stat-enoent-size-throws-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19102-fs-stat-enoent-size-throws-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19102-fs-stat-enoent-size-throws-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19103-fs-stat-success-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19103-fs-stat-success-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19104-fs-stat-success-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19104-fs-stat-success-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19105-fs-stat-enoent-errno-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/19105-fs-stat-enoent-errno-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19106-fs-stat-enoent-guard-ternary.ts": {
+   "order": [
+    "<repo>/tests/corpus/19106-fs-stat-enoent-guard-ternary.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19107-fs-stat-enoent-cjs-ternary.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19107-fs-stat-enoent-cjs-ternary.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19108-fs-stat-enoent-cjs-if-code.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19108-fs-stat-enoent-cjs-if-code.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19109-fs-stat-enoent-cjs-stats-only.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19109-fs-stat-enoent-cjs-stats-only.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19110-fs-stat-enoent-mtime-throws-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19110-fs-stat-enoent-mtime-throws-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19111-fs-stat-enoent-mode-throws-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19111-fs-stat-enoent-mode-throws-ts.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'mode' does not exist on type 'Stats'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/19111-fs-stat-enoent-mode-throws-ts.ts",
+      "start": 153,
+      "end": 157
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/19112-fs-stat-success-then-miss-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19112-fs-stat-success-then-miss-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19113-fs-stat-enoent-then-success-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19113-fs-stat-enoent-then-success-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19114-fs-stat-enoent-message-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19114-fs-stat-enoent-message-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19115-fs-stat-enoent-promises-rejects.ts": {
+   "order": [
+    "<repo>/tests/corpus/19115-fs-stat-enoent-promises-rejects.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19116-fs-stat-success-mode-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19116-fs-stat-success-mode-ts.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'mode' does not exist on type 'Stats'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/19116-fs-stat-success-mode-ts.ts",
+      "start": 96,
+      "end": 100
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/19117-fs-stat-enoent-guard-cjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19117-fs-stat-enoent-guard-cjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19118-fs-stat-enoent-typeof-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/19118-fs-stat-enoent-typeof-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/19119-fs-stat-success-cjs-size.cjs": {
+   "order": [
+    "<repo>/tests/corpus/19119-fs-stat-success-cjs-size.cjs"
+   ],
+   "diags": []
   }
  }
 }
