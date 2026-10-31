@@ -3579,6 +3579,16 @@ export type IrLibFn =
    * callee throws Node's "<name> is not a constructor". In the may-throw
    * seed set. */
   | "dyn.construct"
+  /** `Reflect.apply(target, thisArg, argumentsList)` over a checked-dynamic
+   * target (args: target, thisArg, list, all borrowed dyn; result owned dyn).
+   * Node's exact TypeErrors (a non-callable target, a non-object list) come
+   * from the runtime; the call runs with thisArg as the receiver. MAY THROW. */
+  | "dyn.reflectApply"
+  /** `Reflect.construct(target, argumentsList)` over a checked-dynamic target
+   * (args: target, list; result owned dyn). newTarget is the target: the
+   * lowering refuses every other newTarget at build time. A non-constructor
+   * target throws Node's "<V8 rendering> is not a constructor". MAY THROW. */
+  | "dyn.reflectConstruct"
   /** `v instanceof f` over a checked-dynamic value and a boxed FUNCTION
    * value (args: both borrowed dyn; result bool). JS's
    * OrdinaryHasInstance: walk the value's [[Prototype]] chain looking for
@@ -11258,6 +11268,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
           node.fn === "dyn.captureStack" ||
           node.fn === "dyn.proxyNew" || node.fn === "dyn.proxyRevocable" ||
           node.fn === "dyn.reflectSet" || node.fn === "dyn.reflectDelete" ||
+          node.fn === "dyn.reflectApply" || node.fn === "dyn.reflectConstruct" ||
           node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs" ||
           node.fn === "dyn.cloneOwn" || node.fn === "cls.propsClone" ||
           // The per-instance property table of a compiled class instance
@@ -13357,6 +13368,8 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["dyn.captureStack", "checked-dynamic prototype dispatch"],
   ["dyn.reflectDefine", "checked-dynamic prototype dispatch"],
   ["dyn.reflectSet", "checked-dynamic prototype dispatch"],
+  ["dyn.reflectApply", "checked-dynamic prototype dispatch"],
+  ["dyn.reflectConstruct", "checked-dynamic prototype dispatch"],
   ["dyn.reflectDelete", "checked-dynamic prototype dispatch"],
   ["dyn.proxyNew", "checked-dynamic prototype dispatch"],
   ["dyn.proxyRevocable", "checked-dynamic prototype dispatch"],
@@ -13930,6 +13943,11 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // `new f(...)` throws "is not a constructor", and the constructor BODY
   // throws whatever it throws — through the boxed thunk, catchably
   "dyn.construct",
+  // Reflect.apply / Reflect.construct over a dyn target: the callable and
+  // constructor checks and the list conversion throw Node's TypeErrors, and
+  // the call itself throws whatever the target throws
+  "dyn.reflectApply",
+  "dyn.reflectConstruct",
   // `v instanceof f` throws THREE of JS's TypeErrors, all of them about
   // the right operand: not an object, not callable, and a `prototype`
   // that is not an object. Only a primitive LEFT operand is a false.

@@ -1023,6 +1023,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.hasKey": "scr_dyn_has_key_full",
   "dyn.invokePack": "scr_dyn_invoke_pack",
   "dyn.construct": "scr_dyn_construct",
+  "dyn.reflectApply": "scr_dyn_reflect_apply",
+  "dyn.reflectConstruct": "scr_dyn_reflect_construct",
   "dyn.instanceOf": "scr_dyn_instance_of",
   "dyn.defineProps": "scr_dyn_define_props",
   "dyn.defineProp": "scr_dyn_define_prop",
