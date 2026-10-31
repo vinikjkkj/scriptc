@@ -1218,6 +1218,232 @@ ScrDyn *scr_fs_rename_cb(const ScrDyn *oldp, const ScrDyn *newp, const ScrDyn *c
   return scr_dyn_retain(scr_dyn_undefined());
 }
 
+/* ── exact ERR_* renderings for the four callback writers ────────────
+ * Node renders a received value with inspect: a string is quoted and
+ * escaped (strEscape, quote chosen by content), -0 prints as -0, and a
+ * type error truncates a string to 25 characters and "..." (Node's
+ * determineSpecificType). The shared inspect-lite does none of that, so the
+ * four members render their own values here. The build fences their
+ * argument kinds to string, number, null, undefined (functions in callback
+ * slots), so only these kinds reach the renderers. Node's C++ binding
+ * asserts on a negative zero in an int32, uint32 or length slot: those
+ * values abort the process at the binding, after every JS check. */
+
+static bool fs_negzero(double v) { return v == 0 && signbit(v); }
+
+static void fs_abort_negzero(const char *what) {
+  fprintf(stderr, "Assertion failed: %s (negative zero reached the binding)\n", what);
+  abort();
+}
+
+/* A number as Node's ERR_* message shows it. sep: ERR_OUT_OF_RANGE's
+ * numeric separators for a large integer (the sites that show them). */
+static void fs_num_text(double v, bool sep, char *out, size_t cap) {
+  if (fs_negzero(v)) {
+    snprintf(out, cap, "-0");
+    return;
+  }
+  if (sep) {
+    scr_num_received(v, out);
+    return;
+  }
+  scr_f64_to_str(v, out);
+}
+
+/* strEscape: the quote is ' unless the text has one, then " if it has no ",
+ * else ` if it has no ` or ${, else ' with \' escapes. Control characters
+ * and backslashes escape as Node's meta table does. */
+static char *fs_inspect_bytes(const char *d, size_t n, size_t *outn) {
+  bool sq = memchr(d, '\'', n) != NULL;
+  bool dq = memchr(d, '"', n) != NULL;
+  bool bt = memchr(d, '`', n) != NULL;
+  bool dollar = false;
+  for (size_t i = 0; i + 1 < n && !dollar; i++) dollar = d[i] == '$' && d[i + 1] == '{';
+  char q = '\'';
+  if (sq) {
+    if (!dq) q = '"';
+    else if (!bt && !dollar) q = '`';
+  }
+  char *out = malloc(n * 4 + 4);
+  size_t k = 0;
+  out[k++] = q;
+  for (size_t i = 0; i < n; i++) {
+    unsigned char c = (unsigned char)d[i];
+    if (c == '\\') {
+      out[k++] = '\\';
+      out[k++] = '\\';
+    } else if (c == '\'' && q == '\'') {
+      out[k++] = '\\';
+      out[k++] = '\'';
+    } else if (c < 0x20 || c == 0x7f) {
+      if (c == 8) k += (size_t)sprintf(out + k, "\\b");
+      else if (c == 9) k += (size_t)sprintf(out + k, "\\t");
+      else if (c == 10) k += (size_t)sprintf(out + k, "\\n");
+      else if (c == 12) k += (size_t)sprintf(out + k, "\\f");
+      else if (c == 13) k += (size_t)sprintf(out + k, "\\r");
+      else k += (size_t)sprintf(out + k, "\\x%02X", c);
+    } else if (c == 0xC2 && i + 1 < n && (unsigned char)d[i + 1] >= 0x80 && (unsigned char)d[i + 1] <= 0x9f) {
+      k += (size_t)sprintf(out + k, "\\x%02X", (unsigned char)d[i + 1]);
+      i++;
+    } else {
+      out[k++] = (char)c;
+    }
+  }
+  out[k++] = q;
+  out[k] = 0;
+  *outn = k;
+  return out;
+}
+
+/* determineSpecificType's string: the quote is chosen as strEscape chooses it,
+ * but the text is raw (no escapes): 'a<LF>b' stays raw, "it's" takes double quotes. */
+static char *fs_quote_raw(const char *d, size_t n, size_t *outn) {
+  bool sq = memchr(d, '\'', n) != NULL;
+  bool dq = memchr(d, '"', n) != NULL;
+  bool bt = memchr(d, '`', n) != NULL;
+  bool dollar = false;
+  for (size_t i = 0; i + 1 < n && !dollar; i++) dollar = d[i] == '$' && d[i + 1] == '{';
+  char q = '\'';
+  if (sq) {
+    if (!dq) q = '"';
+    else if (!bt && !dollar) q = '`';
+  }
+  char *out = malloc(n + 3);
+  out[0] = q;
+  memcpy(out + 1, d, n);
+  out[n + 1] = q;
+  out[n + 2] = 0;
+  *outn = n + 2;
+  return out;
+}
+
+/* A string value as ERR_INVALID_ARG_VALUE shows it: the whole text, inspected. */
+static char *fs_inspect_str(const ScrStr *s, size_t *outn) {
+  return fs_inspect_bytes((const char *)s->data, s->len, outn);
+}
+
+/* ERR_INVALID_ARG_TYPE for a received value. Strings and numbers render as
+ * determineSpecificType does; null and undefined keep the shared text. */
+static void fs_type_fail(const char *name, const char *expected, const ScrDyn *v) {
+  if (v->kind != SCR_DYN_STR && v->kind != SCR_DYN_NUM) {
+    scr_dyn_arg_type_fail(name, expected, v);
+    return;
+  }
+  char detail[200];
+  char *inspected = NULL;
+  size_t in = 0;
+  if (v->kind == SCR_DYN_STR) {
+    size_t n = v->v.str->len;
+    char tmp[40];
+    size_t tl = n;
+    if (n > 28) {
+      memcpy(tmp, v->v.str->data, 25);
+      memcpy(tmp + 25, "...", 3);
+      tl = 28;
+    } else {
+      memcpy(tmp, v->v.str->data, n);
+    }
+    inspected = fs_quote_raw(tmp, tl, &in);
+    snprintf(detail, sizeof detail, "type string (%.*s)", (int)in, inspected);
+  } else {
+    char num[64];
+    fs_num_text(v->v.num, false, num, sizeof num);
+    snprintf(detail, sizeof detail, "type number (%s)", num);
+  }
+  char msg[400];
+  int len = snprintf(msg, sizeof msg, "The \"%s\" argument must be %s. Received %s", name, expected, detail);
+  if (inspected != NULL) free(inspected);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)len, "ERR_INVALID_ARG_TYPE");
+}
+
+/* ERR_INVALID_ARG_VALUE: "The argument 'x' <reason>. Received <inspected>". */
+static void fs_value_fail(const char *name, const char *reason, const ScrDyn *v) {
+  if (v->kind != SCR_DYN_STR && v->kind != SCR_DYN_NUM) {
+    scr_dyn_arg_value_fail(name, reason, v);
+    return;
+  }
+  char *inspected = NULL;
+  size_t in = 0;
+  char num[64];
+  const char *shown;
+  if (v->kind == SCR_DYN_STR) {
+    inspected = fs_inspect_str(v->v.str, &in);
+    shown = inspected;
+  } else {
+    fs_num_text(v->v.num, false, num, sizeof num);
+    shown = num;
+  }
+  char *msg = malloc(strlen(shown) + strlen(reason) + strlen(name) + 96);
+  int len = sprintf(msg, "The argument '%s' %s. Received %s", name, reason, shown);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)len, "ERR_INVALID_ARG_VALUE");
+  free(msg);
+  if (inspected != NULL) free(inspected);
+}
+
+/* ERR_OUT_OF_RANGE: "The value of 'x' is out of range. It must be <range>. Received <n>". */
+static void fs_range_fail(const char *name, const char *range, double v, bool sep) {
+  char recv[96];
+  fs_num_text(v, sep, recv, sizeof recv);
+  char msg[320];
+  int len = snprintf(msg, sizeof msg, "The value of \"%s\" is out of range. It must be %s. Received %s", name, range, recv);
+  scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+}
+
+/* validateInt32/validateInteger: type, then an integer, then the range. */
+static bool fs_int_chk(const ScrDyn *v, const char *name, double min, double max, const char *range, bool sep) {
+  if (v->kind != SCR_DYN_NUM) {
+    fs_type_fail(name, "of type number", v);
+    return false;
+  }
+  double n = v->v.num;
+  if (!(isfinite(n) && trunc(n) == n)) {
+    fs_range_fail(name, "an integer", n, sep);
+    return false;
+  }
+  if (n < min || n > max) {
+    fs_range_fail(name, range, n, sep);
+    return false;
+  }
+  return true;
+}
+
+/* parseFileMode (no default here: the callers resolve an absent mode). */
+static bool fs_mode_chk(const ScrDyn *m, const char *name, bool sep) {
+  if (m->kind == SCR_DYN_STR) {
+    const ScrStr *s = m->v.str;
+    bool octal = s->len > 0;
+    for (size_t i = 0; octal && i < s->len; i++) {
+      if (s->data[i] < '0' || s->data[i] > '7') octal = false;
+    }
+    if (octal) return true;
+    fs_value_fail(name, "must be a 32-bit unsigned integer or an octal string", m);
+    return false;
+  }
+  if (m->kind != SCR_DYN_NUM) {
+    fs_type_fail(name, "of type number", m);
+    return false;
+  }
+  return fs_int_chk(m, name, 0, 4294967295.0, ">= 0 && <= 4294967295", sep);
+}
+
+static bool fs_path_chk(const ScrDyn *p, const char *name) {
+  if (p->kind == SCR_DYN_STR || p->kind == SCR_DYN_BYTES) return true;
+  fs_type_fail(name, "of type string or an instance of Buffer or URL", p);
+  return false;
+}
+
+static bool fs_cb_chk(const ScrDyn *cb, const char *name) {
+  if (cb->kind == SCR_DYN_FUNC) return true;
+  fs_type_fail(name, "of type function", cb);
+  return false;
+}
+
+/* The open flags: a number must be an int32 (validateInt32's shape with
+ * Node's separators), a string must be a known flag (checked by the caller). */
+static bool fs_flags_num_chk(const ScrDyn *f) {
+  return fs_int_chk(f, "flags", -2147483648.0, 2147483647.0, ">= -2147483648 && <= 2147483647", true);
+}
+
 /* ── the callback forms of open, close, write and chmod ───────────────
  * Node's ladders (lib/fs.js of v24.15.0, read from the function sources):
  * open's argument count picks the callback slot, the path, the mode and the
@@ -1272,23 +1498,8 @@ static void scr_fs_open_fire(ScrClosure *self) {
   scr_dyn_release(cb);
 }
 
-/* The ERR_INVALID_ARG_VALUE for a bad flags value. inspect-lite cannot
- * render an empty object or array (it sketches them as { ... } and [ ... ]),
- * and Node prints {} and []; those two shapes are spelled here. */
 static void scr_fs_flags_fail(const ScrDyn *flags) {
-  if (flags->kind == SCR_DYN_OBJ || flags->kind == SCR_DYN_ARR) {
-    ScrDyn *keys = flags->kind == SCR_DYN_OBJ ? scr_dyn_obj_keys(flags) : NULL;
-    bool empty = flags->kind == SCR_DYN_ARR ? scr_dyn_arr_len(flags) == 0 : scr_dyn_arr_len(keys) == 0;
-    if (keys != NULL) scr_dyn_release(keys);
-    if (empty) {
-      const char *shown = flags->kind == SCR_DYN_OBJ ? "{}" : "[]";
-      char msg[160];
-      int len = snprintf(msg, sizeof msg, "The argument 'flags' is invalid. Received %s", shown);
-      scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)len, "ERR_INVALID_ARG_VALUE");
-      return;
-    }
-  }
-  scr_dyn_arg_value_fail("flags", "is invalid", flags);
+  fs_value_fail("flags", "is invalid", flags);
 }
 
 /* fs.open(path, flags, mode, callback) with argc the count the caller wrote.
@@ -1297,7 +1508,7 @@ static void scr_fs_flags_fail(const ScrDyn *flags) {
  * then stringToFlags (flags), then the callback. */
 ScrDyn *scr_fs_open_cb(const ScrDyn *path, const ScrDyn *flags0, const ScrDyn *mode0, const ScrDyn *cb0,
                        double argc) {
-  if (!scr_fs_path_chk(path, "path")) return NULL;
+  if (!fs_path_chk(path, "path")) return NULL;
   const ScrDyn *cb = cb0;
   double m = 0666;
   double bits = 0; /* 'r' */
@@ -1307,10 +1518,11 @@ ScrDyn *scr_fs_open_cb(const ScrDyn *path, const ScrDyn *flags0, const ScrDyn *m
     if (mode0->kind == SCR_DYN_FUNC) {
       cb = mode0;
     } else if (!scr_fs_dyn_absent(mode0)) {
-      if (!scr_fs_mode_chk(mode0, "mode")) return NULL;
+      if (!fs_mode_chk(mode0, "mode", true)) return NULL;
       m = mode0->kind == SCR_DYN_NUM ? mode0->v.num : (double)strtol(mode0->v.str->data, NULL, 8);
     }
     if (flags0->kind == SCR_DYN_NUM) {
+      if (!fs_flags_num_chk(flags0)) return NULL;
       bits = flags0->v.num;
     } else if (!scr_fs_dyn_absent(flags0)) {
       int b = flags0->kind == SCR_DYN_STR ? scr_fs_flag_bits(flags0->v.str) : -1;
@@ -1321,7 +1533,9 @@ ScrDyn *scr_fs_open_cb(const ScrDyn *path, const ScrDyn *flags0, const ScrDyn *m
       bits = (double)b;
     }
   }
-  if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+  if (!fs_cb_chk(cb, "cb")) return NULL;
+  if (argc >= 3 && flags0->kind == SCR_DYN_NUM && fs_negzero(flags0->v.num)) fs_abort_negzero("open flags");
+  if (argc >= 3 && mode0->kind == SCR_DYN_NUM && fs_negzero(mode0->v.num)) fs_abort_negzero("open mode");
   ScrDyn *vals[4];
   vals[0] = (ScrDyn *)path;
   vals[1] = scr_dyn_new_num(bits);
@@ -1348,8 +1562,8 @@ static void scr_fs_close_fire(ScrClosure *self) {
 
 ScrDyn *scr_fs_close_cb(const ScrDyn *fd, const ScrDyn *cb) {
   bool dflt = cb->kind == SCR_DYN_UNDEF;
-  if (!dflt && !scr_fs_cb_chk(cb, "cb")) return NULL;
-  if (!scr_fs_int_range_chk(fd, "fd", 0, 2147483647.0, ">= 0 && <= 2147483647")) return NULL;
+  if (!dflt && !fs_cb_chk(cb, "cb")) return NULL;
+  if (!fs_int_chk(fd, "fd", 0, 2147483647.0, ">= 0 && <= 2147483647", false)) return NULL;
   const ScrDyn *vals[2] = {fd, cb};
   scr_set_timeout(scr_fs_cb_closure(scr_fs_close_fire, 2, vals), 0);
   return scr_dyn_retain(scr_dyn_undefined());
@@ -1450,7 +1664,7 @@ static bool scr_fs_write_buffer_chk(const ScrDyn *fd, const ScrDyn *buffer, cons
   if (offv->kind == SCR_DYN_NULL || offv->kind == SCR_DYN_UNDEF || offv->kind == SCR_DYN_FUNC) {
     scr_dyn_release(offv);
     offv = scr_dyn_new_num(0);
-  } else if (!scr_fs_int_range_chk(offv, "offset", 0, 9007199254740991.0, ">= 0 && <= 9007199254740991")) {
+  } else if (!fs_int_chk(offv, "offset", 0, 9007199254740991.0, ">= 0 && <= 9007199254740991", true)) {
     goto fail;
   }
   double offset = offv->v.num;
@@ -1458,27 +1672,28 @@ static bool scr_fs_write_buffer_chk(const ScrDyn *fd, const ScrDyn *buffer, cons
   double length = lenv->kind == SCR_DYN_NUM ? lenv->v.num : blen - offset;
   char recv[48], msg[192];
   if (offset > blen) {
-    scr_num_received(offset, recv);
+    fs_num_text(offset, true, recv, sizeof recv);
     int n = snprintf(msg, sizeof msg, "The value of \"offset\" is out of range. It must be <= %.0f. Received %s", blen, recv);
     scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
     goto fail;
   }
   if (length > blen - offset) {
-    scr_num_received(length, recv);
+    fs_num_text(length, true, recv, sizeof recv);
     int n = snprintf(msg, sizeof msg, "The value of \"length\" is out of range. It must be <= %.0f. Received %s", blen - offset, recv);
     scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
     goto fail;
   }
   if (length < 0) {
-    scr_num_received(length, recv);
+    fs_num_text(length, true, recv, sizeof recv);
     int n = snprintf(msg, sizeof msg, "The value of \"length\" is out of range. It must be >= 0. Received %s", recv);
     scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
     goto fail;
   }
   ScrDyn *ln = scr_dyn_new_num(length);
-  bool lenok = scr_fs_int_range_chk(ln, "length", 0, 2147483647.0, ">= 0 && <= 2147483647");
+  bool lenok = fs_int_chk(ln, "length", 0, 2147483647.0, ">= 0 && <= 2147483647", true);
   scr_dyn_release(ln);
   if (!lenok) goto fail;
+  if (fs_negzero(length)) fs_abort_negzero("write length");
   double pos = scr_fs_write_offset_of(posv);
   scr_dyn_release(offv);
   scr_dyn_release(lenv);
@@ -1497,21 +1712,21 @@ fail:
 /* The six positional slots of fs.write, as Node's parameters. */
 ScrDyn *scr_fs_write_cb(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2, const ScrDyn *a3,
                         const ScrDyn *a4, const ScrDyn *cb0) {
-  if (!scr_fs_int_range_chk(fd, "fd", 0, 2147483647.0, ">= 0 && <= 2147483647")) return NULL;
+  if (!fs_int_chk(fd, "fd", 0, 2147483647.0, ">= 0 && <= 2147483647", true)) return NULL;
   ScrDyn *data, *offv = NULL, *lenv = NULL, *posv = NULL, *shown;
   const ScrDyn *cb;
   if (buffer->kind == SCR_DYN_BYTES) {
     /* callback ||= position || length || offset */
     cb = cb0;
     if (!scr_dyn_truthy(cb)) cb = scr_dyn_truthy(a4) ? a4 : scr_dyn_truthy(a3) ? a3 : a2;
-    if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+    if (!fs_cb_chk(cb, "cb")) return NULL;
     if (!scr_fs_write_buffer_chk(fd, buffer, a2, a3, a4, cb, &offv, &lenv, &posv)) return NULL;
     data = scr_dyn_retain((ScrDyn *)buffer);
     shown = scr_dyn_retain((ScrDyn *)buffer);
   } else {
     /* validateStringAfterArrayBufferView */
     if (buffer->kind != SCR_DYN_STR) {
-      scr_dyn_arg_type_fail("buffer", "of type string or an instance of Buffer, TypedArray, or DataView", buffer);
+      fs_type_fail("buffer", "of type string or an instance of Buffer, TypedArray, or DataView", buffer);
       return NULL;
     }
     const ScrDyn *offset = a2, *length = a3, *position = a4;
@@ -1540,12 +1755,12 @@ ScrDyn *scr_fs_write_cb(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2
       if (units % 2 != 0) {
         char reason[80];
         snprintf(reason, sizeof reason, "is invalid for data of length %zu", units);
-        scr_dyn_arg_value_fail("encoding", reason, length);
+        fs_value_fail("encoding", reason, length);
         return NULL;
       }
     }
     cb = position;
-    if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+    if (!fs_cb_chk(cb, "cb")) return NULL;
     ScrStr *enc = scr_str_new(canon, strlen(canon));
     ScrBytes *b = scr_bytes_from_str(buffer->v.str, enc);
     scr_str_release(enc);
@@ -1597,9 +1812,10 @@ static void scr_fs_chmod_cb_fire(ScrClosure *self) {
 /* chmod(path, mode, callback): path, then parseFileMode (no default), then
  * the callback. */
 ScrDyn *scr_fs_chmod_cb(const ScrDyn *path, const ScrDyn *mode0, const ScrDyn *cb) {
-  if (!scr_fs_path_chk(path, "path")) return NULL;
-  if (!scr_fs_mode_chk(mode0, "mode")) return NULL;
-  if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+  if (!fs_path_chk(path, "path")) return NULL;
+  if (!fs_mode_chk(mode0, "mode", true)) return NULL;
+  if (!fs_cb_chk(cb, "cb")) return NULL;
+  if (mode0->kind == SCR_DYN_NUM && fs_negzero(mode0->v.num)) fs_abort_negzero("chmod mode");
   ScrDyn *m = scr_dyn_new_num(mode0->kind == SCR_DYN_NUM ? mode0->v.num : (double)strtol(mode0->v.str->data, NULL, 8));
   ScrDyn *vals[3];
   vals[0] = (ScrDyn *)path;
