@@ -2010,7 +2010,7 @@ static JSValue isl_dynfn_new(const ScrDyn *d) {
   JSValue boxv = JS_NewObjectClass(isl_ctx, isl_dynfn_class_id);
   JS_SetOpaque(boxv, scr_dyn_retain((ScrDyn *)d));
   JSValueConst data[1] = {boxv};
-  JSValue fn = JS_NewCFunctionData(isl_ctx, isl_dynfn_invoke, (int)d->v.fn.arity, 0, 1, data);
+  JSValue fn = JS_NewCFunctionData(isl_ctx, isl_dynfn_invoke, (int)scr_dyn_fn_len(d), 0, 1, data);
   JS_FreeValue(isl_ctx, boxv); /* fn's func_data holds its own reference */
   return fn;
 }
