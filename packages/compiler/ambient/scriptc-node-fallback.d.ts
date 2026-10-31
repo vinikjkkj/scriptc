@@ -971,6 +971,12 @@ declare module "node:fs" {
   export function readFile(path: string | number, options: { encoding: BufferEncoding }, callback: (err: NodeJS.ErrnoException | null, data: string) => void): void;
   export function readFile(path: string | number, options: { encoding?: null } | null | undefined, callback: (err: NodeJS.ErrnoException | null, data: Buffer) => void): void;
   export function exists(path: string, callback: (exists: boolean) => void): void;
+  /* Last resort for a call Node answers at run time: an argument the
+   * declared forms do not admit (an object literal in the path or callback
+   * slot: fs.exists({}, cb) calls back false, fs.exists(p, {}) throws
+   * ERR_INVALID_ARG_TYPE) stays dynamic, so the ladder answers it exactly
+   * instead of the literal being typed by the declared parameter. */
+  export function exists(path: any, callback: any): void;
   export function mkdtemp(prefix: string, callback: (err: NodeJS.ErrnoException | null, folder: string) => void): void;
   export function mkdtemp(prefix: string, options: { encoding: BufferEncoding }, callback: (err: NodeJS.ErrnoException | null, folder: string) => void): void;
   export function mkdtemp(prefix: string, options: { encoding: "buffer" }, callback: (err: NodeJS.ErrnoException | null, folder: Buffer) => void): void;
