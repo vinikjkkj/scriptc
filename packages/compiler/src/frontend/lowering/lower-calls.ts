@@ -19,7 +19,7 @@ import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { siblingDtsMethodReturnKind } from "../npm.js";
 import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
-import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
+import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr, staticFnCodeOf, boundCodeOf } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
@@ -4820,12 +4820,14 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         ) {
           const name = jsFuncValueNameOf(L, a);
           const src = jsFuncValueSourceOf(L, a);
+          const code = staticFnCodeOf(L, a);
           const boxed: IrExpr = {
             kind: "dynFrom",
             value: lowered,
             type: DYN,
             ...(name !== null ? { fnName: name } : {}),
             ...(src !== null ? { fnSrc: src } : {}),
+            ...(code !== null ? { fnCode: code } : {}),
             loc,
           };
           return {
@@ -9902,6 +9904,7 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
       const lifted: IrFunction = {
         name: fnName,
         jsName,
+        valueCode: fnValueCodeOfNode(node),
         params,
         returnType: bodyReturn,
         locals: ctx.locals,
@@ -13590,6 +13593,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
       appendImplicitUndefinedReturn(L, body, bodyReturn, locOf(decl));
       const fn: IrFunction = {
         name: sig.name,
+        valueCode: fnValueCodeOfNode(decl),
         params,
         returnType: bodyReturn,
         locals: L.ctx.locals,
@@ -14812,7 +14816,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
             const boundArgs = call.arguments
               .slice(1)
               .map((a, i) => L.coerceInto(a, L.lowerExpr(a), (fn.type as { params: IrType[] }).params[i]!));
-            const bound = L.bindThisClosure(fn, thisArg, boundArgs, locOf(call));
+            const bound = L.bindThisClosure(fn, thisArg, boundArgs, locOf(call), true, boundCodeOf(L, call) ?? undefined);
             if (bound) return bound;
           }
         } else {
@@ -14850,7 +14854,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
             const boundArgs = call.arguments
               .slice(1)
               .map((a, i) => L.coerceInto(a, L.lowerExpr(a), (fn.type as { params: IrType[] }).params[i]!));
-            const bound = L.bindThisClosure(fn, thisArg, boundArgs, locOf(call), false);
+            const bound = L.bindThisClosure(fn, thisArg, boundArgs, locOf(call), false, boundCodeOf(L, call) ?? undefined);
             if (bound) {
               if (droppableStatic(thisArg) || bound.kind !== "seqExpr") return bound;
               return {
