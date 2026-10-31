@@ -1303,6 +1303,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.assignAll": { argTypes: [DYN, DYN], result: DYN },
   "dyn.objCreateNullProto": { argTypes: [], result: DYN },
   "dyn.errorProto": { argTypes: [], result: DYN },
+  "dyn.errorClass": { argTypes: [F64], result: DYN },
   "dyn.u8Ctor": { argTypes: [], result: DYN },
   "dyn.bufferValue": { argTypes: [F64], result: DYN },
   "dyn.webCrypto": { argTypes: [], result: DYN },

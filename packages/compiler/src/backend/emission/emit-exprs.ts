@@ -7553,6 +7553,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "dyn.bufferValue":
             // A builtin buffer-module member or the Buffer class as a value (+1).
             return finish(`scr_dyn_buffer_value(${arg(0)})`);
+          case "dyn.errorClass":
+            // A builtin error class as a VALUE (`TypeError` in a JS source): the kind's box (+1).
+            return finish(`scr_dyn_error_class_value(${arg(0)})`);
           case "dyn.errorProto":
             // `Error.prototype`: the process singleton (+1 per read, one
             // node per process — identity is what the chain walk and
