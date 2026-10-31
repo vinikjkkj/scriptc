@@ -1436,6 +1436,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   "timers.immediatePromise": "scr_immediate_promise",
   "http2.createServer": "scr_http2_create_server",
   "http2.createSecureServerDyn": "scr_http2_create_secure_server_dyn",
+  "http2.sessionRequest": "scr_http2_session_request",
+  "http2.sessionClose": "scr_http2_session_close",
+  "http2.sessionCloseCb": "scr_http2_session_close",
+  "http2.sessionDestroy": "scr_http2_session_destroy",
+  "http2.sessionOnClose": "scr_http2_session_on_close",
 };
 
 /** The rows whose runtime entry takes a trailing CONSTANT the IR does not
@@ -1492,6 +1497,7 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
   "dgram.bind": [{ decl: "ptr", arg: "ptr null" }],
   "dgram.connect": [{ decl: "ptr", arg: "ptr null" }],
   "http2.createSecureServerDyn": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
+  "http2.sessionClose": [{ decl: "ptr", arg: "ptr null" }],
 };
 
 /** The rows whose runtime entry TAKES OWNERSHIP of an argument — the
@@ -1533,6 +1539,8 @@ const LIB_FN_MOVE_ARGS: Record<string, readonly number[]> = {
   "wrtc.dcOnOpen": [1],
   "wrtc.dcOnClose": [1],
   "wrtc.dcOnError": [1],
+  "http2.sessionCloseCb": [1],
+  "http2.sessionOnClose": [1],
 };
 
 /** The rows where a STRING argument is handed to the runtime as its raw
@@ -1634,6 +1642,8 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "http2.createSecureServerH2Req",
   "http2.createSecureServerDyn",
   "http2.createSecureServerDynCb",
+  "http2.connect",
+  "http2.connectCb",
 ]);
 
 
@@ -18590,6 +18600,70 @@ class LlEmitter {
       // the receiver and callback temps evaluate (JS evaluates them) and
       // release through the ordinary temp lifecycle; no runtime call, as in the C tier.
       for (const a of e.args) this.emitExpr(a);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "http2.sessionOnConnect") {
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: http2.sessionOnConnect listener not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const sym = cbT.params.length >= 2 ? "scr_http2_connect_thunk2"
+        : cbT.params.length === 1 ? "scr_http2_connect_thunk1"
+        : "scr_http2_connect_thunk0";
+      this.declare(`declare void @${sym}(ptr, ptr, ptr)`);
+      this.declare(`declare void @scr_http2_session_on_connect(ptr, ptr, ptr, i1 zeroext)`);
+      B.line(`call void @scr_http2_session_on_connect(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${sym}, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "http2.connect" || e.fn === "http2.connectCb") {
+      // scr_http2_connect(url, reject_unauthorized, ca data, ca len, cb, fn):
+      // the CA is the string argument's raw bytes and length (the C tier's
+      // ->data / ->len); the listener, when present, moves into the session.
+      const args = e.args.map((a) => this.emitExpr(a));
+      let cb = "null";
+      let adapter = "null";
+      if (e.fn === "http2.connectCb") {
+        const cbT = e.args[3]!.type;
+        if (cbT.kind !== "func") throw new Error("llvm emitter bug: http2.connectCb listener not a func");
+        this.moveTemp(args[3]!);
+        cb = args[3]!.name;
+        const sym = cbT.params.length >= 2 ? "scr_http2_connect_thunk2"
+          : cbT.params.length === 1 ? "scr_http2_connect_thunk1"
+          : "scr_http2_connect_thunk0";
+        this.declare(`declare void @${sym}(ptr, ptr, ptr)`);
+        adapter = `@${sym}`;
+      }
+      const ca = this.pemDataLen(e.fn, args[2]!);
+      this.declare(`declare ptr @scr_http2_connect(ptr, i1 zeroext, ptr, i64, ptr, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_http2_connect(ptr ${args[0]!.name}, i1 ${args[1]!.name}, ptr ${ca.data}, i64 ${ca.len}, ptr ${cb}, ptr ${adapter})`);
+      const out = this.own({ name: t, type: e.type });
+      this.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "http2.sessionOnError" || e.fn === "http2.streamOnError") {
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error(`llvm emitter bug: ${e.fn} listener not a func`);
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const adapter = cbT.params.length === 0 ? "scr_child_err_thunk0" : "scr_child_err_thunk_error";
+      const entry = e.fn === "http2.sessionOnError" ? "scr_http2_session_on_error" : "scr_http2_stream_on_error";
+      this.declare(`declare void @${adapter}(ptr, ptr)`);
+      this.declare(`declare void @${entry}(ptr, ptr, ptr, i1 zeroext)`);
+      B.line(`call void @${entry}(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${adapter}, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "http2.sessionOnGoaway") {
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: http2.sessionOnGoaway listener not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const sym = cbT.params.length >= 2 ? "scr_http2_goaway_thunk2"
+        : cbT.params.length === 1 ? "scr_http2_goaway_thunk1"
+        : "scr_http2_goaway_thunk0";
+      this.declare(`declare void @${sym}(ptr, double, double)`);
+      this.declare(`declare void @scr_http2_session_on_goaway(ptr, ptr, ptr, i1 zeroext)`);
+      B.line(`call void @scr_http2_session_on_goaway(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${sym}, i1 ${args[2]!.name})`);
       return { name: "", type: e.type };
     }
     if (e.fn === "https.createServerDynCb") {
