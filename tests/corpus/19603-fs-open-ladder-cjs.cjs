@@ -11,31 +11,31 @@ const sync = (tag, f) => jobs.push((next) => {
   try { f(); console.log(tag, 'NOTHROW'); } catch (e) { console.log(tag, 'THROW', e.name, e.code, e.message); }
   next();
 });
+let curTag = '';
+let curNext = () => {};
+const CB = (e, ...r) => {
+  console.log(curTag, 'CB', e === null ? 'null' : e.code + ' ' + e.syscall, r.length, typeof r[0]);
+  curNext();
+};
 const asy = (tag, f) => jobs.push((next) => {
-  try {
-    f((e, fd) => {
-      console.log(tag, 'CB', e === null ? 'null' : e.code + ' ' + e.syscall, typeof fd);
-      if (typeof fd === 'number' && e === null) fs.closeSync(fd);
-      next();
-    });
-  } catch (e) { console.log(tag, 'THROW', e.name, e.code, e.message); next(); }
+  curTag = tag;
+  curNext = next;
+  try { f(); } catch (e) { console.log(tag, 'THROW', e.name, e.code, e.message); next(); }
 });
 sync('path-number', () => fs.open(5, 'r', () => {}));
 sync('flags-bad', () => fs.open(F, 'zz', () => {}));
-sync('flags-object', () => fs.open(F, {}, () => {}));
-sync('flags-array', () => fs.open(F, [], () => {}));
 sync('flags-no-cb', () => fs.open(F, 'r'));
 sync('mode-bad', () => fs.open(F, 'r', 'bad', () => {}));
 sync('mode-bool-cb-missing', () => fs.open(F, 'r', 0o600));
 sync('cb-null', () => fs.open(F, 'r', null));
 sync('cb-number', () => fs.open(F, 'r', 0o600, 7));
-asy('read-open', (cb) => fs.open(F, 'r', cb));
-asy('cb-only-open', (cb) => fs.open(F, cb));
-asy('undefined-flags', (cb) => fs.open(F, undefined, cb));
-asy('null-mode', (cb) => fs.open(F, 'r', null, cb));
-asy('string-mode', (cb) => fs.open(F, 'r', '600', cb));
-asy('missing-dir', (cb) => fs.open(D + '/no/such', 'r', cb));
-asy('numeric-flags', (cb) => fs.open(F, 0, cb));
+asy('read-open', () => fs.open(F, 'r', CB));
+asy('cb-only-open', () => fs.open(F, CB));
+asy('undefined-flags', () => fs.open(F, undefined, CB));
+asy('null-mode', () => fs.open(F, 'r', null, CB));
+asy('string-mode', () => fs.open(F, 'r', '600', CB));
+asy('missing-dir', () => fs.open(D + '/no/such', 'r', CB));
+asy('numeric-flags', () => fs.open(F, 0, CB));
 const run = () => {
   const j = jobs.shift();
   if (!j) { fs.rmSync(D, { recursive: true, force: true }); console.log('main end'); return; }

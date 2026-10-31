@@ -11,10 +11,16 @@ const sync = (tag, f) => jobs.push((next) => {
   try { f(); console.log(tag, 'NOTHROW'); } catch (e) { console.log(tag, 'THROW', e.name, e.code, e.message); }
   next();
 });
+let curTag = '';
+let curNext = () => {};
+const CB = (e, ...r) => {
+  console.log(curTag, 'CB', e === null ? 'null' : e.code + ' ' + e.syscall, r.length, r[0]);
+  curNext();
+};
 const asy = (tag, f) => jobs.push((next) => {
-  try {
-    f((e, ...r) => { console.log(tag, 'CB', e === null ? 'null' : e.code + ' ' + e.syscall, r.length, r[0]); next(); });
-  } catch (e) { console.log(tag, 'THROW', e.name, e.code, e.message); next(); }
+  curTag = tag;
+  curNext = next;
+  try { f(); } catch (e) { console.log(tag, 'THROW', e.name, e.code, e.message); next(); }
 });
 const buf = Buffer.from('ABCDEFGH');
 const fd = fs.openSync(F, 'r+');
@@ -43,12 +49,12 @@ sync('chmod-badmode', () => fs.chmod(F, 'zz', () => {}));
 sync('chmod-negmode', () => fs.chmod(F, -1, () => {}));
 sync('chmod-nocb', () => fs.chmod(F, 0o600));
 sync('chmod-path-number', () => fs.chmod(7, 0o600, () => {}));
-asy('w-ebadf', (cb) => fs.write(987654, 'x', cb));
-asy('w-buf-ebadf', (cb) => fs.write(987654, buf, 0, 2, null, cb));
-asy('close-ebadf', (cb) => fs.close(987654, cb));
-asy('chmod-enoent', (cb) => fs.chmod(D + '/none', 0o600, cb));
-asy('w-ok-after', (cb) => fs.write(fd, buf, 0, 3, 0, cb));
-asy('close-ok', (cb) => fs.close(fd, cb));
+asy('w-ebadf', () => fs.write(987654, 'x', CB));
+asy('w-buf-ebadf', () => fs.write(987654, buf, 0, 2, null, CB));
+asy('close-ebadf', () => fs.close(987654, CB));
+asy('chmod-enoent', () => fs.chmod(D + '/none', 0o600, CB));
+asy('w-ok-after', () => fs.write(fd, buf, 0, 3, 0, CB));
+asy('close-ok', () => fs.close(fd, CB));
 const run = () => {
   const j = jobs.shift();
   if (!j) { fs.rmSync(D, { recursive: true, force: true }); console.log('main end'); return; }
