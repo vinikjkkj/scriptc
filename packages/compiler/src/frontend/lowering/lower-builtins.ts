@@ -1127,6 +1127,44 @@ function fsOptionsKindFence(L: Lowerer, fn: string, node: ts.Expression | undefi
   }
 }
 
+/** writeFile/appendFile: the options slot of the four-argument form must be
+ * PROVABLY signal-free. An AbortSignal in options would abort the write in Node
+ * (cb(AbortError), and no write for a signal aborted before the open); no
+ * runtime checks it. The slot admits undefined/null, a string (the encoding), a
+ * number or boolean (no object can carry a signal), and a literal object with
+ * no `signal` member, no spread and no computed key. Anything else (a variable,
+ * a call, a spread literal) fences. The three-argument form is never checked:
+ * Node's `callback ||= options` makes the third slot the callback. */
+function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpression): void {
+  const args = expr.arguments;
+  // Node's `callback ||= options`: in the three-argument form the third slot IS
+  // the callback, so no options object can take effect there.
+  if (args.length < 4) return;
+  const opt: ts.Expression | undefined = args[2];
+  if (opt === undefined) return;
+  let ok = false;
+  if (opt.kind === ts.SyntaxKind.NullKeyword || ts.isStringLiteral(opt) || ts.isNumericLiteral(opt) ||
+      opt.kind === ts.SyntaxKind.TrueKeyword || opt.kind === ts.SyntaxKind.FalseKeyword ||
+      (ts.isIdentifier(opt) && opt.text === "undefined")) {
+    ok = true;
+  } else if (ts.isObjectLiteralExpression(opt)) {
+    ok = opt.properties.every((p) => {
+      if (ts.isSpreadAssignment(p)) return false;
+      const name = p.name;
+      if (!name || ts.isComputedPropertyName(name)) return false;
+      const text = ts.isIdentifier(name) || ts.isStringLiteral(name) ? name.text : undefined;
+      return text !== "signal";
+    });
+  }
+  if (!ok) {
+    L.noLowering(
+      `${fn} with options that are not provably signal-free`,
+      opt,
+      "an AbortSignal in the options would abort the write; only a literal options object without signal (or a string / undefined) lowers",
+    );
+  }
+}
+
   export function lowerFsLadderCall(L: Lowerer, expr: ts.CallExpression,
     bi: { module: string; member: string },
     loc: SrcLoc,): IrExpr | null {
@@ -1261,6 +1299,7 @@ function fsOptionsKindFence(L: Lowerer, fn: string, node: ts.Expression | undefi
         // writeFile(file, data[, options], callback): the four slots cross as
         // dyn values and the runtime resolves the callback (callback || options).
         if (args.length > 4) return null;
+        fsWriteOptionsSignalFree(L, `fs.${bi.member}`, expr);
         fsOptionsKindFence(L, `fs.${bi.member}`, args[2], {
           encoding: ts.TypeFlags.StringLike,
           mode: ts.TypeFlags.NumberLike | ts.TypeFlags.StringLike,
