@@ -899,6 +899,38 @@ ScrBigInt *scr_big_from_dyn(const ScrDyn *d) { return scr_big_to_bigint_impl(d, 
  * is a TypeError. */
 ScrBigInt *scr_big_to_bigint(const ScrDyn *d) { return scr_big_to_bigint_impl(d, true); }
 
+/* BigInt.asIntN / BigInt.asUintN over two checked-dynamic operands, in the
+ * spec's order: ToIndex(bits) first (ToNumber, then the RangeError), THEN
+ * ToBigInt(value) (the TypeError), THEN the operation. Both operands are
+ * conversions that can throw, so the order has to live in one call: an
+ * arrangement that converted the value first would answer Node's TypeError
+ * for an invalid width too (measured on main: asUintN(-1, 5) printed
+ * "Cannot convert 5 to a BigInt" where Node prints the RangeError). Borrows
+ * both operands; answers +1, and zero with the exception pending. */
+ScrBigInt *scr_big_as_n_dyn(const ScrDyn *bits, const ScrDyn *value, bool is_signed) {
+  double bd;
+  if (bits != NULL && bits->kind == SCR_DYN_BIG) {
+    /* ToNumber(bigint) is the TypeError, not a number. */
+    scr_throw_error_msg(SCR_ERR_TYPE, "Cannot convert a BigInt value to a number",
+                        sizeof "Cannot convert a BigInt value to a number" - 1);
+    return scr_big_zero();
+  }
+  double b = bits == NULL ? (double)NAN : scr_dyn_to_number(bits);
+  /* ToNumber can run a user valueOf that throws: that exception stands. */
+  if (scr_exc_pending()) return scr_big_zero();
+  bd = (b != b) ? 0 : trunc(b);
+  if (!(bd >= 0) || bd > 9007199254740991.0) {
+    static const char msg[] = "Invalid value: not (convertible to) a safe integer";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return scr_big_zero();
+  }
+  ScrBigInt *v = scr_big_to_bigint(value);
+  if (v == NULL) return scr_big_zero();
+  ScrBigInt *r = scr_big_as_n(v, bd, is_signed);
+  scr_big_release(v);
+  return r;
+}
+
 /* ── the checked-dynamic crossing (SCR_DYN_BIG) ───────────────────────
  *
  * A bigint flowing into an `unknown` slot. The five value questions the

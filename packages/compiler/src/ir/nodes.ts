@@ -6456,6 +6456,8 @@ export type IrLibFn =
   | "big.toF64"
   | "big.asIntN"
   | "big.asUintN"
+  | "big.asIntNDyn"
+  | "big.asUintNDyn"
   | "insp.dynSpread"
   | "insp.format"
   | "insp.jsval"
@@ -14233,6 +14235,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // the one width that would need a bigger BigInt than V8 will build.
   "big.asIntN",
   "big.asUintN",
+  // The dyn-operand pair: the same RangeError, and the value's TypeError,
+  // in the spec's order (scr_big_as_n_dyn).
+  "big.asIntNDyn",
+  "big.asUintNDyn",
   // ── the platform-conditional process members ───────────────────────
   // On a Windows target Node's process object has no getuid/getgid, so
   // the runtime raises the property-access TypeError those calls really
