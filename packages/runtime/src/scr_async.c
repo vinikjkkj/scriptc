@@ -967,14 +967,13 @@ static bool scr_abandon_registered = false;
 static void scr_abandon_at_exit(void) {
   if (scr_exit_code_hint_get() == 0) return;
   scr_timers_teardown();
+  scr_children_teardown();
 }
-static void scr_abandon_arm(void) {
+void scr_abandon_arm(void) {
   if (scr_abandon_registered) return;
   scr_abandon_registered = true;
   atexit(scr_abandon_at_exit);
 }
-#else
-#define scr_abandon_arm() ((void)0)
 #endif
 
 static void scr_timer_push(ScrTimer t) {
