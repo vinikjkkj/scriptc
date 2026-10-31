@@ -12680,6 +12680,17 @@ static ScrDyn *scr_u8_construct(const ScrDyn *args) {
   return NULL;
 }
 
+/* Whether a FUNC box has [[Construct]]. The compiler proves each function's
+ * kind code at its creation site (fnValueCodeOfNode: an arrow, a method, an
+ * async function and a generator carry SCR_FNK_NOPROTO / ASYNC / GEN), and
+ * the box inherits it from the closure's entry (scr_fn_code_of). Node: none
+ * of those four is a constructor. A bound function (its target decides, and
+ * the box does not record the target) keeps the ordinary construction path. */
+bool scr_dyn_fn_is_ctor(const ScrDyn *fn) {
+  if (scr_dyn_fn_src(fn) == SCR_FN_SRC_BOUND) return true;
+  return (scr_dyn_fn_code(fn) & (SCR_FNK_NOPROTO | SCR_FNK_ASYNC | SCR_FNK_GEN)) == 0;
+}
+
 ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *what) {
   if (fn->kind == SCR_DYN_PROXY) return SCR_PX->construct(fn, args, what);
   if (fn->kind != SCR_DYN_FUNC) {
@@ -12704,6 +12715,15 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
     bool handled = false;
     ScrDyn *cr = scr_dyn_class_ops->construct(fn, args, &handled);
     if (handled) return cr;
+  }
+  if (!scr_dyn_fn_is_ctor(fn)) {
+    /* an arrow, method, getter, async function or generator: no [[Construct]] */
+    ScrJsonBuf nb;
+    scr_jb_init(&nb);
+    scr_jb_puts(&nb, what && what->len ? what->data : "value");
+    scr_jb_puts(&nb, " is not a constructor");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&nb));
+    return NULL;
   }
   ScrDyn *proto = scr_dyn_fn_prototype((ScrDyn *)fn); /* +1 */
   ScrDyn *inst = scr_dyn_new_obj();                   /* +1 */

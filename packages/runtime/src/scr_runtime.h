@@ -6719,6 +6719,14 @@ bool scr_dyn_proxy_has_cstr(ScrDyn *p, const char *key, size_t len);
 bool scr_dyn_proxy_delete(ScrDyn *p, ScrStr *key);
 ScrDyn *scr_dyn_proxy_call(const ScrDyn *p, ScrDyn *const *args, size_t argc, const char *what);
 ScrDyn *scr_dyn_proxy_construct(const ScrDyn *p, const ScrDyn *args, const ScrStr *what);
+/* Reflect.apply(target, thisArg, argumentsList) and Reflect.construct(target,
+ * argumentsList) over a checked-dynamic target (scr_dyn_invoke.c): V8's exact
+ * TypeError texts for a non-callable target and a non-object list. All borrowed;
+ * the result is owned (+1), or NULL with the exception pending. */
+ScrDyn *scr_dyn_reflect_apply(const ScrDyn *target, const ScrDyn *thisArg, const ScrDyn *list);
+ScrDyn *scr_dyn_reflect_construct(const ScrDyn *target, const ScrDyn *list);
+/* Whether a FUNC box has [[Construct]] (scr_json.c: decided by its creation-site text). */
+bool scr_dyn_fn_is_ctor(const ScrDyn *fn);
 bool scr_dyn_reflect_set(ScrDyn *recv, ScrStr *key, ScrDyn *value);
 bool scr_dyn_reflect_delete(ScrDyn *recv, ScrStr *key);
 bool scr_dyn_reflect_define(ScrDyn *target, ScrStr *key, ScrDyn *desc);
