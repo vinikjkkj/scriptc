@@ -3456,6 +3456,9 @@ void scr_fs_rename(ScrStr *oldpath, ScrStr *newpath);
 void scr_fs_write_file_mode(ScrStr *path, ScrStr *data, double mode);
 void scr_fs_mkdir_mode(ScrStr *path, double mode);
 void scr_fs_mkdir_recursive_mode(ScrStr *path, double mode);
+/* mkdir({ recursive: true }) answering the first directory created (+1),
+ * NULL when none was created (the exception is pending on failure). */
+ScrStr *scr_fs_mkdir_recursive_first(ScrStr *path, double mode);
 
 /* Atomics.wait(int32Array, idx, expected, timeoutMs): "not-equal" when
  * the element differs from expected, else a real nanosleep for the
@@ -4112,6 +4115,8 @@ ScrStr *scr_path_win32_to_namespaced_path(ScrStr *path);
  * text, open(2) failures the Node fs error shape), and fs.closeSync(fd)
  * (failure throws the path-less "EBADF: bad file descriptor, close").
  * The pair behind spawn's fd-stdio form. */
+/* Node's string flag grammar as open(2) bits; -1 for a flag Node rejects. */
+int scr_fs_flag_bits(const ScrStr *flags);
 double scr_fs_open(ScrStr *path, ScrStr *flags);
 double scr_fs_read_sync(double fd, ScrBytes *buf, double offset, double length);
 /* fs.read's positioned read (position < 0: from the current position). */
@@ -9868,6 +9873,14 @@ double scr_fs_to_unix_timestamp(const ScrDyn *t);
 ScrDyn *scr_fs_exists_async(const ScrDyn *path, const ScrDyn *cb);
 /* The callback fs forms (lib/fs.js argument order; the operation runs one loop turn later) */
 ScrDyn *scr_fs_read_file_cb(const ScrDyn *path, const ScrDyn *opts, const ScrDyn *cb);
+/* The callback forms of writeFile, appendFile (flag default 'a'), mkdir,
+ * unlink and rename (scr_dyn_ext.c): each runs its checks now and the
+ * operation one loop turn later; all answer the dyn undefined (+1). */
+ScrDyn *scr_fs_write_file_cb(const ScrDyn *path, const ScrDyn *data, const ScrDyn *opts, const ScrDyn *cb);
+ScrDyn *scr_fs_append_file_cb(const ScrDyn *path, const ScrDyn *data, const ScrDyn *opts, const ScrDyn *cb);
+ScrDyn *scr_fs_mkdir_cb(const ScrDyn *path, const ScrDyn *opts, const ScrDyn *cb);
+ScrDyn *scr_fs_unlink_cb(const ScrDyn *path, const ScrDyn *cb);
+ScrDyn *scr_fs_rename_cb(const ScrDyn *oldp, const ScrDyn *newp, const ScrDyn *cb);
 ScrDyn *scr_fs_mkdtemp_cb(const ScrDyn *prefix, const ScrDyn *opts, const ScrDyn *cb);
 ScrDyn *scr_fs_mkdtemp_sync_opts(const ScrDyn *prefix, const ScrDyn *opts);
 ScrDyn *scr_fs_read_cb(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2, const ScrDyn *a3,

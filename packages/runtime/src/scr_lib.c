@@ -2302,7 +2302,7 @@ void scr_fs_chown(ScrStr *path, double uid, double gid) {
  * Node's ERR_INVALID_ARG_VALUE TypeError text, an open(2) failure the
  * usual Node-shaped fs error. Mode is Node's 0666 default (the numeric
  * third argument is a compile fence). */
-double scr_fs_open(ScrStr *path, ScrStr *flags) {
+int scr_fs_flag_bits(const ScrStr *flags) {
   const char *f = flags->data;
   int of;
   if (strcmp(f, "r") == 0) of = O_RDONLY;
@@ -2319,7 +2319,14 @@ double scr_fs_open(ScrStr *path, ScrStr *flags) {
   else if (strcmp(f, "a+") == 0) of = O_APPEND | O_CREAT | O_RDWR;
   else if (strcmp(f, "ax+") == 0 || strcmp(f, "xa+") == 0) of = O_APPEND | O_CREAT | O_RDWR | O_EXCL;
   else if (strcmp(f, "as+") == 0 || strcmp(f, "sa+") == 0) of = O_APPEND | O_CREAT | O_RDWR | O_SYNC;
-  else {
+  else return -1;
+  return of;
+}
+
+double scr_fs_open(ScrStr *path, ScrStr *flags) {
+  int of = scr_fs_flag_bits(flags);
+  if (of < 0) {
+    const char *f = flags->data;
     char msg[128];
     int len = snprintf(msg, sizeof msg, "The argument 'flags' is invalid. Received '%s'", f);
     /* Node stamps ERR_INVALID_ARG_VALUE here; without the code a caller
@@ -2551,8 +2558,20 @@ static bool scr_fs_sep(char c) {
   return c == '/';
 }
 
+/* The first directory a tracked recursive walk creates (fs.mkdir's
+ * recursive callback answers it). Only set while scr_fs_mkdir_recursive_first
+ * runs; the sync forms never record. */
+static ScrStr *scr_mkdir_first;
+static bool scr_mkdir_tracking;
+static void scr_mkdir_note(const char *path, size_t len) {
+  if (scr_mkdir_tracking && scr_mkdir_first == NULL) scr_mkdir_first = scr_str_new(path, len);
+}
+
 static void scr_mkdir_rec(char *path, size_t len, mode_t mode) {
-  if (scr_sys_mkdir(path, mode) == 0) return;
+  if (scr_sys_mkdir(path, mode) == 0) {
+    scr_mkdir_note(path, len);
+    return;
+  }
   int e = errno;
   struct stat st;
   if (e == EEXIST) {
@@ -2583,7 +2602,10 @@ static void scr_mkdir_rec(char *path, size_t len, mode_t mode) {
       scr_mkdir_rec(path, i, mode);
       path[i] = saved;
       if (scr_exc_pending()) return;
-      if (scr_sys_mkdir(path, mode) == 0) return;
+      if (scr_sys_mkdir(path, mode) == 0) {
+        scr_mkdir_note(path, len);
+        return;
+      }
       e = errno;
       if (e == EEXIST && stat(path, &st) == 0 && S_ISDIR(st.st_mode)) return;
     }
@@ -2613,6 +2635,29 @@ void scr_fs_mkdir_recursive_mode(ScrStr *path, double mode) {
   memcpy(buf, path->data, path->len + 1);
   scr_mkdir_rec(buf, path->len, (mode_t)mode);
   free(buf);
+}
+
+/* fs.mkdir(p, { recursive: true }, cb): the first directory created (+1),
+ * or NULL when every directory existed or the walk failed (the exception
+ * is then pending). The walk is the sync recursive walk with tracking on. */
+ScrStr *scr_fs_mkdir_recursive_first(ScrStr *path, double mode) {
+  char *buf = malloc(path->len + 1);
+  if (!buf) {
+    scr_trap("scriptc: out of memory\n");
+  }
+  memcpy(buf, path->data, path->len + 1);
+  scr_mkdir_first = NULL;
+  scr_mkdir_tracking = true;
+  scr_mkdir_rec(buf, path->len, (mode_t)mode);
+  scr_mkdir_tracking = false;
+  free(buf);
+  ScrStr *first = scr_mkdir_first;
+  scr_mkdir_first = NULL;
+  if (scr_exc_pending()) {
+    if (first != NULL) scr_str_release(first);
+    return NULL;
+  }
+  return first;
 }
 
 /* First failure of an rm walk, recorded instead of thrown so the retry

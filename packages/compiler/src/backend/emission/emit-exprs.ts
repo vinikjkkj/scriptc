@@ -6804,6 +6804,21 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "fs.readFileCb":
             E.usesTimers = true;
             return finish(`scr_fs_read_file_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "fs.writeFileCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_write_file_cb(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "fs.appendFileCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_append_file_cb(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "fs.mkdirCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_mkdir_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "fs.unlinkCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_unlink_cb(${arg(0)}, ${arg(1)})`);
+          case "fs.renameCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_rename_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fs.mkdtempCb":
             E.usesTimers = true;
             return finish(`scr_fs_mkdtemp_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
