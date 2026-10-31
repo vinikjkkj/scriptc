@@ -336,6 +336,18 @@ int scr_exit_code_hint_get(void) { return scr_exit_code_hint; }
  * callback's escaped throw: it hands the pending exception to the listeners
  * (clearing it), so execution CONTINUES instead of printing and exiting 1. */
 void (*scr_uncaught_listener_fn)(void) = NULL;
+/* The origin argument of the uncaught listeners: "uncaughtException" for an
+ * escaped throw, "unhandledRejection" for a rejection routed here. */
+const char *scr_uncaught_origin = "uncaughtException";
+/* A rejection with no 'unhandledRejection' listener (scr_async.c's report
+ * loop): the pending reason goes to the uncaught listeners as origin
+ * "unhandledRejection". */
+void scr_uncaught_dispatch_rejection(void) {
+  if (scr_uncaught_listener_fn == NULL || !scr_exc_pending()) return;
+  scr_uncaught_origin = "unhandledRejection";
+  scr_uncaught_listener_fn();
+  scr_uncaught_origin = "uncaughtException";
+}
 void scr_uncaught_dispatch(void) {
   if (scr_uncaught_listener_fn != NULL && scr_exc_pending()) scr_uncaught_listener_fn();
 }
