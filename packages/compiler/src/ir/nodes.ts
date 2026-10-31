@@ -1553,6 +1553,10 @@ export interface IrModule {
    * executable builds resolve their symbols from the manifest's archive
    * and system-library inputs. Absent when the build has no FFI manifest. */
   ffiImports?: IrFfiImport[];
+  /** The entry file is a CommonJS module (Node's format rule, isCjsEntryFile).
+   * Its main body drains process.nextTick callbacks before promise jobs at
+   * the first checkpoint; absent means an ES-module entry (jobs first). */
+  entryCjs?: boolean;
   /** LIBRARY mode: the profile's resolved export map plus the
    * mode-provided symbol names, landed ON the IR so both backends emit the
    * external-linkage wrappers and entries from the same facts — the two

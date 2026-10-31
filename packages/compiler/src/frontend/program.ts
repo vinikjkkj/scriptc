@@ -1063,6 +1063,22 @@ export function isCjsJsFile(sf: ts.SourceFile): boolean {
   return isCjsJsFile7(sf);
 }
 
+/** True when Node loads the ENTRY file as CommonJS. The format decides the
+ * main body's checkpoint order: a CommonJS entry runs synchronously, so its
+ * process.nextTick callbacks drain before its promise jobs; an ES-module
+ * entry runs inside a promise job, so its jobs drain first. Node's rule:
+ * .cjs/.cts are CommonJS, .mjs/.mts are ES modules, a .js/.ts under
+ * "type": "module" is an ES module, and any other file is CommonJS unless it
+ * has ES module syntax (import/export), which Node's syntax detection
+ * promotes to an ES module. */
+export function isCjsEntryFile(sf: ts.SourceFile): boolean {
+  const name = sf.fileName;
+  if (/\.(cjs|cts)$/.test(name)) return true;
+  if (/\.(mjs|mts)$/.test(name)) return false;
+  if (nearestPackageTypeOf(name) === "module") return false;
+  return !ts.isExternalModule(sf);
+}
+
 /** The self-import TDZ fences: for `import { x } from "<self>"` (default
  * and namespace forms included), any TOP-LEVEL reference lexically above
  * the aliased declaration observes Node's temporal dead zone — the direct
