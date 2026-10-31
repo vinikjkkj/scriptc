@@ -8907,22 +8907,223 @@ static void scr_json_throw(const char *msg) {
   scr_throw_error_msg(SCR_ERR_SYNTAX, msg, strlen(msg));
 }
 
-static void scr_json_throw_pos(const char *what, size_t pos) {
-  char buf[128];
-  int n = snprintf(buf, sizeof buf, "%s in JSON at position %zu", what, pos);
-  scr_throw_error_msg(SCR_ERR_SYNTAX, buf, (size_t)n);
+/* Error texts follow V8's json-parser.cc. V8 counts positions, columns and
+ * excerpts in UTF-16 code units, and a lone surrogate prints as U+FFFD; the
+ * source here is UTF-8, so the error path rescans it into units. */
+#define SCR_JSON_CTX 10
+#define SCR_JSON_WIN 64
+
+typedef struct {
+  char *b;
+  size_t n, cap;
+} ScrJsonMsg;
+
+static void scr_jm_c(ScrJsonMsg *m, int c) {
+  if (m->n + 1 < m->cap) m->b[m->n++] = (char)c;
 }
 
-/* V8-flavored bad-token message with a short snippet of the input around
- * the offending character. Approximate fidelity (documented). */
-static void scr_json_throw_token(const ScrJsonP *p) {
-  size_t start = p->pos > 8 ? p->pos - 8 : 0;
-  size_t take = p->len - start < 16 ? p->len - start : 16;
-  char buf[192];
-  int n = snprintf(buf, sizeof buf, "Unexpected token '%c', %s\"%.*s\"%s is not valid JSON",
-                   p->s[p->pos], start > 0 ? "..." : "", (int)take, p->s + start,
-                   start + take < p->len ? "..." : "");
-  scr_throw_error_msg(SCR_ERR_SYNTAX, buf, (size_t)n);
+static void scr_jm_s(ScrJsonMsg *m, const char *s) {
+  while (*s) scr_jm_c(m, *s++);
+}
+
+static void scr_jm_num(ScrJsonMsg *m, size_t v) {
+  char t[24];
+  snprintf(t, sizeof t, "%zu", v);
+  scr_jm_s(m, t);
+}
+
+/* Units [0, n) as UTF-8; a surrogate pair inside the window is one code
+ * point, any other surrogate unit (a cut pair, a lone half) is U+FFFD. */
+static void scr_jm_units(ScrJsonMsg *m, const uint16_t *w, size_t n) {
+  for (size_t i = 0; i < n; i++) {
+    uint32_t cp = w[i];
+    if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < n && w[i + 1] >= 0xDC00 && w[i + 1] <= 0xDFFF) {
+      cp = 0x10000 + ((cp - 0xD800) << 10) + ((uint32_t)w[i + 1] - 0xDC00);
+      i++;
+    } else if (cp >= 0xD800 && cp <= 0xDFFF) {
+      cp = 0xFFFD;
+    }
+    if (cp < 0x80) {
+      scr_jm_c(m, (int)cp);
+    } else if (cp < 0x800) {
+      scr_jm_c(m, (int)(0xC0 | (cp >> 6)));
+      scr_jm_c(m, (int)(0x80 | (cp & 0x3F)));
+    } else if (cp < 0x10000) {
+      scr_jm_c(m, (int)(0xE0 | (cp >> 12)));
+      scr_jm_c(m, (int)(0x80 | ((cp >> 6) & 0x3F)));
+      scr_jm_c(m, (int)(0x80 | (cp & 0x3F)));
+    } else {
+      scr_jm_c(m, (int)(0xF0 | (cp >> 18)));
+      scr_jm_c(m, (int)(0x80 | ((cp >> 12) & 0x3F)));
+      scr_jm_c(m, (int)(0x80 | ((cp >> 6) & 0x3F)));
+      scr_jm_c(m, (int)(0x80 | (cp & 0x3F)));
+    }
+  }
+}
+
+/* One pass over the UTF-8 source: *total is its length in UTF-16 units,
+ * *upos the unit index of byte offset `at`, and the units with index in
+ * [a, b) are copied to win[k - a]. */
+static void scr_json_scan(const char *s, size_t len, size_t at, size_t a, size_t b,
+                          uint16_t *win, size_t *total, size_t *upos) {
+  size_t i = 0, u = 0;
+  bool found = false;
+  *upos = 0;
+  while (i < len) {
+    if (!found && i >= at) {
+      *upos = u;
+      found = true;
+    }
+    unsigned char c = (unsigned char)s[i];
+    uint32_t cp;
+    size_t adv;
+    if (c < 0x80) {
+      cp = c;
+      adv = 1;
+    } else if (c < 0xE0 && i + 1 < len) {
+      cp = ((uint32_t)(c & 0x1F) << 6) | ((unsigned char)s[i + 1] & 0x3F);
+      adv = 2;
+    } else if (c < 0xF0 && i + 2 < len) {
+      cp = ((uint32_t)(c & 0x0F) << 12) | (((unsigned char)s[i + 1] & 0x3F) << 6) |
+           ((unsigned char)s[i + 2] & 0x3F);
+      adv = 3;
+    } else if (c >= 0xF0 && i + 3 < len) {
+      cp = ((uint32_t)(c & 0x07) << 18) | (((unsigned char)s[i + 1] & 0x3F) << 12) |
+           (((unsigned char)s[i + 2] & 0x3F) << 6) | ((unsigned char)s[i + 3] & 0x3F);
+      adv = 4;
+    } else {
+      break;
+    }
+    if (cp >= 0x10000) {
+      uint32_t hi = 0xD800 + ((cp - 0x10000) >> 10), lo = 0xDC00 + ((cp - 0x10000) & 0x3FF);
+      if (u >= a && u < b) win[u - a] = (uint16_t)hi;
+      if (u + 1 >= a && u + 1 < b) win[u + 1 - a] = (uint16_t)lo;
+      u += 2;
+    } else {
+      if (u >= a && u < b) win[u - a] = (uint16_t)cp;
+      u++;
+    }
+    i += adv;
+  }
+  if (!found) *upos = u;
+  *total = u;
+}
+
+/* "<what> at position N (line L column C)": V8's line/column rule. CR LF is
+ * one break, a lone CR or LF is one break; the column is 1 plus the units
+ * since the last break. */
+static void scr_json_throw_loc(const ScrJsonP *p, const char *what, size_t at) {
+  size_t total, upos, line = 1, lb = 0, u = 0, i = 0;
+  scr_json_scan(p->s, p->len, at, 0, 0, NULL, &total, &upos);
+  while (i < at) {
+    unsigned char c = (unsigned char)p->s[i];
+    if (c == '\r' && i + 1 < at && p->s[i + 1] == '\n') {
+      u += 2;
+      i += 2;
+      line++;
+      lb = u;
+      continue;
+    }
+    if (c == '\r' || c == '\n') {
+      u++;
+      i++;
+      line++;
+      lb = u;
+      continue;
+    }
+    if (c >= 0xF0) u += 2;
+    else if ((c & 0xC0) != 0x80) u += 1;
+    i++;
+  }
+  char buf[256];
+  ScrJsonMsg m = {buf, 0, sizeof buf};
+  scr_jm_s(&m, what);
+  scr_jm_s(&m, " at position ");
+  scr_jm_num(&m, upos);
+  scr_jm_s(&m, " (line ");
+  scr_jm_num(&m, line);
+  scr_jm_s(&m, " column ");
+  scr_jm_num(&m, 1 + (u - lb));
+  scr_jm_c(&m, ')');
+  scr_throw_error_msg(SCR_ERR_SYNTAX, m.b, m.n);
+}
+
+/* "<what> in JSON at position N (line L column C)". */
+static void scr_json_throw_pos(const ScrJsonP *p, const char *what, size_t at) {
+  char buf[128];
+  snprintf(buf, sizeof buf, "%s in JSON", what);
+  scr_json_throw_loc(p, buf, at);
+}
+
+/* V8's ReportUnexpectedCharacter / ReportUnexpectedToken for the character at
+ * byte offset `at`: a token class of its own for a string or a number, the
+ * end-of-input text at the end, and otherwise the offending character with
+ * an excerpt (the whole source when short, else 10 units either side). */
+static void scr_json_unexpected(const ScrJsonP *p, size_t at) {
+  if (at >= p->len) {
+    scr_json_throw("Unexpected end of JSON input");
+    return;
+  }
+  char c = p->s[at];
+  if (c == '"') {
+    scr_json_throw_pos(p, "Unexpected string", at);
+    return;
+  }
+  if (c == '-' || (c >= '0' && c <= '9')) {
+    scr_json_throw_pos(p, "Unexpected number", at);
+    return;
+  }
+  size_t total, upos;
+  scr_json_scan(p->s, p->len, at, 0, 0, NULL, &total, &upos);
+  uint16_t win[SCR_JSON_WIN];
+  char buf[320];
+  ScrJsonMsg m = {buf, 0, sizeof buf};
+  /* IsSpecialString: the whole source is one of these texts. */
+  static const char *const special[] = {"[object Object]", "NaN", "Infinity", "undefined"};
+  for (size_t k = 0; k < sizeof special / sizeof special[0]; k++) {
+    if (p->len == strlen(special[k]) && memcmp(p->s, special[k], p->len) == 0) {
+      size_t scratch2;
+      scr_json_scan(p->s, p->len, 0, 0, total, win, &total, &scratch2);
+      scr_jm_c(&m, '"');
+      scr_jm_units(&m, win, total);
+      scr_jm_s(&m, "\" is not valid JSON");
+      scr_throw_error_msg(SCR_ERR_SYNTAX, m.b, m.n);
+      return;
+    }
+  }
+  size_t a, b;
+  int form; /* 0 short, 1 start, 2 surround, 3 end */
+  if (total < 2 * SCR_JSON_CTX + 1) {
+    a = 0;
+    b = total;
+    form = 0;
+  } else if (upos < SCR_JSON_CTX) {
+    a = 0;
+    b = upos + SCR_JSON_CTX;
+    form = 1;
+  } else if (upos < total - SCR_JSON_CTX) {
+    a = upos - SCR_JSON_CTX;
+    b = upos + SCR_JSON_CTX;
+    form = 2;
+  } else {
+    a = upos - SCR_JSON_CTX;
+    b = total;
+    form = 3;
+  }
+  uint16_t tok[1];
+  size_t scratch;
+  scr_json_scan(p->s, p->len, 0, upos, upos + 1, tok, &total, &scratch);
+  scr_jm_s(&m, "Unexpected token '");
+  scr_jm_units(&m, tok, 1);
+  scr_jm_s(&m, "', ");
+  scr_json_scan(p->s, p->len, 0, a, b, win, &total, &scratch);
+  if (form == 2 || form == 3) scr_jm_s(&m, "...");
+  scr_jm_c(&m, '"');
+  scr_jm_units(&m, win, b - a);
+  scr_jm_c(&m, '"');
+  if (form == 1 || form == 2) scr_jm_s(&m, "...");
+  scr_jm_s(&m, " is not valid JSON");
+  scr_throw_error_msg(SCR_ERR_SYNTAX, m.b, m.n);
 }
 
 static void scr_json_ws(ScrJsonP *p) {
@@ -8955,19 +9156,19 @@ static void scr_json_put_cp(ScrJsonBuf *b, uint32_t cp) {
 
 /* Four hex digits at pos, or -1 (throws). */
 static int32_t scr_json_hex4(ScrJsonP *p) {
-  if (p->len - p->pos < 4) {
-    scr_json_throw("Unexpected end of JSON input");
-    return -1;
-  }
   uint32_t v = 0;
   for (int i = 0; i < 4; i++) {
+    if (p->pos + (size_t)i >= p->len) {
+      scr_json_throw_pos(p, "Bad Unicode escape", p->len);
+      return -1;
+    }
     char c = p->s[p->pos + (size_t)i];
     uint32_t digit;
     if (c >= '0' && c <= '9') digit = (uint32_t)(c - '0');
     else if (c >= 'a' && c <= 'f') digit = (uint32_t)(c - 'a' + 10);
     else if (c >= 'A' && c <= 'F') digit = (uint32_t)(c - 'A' + 10);
     else {
-      scr_json_throw_pos("Bad Unicode escape", p->pos + (size_t)i);
+      scr_json_throw_pos(p, "Bad Unicode escape", p->pos + (size_t)i);
       return -1;
     }
     v = v * 16 + digit;
@@ -8995,12 +9196,12 @@ static int scr_json_string_span(ScrJsonP *p, const char **span,
     }
     if (c == '\\') return 0;
     if (c < 0x20) {
-      scr_json_throw_pos("Bad control character in string literal", i);
+      scr_json_throw_pos(p, "Bad control character in string literal", i);
       return -1;
     }
     i++;
   }
-  scr_json_throw_pos("Unterminated string", p->pos);
+  scr_json_throw_pos(p, "Unterminated string", p->len);
   return -1;
 }
 
@@ -9014,7 +9215,7 @@ static ScrStr *scr_json_string_slow(ScrJsonP *p) {
   for (;;) {
     if (p->pos >= p->len) {
       scr_jb_dispose(&b);
-      scr_json_throw_pos("Unterminated string", open);
+      scr_json_throw_pos(p, "Unterminated string", p->len);
       return NULL;
     }
     unsigned char c = (unsigned char)p->s[p->pos];
@@ -9024,7 +9225,7 @@ static ScrStr *scr_json_string_slow(ScrJsonP *p) {
     }
     if (c < 0x20) {
       scr_jb_dispose(&b);
-      scr_json_throw_pos("Bad control character in string literal", p->pos);
+      scr_json_throw_pos(p, "Bad control character in string literal", p->pos);
       return NULL;
     }
     if (c != '\\') {
@@ -9090,7 +9291,7 @@ static ScrStr *scr_json_string_slow(ScrJsonP *p) {
     }
     default:
       scr_jb_dispose(&b);
-      scr_json_throw_pos("Bad escaped character", p->pos);
+      scr_json_throw_pos(p, "Bad escaped character", p->pos);
       return NULL;
     }
   }
@@ -9128,12 +9329,16 @@ static ScrDyn *scr_json_number(ScrJsonP *p) {
     neg = true;
     p->pos++;
     if (p->pos >= p->len || p->s[p->pos] < '0' || p->s[p->pos] > '9') {
-      scr_json_throw_pos("No number after minus sign", p->pos);
+      scr_json_throw_pos(p, "No number after minus sign", p->pos);
       return NULL;
     }
   }
   if (p->s[p->pos] == '0') {
     p->pos++;
+    if (p->pos < p->len && p->s[p->pos] >= '0' && p->s[p->pos] <= '9') {
+      scr_json_unexpected(p, p->pos);
+      return NULL;
+    }
   } else {
     while (p->pos < p->len && p->s[p->pos] >= '0' && p->s[p->pos] <= '9') {
       if (ndig < 15) {
@@ -9148,7 +9353,7 @@ static ScrDyn *scr_json_number(ScrJsonP *p) {
   if (p->pos < p->len && p->s[p->pos] == '.') {
     p->pos++;
     if (p->pos >= p->len || p->s[p->pos] < '0' || p->s[p->pos] > '9') {
-      scr_json_throw_pos("Unterminated fractional number", p->pos);
+      scr_json_throw_pos(p, "Unterminated fractional number", p->pos);
       return NULL;
     }
     while (p->pos < p->len && p->s[p->pos] >= '0' && p->s[p->pos] <= '9') {
@@ -9173,7 +9378,7 @@ static ScrDyn *scr_json_number(ScrJsonP *p) {
       p->pos++;
     }
     if (p->pos >= p->len || p->s[p->pos] < '0' || p->s[p->pos] > '9') {
-      scr_json_throw_pos("Exponent part is missing a number", p->pos);
+      scr_json_throw_pos(p, "Exponent part is missing a number", p->pos);
       return NULL;
     }
     int ev = 0;
@@ -9200,12 +9405,19 @@ static ScrDyn *scr_json_number(ScrJsonP *p) {
 }
 
 static bool scr_json_lit(ScrJsonP *p, const char *word, size_t n) {
-  if (p->len - p->pos >= n && memcmp(p->s + p->pos, word, n) == 0) {
-    p->pos += n;
-    return true;
+  for (size_t i = 1; i < n; i++) {
+    size_t at = p->pos + i;
+    if (at >= p->len) {
+      scr_json_throw("Unexpected end of JSON input");
+      return false;
+    }
+    if (p->s[at] != word[i]) {
+      scr_json_unexpected(p, at);
+      return false;
+    }
   }
-  scr_json_throw_token(p);
-  return false;
+  p->pos += n;
+  return true;
 }
 
 static ScrDyn *scr_json_array(ScrJsonP *p) {
@@ -9224,11 +9436,6 @@ static ScrDyn *scr_json_array(ScrJsonP *p) {
     }
     scr_dyn_arr_push(arr, item);
     scr_json_ws(p);
-    if (p->pos >= p->len) {
-      scr_dyn_release(arr);
-      scr_json_throw("Unexpected end of JSON input");
-      return NULL;
-    }
     if (p->s[p->pos] == ',') {
       p->pos++;
       continue;
@@ -9238,7 +9445,7 @@ static ScrDyn *scr_json_array(ScrJsonP *p) {
       return arr;
     }
     scr_dyn_release(arr);
-    scr_json_throw_pos("Expected ',' or ']' after array element", p->pos);
+    scr_json_throw_pos(p, "Expected ',' or ']' after array element", p->pos);
     return NULL;
   }
 }
@@ -9251,16 +9458,13 @@ static ScrDyn *scr_json_object(ScrJsonP *p) {
     p->pos++;
     return obj;
   }
+  bool after_comma = false;
   for (;;) {
     scr_json_ws(p);
-    if (p->pos >= p->len) {
+    if (p->pos >= p->len || p->s[p->pos] != '"') {
       scr_dyn_release(obj);
-      scr_json_throw("Unexpected end of JSON input");
-      return NULL;
-    }
-    if (p->s[p->pos] != '"') {
-      scr_dyn_release(obj);
-      scr_json_throw_pos("Expected property name or '}'", p->pos);
+      if (after_comma) scr_json_throw_pos(p, "Expected double-quoted property name", p->pos);
+      else scr_json_throw_pos(p, "Expected property name or '}'", p->pos);
       return NULL;
     }
     /* Key: fast span path (no escapes) copies straight into the malloc'd
@@ -9302,8 +9506,7 @@ static ScrDyn *scr_json_object(ScrJsonP *p) {
     if (p->pos >= p->len || p->s[p->pos] != ':') {
       free(key);
       scr_dyn_release(obj);
-      if (p->pos >= p->len) scr_json_throw("Unexpected end of JSON input");
-      else scr_json_throw_pos("Expected ':' after property name", p->pos);
+      scr_json_throw_pos(p, "Expected ':' after property name", p->pos);
       return NULL;
     }
     p->pos++; /* ':' */
@@ -9315,13 +9518,9 @@ static ScrDyn *scr_json_object(ScrJsonP *p) {
     }
     scr_dyn_obj_put(obj, key, key_len, value); /* later duplicate keys win */
     scr_json_ws(p);
-    if (p->pos >= p->len) {
-      scr_dyn_release(obj);
-      scr_json_throw("Unexpected end of JSON input");
-      return NULL;
-    }
     if (p->s[p->pos] == ',') {
       p->pos++;
+      after_comma = true;
       continue;
     }
     if (p->s[p->pos] == '}') {
@@ -9329,7 +9528,7 @@ static ScrDyn *scr_json_object(ScrJsonP *p) {
       return obj;
     }
     scr_dyn_release(obj);
-    scr_json_throw_pos("Expected ',' or '}' after property value", p->pos);
+    scr_json_throw_pos(p, "Expected ',' or '}' after property value", p->pos);
     return NULL;
   }
 }
@@ -9402,7 +9601,7 @@ static ScrDyn *scr_json_value_inner(ScrJsonP *p) {
     return scr_dyn_alloc(SCR_DYN_NULL);
   }
   if (c == '-' || (c >= '0' && c <= '9')) return scr_json_number(p);
-  scr_json_throw_token(p);
+  scr_json_unexpected(p, p->pos);
   return NULL;
 }
 
@@ -9418,10 +9617,7 @@ ScrDyn *scr_json_parse(ScrStr *text) {
   scr_json_ws(&p);
   if (p.pos < p.len) {
     scr_dyn_release(d);
-    char buf[96];
-    int n = snprintf(buf, sizeof buf,
-                     "Unexpected non-whitespace character after JSON at position %zu", p.pos);
-    scr_throw_error_msg(SCR_ERR_SYNTAX, buf, (size_t)n);
+    scr_json_throw_loc(&p, "Unexpected non-whitespace character after JSON", p.pos);
     return NULL;
   }
   return d;
@@ -9596,10 +9792,7 @@ ScrDyn *scr_json_parse_revive(ScrStr *text, ScrDyn *reviver) {
       if (p.pos < p.len) {
         scr_dyn_release(root);
         root = NULL;
-        char buf[96];
-        int n = snprintf(buf, sizeof buf,
-                         "Unexpected non-whitespace character after JSON at position %zu", p.pos);
-        scr_throw_error_msg(SCR_ERR_SYNTAX, buf, (size_t)n);
+        scr_json_throw_loc(&p, "Unexpected non-whitespace character after JSON", p.pos);
       }
     }
   }

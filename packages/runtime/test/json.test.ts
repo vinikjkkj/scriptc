@@ -41,9 +41,9 @@ beforeAll(async () => {
 // The C side parses/inspects dyn values as checks and routes each expected
 // failure through scr_exc_print_uncaught. Parse failures are SyntaxError
 // INSTANCES (the depth cap a RangeError, dynCheck failures TypeErrors), so
-// every uncaught line renders "name: message" — e.name is Node-exact while
-// the V8-flavored message wording stays approximate (SEMANTICS.md): these
-// lines pin OUR rendering, not Node's.
+// every uncaught line renders "name: message". The parse-failure texts are
+// Node 24's (V8 json-parser.cc wording, measured against $NODE_CI with the
+// same inputs); the RangeError and TypeError lines keep their own wording.
 test("json runtime: parser, dyn, dynCheck failure path, stringify buffer", async () => {
   const { stdout, stderr } = await execFileAsync(bin);
   expect(stdout).toMatch(/^(\d+)\/\1 checks passed\n$/);
@@ -51,21 +51,21 @@ test("json runtime: parser, dyn, dynCheck failure path, stringify buffer", async
     [
       `Uncaught SyntaxError: Unexpected end of JSON input`,
       `Uncaught SyntaxError: Unexpected end of JSON input`,
-      `Uncaught SyntaxError: Expected property name or '}' in JSON at position 1`,
+      `Uncaught SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)`,
       `Uncaught SyntaxError: Unexpected end of JSON input`,
-      `Uncaught SyntaxError: Expected ',' or ']' after array element in JSON at position 3`,
-      `Uncaught SyntaxError: Expected ':' after property name in JSON at position 4`,
-      `Uncaught SyntaxError: Expected property name or '}' in JSON at position 7`,
-      `Uncaught SyntaxError: Expected property name or '}' in JSON at position 1`,
-      `Uncaught SyntaxError: Unterminated string in JSON at position 0`,
-      `Uncaught SyntaxError: Bad escaped character in JSON at position 6`,
-      `Uncaught SyntaxError: Bad control character in string literal in JSON at position 6`,
-      `Uncaught SyntaxError: Bad Unicode escape in JSON at position 5`,
-      `Uncaught SyntaxError: No number after minus sign in JSON at position 1`,
-      `Uncaught SyntaxError: Unterminated fractional number in JSON at position 2`,
-      `Uncaught SyntaxError: Exponent part is missing a number in JSON at position 3`,
-      `Uncaught SyntaxError: Unexpected non-whitespace character after JSON at position 2`,
-      `Uncaught SyntaxError: Unexpected token 'n', "nul" is not valid JSON`,
+      `Uncaught SyntaxError: Expected ',' or ']' after array element in JSON at position 3 (line 1 column 4)`,
+      `Uncaught SyntaxError: Expected ':' after property name in JSON at position 4 (line 1 column 5)`,
+      `Uncaught SyntaxError: Expected double-quoted property name in JSON at position 7 (line 1 column 8)`,
+      `Uncaught SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)`,
+      `Uncaught SyntaxError: Unterminated string in JSON at position 13 (line 1 column 14)`,
+      `Uncaught SyntaxError: Bad escaped character in JSON at position 6 (line 1 column 7)`,
+      `Uncaught SyntaxError: Bad control character in string literal in JSON at position 6 (line 1 column 7)`,
+      `Uncaught SyntaxError: Bad Unicode escape in JSON at position 5 (line 1 column 6)`,
+      `Uncaught SyntaxError: No number after minus sign in JSON at position 1 (line 1 column 2)`,
+      `Uncaught SyntaxError: Unterminated fractional number in JSON at position 2 (line 1 column 3)`,
+      `Uncaught SyntaxError: Exponent part is missing a number in JSON at position 3 (line 1 column 4)`,
+      `Uncaught SyntaxError: Unexpected non-whitespace character after JSON at position 2 (line 1 column 3)`,
+      `Uncaught SyntaxError: Unexpected end of JSON input`,
       `Uncaught RangeError: Maximum call stack size exceeded`,
       `Uncaught TypeError: expected number at $.items[2].price, got string`,
       `Uncaught TypeError: expected object at $, got undefined`,
