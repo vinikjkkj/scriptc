@@ -202,6 +202,66 @@ function inspectKey(name: string): string {
   return /^[a-zA-Z_][a-zA-Z_0-9]*$/.test(name) ? name : inspectQuote(name);
 }
 
+/** A record field the checker named for a SYMBOL key (`__@<var>@<id>`, the
+ * late-bound spelling of `{ [s]: v }`). `__@ord@` markers are not symbols. */
+function isSymbolFieldName(name: string): boolean {
+  return name.startsWith("__@") && !name.startsWith("__@ord@");
+}
+
+const symbolSpellingCache = new WeakMap<Lowerer, Map<string, string>>();
+
+/** Node's `Symbol(desc)` spelling of a late-bound symbol key, from the
+ * computed-key expression that declares it: `[s]` with `const s =
+ * Symbol('desc')` / `Symbol()` / `Symbol.for('desc')`, or a well-known
+ * `[Symbol.iterator]`. The checker names the member by the VARIABLE
+ * (`__@s@51`), which carries no description, so the table is built once
+ * per program from every computed key whose type is a unique symbol.
+ * Null when the description cannot be read at build time. */
+export function symbolSpellingOf(L: Lowerer, lateName: string): string | null {
+  let map = symbolSpellingCache.get(L);
+  if (map === undefined) {
+    map = new Map<string, string>();
+    symbolSpellingCache.set(L, map);
+    const stack: ts.Node[] = [...L.moduleOrder];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (ts.isComputedPropertyName(n) && (L.typeOf(n.expression).flags & ts.TypeFlags.UniqueESSymbol) !== 0) {
+        const late = L.checker.getSymbolAtLocation(n)?.name;
+        const spelled = symbolDescriptionSpelling(L, n.expression);
+        if (late !== undefined && late.startsWith("__@") && spelled !== null) map.set(late, spelled);
+      }
+      ts.forEachChild(n, (c) => {
+        stack.push(c);
+        return undefined;
+      });
+    }
+  }
+  return map.get(lateName) ?? null;
+}
+
+function symbolDescriptionSpelling(L: Lowerer, e: ts.Expression): string | null {
+  if (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "Symbol") {
+    if (!L.isStdlibSymbol(L.checker.getSymbolAtLocation(e.expression))) return null;
+    return `Symbol(Symbol.${e.name.text})`;
+  }
+  if (!ts.isIdentifier(e)) return null;
+  const sym = L.resolveValueSymbol(e);
+  const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+  if (!decl || !ts.isVariableDeclaration(decl) || !decl.initializer || !ts.isCallExpression(decl.initializer)) return null;
+  const init = decl.initializer;
+  const callee = init.expression;
+  const isSymbolCall = ts.isIdentifier(callee) && callee.text === "Symbol";
+  const isSymbolFor =
+    ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "Symbol" &&
+    callee.name.text === "for";
+  if (!isSymbolCall && !isSymbolFor) return null;
+  if (!L.isStdlibSymbol(L.checker.getSymbolAtLocation(isSymbolCall ? callee as ts.Identifier : (callee as ts.PropertyAccessExpression).expression))) return null;
+  if (init.arguments.length === 0) return isSymbolCall ? "Symbol()" : null;
+  const arg = init.arguments[0]!;
+  if (init.arguments.length !== 1 || !(ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg))) return null;
+  return `Symbol(${arg.text})`;
+}
+
 /* ── type support ────────────────────────────────────────────────────── */
 
 /** The error-hierarchy gate: `info`'s instances render through the
@@ -756,15 +816,39 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // Baked into this inspect helper's body, and the body is built once —
       // so the shape's order is fixed here (Lowerer.noteEnumOrderBake).
       L.noteEnumOrderBake(t.shapeId, null);
-      const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
+      // SYMBOL-keyed members print after EVERY string key, in insertion
+      // order ([[OwnPropertyKeys]]; Node 24 spells them `Symbol(desc): v`,
+      // unbracketed). A symbol member whose description cannot be read at
+      // build time, or whose value is a function (its name is Node's
+      // `[desc]`), is refused by name rather than printed wrong.
+      const declared = shape.declaredOrder ?? shape.fields.map((f) => f.name);
+      const declaredSet = new Set(declared);
+      const order = [
+        ...declared.filter((n) => !isSymbolFieldName(n)),
+        ...declared.filter((n) => isSymbolFieldName(n)),
+        ...shape.fields.map((f) => f.name).filter((n) => isSymbolFieldName(n) && !declaredSet.has(n)),
+      ];
       const byName = new Map(shape.fields.map((f) => [f.name, f.type] as const));
       const depthLit = strNode(bdepth, loc);
       body = [depthGate(depthLit), ...begin()];
       for (const fname of order) {
         const ft = byName.get(fname);
         if (!ft) continue;
+        const keyText = (() => {
+          if (!isSymbolFieldName(fname)) return inspectKey(fname);
+          const spelled = symbolSpellingOf(L, fname);
+          if (spelled === null || ft.kind === "func") {
+            L.unsupported(
+              "SC1090",
+              L.moduleOrder[0]!,
+              `a symbol-keyed member '${fname}' that prints as ${ft.kind === "func" ? "a function" : "an unreadable symbol description"} ` +
+                `(util.inspect spells it Symbol(desc) with the function's own name)`,
+            );
+          }
+          return spelled;
+        })();
         const st = entry(
-          concatAll([str(`${inspectKey(fname)}: `, loc), child(ft, get(fname, ft))], loc),
+          concatAll([str(`${keyText}: `, loc), child(ft, get(fname, ft))], loc),
           boolLit(false, loc),
         );
         // A field some literal COMPLETED is not readable at all on an
