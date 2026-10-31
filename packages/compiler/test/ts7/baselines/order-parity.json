@@ -20634,10 +20634,20 @@
    "diags": []
   },
   "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs"
-   ],
-   "diags": []
+    "order": [
+      "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs"
+    ],
+    "diags": [
+      {
+        "code": "SC0001",
+        "message": "No overload expects 5 arguments, but overloads do exist that expect either 4 or 6 arguments.",
+        "loc": {
+          "file": "<repo>/tests/diagnostics/js-fs-calls-with-no-real-operation-behind-the-validation.cjs",
+          "start": 2632,
+          "end": 2636
+        }
+      }
+    ]
   },
   "<repo>/tests/diagnostics/js-new-proxy.js": {
    "order": [
