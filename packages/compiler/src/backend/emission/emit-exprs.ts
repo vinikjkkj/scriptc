@@ -6830,6 +6830,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "fs.lchmodCb":
             E.usesTimers = true;
             return finish(`scr_fs_lchmod_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "fs.openCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_open_cb(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
+          case "fs.closeCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_close_cb(${arg(0)}, ${arg(1)})`);
+          case "fs.writeCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_write_cb(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)})`);
+          case "fs.chmodCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_chmod_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fs.lchmodSyncChk":
             return finish(`scr_fs_lchmod_sync_chk(${arg(0)}, ${arg(1)})`);
           case "fsp.lchmodChk":

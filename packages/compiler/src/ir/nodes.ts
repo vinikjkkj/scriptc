@@ -5189,6 +5189,10 @@ export type IrLibFn =
   | "fs.mkdirCb"
   | "fs.unlinkCb"
   | "fs.renameCb"
+  | "fs.openCb"
+  | "fs.closeCb"
+  | "fs.writeCb"
+  | "fs.chmodCb"
   | "fs.mkdtempCb"
   | "fs.mkdtempSyncOpts"
   | "fs.readCb"
@@ -11237,7 +11241,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
  * moduleUsesZlib. */
 const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
   "fs.readFileCb", "fs.writeFileCb", "fs.appendFileCb", "fs.mkdirCb", "fs.unlinkCb", "fs.renameCb",
-  "fs.mkdtempCb", "fs.mkdtempSyncOpts", "fs.readCb", "fs.lchmodCb", "fs.lchmodSyncChk", "fsp.lchmodChk",
+  "fs.mkdtempCb", "fs.mkdtempSyncOpts", "fs.readCb", "fs.lchmodCb", "fs.lchmodSyncChk", "fsp.lchmodChk", "fs.openCb", "fs.closeCb", "fs.writeCb", "fs.chmodCb",
   "buffer.concatDyn", "buffer.concatDynLen", "buffer.byteLenDyn", "buffer.isEncodingDyn", "error.msgDyn", "dyn.isBuffer", "dyn.looseEq", "error.ext",
   "dyn.bufferValue",
 ]);
@@ -13259,6 +13263,10 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["fs.mkdtempCb", "the async fs callback surface (fs.mkdtemp)"],
   ["fs.readCb", "the async fs callback surface (fs.read)"],
   ["fs.lchmodCb", "the async fs callback surface (fs.lchmod)"],
+  ["fs.openCb", "the async fs callback surface (fs.open)"],
+  ["fs.closeCb", "the async fs callback surface (fs.close)"],
+  ["fs.writeCb", "the async fs callback surface (fs.write)"],
+  ["fs.chmodCb", "the async fs callback surface (fs.chmod)"],
   // randomFill's callback rides the check phase (scr_random_fill.c), which
   // library links exclude with the rest of the loop — refuse the surface
   // by name instead of owing the embedder scr_set_immediate.
@@ -14047,6 +14055,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.mkdtempSyncOpts",
   "fs.readCb",
   "fs.lchmodCb",
+  "fs.openCb",
+  "fs.closeCb",
+  "fs.writeCb",
+  "fs.chmodCb",
   "fs.lchmodSyncChk",
   "fsp.lchmodChk",
   "net.connect",

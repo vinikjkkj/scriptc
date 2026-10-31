@@ -1177,7 +1177,8 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
     const tsCallbackForm = bi.module === "fs" &&
       (bi.member === "readFile" || bi.member === "exists" || bi.member === "mkdtemp" || bi.member === "read" ||
         bi.member === "writeFile" || bi.member === "appendFile" || bi.member === "mkdir" ||
-        bi.member === "unlink" || bi.member === "rename");
+        bi.member === "unlink" || bi.member === "rename" || bi.member === "open" || bi.member === "close" ||
+        bi.member === "write" || bi.member === "chmod");
     if (!isJsSourceFile(expr.getSourceFile()) && !tsCallbackForm) return null;
     const args = expr.arguments;
     if (args.some(ts.isSpreadElement)) return null;
@@ -1338,6 +1339,34 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
         if (args.length > 3) return null;
         const a = dynArgs([args[0], args[1], args[2]]);
         return a && chk("fs.lchmodCb", a, DYN);
+      }
+      case "open": {
+        // open(path[, flags][, mode], callback): the argument count picks the
+        // callback slot (a two-argument call's flags slot IS the callback), so
+        // the count rides along as the last argument.
+        if (args.length > 4) return null;
+        const a = dynArgs([args[0], args[1], args[2], args[3]]);
+        if (a === null) return null;
+        return chk("fs.openCb", [...a, { kind: "numLit", value: args.length, type: F64, loc }], DYN);
+      }
+      case "close": {
+        // close(fd[, callback])
+        if (args.length > 2) return null;
+        const a = dynArgs([args[0], args[1]]);
+        return a && chk("fs.closeCb", a, DYN);
+      }
+      case "write": {
+        // write(fd, buffer | string, ...) over the six positional slots of Node's
+        // signature; the callback is whichever slot Node resolves it from.
+        if (args.length > 6) return null;
+        const a = dynArgs([args[0], args[1], args[2], args[3], args[4], args[5]]);
+        return a && chk("fs.writeCb", a, DYN);
+      }
+      case "chmod": {
+        // chmod(path, mode, callback)
+        if (args.length > 3) return null;
+        const a = dynArgs([args[0], args[1], args[2]]);
+        return a && chk("fs.chmodCb", a, DYN);
       }
       case "read": {
         // read(fd, buffer, offsetOrOptions, length, position, callback) in
