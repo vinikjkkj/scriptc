@@ -10035,6 +10035,11 @@ ScrBigInt *scr_big_not(const ScrBigInt *a);
  * or unsigned. `bits` is ToIndex (RangeError outside it); throws
  * catchably and answers zero, the family's convention. */
 ScrBigInt *scr_big_as_n(const ScrBigInt *a, double bits, bool is_signed);
+/* The same two operations over checked-dynamic operands, in the spec's order:
+ * ToIndex(bits) (its RangeError), then ToBigInt(value) (its TypeError), then
+ * the operation. Borrows both; +1. Used when the value is not a bigint, so
+ * the width and the value conversions cannot be sequenced by the caller. */
+ScrBigInt *scr_big_as_n_dyn(const ScrDyn *bits, const ScrDyn *value, bool is_signed);
 /* The low 64 bits of the infinite two's complement — ToBigUint64 and
  * ToBigInt64 both, which store the same bits. Never throws. */
 uint64_t scr_big_low_u64(const ScrBigInt *a);

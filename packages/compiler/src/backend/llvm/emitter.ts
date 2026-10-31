@@ -16493,6 +16493,20 @@ class LlEmitter {
       this.emitPendingCheck();
       return r;
     }
+    if (e.fn === "big.asIntNDyn" || e.fn === "big.asUintNDyn") {
+      // The dyn-operand pair, in the DECLARED order (bits, value), which is
+      // the C signature's order too: scr_big_as_n_dyn(bits, value, is_signed).
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.declare(`declare ptr @scr_big_as_n_dyn(ptr, ptr, i1 zeroext)`);
+      const out = B.tmp();
+      B.line(
+        `${out} = call ptr @scr_big_as_n_dyn(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+          `i1 ${e.fn === "big.asIntNDyn" ? "true" : "false"})`,
+      );
+      const r = this.own({ name: out, type: e.type });
+      this.emitPendingCheck();
+      return r;
+    }
     if (e.fn === "global.esmRequireThrow") {
       // An ES module's require read (see global.undefRead): the same throw,
       // carrying the decoration the uncaught report appends.

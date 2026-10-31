@@ -8419,6 +8419,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_big_as_n(${arg(1)}, ${arg(0)}, true)`);
           case "big.asUintN":
             return finish(`scr_big_as_n(${arg(1)}, ${arg(0)}, false)`);
+          case "big.asIntNDyn":
+            return finish(`scr_big_as_n_dyn(${arg(0)}, ${arg(1)}, true)`);
+          case "big.asUintNDyn":
+            return finish(`scr_big_as_n_dyn(${arg(0)}, ${arg(1)}, false)`);
           case "insp.dynSpread":
             return finish(`scr_insp_dyn_spread(${arg(0)})`);
           case "insp.format":

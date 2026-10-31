@@ -1546,6 +1546,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // (bits, value) — the declared argument ORDER, which is the spec's.
   "big.asIntN": { argTypes: [F64, BIGINT_T], result: BIGINT_T },
   "big.asUintN": { argTypes: [F64, BIGINT_T], result: BIGINT_T },
+  // (bits, value) over checked-dynamic operands (scr_big_as_n_dyn).
+  "big.asIntNDyn": { argTypes: [DYN, DYN], result: BIGINT_T },
+  "big.asUintNDyn": { argTypes: [DYN, DYN], result: BIGINT_T },
   "insp.dynSpread": { argTypes: [DYN], result: STRING },
   "insp.format": { argTypes: [DYN], result: STRING },
   "insp.jsval": { argTypes: [JSVAL, F64, F64], result: STRING },

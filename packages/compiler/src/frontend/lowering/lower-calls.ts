@@ -5099,9 +5099,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // 2^bits read signed or unsigned, which is the operation a 32-bit-half
     // integer library is BUILT out of (`long`'s fromBigInt splits a bigint
     // with asIntN(32, v) and asIntN(32, v >> 32n)). `bits` is ToIndex, so
-    // a number argument is the only lowered spelling; the value must
-    // already be a bigint (JS itself refuses to mix, and there is no
-    // implicit conversion that could be right).
+    // a number argument with a bigint value is the typed spelling; any
+    // other operand is converted by ToIndex and ToBigInt in the spec's
+    // order inside the dyn entry (see below).
     if (
       ts.isPropertyAccessExpression(expr.expression) &&
       (expr.expression.name.text === "asIntN" || expr.expression.name.text === "asUintN") &&
@@ -5110,39 +5110,44 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       expr.arguments.length === 2 &&
       !expr.arguments.some((a) => ts.isSpreadElement(a))
     ) {
-      const bits = L.lowerExprExpecting(expr.arguments[0]!, F64);
+      const bitsRaw = L.lowerExpr(expr.arguments[0]!);
       const raw = L.lowerExpr(expr.arguments[1]!);
-      // An 'unknown' value is RECOVERED rather than refused now that a
-      // bigint has a checked-dynamic representation: the checked cast is
-      // the same one `u as bigint` emits, so a non-bigint arrives as the
-      // usual path-annotated TypeError instead of a compile-time fence.
-      // This is `long`'s fromBigInt, whose parameter JS leaves untyped.
-      // The value is ToBigInt'd, which is NOT the BigInt() function: a
-      // number is a TypeError ("Cannot convert 5 to a BigInt"), a string
-      // parses (SyntaxError when it is not an integer), a boolean is 0n/1n.
-      // So every non-bigint operand crosses as a dyn and big.toBigInt
-      // answers exactly (long's fromBigInt, called with a number by a
-      // dead branch, must throw Node's error, not fence the build).
-      let value: IrExpr = raw;
-      if (raw.type.kind !== "bigint") {
-        const boxed: IrExpr | null = raw.type.kind === "dyn"
-          ? raw
-          : canConvertToDyn(raw.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
-            ? { kind: "dynFrom", value: raw, type: DYN, loc: raw.loc }
+      // The width (ToIndex) and the value (ToBigInt) must convert in the
+      // spec's order: the width's RangeError before the value's TypeError.
+      // Two converted operands cannot be sequenced by the caller, so any
+      // call whose value is not already a bigint, and any call whose width
+      // is not a number, goes through the dyn entry (scr_big_as_n_dyn),
+      // which does the width first. A bigint value with a number width stays
+      // on the typed entry, where only the width can throw.
+      const asIntNCall = expr.expression.name.text === "asIntN";
+      const boxedOf = (x: IrExpr): IrExpr | null =>
+        x.type.kind === "dyn"
+          ? x
+          : canConvertToDyn(x.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+            ? { kind: "dynFrom", value: x, type: DYN, loc: x.loc }
             : null;
-        if (boxed !== null) value = { kind: "libCall", fn: "big.toBigInt", args: [boxed], type: BIGINT, loc: raw.loc };
-      }
-      if (bits.type.kind === "f64" && value.type.kind === "bigint") {
+      if (bitsRaw.type.kind === "f64" && raw.type.kind === "bigint") {
         return {
           kind: "libCall",
-          fn: expr.expression.name.text === "asIntN" ? "big.asIntN" : "big.asUintN",
-          args: [bits, value],
+          fn: asIntNCall ? "big.asIntN" : "big.asUintN",
+          args: [bitsRaw, raw],
+          type: BIGINT,
+          loc,
+        };
+      }
+      const bitsBoxed = boxedOf(bitsRaw);
+      const valueBoxed = boxedOf(raw);
+      if (bitsBoxed !== null && valueBoxed !== null) {
+        return {
+          kind: "libCall",
+          fn: asIntNCall ? "big.asIntNDyn" : "big.asUintNDyn",
+          args: [bitsBoxed, valueBoxed],
           type: BIGINT,
           loc,
         };
       }
       L.noLowering(
-        `BigInt.${expr.expression.name.text}(${L.fmt(bits.type)}, ${L.fmt(value.type)})`,
+        `BigInt.${expr.expression.name.text}(${L.fmt(bitsRaw.type)}, ${L.fmt(raw.type)})`,
         expr,
         "a number width and a bigint value are the lowered forms",
       );
