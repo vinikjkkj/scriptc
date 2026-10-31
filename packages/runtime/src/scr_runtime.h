@@ -7485,6 +7485,8 @@ long scr_dyn_live_count(void);
  */
 void scr_obj_alloc_note(void);
 void scr_obj_free_note(void);
+/* The pending-timer mirror (scr_object.c owns the storage; scr_async.c sets it). */
+void scr_timers_live_set(long n);
 #ifdef SCR_RC_AUDIT
 long scr_obj_live_count(void);
 #endif

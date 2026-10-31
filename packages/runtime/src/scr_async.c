@@ -883,10 +883,13 @@ typedef struct {
 
 static ScrTimer *scr_timers = NULL;
 static size_t scr_ntimers = 0, scr_timers_cap = 0;
+/* Pending timer entries are mirrored into scr_object.c after every change of
+ * the heap size: the RC audit reads the count at exit from an always-linked
+ * unit, so a link that omits this file still resolves it (see scr_timers_live_set). */
 #ifdef SCR_RC_AUDIT
-/* Pending timer entries (armed setTimeout/setInterval, refed or not). Read
- * by the RC audit at exit: an entry still armed then is a live timer. */
-long scr_timers_live_count(void) { return (long)scr_ntimers; }
+#define SCR_TIMERS_MIRROR() scr_timers_live_set((long)scr_ntimers)
+#else
+#define SCR_TIMERS_MIRROR() ((void)0)
 #endif
 static unsigned long scr_timer_seq = 0;
 /* REF'd armed timers — the loop's timer-liveness count (an unref'd timer
@@ -916,6 +919,7 @@ static void scr_timer_push(ScrTimer t) {
   }
   if (t.reffed) scr_reffed_timers++;
   size_t i = scr_ntimers++;
+  SCR_TIMERS_MIRROR();
   scr_timers[i] = t;
   while (i > 0) {
     size_t parent = (i - 1) / 2;
@@ -931,6 +935,7 @@ static ScrTimer scr_timer_pop(void) {
   ScrTimer top = scr_timers[0];
   if (top.reffed && scr_reffed_timers > 0) scr_reffed_timers--;
   scr_timers[0] = scr_timers[--scr_ntimers];
+  SCR_TIMERS_MIRROR();
   size_t i = 0;
   for (;;) {
     size_t l = 2 * i + 1, r = 2 * i + 2, min = i;
@@ -1103,6 +1108,7 @@ static bool scr_firing_refresh = false; /* refresh() called mid-callback */
 static void scr_timer_remove_at(size_t i) {
   if (scr_timers[i].reffed && scr_reffed_timers > 0) scr_reffed_timers--;
   scr_timers[i] = scr_timers[--scr_ntimers];
+  SCR_TIMERS_MIRROR();
   if (i >= scr_ntimers) return;
   /* Sift up if the moved entry beats its parent, else sift down. */
   while (i > 0) {
@@ -1360,6 +1366,7 @@ static void scr_immediates_teardown(void);
 void scr_timers_teardown(void) {
   for (size_t i = 0; i < scr_ntimers; i++) scr_closure_release(scr_timers[i].cb);
   scr_ntimers = 0;
+  SCR_TIMERS_MIRROR();
   scr_reffed_timers = 0;
   scr_immediates_teardown();
   scr_nticks_teardown();

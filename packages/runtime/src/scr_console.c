@@ -53,7 +53,7 @@ extern long scr_obj_live_count(void);     /* scr_object.c */
 extern long scr_union_live_count(void);   /* scr_union.c */
 extern long scr_dyn_live_count(void);     /* scr_json.c */
 extern long scr_bytes_live_count(void);   /* scr_bytes.c */
-extern long scr_timers_live_count(void); /* scr_async.c */
+extern long scr_timers_live_count(void); /* scr_object.c (mirrored by scr_async.c) */
 extern long scr_netsock_live_count(void); /* scr_object.c */
 extern long scr_netsrv_live_count(void); /* scr_object.c */
 extern long scr_tlsctx_live_count(void); /* scr_object.c */

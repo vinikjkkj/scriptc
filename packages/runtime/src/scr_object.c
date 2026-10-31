@@ -60,6 +60,13 @@ void scr_obj_free_note(void) { scr_live_objects--; }
  * link units and this TU is always linked -- see scr_runtime.h. Off the
  * audit lane the notes are macros that expand to nothing, so none of this
  * exists. */
+/* The pending-timer count, mirrored here by scr_async.c on every change of
+ * its heap size (SCR_TIMERS_MIRROR). The timer heap lives in a link-gated
+ * unit; this TU is always linked, so the audit's read always resolves. */
+static long scr_live_timers = 0;
+long scr_timers_live_count(void) { return scr_live_timers; }
+void scr_timers_live_set(long n) { scr_live_timers = n; }
+
 #define SCR_HANDLE_COUNTER(kind)                                 \
   static long scr_live_##kind = 0;                               \
   long scr_##kind##_live_count(void) { return scr_live_##kind; } \
