@@ -41,7 +41,7 @@ import { jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type Param
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
-import { lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
+import { errorRootedType, lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
 import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { emitterRooted } from "./lower-emitter.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, type ClassInfo } from "./lower-classes.js";
@@ -855,9 +855,9 @@ export function refuseUnloweredSubtleCall(L: Lowerer, call: ts.CallExpression): 
   };
   /** the hash of a dictionary argument: provably served, or absent (the runtime answers the missing-member error) */
   const hashOk = (e: ts.Expression | undefined): boolean => {
-    if (e === undefined) return true;
-    const obj = provableObject(L, e);
-    if (obj === null) return provableString(L, e) !== null; /* a bare name has no hash to check */
+    if (e === undefined) return true;
+    const obj = provableObject(L, e);
+    if (obj === null) return provableString(L, e) !== null; /* a bare name has no hash to check */
     const h = memberOf(obj, "hash");
     if (h === undefined) return true;
     // The hash is a name or a { name } dictionary (HmacImportParams.hash: HashAlgorithmIdentifier).
@@ -1010,7 +1010,7 @@ export function refuseUnloweredWebCryptoPattern(L: Lowerer, pattern: ts.ObjectBi
 }
 
 
-function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
+function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
   refuseWebCryptoFlowsAt(L, expr);
   if (ts.isBinaryExpression(expr)) refuseUnloweredWebCryptoAssign(L, expr);
     const loc = locOf(expr);
@@ -24668,6 +24668,8 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
         }
       }
     }
+    const nullableDyn = lowerUnionNullableDynRead(L, expr, value, field);
+    if (nullableDyn) return nullableDyn;
     L.unsupported(
       "SC1090",
       expr,
@@ -24742,6 +24744,59 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
     const joined = lowerUnionFieldJoinRead(L, expr, value, field);
     if (joined) return joined;
     return lowerUnionIntrinsicLengthRead(L, expr, value, field);
+  }
+
+  /** JavaScript `r.f` on a union whose unit arms are Node's null/undefined and
+   * whose other arms are records or classes (`err` of an fs callback is
+   * `Error | null`; dns.lookup's err is the same union). No static reader
+   * answers it: the null arm has no member to read, and the static readers
+   * need the field on EVERY arm. Node's answer is the member of the value arm
+   * and the TypeError "Cannot read properties of null (reading 'f')" on the
+   * null arm. That is exactly a checked-dynamic property read, the shape an
+   * unannotated callback parameter already takes (readFile's and mkdir's err):
+   * the union boxes to dyn, and dynKeyGet answers the member or throws Node's
+   * TypeError at the read. Scoped to a plain `r.f` (an optional `r?.f` keeps
+   * its own chain rule) and to JavaScript sources; TypeScript's strict
+   * checker rejects the unguarded read before it reaches here. Destructuring
+   * is not a member read (its own message) and does not come through here. */
+  const ERRNO_MEMBER_NAMES = new Set(["code", "errno", "syscall", "path", "dest", "hostname", "message"]);
+
+  function lowerUnionNullableDynRead(L: Lowerer, expr: ts.PropertyAccessExpression, value: IrExpr, field: string): IrExpr | null {
+    if (expr.questionDotToken !== undefined || !isJsSourceFile(expr.getSourceFile())) return null;
+    if (value.type.kind !== "union") return null;
+    const def = L.unions.get(value.type.unionId);
+    if (!def) return null;
+    let unitArms = 0;
+    let valueArms = 0;
+    for (const arm of def.arms) {
+      if (arm.kind === "nullT" || arm.kind === "undefinedT") {
+        unitArms++;
+        continue;
+      }
+      if (arm.kind !== "record" && arm.kind !== "object") return null;
+      valueArms++;
+      // The dyn read answers an OWN member. Every value arm must declare the
+      // field (a record shape field, a class field), or be an %Error-rooted
+      // object whose own members are the errno-style set the runtime carries
+      // (`stack` and `cause` have their own static answers, so they keep the
+      // fence). A name the arm lacks would reach Object.prototype in JS.
+      if (arm.kind === "record") {
+        if (!L.shapes.get(arm.shapeId)?.fields.some((f) => f.name === field)) return null;
+      } else if (errorRootedType(L, arm)) {
+        if (!ERRNO_MEMBER_NAMES.has(field)) return null;
+      } else if (!L.classes.get(arm.className)?.fields.has(field)) {
+        return null;
+      }
+    }
+    if (unitArms === 0 || valueArms === 0) return null;
+    const loc = locOf(expr);
+    return {
+      kind: "dynKeyGet",
+      key: { kind: "strLit", value: field, type: STRING, loc },
+      value: L.coerceToExpected(value, DYN),
+      type: DYN,
+      loc,
+    };
   }
 
   /** The union-receiver property read, addressed by a NODE rather than by
