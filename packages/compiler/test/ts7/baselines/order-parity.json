@@ -9926,6 +9926,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21300-bigint-asn-value-conditional.ts": {
+   "order": [
+    "<repo>/tests/corpus/21300-bigint-asn-value-conditional.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21301-bigint-asn-value-const-and-argument.ts": {
+   "order": [
+    "<repo>/tests/corpus/21301-bigint-asn-value-const-and-argument.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21302-bigint-asn-value-long-conversion.js": {
+   "order": [
+    "<repo>/tests/corpus/21302-bigint-asn-value-long-conversion.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21303-bigint-asn-value-type-errors.js": {
+   "order": [
+    "<repo>/tests/corpus/21303-bigint-asn-value-type-errors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21304-bigint-asn-direct-call-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/21304-bigint-asn-direct-call-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21305-bigint-asn-value-name-length-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/21305-bigint-asn-value-name-length-identity.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2140-uri-component-codecs.ts": {
    "order": [
     "<repo>/tests/corpus/2140-uri-component-codecs.ts"
