@@ -148,7 +148,7 @@ import { lowerStaticFetchCall } from "./lower-fetch.js";
 import { lowerDgramDnsModuleCall, lowerDgramMethodCall } from "./lower-dgram.js";
 import { lowerNodeTestModuleCall, lowerTestDirectCall, lowerTestMethodCall, lowerTestCtxProperty } from "./lower-test.js";
 import { lowerAssertModuleCall, lowerAssertDirectCall } from "./lower-assert.js";
-import { lowerUtilModuleCall } from "./lower-inspect.js";
+import { lowerUtilModuleCall, symbolSpellingOf } from "./lower-inspect.js";
 import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueToIr } from "./lower-comptime.js";
 import { lowerDeleteValue, lowerElemValuePosition, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { unboundMethodThunk, recordKeyResultOk, narrowBridgeDyn, FieldTarget, bufferValueIndexOf, bufferValueOf, lowerDynObjectLiteral, lowerDynSpreadObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, numberConvAtDynWidth, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
@@ -3448,6 +3448,72 @@ export class Lowerer {
    * dyn is refused at compile time at every dyn-source Array.from, naming the
    * boxing site, instead of the run-time "cannot be called through it" error.
    * A program without such a box is not touched. */
+  /** A SYMBOL-keyed value boxed into the dynamic tree. The dyn table holds
+   * string keys only: the record-to-dyn walk drops a symbol member, so
+   * `const o: any = { a: 1, [s]: 2 }` printed `{ a: 1 }` where Node prints
+   * `{ a: 1, Symbol(desc): 2 }`, silently. Refused by name at each boxing
+   * site (the box is the only place the loss happens). */
+  fenceSymbolKeyedDynBox(functions: readonly IrFunction[]): void {
+    const sites: { loc: SrcLoc; type: IrType }[] = [];
+    const seen = new Set<unknown>();
+    const visit = (n: unknown): void => {
+      if (n === null || typeof n !== "object" || seen.has(n)) return;
+      seen.add(n);
+      if (Array.isArray(n)) {
+        for (const x of n) visit(x);
+        return;
+      }
+      const node = n as { kind?: unknown; loc?: SrcLoc; value?: { type?: IrType } };
+      if (node.kind === "dynFrom" && node.loc && node.value?.type) sites.push({ loc: node.loc, type: node.value.type });
+      for (const [k, v] of Object.entries(n)) {
+        if (k !== "loc" && k !== "type") visit(v);
+      }
+    };
+    visit(functions);
+    if (sites.length === 0) return;
+    // A WELL-KNOWN symbol member (`Symbol.iterator`, `Symbol.toStringTag`) is answered by the runtime's
+    // own key spelling (`__@toStringTag@<id>`), so Object.prototype.toString and Array.from read it through
+    // a box: refusing it would refuse programs that run exactly. Only a USER symbol has no such reader.
+    const isUserSymbolField = (name: string): boolean => {
+      if (!name.startsWith("__@") || name.startsWith("__@ord@")) return false;
+      const spelled = symbolSpellingOf(this, name);
+      return spelled === null || !spelled.startsWith("Symbol(Symbol.");
+    };
+    const hasSymbolMember = (t: IrType, visiting: Set<string>): boolean => {
+      if (t.kind === "record") {
+        const key = "r:" + t.shapeId;
+        if (visiting.has(key)) return false;
+        visiting.add(key);
+        const shape = this.shapes.get(t.shapeId);
+        if (!shape) return false;
+        return shape.fields.some((f) => isUserSymbolField(f.name) || hasSymbolMember(f.type, visiting));
+      }
+      if (t.kind === "object") {
+        const key = "o:" + t.className;
+        if (visiting.has(key)) return false;
+        visiting.add(key);
+        const info = this.classes.get(t.className);
+        return [...(info?.symbolFields?.values() ?? [])].some((spelled) => !spelled.startsWith("Symbol(Symbol."));
+      }
+      if (t.kind === "union") {
+        const key = "u:" + t.unionId;
+        if (visiting.has(key)) return false;
+        visiting.add(key);
+        const def = this.unions.get(t.unionId);
+        return (def?.arms ?? []).some((a) => hasSymbolMember(a, visiting));
+      }
+      if (t.kind === "array") return hasSymbolMember(t.elem, visiting);
+      return false;
+    };
+    for (const s of sites) {
+      if (!hasSymbolMember(s.type, new Set())) continue;
+      this.pushDiag(unsupportedDiag("SC1090", s.loc,
+        "boxing a symbol-keyed object into the untyped (any / dynamic) tree",
+        "the dynamic table has no symbol-keyed storage, so util.inspect, `in` and Object.assign would drop the symbol " +
+          "member; keep the value statically typed, or read its string-keyed members before the box"));
+    }
+  }
+
   fenceDynArrFromOnStrandedBox(functions: readonly IrFunction[]): void {
     const arrFromSites: SrcLoc[] = [];
     // Boxed values are collected first; the generator walk runs only when the
@@ -3685,6 +3751,7 @@ export class Lowerer {
     // is not complete until the last body is lowered.
     this.reportRecordWidthCopies(functions);
     this.fenceDynArrFromOnStrandedBox(functions);
+    this.fenceSymbolKeyedDynBox(functions);
 
     if (this.remainder) {
       // Deferred collection diagnostics nothing flushed — declarations no

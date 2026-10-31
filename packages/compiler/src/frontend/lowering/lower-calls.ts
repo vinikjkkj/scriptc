@@ -12630,6 +12630,15 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       access.name.text === "ownKeys" && call.arguments.length === 1 && L.isStdlibGlobal(access.expression, "Reflect");
     if (!reflectOwnKeys && !L.isStdlibGlobal(access.expression, "Object")) return null;
     const member = reflectOwnKeys ? "getOwnPropertyNames" : access.name.text;
+    // Reflect.ownKeys also lists SYMBOL keys, which a record's string-key walk cannot carry: a symbol-keyed
+    // record is refused here by name rather than answered without its symbols.
+    if (reflectOwnKeys && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
+      const argT = L.mapTypeOf(L.typeOf(call.arguments[0]!));
+      const argShape = argT !== null && argT.kind === "record" ? L.shapes.get(argT.shapeId) : undefined;
+      if (argShape?.fields.some((f) => f.name.startsWith("__@") && !f.name.startsWith("__@ord@"))) {
+        L.unsupported("SC1090", call, "Reflect.ownKeys over a symbol-keyed object (its symbol keys are not in the string-key list, and Node lists them)");
+      }
+    }
     if (member === "getOwnPropertyDescriptor") {
       const desc = protoMethodDescriptorOf(L, call);
       if (desc !== null) return desc;

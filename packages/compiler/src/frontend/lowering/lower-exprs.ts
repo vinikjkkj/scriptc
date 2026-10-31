@@ -9872,6 +9872,18 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
       const name = prop.name;
       let key: IrExpr;
       if (ts.isComputedPropertyName(name)) {
+        // A SYMBOL-keyed member of an untyped literal has no exact home: the
+        // dyn table holds string keys only, so the member vanished from
+        // util.inspect and `in`, and a symbol key reached a string key
+        // (`'Symbol(x)'`) through the coercion below. Refused by name.
+        const wellKnownKey = ts.isPropertyAccessExpression(name.expression) && ts.isIdentifier(name.expression.expression) && name.expression.expression.text === "Symbol" && L.isStdlibSymbol(L.checker.getSymbolAtLocation(name.expression.expression));
+        if (!wellKnownKey && (L.typeOf(name.expression).flags & (ts.TypeFlags.ESSymbol | ts.TypeFlags.UniqueESSymbol)) !== 0) {
+          L.unsupported(
+            "SC1090",
+            name,
+            "a symbol-keyed member of an untyped (any / dynamic) object literal (the dynamic table has no symbol-keyed storage: util.inspect, `in` and Object.assign would drop or stringify the key)",
+          );
+        }
         const folded = literalComputedKey(L, name);
         if (folded !== null) {
           key = { kind: "strLit", value: folded, type: STRING, loc: locOf(name) };
