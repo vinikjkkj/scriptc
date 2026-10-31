@@ -26,7 +26,7 @@
 import { createHash } from "node:crypto";
 import { globSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
@@ -194,8 +194,8 @@ function comparableStderr(stderr: Buffer): Buffer {
   return Buffer.from(kept.join("\n"), "utf8");
 }
 
-const comptimeShim = pathToFileURL(join(import.meta.dirname, "comptime-shim.mjs")).href;
-const islandShim = pathToFileURL(join(import.meta.dirname, "island-shim.mjs")).href;
+const comptimeShim = pathToFileURL(join(import.meta.dirname, "comptime-shim.cjs")).href;
+const islandShim = pathToFileURL(join(import.meta.dirname, "island-shim.cjs")).href;
 
 /** differential.test.ts's twin: the Node oracle runs with
  * --experimental-transform-types for corpus programs using non-erasable
@@ -242,7 +242,8 @@ function nodeOracleArgs(file: string): string[] {
     ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning"]
     : [];
   const nodep = wantsNoDeprecation(file) ? ["--no-deprecation"] : [];
-  return [...transform, ...nodep, "--import", comptimeShim, "--import", islandShim, nodeOracleFile(file)];
+  // --require, not --import (see differential-suite.ts nodeOracleArgs).
+  return [...transform, ...nodep, "--require", fileURLToPath(comptimeShim), "--require", fileURLToPath(islandShim), nodeOracleFile(file)];
 }
 
 function programInputs(file: string): string[] {

@@ -232,8 +232,8 @@ async function runLinuxNode(file: string): Promise<RunResult> {
     ...(directiveHead(file).some((l) => /^\/\/ @no-deprecation\s*$/.test(l))
       ? ["--no-deprecation"]
       : []),
-    "--import", inContainer(join(repoRoot, "tests/harness/comptime-shim.mjs")),
-    "--import", inContainer(join(repoRoot, "tests/harness/island-shim.mjs")),
+    "--require", inContainer(join(repoRoot, "tests/harness/comptime-shim.cjs")),
+    "--require", inContainer(join(repoRoot, "tests/harness/island-shim.cjs")),
     inContainer(nodeOracleFile(file)),
   ]);
 }
