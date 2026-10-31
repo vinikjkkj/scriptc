@@ -36,7 +36,7 @@ import type {
 import { DYN, funcOf, moduleUsesTextMb, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesFnText, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import { setDynOrderPlan } from "../dyn-members.js";
-import { orderRecordPlanCached, isRuntimeRootedClassName, moduleUsesObjectWeakKeys } from "../../ir/nodes.js";
+import { orderRecordPlanCached, isRuntimeRootedClassName, moduleUsesObjectWeakKeys, fnNameTableRows } from "../../ir/nodes.js";
 import {
   mangleAsyncSpawn,
   mangleGenSpawn,
@@ -694,6 +694,11 @@ export class CEmitter {
    * creation sites as fnNames; emitted (ScrFnText table, scr_fntext.c) only
    * when the program uses fn.text (moduleUsesFnText). */
   readonly fnTexts = new Map<string, string>();
+  /** Emitted closure entry point symbol -> its inspect kind code (ir/nodes.ts
+   * irFunctionValueCode: async/generator, and no-prototype for an arrow, a
+   * method or an async function). Read by the runtime's box constructor
+   * through the same ScrFnName row as the name; 0 rows are not emitted. */
+  readonly fnCodes = new Map<string, number>();
   /** dyn-promise settle adapters (sc_pda_*), per INNER typeKey: convert a
    * typed fulfillment payload into the boxed destination's dyn payload
    * (scr_dyn_new_promise_adapting's callback — toDynHelper's promise arm). */
@@ -1748,12 +1753,12 @@ export class CEmitter {
     // function of the program and not of emission order. Emitted here,
     // with the RC table, for the same reason — the bodies it names are
     // all prototyped by now.
-    const fnNameRows = [...this.fnNames].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const fnNameRows = fnNameTableRows(this.fnNames, this.fnCodes);
     if (fnNameRows.length > 0) {
       out.push(
         `${this.link}const ScrFnName sc_fn_name_tbl[] = {`,
-        ...fnNameRows.map(([sym, name]) =>
-          `  { (const void *)&${sym}, ${cStringLiteral(Buffer.from(name, "utf8"))} },`),
+        ...fnNameRows.map(([sym, name, code]) =>
+          `  { (const void *)&${sym}, ${name === null ? "NULL" : cStringLiteral(Buffer.from(name, "utf8"))}, ${code}u },`),
         `};`,
         ``,
       );

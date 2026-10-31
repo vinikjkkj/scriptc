@@ -14,7 +14,7 @@ function canonNum(type: { kind: string }, expr: string): string {
   return type.kind === "f64" ? `scr_num_canon(${expr})` : expr;
 }
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
-import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
+import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
@@ -2264,6 +2264,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const jsName = irFunctionJsName(target);
           if (jsName !== null) E.fnNames.set(mangleWrapper(e.fnName), jsName);
           if (target.srcText !== undefined) E.fnTexts.set(mangleWrapper(e.fnName), target.srcText);
+          if (irFunctionValueCode(target) !== 0) E.fnCodes.set(mangleWrapper(e.fnName), irFunctionValueCode(target));
           return E.newTemp(
             e.type,
             retainCallC(e.type, `(ScrClosure *)&${mangleFnClosure(e.fnName)}`),
@@ -2277,6 +2278,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const jsName = irFunctionJsName(target);
         if (jsName !== null) E.fnNames.set(E.callTargetC(e.fnName), jsName);
         if (target.srcText !== undefined) E.fnTexts.set(E.callTargetC(e.fnName), target.srcText);
+        if (irFunctionValueCode(target) !== 0) E.fnCodes.set(E.callTargetC(e.fnName), irFunctionValueCode(target));
         const t = E.newTemp(
           e.type,
           `scr_closure_new((void *)&${E.callTargetC(e.fnName)}, ${e.captures.length})`,
@@ -2741,7 +2743,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             e.fnSrc === undefined ? "NULL"
             : e.fnSrc === "bound" ? "SCR_FN_SRC_BOUND"
             : cStringLiteral(Buffer.from(e.fnSrc.text, "utf8"));
-          return E.newTemp(e.type, `${E.dynFuncBoxHelper(v.type)}(${v.name}, ${name}, ${src})`);
+          const box = `${E.dynFuncBoxHelper(v.type)}(${v.name}, ${name}, ${src})`;
+          return E.newTemp(e.type, e.fnCode !== undefined ? `scr_dyn_fn_code_set(${box}, ${e.fnCode}u)` : box);
         }
         const conv = `${E.toDynHelper(v.type)}(${v.name})`;
         // An ARRAY or RECORD the caller still names: the copy the converter
@@ -8287,6 +8290,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_error((ScrError *)${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "insp.dyn":
             return finish(`scr_insp_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "insp.dynH":
+            return finish(`scr_insp_dyn_h(${arg(0)}, ${arg(1)})`);
           case "insp.dynS":
             return finish(`scr_insp_dyn_s(${arg(0)}, ${arg(1)})`);
           case "insp.fmtS":
