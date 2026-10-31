@@ -1240,6 +1240,30 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
       const a = dynArgs([args[0], args[1]]);
       return a && chk("fsp.lchmodChk", a, { kind: "promise", inner: VOID });
     }
+    // The callback writers open, close, write and chmod cross only values whose
+    // validation message the runtime renders exactly: a provably string, number,
+    // null or undefined (a Buffer where the data or path is taken), a function
+    // or such a scalar in a callback slot, and a literal options object whose
+    // members are scalars. An object, array, boolean, any or unknown would reach
+    // the message through the approximate inspector, so the call refuses at build
+    // (the same refusal main gives every one of them).
+    const SCALAR_KINDS = ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike | ts.TypeFlags.Undefined | ts.TypeFlags.Null;
+    const partsOfArg = (n: ts.Expression): readonly ts.Type[] => {
+      const t = L.typeOf(n);
+      return (t.flags & ts.TypeFlags.Union) ? (t as unknown as { types: ts.Type[] }).types : [t];
+    };
+    const scalarSlot = (n: ts.Expression | undefined): boolean =>
+      n === undefined || partsOfArg(n).every((p) => (p.flags & SCALAR_KINDS) !== 0);
+    const bufferSlot = (n: ts.Expression | undefined): boolean => n === undefined ||
+      partsOfArg(n).every((p) => (p.flags & SCALAR_KINDS) !== 0 || /^(Buffer|Uint8Array)\b/.test(L.checker.typeToString(p)));
+    const fnSlot = (n: ts.Expression | undefined): boolean => n === undefined ||
+      partsOfArg(n).every((p) => (p.flags & SCALAR_KINDS) !== 0 ||
+        L.checker.getCallSignatures(p).length > 0);
+    const optsSlot = (n: ts.Expression): boolean => ts.isObjectLiteralExpression(n) &&
+      n.properties.every((p) => ts.isPropertyAssignment(p) ? scalarSlot(p.initializer)
+        : ts.isShorthandPropertyAssignment(p) ? scalarSlot(p.name as ts.Expression) : false);
+    const anySlot = (n: ts.Expression | undefined): boolean =>
+      n === undefined || scalarSlot(n) || fnSlot(n) || optsSlot(n);
     switch (bi.member) {
       case "exists": {
         // The REAL deprecated-API shape: the callback validates
@@ -1345,6 +1369,10 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
         // callback slot (a two-argument call's flags slot IS the callback), so
         // the count rides along as the last argument.
         if (args.length > 4) return null;
+        const openProvable = bufferSlot(args[0]) && (args.length === 2 ? fnSlot(args[1])
+          : args.length === 3 ? scalarSlot(args[1]) && (fnSlot(args[2]) || scalarSlot(args[2]))
+          : args.length === 4 ? scalarSlot(args[1]) && scalarSlot(args[2]) && fnSlot(args[3]) : true);
+        if (!openProvable) return null;
         const a = dynArgs([args[0], args[1], args[2], args[3]]);
         if (a === null) return null;
         return chk("fs.openCb", [...a, { kind: "numLit", value: args.length, type: F64, loc }], DYN);
@@ -1352,6 +1380,7 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
       case "close": {
         // close(fd[, callback])
         if (args.length > 2) return null;
+        if (!scalarSlot(args[0]) || !fnSlot(args[1])) return null;
         const a = dynArgs([args[0], args[1]]);
         return a && chk("fs.closeCb", a, DYN);
       }
@@ -1359,12 +1388,15 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
         // write(fd, buffer | string, ...) over the six positional slots of Node's
         // signature; the callback is whichever slot Node resolves it from.
         if (args.length > 6) return null;
+        if (!scalarSlot(args[0]) || !bufferSlot(args[1]) || !anySlot(args[2]) ||
+            !args.slice(3).every((x) => scalarSlot(x) || fnSlot(x))) return null;
         const a = dynArgs([args[0], args[1], args[2], args[3], args[4], args[5]]);
         return a && chk("fs.writeCb", a, DYN);
       }
       case "chmod": {
         // chmod(path, mode, callback)
         if (args.length > 3) return null;
+        if (!bufferSlot(args[0]) || !scalarSlot(args[1]) || !fnSlot(args[2])) return null;
         const a = dynArgs([args[0], args[1], args[2]]);
         return a && chk("fs.chmodCb", a, DYN);
       }
