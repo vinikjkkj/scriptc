@@ -227,20 +227,13 @@ struct ScrSecureCtx {
 };
 
 
-#ifdef SCR_RC_AUDIT
-static long scr_live_secure_ctx = 0;
-long scr_secure_ctx_live_count(void) { return scr_live_secure_ctx; }
-#endif
-
 static ScrSecureCtx *scr_secure_ctx_alloc(void) {
   ScrSecureCtx *c = calloc(1, sizeof *c);
   if (!c) scr_tls_oom();
   c->rc = 1;
   mbedtls_x509_crt_init(&c->cert);
   mbedtls_pk_init(&c->pk);
-#ifdef SCR_RC_AUDIT
-  scr_live_secure_ctx++;
-#endif
+  scr_tlsctx_alloc_note();
   return c;
 }
 
@@ -267,9 +260,7 @@ void scr_secure_ctx_release(ScrSecureCtx *c) {
   mbedtls_pk_free(&c->pk);
   scr_bytes_release(c->ca);
   free(c);
-#ifdef SCR_RC_AUDIT
-  scr_live_secure_ctx--;
-#endif
+  scr_tlsctx_free_note();
 }
 
 void *scr_secure_ctx_retain_v(void *p) { return scr_secure_ctx_retain((ScrSecureCtx *)p); }
@@ -2113,6 +2104,7 @@ static void scr_tls_free(void *tctx) {
   scr_net_ls_drop(&t->session_ls);
   free(t->hello);
   scr_secure_ctx_release(t->sni_ctx);
+  scr_tlssock_free_note();
   free(t);
 }
 
@@ -2145,6 +2137,7 @@ static void scr_tls_srv_on_conn(void *ctx, ScrNetSocket *sock) {
   ScrTlsSrv *srv = (ScrTlsSrv *)ctx;
   ScrTlsSock *t = calloc(1, sizeof *t);
   if (!t) scr_tls_oom();
+  scr_tlssock_alloc_note();
   mbedtls_ssl_init(&t->ssl);
   if (mbedtls_ssl_setup(&t->ssl, &srv->conf) != 0) scr_tls_oom();
   t->sock = sock;
@@ -2202,6 +2195,7 @@ static void scr_tls_cli_wrap(ScrNetSocket *sock, void *ctx) {
   ScrTlsCli *cli = (ScrTlsCli *)ctx;
   ScrTlsSock *t = calloc(1, sizeof *t);
   if (!t) scr_tls_oom();
+  scr_tlssock_alloc_note();
   mbedtls_ssl_init(&t->ssl);
   if (mbedtls_ssl_setup(&t->ssl, &cli->conf) != 0) scr_tls_oom();
   if (cli->hostname != NULL) (void)mbedtls_ssl_set_hostname(&t->ssl, cli->hostname);

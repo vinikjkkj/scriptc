@@ -227,6 +227,7 @@ void scr_watcher_release(ScrWatcher *w) {
     scr_watch_backend_drop(w);
 #endif
     scr_str_release(w->path);
+    scr_watcher_free_note();
     free(w);
   }
 }
@@ -297,6 +298,7 @@ ScrWatcher *scr_fs_watch(ScrStr *path, ScrClosure *cb /*moves, nullable*/, ScrWa
 #endif
   ScrWatcher *w = calloc(1, sizeof *w);
   if (!w) scr_watch_oom();
+  scr_watcher_alloc_note();
   w->rc = 1;
   w->path = scr_str_retain(path);
   if (cb != NULL) {

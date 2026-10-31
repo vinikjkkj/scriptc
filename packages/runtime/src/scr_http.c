@@ -200,10 +200,6 @@ struct ScrHttpReq {
   void (*body_view_free)(void *);
 };
 
-#ifdef SCR_RC_AUDIT
-static long scr_http_live = 0;
-long scr_http_live_count(void) { return scr_http_live; }
-#endif
 
 ScrHttpReq *scr_http_req_retain(ScrHttpReq *r) {
   if (r->rc != SIZE_MAX) r->rc++;
@@ -273,9 +269,7 @@ void scr_http_req_release(ScrHttpReq *r) {
       r->body_view = NULL;
       freefn(v);
     }
-#ifdef SCR_RC_AUDIT
-    scr_http_live--;
-#endif
+    scr_httpmsg_free_note();
     free(r);
   }
 }
@@ -674,9 +668,7 @@ void scr_http_res_release(ScrHttpRes *r) {
     if (r->req_ref) scr_http_req_release(r->req_ref);
     if (r->sock) scr_net_sock_release(r->sock);
     if (r->h2_stream) scr_http_h2_ops->release(r->h2_stream);
-#ifdef SCR_RC_AUDIT
-    scr_http_live--;
-#endif
+    scr_httpmsg_free_note();
     free(r);
   }
 }
@@ -1746,9 +1738,7 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len) {
   req->status = -1; /* Node: statusCode is undefined on server requests */
   req->join_dup = conn->srv != NULL && conn->srv->join_dup;
   req->sock = scr_net_sock_retain(conn->sock);
-#ifdef SCR_RC_AUDIT
-  scr_http_live++;
-#endif
+  scr_httpmsg_alloc_note();
   req->method = scr_str_new(buf, (size_t)(sp1 - buf));
   req->url = scr_str_new(sp1 + 1, (size_t)(sp2 - sp1 - 1));
   req->http10 = http10;
@@ -1882,9 +1872,7 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len) {
   ScrHttpRes *res = calloc(1, sizeof *res);
   if (!res) scr_http_oom();
   res->rc = 1;
-#ifdef SCR_RC_AUDIT
-  scr_http_live++;
-#endif
+  scr_httpmsg_alloc_note();
   res->sock = scr_net_sock_retain(conn->sock);
   res->conn = conn;
   res->keep_alive = req_keep_alive;
@@ -2178,6 +2166,7 @@ static void scr_http_conn_free(void *ctx) {
   scr_http_conn_drop_request(conn, false);
   if (conn->srv) scr_http_srv_ctx_release(conn->srv);
   free(conn->buf);
+  scr_httpconn_free_note();
   free(conn);
 }
 
@@ -2229,6 +2218,7 @@ static void scr_http_on_connection(void *ctx, ScrNetSocket *sock) {
   ScrHttpSrvCtx *srv = (ScrHttpSrvCtx *)ctx;
   ScrHttpConn *conn = calloc(1, sizeof *conn);
   if (!conn) scr_http_oom();
+  scr_httpconn_alloc_note();
   conn->sock = sock; /* borrowed — see the struct comment */
   conn->srv = scr_http_srv_ctx_retain(srv);
   conn->idle_epoch = scr_net_epoch_now();
@@ -2557,9 +2547,7 @@ ScrHttpReq *scr_http_h2_req_new(ScrNetSocket *sock /*borrowed, nullable*/,
   req->h2_stream = stream != NULL ? scr_http_h2_ops->retain(stream) : NULL;
   req->method = scr_str_new("GET", 3); /* :method replaces it */
   req->url = scr_str_new("/", 1);      /* :path replaces it */
-#ifdef SCR_RC_AUDIT
-  scr_http_live++;
-#endif
+  scr_httpmsg_alloc_note();
   return req;
 }
 
@@ -2615,9 +2603,7 @@ ScrHttpRes *scr_http_h2_res_new(ScrNetSocket *sock /*borrowed, nullable*/,
   res->sock = sock ? scr_net_sock_retain(sock) : NULL;
   res->h2_stream = scr_http_h2_ops->retain(stream);
   res->keep_alive = true; /* inert on h2 — no Connection header exists */
-#ifdef SCR_RC_AUDIT
-  scr_http_live++;
-#endif
+  scr_httpmsg_alloc_note();
   return res;
 }
 
@@ -2797,9 +2783,7 @@ void scr_http_client_release(ScrHttpClientReq *c) {
     if (c->res) scr_http_req_release(c->res);
     if (c->sock) scr_net_sock_release(c->sock);
     if (c->destroy_err) scr_error_release(c->destroy_err);
-#ifdef SCR_RC_AUDIT
-    scr_http_live--;
-#endif
+    scr_httpmsg_free_note();
     free(c);
   }
 }
@@ -3141,9 +3125,7 @@ static bool scr_http_client_parse_head(ScrHttpConn *conn, size_t head_len) {
   res->rc = 1;
   res->status = status;
   res->sock = scr_net_sock_retain(conn->sock);
-#ifdef SCR_RC_AUDIT
-  scr_http_live++;
-#endif
+  scr_httpmsg_alloc_note();
   res->method = scr_str_new("", 0);
   res->url = scr_str_new("", 0); /* Node: res.url is "" on client responses */
   res->http10 = memcmp(buf, "HTTP/1.0", 8) == 0;
@@ -3465,6 +3447,7 @@ static void scr_http_client_conn_free(ScrHttpConn *conn) {
     scr_http_client_release(c);
   }
   free(conn->buf);
+  scr_httpconn_free_note();
   free(conn);
 }
 
@@ -3513,9 +3496,7 @@ static ScrHttpClientReq *scr_http_request_impl(ScrStr *host /*borrowed*/, double
   ScrHttpClientReq *c = calloc(1, sizeof *c);
   if (!c) scr_http_oom();
   c->rc = 1;
-#ifdef SCR_RC_AUDIT
-  scr_http_live++;
-#endif
+  scr_httpmsg_alloc_note();
   c->host = scr_str_retain(host);
   c->path = scr_str_retain(path);
   c->method = scr_str_retain(method);
@@ -3555,6 +3536,7 @@ static ScrHttpClientReq *scr_http_request_impl(ScrStr *host /*borrowed*/, double
   }
   ScrHttpConn *conn = calloc(1, sizeof *conn);
   if (!conn) scr_http_oom();
+  scr_httpconn_alloc_note();
   conn->sock = c->sock; /* borrowed */
   conn->client_mode = true;
   conn->client = scr_http_client_retain(c);

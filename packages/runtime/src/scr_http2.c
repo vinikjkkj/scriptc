@@ -756,11 +756,6 @@ struct ScrH2Session {
 
 /* ── refcounts + the RC audit ────────────────────────────────────────── */
 
-#ifdef SCR_RC_AUDIT
-static long scr_h2_sessions_live = 0;
-static long scr_h2_streams_live = 0;
-long scr_http2_live_count(void) { return scr_h2_sessions_live + scr_h2_streams_live; }
-#endif
 
 ScrH2Session *scr_http2_session_retain(ScrH2Session *s) {
   if (s && s->rc != SIZE_MAX) s->rc++;
@@ -832,9 +827,7 @@ static void scr_h2_stream_free(ScrH2Stream *st) {
   free(st->wbuf.data);
   scr_http2_session_release(st->sess);
   free(st);
-#ifdef SCR_RC_AUDIT
-  scr_h2_streams_live--;
-#endif
+  scr_h2stream_free_note();
 }
 
 static void scr_h2_session_drop_lists(ScrH2Session *s) {
@@ -858,9 +851,7 @@ static void scr_h2_session_free(ScrH2Session *s) {
   if (s->srv) scr_h2_srv_ctx_release(s->srv);
   if (s->sock) scr_net_sock_release(s->sock);
   free(s);
-#ifdef SCR_RC_AUDIT
-  scr_h2_sessions_live--;
-#endif
+  scr_h2sess_free_note();
 }
 
 /* ── the deferred-emit queue (the scr_http.c pattern) ────────────────── */
@@ -1012,9 +1003,7 @@ static ScrH2Stream *scr_h2_stream_new(ScrH2Session *sess, int32_t id) {
   st->id = id;
   st->sess = scr_http2_session_retain(sess);
   st->send_window = sess->peer_init_window ? (int64_t)sess->peer_init_window : SCR_H2_DEFAULT_WINDOW;
-#ifdef SCR_RC_AUDIT
-  scr_h2_streams_live++;
-#endif
+  scr_h2stream_alloc_note();
   if (sess->nstreams == sess->streams_cap) {
     sess->streams_cap = sess->streams_cap ? sess->streams_cap * 2 : 8;
     sess->streams = realloc(sess->streams, sess->streams_cap * sizeof *sess->streams);
@@ -1681,9 +1670,7 @@ static ScrH2Session *scr_h2_session_new(bool client) {
   scr_h2_settings_defaults(&s->remote_settings);
   if (client) s->local_settings.enable_push = false; /* Node pins client push off */
   scr_h2_dyntab_init(&s->dec_table);
-#ifdef SCR_RC_AUDIT
-  scr_h2_sessions_live++;
-#endif
+  scr_h2sess_alloc_note();
   return s;
 }
 

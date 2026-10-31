@@ -7536,6 +7536,46 @@ long scr_abortsig_live_count(void);
 void scr_abortctl_alloc_note(void);
 void scr_abortctl_free_note(void);
 long scr_abortctl_live_count(void);
+/* The socket, TLS, HTTP, HTTP/2, dgram, fs-watch and child-process handle
+ * kinds. Same contract as the block above: the counters live in scr_object.c
+ * (always linked), because their units are link-gated and the audit reads
+ * every counter unconditionally. Off the audit lane each note is nothing. */
+void scr_netsock_alloc_note(void);
+void scr_netsock_free_note(void);
+long scr_netsock_live_count(void);
+void scr_netsrv_alloc_note(void);
+void scr_netsrv_free_note(void);
+long scr_netsrv_live_count(void);
+void scr_tlsctx_alloc_note(void);
+void scr_tlsctx_free_note(void);
+long scr_tlsctx_live_count(void);
+void scr_tlssock_alloc_note(void);
+void scr_tlssock_free_note(void);
+long scr_tlssock_live_count(void);
+void scr_httpconn_alloc_note(void);
+void scr_httpconn_free_note(void);
+long scr_httpconn_live_count(void);
+void scr_httpmsg_alloc_note(void);
+void scr_httpmsg_free_note(void);
+long scr_httpmsg_live_count(void);
+void scr_h2sess_alloc_note(void);
+void scr_h2sess_free_note(void);
+long scr_h2sess_live_count(void);
+void scr_h2stream_alloc_note(void);
+void scr_h2stream_free_note(void);
+long scr_h2stream_live_count(void);
+void scr_dgram_alloc_note(void);
+void scr_dgram_free_note(void);
+long scr_dgram_live_count(void);
+void scr_watcher_alloc_note(void);
+void scr_watcher_free_note(void);
+long scr_watcher_live_count(void);
+void scr_child_alloc_note(void);
+void scr_child_free_note(void);
+long scr_child_live_count(void);
+void scr_childstream_alloc_note(void);
+void scr_childstream_free_note(void);
+long scr_childstream_live_count(void);
 #else
 #define scr_bigint_alloc_note() ((void)0)
 #define scr_bigint_free_note() ((void)0)
@@ -7551,6 +7591,30 @@ long scr_abortctl_live_count(void);
 #define scr_abortsig_free_note() ((void)0)
 #define scr_abortctl_alloc_note() ((void)0)
 #define scr_abortctl_free_note() ((void)0)
+#define scr_netsock_alloc_note() ((void)0)
+#define scr_netsock_free_note() ((void)0)
+#define scr_netsrv_alloc_note() ((void)0)
+#define scr_netsrv_free_note() ((void)0)
+#define scr_tlsctx_alloc_note() ((void)0)
+#define scr_tlsctx_free_note() ((void)0)
+#define scr_tlssock_alloc_note() ((void)0)
+#define scr_tlssock_free_note() ((void)0)
+#define scr_httpconn_alloc_note() ((void)0)
+#define scr_httpconn_free_note() ((void)0)
+#define scr_httpmsg_alloc_note() ((void)0)
+#define scr_httpmsg_free_note() ((void)0)
+#define scr_h2sess_alloc_note() ((void)0)
+#define scr_h2sess_free_note() ((void)0)
+#define scr_h2stream_alloc_note() ((void)0)
+#define scr_h2stream_free_note() ((void)0)
+#define scr_dgram_alloc_note() ((void)0)
+#define scr_dgram_free_note() ((void)0)
+#define scr_watcher_alloc_note() ((void)0)
+#define scr_watcher_free_note() ((void)0)
+#define scr_child_alloc_note() ((void)0)
+#define scr_child_free_note() ((void)0)
+#define scr_childstream_alloc_note() ((void)0)
+#define scr_childstream_free_note() ((void)0)
 #endif
 
 /* ── async: promises, fibers, event loop ────────────────────────────
@@ -10381,9 +10445,6 @@ void scr_net_install(void);
  * net unit is linked, so the always-linked dyn core never references
  * this unit's entry points. */
 void scr_net_dyn_install(void);
-#ifdef SCR_RC_AUDIT
-long scr_net_live_count(void);
-#endif
 
 /* ── the socket TRANSPORT hooks (scr_tls.c — compiled only into
  * TLS-using binaries; scr_net.c stays transport-agnostic through this
@@ -10673,9 +10734,6 @@ void scr_tls_dyn_install(void);
 void scr_keyobj_dyn_install(void);
 ScrNetServer *scr_https_create_server_sni(const char *cert, size_t cert_len, const char *key, size_t key_len, ScrClosure *sni_cb /*moves, nullable*/, void *answer_fn); /* +1 */
 void scr_tls_sni_answer(ScrClosure *self, bool has_err, ScrSecureCtx *ctx /*moves, nullable*/);
-#ifdef SCR_RC_AUDIT
-long scr_secure_ctx_live_count(void);
-#endif
 
 /* ── node:tls, the CA-store introspection slice (scr_tls_ca.c — its own
  * unit and link gate; plain PEM-block bookkeeping, NO mbedTLS, so a
@@ -11054,9 +11112,6 @@ ScrHttpClientReq *scr_http_request_agent(ScrStr *host /*borrowed*/, double port,
                                           double timeout_ms, ScrArr *header_pairs /*borrowed*/,
                                           bool auto_end, const ScrDyn *agent /*borrowed*/,
                                           ScrClosure *cb /*moves, nullable*/, ScrHttpRespFn fn); /* +1 */
-#ifdef SCR_RC_AUDIT
-long scr_http_live_count(void);
-#endif
 
 /* ── node:http2 (scr_http2.c — REAL HTTP/2: h2c server + client over
  * the net loop, with an in-tree RFC 7540 frame codec and RFC 7541 HPACK;
@@ -11202,9 +11257,6 @@ void scr_net_sock_set_native_established(ScrNetSocket *s, ScrNetNativeEventFn fn
  * calls it when the unit is linked — the scr_net_dyn_install story). */
 void scr_http2_dyn_install(void);
 
-#ifdef SCR_RC_AUDIT
-long scr_http2_live_count(void);
-#endif
 
 /* node:https (scr_tls.c — the http server/client over the TLS
  * transport; see the tls block above for the ownership story). */
