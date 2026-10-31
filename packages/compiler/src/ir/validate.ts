@@ -167,6 +167,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.hasKey": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.invokePack": { argTypes: [DYN, DYN, STRING, STRING], result: DYN },
   "dyn.construct": { argTypes: [DYN, DYN, STRING], result: DYN },
+  "dyn.reflectApply": { argTypes: [DYN, DYN, DYN], result: DYN },
+  "dyn.reflectConstruct": { argTypes: [DYN, DYN], result: DYN },
   "dyn.instanceOf": { argTypes: [DYN, DYN], result: BOOL },
   "dyn.toString": { argTypes: [DYN, STRING, STRING], result: STRING },
   "dyn.toStringRange": { argTypes: [DYN, STRING, DYN, DYN, STRING], result: STRING },
