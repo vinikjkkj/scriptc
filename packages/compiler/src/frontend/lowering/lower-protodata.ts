@@ -356,6 +356,9 @@ export function protoDataMemberRead(L: Lowerer, expr: ts.PropertyAccessExpressio
   if (own === null) return slotRef;
   const target = L.fieldTarget(expr);
   if (!target) return null;
+  if (own.kind === "dyn" && target.container === "class") {
+    return protoDataFieldRead(L, target, loc, expr);
+  }
   const fieldRead = L.fieldGetExpr(target, loc, expr);
   if (own.kind === "dyn") {
     // Checked-dynamic field: the unset state is the undefined value.
@@ -381,6 +384,100 @@ export function protoDataMemberRead(L: Lowerer, expr: ts.PropertyAccessExpressio
     L.unsupported("SC1090", expr, `reading the prototype member '${name}' whose slot type differs from the instance field's`);
   }
   return { kind: "ternary", cond: isSet, then: fieldRead, else_: elseArm, type: own, loc };
+}
+
+/** The callee of `recv.name(args)` where `name` is prototype data of an ES
+ * class (`C.prototype.name = <value>`) and the class carries the checked-
+ * dynamic instance field of that name. The callee is the instance field when
+ * it is set, else the prototype slot: the same answer protoDataMemberRead gives
+ * a plain read, which a CALL must give too (JS calls the value the lookup
+ * finds, with the receiver as `this`). `pre` binds a receiver that is not a
+ * plain name or `this` to a hidden local first, so it is evaluated once.
+ * Null when `name` is not such a member, or the field is typed (the ordinary
+ * field-call path answers that shape). */
+export function protoDataCallee(
+  L: Lowerer,
+  recvExpr: ts.Expression,
+  name: string,
+  access: ts.Node,
+): { pre: IrStmt[]; recv: IrExpr; callee: IrExpr } | null {
+  const recvT = L.mapTypeOf(L.typeOf(recvExpr));
+  if (recvT?.kind !== "object") return null;
+  const start = L.classes.get(recvT.className) ?? null;
+  if (start === null) return null;
+  const slot = slotFrom(L, start, name);
+  if (slot === null || slot === "fence") return null;
+  const loc = locOf(access);
+  for (let c: ClassInfo | null = start; c; c = c.base) {
+    const why = L.protoDataFenced.get(`${c.def.name}.${name}`);
+    if (why !== undefined) L.unsupported("SC1090", access, why);
+  }
+  if (subclassDeclares(L, start, name)) {
+    L.unsupported("SC1090", access, `calling the prototype member '${name}' through a class whose subclass declares its own '${name}' (the static receiver type hides that storage)`);
+  }
+  if (slot.file === access.getSourceFile() && isInitPosition(access) && access.getStart() < slot.firstWriteStart) {
+    L.unsupported("SC1090", access, `calling the prototype member '${name}' above its first assignment (JS answers undefined there, which is not callable — move the call below the assignment)`);
+  }
+  const own = start.fields.get(name) ?? null;
+  if (own !== null && own.kind !== "dyn") return null;
+  let recv: IrExpr = L.lowerExpr(recvExpr);
+  const pre: IrStmt[] = [];
+  if (!pureReceiver(recvExpr)) {
+    const tmp = L.declareHiddenLocal("%pdrecv", recv.type);
+    pre.push({ kind: "varDecl", localId: tmp.id, init: recv, loc });
+    recv = { kind: "varRef", localId: tmp.id, type: recv.type, loc };
+  }
+  const slotRef: IrExpr = { kind: "varRef", localId: slot.global.id, type: slot.type, loc };
+  if (own === null) return { pre, recv, callee: slotRef };
+  const callee = protoDataFieldRead(L, { obj: recv, className: recvT.className, field: name, fieldType: own }, loc, access);
+  if (callee === null) L.unsupported("SC1090", access, `calling the prototype member '${name}' (its checked-dynamic field has no read)`);
+  return { pre, recv, callee };
+}
+
+/** The read of a checked-dynamic instance field `obj.name` whose name is
+ * prototype data on the class chain (a `C.prototype.name = v` slot): the
+ * field when it is set, else the slot -- JS's lookup. Every spelling of the
+ * member reads through here (a dot or element read, a destructuring element,
+ * a call's callee), so none of them can answer the absent field alone. A
+ * receiver that is not a local is bound once, so it is evaluated once. Null
+ * when the name has no slot, or the field is not checked-dynamic. */
+export function protoDataFieldRead(
+  L: Lowerer,
+  target: { obj: IrExpr; className: string; field: string; fieldType: IrType },
+  loc: SrcLoc,
+  blame: ts.Node,
+): IrExpr | null {
+  if (target.fieldType.kind !== "dyn") return null;
+  const start = L.classes.get(target.className) ?? null;
+  if (start === null) return null;
+  const slot = slotFrom(L, start, target.field);
+  if (slot === null || slot === "fence") return null;
+  const name = target.field;
+  for (let c: ClassInfo | null = start; c; c = c.base) {
+    const why = L.protoDataFenced.get(`${c.def.name}.${name}`);
+    if (why !== undefined) L.unsupported("SC1090", blame, why);
+  }
+  if (subclassDeclares(L, start, name)) {
+    L.unsupported("SC1090", blame, `reading the prototype member '${name}' through a class whose subclass declares its own '${name}' (the static receiver type hides that storage)`);
+  }
+  if (slot.file === blame.getSourceFile() && isInitPosition(blame) && blame.getStart() < slot.firstWriteStart) {
+    L.unsupported("SC1090", blame, `reading the prototype member '${name}' above its first assignment (JS answers undefined there, which the slot's type may not hold — move the read below the assignment)`);
+  }
+  if (slot.type.kind !== "dyn") {
+    L.unsupported("SC1090", blame, `reading the prototype member '${name}' whose slot type is not checked-dynamic like its instance field`);
+  }
+  let obj = target.obj;
+  const pre: IrStmt[] = [];
+  if (obj.kind !== "varRef") {
+    const tmp = L.declareHiddenLocal("%pdobj", obj.type);
+    pre.push({ kind: "varDecl", localId: tmp.id, init: obj, loc });
+    obj = { kind: "varRef", localId: tmp.id, type: obj.type, loc };
+  }
+  const fieldRead: IrExpr = { kind: "fieldGet", obj, className: target.className, field: name, type: DYN, loc };
+  const isSet: IrExpr = { kind: "dynTest", test: "undefined", negated: true, value: fieldRead, type: BOOL, loc };
+  const slotRef: IrExpr = { kind: "varRef", localId: slot.global.id, type: slot.type, loc };
+  const read: IrExpr = { kind: "ternary", cond: isSet, then: fieldRead, else_: slotRef, type: DYN, loc };
+  return pre.length === 0 ? read : { kind: "seqExpr", stmts: pre, result: read, type: DYN, loc };
 }
 
 /** `recv` (an instance of a class with prototype data `key` on its chain) has

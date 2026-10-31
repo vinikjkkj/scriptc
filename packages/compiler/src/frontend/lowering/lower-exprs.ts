@@ -4,7 +4,7 @@
  * comparisons, nullish coalescing and optional chains, conditions and
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
-import { protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
+import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
@@ -25854,6 +25854,10 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
       return guardedKeyReadAtDynWidth(L, blame, ovfRead, t) ?? ovfRead;
     }
     if (target.container === "class") {
+      // A checked-dynamic field with a prototype-data slot (lower-protodata.ts):
+      // the field when set, else the slot, so no spelling of the read misses it.
+      const pd = protoDataFieldRead(L, target, loc, blame);
+      if (pd !== null) return pd;
       const read: IrExpr = { kind: "fieldGet", obj: target.obj, className: target.className, field: target.field, type: target.fieldType, loc };
       // DEFERRED-INIT fields (`stream!: T` assigned past the constructor's
       // top level — ClassInfo.deferredInitFields): the SLOT is the

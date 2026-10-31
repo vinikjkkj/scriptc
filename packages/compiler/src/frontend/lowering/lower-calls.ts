@@ -12,6 +12,7 @@ import type { EnumRefill } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
+import { protoDataCallee } from "./lower-protodata.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
@@ -6441,6 +6442,15 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     ) {
       const si = lowerStreamAsyncIteratorCall(L, expr, expr.expression);
       if (si) return si;
+    }
+    // The ELEMENT spelling of a prototype-data member (`o["call"](x)`): the lookup
+    // `o.call(x)` makes (lowerProtoDataCall).
+    if (
+      ts.isElementAccessExpression(expr.expression) &&
+      ts.isStringLiteralLike(expr.expression.argumentExpression)
+    ) {
+      const pdCall = lowerProtoDataCall(L, expr, expr.expression.expression, expr.expression.argumentExpression.text, expr.expression);
+      if (pdCall !== null) return pdCall;
     }
     // The ELEMENT spelling of a primitive method call — `x['toString']()`,
     // `s['charAt'](0)`: JS resolves it exactly like the dot form, so the
@@ -15488,6 +15498,13 @@ function lowerPrototypeGenericMethodCall(L: Lowerer, call: ts.CallExpression, ac
     // and bridges to the arm, the same trusted unionNarrow a narrowed
     // LOCAL of the same type already lowers through. An un-narrowed union
     // stays union-typed and falls through to the fences below.
+    // A prototype-data member of the ES class (`C.prototype.call = gen(...)`,
+    // lower-protodata.ts): JS calls the value the lookup finds, the instance's
+    // own field when set and else the prototype slot, with the receiver as `this`.
+    if (info && !found) {
+      const pdCall = lowerProtoDataCall(L, call, access.expression, access.name.text, access);
+      if (pdCall !== null) return pdCall;
+    }
     // A member the BASE never declares but its subclasses do as FIELDS
     // (mysql2's `this.onResult(err)` in Command.execute): the receiver's
     // class picks the slot (lowerSubclassFieldRead), the call goes through
@@ -15619,6 +15636,31 @@ function lowerPrototypeGenericMethodCall(L: Lowerer, call: ts.CallExpression, ac
       loc: locOf(call),
     });
   }
+/** `recv.name(args)` (dot or literal element spelling) where `name` is
+ * prototype data of an ES class: the call runs the value the lookup finds
+ * (lower-protodata.ts) with the receiver as `this`. Null when it is not such a
+ * member. Optional and spread forms of it are refused, never run blind. */
+function lowerProtoDataCall(L: Lowerer, call: ts.CallExpression, recvExpr: ts.Expression, name: string,
+  site: ts.PropertyAccessExpression | ts.ElementAccessExpression): IrExpr | null {
+  const pd = protoDataCallee(L, recvExpr, name, site);
+  if (pd === null) return null;
+  if (call.questionDotToken !== undefined || site.questionDotToken !== undefined) {
+    L.unsupported("SC1090", call, `optional call of the prototype member '${name}'`);
+  }
+  if (call.arguments.some((a) => ts.isSpreadElement(a))) {
+    L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
+  }
+  const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+  const recv = L.coerceToExpected(pd.recv, DYN);
+  if (recv.type.kind !== "dyn") {
+    L.unsupported("SC1090", call, `calling the prototype member '${name}' on a receiver that cannot be passed as 'this'`);
+  }
+  const callE = dynCallWithThis(L, recv, pd.callee, args, site.getText(), locOf(call));
+  return pd.pre.length === 0
+    ? callE
+    : { kind: "seqExpr", stmts: pd.pre, result: callE, type: callE.type, loc: locOf(call) };
+}
+
 /** `recv.f(args)` where `f` holds a checked-dynamic function value: the call
  * runs with `this` = the receiver. The ambient-receiver window is opened for
  * the call's extent by an interned helper `%dyncallthis.<n>(recv, f, a0..)`
