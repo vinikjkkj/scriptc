@@ -167,7 +167,7 @@ static void scr_rjh_teardown(void) {
 }
 
 static bool scr_urj_dispatch(ScrPromise *p);
-static void scr_rjh_dispatch(ScrPromise *p);
+static bool scr_rjh_dispatch(ScrPromise *p);
 
 /* Node's ERR_INVALID_ARG_TYPE for a non-function listener; true when the
  * value is fine. */
@@ -342,13 +342,15 @@ static void scr_uncx_dispatch(void) {
   }
 }
 
-/* 'rejectionHandled' delivery — (promise), Node's payload. A listener
- * throw propagates as a pending exception through the attach site. */
-static void scr_rjh_dispatch(ScrPromise *p) {
+/* 'rejectionHandled' delivery — (promise), Node's payload. Called from the
+ * checkpoint's rejectionHandled flush (scr_async.c). false = a listener threw
+ * (the uncaught crash path, like the unhandledRejection listener). */
+static bool scr_rjh_dispatch(ScrPromise *p) {
   ScrDyn *boxed = scr_dyn_new_promise(p);
-  (void)scr_rej_fire(&scr_rjh_listeners, &scr_nrjh, &boxed, 1);
+  bool ok = scr_rej_fire(&scr_rjh_listeners, &scr_nrjh, &boxed, 1);
   scr_dyn_release(boxed);
   scr_rjh_sync_hook(); /* a once-consumed-to-empty registry disarms */
+  return ok;
 }
 
 /* `new Promise(setImmediate)` (the Node-suite early-exit shape): the

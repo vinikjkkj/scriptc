@@ -361,7 +361,43 @@ ScrPromise *scr_promise_new(void) {
  * registration — the scr_urj_deliver_fn pattern, so listener-free
  * binaries keep their size class): called when a promise the checkpoint
  * report already delivered as unhandled gains a handler. */
-void (*scr_rjh_notify_fn)(ScrPromise *p) = NULL;
+bool (*scr_rjh_notify_fn)(ScrPromise *p) = NULL;
+
+/* Node's asyncHandledRejections: promises the checkpoint report already
+ * delivered as unhandled, which a handler attached after (scr_prom_observe).
+ * The 'rejectionHandled' event waits here (entries +1) for the checkpoint:
+ * Node emits it from processPromiseRejections, after the tick and microtask
+ * queues drained, so the handler's own reaction (queued by the attach) runs
+ * first. */
+static ScrPromise **scr_rjh_queue = NULL;
+static size_t scr_rjh_nqueue = 0, scr_rjh_qcap = 0;
+
+static void scr_rjh_enqueue(ScrPromise *p) {
+  if (scr_rjh_nqueue == scr_rjh_qcap) {
+    scr_rjh_qcap = scr_rjh_qcap ? scr_rjh_qcap * 2 : 8;
+    scr_rjh_queue = realloc(scr_rjh_queue, scr_rjh_qcap * sizeof *scr_rjh_queue);
+    if (!scr_rjh_queue) scr_oom();
+  }
+  scr_rjh_queue[scr_rjh_nqueue++] = scr_promise_retain(p);
+}
+
+/* processPromiseRejections' rejectionHandled half, FIFO. Entries are taken
+ * by index: a listener may attach another late handler, which appends (and
+ * may move the array). false = a listener threw (the uncaught crash path);
+ * the entries after it are kept, the process is ending. */
+static bool scr_rjh_flush(void) {
+  size_t i = 0;
+  bool ok = true;
+  while (i < scr_rjh_nqueue && ok) {
+    ScrPromise *p = scr_rjh_queue[i++];
+    if (scr_rjh_notify_fn != NULL) ok = scr_rjh_notify_fn(p);
+    scr_promise_release(p);
+  }
+  size_t remaining = scr_rjh_nqueue - i;
+  if (remaining > 0) memmove(scr_rjh_queue, scr_rjh_queue + i, remaining * sizeof *scr_rjh_queue);
+  scr_rjh_nqueue = remaining;
+  return ok;
+}
 
 /* Every handler attach funnels here: mark the rejection observed, and
  * fire Node's 'rejectionHandled' when the attach arrived AFTER the
@@ -390,7 +426,7 @@ static void scr_prom_observe(ScrPromise *p) {
   p->rejection_observed = true;
   if (p->reported_unhandled) {
     p->reported_unhandled = false;
-    if (scr_rjh_notify_fn != NULL) scr_rjh_notify_fn(p);
+    scr_rjh_enqueue(p);
   }
   /* A PAYLOAD-CONVERSION ADAPTER IS THE SAME PROMISE IN THE SOURCE
    * PROGRAM. `const u: Promise<unknown> = a` is an assignment in JS —
@@ -4354,7 +4390,7 @@ void scr_loop_drain_callback(void) {
     }
     if (scr_loop_root_rejected()) return; /* the root's rejection is the report */
     if (scr_nt_head != NULL || scr_ready_len > 0) continue;
-    if (scr_nunhandled == 0) return;
+    if (scr_nunhandled == 0 && scr_rjh_nqueue == 0) return;
     bool failed = scr_report_unhandled_rejections();
     if (scr_exc_pending()) return;
     if (failed) {
@@ -5047,6 +5083,14 @@ bool scr_report_unhandled_rejections(void) {
   if (scr_island_jobs_drain_fn != NULL) {
     scr_island_jobs_drain_fn();
     if (scr_ready_len > 0 || scr_nt_head != NULL) return false;
+  }
+  /* processPromiseRejections order (measured against Node: a late handler and
+   * a new rejection in one checkpoint print RH before UR): the rejectionHandled
+   * queue first, then the unhandled ledger below. */
+  if (scr_rjh_nqueue > 0 && !scr_rjh_flush()) {
+    scr_exc_print_uncaught();
+    scr_exit_code_note(1);
+    return true;
   }
   bool any = false;
   bool crashed = false;

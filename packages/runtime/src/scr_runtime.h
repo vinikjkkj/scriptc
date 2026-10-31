@@ -7752,7 +7752,7 @@ extern bool (*scr_urj_deliver_fn)(ScrPromise *p);
  * 'rejectionHandled' listener registers): scr_async.c calls it when a
  * promise the report already delivered as unhandled gains a handler.
  * Runtime-internal. */
-extern void (*scr_rjh_notify_fn)(ScrPromise *p);
+extern bool (*scr_rjh_notify_fn)(ScrPromise *p);
 /* The attach-time handled mark (a dyn then/catch carrying a rejection
  * handler, or the module loader taking ownership of an evaluation
  * promise): marks pending and rejected sources observed at Node's attach
