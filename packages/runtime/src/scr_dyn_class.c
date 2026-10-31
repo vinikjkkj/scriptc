@@ -97,67 +97,6 @@ ScrDyn *scr_dyn_class_value(const ScrClassObj *c) {
   return NULL;
 }
 
-/* The BUILTIN error classes' values (Error, TypeError, ...): `e.constructor`
- * of an error ENCODING. Same shape as a program class's box -- one immortal
- * FUNC per kind, typeof "function", `name` the kind's -- except that an
- * Error constructor is callable WITHOUT `new` too (it constructs either
- * way), and that no statics are modeled: every other key is the loud ladder
- * (Error.captureStackTrace and friends are real members this box cannot
- * answer, and undefined would be the silent wrong answer). */
-static ScrDyn *dyn_error_class_boxes[SCR_ERR_KINDS];
-static bool dyn_error_class_teardown_set = false;
-
-static void dyn_error_class_teardown(void) {
-  for (int i = 0; i < SCR_ERR_KINDS; i++) {
-    scr_dyn_release(dyn_error_class_boxes[i]);
-    dyn_error_class_boxes[i] = NULL;
-  }
-  dyn_error_class_teardown_set = false;
-}
-
-static int dyn_error_class_kind_of_clo(ScrClosure *clo) {
-  return (int)(intptr_t)scr_box_get_ref((ScrBox *)clo->caps[0]);
-}
-
-static ScrDyn *dyn_error_class_make(int kind, const ScrDyn *msg) {
-  ScrStr *m = NULL;
-  if (msg != NULL && msg->kind != SCR_DYN_UNDEF) {
-    m = scr_dyn_string_coerce((ScrDyn *)msg);
-    if (scr_exc_pending()) {
-      scr_str_release(m);
-      return NULL;
-    }
-  }
-  ScrError *e = scr_error_new(kind, m);
-  scr_str_release(m);
-  ScrDyn *r = scr_dyn_from_error(e);
-  scr_error_release(e);
-  return r;
-}
-
-static ScrDyn *dyn_error_class_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
-  return dyn_error_class_make(dyn_error_class_kind_of_clo(clo), argc > 0 ? args[0] : NULL);
-}
-
-static bool dyn_error_class_is(const ScrDyn *d) {
-  return d != NULL && d->kind == SCR_DYN_FUNC && d->v.fn.thunk == dyn_error_class_thunk;
-}
-
-ScrDyn *dyn_cls_impl_error_box(int kind) {
-  if (kind < 0 || kind >= SCR_ERR_KINDS || kind == SCR_ERR_DOMEX) return NULL;
-  if (dyn_error_class_boxes[kind] == NULL) {
-    ScrClosure *clo = scr_closure_new((void *)dyn_error_class_thunk, 1);
-    clo->caps[0] = scr_box_new_obj(dyn_cls_noop_v, dyn_cls_noop_rel_v, NULL);
-    scr_box_set_ref((ScrBox *)clo->caps[0], (void *)(intptr_t)kind);
-    dyn_error_class_boxes[kind] = scr_dyn_new_func(clo, dyn_error_class_thunk, 1, "(string)", scr_error_kind_name(kind));
-    if (!dyn_error_class_teardown_set) {
-      dyn_error_class_teardown_set = true;
-      scr_atexit(dyn_error_class_teardown);
-    }
-  }
-  return scr_dyn_retain(dyn_error_class_boxes[kind]);
-}
-
 static const ScrDynClassMember *dyn_class_static(const ScrDynClass *cls, const char *k, size_t n) {
   for (size_t i = 0; i < cls->nstatics; i++) {
     const ScrDynClassMember *m = &cls->statics[i];
@@ -295,20 +234,7 @@ bool dyn_cls_impl_err_delete(ScrDyn *d, const ScrStr *key) {
   return true; /* nothing own by that name: Node answers true */
 }
 
-
 static ScrDyn *dyn_cls_ops_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
-  /* A BUILTIN ERROR CLASS value answers `name` (below) and nothing else. */
-  if (dyn_error_class_is(d) && !(key_len == 4 && memcmp(key, "name", 4) == 0)) {
-    ScrJsonBuf fb;
-    scr_jb_init(&fb);
-    scr_jb_puts(&fb, "reading '");
-    scr_jb_write(&fb, key, key_len);
-    scr_jb_puts(&fb, "' on the class value ");
-    scr_jb_puts(&fb, scr_dyn_fn_name(d));
-    scr_jb_puts(&fb, " is not supported yet");
-    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&fb));
-    return NULL;
-  }
   /* A CLASS VALUE answers its statics first (dyn_class_static_get). */
   {
     const ScrDynClass *cls = dyn_cls_impl_of_value(d);
@@ -322,10 +248,6 @@ static ScrDyn *dyn_cls_ops_fn_get(const ScrDyn *d, const char *key, size_t key_l
 
 static ScrDyn *dyn_cls_ops_construct(const ScrDyn *fn, const ScrDyn *args, bool *handled) {
   *handled = true;
-  if (dyn_error_class_is(fn)) {
-    return dyn_error_class_make(dyn_error_class_kind_of_clo(fn->v.fn.clo),
-                                args->kind == SCR_DYN_ARR && args->v.arr.len > 0 ? args->v.arr.items[0] : NULL);
-  }
   /* A CLASS VALUE: the class's own constructor (dyn_class_construct). */
   {
     const ScrDynClass *cls = dyn_cls_impl_of_value(fn);
@@ -644,7 +566,7 @@ static ScrStr *dyn_cls_objinst_to_string(const ScrDyn *d) {
 }
 
 static const ScrDynClassOps dyn_cls_ops_impl = {
-  dyn_cls_impl_box, dyn_cls_impl_of_value, dyn_cls_impl_error_box,
+  dyn_cls_impl_box, dyn_cls_impl_of_value,
   dyn_cls_impl_err_get, dyn_cls_impl_err_set, dyn_cls_impl_err_has, dyn_cls_impl_err_delete,
   dyn_cls_ops_fn_get, dyn_cls_ops_construct, dyn_cls_ops_set, dyn_cls_ops_delete, dyn_cls_ops_walk_error,
   dyn_cls_ops_error_rooted, dyn_cls_ops_error_instanceof,

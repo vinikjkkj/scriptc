@@ -6877,7 +6877,6 @@ void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls);
 typedef struct ScrDynClassOps {
   ScrDyn *(*class_box)(const ScrDynClass *cls);
   const ScrDynClass *(*class_of_value)(const ScrDyn *d);
-  ScrDyn *(*error_class_box)(int kind);
   ScrDyn *(*error_get)(ScrDyn *d, const ScrStr *key);
   void (*error_set)(ScrDyn *d, const ScrStr *key, const ScrDyn *value);
   bool (*error_has)(const ScrDyn *d, const char *key, size_t key_len);
@@ -6909,7 +6908,8 @@ ScrStr *scr_dyn_objinst_builtin_string(const ScrDyn *d);
 static inline bool scr_dyn_objinst_error_rooted(const ScrDyn *d) { return scr_dyn_class_ops != NULL && scr_dyn_class_ops->error_rooted(d); }
 static inline ScrDyn *scr_dyn_class_box(const ScrDynClass *cls) { return scr_dyn_class_ops ? scr_dyn_class_ops->class_box(cls) : NULL; }
 static inline const ScrDynClass *scr_dyn_class_of_value(const ScrDyn *d) { return scr_dyn_class_ops ? scr_dyn_class_ops->class_of_value(d) : NULL; }
-static inline ScrDyn *scr_dyn_error_class_box(int kind) { return scr_dyn_class_ops ? scr_dyn_class_ops->error_class_box(kind) : NULL; }
+ScrDyn *scr_dyn_error_class_box(int kind); /* the builtin error class value of a kind (scr_json.c), always linked; NULL for DOMException */
+ScrDyn *scr_dyn_error_class_value(double kind); /* the same, as a value of the dyn.errorClass libCall (+1) */
 static inline ScrDyn *scr_dyn_error_member_get(ScrDyn *d, const ScrStr *key) { return scr_dyn_class_ops ? scr_dyn_class_ops->error_get(d, key) : NULL; }
 static inline void scr_dyn_error_member_set(ScrDyn *d, const ScrStr *key, const ScrDyn *value) { if (scr_dyn_class_ops) scr_dyn_class_ops->error_set(d, key, value); }
 static inline bool scr_dyn_error_member_has(const ScrDyn *d, const char *key, size_t key_len) { return scr_dyn_class_ops && scr_dyn_class_ops->error_has(d, key, key_len); }
