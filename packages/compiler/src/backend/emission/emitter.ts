@@ -1986,7 +1986,7 @@ export class CEmitter {
       // both exit 1, like Node.
       ...(hasAsync || hasGenerators || this.usesTimers || usesIsland || moduleCreatesPromises(this.mod) || moduleBoxesProcStream(this.mod)
         ? [
-            `  bool sc_loop_rejection = scr_loop_run(${asyncEntry ? "sc_top" : "NULL"});`,
+            `  bool sc_loop_rejection = ${this.mod.entryCjs ? "scr_loop_run_cjs" : "scr_loop_run"}(${asyncEntry ? "sc_top" : "NULL"});`,
             ...uncaught("  ", asyncEntry),
             `  if (sc_loop_rejection) {`,
             `    scr_discard_unhandled_rejections();`,

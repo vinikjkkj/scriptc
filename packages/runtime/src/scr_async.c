@@ -4388,16 +4388,18 @@ static void scr_loop_why_report(bool kids, bool io, bool events, bool net, bool 
 #else
 #define SCR_LOOP_NOINLINE
 #endif
-SCR_LOOP_NOINLINE static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed);
+SCR_LOOP_NOINLINE static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_entry);
 
 /* The loop, resumed after every escaped throw an 'uncaughtException'
  * listener consumed (Node calls the listener and keeps going); with no
  * listener the exception stays pending and main reports it. A resumed pass
- * is past the first checkpoint: the later checkpoints drain ticks first. */
-bool scr_loop_run(ScrPromise *top_level) {
+ * is past the first checkpoint: the later checkpoints drain ticks first.
+ * cjs_entry: the entry file is CommonJS (scr_loop_run_cjs), see the first
+ * checkpoint below. */
+static bool scr_loop_run_mode(ScrPromise *top_level, bool cjs_entry) {
   bool resumed = false;
   for (;;) {
-    bool r = scr_loop_run_inner(top_level, resumed);
+    bool r = scr_loop_run_inner(top_level, resumed, cjs_entry);
     if (scr_uncaught_listener_fn != NULL && scr_exc_pending()) {
       scr_uncaught_dispatch();
       resumed = true;
@@ -4407,14 +4409,23 @@ bool scr_loop_run(ScrPromise *top_level) {
   }
 }
 
-static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
+bool scr_loop_run(ScrPromise *top_level) {
+  return scr_loop_run_mode(top_level, false);
+}
+
+bool scr_loop_run_cjs(ScrPromise *top_level) {
+  return scr_loop_run_mode(top_level, true);
+}
+
+static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_entry) {
   scr_loop_root = top_level;
-  /* The FIRST checkpoint after the synchronous main body runs promise
-   * jobs BEFORE the first tick drain: Node's main-module evaluation is
-   * itself awaited (the runMain continuation is a microtask queued after
-   * the body's own), so microtasks scheduled during the body beat ticks
-   * scheduled during the body exactly once, at startup — differentially
-   * pinned. Every later checkpoint drains ticks first. */
+  /* The FIRST checkpoint after the synchronous main body. An ES-module entry
+   * runs inside a promise job (Node awaits its evaluation: the runMain
+   * continuation is a microtask queued after the body's own), so promise
+   * jobs scheduled during the body run BEFORE its ticks, exactly once, at
+   * startup — differentially pinned. A CommonJS entry runs synchronously
+   * with no job around it, so its ticks drain first, like every later
+   * checkpoint (Node's processTicksAndRejections). */
   bool first_checkpoint = !resumed;
   bool rejection_failed = false;
   for (;;) {
@@ -4429,7 +4440,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed) {
      * nextTick runs before the turn proceeds, but never preempts the
      * microtask queue mid-drain (V8 drains it fully). A tick's uncaught
      * throw ends the loop like any listener's (main reports it). */
-    if (!first_checkpoint) {
+    if (!first_checkpoint || cjs_entry) {
       while (scr_nt_head != NULL) {
         ScrNtick *t = scr_nt_head;
         scr_nt_head = t->next;
