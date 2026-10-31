@@ -3830,6 +3830,13 @@ bool scr_child_kill_num(ScrChild *c, double signum);
 void scr_child_unref(ScrChild *c);
 bool scr_children_reffed_pending(void);
 void scr_children_teardown(void);
+#ifdef SCR_RC_AUDIT
+/* scr_async.c: arms the fatal-exit release of abandoned loop handles (timers,
+ * immediates, ticks, children) for the RC audit. Shipping builds: no-op. */
+void scr_abandon_arm(void);
+#else
+#define scr_abandon_arm() ((void)0)
+#endif
 /* Node's signal-name table (scr_lib.c), shared with child.kill: the
  * resolved signal number, or -1 for names outside the table. */
 int scr_signal_from_name(const ScrStr *signal);
