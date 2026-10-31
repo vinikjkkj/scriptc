@@ -1434,6 +1434,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "timers.setIntervalFnValue": "scr_set_interval_dyn_value",
   "dyn.structuredCloneFnValue": "scr_structured_clone_dyn_value",
   "timers.immediatePromise": "scr_immediate_promise",
+  "http2.createServer": "scr_http2_create_server",
+  "http2.createSecureServerDyn": "scr_http2_create_secure_server_dyn",
 };
 
 /** The rows whose runtime entry takes a trailing CONSTANT the IR does not
@@ -1489,6 +1491,7 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
   // siblings pass the real closure as their own fourth argument.
   "dgram.bind": [{ decl: "ptr", arg: "ptr null" }],
   "dgram.connect": [{ decl: "ptr", arg: "ptr null" }],
+  "http2.createSecureServerDyn": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
 };
 
 /** The rows whose runtime entry TAKES OWNERSHIP of an argument — the
@@ -1623,6 +1626,14 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "dc.tcTracePromise",
   "process.onUnhandledRejection", "process.onRejectionHandled", "process.onUncaught",
   "timers.queueMicrotaskDyn", "timers.setImmediateFnValue", "timers.setTimeoutFnValue", "timers.setIntervalFnValue", "timers.immediatePromise",
+  "http2.createServer",
+  "http2.createServerReq",
+  "http2.createSecureServer",
+  "http2.createSecureServerH2",
+  "http2.createSecureServerReq",
+  "http2.createSecureServerH2Req",
+  "http2.createSecureServerDyn",
+  "http2.createSecureServerDynCb",
 ]);
 
 
@@ -18474,6 +18485,84 @@ class LlEmitter {
       this.declare(`declare ptr @scr_http_create_server(ptr, ptr)`);
       const t = B.tmp();
       B.line(`${t} = call ptr @scr_http_create_server(ptr ${cb}, ptr ${adapter})`);
+      return this.own({ name: t, type: e.type });
+    }
+    // ── node:http2: the shapes the generic row cannot spell (the C tier's
+    // emit-exprs.ts http2 cases): an adapter picked by the callback's arity,
+    // a closure the runtime keeps, a PEM or string argument's data and length,
+    // or a no-op. Each mirrors its C case line for line.
+    if (e.fn === "http2.createSecureServer" || e.fn === "http2.createSecureServerH2") {
+      // (cert, key) as PEM strings or Buffers. The allowHTTP1 flavor is the
+      // https entry with a NULL closure and adapter; the h2-only flavor is
+      // scr_http2_create_secure_server. Bad PEM is the construction-time trap.
+      const args = e.args.map((a) => this.emitExpr(a));
+      const cert = this.pemDataLen(e.fn, args[0]!);
+      const key = this.pemDataLen(e.fn, args[1]!);
+      const t = B.tmp();
+      if (e.fn === "http2.createSecureServer") {
+        this.declare(`declare ptr @scr_https_create_server(ptr, i64, ptr, i64, ptr, ptr)`);
+        B.line(`${t} = call ptr @scr_https_create_server(ptr ${cert.data}, i64 ${cert.len}, ptr ${key.data}, i64 ${key.len}, ptr null, ptr null)`);
+      } else {
+        this.declare(`declare ptr @scr_http2_create_secure_server(ptr, i64, ptr, i64)`);
+        B.line(`${t} = call ptr @scr_http2_create_secure_server(ptr ${cert.data}, i64 ${cert.len}, ptr ${key.data}, i64 ${key.len})`);
+      }
+      return this.own({ name: t, type: e.type });
+    }
+    if (e.fn === "http2.createSecureServerReq" || e.fn === "http2.createSecureServerH2Req") {
+      // createSecureServer(options, handler): the eager COMPAT handler is the
+      // first 'request' listener on either flavor (the createServerReq family).
+      const cbT = e.args[2]!.type;
+      if (cbT.kind !== "func") throw new Error(`llvm emitter bug: ${e.fn} handler not a func`);
+      const args = e.args.map((a) => this.emitExpr(a));
+      const cert = this.pemDataLen(e.fn, args[0]!);
+      const key = this.pemDataLen(e.fn, args[1]!);
+      this.moveTemp(args[2]!);
+      const sym = cbT.params.length === 2 ? "scr_http_handler_thunk2"
+        : cbT.params.length === 1 ? "scr_http_handler_thunk1"
+        : "scr_http_handler_thunk0";
+      this.declare(`declare void @${sym}(ptr, ptr, ptr)`);
+      const t = B.tmp();
+      if (e.fn === "http2.createSecureServerReq") {
+        this.declare(`declare ptr @scr_https_create_server(ptr, i64, ptr, i64, ptr, ptr)`);
+        B.line(`${t} = call ptr @scr_https_create_server(ptr ${cert.data}, i64 ${cert.len}, ptr ${key.data}, i64 ${key.len}, ptr ${args[2]!.name}, ptr @${sym})`);
+      } else {
+        this.declare(`declare ptr @scr_http2_create_secure_server_req(ptr, i64, ptr, i64, ptr, ptr)`);
+        B.line(`${t} = call ptr @scr_http2_create_secure_server_req(ptr ${cert.data}, i64 ${cert.len}, ptr ${key.data}, i64 ${key.len}, ptr ${args[2]!.name}, ptr @${sym})`);
+      }
+      return this.own({ name: t, type: e.type });
+    }
+    if (e.fn === "http2.createSecureServerDynCb") {
+      // The runtime-options form with the eager compat handler (the https
+      // createServerDynCb shape): the options record is borrowed, the handler
+      // moves into the server, and the walk's catchable fence is the pending check.
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: http2.createSecureServerDynCb handler not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const sym = cbT.params.length === 2 ? "scr_http_handler_thunk2"
+        : cbT.params.length === 1 ? "scr_http_handler_thunk1"
+        : "scr_http_handler_thunk0";
+      this.declare(`declare void @${sym}(ptr, ptr, ptr)`);
+      this.declare(`declare ptr @scr_http2_create_secure_server_dyn(ptr, ptr, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_http2_create_secure_server_dyn(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${sym})`);
+      const out = this.own({ name: t, type: e.type });
+      this.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "http2.createServerReq") {
+      // createServer(handler): the eager COMPAT handler, the http.createServer adapter family.
+      const cbT = e.args[0]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: http2.createServerReq handler not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[0]!);
+      const sym = cbT.params.length === 2 ? "scr_http_handler_thunk2"
+        : cbT.params.length === 1 ? "scr_http_handler_thunk1"
+        : "scr_http_handler_thunk0";
+      this.declare(`declare void @${sym}(ptr, ptr, ptr)`);
+      this.declare(`declare ptr @scr_http2_create_server_req(ptr, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_http2_create_server_req(ptr ${args[0]!.name}, ptr @${sym})`);
       return this.own({ name: t, type: e.type });
     }
     if (e.fn === "https.createServerDynCb") {
