@@ -3776,6 +3776,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // source spelling all BORROWED; the instance is owned (+1)
             // and may ride a pending exception (may-throw seed set).
             return finish(`scr_dyn_construct(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.reflectApply":
+            // Reflect.apply(target, thisArg, list) over a dyn target: all three
+            // BORROWED; the result is owned (+1) and may ride a pending throw.
+            return finish(`scr_dyn_reflect_apply(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.reflectConstruct":
+            // Reflect.construct(target, list): both borrowed, result owned (+1).
+            return finish(`scr_dyn_reflect_construct(${arg(0)}, ${arg(1)})`);
           case "dyn.instanceOf":
             // `v instanceof f`: the prototype-chain identity walk (both
             // borrowed, no allocation). Throws JS's three right-operand
