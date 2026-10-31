@@ -18565,6 +18565,33 @@ class LlEmitter {
       B.line(`${t} = call ptr @scr_http2_create_server_req(ptr ${args[0]!.name}, ptr @${sym})`);
       return this.own({ name: t, type: e.type });
     }
+    if (e.fn === "http2.serverOnStream" || e.fn === "http2.sessionOnStream") {
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const entry = e.fn === "http2.serverOnStream" ? "scr_http2_server_on_stream" : "scr_http2_session_on_stream";
+      this.declare(`declare void @scr_http2_stream_thunk(ptr, ptr, ptr, double)`);
+      this.declare(`declare void @${entry}(ptr, ptr, ptr, i1 zeroext)`);
+      B.line(`call void @${entry}(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @scr_http2_stream_thunk, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "http2.serverOnSession") {
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: http2.serverOnSession listener not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const sym = cbT.params.length === 0 ? "scr_http2_session_thunk0" : "scr_http2_session_thunk";
+      this.declare(`declare void @${sym}(ptr, ptr)`);
+      this.declare(`declare void @scr_http2_server_on_session(ptr, ptr, ptr, i1 zeroext)`);
+      B.line(`call void @scr_http2_server_on_session(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${sym}, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "http2.serverOnSessionError") {
+      // Dead registration: no h2 session ever exists on the compat server, so
+      // the receiver and callback temps evaluate (JS evaluates them) and
+      // release through the ordinary temp lifecycle; no runtime call, as in the C tier.
+      for (const a of e.args) this.emitExpr(a);
+      return { name: "", type: e.type };
+    }
     if (e.fn === "https.createServerDynCb") {
       // The https runtime-options handler form (the C tier's
       // emit-exprs.ts case, same three arguments): the options record is
