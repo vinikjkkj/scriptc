@@ -7859,6 +7859,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/18300-fn-kind-static-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/18300-fn-kind-static-inspect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18301-fn-kind-console-log-async.ts": {
+   "order": [
+    "<repo>/tests/corpus/18301-fn-kind-console-log-async.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18302-fn-kind-any-box.ts": {
+   "order": [
+    "<repo>/tests/corpus/18302-fn-kind-any-box.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18303-fn-kind-record-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/18303-fn-kind-record-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18304-fn-showhidden-arrow.ts": {
+   "order": [
+    "<repo>/tests/corpus/18304-fn-showhidden-arrow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18305-fn-showhidden-named.ts": {
+   "order": [
+    "<repo>/tests/corpus/18305-fn-showhidden-named.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18306-fn-showhidden-async.ts": {
+   "order": [
+    "<repo>/tests/corpus/18306-fn-showhidden-async.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18307-fn-bound-static.ts": {
+   "order": [
+    "<repo>/tests/corpus/18307-fn-bound-static.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18308-fn-bound-async.ts": {
+   "order": [
+    "<repo>/tests/corpus/18308-fn-bound-async.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/18309-fn-bound-boxed-away.ts": {
+   "order": [
+    "<repo>/tests/corpus/18309-fn-bound-boxed-away.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1791-searchparams-core.ts": {
    "order": [
     "<repo>/tests/corpus/1791-searchparams-core.ts"
