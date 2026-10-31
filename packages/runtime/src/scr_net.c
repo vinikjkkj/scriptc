@@ -2933,8 +2933,7 @@ static bool scr_net_dyn_port_arg(const ScrDyn *v, double *out) {
 /* The lookup callback's thunk (a dyn function over the socket): the first
  * answer decides. The user passes an error (fails the dial with that Error), or
  * an addresses array of { address, family } (Node's all:true answer). */
-static ScrDyn *scr_net_lookup_cb_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
-  ScrNetSocket *s = (ScrNetSocket *)scr_box_get_ref(clo->caps[0]);
+static ScrDyn *scr_net_lookup_cb_answer(ScrNetSocket *s, ScrDyn *const *args, size_t argc) {
   if (s == NULL || !s->lookup_wait || s->close_emitted || s->fd >= 0) return scr_dyn_retain(scr_dyn_undefined());
   s->lookup_wait = false;
   const ScrDyn *err = argc > 0 ? args[0] : NULL;
@@ -2991,6 +2990,18 @@ static ScrDyn *scr_net_lookup_cb_thunk(ScrClosure *clo, ScrDyn *const *args, siz
     scr_net_fail_connect(s, e);
   }
   return scr_dyn_retain(scr_dyn_undefined());
+}
+
+/* The callback's thunk. scr_box_get_ref retains the socket (+1) for the
+ * answer's duration; that reference is given back on every path, as
+ * scr_net_lookup_answer does on the static lane. Without this release each
+ * answered dyn lookup left one socket reference behind, which the RC audit
+ * reported as a live net socket at exit (corpora 14926, 14928). */
+static ScrDyn *scr_net_lookup_cb_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrNetSocket *s = (ScrNetSocket *)scr_box_get_ref(clo->caps[0]);
+  ScrDyn *r = scr_net_lookup_cb_answer(s, args, argc);
+  scr_net_sock_release(s);
+  return r;
 }
 
 /* Ask the user's lookup(host, { hints, all: true }, callback) for the host. The
