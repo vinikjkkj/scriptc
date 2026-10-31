@@ -12,6 +12,8 @@
 #include "scr_runtime.h"
 
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -850,3 +852,349 @@ double scr_fs_read_at(double fd, ScrBytes *buf, double offset, double length, do
   return n;
 }
 
+
+/* ── the callback forms of writeFile, appendFile, mkdir, unlink, rename ──
+ * Each follows lib/fs.js's order: the callback check, then the options
+ * ladder (type, encoding, flush), then the data and path contracts, all
+ * synchronous. The operation runs one loop turn later through the sync
+ * primitives; a failure rides the callback as the Node-shaped error. The
+ * data of a Buffer write is read at fire time (Node writes the buffer it
+ * was given, not a snapshot), a string is encoded at call time (Node's
+ * Buffer.from). */
+
+#ifdef SCR_LIB
+ScrDyn *scr_fs_write_file_cb(const ScrDyn *path, const ScrDyn *data, const ScrDyn *opts, const ScrDyn *cb) {
+  (void)path; (void)data; (void)opts; (void)cb;
+  scr_trap("scriptc: internal error: fs.writeFile callback reached in a library build — please report this");
+  return NULL;
+}
+ScrDyn *scr_fs_append_file_cb(const ScrDyn *path, const ScrDyn *data, const ScrDyn *opts, const ScrDyn *cb) {
+  (void)path; (void)data; (void)opts; (void)cb;
+  scr_trap("scriptc: internal error: fs.appendFile callback reached in a library build — please report this");
+  return NULL;
+}
+ScrDyn *scr_fs_mkdir_cb(const ScrDyn *path, const ScrDyn *opts, const ScrDyn *cb) {
+  (void)path; (void)opts; (void)cb;
+  scr_trap("scriptc: internal error: fs.mkdir callback reached in a library build — please report this");
+  return NULL;
+}
+ScrDyn *scr_fs_unlink_cb(const ScrDyn *path, const ScrDyn *cb) {
+  (void)path; (void)cb;
+  scr_trap("scriptc: internal error: fs.unlink callback reached in a library build — please report this");
+  return NULL;
+}
+ScrDyn *scr_fs_rename_cb(const ScrDyn *oldp, const ScrDyn *newp, const ScrDyn *cb) {
+  (void)oldp; (void)newp; (void)cb;
+  scr_trap("scriptc: internal error: fs.rename callback reached in a library build — please report this");
+  return NULL;
+}
+#else
+
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
+
+/* The bytes a writeFile data slot names, as a Buffer dyn (+1): a string is
+ * encoded now with the options' encoding (utf8 by default); a view is
+ * retained and read at fire time. NULL with the exception pending. */
+static ScrDyn *scr_fs_write_data_dyn(const ScrDyn *data, const ScrDyn *opts) {
+  if (data->kind == SCR_DYN_BYTES) return scr_dyn_retain((ScrDyn *)data);
+  if (data->kind != SCR_DYN_STR) {
+    scr_dyn_arg_type_fail("data", "of type string or an instance of Buffer, TypedArray, or DataView", data);
+    return NULL;
+  }
+  bool isbuf;
+  const char *canon = scr_fs_opt_encoding(opts, &isbuf);
+  if (isbuf) {
+    const char *msg = "Unknown encoding: buffer";
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, strlen(msg), "ERR_UNKNOWN_ENCODING");
+    return NULL;
+  }
+  if (canon[0] == 0) canon = "utf8";
+  ScrStr *enc = scr_str_new(canon, strlen(canon));
+  ScrBytes *b = scr_bytes_from_str(data->v.str, enc);
+  scr_str_release(enc);
+  ScrDyn *d = scr_dyn_new_buffer_copy(b);
+  scr_bytes_release(b);
+  return d;
+}
+
+/* fsync(2) under its Windows name too. */
+static int scr_fs_fsync_fd(int fd) {
+#ifdef _WIN32
+  return _commit(fd);
+#else
+  return fsync(fd);
+#endif
+}
+
+/* The write half of writeFile/appendFile, at fire time: open(2) with the
+ * resolved flags and mode (a path) or the given descriptor (a fd is never
+ * closed), the write(2) loop, fsync(2) when flush is set, close(2). The
+ * first failure throws with its syscall; a descriptor failure has no path. */
+static void scr_fs_write_run(const ScrDyn *path, const ScrBytes *data, int bits, mode_t mode, bool flush) {
+  bool owned = path->kind != SCR_DYN_NUM;
+  ScrStr *ps = NULL;
+  int fd;
+  if (owned) {
+    ps = scr_fs_path_str(path);
+    fd = open(ps->data, bits | O_BINARY, mode);
+    if (fd < 0) {
+      scr_fs_throw(errno, "open", ps);
+      scr_str_release(ps);
+      return;
+    }
+  } else {
+    fd = (int)path->v.num;
+  }
+  size_t n = data->len * scr_bytes_elem_size(data->elem);
+  size_t at = 0;
+  const char *op = NULL;
+  int err = 0;
+  while (at < n) {
+    ssize_t w = write(fd, data->data + at, n - at);
+    if (w < 0) {
+      if (errno == EINTR) continue;
+      err = errno;
+      op = "write";
+      break;
+    }
+    at += (size_t)w;
+  }
+  if (op == NULL && flush && scr_fs_fsync_fd(fd) != 0) {
+    err = errno;
+    op = "fsync";
+  }
+  if (owned && close(fd) != 0 && op == NULL) {
+    err = errno;
+    op = "close";
+  }
+  /* A descriptor failure names no path (NULL), as Node does. */
+  if (op != NULL) scr_fs_throw(err, op, ps);
+  if (ps != NULL) scr_str_release(ps);
+}
+
+static void scr_fs_write_fire_common(ScrClosure *self, const char *what) {
+  ScrDyn *path = scr_box_get_ref(self->caps[0]);
+  ScrDyn *data = scr_box_get_ref(self->caps[1]);
+  ScrDyn *bits = scr_box_get_ref(self->caps[2]);
+  ScrDyn *mode = scr_box_get_ref(self->caps[3]);
+  ScrDyn *flush = scr_box_get_ref(self->caps[4]);
+  ScrDyn *cb = scr_box_get_ref(self->caps[5]);
+  scr_fs_write_run(path, data->v.bytes, (int)bits->v.num, (mode_t)mode->v.num, flush->v.b);
+  scr_fs_cb_finish(cb, NULL, 0, what);
+  scr_dyn_release(path);
+  scr_dyn_release(data);
+  scr_dyn_release(bits);
+  scr_dyn_release(mode);
+  scr_dyn_release(flush);
+  scr_dyn_release(cb);
+}
+
+static void scr_fs_write_file_fire(ScrClosure *self) {
+  scr_fs_write_fire_common(self, "the fs.writeFile callback");
+}
+
+static void scr_fs_append_file_fire(ScrClosure *self) {
+  scr_fs_write_fire_common(self, "the fs.appendFile callback");
+}
+
+/* writeFile(file, data, options?, cb) and appendFile (the default flag is
+ * 'a'). The ladder: cb (callback || options), getOptions (type, encoding),
+ * options.flush (a boolean when present), the data contract, then the
+ * descriptor (an int32 >= 0) or the path with fs.open's flags then mode. */
+static ScrDyn *scr_fs_write_cb_common(const ScrDyn *path, const ScrDyn *data, const ScrDyn *opts,
+                                      const ScrDyn *cb0, bool append) {
+  const ScrDyn *cb = scr_dyn_truthy(cb0) ? cb0 : opts;
+  if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+  if (!scr_fs_get_options(opts)) return NULL;
+  bool obj = opts->kind == SCR_DYN_OBJ;
+  bool flush = false;
+  const ScrDyn *f = obj ? scr_dyn_obj_get(opts, "flush", 5) : NULL;
+  if (f != NULL && !scr_fs_dyn_absent(f)) {
+    if (f->kind != SCR_DYN_BOOL) {
+      scr_dyn_prop_type_fail("options.flush", "of type boolean", f);
+      return NULL;
+    }
+    flush = f->v.b;
+  }
+  ScrDyn *bytes = scr_fs_write_data_dyn(data, opts);
+  if (bytes == NULL) return NULL;
+  int bits = append ? (O_APPEND | O_CREAT | O_WRONLY) : (O_TRUNC | O_CREAT | O_WRONLY);
+  double mode = 0666;
+  if (path->kind == SCR_DYN_NUM) {
+    double v = path->v.num;
+    if (!(isfinite(v) && trunc(v) == v)) {
+      char recv[48], msg[160];
+      scr_num_received(v, recv);
+      int len = snprintf(msg, sizeof msg, "The value of \"fd\" is out of range. It must be an integer. Received %s", recv);
+      scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+      scr_dyn_release(bytes);
+      return NULL;
+    }
+    if (v < 0 || v > 2147483647.0) {
+      char recv[48], msg[160];
+      scr_num_received(v, recv);
+      int len = snprintf(msg, sizeof msg, "The value of \"fd\" is out of range. It must be >= 0 && <= 2147483647. Received %s", recv);
+      scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+      scr_dyn_release(bytes);
+      return NULL;
+    }
+  } else {
+    if (!scr_fs_path_chk(path, "path")) {
+      scr_dyn_release(bytes);
+      return NULL;
+    }
+    const ScrDyn *fl = obj ? scr_dyn_obj_get(opts, "flag", 4) : NULL;
+    if (fl != NULL && scr_dyn_truthy(fl)) {
+      if (fl->kind == SCR_DYN_NUM) {
+        bits = (int)fl->v.num;
+      } else if (fl->kind == SCR_DYN_STR && scr_fs_flag_bits(fl->v.str) >= 0) {
+        bits = scr_fs_flag_bits(fl->v.str);
+      } else {
+        scr_dyn_arg_value_fail("flags", "is invalid", fl);
+        scr_dyn_release(bytes);
+        return NULL;
+      }
+    }
+    const ScrDyn *m = obj ? scr_dyn_obj_get(opts, "mode", 4) : NULL;
+    if (m != NULL && !scr_fs_dyn_absent(m)) {
+      if (!scr_fs_mode_chk(m, "mode")) {
+        scr_dyn_release(bytes);
+        return NULL;
+      }
+      mode = m->kind == SCR_DYN_NUM ? m->v.num : (double)strtol(m->v.str->data, NULL, 8);
+    }
+  }
+  ScrDyn *vals[6];
+  vals[0] = (ScrDyn *)path;
+  vals[1] = bytes;
+  vals[2] = scr_dyn_new_num((double)bits);
+  vals[3] = scr_dyn_new_num(mode);
+  vals[4] = scr_dyn_new_bool(flush);
+  vals[5] = (ScrDyn *)cb;
+  ScrClosure *clo = scr_fs_cb_closure(append ? scr_fs_append_file_fire : scr_fs_write_file_fire, 6,
+                                      (const ScrDyn *const *)vals);
+  scr_dyn_release(vals[2]);
+  scr_dyn_release(vals[3]);
+  scr_dyn_release(vals[4]);
+  scr_dyn_release(bytes);
+  scr_set_timeout(clo, 0);
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+ScrDyn *scr_fs_write_file_cb(const ScrDyn *path, const ScrDyn *data, const ScrDyn *opts, const ScrDyn *cb) {
+  return scr_fs_write_cb_common(path, data, opts, cb, false);
+}
+
+ScrDyn *scr_fs_append_file_cb(const ScrDyn *path, const ScrDyn *data, const ScrDyn *opts, const ScrDyn *cb) {
+  return scr_fs_write_cb_common(path, data, opts, cb, true);
+}
+
+static void scr_fs_mkdir_fire(ScrClosure *self) {
+  ScrDyn *path = scr_box_get_ref(self->caps[0]);
+  ScrDyn *mode = scr_box_get_ref(self->caps[1]);
+  ScrDyn *recursive = scr_box_get_ref(self->caps[2]);
+  ScrDyn *cb = scr_box_get_ref(self->caps[3]);
+  ScrDyn *out = NULL;
+  ScrStr *p = scr_fs_path_str(path);
+  if (recursive->v.b) {
+    ScrStr *first = scr_fs_mkdir_recursive_first(p, mode->v.num);
+    if (first != NULL) {
+      out = scr_dyn_new_str(first);
+      scr_str_release(first);
+    }
+  } else {
+    scr_fs_mkdir_mode(p, mode->v.num);
+  }
+  scr_str_release(p);
+  scr_fs_cb_finish(cb, &out, out != NULL ? 1 : 0, "the fs.mkdir callback");
+  if (out != NULL) scr_dyn_release(out);
+  scr_dyn_release(path);
+  scr_dyn_release(mode);
+  scr_dyn_release(recursive);
+  scr_dyn_release(cb);
+}
+
+/* mkdir(path, options?, cb): a function in the options slot is the callback.
+ * A number or string options value is the mode; an object reads recursive
+ * (a boolean when present) and mode; other truthy values are ignored. */
+ScrDyn *scr_fs_mkdir_cb(const ScrDyn *path, const ScrDyn *opts, const ScrDyn *cb0) {
+  const ScrDyn *cb = opts->kind == SCR_DYN_FUNC ? opts : cb0;
+  if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+  if (!scr_fs_path_chk(path, "path")) return NULL;
+  double mode = 0777;
+  bool recursive = false;
+  if (opts->kind == SCR_DYN_NUM || opts->kind == SCR_DYN_STR) {
+    if (!scr_fs_mode_chk(opts, "mode")) return NULL;
+    mode = opts->kind == SCR_DYN_NUM ? opts->v.num : (double)strtol(opts->v.str->data, NULL, 8);
+  } else if (opts->kind == SCR_DYN_OBJ) {
+    const ScrDyn *r = scr_dyn_obj_get(opts, "recursive", 9);
+    if (r != NULL && !scr_fs_dyn_absent(r)) {
+      if (r->kind != SCR_DYN_BOOL) {
+        scr_dyn_prop_type_fail("options.recursive", "of type boolean", r);
+        return NULL;
+      }
+      recursive = r->v.b;
+    }
+    const ScrDyn *m = scr_dyn_obj_get(opts, "mode", 4);
+    if (m != NULL && !scr_fs_dyn_absent(m)) {
+      if (!scr_fs_mode_chk(m, "options.mode")) return NULL;
+      mode = m->kind == SCR_DYN_NUM ? m->v.num : (double)strtol(m->v.str->data, NULL, 8);
+    }
+  }
+  ScrDyn *vals[4];
+  vals[0] = (ScrDyn *)path;
+  vals[1] = scr_dyn_new_num(mode);
+  vals[2] = scr_dyn_new_bool(recursive);
+  vals[3] = (ScrDyn *)cb;
+  ScrClosure *clo = scr_fs_cb_closure(scr_fs_mkdir_fire, 4, (const ScrDyn *const *)vals);
+  scr_dyn_release(vals[1]);
+  scr_dyn_release(vals[2]);
+  scr_set_timeout(clo, 0);
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+static void scr_fs_unlink_fire(ScrClosure *self) {
+  ScrDyn *path = scr_box_get_ref(self->caps[0]);
+  ScrDyn *cb = scr_box_get_ref(self->caps[1]);
+  ScrStr *p = scr_fs_path_str(path);
+  scr_fs_unlink(p);
+  scr_str_release(p);
+  scr_fs_cb_finish(cb, NULL, 0, "the fs.unlink callback");
+  scr_dyn_release(path);
+  scr_dyn_release(cb);
+}
+
+ScrDyn *scr_fs_unlink_cb(const ScrDyn *path, const ScrDyn *cb) {
+  if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+  if (!scr_fs_path_chk(path, "path")) return NULL;
+  const ScrDyn *vals[2] = {path, cb};
+  scr_set_timeout(scr_fs_cb_closure(scr_fs_unlink_fire, 2, vals), 0);
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+static void scr_fs_rename_fire(ScrClosure *self) {
+  ScrDyn *oldp = scr_box_get_ref(self->caps[0]);
+  ScrDyn *newp = scr_box_get_ref(self->caps[1]);
+  ScrDyn *cb = scr_box_get_ref(self->caps[2]);
+  ScrStr *a = scr_fs_path_str(oldp);
+  ScrStr *b = scr_fs_path_str(newp);
+  scr_fs_rename(a, b);
+  scr_str_release(a);
+  scr_str_release(b);
+  scr_fs_cb_finish(cb, NULL, 0, "the fs.rename callback");
+  scr_dyn_release(oldp);
+  scr_dyn_release(newp);
+  scr_dyn_release(cb);
+}
+
+ScrDyn *scr_fs_rename_cb(const ScrDyn *oldp, const ScrDyn *newp, const ScrDyn *cb) {
+  if (!scr_fs_cb_chk(cb, "cb")) return NULL;
+  if (!scr_fs_path_chk(oldp, "oldPath")) return NULL;
+  if (!scr_fs_path_chk(newp, "newPath")) return NULL;
+  const ScrDyn *vals[3] = {oldp, newp, cb};
+  scr_set_timeout(scr_fs_cb_closure(scr_fs_rename_fire, 3, vals), 0);
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+#endif
