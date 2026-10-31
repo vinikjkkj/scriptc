@@ -1825,6 +1825,14 @@ __attribute__((noinline)) const char *scr_dyn_fn_name(const ScrDyn *d) {
 }
 const char *scr_dyn_fn_src_of(const ScrDyn *d) { return scr_dyn_fn_src(d); }
 
+/* The compiler's PROVEN kind code for a FUNC box whose closure the table
+ * cannot name (a static bind: one shared wrapper per signature, whose code
+ * is the target's). Replaces the code bits and keeps the JS length. */
+ScrDyn *scr_dyn_fn_code_set(ScrDyn *d, unsigned code) {
+  d->v.fn.arity = (d->v.fn.arity & 0xffffffu) | ((uint32_t)(code & SCR_FNK_CODE_MASK) << SCR_FNK_SHIFT);
+  return d;
+}
+
 ScrDyn *scr_dyn_new_null(void) { return scr_dyn_alloc(SCR_DYN_NULL); }
 
 ScrDyn *scr_dyn_new_bool(bool b) {
@@ -2440,7 +2448,10 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
     d->v.fn.name = scr_rva_of(n);
   }
   d->v.fn.src = scr_rva_of(src);
-  d->v.fn.arity = arity;
+  /* The kind code (SCR_FNK_*) rides in the top of the arity word. A
+   * compiled closure's code comes from the program's own name table; a box
+   * the runtime builds itself (a bound function) passes its code in `arity`. */
+  d->v.fn.arity = (arity & 0xffffffu) | ((uint32_t)(clo != NULL ? scr_fn_code_of(clo->fn) : 0u) << SCR_FNK_SHIFT) | (arity & 0x1f000000u);
   return d;
 }
 
@@ -9929,7 +9940,7 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
     return r;
   }
   if (key_len == 6 && memcmp(key, "length", 6) == 0) {
-    return scr_dyn_new_num((double)d->v.fn.arity);
+    return scr_dyn_new_num((double)scr_dyn_fn_len(d));
   }
   /* `Uint8Array.BYTES_PER_ELEMENT`. Answered off the BOX rather than out
    * of the property table because a FUNC box's table has no
@@ -10011,7 +10022,7 @@ ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn) {
   if (clo->implicit_proto == NULL) {
     if (scr_ctor_len * 2 >= scr_ctor_cap) scr_ctor_grow();
     ScrCtorDesc d = {clo, fn->v.fn.thunk, scr_dyn_fn_sig(fn), scr_dyn_fn_name(fn), scr_dyn_fn_src(fn),
-                     fn->v.fn.arity};
+                     scr_dyn_fn_len(fn)};
     scr_ctor_insert(scr_ctor_tab, scr_ctor_cap, proto, d);
     scr_ctor_len++;
     clo->implicit_proto = scr_dyn_retain(proto);

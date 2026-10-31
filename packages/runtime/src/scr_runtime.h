@@ -4939,11 +4939,30 @@ void scr_rc_audit_sites_report(void);
  * the fallback is already the right answer rather than a guess. */
 typedef struct ScrFnName {
   const void *fn;    /* the closure entry point (ScrClosure.fn) */
-  const char *name;  /* its JS Function.prototype.name -- a static literal */
+  const char *name;  /* its JS Function.prototype.name -- a static literal, or NULL */
+  unsigned code;     /* its inspect kind code (SCR_FNK_*); 0 is a plain function */
 } ScrFnName;
 void scr_fn_names_install(const ScrFnName *tbl, size_t n);
 /* NULL when this program never named that entry point. */
 const char *scr_fn_name_of(const void *fn);
+/* The kind code of that entry point (0 when the program never named it). */
+unsigned scr_fn_code_of(const void *fn);
+
+/* The inspect KIND of a function value, packed into the top bits of a FUNC
+ * box's `arity` word (bits 24..26; the low 24 bits are the JS `length`).
+ * Bits 0..1 are the function kind -- 0 Function, 1 AsyncFunction, 2
+ * GeneratorFunction, 3 AsyncGeneratorFunction -- and SCR_FNK_NOPROTO says
+ * the value has no own `prototype` (an arrow, a method, an async function
+ * that is not a generator, or a bound function). Bits 3..4 are the kind of
+ * the prototype-chain constructor a BOUND function inherits from its target
+ * (Node prints `[Function: bound f] AsyncFunction` for a bound async f). A
+ * box built with no code word is a plain function with a prototype. */
+#define SCR_FNK_ASYNC 1u
+#define SCR_FNK_GEN 2u
+#define SCR_FNK_NOPROTO 4u
+#define SCR_FNK_INH_SHIFT 3u
+#define SCR_FNK_SHIFT 24
+#define SCR_FNK_CODE_MASK 0x1fu
 
 /* Function.prototype.toString of a function VALUE (scr_fntext.c, linked only
  * when a program converts a function to a string: moduleUsesFnText). The
@@ -5325,6 +5344,10 @@ extern const char *(*scr_dyn_bound_name_fn)(const ScrDyn *d);
  * caller grew the always-linked code. */
 const char *scr_dyn_fn_name(const ScrDyn *d);
 static inline const char *scr_dyn_fn_src(const ScrDyn *d) { return scr_rva_str(d->v.fn.src); }
+/* The JS `length` of a FUNC box (the arity word without its kind code). */
+static inline uint32_t scr_dyn_fn_len(const ScrDyn *d) { return d->v.fn.arity & 0xffffffu; }
+/* The kind code of a FUNC box (SCR_FNK_*). */
+static inline unsigned scr_dyn_fn_code(const ScrDyn *d) { return (unsigned)(d->v.fn.arity >> SCR_FNK_SHIFT) & SCR_FNK_CODE_MASK; }
 /* The same three as callable symbols: the LLVM backend emits calls, not
  * C, so it cannot reach a static inline -- and it used to read `sig` as
  * a plain pointer load at +32, which is the kind of hardcoded layout
@@ -9958,6 +9981,10 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth);
 /* A format argument's REST-ARG conversion: dyn strings pass verbatim,
  * everything else inspects. Never throws (console.log's conversion). */
 ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth);
+/* Sets a FUNC box's kind code (SCR_FNK_*) to the compiler's proven value. */
+ScrDyn *scr_dyn_fn_code_set(ScrDyn *d, unsigned code);
+/* util.format %o: scr_insp_dyn_s with showHidden on function values. */
+ScrStr *scr_insp_dyn_h(ScrDyn *d, double depth);
 /* format's %s conversion, which is NOT the one above: an object carrying
  * its OWN toString is String()-converted rather than inspected (Node's
  * hasBuiltInToString test). MAY THROW — the toString is user code. */

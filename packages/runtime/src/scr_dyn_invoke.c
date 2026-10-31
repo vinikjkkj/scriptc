@@ -1497,9 +1497,14 @@ static ScrDyn *dyn_bind_func(ScrDyn *fn, ScrDyn *const *args, size_t argc) {
     clo->caps[3 + i] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
     scr_box_set_ref(clo->caps[3 + i], scr_dyn_retain(args[1 + i]));
   }
-  uint32_t target_len = fn->v.fn.arity;
+  uint32_t target_len = scr_dyn_fn_len(fn);
   uint32_t len = target_len > nb ? (uint32_t)(target_len - nb) : 0;
-  return scr_dyn_new_func(clo, dyn_bound_fn_thunk, len, "()", scr_dyn_bound_name_mark);
+  /* A bound function is a plain Function with no own prototype; it prints the
+   * kind of its target's prototype-chain constructor when the target is an
+   * async or generator function (Node: `[Function: bound f] AsyncFunction`). */
+  const unsigned tk = scr_dyn_fn_code(fn);
+  const unsigned inh = (tk & 3u) != 0 ? (tk & 3u) : ((tk >> SCR_FNK_INH_SHIFT) & 3u);
+  return scr_dyn_new_func(clo, dyn_bound_fn_thunk, len | ((SCR_FNK_NOPROTO | (inh << SCR_FNK_INH_SHIFT)) << SCR_FNK_SHIFT), "()", scr_dyn_bound_name_mark);
 }
 
 /* `m.call(x, ...)` / `m.apply(x, pack)` where `m` is a built-in method READ off a value
