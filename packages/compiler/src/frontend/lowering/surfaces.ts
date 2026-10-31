@@ -1360,6 +1360,11 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
   // ── fs (lowerFsStatCallbackCall): the callback form of fs.stat — the stat runs
   // at the call and the (err, stats) answer is the filesystem's, so it demotes.
   { id: "node-builtin.fs.stat", kind: "node-builtin", name: "fs.stat", fns: ["fs.statCb"], note: "the callback form; the two-argument shape only" },
+  { id: "node-builtin.fs.writeFile", kind: "node-builtin", name: "fs.writeFile", fns: ["fs.writeFileCb"], note: "the callback form; the options must be provably signal-free (four-argument form)" },
+  { id: "node-builtin.fs.appendFile", kind: "node-builtin", name: "fs.appendFile", fns: ["fs.appendFileCb"], note: "the callback form; the options must be provably signal-free (four-argument form)" },
+  { id: "node-builtin.fs.mkdir", kind: "node-builtin", name: "fs.mkdir", fns: ["fs.mkdirCb"], note: "the callback form: plain, mode, and { recursive } (first created path)" },
+  { id: "node-builtin.fs.unlink", kind: "node-builtin", name: "fs.unlink", fns: ["fs.unlinkCb"], note: "the callback form" },
+  { id: "node-builtin.fs.rename", kind: "node-builtin", name: "fs.rename", fns: ["fs.renameCb"], note: "the callback form" },
   { id: "node-builtin.process.argv", kind: "node-builtin", name: "process.argv", fns: ["process.argv"] },
   { id: "node-builtin.process.cwd", kind: "node-builtin", name: "process.cwd", fns: ["process.cwd"] },
   { id: "node-builtin.process.chdir", kind: "node-builtin", name: "process.chdir", fns: ["process.chdir"] },
