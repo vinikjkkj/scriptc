@@ -9734,6 +9734,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/20900-nullable-call-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/20900-nullable-call-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/20901-nullable-call-js.js": {
+   "order": [
+    "<repo>/tests/corpus/20901-nullable-call-js.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/20902-nullable-call-void.ts": {
+   "order": [
+    "<repo>/tests/corpus/20902-nullable-call-void.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/20903-nullable-call-optchain-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/20903-nullable-call-optchain-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/20904-nullable-call-control-guarded.js": {
+   "order": [
+    "<repo>/tests/corpus/20904-nullable-call-control-guarded.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2091-index-signature-string-intersection.ts": {
    "order": [
     "<repo>/tests/corpus/2091-index-signature-string-intersection.ts"
