@@ -15,7 +15,7 @@ import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStr
 import { admitWeakTableIr, isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
-import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
+import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, newFnCtx, own } from "./lowerer.js";
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerDateNumArg, lowerSearchParamsNew } from "./lower-builtins.js";
@@ -9581,7 +9581,11 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       // A static METHOD's value is a function named by its key (JS:
       // `static sm(){}` is "sm"); a static ACCESSOR keeps no jsName
       // (its `get:`/`set:` IR name declines in irFunctionJsName).
-      if (entry.member.kind === ts.SyntaxKind.MethodDeclaration) fn.jsName = name;
+      if (entry.member.kind === ts.SyntaxKind.MethodDeclaration) {
+        fn.jsName = name;
+        // A method value has no prototype (a generator method does).
+        fn.valueCode = fnValueCodeOfNode(entry.member);
+      }
       return fn;
     } catch (e) {
       // A poison OUTSIDE the per-statement catches (the this/super fence,
