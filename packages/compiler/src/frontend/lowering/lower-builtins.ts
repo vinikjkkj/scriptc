@@ -6529,7 +6529,7 @@ let digestInputValueDispatches = 0;
     const name = access.name.text;
     const typeIdx = STATS_TYPE_INDEX.get(name);
     if (typeIdx !== undefined && call.arguments.length === 0) {
-      const receiver = L.lowerExpr(access.expression);
+      const receiver = L.lowerStatsReceiver(access.expression);
       const idx: IrExpr = { kind: "numLit", value: typeIdx, type: F64, loc: locOf(call) };
       return { kind: "libCall", fn: "stats.isType", args: [receiver, idx], type: BOOL, loc: locOf(call) };
     }
@@ -6537,7 +6537,7 @@ let digestInputValueDispatches = 0;
       (name === "isFile" || name === "isDirectory" || name === "isSymbolicLink") &&
       call.arguments.length === 0
     ) {
-      const receiver = L.lowerExpr(access.expression);
+      const receiver = L.lowerStatsReceiver(access.expression);
       const fn =
         name === "isFile" ? "stats.isFile"
         : name === "isDirectory" ? "stats.isDirectory"
@@ -6830,7 +6830,7 @@ let digestInputValueDispatches = 0;
     }
     if (kind === "child") return null; // pid/exitCode/killed live in lowerIntrinsicProperty
     if (kind === "stats" && name === "mtimeMs") {
-      const receiver = L.lowerExpr(expr.expression);
+      const receiver = L.lowerStatsReceiver(expr.expression);
       return { kind: "libCall", fn: "stats.mtimeMs", args: [receiver], type: F64, loc };
     }
     if (kind === "spawnRes" && name === "signal") {

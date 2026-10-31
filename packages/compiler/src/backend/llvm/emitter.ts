@@ -13816,7 +13816,8 @@ class LlEmitter {
     if (cbT.kind !== "func") throw new Error("llvm emitter bug: fs.stat callback not a func");
     const nparams = cbT.params.length;
     const errT = nparams >= 1 ? cbT.params[0] : undefined;
-    const key = `fsstat:${nparams}:${errT?.kind === "union" ? errT.unionId : "-"}`;
+    const statsU = nparams >= 2 ? cbT.params[1] : undefined;
+    const key = `fsstat:${nparams}:${errT?.kind === "union" ? errT.unionId : "-"}:${statsU?.kind === "union" ? statsU.unionId : "-"}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
     sym = `sc_fsstat_${this.resolveThunks.size}`;
@@ -13858,16 +13859,27 @@ class LlEmitter {
       this.resolveThunkDefs.push(...d);
       return sym;
     }
+    // The stats argument: the Stats | undefined union. Node passes undefined
+    // on a failure, where the runtime's stats is NULL.
+    const statsDef = statsU?.kind === "union" ? this.unionsById.get(statsU.unionId) : undefined;
+    const statsTag = statsDef ? statsDef.arms.findIndex((a) => a.kind === "stats") : -1;
+    const undefTag = statsDef ? statsDef.arms.findIndex((a) => a.kind === "undefinedT") : -1;
+    if (statsU?.kind !== "union" || statsTag < 0 || undefTag < 0) {
+      throw new Error("llvm emitter bug: fs.stat stats param not a Stats | undefined union");
+    }
+    this.declare(`declare ptr @scr_stats_retain_v(ptr)`);
+    this.declare(`declare void @scr_stats_release_v(ptr)`);
     d.push(
       `  %hasSt = icmp ne ptr %st, null`,
       `  br i1 %hasSt, label %mkst, label %nostat`,
       `mkst:`,
       `  %sr = call ptr @scr_stats_retain(ptr %st)`,
+      `  %us = call ptr @scr_union_new_ref(i32 ${statsTag}, ptr %sr, ptr @scr_stats_retain_v, ptr @scr_stats_release_v, ptr null)`,
       `  br label %havest`,
       `nostat:`,
       `  br label %havest`,
       `havest:`,
-      `  %sv = phi ptr [ %sr, %mkst ], [ null, %nostat ]`,
+      `  %sv = phi ptr [ %us, %mkst ], [ ${this.unitInstanceRef(statsU.unionId, undefTag)}, %nostat ]`,
       `  call void %fn(ptr %cb, ptr %u, ptr %sv)`,
       `  ret void`,
       `}`,

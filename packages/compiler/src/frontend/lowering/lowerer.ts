@@ -2327,6 +2327,9 @@ export class Lowerer {
   /** presence bool -> the raw pointer read it was derived from. */
   readonly presenceReads = new WeakMap<IrExpr, IrExpr>();
   readonly lyingResults = new WeakSet<IrExpr>();
+  /** Receivers of a fs.Stats member use (lowerStatsReceiver): their union
+   * read answers the member use exactly (maybeNarrow). */
+  readonly statsRecvNodes = new WeakSet<ts.Node>();
   readonly bindEvidenceBusy = new Set<ts.Node>();
   /** Nested function DECLARATIONS lowered eagerly by the forward-hoisting
    * machinery (predeclareForwardFnDecl — a reference above the declaration
@@ -13512,6 +13515,15 @@ export class Lowerer {
       ? this.deferredReadHelper(union.type.unionId, target, loc)
       : this.narrowedArmHelper(union.type.unionId, target, loc);
     return h ? done({ kind: "call", callee: h, args: [union], type: target, loc }) : null;
+  }
+
+  /** A fs.Stats receiver lowered for a member use or method call. The
+   * stat callback's stats parameter is a Stats | undefined union (undefined
+   * on a failure): the member use answers Node's TypeError naming the
+   * property, through the maybeNarrow hook on statsRecvNodes. */
+  lowerStatsReceiver(node: ts.Expression): IrExpr {
+    this.statsRecvNodes.add(node);
+    return this.lowerExpr(node);
   }
 
   /** The DEFERRED-INIT field read (`stream!: T` assigned past the

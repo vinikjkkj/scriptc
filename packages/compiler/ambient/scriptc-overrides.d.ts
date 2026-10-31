@@ -110,3 +110,8 @@ declare namespace NodeJS {
  * the one place the answer's real union is written. */
 type ScriptcDnsAddress = string | null | undefined;
 type ScriptcDnsFamily = number | undefined;
+
+/* fs.stat's stats callback parameter as the reads see it (lower-dgram.ts
+ * lowerStatCallbackArg): the Stats arm. The IR parameter is Stats | undefined
+ * (undefined on a failure), and a member use on it answers Node's TypeError. */
+type ScriptcStatsRead = import("node:fs").Stats;

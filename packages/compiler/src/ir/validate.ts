@@ -4983,8 +4983,17 @@ function validateFunction(
               def.arms.length === 2 &&
               def.arms.some((a) => a.kind === "nullT") &&
               def.arms.some((a) => a.kind === "object" && a.className === "%Error");
+            // The stats argument is the Stats | undefined union (undefined
+            // on a failure): stats and undefinedT arms, nothing else.
             const p1 = cbT.params[1];
-            if (ok && p1 !== undefined) ok = p1.kind === "stats";
+            const d1 = p1?.kind === "union" ? unions.get(p1.unionId) : undefined;
+            if (ok && p1 !== undefined) {
+              ok =
+                d1 !== undefined &&
+                d1.arms.length === 2 &&
+                d1.arms.some((a) => a.kind === "stats") &&
+                d1.arms.some((a) => a.kind === "undefinedT");
+            }
           }
           if (!ok) {
             err(`libCall fs.statCb callback shape (frontend must fence)`, e.loc);

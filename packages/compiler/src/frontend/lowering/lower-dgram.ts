@@ -10,7 +10,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { BOOL, canBoxFuncIntoDyn, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, NULL_T, SrcLoc, STRING, typeKey, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { BOOL, canBoxFuncIntoDyn, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, NULL_T, SrcLoc, STATS_T, STRING, typeKey, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { DNS_LOOKUP_DOCUMENTED_OPTIONS, fenceOrDropOptionKey } from "./surfaces.js";
 import { overridesDtsPath } from "../shared.js";
 
@@ -116,12 +116,77 @@ function lowerFsStatCallbackCall(L: Lowerer, expr: ts.CallExpression,
   const args = expr.arguments;
   if (args.length !== 2 || args.some(ts.isSpreadElement)) return null;
   const path = L.lowerExprExpecting(args[0]!, STRING);
-  const { cb } = lowerCallbackArg(
-    L, args[1]!, "stat callbacks", 2,
-    (p, i) => (i === 0 ? isErrorOrNullUnion(L, p) : p.kind === "stats"),
-    "use (err, stats) — err is Error | null, stats a Stats",
-  );
+  const cb = lowerStatCallbackArg(L, args[1]!);
   return { kind: "libCall", fn: "fs.statCb", args: [path, cb], type: VOID, loc };
+}
+
+/** The stat callback: an INLINE function literal whose (err, stats) are
+ * the delivered answers. On a failure Node passes stats as undefined, so the
+ * stats parameter is typed (IR and reads alike) as the union Stats |
+ * undefined: `s === undefined` and member reads on it meet the union, and a
+ * member read on the undefined arm is Node's TypeError, never a dereference
+ * of the runtime's NULL. The mechanism is lowerDnsCallback's (paramIrOverrides
+ * + the overrides file's alias for the reads). A named function value binds
+ * the checker's Stats, which contradicts the delivered undefined, so it is
+ * refused by name (no fs.stat callback ran on main before this). */
+function lowerStatCallbackArg(L: Lowerer, node: ts.Expression): IrExpr {
+  let fn: ts.Expression = node;
+  while (ts.isParenthesizedExpression(fn)) fn = fn.expression;
+  if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) {
+    L.unsupported(
+      "SC1090",
+      node,
+      "stat callbacks that are not inline function literals (the stats argument is undefined on a failure, so the callback must be written in place)",
+    );
+  }
+  const errU = dnsAnswerUnion(L, [{ kind: "object", className: "%Error" }, NULL_T]);
+  const statsU = dnsAnswerUnion(L, [STATS_T, UNDEFINED_T]);
+  const forced: ts.ParameterDeclaration[] = [];
+  const reads: ts.Node[] = [];
+  const force = (idx: number, t: IrType, readT?: ts.Type): void => {
+    const p = fn.parameters[idx];
+    if (p === undefined) return;
+    if (!ts.isIdentifier(p.name) || p.type !== undefined || p.initializer !== undefined ||
+        p.questionToken !== undefined || p.dotDotDotToken !== undefined) {
+      L.unsupported(
+        "SC1090",
+        p,
+        "a stat callback's error or stats parameter with an annotation, default, or rest form (write it as a plain identifier)",
+      );
+    }
+    L.paramIrOverrides.set(p, t);
+    forced.push(p);
+    // The reads of the stats parameter are typed Stats (the delivered arm):
+    // a JS parameter is checker-any, and a dyn read of the union takes the
+    // dyn path, not Node's member TypeError. Member uses then answer through
+    // the stats receiver (lowerStatsReceiver), which names the property.
+    if (readT === undefined) return;
+    const psym = L.resolveValueSymbol(p.name);
+    const bind = (n: ts.Node): void => {
+      if (L.chainNarrowedType.has(n)) return;
+      L.chainNarrowedType.set(n, readT);
+      reads.push(n);
+    };
+    bind(p.name);
+    if (psym !== null && fn.body !== undefined) {
+      ts.walkPreorder(fn.body, (n) => {
+        if (ts.isIdentifier(n) && n.text === (p.name as ts.Identifier).text && L.resolveValueSymbol(n) === psym) bind(n);
+        return undefined;
+      });
+    }
+  };
+  force(0, errU);
+  force(1, statsU, dnsAnswerTsType(L, "ScriptcStatsRead"));
+  try {
+    return lowerCallbackArg(
+      L, node, "stat callbacks", 2,
+      (p, i) => (i === 0 ? isErrorOrNullUnion(L, p) : isUnionOfKinds(L, p, ["stats", "undefinedT"])),
+      "use (err, stats) — err is Error | null, stats a Stats | undefined",
+    ).cb;
+  } finally {
+    for (const p of forced) L.paramIrOverrides.delete(p);
+    for (const n of reads) L.chainNarrowedType.delete(n);
+  }
 }
 
 /** Module-function calls on dgram/dns import bindings (named imports AND

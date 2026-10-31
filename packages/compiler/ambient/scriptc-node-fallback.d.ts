@@ -1026,6 +1026,10 @@ declare module "node:fs" {
   }
   export function statSync(path: string): Stats;
   export function lstatSync(path: string): Stats;
+  /* The two-argument callback form (lower-dgram.ts lowerFsStatCallbackCall):
+   * on a failure the error is set and the stats argument is undefined, as in
+   * Node; the callback body reads the stats through the lowered union. */
+  export function stat(path: string, callback: (err: NodeJS.ErrnoException | null, stats: Stats) => void): void;
   /* The fd pair behind spawn's fd-stdio form: openSync(path, flags) →
    * the raw fd (string flags only — "r", "w", "a" and the +/x/s
    * variants), closeSync(fd). */

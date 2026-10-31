@@ -539,7 +539,8 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
     if (cbT.kind !== "func") throw new Error("emitter bug: fs.stat callback not a func");
     const nparams = cbT.params.length;
     const errT = nparams >= 1 ? cbT.params[0]! : undefined;
-    const key = `${nparams}/${errT?.kind === "union" ? errT.unionId : "-"}`;
+    const statsT = nparams >= 2 ? cbT.params[1]! : undefined;
+    const key = `${nparams}/${errT?.kind === "union" ? errT.unionId : "-"}/${statsT?.kind === "union" ? statsT.unionId : "-"}`;
     let sym = E.fsStatThunks.get(key);
     if (!sym) {
       sym = mangleFsStatThunk(E.fsStatThunks.size);
@@ -561,8 +562,18 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
         if (errTag < 0 || nullTag < 0) {
           throw new Error("emitter bug: fs.stat err union lacks its arms");
         }
-        const statsArg = nparams >= 2 ? ", sc_st ? scr_stats_retain(sc_st) : NULL" : "";
-        const callTy = nparams >= 2 ? "ScrClosure *, ScrUnion *, ScrStats *" : "ScrClosure *, ScrUnion *";
+        // The stats argument: the Stats | undefined union (Node passes
+        // undefined on a failure, where the runtime's stats is NULL).
+        const statsDef = statsT?.kind === "union" ? E.unionsById.get(statsT.unionId) : undefined;
+        const statsTag = statsDef ? statsDef.arms.findIndex((a) => a.kind === "stats") : -1;
+        const undefTag = statsDef ? statsDef.arms.findIndex((a) => a.kind === "undefinedT") : -1;
+        if (nparams >= 2 && (statsT?.kind !== "union" || statsTag < 0 || undefTag < 0)) {
+          throw new Error("emitter bug: fs.stat stats param not a Stats | undefined union");
+        }
+        const callTy = nparams >= 2 ? "ScrClosure *, ScrUnion *, ScrUnion *" : "ScrClosure *, ScrUnion *";
+        const statsArg = nparams >= 2 && statsT?.kind === "union"
+          ? `, sc_st ? scr_union_new_ref(${statsTag}, scr_stats_retain(sc_st), &scr_stats_retain_v, &scr_stats_release_v, NULL) : ${E.unitInstanceRef(statsT.unionId, undefTag)}`
+          : "";
         E.walkerDefs.push(
           `${E.link}void ${sym}(ScrClosure *sc_cb, ScrError *sc_err, ScrStats *sc_st) {`,
           `  ScrUnion *sc_u = sc_err`,

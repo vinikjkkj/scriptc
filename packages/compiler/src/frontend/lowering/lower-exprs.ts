@@ -5222,6 +5222,13 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
     // A lyingRead result already answered its consumer: narrowing it again
     // would re-trap the peeled union.
     if (L.lyingResults.has(expr)) return expr;
+    // A fs.Stats receiver (lowerStatsReceiver): the member use names the
+    // property in Node's TypeError at the undefined arm, not the generic
+    // checked-extraction trap.
+    if (L.statsRecvNodes.has(node) && expr.type.kind === "union") {
+      const lr = L.lyingRead(expr, node as ts.Expression);
+      if (lr) return lr;
+    }
     // A read of a widened JS let (see jsLetReadStaysDyn) is the dyn value
     // itself: the checker's declared-primitive type is not a proof here.
     if (expr.type.kind === "dyn" && jsLetReadStaysDyn(L, node)) return expr;
@@ -8811,11 +8818,11 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     }
     if (kind === "stats") {
       if (name === "size") {
-        const receiver = L.lowerExpr(expr.expression);
+        const receiver = L.lowerStatsReceiver(expr.expression);
         return { kind: "libCall", fn: "stats.size", args: [receiver], type: F64, loc: locOf(expr) };
       }
       if (name === "mode") {
-        const receiver = L.lowerExpr(expr.expression);
+        const receiver = L.lowerStatsReceiver(expr.expression);
         return { kind: "libCall", fn: "stats.mode", args: [receiver], type: F64, loc: locOf(expr) };
       }
       // The rest of Node's Stats fields: one field table (scr_lib.c's
@@ -8823,7 +8830,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       // rounded millisecond field (Node's dateFromMs).
       const statsField = STATS_FIELD_INDEX.get(name);
       if (statsField !== undefined) {
-        const receiver = L.lowerExpr(expr.expression);
+        const receiver = L.lowerStatsReceiver(expr.expression);
         if (statsField >= 14) {
           // The Date members: the shared, cached Date (scr_stats_date_of), 1..4.
           const which: IrExpr = { kind: "numLit", value: statsField - 13, type: F64, loc: locOf(expr) };
