@@ -947,7 +947,38 @@ static bool scr_timer_before(const ScrTimer *a, const ScrTimer *b) {
   return a->seq < b->seq;
 }
 
+/* ── fatal-exit handle accounting (RC audit builds only) ─────────────
+ * A fatal exit (an uncaught throw from top-level code or from a loop
+ * callback, a fatal module root) ends the process with whatever the loop
+ * still queues: Node drops its timers, immediates and ticks and exits
+ * with the failure status. Loop exhaustion releases them; the fatal
+ * returns skip that release, so the audit read every abandoned timer,
+ * immediate, tick and fs.stat callback (a zero-delay timer) as a leak and
+ * replaced the program's status with 99. This hook releases them at exit,
+ * and only when the exit status is non-zero: a drained loop already
+ * released everything, so a normal exit is audited exactly as before.
+ * Shipping builds are untouched.
+ *
+ * Registered on the first arm, not at init: atexit is LIFO, so a hook
+ * registered after scr_init's audit runs before it. Init cannot name this
+ * unit, because the audit's own unit is link-gated in test subsets. */
+#ifdef SCR_RC_AUDIT
+static bool scr_abandon_registered = false;
+static void scr_abandon_at_exit(void) {
+  if (scr_exit_code_hint_get() == 0) return;
+  scr_timers_teardown();
+}
+static void scr_abandon_arm(void) {
+  if (scr_abandon_registered) return;
+  scr_abandon_registered = true;
+  atexit(scr_abandon_at_exit);
+}
+#else
+#define scr_abandon_arm() ((void)0)
+#endif
+
 static void scr_timer_push(ScrTimer t) {
+  scr_abandon_arm();
   if (scr_ntimers == scr_timers_cap) {
     scr_timers_cap = scr_timers_cap ? scr_timers_cap * 2 : 16;
     scr_timers = realloc(scr_timers, scr_timers_cap * sizeof *scr_timers);
@@ -1307,6 +1338,7 @@ static ScrNtick *scr_nt_tail = NULL;
  * enqueue ticks that must never run (Node) yet must not leak. */
 
 void scr_next_tick(ScrClosure *cb /*moves*/) {
+  scr_abandon_arm();
   ScrNtick *t = calloc(1, sizeof *t);
   if (!t) scr_oom();
   t->cb = cb;
@@ -1321,6 +1353,7 @@ void scr_next_tick(ScrClosure *cb /*moves*/) {
  * endReadableNT, ...). The hook dispatches exactly one stream tick;
  * teardown just drops markers (the stream queue owns its entries). */
 void scr_next_tick_raw(void (*fn)(void)) {
+  scr_abandon_arm();
   ScrNtick *t = calloc(1, sizeof *t);
   if (!t) scr_oom();
   t->raw = fn;
@@ -1446,6 +1479,7 @@ static size_t scr_pending_immediates = 0;
 static size_t scr_reffed_immediates = 0;
 
 double scr_set_immediate(ScrClosure *cb) {
+  scr_abandon_arm();
   if (scr_nimmediates == scr_immediates_cap) {
     scr_immediates_cap = scr_immediates_cap ? scr_immediates_cap * 2 : 16;
     scr_immediates = realloc(scr_immediates, scr_immediates_cap * sizeof *scr_immediates);
