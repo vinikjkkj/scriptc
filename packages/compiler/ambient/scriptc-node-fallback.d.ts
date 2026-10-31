@@ -958,6 +958,25 @@ declare module "node:fs" {
   export function readFileSync(fd: number): Buffer;
   /* The options-object spelling of the utf8 form. */
   export function readFileSync(path: string, options: { encoding: "utf8" | "utf-8" }): string;
+  /* The callback forms the lowering answers (fs.readFileCb,
+   * fs.existsChk, fs.mkdtempCb, fs.readCb). fs.stat(path, cb) is NOT declared:
+   * its ENOENT path passes no stats, which the lowering cannot yet type (OPEN).
+   * The runtime dispatches every
+   * @types/node spelling over dyn values, the callback runs on a later turn,
+   * and the error is Node's ErrnoException. Only the forms that lower are
+   * declared; the others (writeFile, mkdir, open, ...) have no callback
+   * lowering and stay undeclared (a build-time refusal, not a runtime throw). */
+  export function readFile(path: string | number, callback: (err: NodeJS.ErrnoException | null, data: Buffer) => void): void;
+  export function readFile(path: string | number, encoding: BufferEncoding, callback: (err: NodeJS.ErrnoException | null, data: string) => void): void;
+  export function readFile(path: string | number, options: { encoding: BufferEncoding }, callback: (err: NodeJS.ErrnoException | null, data: string) => void): void;
+  export function readFile(path: string | number, options: { encoding?: null } | null | undefined, callback: (err: NodeJS.ErrnoException | null, data: Buffer) => void): void;
+  export function exists(path: string, callback: (exists: boolean) => void): void;
+  export function mkdtemp(prefix: string, callback: (err: NodeJS.ErrnoException | null, folder: string) => void): void;
+  export function mkdtemp(prefix: string, options: { encoding: BufferEncoding }, callback: (err: NodeJS.ErrnoException | null, folder: string) => void): void;
+  export function mkdtemp(prefix: string, options: { encoding: "buffer" }, callback: (err: NodeJS.ErrnoException | null, folder: Buffer) => void): void;
+  export function read(fd: number, callback: (err: NodeJS.ErrnoException | null, bytesRead: number, buffer: Buffer) => void): void;
+  export function read<TBuffer extends Uint8Array>(fd: number, buffer: TBuffer, offset: number, length: number, position: number | null, callback: (err: NodeJS.ErrnoException | null, bytesRead: number, buffer: TBuffer) => void): void;
+  export function read<TBuffer extends Uint8Array>(fd: number, buffer: TBuffer, options: { offset?: number; length?: number; position?: number | null }, callback: (err: NodeJS.ErrnoException | null, bytesRead: number, buffer: TBuffer) => void): void;
   /* The options form carries the mode (applied at CREATION only, like
    * Node — an existing file keeps its permissions) and/or the utf8
    * encoding spelling. */
