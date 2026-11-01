@@ -118,6 +118,17 @@ const WINDOWS_SKIPS: Record<string, string> = {
   // the first time once the events gate lifted): both drive their signal
   // listeners through a /bin/sh child, ENOENT on Windows Node too.
   "1443-signal-handlers.ts": "posix-shaped: the /bin/sh signal driver is ENOENT on Windows Node too — no portable way to deliver a real SIGINT to both sides here",
+  // Signal delivery order (sigdrain): the rows drive process.kill(process.pid,
+  // SIGINT|SIGTERM) and rely on POSIX delivery order and per-delivery drains.
+  "21200-signal-two-signals-tick-job-order.ts": "posix-shaped: process.kill of SIGINT/SIGTERM to this process, batched by POSIX delivery order; Windows has no such batch",
+  "21201-signal-delivery-order-not-registry.ts": "posix-shaped: POSIX delivery order of two self-sent signals; Windows has no such batch",
+  "21202-signal-two-listeners-then-second-signal.ts": "posix-shaped: POSIX delivery order of two self-sent signals; Windows has no such batch",
+  "21203-signal-remove-listener-mid-emit.ts": "posix-shaped: POSIX delivery order of two self-sent signals; Windows has no such batch",
+  "21204-signal-throw-in-first-delivery.ts": "posix-shaped: POSIX delivery order of two self-sent signals; Windows has no such batch",
+  "21205-signal-tick-schedules-job-across-deliveries.ts": "posix-shaped: POSIX delivery order of two self-sent signals; Windows has no such batch",
+  "21206-signal-same-twice-one-batch.ts": "posix-shaped: two self-sent SIGINT deliveries in one batch; Windows has no such batch",
+  "21207-signal-two-listeners-one-emit.ts": "posix-shaped: self-sent SIGINT delivery; Windows has no POSIX signal batch",
+  "21208-signal-once-batch-then-rearm.ts": "posix-shaped: POSIX delivery order of two self-sent signals, then a re-armed listener; Windows has no such batch",
   "1469-remove-listener.ts": "posix-shaped: the unlistened sh spawn failure crashes both sides, rendered differently",
   // Not child_process: a posix-shaped fs program from another lane.
   // (The former POSIX-path-semantics skips are gone: a win32 target now
