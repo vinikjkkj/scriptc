@@ -14941,6 +14941,33 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
         !call.arguments.some((a) => ts.isSpreadElement(a)) &&
         L.checker.getCallSignatures(recvT).length > 0
       ) {
+        // A bind whose result is `any` / checked-dynamic (TypeScript types bind as `any`):
+        // the runtime bind over the dyn target. Its bound function constructs through the
+        // target with the bound arguments and ignores the bound receiver, exactly as Node
+        // does, which a static bound closure cannot answer (the box would carry its code
+        // but construct with the bound receiver). Measured in the reflectcall slice.
+        // TypeScript types a bind with its partially applied signature, so the slot it lands in
+        // decides: a contextual type that is checked-dynamic (`const f: any = g.bind(...)`, an
+        // `any` member) takes the runtime bind.
+        const bindCtx = L.checker.getContextualType(call);
+        const bindParent = call.parent;
+        // `any` only: an `unknown` slot (`x.bind(y) as unknown as T`) reads the bind as a value
+        // of the asserted type, which the static path answers.
+        const isDynTs = (t: ts.Type): boolean =>
+          (t.flags & ts.TypeFlags.Any) !== 0 ||
+          ((t.flags & ts.TypeFlags.Unknown) === 0 && L.mapTypeOf(t)?.kind === "dyn");
+        const dynSlot =
+          (bindCtx !== undefined && isDynTs(bindCtx)) ||
+          (ts.isVariableDeclaration(bindParent) && bindParent.initializer === call &&
+            isDynTs(L.typeOf(bindParent.name))) ||
+          (ts.isBinaryExpression(bindParent) && bindParent.right === call &&
+            bindParent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+            isDynTs(L.typeOf(bindParent.left)));
+        if (dynSlot && call.arguments.every((a) => !ts.isSpreadElement(a))) {
+          const target = L.lowerExprExpecting(access.expression, DYN);
+          const ops: IrExpr[] = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+          return { kind: "dynInvoke", recv: target, method: "bind", calleeName: "bind", args: ops, type: DYN, loc: locOf(call) };
+        }
         // `obj.method.bind(receiver)` on a CLASS METHOD (the coordinator
         // `.bind(this)` idiom): the method reference has no plain value, but
         // binding it to its OWN receiver IS a bound closure — capture the
