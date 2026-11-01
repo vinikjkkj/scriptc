@@ -11663,7 +11663,9 @@ export function moduleUsesFnText(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && node.fn === "fn.text") {
+    // A construct site over a checked-dynamic value names a non-constructor's
+    // text in its TypeError, so the text table is needed there too.
+    if (node.kind === "libCall" && (node.fn === "fn.text" || node.fn === "dyn.construct" || node.fn === "dyn.reflectConstruct")) {
       found = true;
       return;
     }

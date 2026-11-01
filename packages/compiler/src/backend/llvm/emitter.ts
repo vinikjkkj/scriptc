@@ -11054,8 +11054,9 @@ class LlEmitter {
           // Function.prototype.toString — the C emitter's twin.
           const name =
             e.fnName !== undefined && e.fnName !== "" ? this.cstr(e.fnName) : "null";
+          const liftedSrc = e.fnSrc === undefined && e.value.kind === "closure" ? this.fnByName.get(e.value.fnName)?.srcText : undefined;
           const src =
-            e.fnSrc === undefined ? "null"
+            e.fnSrc === undefined ? (liftedSrc !== undefined ? this.cstr(liftedSrc) : "null")
             : e.fnSrc === "bound" ? "@SCR_FN_SRC_BOUND"
             : this.cstr(e.fnSrc.text);
           if (e.fnSrc === "bound") this.declare(`@SCR_FN_SRC_BOUND = external constant i8`);
