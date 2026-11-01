@@ -5256,6 +5256,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
                 ? (L.mapTypeOf(t) ?? (dynBoxLosesMethodTable(L, t, assign) ? null : dynFallbackType(L, assign, t)))
                 : null;
               if (!type || type.kind === "void") L.badType(assign, t ?? L.typeOf(assign));
+              // A field assigned from an authored-JS parameter that the
+              // param rule types DYN (`hooks = {}`: the literal types the
+              // parameter `{}`, but callers pass members the empty type
+              // lacks). The field takes the same checked-dynamic slot, or
+              // the record type would drop the passed members (a read of
+              // `this.hooks.onCreate` answered undefined).
+              if (isJsSourceFile(assign.getSourceFile()) && dynShapedParamRead(L, stmt)) {
+                type = DYN;
+              }
               // A STATE-MACHINE slot (mysql2's `this.next = this.start`, then
               // `this.next = this.next(packet)`): the field holds methods that
               // each answer the NEXT method. The checker unrolls that
@@ -14086,3 +14095,19 @@ function isClassPrototypeOf(L: Lowerer, e: ts.Expression): boolean {
   return d !== undefined && ts.isClassDeclaration(d);
 }
 
+
+/** True when `stmt` is `this.x = p` and `p` is an authored-JS parameter
+ * defaulted to an empty object literal (`p = {}`), the parameter the param
+ * rule types checked-dynamic (lower-calls paramShape). Its checker type is
+ * the empty `{}`, which has no members, so a field inferred from it would
+ * drop the members callers pass. */
+function dynShapedParamRead(L: Lowerer, stmt: ts.Statement): boolean {
+  if (!ts.isExpressionStatement(stmt) || !ts.isBinaryExpression(stmt.expression)) return false;
+  const rhs = stmt.expression.right;
+  if (!ts.isIdentifier(rhs)) return false;
+  const sym = L.checker.getSymbolAtLocation(rhs);
+  const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+  return d !== undefined && ts.isParameter(d) && isJsSourceFile(d.getSourceFile()) &&
+    d.type === undefined && d.dotDotDotToken === undefined && d.initializer !== undefined &&
+    ts.isObjectLiteralExpression(d.initializer) && d.initializer.properties.length === 0;
+}
