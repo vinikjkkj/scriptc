@@ -4352,6 +4352,46 @@ export function commaIndirectMemberCallee(callee: ts.Expression): ts.PropertyAcc
   return right;
 }
 
+/** A `.bind` result stored in a LOCAL (`const endCB = function (err) {...}.bind(this)`) whose
+ * local reaches checked-dynamic code: an argument of a call through an any receiver
+ * (`connection._realEnd(endCB)`), an argument of a call whose callee is any, or the right side of
+ * an assignment into an any slot. TypeScript types such a local with the bind's partially applied
+ * signature (strictBindCallApply), not `any`, so the declaration rule of the bind block never sees
+ * the escape; the static bound closure then answers [[Construct]] with its captured receiver, which
+ * Node does not. The walk is iterative and stays inside the declaring function, where every read of
+ * the local lives (closures included). */
+function bindLocalEscapesToDyn(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+  if (!ts.isIdentifier(decl.name)) return false;
+  const sym = L.resolveValueSymbol(decl.name);
+  if (sym === null) return false;
+  let scope: ts.Node = decl;
+  while (!ts.isFunctionLike(scope) && !ts.isSourceFile(scope)) scope = scope.parent;
+  const isDyn = (t: ts.Type): boolean => (t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+  const stack: ts.Node[] = [scope];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (ts.isIdentifier(n) && n !== decl.name && L.resolveValueSymbol(n) === sym) {
+      const p = n.parent;
+      if (ts.isCallExpression(p) && p.arguments.includes(n)) {
+        const callee = p.expression;
+        if ((ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+            isDyn(L.typeOf(callee.expression))) return true;
+        if (ts.isIdentifier(callee)) {
+          const ctx = L.checker.getContextualType(n);
+          if (ctx !== undefined && isDyn(ctx)) return true;
+        }
+      }
+      if (ts.isBinaryExpression(p) && p.right === n &&
+          p.operatorToken.kind === ts.SyntaxKind.EqualsToken && isDyn(L.typeOf(p.left))) return true;
+    }
+    ts.forEachChild(n, (c) => {
+      stack.push(c);
+      return undefined;
+    });
+  }
+  return false;
+}
+
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // A codec reaching a string sink (String, JSON, Object.prototype.toString, toString/join): refuse.
     refuseCodecCoercionCall(L, expr);
@@ -15016,7 +15056,10 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
           (ts.isBinaryExpression(bindParent) && bindParent.right === call &&
             bindParent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
             isAnyTs(L.typeOf(bindParent.left))) ||
-          argOfPlainCall;
+          argOfPlainCall ||
+          // A local holding the bind that escapes into checked-dynamic code (see bindLocalEscapesToDyn).
+          (ts.isVariableDeclaration(bindParent) && bindParent.initializer === call &&
+            bindLocalEscapesToDyn(L, bindParent));
         if (dynSlot && call.arguments.every((a) => !ts.isSpreadElement(a))) {
           const target = L.lowerExprExpecting(access.expression, DYN);
           const ops: IrExpr[] = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
