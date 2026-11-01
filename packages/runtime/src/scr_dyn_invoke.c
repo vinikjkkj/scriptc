@@ -4427,6 +4427,11 @@ static void dyn_reflect_render(ScrJsonBuf *b, const ScrDyn *d) {
     /* Node prints the function's source text. A TypeScript program's
      * functions carry none in this build (scr_fn_to_string traps on that),
      * so the message names the boundary instead of guessing the text. */
+    const char *table = (scr_dyn_fn_src(d) == NULL && scr_fn_text_row_hook != NULL) ? scr_fn_text_row_hook(d->v.fn.clo) : NULL;
+    if (table != NULL) {
+      scr_jb_puts(b, table);
+      return;
+    }
     if (scr_dyn_fn_src(d) == NULL) {
       scr_jb_puts(b, "[scriptc: no source text for ");
       scr_jb_puts(b, scr_dyn_fn_name(d) != NULL ? scr_dyn_fn_name(d) : "(anonymous)");
