@@ -7227,8 +7227,6 @@ ScrBigInt *scr_dyn_big_of(const ScrDyn *d);
  * box answers the RETAINED digits (+1); anything else throws the
  * path-annotated catchable TypeError and returns NULL. */
 ScrBigInt *scr_dyn_big_unbox(const ScrDyn *d, const ScrDynPath *path, const char *want);
-/* dynCheck of a promise<unknown> target (scr_json.c): retained ScrPromise, or the path TypeError. */
-ScrPromise *scr_dyn_promise_unbox(const ScrDyn *d, const ScrDynPath *path, const char *want);
 /* The loud ladder for the operations a bigint box has no prototype to
  * answer (property reads, calls, iteration). Always throws catchably;
  * returns false so a bool tail can `return scr_dyn_big_fence(...)`. */
