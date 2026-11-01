@@ -17525,6 +17525,14 @@ export class Lowerer {
           return canonicalBuiltinModule(importDecl.moduleSpecifier.text);
         }
       }
+      // The TS `import x = require("node:m")` spelling of the same binding
+      // (its runtime form is the module object, as a default import's is).
+      if (
+        ts.isImportEqualsDeclaration(decl) && !decl.isTypeOnly &&
+        ts.isExternalModuleReference(decl.moduleReference) && ts.isStringLiteral(decl.moduleReference.expression)
+      ) {
+        return canonicalBuiltinModule(decl.moduleReference.expression.text);
+      }
       if (!ts.isNamespaceImport(decl)) return null;
       const importDecl = decl.parent.parent;
       if (!ts.isImportDeclaration(importDecl) || !ts.isStringLiteral(importDecl.moduleSpecifier)) return null;
