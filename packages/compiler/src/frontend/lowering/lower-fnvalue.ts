@@ -380,6 +380,10 @@ export function builtinFnValueClosure(L: Lowerer, name: string, want: IrType, lo
     }));
     const fn: IrFunction = {
       name: fnName,
+      // A builtin plain function is NOT a constructor (SCR_FNK_NOPROTO) and
+      // prints Node's native text (Function.prototype.toString).
+      valueCode: NATIVE_NOPROTO_CODE,
+      srcText: nativeFnText(name),
       params: entry.params.map(([pname, type], i) => ({
         localId: `${pname}.${i}`,
         name: pname,
@@ -604,6 +608,8 @@ export function builtinMemberFnValueOf(
     const args: IrExpr[] = params.map((p) => ({ kind: "varRef", localId: p.localId, type: p.type, loc }));
     const fn: IrFunction = {
       name: fnName,
+      valueCode: NATIVE_NOPROTO_CODE,
+      srcText: nativeFnText(got.row.fn),
       params,
       returnType: got.row.result,
       locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
@@ -615,6 +621,15 @@ export function builtinMemberFnValueOf(
   return { kind: "closure", fnName, captures: [], type: got.want, loc };
 }
 
+
+/** SCR_FNK_NOPROTO (ir/nodes.ts irFunctionValueCode): a builtin plain function has no
+ * [[Construct]], so `new f()` / Reflect.construct over its value throws Node's TypeError. */
+const NATIVE_NOPROTO_CODE = 4;
+
+/** Node's Function.prototype.toString text of a builtin plain function. */
+function nativeFnText(name: string): string {
+  return `function ${name}() { [native code] }`;
+}
 
 /* GLOBAL FUNCTIONS TAKEN AS VALUES IN A JAVASCRIPT SOURCE.
  *
@@ -782,6 +797,8 @@ export function jsGlobalFnValueOf(L: Lowerer, expr: ts.Identifier, name: string,
     if (body === null) return null;
     const fn: IrFunction = {
       name: fnName,
+      valueCode: NATIVE_NOPROTO_CODE,
+      srcText: nativeFnText(name),
       params,
       returnType: mapped.ret,
       locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
@@ -911,6 +928,7 @@ export function dynBuiltinFnValueOf(L: Lowerer, key: string, loc: SrcLoc): IrExp
     const args: IrExpr[] = params.map((p) => ({ kind: "varRef", localId: p.localId, type: DYN, loc }));
     L.liftedFns.push({
       name: fnName,
+      valueCode: NATIVE_NOPROTO_CODE,
       params,
       returnType: sig.ret,
       locals: params.map((p) => ({ id: p.localId, name: p.name, type: DYN, mutable: false })),
@@ -1085,6 +1103,7 @@ export function dynBuiltinHofCallback(
     });
     L.liftedFns.push({
       name: fnName,
+      valueCode: NATIVE_NOPROTO_CODE,
       params: ps,
       returnType: sig.ret,
       locals: ps.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),

@@ -25,7 +25,10 @@ static size_t scr_fntext_probe(const ScrFnText **tab, size_t cap, const void *fn
   return i;
 }
 
+static const char *scr_fn_text_row(const ScrClosure *c);
+
 void scr_fn_texts_install(const ScrFnText *tbl, size_t n) {
+  scr_fn_text_row_hook = scr_fn_text_row;
   free(scr_fntext_idx);
   scr_fntext_idx = NULL;
   scr_fntext_idx_cap = 0;
@@ -48,6 +51,15 @@ void scr_fn_texts_install(const ScrFnText *tbl, size_t n) {
  * the closure it captured at slot 0, so `String(f)` of a function held in a
  * converted slot is the text of f. Bounded: an adapter chain is finite. */
 #define SCR_FNTEXT_MAX_HOPS 64
+
+/* The table's text for a closure's entry point, or NULL when the table has none (no
+ * default: a caller that needs an exact answer must not print a guessed one). */
+static const char *scr_fn_text_row(const ScrClosure *c) {
+  if (scr_fntext_idx == NULL || c == NULL || c->fn == NULL) return NULL;
+  size_t i = scr_fntext_probe(scr_fntext_idx, scr_fntext_idx_cap, c->fn);
+  const ScrFnText *row = scr_fntext_idx[i];
+  return (row != NULL && row->fn == c->fn) ? row->text : NULL;
+}
 
 ScrStr *scr_fn_text(const ScrClosure *c) {
   const char *text = "function () { [native code] }";
