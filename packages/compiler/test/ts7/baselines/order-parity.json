@@ -23101,6 +23101,12 @@
     "<repo>/tests/corpus/21108-reflect-apply-bytes-list.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/21109-reflect-bind-dyn-construct.ts": {
+   "order": [
+    "<repo>/tests/corpus/21109-reflect-bind-dyn-construct.ts"
+   ],
+   "diags": []
   }
  }
 }
