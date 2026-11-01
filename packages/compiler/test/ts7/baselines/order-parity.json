@@ -23047,6 +23047,48 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/22400-import-equals-events-subclass.ts": {
+   "order": [
+    "<repo>/tests/corpus/22400-import-equals-events-subclass.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22401-import-equals-events-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/22401-import-equals-events-instance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22402-import-equals-path-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/22402-import-equals-path-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22403-import-equals-fs-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/22403-import-equals-fs-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22404-import-equals-node-prefix.ts": {
+   "order": [
+    "<repo>/tests/corpus/22404-import-equals-node-prefix.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22405-import-equals-type-only-builtin.ts": {
+   "order": [
+    "<repo>/tests/corpus/22405-import-equals-type-only-builtin.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22406-import-equals-events-type-and-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/22406-import-equals-events-type-and-value.ts"
+   ],
+   "diags": []
   }
  }
 }
