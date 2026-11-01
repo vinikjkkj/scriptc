@@ -9866,60 +9866,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/21200-signal-two-signals-tick-job-order.ts": {
-   "order": [
-    "<repo>/tests/corpus/21200-signal-two-signals-tick-job-order.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21201-signal-delivery-order-not-registry.ts": {
-   "order": [
-    "<repo>/tests/corpus/21201-signal-delivery-order-not-registry.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21202-signal-two-listeners-then-second-signal.ts": {
-   "order": [
-    "<repo>/tests/corpus/21202-signal-two-listeners-then-second-signal.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21203-signal-remove-listener-mid-emit.ts": {
-   "order": [
-    "<repo>/tests/corpus/21203-signal-remove-listener-mid-emit.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21204-signal-throw-in-first-delivery.ts": {
-   "order": [
-    "<repo>/tests/corpus/21204-signal-throw-in-first-delivery.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21205-signal-tick-schedules-job-across-deliveries.ts": {
-   "order": [
-    "<repo>/tests/corpus/21205-signal-tick-schedules-job-across-deliveries.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21206-signal-same-twice-one-batch.ts": {
-   "order": [
-    "<repo>/tests/corpus/21206-signal-same-twice-one-batch.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21207-signal-two-listeners-one-emit.ts": {
-   "order": [
-    "<repo>/tests/corpus/21207-signal-two-listeners-one-emit.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21208-signal-once-batch-then-rearm.ts": {
-   "order": [
-    "<repo>/tests/corpus/21208-signal-once-batch-then-rearm.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/2091-index-signature-string-intersection.ts": {
    "order": [
     "<repo>/tests/corpus/2091-index-signature-string-intersection.ts"
@@ -10050,6 +9996,60 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21200-signal-two-signals-tick-job-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/21200-signal-two-signals-tick-job-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21201-signal-delivery-order-not-registry.ts": {
+   "order": [
+    "<repo>/tests/corpus/21201-signal-delivery-order-not-registry.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21202-signal-two-listeners-then-second-signal.ts": {
+   "order": [
+    "<repo>/tests/corpus/21202-signal-two-listeners-then-second-signal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21203-signal-remove-listener-mid-emit.ts": {
+   "order": [
+    "<repo>/tests/corpus/21203-signal-remove-listener-mid-emit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21204-signal-throw-in-first-delivery.ts": {
+   "order": [
+    "<repo>/tests/corpus/21204-signal-throw-in-first-delivery.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21205-signal-tick-schedules-job-across-deliveries.ts": {
+   "order": [
+    "<repo>/tests/corpus/21205-signal-tick-schedules-job-across-deliveries.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21206-signal-same-twice-one-batch.ts": {
+   "order": [
+    "<repo>/tests/corpus/21206-signal-same-twice-one-batch.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21207-signal-two-listeners-one-emit.ts": {
+   "order": [
+    "<repo>/tests/corpus/21207-signal-two-listeners-one-emit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21208-signal-once-batch-then-rearm.ts": {
+   "order": [
+    "<repo>/tests/corpus/21208-signal-once-batch-then-rearm.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2121-esm-cycle-inert-backedge/main.ts": {
    "order": [
     "<repo>/tests/corpus/2121-esm-cycle-inert-backedge/peer.ts",
@@ -10145,48 +10145,6 @@
   "<repo>/tests/corpus/21403-fn-union-tostring-adapter-slot.ts": {
    "order": [
     "<repo>/tests/corpus/21403-fn-union-tostring-adapter-slot.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21900-dyn-promise-then-catch-finally.js": {
-   "order": [
-    "<repo>/tests/corpus/21900-dyn-promise-then-catch-finally.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21901-dyn-optional-element-key.js": {
-   "order": [
-    "<repo>/tests/corpus/21901-dyn-optional-element-key.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21902-dyn-promise-into-promise-slot.js": {
-   "order": [
-    "<repo>/tests/corpus/21902-dyn-promise-into-promise-slot.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21903-dyn-promise-rejection-paths.js": {
-   "order": [
-    "<repo>/tests/corpus/21903-dyn-promise-rejection-paths.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21904-dyn-promise-non-thenable-typeerror.js": {
-   "order": [
-    "<repo>/tests/corpus/21904-dyn-promise-non-thenable-typeerror.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21905-dyn-async-return-non-promise.js": {
-   "order": [
-    "<repo>/tests/corpus/21905-dyn-async-return-non-promise.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/21906-dyn-optional-method-on-parsed-strings.js": {
-   "order": [
-    "<repo>/tests/corpus/21906-dyn-optional-method-on-parsed-strings.js"
    ],
    "diags": []
   },
@@ -10413,6 +10371,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21900-dyn-promise-then-catch-finally.js": {
+   "order": [
+    "<repo>/tests/corpus/21900-dyn-promise-then-catch-finally.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21901-dyn-optional-element-key.js": {
+   "order": [
+    "<repo>/tests/corpus/21901-dyn-optional-element-key.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21902-dyn-promise-into-promise-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/21902-dyn-promise-into-promise-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21903-dyn-promise-rejection-paths.js": {
+   "order": [
+    "<repo>/tests/corpus/21903-dyn-promise-rejection-paths.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21904-dyn-promise-non-thenable-typeerror.js": {
+   "order": [
+    "<repo>/tests/corpus/21904-dyn-promise-non-thenable-typeerror.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21905-dyn-async-return-non-promise.js": {
+   "order": [
+    "<repo>/tests/corpus/21905-dyn-async-return-non-promise.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21906-dyn-optional-method-on-parsed-strings.js": {
+   "order": [
+    "<repo>/tests/corpus/21906-dyn-optional-method-on-parsed-strings.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2191-uri-encoders.ts": {
    "order": [
     "<repo>/tests/corpus/2191-uri-encoders.ts"
@@ -10492,6 +10492,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/22400-import-equals-events-subclass.ts": {
+   "order": [
+    "<repo>/tests/corpus/22400-import-equals-events-subclass.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22401-import-equals-events-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/22401-import-equals-events-instance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22402-import-equals-path-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/22402-import-equals-path-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22403-import-equals-fs-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/22403-import-equals-fs-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22404-import-equals-node-prefix.ts": {
+   "order": [
+    "<repo>/tests/corpus/22404-import-equals-node-prefix.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22405-import-equals-type-only-builtin.ts": {
+   "order": [
+    "<repo>/tests/corpus/22405-import-equals-type-only-builtin.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22406-import-equals-events-type-and-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/22406-import-equals-events-type-and-value.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2241-width-record-into-class.ts": {
    "order": [
     "<repo>/tests/corpus/2241-width-record-into-class.ts"
@@ -10516,9 +10558,81 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/22500-cause-options-variable.ts": {
+   "order": [
+    "<repo>/tests/corpus/22500-cause-options-variable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22501-cause-options-empty-and-undefined-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/22501-cause-options-empty-and-undefined-member.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22502-cause-options-undefined-null-number.ts": {
+   "order": [
+    "<repo>/tests/corpus/22502-cause-options-undefined-null-number.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22503-cause-options-inherited.ts": {
+   "order": [
+    "<repo>/tests/corpus/22503-cause-options-inherited.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22504-cause-options-getter-counter.ts": {
+   "order": [
+    "<repo>/tests/corpus/22504-cause-options-getter-counter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22505-cause-options-getter-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/22505-cause-options-getter-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22506-cause-options-function-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/22506-cause-options-function-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22507-cause-options-super-forward.ts": {
+   "order": [
+    "<repo>/tests/corpus/22507-cause-options-super-forward.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22508-cause-options-super-tagged.ts": {
+   "order": [
+    "<repo>/tests/corpus/22508-cause-options-super-tagged.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22509-cause-options-json-dyn.ts": {
+   "order": [
+    "<repo>/tests/corpus/22509-cause-options-json-dyn.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2251-tagged-templates-dyn.ts": {
    "order": [
     "<repo>/tests/corpus/2251-tagged-templates-dyn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22510-cause-options-no-new.ts": {
+   "order": [
+    "<repo>/tests/corpus/22510-cause-options-no-new.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22511-cause-options-nested-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/22511-cause-options-nested-inspect.ts"
    ],
    "diags": []
   },
@@ -23209,78 +23323,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/22500-cause-options-variable.ts": {
-   "order": [
-    "<repo>/tests/corpus/22500-cause-options-variable.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22502-cause-options-undefined-null-number.ts": {
-   "order": [
-    "<repo>/tests/corpus/22502-cause-options-undefined-null-number.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22503-cause-options-inherited.ts": {
-   "order": [
-    "<repo>/tests/corpus/22503-cause-options-inherited.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22504-cause-options-getter-counter.ts": {
-   "order": [
-    "<repo>/tests/corpus/22504-cause-options-getter-counter.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22505-cause-options-getter-throws.ts": {
-   "order": [
-    "<repo>/tests/corpus/22505-cause-options-getter-throws.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22506-cause-options-function-object.ts": {
-   "order": [
-    "<repo>/tests/corpus/22506-cause-options-function-object.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22507-cause-options-super-forward.ts": {
-   "order": [
-    "<repo>/tests/corpus/22507-cause-options-super-forward.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22508-cause-options-super-tagged.ts": {
-   "order": [
-    "<repo>/tests/corpus/22508-cause-options-super-tagged.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22509-cause-options-json-dyn.ts": {
-   "order": [
-    "<repo>/tests/corpus/22509-cause-options-json-dyn.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22510-cause-options-no-new.ts": {
-   "order": [
-    "<repo>/tests/corpus/22510-cause-options-no-new.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22501-cause-options-empty-and-undefined-member.ts": {
-   "order": [
-    "<repo>/tests/corpus/22501-cause-options-empty-and-undefined-member.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/22511-cause-options-nested-inspect.ts": {
-   "order": [
-    "<repo>/tests/corpus/22511-cause-options-nested-inspect.ts"
-   ],
-   "diags": []
   }
  }
 }
