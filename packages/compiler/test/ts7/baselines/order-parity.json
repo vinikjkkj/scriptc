@@ -10143,6 +10143,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21700-nullable-dyn-call-args.js": {
+   "order": [
+    "<repo>/tests/corpus/21700-nullable-dyn-call-args.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21701-nullable-dyn-call-spread.js": {
+   "order": [
+    "<repo>/tests/corpus/21701-nullable-dyn-call-spread.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21702-dyn-call-missing-member-control.js": {
+   "order": [
+    "<repo>/tests/corpus/21702-dyn-call-missing-member-control.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21703-nullable-dyn-new-and-keyed.js": {
+   "order": [
+    "<repo>/tests/corpus/21703-nullable-dyn-new-and-keyed.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21704-nullable-union-call-ts.ts": {
+   "order": [
+    "<repo>/tests/corpus/21704-nullable-union-call-ts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21705-nullable-dyn-guarded-control.js": {
+   "order": [
+    "<repo>/tests/corpus/21705-nullable-dyn-guarded-control.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2171-island-json-stringify.ts": {
    "order": [
     "<repo>/tests/corpus/2171-island-json-stringify.ts"
