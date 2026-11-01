@@ -2264,6 +2264,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const jsName = irFunctionJsName(target);
           if (jsName !== null) E.fnNames.set(mangleWrapper(e.fnName), jsName);
           if (target.srcText !== undefined) E.fnTexts.set(mangleWrapper(e.fnName), target.srcText);
+          else if (target.srcForwardCap0 === true) E.fnTexts.set(mangleWrapper(e.fnName), null);
           if (irFunctionValueCode(target) !== 0) E.fnCodes.set(mangleWrapper(e.fnName), irFunctionValueCode(target));
           return E.newTemp(
             e.type,
@@ -2278,6 +2279,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const jsName = irFunctionJsName(target);
         if (jsName !== null) E.fnNames.set(E.callTargetC(e.fnName), jsName);
         if (target.srcText !== undefined) E.fnTexts.set(E.callTargetC(e.fnName), target.srcText);
+        else if (target.srcForwardCap0 === true) E.fnTexts.set(E.callTargetC(e.fnName), null);
         if (irFunctionValueCode(target) !== 0) E.fnCodes.set(E.callTargetC(e.fnName), irFunctionValueCode(target));
         const t = E.newTemp(
           e.type,

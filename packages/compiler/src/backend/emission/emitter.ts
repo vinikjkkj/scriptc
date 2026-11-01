@@ -693,7 +693,7 @@ export class CEmitter {
    * .toString text of its function (IrFunction.srcText). Filled at the same
    * creation sites as fnNames; emitted (ScrFnText table, scr_fntext.c) only
    * when the program uses fn.text (moduleUsesFnText). */
-  readonly fnTexts = new Map<string, string>();
+  readonly fnTexts = new Map<string, string | null>();
   /** Emitted closure entry point symbol -> its inspect kind code (ir/nodes.ts
    * irFunctionValueCode: async/generator, and no-prototype for an arrow, a
    * method or an async function). Read by the runtime's box constructor
@@ -1798,7 +1798,7 @@ export class CEmitter {
         // closure it holds one NULL row, which the install skips.
         ...(fnTextRows.length > 0
           ? fnTextRows.map(([sym, text]) =>
-            `  { (const void *)&${sym}, ${cStringLiteral(Buffer.from(text, "utf8"))} },`)
+            `  { (const void *)&${sym}, ${text === null ? "NULL" : cStringLiteral(Buffer.from(text, "utf8"))} },`)
           : [`  { NULL, "" },`]),
         `};`,
         ``,

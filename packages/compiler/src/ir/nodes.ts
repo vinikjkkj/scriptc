@@ -2611,6 +2611,11 @@ export interface IrFunction {
    * only for closure targets of a program that uses `fn.text`). Absent for
    * every other function, so no backend reads it unless the table exists. */
   srcText?: string;
+  /** Set (instead of srcText) on an adapter closure body (`%fn.adapt.N.impl`,
+   * lowerer funcCoerceAdapter), whose one capture (slot 0) is the function
+   * value it wraps. Its text is that closure's, found at run time: the text
+   * table row carries a NULL text and scr_fn_text answers through caps[0]. */
+  srcForwardCap0?: true;
   /** Original TS name (mangling is a backend concern). Lifted lambdas get
    * synthetic '%'-prefixed names ('%' can't appear in a TS identifier). */
   name: string;

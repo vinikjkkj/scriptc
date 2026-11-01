@@ -43,12 +43,30 @@ void scr_fn_texts_install(const ScrFnText *tbl, size_t n) {
   scr_fntext_idx_cap = cap;
 }
 
+/* An adapter closure (a row with a NULL text: the lowerer's %fn.adapt.N.impl,
+ * which wraps the function a slot's signature converts) answers the text of
+ * the closure it captured at slot 0, so `String(f)` of a function held in a
+ * converted slot is the text of f. Bounded: an adapter chain is finite. */
+#define SCR_FNTEXT_MAX_HOPS 64
+
 ScrStr *scr_fn_text(const ScrClosure *c) {
   const char *text = "function () { [native code] }";
-  if (scr_fntext_idx != NULL && c != NULL && c->fn != NULL) {
+  ScrClosure *held = NULL; /* +1 on the wrapped closure of the last adapter hop */
+  for (int hop = 0; hop < SCR_FNTEXT_MAX_HOPS && scr_fntext_idx != NULL && c != NULL && c->fn != NULL; hop++) {
     size_t i = scr_fntext_probe(scr_fntext_idx, scr_fntext_idx_cap, c->fn);
     const ScrFnText *row = scr_fntext_idx[i];
-    if (row != NULL && row->fn == c->fn) text = row->text;
+    if (row == NULL || row->fn != c->fn) break;
+    if (row->text != NULL) {
+      text = row->text;
+      break;
+    }
+    if (c->ncaps < 1 || c->caps[0] == NULL) break;
+    ScrClosure *next = (ScrClosure *)scr_box_get_ref(c->caps[0]);
+    if (held != NULL) scr_closure_release(held);
+    held = next;
+    c = next;
   }
-  return scr_str_new(text, strlen(text));
+  ScrStr *out = scr_str_new(text, strlen(text));
+  if (held != NULL) scr_closure_release(held);
+  return out;
 }
