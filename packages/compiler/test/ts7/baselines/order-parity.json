@@ -10148,6 +10148,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21900-dyn-promise-then-catch-finally.js": {
+   "order": [
+    "<repo>/tests/corpus/21900-dyn-promise-then-catch-finally.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21901-dyn-optional-element-key.js": {
+   "order": [
+    "<repo>/tests/corpus/21901-dyn-optional-element-key.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21902-dyn-promise-into-promise-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/21902-dyn-promise-into-promise-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21903-dyn-promise-rejection-paths.js": {
+   "order": [
+    "<repo>/tests/corpus/21903-dyn-promise-rejection-paths.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21904-dyn-promise-non-thenable-typeerror.js": {
+   "order": [
+    "<repo>/tests/corpus/21904-dyn-promise-non-thenable-typeerror.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2160-dc-tracing-channel.cjs": {
    "order": [
     "<repo>/tests/corpus/2160-dc-tracing-channel.cjs"
