@@ -4971,7 +4971,8 @@ unsigned scr_fn_code_of(const void *fn);
  * Node prints as native code. +1 string. */
 typedef struct ScrFnText {
   const void *fn;    /* the closure entry point (ScrClosure.fn) */
-  const char *text;  /* its exact toString text -- a static literal */
+  const char *text;  /* its exact toString text -- a static literal; NULL for
+                      * an adapter closure, whose text is its caps[0] closure's */
 } ScrFnText;
 void scr_fn_texts_install(const ScrFnText *tbl, size_t n);
 ScrStr *scr_fn_text(const ScrClosure *c);

@@ -33,6 +33,7 @@ export interface FnTextAttachResult {
   missing: { loc: SrcLoc; fnName: string } | null;
 }
 
+const ADAPTER_IMPL = /^%fn\.adapt\.[0-9]+\.impl$/;
 const BUILTIN_VALUE = /^%builtin\.([A-Za-z_$][A-Za-z0-9_$]*)\.value$/;
 
 /** Visit every IR node once; `visit` sees each object with a `kind`. */
@@ -94,6 +95,12 @@ export function attachFnSrcText(
   }
   for (const [name, fn] of targets) {
     if (fn !== null && fn.srcText !== undefined) continue;
+    // An adapter body (funcCoerceAdapter's impl) wraps one function value in
+    // capture slot 0; its text is that closure's, resolved at run time.
+    if (fn !== null && ADAPTER_IMPL.test(name) && fn.captures?.length === 1 && fn.captures[0]!.type.kind === "func") {
+      fn.srcForwardCap0 = true;
+      continue;
+    }
     const builtin = BUILTIN_VALUE.exec(name);
     let text: string | null = null;
     if (fn === null) {

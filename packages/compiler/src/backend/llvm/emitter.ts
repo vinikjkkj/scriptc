@@ -1811,7 +1811,7 @@ class LlEmitter {
   private readonly fnNames = new Map<string, string>();
   /** Closure entry symbol -> its exact toString text (ScrFnText rows; the
    * table exists only when the program uses fn.text, see fnTextRows below). */
-  private readonly fnTexts = new Map<string, string>();
+  private readonly fnTexts = new Map<string, string | null>();
   /** Entry symbol -> inspect kind code (see the C twin, emitter.ts fnCodes). */
   private readonly fnCodes = new Map<string, number>();
   private needsOom = false;
@@ -2834,7 +2834,7 @@ class LlEmitter {
       // A program that uses fn.text always has a table; with no named closure
       // it holds one null row, which the install skips.
       const rows = fnTextRows.length > 0
-        ? fnTextRows.map(([sym, lit]) => `%ScrFnText { ptr @${sym}, ptr ${lit} }`)
+        ? fnTextRows.map(([sym, lit]) => `%ScrFnText { ptr @${sym}, ptr ${lit ?? "null"} }`)
         : [`%ScrFnText { ptr null, ptr null }`];
       out.push(
         `declare void @scr_fn_texts_install(ptr, i64)`,
@@ -9840,6 +9840,7 @@ class LlEmitter {
           const declName = irFunctionJsName(target);
           if (declName !== null) this.fnNames.set(mangleWrapper(e.fnName), this.cstr(declName));
           if (target.srcText !== undefined) this.fnTexts.set(mangleWrapper(e.fnName), this.cstr(target.srcText));
+          else if (target.srcForwardCap0 === true) this.fnTexts.set(mangleWrapper(e.fnName), null);
           if (irFunctionValueCode(target) !== 0) this.fnCodes.set(mangleWrapper(e.fnName), irFunctionValueCode(target));
           return this.own({
             name: this.retainValue(`@${mangleFnClosure(e.fnName)}`, e.type),
@@ -9849,6 +9850,7 @@ class LlEmitter {
         const liftedName = irFunctionJsName(target);
         if (liftedName !== null) this.fnNames.set(this.callTarget(e.fnName), this.cstr(liftedName));
         if (target.srcText !== undefined) this.fnTexts.set(this.callTarget(e.fnName), this.cstr(target.srcText));
+        else if (target.srcForwardCap0 === true) this.fnTexts.set(this.callTarget(e.fnName), null);
         if (irFunctionValueCode(target) !== 0) this.fnCodes.set(this.callTarget(e.fnName), irFunctionValueCode(target));
         // Lifted async lambdas enter through their spawn wrapper (which
         // takes sc_env first, like every lifted function).
