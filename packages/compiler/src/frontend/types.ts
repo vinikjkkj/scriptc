@@ -2972,6 +2972,22 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       }
     }
     if (refined && handle !== null) return handle;
+    // ERROR-ROOTED REFINEMENT: `Error & { errors: Error[] }` (mongodb's
+    // AggregateError guard) and `Error & { cause?: unknown }` (ioredis's
+    // cause), over a builtin error class or a user class that extends one.
+    // The VALUE is the error object, so the type maps to that class; the
+    // refinement's members that the Error part does not declare live in the
+    // error's expando bag (error.propGet / error.propSet), typed per access
+    // (lower-exprs.ts errorRefinementMember). Every other constituent must
+    // be a plain object refinement: no call or construct signature, no
+    // class identity, no index signature.
+    {
+      const parts = ts.constituentTypes(widened);
+      const errParts = parts.filter((p) => isErrorRootedType(p, ctx, 0));
+      if (errParts.length === 1 && parts.every((p) => p === errParts[0] || isPlainObjectRefinement(p, checker))) {
+        return mapType(errParts[0]!, ctx);
+      }
+    }
     // THE WEBSOCKET GLOBAL's cast intersection. A program with no lib.dom
     // reaches the global the only way it can:
     //
@@ -6762,6 +6778,45 @@ function mapHybridCallableIntersection(widened: ts.Type, ctx: TypeMapperCtx): Ir
   if (fields.length === 1) return null; // no properties — it is just F
   fields.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return { kind: "record", shapeId: shapes.intern(fields, false, undefined, declaredOrder) };
+}
+
+/** True when a checker type is an error object of the runtime's Error
+ * hierarchy (`Error`, `TypeError`, ...) or a class whose declared bases reach
+ * one (`class E extends Error`), mapped as an object. DOMException keeps its
+ * own read surface and is excluded. */
+function isErrorRootedType(t: ts.Type, ctx: TypeMapperCtx, depth: number): boolean {
+  if (depth > 32) return false;
+  const direct = mapType(t, ctx);
+  if (direct?.kind === "object" && direct.className !== "%DOMException" && RUNTIME_ERROR_CLASSES.has(direct.className)) {
+    return true;
+  }
+  if (direct?.kind !== "object") return false;
+  const sym = t.getSymbol();
+  if (sym === undefined || (sym.flags & ts.SymbolFlags.Class) === 0) return false;
+  for (const d of ctx.checker.declarationsOf(sym)) {
+    if (!ts.isClassDeclaration(d) && !ts.isClassExpression(d)) continue;
+    const ext = d.heritageClauses?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword);
+    const baseExpr = ext?.types[0]?.expression;
+    if (baseExpr === undefined) continue;
+    let baseSym = ctx.checker.getSymbolAtLocation(baseExpr);
+    if (baseSym === undefined) continue;
+    if ((baseSym.flags & ts.SymbolFlags.Alias) !== 0) baseSym = ctx.checker.getAliasedSymbol(baseSym);
+    if (isErrorRootedType(ctx.checker.getDeclaredTypeOfSymbol(baseSym), ctx, depth + 1)) return true;
+  }
+  return false;
+}
+
+/** A plain object refinement: an object type with no call or construct
+ * signature, no class identity and no index signature. */
+function isPlainObjectRefinement(t: ts.Type, checker: ts.TypeChecker): boolean {
+  if ((t.flags & ts.TypeFlags.Object) === 0) return false;
+  const sym = t.getSymbol();
+  return (
+    (sym === undefined || (sym.flags & ts.SymbolFlags.Class) === 0) &&
+    checker.getCallSignatures(t).length === 0 &&
+    checker.getConstructSignatures(t).length === 0 &&
+    checker.getIndexInfosOfType(t).length === 0
+  );
 }
 
 /** True for MAPPED-type results — `Partial<Config>`, `Record<"a", n>`,
