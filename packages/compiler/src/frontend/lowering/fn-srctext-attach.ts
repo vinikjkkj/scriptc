@@ -67,11 +67,14 @@ function constructReasonOf(name: string, fn: IrFunction | undefined): string | n
   if (PRIMITIVE_CTOR_CLOSURE.test(name)) {
     return "the primitive constructor answers a wrapper object (new String / Number / Boolean) this build does not represent";
   }
-  if (fn === undefined) return "the function is not one this lowering emitted";
+  // Not in this pass's function list (a factory-minted closure): its kind code and text are
+  // registered by the emitter from the whole module, so the run-time answer is exact.
+  if (fn === undefined) return null;
   const code = irFunctionValueCode(fn);
   const nonCtor = (code & 7) !== 0;
   if (name.startsWith("%bindthis.")) {
-    return "a statically bound function reaching a checked-dynamic value: its [[Construct]] answer is not carried exactly by the bound closure";
+    // A bind of a provably non-constructor (an arrow, a method) answers Node's own refusal exactly.
+    return nonCtor ? null : "a statically bound function of a constructible target reaching a checked-dynamic value: its [[Construct]] answer is not carried exactly by the bound closure";
   }
   if (nonCtor && fn.srcText === undefined) {
     return "a non-constructor function has no exact source text for Node's TypeError message";
@@ -115,7 +118,7 @@ function indexFile(sf: ts.SourceFile): Map<string, ts.Node> {
   return out;
 }
 
-const PRIMITIVE_CTOR_CLOSURE = /^%builtin\.(String|Number|Boolean)$/;
+const PRIMITIVE_CTOR_CLOSURE = /^%builtin\.(?:dyn\.)?(String|Number|Boolean)$/;
 
 export function attachFnSrcText(
   functions: IrFunction[],
@@ -129,6 +132,8 @@ export function attachFnSrcText(
   let reflectConstruct: SrcLoc | null = null;
   let protoWrite: SrcLoc | null = null;
   let staticBoundReach: SrcLoc | null = null;
+  let primitiveStored: SrcLoc | null = null;
+  const argDynFroms = new Set<unknown>();
   const targets = new Map<string, IrFunction | null>();
   const closureNames: string[] = [];
   // Closures a checked-dynamic value is minted from (dynFrom over a closure):
@@ -154,12 +159,23 @@ export function attachFnSrcText(
       }
     }
     if (node.kind === "closure" && typeof node.fnName === "string") closureNames.push(node.fnName);
+    // A dyn value passed directly as an argument is called, not stored: it can only reach a
+    // construct site through the callee, which is a value of its own.
+    if (Array.isArray(node.args)) {
+      for (const a of node.args as unknown[]) {
+        if (a !== null && typeof a === "object" && (a as { kind?: unknown }).kind === "dynFrom") argDynFroms.add(a);
+      }
+    }
     if (node.kind === "dynFrom") {
       const v = node.value as { kind?: string; fnName?: unknown; type?: { kind?: string } } | undefined;
+      // A primitive constructor stored in a value (not passed as an argument) can be constructed.
+      if (v !== undefined && v.kind === "closure" && typeof v.fnName === "string" && PRIMITIVE_CTOR_CLOSURE.test(v.fnName)) {
+        if (!argDynFroms.has(node) && primitiveStored === null) primitiveStored = node.loc as SrcLoc;
+      }
       // A statically bound function (`f.bind(...)`, reached through a variable or a member
       // as well as directly): its box carries the bind's text, not its target's.
-      if (node.fnSrc === "bound" && staticBoundReach === null) staticBoundReach = node.loc as SrcLoc;
-      if (v !== undefined && v.kind === "closure" && typeof v.fnName === "string" && !dynNames.has(v.fnName)) {
+      if (node.staticBindCtor === true && staticBoundReach === null) staticBoundReach = node.loc as SrcLoc;
+      if (v !== undefined && v.kind === "closure" && typeof v.fnName === "string" && !dynNames.has(v.fnName) && !PRIMITIVE_CTOR_CLOSURE.test(v.fnName)) {
         dynNames.set(v.fnName, node.loc as SrcLoc);
       }
     }
@@ -215,6 +231,13 @@ export function attachFnSrcText(
       continue;
     }
     fn!.srcText = text;
+  }
+  if (construct !== null && primitiveStored !== null) {
+    result.constructMissing ??= {
+      loc: primitiveStored,
+      fnName: "<primitive constructor>",
+      reason: "the primitive constructor (String / Number / Boolean) is stored as a value, and constructing it answers a wrapper object this build does not represent",
+    };
   }
   if (construct !== null && staticBoundReach !== null) {
     result.constructMissing ??= {

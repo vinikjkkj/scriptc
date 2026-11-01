@@ -1396,6 +1396,13 @@ export function boundCodeOf(L: Lowerer, call: ts.Node): number | null {
     const inner = boundCodeOf(L, recv);
     if (inner === null) return null;
     target = inner;
+  } else if (ts.isFunctionExpression(recv) || ts.isArrowFunction(recv)) {
+    target = fnValueCodeOfNode(recv);
+  } else if (ts.isPropertyAccessExpression(recv) && recv.questionDotToken === undefined) {
+    // `this.m.bind(this)` / `o.m.bind(o)`: a class or object METHOD (a non-constructor) with a single declaration.
+    const msym = L.checker.getSymbolAtLocation(recv.name);
+    const mdecls = msym ? L.checker.declarationsOf(msym) : [];
+    if (mdecls.length === 1 && ts.isMethodDeclaration(mdecls[0]!)) target = fnValueCodeOfNode(mdecls[0]!);
   } else if (ts.isIdentifier(recv)) {
     const sym = L.resolveValueSymbol(recv);
     if (!sym) return null;
@@ -1522,6 +1529,45 @@ function declaredFuncValueName(L: Lowerer, id: ts.Identifier, seen: Set<ts.Symbo
  * `String(f)`), which is loud.
  *
  * `seen` breaks `var a = b, b = a` cycles, like the name walk. */
+/** A value that is a static `f.bind(...)` of a CONSTRUCTIBLE target (a function expression or a
+ * plain function declaration; an arrow or a method is not a constructor, so its bind answers
+ * Node's refusal exactly). Looks through a const binding to its initializer. */
+export function bindValueTargetIsCtor(L: Lowerer, node: ts.Node, seen = new Set<ts.Node>()): boolean {
+  let n: ts.Node = node;
+  while (ts.isParenthesizedExpression(n)) n = n.expression;
+  if (seen.has(n)) return false;
+  seen.add(n);
+  if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "bind") {
+    let t: ts.Node = n.expression.expression;
+    while (ts.isParenthesizedExpression(t)) t = t.expression;
+    if (ts.isArrowFunction(t)) return false;
+    if (ts.isFunctionExpression(t)) return true;
+    if (ts.isPropertyAccessExpression(t)) {
+      const sym = L.checker.getSymbolAtLocation(t.name);
+      const decls = sym ? L.checker.declarationsOf(sym) : [];
+      return !(decls.length === 1 && ts.isMethodDeclaration(decls[0]!));
+    }
+    if (ts.isIdentifier(t)) {
+      const sym = L.resolveValueSymbol(t);
+      const decls = sym ? L.checker.declarationsOf(sym) : [];
+      if (decls.length !== 1) return true;
+      const d = decls[0]!;
+      if (ts.isFunctionDeclaration(d)) return true;
+      if (ts.isVariableDeclaration(d) && d.initializer !== undefined) return !ts.isArrowFunction(d.initializer);
+      return true;
+    }
+    return true;
+  }
+  if (ts.isIdentifier(n)) {
+    const sym = L.resolveValueSymbol(n);
+    const decls = sym ? L.checker.declarationsOf(sym) : [];
+    if (decls.length !== 1) return false;
+    const d = decls[0]!;
+    if (ts.isVariableDeclaration(d) && d.initializer !== undefined) return bindValueTargetIsCtor(L, d.initializer, seen);
+  }
+  return false;
+}
+
 export function jsFuncValueSourceOf(
   L: Lowerer,
   node: ts.Node,
@@ -10742,6 +10788,10 @@ export class Lowerer {
           : [{ kind: "return", value: call, loc }];
       this.liftedFns.push({
         name,
+        // A bound method value is a bound function: no prototype (SCR_FNK_NOPROTO), and Node
+        // prints its nameless native text.
+        valueCode: 4,
+        srcText: "function () { [native code] }",
         params,
         returnType: proj.func.ret,
         captures: [{ localId: "self.0", name: "self", type: recvT }],
@@ -14099,6 +14149,11 @@ export class Lowerer {
     if (e.kind === "dynFrom" && e.value.type.kind === "func" && e.fnSrc === undefined) {
       const src = jsFuncValueSourceOf(this, node);
       if (src !== null) e = { ...e, fnSrc: src };
+      // A static bind of a constructible target: its [[Construct]] is not exact (see attach).
+    }
+    // A static bind of a constructible target (whatever set its creation-site text): its [[Construct]] is not exact.
+    if (e.kind === "dynFrom" && e.fnSrc === "bound" && e.staticBindCtor === undefined && bindValueTargetIsCtor(this, node)) {
+      e = { ...e, staticBindCtor: true };
     }
     // A union the plain re-tag declined (stranded NON-unit arms): when the
     // node's CHECKER type proves those arms away, they trap instead — the

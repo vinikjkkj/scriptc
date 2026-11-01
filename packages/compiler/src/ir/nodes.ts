@@ -7933,7 +7933,7 @@ export type IrExpr =
    * that byte-exactly is a separate piece of work, and until it exists a
    * TypeScript function's text would be wrong in a way no one could see.
    * The TypeScript arms stay loud. */
-  | { kind: "dynFrom"; value: IrExpr; fnName?: string; fnSrc?: { text: string } | "bound"; fnCode?: number; type: IrType; loc: SrcLoc }
+  | { kind: "dynFrom"; value: IrExpr; fnName?: string; fnSrc?: { text: string } | "bound"; fnCode?: number; staticBindCtor?: true; type: IrType; loc: SrcLoc }
   /** Island value → dyn conversion (`type` is always dyn; the operand
    * is always jsval): the jsval→dyn crossing — an 'any'-typed engine
    * value flowing into an 'unknown'/'object'/JS-residue slot wraps BY
