@@ -140,23 +140,27 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<Pr
   });
 }
 
-async function build(entry: string): Promise<string> {
+/* The two emitters. http2 programs run on both (the LLVM lane is the same
+ * program under the same three legs); the other server families stay on
+ * the C lane until their LLVM lowering lands. */
+type Backend = "c" | "llvm";
+
+async function build(entry: string, backend: Backend): Promise<string> {
   const hash = createHash("sha256");
   hash.update(entry).update(readFileSync(entry));
-  const key = hash.update(sanitize ? "san" : "plain").digest("hex").slice(0, 16);
+  const key = hash.update(sanitize ? "san" : "plain").update(backend).digest("hex").slice(0, 16);
   // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
   // reclaim this run's own finished scratch mid-run. Released by the
   // per-test hook -- safe here because this directory is created, built
   // into and read inside one helper call, within one test.
-  const outDir = holdScratch(cacheDir, `server-${key}`);
+  const outDir = holdScratch(cacheDir, `server-${backend}-${key}`);
   const result = await compile(entry, {
     outPath: join(outDir, exeName("program")),
     outDir,
     sanitize,
-    // Pinned: the listening-process differential was written against the
-    // C lane; keeping lane identity fixed keeps a three-leg diff meaning
-    // "server behavior changed", never "the default backend moved".
-    backend: "c",
+    // Explicit per lane, so a three-leg diff means "server behavior changed"
+    // or one emitter moved, never that the default backend changed.
+    backend,
   });
   if (!result.ok) {
     throw new Error(
@@ -192,8 +196,21 @@ describe(`server differential (${cases.length} programs${sanitize ? ", sanitized
     keyOf: (c) => c.name,
     selectFor: (spec) => shardSelect(allCases, (c) => c.name, spec),
   });
-  test.for(cases.map((c) => [c.name, c] as const))("%s", async ([, c]) => {
-    const binary = await build(c.entry);
+  // The C lane keeps every case name. The LLVM lane is the http2 family under
+  // the same expectations, named with its backend suffix. Cases stay
+  // C-only until their walls fall: h2c-js and h2c-compat-js hold an http2
+  // Stream/Session as a dyn value (LLVM dyn-handle-tag refusal); http2-connect
+  // reaches http.requestConn (an http libCall, not in this family); and
+  // http2-sni needs the SNI answer lowering, which is not on this branch.
+  const LLVM_UNREACHED = new Set(["h2c-js", "h2c-compat-js", "http2-connect", "http2-sni"]);
+  const lanes: [string, (typeof cases)[number], Backend][] = [
+    ...cases.map((c): [string, (typeof cases)[number], Backend] => [c.name, c, "c"]),
+    ...cases
+      .filter((c) => /^(h2|http2)/.test(c.name) && !LLVM_UNREACHED.has(c.name))
+      .map((c): [string, (typeof cases)[number], Backend] => [`${c.name} [llvm]`, c, "llvm"]),
+  ];
+  test.for(lanes)("%s", async ([, c, backend]) => {
+    const binary = await build(c.entry, backend);
     // Sequential, not parallel: both lanes bind ephemeral ports and drive
     // real sockets — parallelism buys little and interleaves kernel state.
     const nodeRes = await runLane("node", [c.entry], c.driver);
