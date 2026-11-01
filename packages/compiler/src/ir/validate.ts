@@ -5740,6 +5740,9 @@ function validateFunction(
         // Runtime HANDLE targets unwrap the checked-dynamic tree's handle kind by tag (a
         // retained reference, no copy — DYN_HANDLE_KINDS).
         const handleOk = DYN_HANDLE_KINDS.has(e.type.kind);
+        // A promise<unknown> target (the dyn→Promise<T> edge): the runtime's
+        // checked unwrap of a promise box (scr_dyn_promise_unbox).
+        const promiseOk = e.type.kind === "promise" && e.type.inner.kind === "dyn";
         // Composites whose every leaf is checkable ride the same walker,
         // one check per field -- a byte field is no less checkable for
         // having a record around it.
@@ -5753,7 +5756,7 @@ function validateFunction(
         // nothing. Same condition, same answers, same diagnostics -- && was
         // always going to short-circuit; the const was what stopped it.
         if (
-          !jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !funcOk && !handleOk &&
+          !jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !funcOk && !handleOk && !promiseOk &&
           !canDynCheckTo(e.type, (id) => records.get(id), (id) => unions.get(id))
         ) {
           err(`dynCheck against non-JSON-representable type ${e.type.kind}`, e.loc);

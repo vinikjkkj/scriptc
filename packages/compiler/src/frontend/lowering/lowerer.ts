@@ -7953,6 +7953,23 @@ export class Lowerer {
     // record of Uint8Array fields — which canDynCheckTo's nested walk
     // grants and both emitters already walk field by field. Everything
     // outside it keeps requireExactShape's SC1100 fence.
+    // A CHECKED-DYNAMIC value flowing into a Promise<T> slot (an untyped
+    // call's result that tsc types as a promise: `ioredis`'s pipeline exec
+    // and tracing wrappers). The value is checked to be a promise box
+    // (dynCheck to promise<unknown>: the runtime's kind test, the path
+    // TypeError otherwise), then the payload converts through the ordinary
+    // promise adapter (`async (p) => coerce(await p)`), so the slot holds a
+    // promise whose payload really is T. A payload that cannot be checked
+    // falls through to requireExactShape's fence.
+    if (expr.type.kind === "dyn" && expected.kind === "promise") {
+      const dynPromiseT: IrType & { kind: "promise" } = { kind: "promise", inner: DYN };
+      const boxed: IrExpr = { kind: "dynCheck", value: expr, type: dynPromiseT, loc: expr.loc };
+      const adapter = this.promiseCoerceAdapter(dynPromiseT, expected, expr.loc);
+      if (adapter) {
+        return { kind: "call", callee: adapter, args: [boxed], type: expected, loc: expr.loc };
+      }
+      return expr;
+    }
     if (expr.type.kind === "dyn" && expected.kind !== "dyn") {
       if (canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) {
         return { kind: "dynCheck", value: expr, type: expected, loc: expr.loc };
