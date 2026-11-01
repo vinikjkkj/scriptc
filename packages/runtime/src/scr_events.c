@@ -53,9 +53,9 @@ static void scr_events_oom(void) {
  * watching a signal replaces its default disposition (Ctrl-C no longer
  * kills), removing the LAST listener restores it, `once` listeners are
  * removed BEFORE they run, and signal listeners do NOT keep the loop
- * alive — the exhaustion test ignores them, exactly Node. Multiple
- * deliveries between two loop turns coalesce into one dispatch (the
- * kernel coalesces pending non-RT signals the same way). */
+ * alive — the exhaustion test ignores them, exactly Node. Each delivery
+ * between two loop turns dispatches in arrival order, with its own
+ * tick/microtask drain after it, as Node's per-callback scope does. */
 
 typedef struct {
   ScrClosure *cb; /* owned */
@@ -80,7 +80,15 @@ typedef struct ScrSigReg {
 
 static ScrSigReg *scr_sig_regs = NULL;
 static size_t scr_sig_watched = 0; /* watched signal COUNT (regs) */
-static volatile sig_atomic_t scr_sig_flag[SCR_SIG_MAX];
+/* Delivery queue: one entry per handler run, in delivery order. Node's
+ * libuv signal watcher runs one callback per delivered signal, in the order
+ * the signals arrived, and each callback closes its own tick/microtask scope.
+ * The handler appends; the drain swaps the queue out with every signal held
+ * off. SCR_SIG_QMAX bounds it: a 257th delivery between two loop turns is
+ * dropped, which only a program flooding the process with signals reaches. */
+#define SCR_SIG_QMAX 256
+static volatile sig_atomic_t scr_sig_q[SCR_SIG_QMAX];
+static volatile sig_atomic_t scr_sig_qn = 0;
 static volatile sig_atomic_t scr_sig_any = 0;
 static int scr_wake_pipe[2] = {-1, -1};
 
@@ -93,7 +101,7 @@ static void scr_sig_handler(int sig) {
    * restores the previous disposition below. */
   signal(sig, scr_sig_handler);
 #endif
-  scr_sig_flag[sig] = 1;
+  if (scr_sig_qn < SCR_SIG_QMAX) scr_sig_q[scr_sig_qn++] = sig;
   scr_sig_any = 1;
   if (scr_wake_pipe[1] >= 0) {
     ssize_t ignored = write(scr_wake_pipe[1], "s", 1);
@@ -165,7 +173,9 @@ void scr_signal_on(double signum, ScrClosure *cb /*moves*/, bool once) {
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = scr_sig_handler;
-    sigemptyset(&sa.sa_mask);
+    /* Hold every signal while a handler runs: the queue append is then never
+     * interleaved with another handler's append or with the drain's swap. */
+    sigfillset(&sa.sa_mask);
     sa.sa_flags = 0; /* NO SA_RESTART: idle sleeps must EINTR */
     sigaction(sig, &sa, &reg->prev);
 #endif
@@ -210,54 +220,76 @@ void scr_signal_off(double signum, ScrClosure *cb /*borrowed*/) {
   }
 }
 
-/* One dispatch pass: every flagged signal fires its listener SNAPSHOT
- * (Node emits over a copy — a listener removed mid-emit still runs for
- * this delivery; one added mid-emit waits for the next). `once` entries
- * leave the live list BEFORE their callback runs; an emptied list
- * restores the default disposition, so the next delivery of that signal
- * kills the process — Node-exact. A throw stops the pass and leaves the
+/* One delivery: the signal's listeners fire as ONE emit (Node emits over a
+ * copy — a listener removed mid-emit still runs for this delivery; one added
+ * mid-emit waits for the next). `once` entries leave the live list BEFORE
+ * their callback runs; an emptied list restores the default disposition, so
+ * the next delivery of that signal kills the process — Node-exact. The
+ * listeners of one emit share one tick/microtask scope: their nextTicks and
+ * promise jobs run after the whole emit, not between two listeners. */
+static void scr_sig_emit(int sig) {
+  ScrSigReg *reg = scr_sig_regs;
+  while (reg && reg->sig != sig) reg = reg->next;
+  if (!reg) return; /* the last listener left before this delivery ran */
+  size_t n = reg->n;
+  ScrSigListener *snap = malloc(n * sizeof *snap);
+  if (!snap) scr_events_oom();
+  for (size_t i = 0; i < n; i++) {
+    snap[i] = reg->ls[i];
+    scr_closure_retain(snap[i].cb);
+  }
+  bool dropped = false;
+  for (size_t i = 0; i < n; i++) {
+    if (snap[i].once && !dropped) {
+      /* remove from the live list before invoking */
+      for (size_t j = 0; j < reg->n; j++) {
+        if (reg->ls[j].cb == snap[i].cb) {
+          scr_closure_release(reg->ls[j].cb);
+          memmove(reg->ls + j, reg->ls + j + 1, (reg->n - j - 1) * sizeof *reg->ls);
+          reg->n--;
+          break;
+        }
+      }
+      if (reg->n == 0) {
+        scr_sig_reg_drop(reg);
+        dropped = true;
+      }
+    }
+    if (!scr_exc_pending()) {
+      ((void (*)(ScrClosure *))snap[i].cb->fn)(snap[i].cb);
+    }
+    scr_closure_release(snap[i].cb);
+  }
+  free(snap);
+}
+
+/* One dispatch pass: the deliveries queued since the last turn fire in
+ * delivery order. The queue is taken with signals held off (POSIX; the
+ * Windows handler has no mask), so a delivery arriving during the pass
+ * waits for the next one. After EACH delivery's emit the ticks and promise
+ * jobs it queued run to exhaustion, as Node's per-callback scope does, before
+ * the next delivery's listeners. A throw stops the pass and leaves the
  * exception for the loop. */
 static void scr_signals_drain(void) {
   if (!scr_sig_any) return;
+  int pend[SCR_SIG_QMAX];
+  size_t n;
+#ifndef _WIN32
+  sigset_t all, old;
+  sigfillset(&all);
+  sigprocmask(SIG_BLOCK, &all, &old);
+#endif
+  n = (size_t)scr_sig_qn;
+  for (size_t i = 0; i < n; i++) pend[i] = scr_sig_q[i];
+  scr_sig_qn = 0;
   scr_sig_any = 0;
-  ScrSigReg *reg = scr_sig_regs;
-  while (reg) {
-    ScrSigReg *next = reg->next; /* reg may drop below */
-    if (scr_sig_flag[reg->sig]) {
-      scr_sig_flag[reg->sig] = 0;
-      size_t n = reg->n;
-      ScrSigListener *snap = malloc(n * sizeof *snap);
-      if (!snap) scr_events_oom();
-      for (size_t i = 0; i < n; i++) {
-        snap[i] = reg->ls[i];
-        scr_closure_retain(snap[i].cb);
-      }
-      bool dropped = false;
-      for (size_t i = 0; i < n; i++) {
-        if (snap[i].once && !dropped) {
-          /* remove from the live list before invoking */
-          for (size_t j = 0; j < reg->n; j++) {
-            if (reg->ls[j].cb == snap[i].cb) {
-              scr_closure_release(reg->ls[j].cb);
-              memmove(reg->ls + j, reg->ls + j + 1, (reg->n - j - 1) * sizeof *reg->ls);
-              reg->n--;
-              break;
-            }
-          }
-          if (reg->n == 0) {
-            scr_sig_reg_drop(reg);
-            dropped = true;
-          }
-        }
-        if (!scr_exc_pending()) {
-          ((void (*)(ScrClosure *))snap[i].cb->fn)(snap[i].cb);
-        }
-        scr_closure_release(snap[i].cb);
-      }
-      free(snap);
-      if (scr_exc_pending()) return;
-    }
-    reg = next;
+#ifndef _WIN32
+  sigprocmask(SIG_SETMASK, &old, NULL);
+#endif
+  for (size_t i = 0; i < n; i++) {
+    scr_sig_emit(pend[i]);
+    if (scr_exc_pending()) return;
+    if (!scr_loop_drain_ticks_jobs()) return;
   }
 }
 
