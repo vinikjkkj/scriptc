@@ -33,8 +33,9 @@ export interface FnTextAttachResult {
   missing: { loc: SrcLoc; fnName: string } | null;
 }
 
-const ADAPTER_IMPL = /^%fn\.adapt\.[0-9]+\.impl$/;
 const BUILTIN_VALUE = /^%builtin\.([A-Za-z_$][A-Za-z0-9_$]*)\.value$/;
+const ADAPTER_IMPL = /^%fn\.adapt\.[0-9]+\.impl$/;
+const INTERNAL_THEN = /^%fn[0-9]+_then$/;
 
 /** Visit every IR node once; `visit` sees each object with a `kind`. */
 function forEachIrNode(root: unknown, visit: (node: { kind: string } & Record<string, unknown>) => void): void {
@@ -95,6 +96,10 @@ export function attachFnSrcText(
   }
   for (const [name, fn] of targets) {
     if (fn !== null && fn.srcText !== undefined) continue;
+    // A promise handler the lowering builds for `.then(cb)` (`%fnN_then`, cb
+    // returning a promise) is the runtime's own callback: no user code holds
+    // it as a value, so no fn.text can reach it and it needs no text.
+    if (fn !== null && INTERNAL_THEN.test(name)) continue;
     // An adapter body (funcCoerceAdapter's impl) wraps one function value in
     // capture slot 0; its text is that closure's, resolved at run time.
     if (fn !== null && ADAPTER_IMPL.test(name) && fn.captures?.length === 1 && fn.captures[0]!.type.kind === "func") {
