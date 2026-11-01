@@ -814,6 +814,33 @@ static bool dyn_arr_proto_unimpl(const char *m) {
  * The key arrives already reduced to a string by the same rule the keyed
  * read uses, so the two spellings cannot disagree about which member they
  * name. Borrows all three, returns +1, may throw. */
+/* Node reads the callee's member (`o.m`, `o[k]`, `o.call`) BEFORE it
+ * evaluates the call's arguments, so a nullish receiver throws
+ * "Cannot read properties of <unit> (reading '<name>')" with no argument
+ * run. The dispatch below throws the same error but only after the
+ * arguments were evaluated (the emitter evaluates them first), so the
+ * emitter calls the guard between the receiver (and the key) and the
+ * arguments. A receiver that is not nullish passes through untouched: the
+ * guard reads nothing, so no getter runs before the real read. */
+static void dyn_throw_nullish_read(const ScrDyn *recv, const char *name) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, "Cannot read properties of ");
+  scr_jb_puts(&b, recv->kind == SCR_DYN_UNDEF ? "undefined" : "null");
+  scr_jb_puts(&b, " (reading '");
+  scr_jb_puts(&b, name);
+  scr_jb_puts(&b, "')");
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+}
+
+void scr_dyn_invoke_guard(ScrDyn *recv, const char *method) {
+  if (recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) dyn_throw_nullish_read(recv, method);
+}
+
+void scr_dyn_invoke_guard_key(ScrDyn *recv, const ScrStr *key) {
+  if (recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) dyn_throw_nullish_read(recv, key->data);
+}
+
 ScrDyn *scr_dyn_invoke_key(ScrDyn *recv, const ScrStr *key, ScrDyn *const *args, size_t argc, const char *what) {
   /* `fs[0](x)` over an array: the key is an INDEX, which is not a named
    * member of the array (indices live in the item vector, never in the
@@ -2096,14 +2123,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     return r;
   }
   if (recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) {
-    ScrJsonBuf b;
-    scr_jb_init(&b);
-    scr_jb_puts(&b, "Cannot read properties of ");
-    scr_jb_puts(&b, recv->kind == SCR_DYN_UNDEF ? "undefined" : "null");
-    scr_jb_puts(&b, " (reading '");
-    scr_jb_puts(&b, method);
-    scr_jb_puts(&b, "')");
-    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    dyn_throw_nullish_read(recv, method);
     return NULL;
   }
 

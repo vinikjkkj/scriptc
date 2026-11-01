@@ -6521,6 +6521,9 @@ bool scr_dyn_has_key_full(const ScrDyn *v, const ScrStr *key);
  * express such a name at all, and no shipped package in this corpus does. */
 ScrDyn *scr_dyn_invoke_pack(ScrDyn *recv, ScrDyn *pack, const ScrStr *method, const ScrStr *what); /* dynInvoke over a built argument array (spread calls) */
 ScrDyn *scr_dyn_invoke_key(ScrDyn *recv, const ScrStr *key, ScrDyn *const *args, size_t argc, const char *what);
+/* Between a dyn callee's receiver (and key) and its arguments: the Node read that throws for a nullish receiver before any argument runs. MAY THROW (pending). */
+void scr_dyn_invoke_guard(ScrDyn *recv, const char *method);
+void scr_dyn_invoke_guard_key(ScrDyn *recv, const ScrStr *key);
 /* Keyed read on a FUNC node: the own-property table first (defineProperties
  * writes land there), then "name" (the box's best-effort static name; ""
  * for anonymous) and "length" (the boxed arity). Returns +1, or NULL when

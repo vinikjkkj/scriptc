@@ -2838,6 +2838,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // The ELEMENT spelling evaluates its key between the receiver and
         // the arguments, which is JS's order for `o[k](a)`.
         const keyv = e.methodKey === undefined ? null : E.emitExpr(e.methodKey);
+        const method = cStringLiteral(Buffer.from(e.method, "utf8"));
+        // JS reads the member BEFORE it evaluates the arguments: a nullish
+        // receiver throws here, so no argument runs (the guard reads nothing
+        // on a receiver that is not nullish).
+        if (e.args.length > 0) {
+          if (keyv !== null) E.line(`scr_dyn_invoke_guard_key(${recv.name}, ${keyv.name});`);
+          else E.line(`scr_dyn_invoke_guard(${recv.name}, ${method});`);
+          E.emitPendingCheck();
+        }
         const args = e.args.map((a) => E.emitExpr(a));
         let argsExpr = "NULL";
         if (args.length > 0) {
@@ -2845,7 +2854,6 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.line(`ScrDyn *${arr}[${args.length}] = { ${args.map((a) => a.name).join(", ")} };`);
           argsExpr = arr;
         }
-        const method = cStringLiteral(Buffer.from(e.method, "utf8"));
         const what = cStringLiteral(Buffer.from(e.calleeName, "utf8"));
         if (keyv !== null) {
           return E.fallibleTemp(
@@ -3560,7 +3568,21 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // JS identity — everything else fresh). Throwing members (the
         // may-throw seed set) get the standard pending check, emitted after
         // a result temp joins its frame so an unwind releases it.
-        const args = e.args.map((a) => E.emitExpr(a));
+        // dyn.invokePack (a spread call on a dyn callee): JS reads the
+        // member before it evaluates the argument pack, so the nullish
+        // guard runs between the receiver and the pack (see the dynInvoke
+        // arm). The method string is a literal: emitting it early is free.
+        const args: Temp[] = [];
+        if (e.fn === "dyn.invokePack") {
+          args[0] = E.emitExpr(e.args[0]!);
+          args[2] = E.emitExpr(e.args[2]!);
+          E.line(`scr_dyn_invoke_guard_key(${args[0].name}, ${args[2].name});`);
+          E.emitPendingCheck();
+          args[1] = E.emitExpr(e.args[1]!);
+          args[3] = E.emitExpr(e.args[3]!);
+        } else {
+          for (const a of e.args) args.push(E.emitExpr(a));
+        }
         const arg = (i: number) => args[i]!.name;
         // Fenced<S>: a raw fragment spelling scr_await_ does not compile here.
         // See ir/suspends.ts -- fiberOnly was opt-in, and that is how the
