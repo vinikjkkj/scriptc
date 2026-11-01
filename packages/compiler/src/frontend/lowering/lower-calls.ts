@@ -7503,7 +7503,7 @@ function mcallWhy(arm: string, node: ts.Node, key: string, extra?: () => string)
  * side effects, which is what licenses the adopted-instance probe to
  * lower the receiver a second time. Optional chaining stays out: its
  * guard belongs to the chain lowering, not to a probe. */
-function plainReadChain(recv: ts.Expression): boolean {
+export function plainReadChain(recv: ts.Expression): boolean {
   let n: ts.Expression = recv;
   while (ts.isParenthesizedExpression(n)) n = n.expression;
   while (ts.isPropertyAccessExpression(n) && n.questionDotToken === undefined) {
@@ -15757,7 +15757,7 @@ function lowerProtoDataCall(L: Lowerer, call: ts.CallExpression, recvExpr: ts.Ex
  * (push, call, pop in a `finally` — the callee can throw and the unwind is an
  * early return, so a bare push/pop would leak a stack entry onto every later
  * `this` read; bindThisClosure's reasoning). One helper per arity. */
-function dynCallWithThis(L: Lowerer, recv: IrExpr, callee: IrExpr, args: IrExpr[], calleeName: string, loc: SrcLoc): IrExpr {
+export function dynCallWithThis(L: Lowerer, recv: IrExpr, callee: IrExpr, args: IrExpr[], calleeName: string, loc: SrcLoc): IrExpr {
   const n = args.length;
   const name = `%dyncallthis.${n}`;
   if (!L.liftedFns.some((f) => f.name === name)) {
