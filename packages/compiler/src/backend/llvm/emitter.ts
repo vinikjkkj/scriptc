@@ -962,6 +962,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "error.propSet": "scr_error_prop_set",
   "error.propGet": "scr_error_prop_get",
   "error.setCause": "scr_error_set_cause",
+  "error.installOptions": "scr_error_install_options",
+  "error.installRequiredCause": "scr_error_install_required_cause",
   "class.name": "scr_classobj_name",
   "class.instanceName": "scr_object_ctor_name",
   "error.stackLimitGet": "scr_error_stack_limit_get",

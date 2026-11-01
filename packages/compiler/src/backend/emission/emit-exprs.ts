@@ -7487,6 +7487,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "error.setCause":
             // Borrowed receiver and dyn value: the error's own hidden `cause`.
             return finish(`scr_error_set_cause((ScrError *)${arg(0)}, ${arg(1)})`);
+          case "error.installOptions":
+            // Borrowed receiver and dyn options (InstallErrorCause): the
+            // [[HasProperty]] / [[Get]] of `cause` run in the runtime.
+            return finish(`scr_error_install_options((ScrError *)${arg(0)}, ${arg(1)})`);
+          case "error.installRequiredCause":
+            // Borrowed receiver and dyn options: the cause member is present by type.
+            return finish(`scr_error_install_required_cause((ScrError *)${arg(0)}, ${arg(1)})`);
           case "error.propGet":
             // +1 dyn value (the dyn undefined when absent).
             return finish(`scr_error_prop_get((ScrError *)${arg(0)}, ${arg(1)})`);
